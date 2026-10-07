@@ -61,6 +61,17 @@ describe("reading a hand-edited file", () => {
     assert.deepEqual(messagingStore.get().quickReplies, ["Copy", "Walking now", "Need 2 min"]);
   });
 
+  test("names the rule each left-out entry broke, in the words a save would have refused it with", () => {
+    const line = warned.find((l) => l.startsWith("[messages] messaging.json")) ?? "";
+    assert.match(line, /group green ROOM: two groups are named "green ROOM" \(names are not case-sensitive\)/);
+    assert.match(line, /group Bo\\noth: a group id is not one this app issued/);
+    assert.match(line, /group Everyone: "Everyone" is built in/);
+    assert.match(line, /a group name is at most 40 characters \(this one is 41\)/);
+    assert.match(line, /quick message : a quick message cannot be empty/);
+    assert.match(line, /a quick message is at most 280 characters \(this one is 281\)/);
+    assert.match(line, /a quick message must be text/);
+  });
+
   test("says what it left out, on one line, with a newline in a name escaped", () => {
     const lines = warned.filter((l) => l.startsWith("[messages] messaging.json"));
     assert.equal(lines.length, 1, `expected one line, got ${JSON.stringify(warned)}`);

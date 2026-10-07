@@ -31,8 +31,8 @@ import {
 } from "../types/messages.js";
 import { DataStore } from "./data-store.js";
 import { MessageRefused, checkedText } from "./message-rules.js";
+import { plural } from "./plural.js";
 import { scrub } from "./scrub.js";
-import { WriteQueue } from "./write-queue.js";
 
 /**
  * The config this was based on is not the stored one any more: another window
@@ -63,13 +63,52 @@ function copyOf(config: MessagingConfig): MessagingConfig {
   };
 }
 
+// ── The rules, once ───────────────────────────────────────────────────────
+//
+// Each checks ONE entry and throws MessageRefused naming what is wrong with it.
+// A PUT lets the first one propagate; reading the file catches it per entry and
+// leaves that entry out, so /log says the same thing the operator would have been
+// told. They only read the sets they are given: the caller adds an entry's name
+// and id once every check on it has passed, so a refused entry claims nothing.
+
+/** A group's name, against the lower-cased names the groups before it hold. */
+function checkedGroupName(raw: unknown, seen: ReadonlySet<string>): string {
+  const name = checkedText(raw, "a group name", GROUP_NAME_MAX);
+  const key = name.toLowerCase();
+  if (key === EVERYONE) throw new MessageRefused(`"${name}" is built in; pick another group name`);
+  if (seen.has(key)) throw new MessageRefused(`two groups are named "${name}" (names are not case-sensitive)`);
+  return name;
+}
+
+/** A group's id, as the server issues them, against the ids the groups before it hold. */
+function checkedGroupId(raw: unknown, seen: ReadonlySet<string>): string {
+  if (typeof raw !== "string" || !GROUP_ID.test(raw)) throw new MessageRefused("a group id is not one this app issued");
+  if (seen.has(raw)) throw new MessageRefused(`the group id ${raw} appears twice`);
+  return raw;
+}
+
+function groupRow(entry: unknown): { id?: unknown; name?: unknown } {
+  if (entry === null || typeof entry !== "object") throw new MessageRefused("every group must be { name } or { id, name }");
+  return entry as { id?: unknown; name?: unknown };
+}
+
+/** Run `check`; what it returns, or the reason it refused. Anything but a refusal is a bug and propagates. */
+function attempt<T>(check: () => T): { value: T } | { why: string } {
+  try {
+    return { value: check() };
+  } catch (err) {
+    if (err instanceof MessageRefused) return { why: err.message };
+    throw err;
+  }
+}
+
 /**
  * Read what a file held, total: it runs on whatever `messaging.json` contains,
  * including a hand edit or a restore from a build with other limits.
  *
- * An entry that breaks a limit is left out of the live config and named on /log,
- * not repaired into something the operator did not write. The file keeps it
- * until the next save.
+ * An entry that breaks a rule is left out of the live config and named on /log
+ * with the rule it broke, not repaired into something the operator did not write.
+ * The file keeps it until the next save.
  */
 function readFile(parsed: unknown): MessagingConfig {
   const out = defaults();
@@ -85,44 +124,45 @@ function readFile(parsed: unknown): MessagingConfig {
     const ids = new Set<string>();
     const names = new Set<string>();
     out.groups = [];
-    for (const g of raw.groups) {
-      const row = g as { id?: unknown; name?: unknown } | null;
-      const name = typeof row?.name === "string" ? row.name.trim() : "";
-      const id = typeof row?.id === "string" ? row.id : "";
-      const key = name.toLowerCase();
-      if (
-        !GROUP_ID.test(id) || ids.has(id)
-        || name.length < 1 || name.length > GROUP_NAME_MAX
-        || key === EVERYONE || names.has(key)
-        || out.groups.length >= GROUPS_MAX
-      ) {
-        skipped.push(`group ${scrub(name || id, 40)}`);
+    for (const entry of raw.groups) {
+      const result = attempt((): MessageGroup => {
+        if (out.groups.length >= GROUPS_MAX) throw new MessageRefused(`groups can hold at most ${GROUPS_MAX}`);
+        const row = groupRow(entry);
+        return { id: checkedGroupId(row.id, ids), name: checkedGroupName(row.name, names) };
+      });
+      if ("why" in result) {
+        const row = entry as { id?: unknown; name?: unknown } | null;
+        const label = typeof row?.name === "string" && row.name.trim() !== "" ? row.name.trim() : row?.id;
+        skipped.push(`group ${scrub(label, 40)}: ${result.why}`);
         continue;
       }
-      ids.add(id);
-      names.add(key);
-      out.groups.push({ id, name });
+      ids.add(result.value.id);
+      names.add(result.value.name.toLowerCase());
+      out.groups.push(result.value);
     }
   }
-  const list = (value: unknown, fallback: string[], max: number, each: number, what: string): string[] => {
+  const list = (value: unknown, fallback: string[], max: number, each: number, what: string, whats: string): string[] => {
     if (!Array.isArray(value)) return fallback;
     const kept: string[] = [];
     for (const entry of value) {
-      const text = typeof entry === "string" ? entry.trim() : "";
-      if (text.length < 1 || text.length > each || kept.length >= max) {
-        skipped.push(`${what} ${scrub(text || entry, 40)}`);
+      const result = attempt(() => {
+        if (kept.length >= max) throw new MessageRefused(`${whats} can hold at most ${max}`);
+        return checkedText(entry, `a ${what}`, each);
+      });
+      if ("why" in result) {
+        skipped.push(`${what} ${scrub(typeof entry === "string" ? entry.trim() : entry, 40)}: ${result.why}`);
         continue;
       }
-      kept.push(text);
+      kept.push(result.value);
     }
     return kept;
   };
-  out.quickMessages = list(raw.quickMessages, out.quickMessages, QUICK_MESSAGES_MAX, MESSAGE_MAX, "quick message");
-  out.quickReplies = list(raw.quickReplies, out.quickReplies, QUICK_REPLIES_MAX, QUICK_REPLY_MAX, "quick reply");
+  out.quickMessages = list(raw.quickMessages, out.quickMessages, QUICK_MESSAGES_MAX, MESSAGE_MAX, "quick message", "quick messages");
+  out.quickReplies = list(raw.quickReplies, out.quickReplies, QUICK_REPLIES_MAX, QUICK_REPLY_MAX, "quick reply", "quick replies");
 
   if (skipped.length > 0) {
     console.warn(
-      `[messages] messaging.json: left out ${scrub(skipped.length)} entr${scrub(skipped.length === 1 ? "y" : "ies")} that break a limit: ${scrub(skipped.join(", "), 600)}`,
+      `[messages] messaging.json: left out ${scrub(plural(skipped.length, "entry", "entries"))} that break a rule: ${scrub(skipped.join(", "), 600)}`,
     );
   }
   return out;
@@ -130,25 +170,16 @@ function readFile(parsed: unknown): MessagingConfig {
 
 const store = new DataStore<MessagingConfig>("messaging.json", defaults(), "config", { normalize: readFile });
 
-let cache: MessagingConfig | null = null;
-let loading: Promise<void> | null = null;
+/**
+ * What get() answers, synchronously. DataStore holds the truth and serialises the
+ * writes; this is the copy the rest of the app can read without awaiting. It only
+ * moves forward: a replace sets it when it lands, so a write that fails never
+ * shows, and two landing out of order cannot leave the older one in place.
+ */
+let mirror: MessagingConfig | null = null;
 
-/** Serialises replace(): it reads the groups that exist to decide which were
- *  removed, and two interleaved calls would each decide against a stale list. */
-const writes = new WriteQueue();
-
-async function ensureLoaded(): Promise<void> {
-  if (cache) return;
-  // The load in flight, shared, so two callers arriving cold do not each
-  // reassign the cache over the other's write.
-  loading ??= (async () => {
-    cache = copyOf(await store.load());
-  })();
-  try {
-    await loading;
-  } finally {
-    loading = null;
-  }
+function adopt(config: MessagingConfig): void {
+  if (!mirror || config.version > mirror.version) mirror = copyOf(config);
 }
 
 function newGroupId(taken: ReadonlySet<string>): string {
@@ -166,10 +197,11 @@ function asList(value: unknown, field: string, max: number): unknown[] {
 
 /**
  * The strict reading of a body, for PUT. Throws MessageRefused naming the
- * first thing wrong; returns the config to store.
+ * first thing wrong, or MessagingConflict when it was built from another version;
+ * returns the config to store.
  *
- * `existing` is the groups as they stand: a group in the body that carries an
- * id must be one of them. Ids are the server's to hand out, so a well-formed id
+ * `current` is the config as it stands: a group in the body that carries an id
+ * must be one of its groups. Ids are the server's to hand out, so a well-formed id
  * nobody issued is refused rather than taken — otherwise a stale page could
  * bring a deleted group back under its old id.
  */
@@ -184,31 +216,23 @@ function validate(input: unknown, current: MessagingConfig): MessagingConfig {
     throw new MessageRefused("version (number) is required: send the version the config was read at");
   }
   if (body.version !== current.version) throw new MessagingConflict();
-  const existing = current.groups;
-  const known = new Map(existing.map((g) => [g.id, g]));
-  const taken = new Set(known.keys());
+  const known = new Set(current.groups.map((g) => g.id));
+  const taken = new Set(known);
   const seenIds = new Set<string>();
   const seenNames = new Set<string>();
 
   const groups: MessageGroup[] = asList(body.groups, "groups", GROUPS_MAX).map((entry) => {
-    if (entry === null || typeof entry !== "object") throw new MessageRefused("every group must be { name } or { id, name }");
-    const row = entry as { id?: unknown; name?: unknown };
-    const name = checkedText(row.name, "a group name", GROUP_NAME_MAX);
-    const key = name.toLowerCase();
-    if (key === EVERYONE) throw new MessageRefused(`"${name}" is built in; pick another group name`);
-    if (seenNames.has(key)) throw new MessageRefused(`two groups are named "${name}" (names are not case-sensitive)`);
-    seenNames.add(key);
-
+    const row = groupRow(entry);
+    const name = checkedGroupName(row.name, seenNames);
     let id: string;
     if (row.id === undefined) {
       id = newGroupId(taken);
       taken.add(id);
     } else {
-      if (typeof row.id !== "string" || !GROUP_ID.test(row.id)) throw new MessageRefused("a group id is not one this app issued");
-      if (!known.has(row.id)) throw new MessageRefused(`no group has the id ${row.id}; reload and try again`);
-      if (seenIds.has(row.id)) throw new MessageRefused(`the group id ${row.id} appears twice`);
-      id = row.id;
+      id = checkedGroupId(row.id, seenIds);
+      if (!known.has(id)) throw new MessageRefused(`no group has the id ${id}; reload and try again`);
     }
+    seenNames.add(name.toLowerCase());
     seenIds.add(id);
     return { id, name };
   });
@@ -225,7 +249,13 @@ function validate(input: unknown, current: MessagingConfig): MessagingConfig {
 export const messagingStore = {
   /** Read the file into memory. Idempotent, and safe to call concurrently. */
   async init(): Promise<void> {
-    await ensureLoaded();
+    if (mirror) return;
+    // A copy taken before the assignment, never `mirror ??= copyOf(await ...)`:
+    // that evaluates the right side only when the mirror is empty NOW, but the
+    // await inside it can finish after a replace has set it, and the assignment
+    // would then put the older config over the newer one.
+    const loaded = copyOf(await store.load());
+    mirror ??= loaded;
   },
 
   /**
@@ -234,7 +264,7 @@ export const messagingStore = {
    * something from it (send, assigning a screen to a group) `init()` first.
    */
   get(): MessagingConfig {
-    return copyOf(cache ?? defaults());
+    return copyOf(mirror ?? defaults());
   },
 
   /**
@@ -243,28 +273,25 @@ export const messagingStore = {
    * so the caller can take them off the screens that had them and say so to
    * the ones that draw them.
    *
-   * Refuses with MessageRefused when a limit is broken, and with
-   * MessagingConflict when the body's `version` is not the stored one. The file is written
-   * before the live config changes: a write that fails (a full SD card) throws
-   * to the caller and leaves what was there, instead of a config every reader
-   * calls saved that the next restart loses.
+   * Refuses with MessageRefused when a rule is broken, and with MessagingConflict
+   * when the body's `version` is not the stored one. Runs through the store's own
+   * update(), which serialises writes and does not let a write that failed stay
+   * in memory: a save that cannot reach the disk (a full SD card) throws to the
+   * caller and leaves what was there, instead of a config every reader calls
+   * saved that the next restart loses. Which groups are gone is decided inside
+   * that serialised step, against the config this write replaces.
    */
   async replace(input: unknown): Promise<{ config: MessagingConfig; removed: MessageGroup[]; groupsChanged: boolean }> {
-    return writes.enqueue(async () => {
-      await ensureLoaded();
-      const before = cache ?? defaults();
-      const next = validate(input, before);
-      await store.save(copyOf(next));
-      cache = copyOf(next);
+    let removed: MessageGroup[] = [];
+    let groupsChanged = false;
+    const stored = await store.update((current) => {
+      const next = validate(input, current);
       const kept = new Set(next.groups.map((g) => g.id));
-      return {
-        config: copyOf(next),
-        removed: before.groups.filter((g) => !kept.has(g.id)),
-        // Decided here, against the groups this write replaced, because a caller
-        // that read them before the call can have two overlapping saves each
-        // compare against a list the other has already changed.
-        groupsChanged: JSON.stringify(before.groups) !== JSON.stringify(next.groups),
-      };
+      removed = current.groups.filter((g) => !kept.has(g.id));
+      groupsChanged = JSON.stringify(current.groups) !== JSON.stringify(next.groups);
+      return next;
     });
+    adopt(stored);
+    return { config: copyOf(stored), removed, groupsChanged };
   },
 };
