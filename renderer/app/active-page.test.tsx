@@ -124,7 +124,7 @@ describe("every registered route resolves a title", () => {
     // these went untitled with the suite green, and a bare count cannot tell
     // an added route plus a removed one from no change at all — a sorted list
     // also merges cleanly when two branches each add a different route.
-    // 25: /settings/messages joined the 24 that existed once /servicecue split into the tablet's page and /servicecue/manage,
+    // 24 since /servicecue split into the tablet's page and /servicecue/manage,
     // plus /video-feeds, the Screens-adjacent page for camera and program feeds,
     // plus the two routes that redirect the old /scriptview prefix.
     assert.deepEqual(
@@ -160,7 +160,7 @@ describe("every registered route resolves a title", () => {
     );
   });
 
-  test("twenty of the twenty-five registered routes are titled", () => {
+  test("the registered routes that resolve a title are exactly these", () => {
     // The five untitled: /settings, /displays, /views, /scriptview and
     // /scriptview/$, every one a redirect. Everything else must resolve a label.
     const titled = REGISTERED.filter((p) => resolvePage(fill(p), CONSOLES)?.page.label);
