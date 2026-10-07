@@ -34,9 +34,10 @@ export function BrandingRoute() {
 
 export function MessagesRoute() {
   const s = useStageSettings();
-  // The outputs, for how many screens a group holds before it is removed.
-  if (s.stageLoading || !s.stageState) return <Loading />;
-  return <MessagesSection outputs={s.stageState.outputs ?? []} />;
+  // The outputs only say how many screens are in each group, so the page does not
+  // wait for them: a stage state that is slow, or never comes, must not leave it
+  // on a spinner. Counts appear when they are known.
+  return <MessagesSection outputs={s.stageState?.outputs} />;
 }
 
 export function AdvancedRoute() {

@@ -3,9 +3,11 @@
 //
 // Saved through one call. The server takes all three lists at once and answers
 // with what it stored, so a new group comes back with the id the server gave it
-// and a refusal says which limit was broken. Every edit is one save; while one is
-// in flight the controls are off, because the second would be built from the
-// list the first is about to replace.
+// and a refusal says which limit was broken. Every edit is one save, and saves
+// run one after another: each is worked out from the config the one before it
+// left, when its turn comes, not from the page as it was drawn when the click
+// happened. The controls stay on meanwhile, so a click on another row's button
+// that blurred a box (and so started a save) is not lost to a disabled button.
 //
 // A save that fails toasts, says so on /log, and KEEPS what was typed: a name
 // that the server refused is still in its box to fix, not gone.
@@ -23,7 +25,7 @@
 // place and letting the operator add to it would save a list that holds only
 // what they just typed, over the groups and replies they cannot see.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
@@ -43,12 +45,12 @@ import { logToServer } from "../../lib/client-log";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { useResyncOn } from "../../lib/use-resync-on";
 
-/** What the server takes: a group the server has not met carries no id. */
-type ConfigBody = {
-  version: number;
-  groups: { id?: string; name: string }[];
-  quickMessages: string[];
-  quickReplies: string[];
+/** What a save changes: any of the three lists, worked out from the config it is
+ *  applied to. A group the server has not met carries no id. */
+type ConfigChange = {
+  groups?: { id?: string; name: string }[];
+  quickMessages?: string[];
+  quickReplies?: string[];
 };
 
 /** The two lists of plain text share one editor. */
@@ -62,9 +64,10 @@ interface StringListProps {
   max: number;
   itemMax: number;
   placeholder: string;
-  busy: boolean;
-  /** Resolves true when the save landed. */
-  onChange: (next: string[]) => Promise<boolean>;
+  /** Resolves true when the save landed. `update` is given the list as it stands
+   *  when this save's turn comes, and returns the new one, or null when what was
+   *  asked for no longer applies (the row it named has since moved). */
+  onChange: (update: (current: readonly string[]) => string[] | null) => Promise<boolean>;
 }
 
 /** A row of an editable list: the text, and what can be done to it. */
@@ -73,7 +76,6 @@ function ListRow({
   first,
   last,
   itemMax,
-  busy,
   onEdit,
   onMove,
   onRemove,
@@ -82,7 +84,6 @@ function ListRow({
   first: boolean;
   last: boolean;
   itemMax: number;
-  busy: boolean;
   onEdit: (next: string) => Promise<boolean>;
   onMove: (by: -1 | 1) => void;
   onRemove: () => void;
@@ -112,7 +113,6 @@ function ListRow({
       <Input
         value={draft}
         maxLength={itemMax}
-        disabled={busy}
         aria-label={`Edit ${text}`}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => void commit()}
@@ -121,33 +121,53 @@ function ListRow({
           if (e.key === "Escape") setDraft(text);
         }}
       />
-      <Button variant="transparent" size="small" iconOnly disabled={busy || first} onClick={() => onMove(-1)} aria-label={`Move ${text} up`}>
+      <Button variant="transparent" size="small" iconOnly disabled={first} onClick={() => onMove(-1)} aria-label={`Move ${text} up`}>
         <ArrowUpIcon className="size-3.5" />
       </Button>
-      <Button variant="transparent" size="small" iconOnly disabled={busy || last} onClick={() => onMove(1)} aria-label={`Move ${text} down`}>
+      <Button variant="transparent" size="small" iconOnly disabled={last} onClick={() => onMove(1)} aria-label={`Move ${text} down`}>
         <ArrowDownIcon className="size-3.5" />
       </Button>
-      <Button variant="transparent" size="small" iconOnly disabled={busy} onClick={onRemove} aria-label={`Remove ${text}`} className="text-danger-11">
+      <Button variant="transparent" size="small" iconOnly onClick={onRemove} aria-label={`Remove ${text}`} className="text-danger-11">
         <Trash2Icon className="size-3.5" />
       </Button>
     </li>
   );
 }
 
-function StringList({ label, noun, description, items, max, itemMax, placeholder, busy, onChange }: StringListProps) {
+/** `current` with the entry at `index` replaced, moved or dropped, but only if it
+ *  still holds `text`: a save queued behind another one may find the list has
+ *  moved on, and acting on whatever is at that index now would change a row
+ *  nobody clicked. */
+function whereItIs(current: readonly string[], index: number, text: string): boolean {
+  return current[index] === text;
+}
+
+function StringList({ label, noun, description, items, max, itemMax, placeholder, onChange }: StringListProps) {
   const [adding, setAdding] = useState("");
+  // Only the add box stays off while its own add is in flight, so a double click
+  // cannot add the same entry twice.
+  const [pending, setPending] = useState(false);
   const full = items.length >= max;
 
   async function add() {
     const text = adding.trim();
-    if (!text || full) return;
-    if (await onChange([...items, text])) setAdding("");
+    if (!text || full || pending) return;
+    setPending(true);
+    try {
+      if (await onChange((current) => (current.length >= max ? null : [...current, text]))) setAdding("");
+    } finally {
+      setPending(false);
+    }
   }
 
   function move(index: number, by: -1 | 1) {
-    const next = [...items];
-    [next[index], next[index + by]] = [next[index + by], next[index]];
-    void onChange(next);
+    const text = items[index];
+    void onChange((current) => {
+      if (!whereItIs(current, index, text) || current[index + by] === undefined) return null;
+      const next = [...current];
+      [next[index], next[index + by]] = [next[index + by], next[index]];
+      return next;
+    });
   }
 
   return (
@@ -163,10 +183,9 @@ function StringList({ label, noun, description, items, max, itemMax, placeholder
             first={i === 0}
             last={i === items.length - 1}
             itemMax={itemMax}
-            busy={busy}
-            onEdit={(next) => onChange(items.map((t, j) => (j === i ? next : t)))}
+            onEdit={(next) => onChange((current) => (whereItIs(current, i, text) ? current.map((t, j) => (j === i ? next : t)) : null))}
             onMove={(by) => move(i, by)}
-            onRemove={() => void onChange(items.filter((_, j) => j !== i))}
+            onRemove={() => void onChange((current) => (whereItIs(current, i, text) ? current.filter((_, j) => j !== i) : null))}
           />
         ))}
       </ul>
@@ -175,7 +194,7 @@ function StringList({ label, noun, description, items, max, itemMax, placeholder
         <Input
           value={adding}
           maxLength={itemMax}
-          disabled={busy || full}
+          disabled={pending || full}
           placeholder={full ? `At most ${max}` : placeholder}
           aria-label={`New ${noun}`}
           onChange={(e) => setAdding(e.target.value)}
@@ -183,7 +202,7 @@ function StringList({ label, noun, description, items, max, itemMax, placeholder
             if (e.key === "Enter") void add();
           }}
         />
-        <Button variant="accent" size="small" disabled={busy || full || adding.trim() === ""} onClick={() => void add()}>
+        <Button variant="accent" size="small" disabled={pending || full || adding.trim() === ""} onClick={() => void add()}>
           <PlusIcon className="size-3.5" /> Add
         </Button>
       </div>
@@ -197,13 +216,12 @@ function StringList({ label, noun, description, items, max, itemMax, placeholder
 function GroupRow({
   group,
   screens,
-  busy,
   onRename,
   onRemove,
 }: {
   group: MessageGroup;
-  screens: number;
-  busy: boolean;
+  /** Null until the Screens are known: the count is left off rather than drawn as 0. */
+  screens: number | null;
   onRename: (name: string) => Promise<boolean>;
   onRemove: () => void;
 }) {
@@ -224,7 +242,6 @@ function GroupRow({
       <Input
         value={draft}
         maxLength={GROUP_NAME_MAX}
-        disabled={busy}
         aria-label={`Rename ${group.name}`}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => void commit()}
@@ -234,75 +251,120 @@ function GroupRow({
         }}
       />
       <span className="w-20 shrink-0 text-caption2 text-fg-subtle">
-        {screens === 0 ? "no screens" : screens === 1 ? "1 screen" : `${screens} screens`}
+        {screens === null ? "" : screens === 0 ? "no screens" : screens === 1 ? "1 screen" : `${screens} screens`}
       </span>
-      <Button variant="transparent" size="small" iconOnly disabled={busy} onClick={onRemove} aria-label={`Remove ${group.name}`} className="text-danger-11">
+      <Button variant="transparent" size="small" iconOnly onClick={onRemove} aria-label={`Remove ${group.name}`} className="text-danger-11">
         <Trash2Icon className="size-3.5" />
       </Button>
     </li>
   );
 }
 
-export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
+/**
+ * `outputs` is undefined until the screens are known. The page does not wait for
+ * them: they only supply the "N screens" beside a group, and a count that is not
+ * known yet is left blank rather than drawn as 0.
+ */
+export function MessagesSection({ outputs }: { outputs?: readonly Output[] }) {
   const [config, setConfig] = useState<MessagingConfig | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [addingGroup, setAddingGroup] = useState(false);
   const [newGroup, setNewGroup] = useState("");
   const { failed, fail, clear } = useFailedReads<"config">("messages");
 
-  const load = useCallback(() => {
-    let cancelled = false;
-    invoke<MessagingConfig>("messaging:get")
-      .then((c) => {
-        if (cancelled) return;
-        setConfig(c);
-        clear("config");
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) fail("config", "the groups and quick messages", err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [fail, clear]);
-  useEffect(() => load(), [load]);
+  // The config the next save is built from. State is what is drawn; this is what
+  // is TRUE, and it moves the instant a save lands, before React has re-rendered.
+  const latest = useRef<MessagingConfig | null>(null);
+  // The end of the line of saves. Each one waits for the one before it.
+  const line = useRef<Promise<unknown>>(Promise.resolve());
+  // Bumped by every save that lands. A read that was already on its way when one
+  // did is older than what the page holds, and is dropped.
+  const epoch = useRef(0);
 
-  /** Save the whole config. Resolves true when it landed; on a refusal the
-   *  reason is toasted and logged and the caller keeps what it had typed. */
-  async function persist(next: ConfigBody): Promise<boolean> {
-    setSaving(true);
-    try {
-      setConfig(await invoke<MessagingConfig>("messaging:set", next));
-      clear("config");
-      return true;
-    } catch (err) {
-      if ((err as ApiError).status === 409) {
-        logToServer("messages", "the groups and quick messages changed in another window; reloaded");
-        toast.error("The groups and quick messages were changed in another window. They have been reloaded; make your change again.");
-        load();
+  const adopt = useCallback((next: MessagingConfig) => {
+    latest.current = next;
+    setConfig(next);
+  }, []);
+
+  /** Read the stored config. Resolves false when it could not be read. */
+  const read = useCallback(
+    (): Promise<boolean> => {
+      const started = epoch.current;
+      return invoke<MessagingConfig>("messaging:get").then(
+        (stored) => {
+          if (epoch.current === started) adopt(stored);
+          clear("config");
+          return true;
+        },
+        (err: unknown) => {
+          fail("config", "the groups and quick messages", err);
+          return false;
+        },
+      );
+    },
+    [adopt, fail, clear],
+  );
+  useEffect(() => {
+    void read();
+  }, [read]);
+
+  /**
+   * Save a change to the config, after every save before it. `change` is given the
+   * config as it stands when this one's turn comes and returns what to replace
+   * (null: nothing, the thing it named is gone). Resolves true when it landed; on
+   * a refusal the reason is toasted and logged and the caller keeps what it typed.
+   */
+  function save(change: (current: MessagingConfig) => ConfigChange | null): Promise<boolean> {
+    const run = async (): Promise<boolean> => {
+      const current = latest.current;
+      const replaced = current && change(current);
+      if (!current || !replaced) return false;
+      try {
+        const stored = await invoke<MessagingConfig>("messaging:set", {
+          version: current.version,
+          groups: current.groups,
+          quickMessages: current.quickMessages,
+          quickReplies: current.quickReplies,
+          ...replaced,
+        });
+        epoch.current++;
+        adopt(stored);
+        clear("config");
+        return true;
+      } catch (err) {
+        const { status, code } = err as ApiError;
+        if (status === 409) {
+          // Another window saved first. Nothing was changed; what it left is read
+          // BEFORE the next queued save runs, or that one is refused the same way.
+          logToServer("messages", "the groups and quick messages changed in another window; reloaded");
+          toast.error("The groups and quick messages were changed in another window. They have been reloaded; make your change again.");
+          await read();
+          return false;
+        }
+        if (code === "groups-not-cleared") {
+          // The config WAS saved; what failed is taking a deleted group off the
+          // screens. The page's copy is out of date either way, and the message
+          // already says that saving again retries.
+          logToServer("messages", `saved the groups, but ${errorMessage(err)}`);
+          toast.error(errorMessage(err));
+          await read();
+          return true;
+        }
+        logToServer("messages", `could not save the groups and quick messages: ${errorMessage(err)}`);
+        toast.error(`Couldn't save that: ${errorMessage(err)}`);
         return false;
       }
-      if ((err as ApiError).code === "groups-not-cleared") {
-        // The config WAS saved; what failed is taking a deleted group off the
-        // screens. The page's copy is out of date either way, and the message
-        // already says that saving again retries.
-        logToServer("messages", `saved the groups, but ${errorMessage(err)}`);
-        toast.error(errorMessage(err));
-        load();
-        return true;
-      }
-      logToServer("messages", `could not save the groups and quick messages: ${errorMessage(err)}`);
-      toast.error(`Couldn't save that: ${errorMessage(err)}`);
-      return false;
-    } finally {
-      setSaving(false);
-    }
+    };
+    const result = line.current.then(run);
+    // run() answers every failure itself, so the line never holds a rejection.
+    line.current = result;
+    return result;
   }
 
   if (!config) {
     return failed.has("config") ? (
       <div className="flex flex-col items-start gap-2 pt-5">
         <ErrorNote>Couldn't load the groups and quick messages.</ErrorNote>
-        <Button variant="filled" size="small" onClick={() => void load()}>
+        <Button variant="filled" size="small" onClick={() => void read()}>
           Try again
         </Button>
       </div>
@@ -311,29 +373,29 @@ export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
     );
   }
 
-  const body = (over: Partial<ConfigBody>): ConfigBody => ({
-    version: config.version,
-    groups: config.groups,
-    quickMessages: config.quickMessages,
-    quickReplies: config.quickReplies,
-    ...over,
-  });
-  const screensIn = (id: string) => outputs.filter((o) => o.groups?.includes(id)).length;
+  const screensIn = (id: string): number | null => (outputs ? outputs.filter((o) => o.groups?.includes(id)).length : null);
 
   async function addGroup() {
     const name = newGroup.trim();
-    if (!name || !config) return;
-    if (await persist(body({ groups: [...config.groups, { name }] }))) setNewGroup("");
+    if (!name || addingGroup) return;
+    setAddingGroup(true);
+    try {
+      if (await save((current) => ({ groups: [...current.groups, { name }] }))) setNewGroup("");
+    } finally {
+      setAddingGroup(false);
+    }
   }
 
   async function removeGroup(group: MessageGroup) {
     const n = screensIn(group.id);
     const message =
-      n === 0
-        ? "No screens are in it. Messages already sent to it stay in today's thread."
-        : `${n} screen${n === 1 ? " is" : "s are"} in it, and will be taken out of it. Messages already sent to it stay in today's thread.`;
+      n === null
+        ? "Any screens in it will be taken out of it. Messages already sent to it stay in today's thread."
+        : n === 0
+          ? "No screens are in it. Messages already sent to it stay in today's thread."
+          : `${n} screen${n === 1 ? " is" : "s are"} in it, and will be taken out of it. Messages already sent to it stay in today's thread.`;
     if (!(await confirm({ title: `Remove ${group.name}?`, message, confirmLabel: "Remove", destructive: true }))) return;
-    await persist(body({ groups: config!.groups.filter((g) => g.id !== group.id) }));
+    await save((current) => (current.groups.some((g) => g.id === group.id) ? { groups: current.groups.filter((g) => g.id !== group.id) } : null));
   }
 
   return (
@@ -353,8 +415,13 @@ export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
                 key={g.id}
                 group={g}
                 screens={screensIn(g.id)}
-                busy={saving}
-                onRename={(name) => persist(body({ groups: config.groups.map((x) => (x.id === g.id ? { id: x.id, name } : x)) }))}
+                onRename={(name) =>
+                  save((current) =>
+                    current.groups.some((x) => x.id === g.id)
+                      ? { groups: current.groups.map((x) => (x.id === g.id ? { id: x.id, name } : x)) }
+                      : null,
+                  )
+                }
                 onRemove={() => void removeGroup(g)}
               />
             ))}
@@ -364,7 +431,7 @@ export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
             <Input
               value={newGroup}
               maxLength={GROUP_NAME_MAX}
-              disabled={saving || config.groups.length >= GROUPS_MAX}
+              disabled={addingGroup || config.groups.length >= GROUPS_MAX}
               placeholder={config.groups.length >= GROUPS_MAX ? `At most ${GROUPS_MAX}` : "New group"}
               aria-label="New group"
               onChange={(e) => setNewGroup(e.target.value)}
@@ -375,7 +442,7 @@ export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
             <Button
               variant="accent"
               size="small"
-              disabled={saving || config.groups.length >= GROUPS_MAX || newGroup.trim() === ""}
+              disabled={addingGroup || config.groups.length >= GROUPS_MAX || newGroup.trim() === ""}
               onClick={() => void addGroup()}
             >
               <PlusIcon className="size-3.5" /> Add
@@ -399,8 +466,12 @@ export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
           max={QUICK_MESSAGES_MAX}
           itemMax={MESSAGE_MAX}
           placeholder="New quick message"
-          busy={saving}
-          onChange={(next) => persist(body({ quickMessages: next }))}
+          onChange={(update) =>
+            save((current) => {
+              const quickMessages = update(current.quickMessages);
+              return quickMessages && { quickMessages };
+            })
+          }
         />
       </div>
 
@@ -416,8 +487,12 @@ export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
           max={QUICK_REPLIES_MAX}
           itemMax={QUICK_REPLY_MAX}
           placeholder="New quick reply"
-          busy={saving}
-          onChange={(next) => persist(body({ quickReplies: next }))}
+          onChange={(update) =>
+            save((current) => {
+              const quickReplies = update(current.quickReplies);
+              return quickReplies && { quickReplies };
+            })
+          }
         />
       </div>
     </div>

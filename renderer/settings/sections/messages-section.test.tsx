@@ -39,8 +39,36 @@ let server: Config;
 let puts: Config[] = [];
 let refuse: string | null = null;
 let halfDone = false;
+/** While set, every PUT waits for it: a save that is still in flight. */
+let gate: Promise<void> | null = null;
 let readFails = false;
 let fetchStub: ReturnType<typeof stubFetchWithLog>;
+
+type PutBody = { version: number; groups: { id?: string; name: string }[]; quickMessages: string[]; quickReplies: string[] };
+
+/** What the real server does with a PUT: a body built from another version is a
+ *  409, otherwise it is stored whole and answered. */
+function answerPut(body: PutBody) {
+  // What the real one does: a body built from another version is a 409.
+  if (body.version !== server.version) {
+    return reply(409, { error: "The groups and quick messages were changed in another window. Reload and try again.", code: "config-changed" });
+  }
+  let n = 0;
+  server = {
+    version: server.version + 1,
+    groups: body.groups.map((g) => ({ id: g.id ?? `g-9999999${++n}`, name: g.name })),
+    quickMessages: body.quickMessages,
+    quickReplies: body.quickReplies,
+  };
+  // Saved, and then the half that takes a deleted group off the screens failed.
+  if (halfDone) {
+    return reply(500, {
+      error: "The groups were saved, but taking deleted groups off the screens failed. Saving again retries it.",
+      code: "groups-not-cleared",
+    });
+  }
+  return ok(server);
+}
 
 beforeEach(() => {
   server = {
@@ -52,32 +80,15 @@ beforeEach(() => {
   puts = [];
   refuse = null;
   halfDone = false;
+  gate = null;
   readFails = false;
   fetchStub = stubFetchWithLog((url, init) => {
     if (url !== "/api/messaging") return ok({});
     if ((init?.method ?? "GET") === "PUT") {
-      const body = JSON.parse(String(init?.body)) as { version: number; groups: { id?: string; name: string }[]; quickMessages: string[]; quickReplies: string[] };
+      const body = JSON.parse(String(init?.body)) as PutBody;
       puts.push(body as Config);
       if (refuse) return reply(400, { error: refuse });
-      // What the real one does: a body built from another version is a 409.
-      if (body.version !== server.version) {
-        return reply(409, { error: "The groups and quick messages were changed in another window. Reload and try again.", code: "config-changed" });
-      }
-      let n = 0;
-      server = {
-        version: server.version + 1,
-        groups: body.groups.map((g) => ({ id: g.id ?? `g-9999999${++n}`, name: g.name })),
-        quickMessages: body.quickMessages,
-        quickReplies: body.quickReplies,
-      };
-      // Saved, and then the half that takes a deleted group off the screens failed.
-      if (halfDone) {
-        return reply(500, {
-          error: "The groups were saved, but taking deleted groups off the screens failed. Saving again retries it.",
-          code: "groups-not-cleared",
-        });
-      }
-      return ok(server);
+      return gate ? gate.then(() => answerPut(body)) : answerPut(body);
     }
     if (readFails) throw new TypeError("fetch failed");
     return ok(server);
@@ -88,12 +99,13 @@ afterEach(() => fetchStub.restore());
 const outputs = (...groups: string[][]): Output[] =>
   groups.map((g, i) => ({ id: `display-${i}`, name: `Screen ${i}`, viewId: null, groups: g }));
 
-async function mount(screens: Output[] = []) {
+/** `null`: the screens have not been read. */
+async function mount(screens: Output[] | null = []) {
   render(
     React.createElement(
       TooltipProvider,
       null,
-      React.createElement(MessagesSection, { outputs: screens }),
+      React.createElement(MessagesSection, { outputs: screens ?? undefined }),
       React.createElement(ConfirmHost),
       React.createElement(Toaster),
     ),
@@ -373,4 +385,75 @@ test("a save the server made but could not finish shows its message, and the pag
     "the page still shows a group the server has already deleted",
   );
   assert.ok(fetchStub.logs.some((l) => l.tag === "messages" && /saved the groups, but/.test(l.message)));
+});
+
+test("a click on another row while a save is in flight is not lost, and is built on what the first save left", async () => {
+  await mount();
+  let release!: () => void;
+  gate = new Promise<void>((r) => (release = r));
+
+  // Typing a new name and then clicking elsewhere blurs the box, which saves.
+  const box = screen.getByLabelText("Rename Stage");
+  fireEvent.change(box, { target: { value: "Main stage" } });
+  fireEvent.blur(box);
+  await flush();
+  assert.equal(puts.length, 1, "the rename was not sent");
+
+  // The click that caused the blur lands while that save is still in flight.
+  const trash = screen.getByLabelText("Remove Walk now") as HTMLButtonElement;
+  assert.equal(trash.disabled, false, "another row's button is off while a save is in flight");
+  fireEvent.click(trash);
+  await flush();
+  assert.equal(puts.length, 1, "the second save went out before the first had landed");
+
+  release();
+  await flush();
+  assert.equal(puts.length, 2, "the click was lost");
+  assert.equal(puts[1].version, 4, "the second save was built from the config as it was before the first");
+  assert.deepEqual(puts[1].groups, [GREEN, { id: STAGE.id, name: "Main stage" }], "the second save undid the rename");
+  assert.deepEqual(puts[1].quickMessages, ["2 minutes"]);
+  assert.deepEqual(server.groups.map((g) => g.name), ["Green room", "Main stage"]);
+  assert.deepEqual(server.quickMessages, ["2 minutes"]);
+});
+
+test("a queued move that names a row the first save has since moved changes nothing", async () => {
+  await mount();
+  let release!: () => void;
+  gate = new Promise<void>((r) => (release = r));
+  // Two clicks on the same arrow, the second before the first has landed: the
+  // second names what was at that place when it was clicked, and that is no
+  // longer there, so it must not move whatever is.
+  fireEvent.click(screen.getByLabelText("Move 2 minutes up"));
+  await flush();
+  fireEvent.click(screen.getByLabelText("Move 2 minutes up"));
+  await flush();
+  release();
+  await flush();
+  assert.equal(puts.length, 1, "the stale second move was sent");
+  assert.deepEqual(server.quickMessages, ["2 minutes", "Walk now"]);
+});
+
+test("the add box stays off only while its own add is in flight, so one click cannot add twice", async () => {
+  await mount();
+  let release!: () => void;
+  gate = new Promise<void>((r) => (release = r));
+  type("New quick message", "Wrap it up");
+  const add = within(screen.getByTestId("messages-quick-messages")).getByRole("button", { name: /Add/ });
+  fireEvent.click(add);
+  await flush();
+  fireEvent.click(add);
+  await flush();
+  assert.equal(puts.length, 1, "a second click added it again");
+  release();
+  await flush();
+  assert.deepEqual(server.quickMessages, ["Walk now", "2 minutes", "Wrap it up"]);
+});
+
+test("until the screens are known no count is drawn, and removing a group does not claim none are in it", async () => {
+  await mount(null);
+  assert.equal(document.querySelector(`[data-group-row="${STAGE.id}"]`)?.textContent, "", "a count was drawn for screens nobody has read");
+  fireEvent.click(screen.getByLabelText("Remove Stage"));
+  await flush();
+  assert.match(document.body.textContent ?? "", /Any screens in it will be taken out of it/);
+  assert.doesNotMatch(document.body.textContent ?? "", /No screens are in it/);
 });
