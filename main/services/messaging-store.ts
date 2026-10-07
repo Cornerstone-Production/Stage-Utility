@@ -119,7 +119,7 @@ function readFile(parsed: unknown): MessagingConfig {
 
   if (skipped.length > 0) {
     console.warn(
-      `[messages] messaging.json: left out ${skipped.length} entr${skipped.length === 1 ? "y" : "ies"} that break a limit: ${skipped.join(", ")}`,
+      `[messages] messaging.json: left out ${scrub(skipped.length)} entr${scrub(skipped.length === 1 ? "y" : "ies")} that break a limit: ${scrub(skipped.join(", "), 600)}`,
     );
   }
   return out;

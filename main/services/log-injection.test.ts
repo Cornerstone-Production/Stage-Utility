@@ -106,6 +106,15 @@ const REQUEST_FACING = [
   // into an HTTP body.
   "home-assistant-yaml.ts",
   "integration-manager.ts",
+  // Its sent line names the groups, the sender and the TEXT of a message, all
+  // typed into POST /api/messages; its refusal line carries the reason, which
+  // can name an id off the wire.
+  "messages-service.ts",
+  // Its one warning counts the stored messages it could not read.
+  "messages-store.ts",
+  // Its one warning names the stored groups and quick messages that break a
+  // limit, text the operator typed into PUT /api/messaging.
+  "messaging-store.ts",
   "pco-service.ts",
   "person-directory.ts",
   // GET /photos?u= hands the caller's string to every one of its log lines: the
@@ -402,6 +411,15 @@ function requestFacingFiles(): string[] {
     // then foldConfigEntries warns with the rejected KEY. That key is an
     // attacker's string, verbatim, and this file was missing from the list.
     path.join(HERE, "integration-manager.ts"),
+    // Its sent line names the groups, the sender and the TEXT of a message, all
+    // typed into POST /api/messages; its refusal line carries the reason, which
+    // can name an id off the wire.
+    path.join(HERE, "messages-service.ts"),
+    // Its one warning counts the stored messages it could not read.
+    path.join(HERE, "messages-store.ts"),
+    // Its one warning names the stored groups and quick messages that break a
+    // limit, text the operator typed into PUT /api/messaging.
+    path.join(HERE, "messaging-store.ts"),
     path.join(HERE, "pco-service.ts"),
     // Its lines name a by-person slot's person ID, which the operator types into
     // the slot editor and saves over HTTP; scrubbed at the logger.
