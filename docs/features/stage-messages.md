@@ -33,9 +33,11 @@ change is saved at once. A change the server refuses — a duplicate group name,
 list past its limit — says why and leaves what you typed where it is.
 
 If the page is open in two windows, the one that saves second is told the
-config changed in another window, reloads what is stored, and saves nothing:
+config changed since the page loaded, reloads what is stored, and saves nothing:
 the whole config is replaced at once, so a save built from the old one would
-delete the group the other window added. Make the change again.
+delete the group the other window added. The same message appears when this
+page's own earlier save went through after its answer was lost (a timeout).
+Make the change again.
 
 These are the operator's own work, so they are carried by every backup.
 

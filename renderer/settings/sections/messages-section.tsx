@@ -13,7 +13,8 @@
 // that the server refused is still in its box to fix, not gone.
 //
 // Every save carries the version of the config it was built from. A 409 means
-// another window saved first: this one reloads what is stored, says so, and
+// the page is behind (another window saved first, or this page's own save went
+// through after its answer was lost): it reloads what is stored, says so, and
 // saves nothing, because the whole config is replaced at once and a save built
 // from the old one would delete what the other window added.
 //
@@ -210,18 +211,38 @@ function AddRow({
   );
 }
 
-/** `current` has `text` at `index`: a save queued behind another one may find the
- *  list has moved on, and acting on whatever is at that index now would change a
- *  row nobody clicked. */
-function whereItIs(current: readonly string[], index: number, text: string): boolean {
-  return current[index] === text;
+/** `current` has one of `texts` at `index`: a save queued behind another one may
+ *  find the list has moved on, and acting on whatever is at that index now would
+ *  change a row nobody clicked. */
+function whereItIs(current: readonly string[], index: number, texts: readonly string[]): boolean {
+  return texts.includes(current[index]);
 }
 
 function StringList({ label, noun, description, items, max, itemMax, placeholder, onChange }: StringListProps) {
+  // What a row's edit that is still in flight will make it say, by index. A click
+  // on its arrows or trash can while the edit saves names the text it shows now;
+  // by the time that click's turn comes the row says the new text, and an action
+  // that accepted only the old one would find nothing and do nothing.
+  const editing = useRef(new Map<number, string>());
+  /** The texts a click on row `index`, showing `text`, may find there when its turn comes. */
+  const acceptable = (index: number, text: string): string[] => {
+    const next = editing.current.get(index);
+    return next === undefined ? [text] : [text, next];
+  };
+
+  async function edit(index: number, text: string, next: string): Promise<boolean> {
+    editing.current.set(index, next);
+    try {
+      return await onChange((current) => (whereItIs(current, index, [text]) ? current.map((t, j) => (j === index ? next : t)) : null));
+    } finally {
+      if (editing.current.get(index) === next) editing.current.delete(index);
+    }
+  }
+
   function move(index: number, by: -1 | 1) {
-    const text = items[index];
+    const texts = acceptable(index, items[index]);
     void onChange((current) => {
-      if (!whereItIs(current, index, text) || current[index + by] === undefined) return null;
+      if (!whereItIs(current, index, texts) || current[index + by] === undefined) return null;
       const next = [...current];
       [next[index], next[index + by]] = [next[index + by], next[index]];
       return next;
@@ -242,9 +263,12 @@ function StringList({ label, noun, description, items, max, itemMax, placeholder
             maxLength={itemMax}
             first={i === 0}
             last={i === items.length - 1}
-            onEdit={(next) => onChange((current) => (whereItIs(current, i, text) ? current.map((t, j) => (j === i ? next : t)) : null))}
+            onEdit={(next) => edit(i, text, next)}
             onMove={(by) => move(i, by)}
-            onRemove={() => void onChange((current) => (whereItIs(current, i, text) ? current.filter((_, j) => j !== i) : null))}
+            onRemove={() => {
+              const texts = acceptable(i, text);
+              void onChange((current) => (whereItIs(current, i, texts) ? current.filter((_, j) => j !== i) : null));
+            }}
           />
         ))}
       </ul>
@@ -284,9 +308,6 @@ export function MessagesSection({ outputs }: { outputs?: readonly Output[] }) {
   const latest = useRef<MessagingConfig | null>(null);
   // The end of the line of saves. Each one waits for the one before it.
   const line = useRef<Promise<unknown>>(Promise.resolve());
-  // Bumped by every save that lands. A read that was already on its way when one
-  // did is older than what the page holds, and is dropped.
-  const epoch = useRef(0);
 
   const adopt = useCallback((next: MessagingConfig) => {
     latest.current = next;
@@ -295,11 +316,12 @@ export function MessagesSection({ outputs }: { outputs?: readonly Output[] }) {
 
   /** Read the stored config. Resolves false when it could not be read. */
   const read = useCallback(
-    (): Promise<boolean> => {
-      const started = epoch.current;
-      return invoke<MessagingConfig>("messaging:get").then(
+    // Never racing a save: it runs when the page has no config yet (the first
+    // read, Try again), or inside the line of saves, which waits for it.
+    (): Promise<boolean> =>
+      invoke<MessagingConfig>("messaging:get").then(
         (stored) => {
-          if (epoch.current === started) adopt(stored);
+          adopt(stored);
           clear("config");
           return true;
         },
@@ -307,8 +329,7 @@ export function MessagesSection({ outputs }: { outputs?: readonly Output[] }) {
           fail("config", "the groups and quick messages", err);
           return false;
         },
-      );
-    },
+      ),
     [adopt, fail, clear],
   );
   useEffect(() => {
@@ -334,7 +355,6 @@ export function MessagesSection({ outputs }: { outputs?: readonly Output[] }) {
           quickReplies: current.quickReplies,
           ...replaced,
         });
-        epoch.current++;
         adopt(stored);
         clear("config");
         return true;
@@ -343,8 +363,10 @@ export function MessagesSection({ outputs }: { outputs?: readonly Output[] }) {
         if (status === 409) {
           // Another window saved first. Nothing was changed; what it left is read
           // BEFORE the next queued save runs, or that one is refused the same way.
-          logToServer("messages", "the groups and quick messages changed in another window; reloaded");
-          toast.error("The groups and quick messages were changed in another window. They have been reloaded; make your change again.");
+          // Another window saved first, or this page's own earlier save went through
+          // after its answer was lost (a timeout): either way the page is behind.
+          logToServer("messages", "the groups and quick messages changed since this page loaded; reloaded");
+          toast.error("The groups and quick messages changed since this page loaded, so they have been reloaded. Make your change again.");
           await read();
           return false;
         }
@@ -352,7 +374,7 @@ export function MessagesSection({ outputs }: { outputs?: readonly Output[] }) {
           // The config WAS saved; what failed is taking a deleted group off the
           // screens. The page's copy is out of date either way, and the message
           // already says that saving again retries.
-          logToServer("messages", `saved the groups, but ${errorMessage(err)}`);
+          logToServer("messages", `the save landed but did not finish: ${errorMessage(err)}`);
           toast.error(errorMessage(err));
           await read();
           return true;
