@@ -69,6 +69,8 @@ let outputs: Output[];
 let messageGroups: { id: string; name: string }[];
 let patches: { url: string; body: unknown }[];
 let patchFails: boolean;
+/** While set, every PATCH waits for it: a tick whose answer has not come back. */
+let patchGate: Promise<void> | null;
 
 beforeEach(() => {
   outputs = [
@@ -78,6 +80,7 @@ beforeEach(() => {
   messageGroups = [GREEN, STAGE];
   patches = [];
   patchFails = false;
+  patchGate = null;
   fetchStub = stubFetchWithLog((url, init) => {
     const method = init?.method ?? "GET";
     if (method === "PATCH" && url.startsWith("/api/outputs/")) {
@@ -85,8 +88,11 @@ beforeEach(() => {
       patches.push({ url, body });
       if (patchFails) return reply(500, { error: "disk full" });
       const id = decodeURIComponent(url.slice("/api/outputs/".length));
-      outputs = outputs.map((o) => (o.id === id ? { ...o, groups: body.groups } : o));
-      return ok({ ...DEFAULT_STAGE_STATE, outputs });
+      const answer = () => {
+        outputs = outputs.map((o) => (o.id === id ? { ...o, groups: body.groups } : o));
+        return ok({ ...DEFAULT_STAGE_STATE, outputs });
+      };
+      return patchGate ? patchGate.then(answer) : answer();
     }
     if (url === "/api/state") return ok({ ...DEFAULT_STAGE_STATE, outputs });
     if (url === "/api/messages") return ok({ rev: 1, groups: messageGroups, messages: [], alerts: [] });
@@ -157,6 +163,31 @@ describe("ticking a group on a screen's card", () => {
     );
     const chips = [...document.querySelectorAll('[data-testid="screen-groups"] li')].map((li) => li.textContent);
     assert.deepEqual(chips, ["Stage"]);
+  });
+
+  test("a second tick before the first is answered is built on the first: the whole list, both groups", async () => {
+    let release!: () => void;
+    patchGate = new Promise<void>((r) => (release = r));
+    await mountScreens();
+    await openGroups("Booth");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Green room" }));
+      await settle();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Stage" }));
+      await settle();
+    });
+    assert.deepEqual(
+      patches.map((p) => p.body),
+      [{ groups: [GREEN.id] }, { groups: [GREEN.id, STAGE.id] }],
+      "the second tick was built from the screen as the server last said it, and undid the first",
+    );
+    await act(async () => {
+      release();
+      await settle();
+      await settle();
+    });
   });
 
   test("offers the groups the server holds, not a made-up list", async () => {
