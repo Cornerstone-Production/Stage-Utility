@@ -159,6 +159,26 @@ describe("a body the limits refuse leaves the stored config alone", () => {
   });
 });
 
+describe("a save that fails", () => {
+  test("leaves the config every reader sees as it was, and the next save works", async () => {
+    const { config } = await messagingStore.replace(body({ groups: [{ name: "Kept" }] }));
+    const before = JSON.stringify(messagingStore.get());
+    // A file the write cannot replace: the temp file is written, then renamed
+    // over a directory, which fails. What a full card or a read-only disk does.
+    fs.rmSync(FILE);
+    fs.mkdirSync(FILE);
+    try {
+      await assert.rejects(() => messagingStore.replace(body({ groups: [{ id: config.groups[0].id, name: "Renamed" }, { name: "Added" }] })));
+      assert.equal(JSON.stringify(messagingStore.get()), before, "a save that failed changed the config readers are shown");
+    } finally {
+      fs.rmdirSync(FILE);
+    }
+    const retried = await messagingStore.replace(body({ groups: [{ id: config.groups[0].id, name: "Renamed" }] }));
+    assert.equal(retried.config.version, config.version + 1, "the failed save used up a version");
+    assert.deepEqual(onDisk().groups.map((g) => g.name), ["Renamed"]);
+  });
+});
+
 describe("the version", () => {
   test("starts at 0 for a config that has never been saved, and goes up by one with every replace", async () => {
     const before = messagingStore.get().version;
