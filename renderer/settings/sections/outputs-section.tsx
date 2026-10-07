@@ -4,7 +4,7 @@ import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon, PanelTopIcon, PanelTopDashedIcon, CheckIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon, PanelTopIcon, PanelTopDashedIcon, CheckIcon, ChevronRightIcon, UsersIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
@@ -35,6 +35,7 @@ import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useSortableRow } from "../../lib/use-sortable-row";
 import { useVideoState } from "../../main/video/use-video-state";
+import { useMessageGroups, type MessageGroups } from "../../main/use-message-groups";
 
 
 const UNROUTED = "__none__";
@@ -140,6 +141,13 @@ export interface OutputRowProps {
   /** Allow or refuse HLS playback for a Video widget on THIS screen. Off keeps
    *  a struggling Pi on WebRTC only. */
   onSetAllowHls: (allowHls: boolean) => void;
+  /** The message groups that exist, and whether they have been read. */
+  messageGroups: MessageGroups;
+  /** Replace this screen's message groups with these ids. */
+  onSetGroups: (groups: string[]) => void;
+  /** Open Settings -> Messages, where groups are made. Absent where there is
+   *  nowhere to go. */
+  onOpenMessagingSettings?: () => void;
   /** Awaited: switching a screen to a panel must LAND before a console view
    *  is assigned to it, because the server refuses the pair in the wrong order. */
   onSetMode: (mode: "display" | "panel") => Promise<void>;
@@ -190,7 +198,7 @@ export function resolveIconEntry(
   return { key, legacyKey, value: iconEntryAt(entries, key, legacyKey) };
 }
 
-export function OutputRow({ output, views, baseUrl, online, struggles, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetAllowHls, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+export function OutputRow({ output, views, baseUrl, online, struggles, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetAllowHls, messageGroups, onSetGroups, onOpenMessagingSettings, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   // Both bar items below are about a strip that only some kinds draw. Offering
@@ -204,6 +212,14 @@ export function OutputRow({ output, views, baseUrl, online, struggles, canRemove
   const [viewName, setViewName] = useState("");
 
   const { setNodeRef, style, dragA11y, listeners } = useSortableRow(output.id);
+
+  // This screen's groups, in the config's order. An id the config no longer holds
+  // (a group deleted since) names nothing and draws nothing; the server takes it
+  // off the screen when the group is deleted.
+  const screenGroups = messageGroups.groups.filter((g) => output.groups?.includes(g.id));
+  function toggleGroup(id: string, on: boolean) {
+    onSetGroups(messageGroups.groups.filter((g) => (g.id === id ? on : screenGroups.some((s) => s.id === g.id))).map((g) => g.id));
+  }
 
   useResyncOn([output.name], () => {
     setEditName(output.name);
@@ -448,6 +464,50 @@ export function OutputRow({ output, views, baseUrl, online, struggles, canRemove
                   Off, this screen plays only WebRTC. A feed that needs HLS says it can't play here.
                 </p>
               )}
+              {/* Which message groups this screen is in. One checkbox per group,
+                  kept open across a click so several can be set in one visit. */}
+              <DropdownMenu.Sub>
+                <DropdownMenu.SubTrigger className={cn(MENU_ITEM, "data-[state=open]:bg-fill")}>
+                  <UsersIcon className="size-3.5 text-fg-subtle" />
+                  Groups
+                  <ChevronRightIcon className="ml-auto size-3.5 text-fg-subtle" />
+                </DropdownMenu.SubTrigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.SubContent sideOffset={6} alignOffset={-4} className={menuContent()}>
+                    {messageGroups.groups.map((g) => (
+                      <DropdownMenu.CheckboxItem
+                        key={g.id}
+                        checked={screenGroups.some((s) => s.id === g.id)}
+                        onCheckedChange={(on) => toggleGroup(g.id, on)}
+                        onSelect={(e) => e.preventDefault()}
+                        className={MENU_ITEM}
+                      >
+                        <span className="flex size-3.5 shrink-0 items-center justify-center">
+                          <DropdownMenu.ItemIndicator>
+                            <CheckIcon className="size-3.5 text-accent" />
+                          </DropdownMenu.ItemIndicator>
+                        </span>
+                        {g.name}
+                      </DropdownMenu.CheckboxItem>
+                    ))}
+                    {messageGroups.groups.length === 0 && (
+                      messageGroups.failed ? (
+                        <p className="px-2 py-1.5 text-caption1 text-danger-11">Couldn't load the groups.</p>
+                      ) : !messageGroups.known ? (
+                        <p className="px-2 py-1.5 text-caption1 text-fg-subtle">Loading groups...</p>
+                      ) : (
+                        <DropdownMenu.Item
+                          onSelect={() => onOpenMessagingSettings?.()}
+                          disabled={!onOpenMessagingSettings}
+                          className={MENU_ITEM}
+                        >
+                          No groups yet. Make some in Settings → Messages
+                        </DropdownMenu.Item>
+                      )
+                    )}
+                  </DropdownMenu.SubContent>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Sub>
               <DropdownMenu.Item
                 // preventDefault keeps the menu OPEN across the copy. Without it
                 // Radix closes and returns focus to the trigger, which discards
@@ -496,6 +556,18 @@ export function OutputRow({ output, views, baseUrl, online, struggles, canRemove
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
       </div>
+
+      {/* The message groups this screen is in. Under the name, small: it is
+          context for the screen, not something to work from. */}
+      {screenGroups.length > 0 && (
+        <ul data-testid="screen-groups" aria-label="Message groups" className="flex flex-wrap gap-1 px-3 pt-1.5">
+          {screenGroups.map((g) => (
+            <li key={g.id} className="rounded-full border border-line bg-fill px-2 py-0.5 text-caption2 text-fg-muted">
+              {g.name}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {/* A LIVE preview: the real kiosk renderers in an iframe, scaled. It only
           mounts once the card is on screen — eight iframes booting at once each
@@ -747,8 +819,11 @@ export function OutputsSection({
   stageState,
   handlers,
   onEditLayout,
+  onOpenMessagingSettings,
   serviceTypes = [],
 }: Pick<SectionProps, "stageState" | "handlers"> & {
+  /** Open Settings -> Messages, from a screen's empty Groups menu. */
+  onOpenMessagingSettings?: () => void;
   /** For a plan import's service type picker. Defaulted so the one other
    *  caller — none today — is not forced to thread it. */
   serviceTypes?: SectionProps["serviceTypes"];
@@ -803,6 +878,9 @@ export function OutputsSection({
   // exactly then (see ScreenVideoHealth's own comment) — never read off the
   // live window fields, which dilute out from under a still-struggling pair.
   const video = useVideoState();
+  // The message groups, for the Groups menu and the chips. Live, so a group
+  // renamed or deleted in Settings reaches an open Screens page.
+  const messageGroups = useMessageGroups();
   const strugglesByOutput = new Map<string, ScreenStruggle[]>();
   for (const health of video?.screens ?? []) {
     if (!health.struggling || !health.episode) continue;
@@ -869,6 +947,9 @@ export function OutputsSection({
                 onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
                 onSetHideTopBar={(hideTopBar) => handlers.handleSetOutputHideTopBar(output.id, hideTopBar)}
                 onSetAllowHls={(allowHls) => handlers.handleSetOutputAllowHls(output.id, allowHls)}
+                messageGroups={messageGroups}
+                onSetGroups={(groups) => handlers.handleSetOutputGroups(output.id, groups)}
+                onOpenMessagingSettings={onOpenMessagingSettings}
                 onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}

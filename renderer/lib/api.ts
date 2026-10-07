@@ -437,6 +437,7 @@ export type IpcChannel =
   | "layoutTemplates:list"
   | "layoutTemplates:save"
   | "layoutTemplates:update"
+  | "messages:get"
   | "notes:set"
   | "obs:getStatus"
   | "osc:addTarget"
@@ -454,6 +455,7 @@ export type IpcChannel =
   | "outputs:rename"
   | "outputs:reorder"
   | "outputs:setAllowHls"
+  | "outputs:setGroups"
   | "outputs:setHideTopBar"
   | "outputs:setLocked"
   | "outputs:setMode"
@@ -1340,6 +1342,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { allowHls: p.allowHls });
     }
 
+    case "outputs:setGroups": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { groups: p.groups });
+    }
+
     case "history:editWindow":
       return post<T>("/api/history/window", p);
 
@@ -1549,6 +1556,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "notes:set":
       return post<T>("/api/notes", p);
+
+    case "messages:get":
+      return apiFetch<T>("/api/messages");
 
     case "views:setSurface":
       return patch<T>(`/api/views/${encodeURIComponent(String(p.id))}`, { surface: p.surface });

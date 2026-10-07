@@ -113,6 +113,8 @@ function renderRow(struggles: Parameters<typeof OutputRow>[0]["struggles"]) {
         onSetLocked: () => {},
         onSetHideTopBar: () => {},
         onSetAllowHls: () => {},
+        messageGroups: { groups: [], known: true, failed: false },
+        onSetGroups: () => {},
         onSetMode: NOOP_ASYNC,
         onRefresh: () => {},
         onRemove: () => {},

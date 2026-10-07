@@ -13,6 +13,17 @@ or deleted, and no group can be named Everyone.
 
 Up to 20 groups, each name 1–40 characters, unique without regard to case.
 
+### Putting a screen in groups
+
+On the **Screens** page, open a screen's **⋯** menu and choose **Groups**. Each
+group is a checkbox, and the menu stays open so several can be set in one visit.
+The groups a screen is in show as small chips under its name. With no groups made
+yet the submenu says so and links to Settings → Messages.
+
+A screen's groups are stored with the screen (`Output.groups`), so they follow it
+across a restart and are carried in backups with the rest of the screen's
+settings. See [Data model](../reference/data-model.md#stage-messages).
+
 ## Messages
 
 A message is a short piece of text addressed to one or more groups, or to
@@ -20,10 +31,10 @@ Everyone. It is 1–280 characters once trimmed, has a sender (a name, not an
 account: it defaults to `Operator`, at most 60 characters), and may be an
 **alert**.
 
-It is sent with `POST /api/messages` and read back with `GET /api/messages`. The server stamps the id and the time; a
-body cannot choose either. A message that breaks a rule is refused with a `400`
-that says which, is logged as `[messages] refused: …`, and is neither saved nor
-sent.
+It is sent with `POST /api/messages` and read back with `GET /api/messages`. The
+server stamps the id and the time; a body cannot choose either. A message that
+breaks a rule is refused with a `400` that says which, is logged as
+`[messages] refused: …`, and is neither saved nor sent.
 
 ### Alerts
 
