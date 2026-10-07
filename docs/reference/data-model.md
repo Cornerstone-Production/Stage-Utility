@@ -286,7 +286,7 @@ Two stores, split by whose work they are:
 | `messages.json` | runtime | The day's messages and `lastClearedDate`. Not restored from a backup: a message is an observation about one day. |
 
 A screen is in any number of groups: `Output.groups` holds their ids, in the
-groups' own order, and is absent when the screen is in none. **Everyone** is
+groups' own order, and is empty or absent when the screen is in none. **Everyone** is
 built in and is not stored; it reaches every screen whether the screen is in a
 group or not. Deleting a group takes its id off every screen that held it.
 

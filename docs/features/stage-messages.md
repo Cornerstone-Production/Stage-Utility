@@ -41,7 +41,7 @@ These are the operator's own work, so they are carried by every backup.
 
 ### Putting a screen in groups
 
-On the **Screens** page, open a screen's **⋯** menu and choose **Groups**. Each
+On the **Screens** page, open a screen's menu (the vertical dots) and choose **Groups**. Each
 group is a checkbox, and the menu stays open so several can be set in one visit.
 The groups a screen is in show as small chips under its name. With no groups made
 yet the submenu says so and links to Settings → Messages.
@@ -70,11 +70,12 @@ screen with a wrong clock still ends it on time. `POST /api/messages/:id/clear-a
 ends one early; the message stays in the thread with a `clearedAt` time.
 Clearing an alert that is already over is not an error.
 
-`alert` in the state is the newest message whose alert is still running. When it
-runs out the server sends the state again with `alert` back to `null`, so a screen
-that keeps no timer of its own still stops showing it. Two alerts to different
-groups can run at once; each message carries its own `alertUntil` and
-`clearedAt`.
+`alerts` in the state lists every message whose alert is still running, newest
+first. Two alerts to different groups can run at once, and a screen draws the ones
+sent to its own groups. Each alert's end goes out as its own frame: when it runs
+out, or is cleared, the server sends the state again without it, so a screen that
+keeps no timer of its own still stops showing it. Each message carries its own
+`alertUntil` and `clearedAt`.
 
 ### The day's thread
 
