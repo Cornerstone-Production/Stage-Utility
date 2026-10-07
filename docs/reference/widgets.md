@@ -465,12 +465,21 @@ nothing.
 | **RossTalk button** | Fires a RossTalk command | A Ross switcher |
 | **Action button** | Runs one of the app's own actions | This app |
 | **Cue button** | Fires a cue and shows its device's state: on, off, settling after a press, stale when Companion has lost the device, dimmed when the cue refuses | This app, via Companion |
-| **Notes** | A shared note anyone can type into | This app |
+| **Notes** | A note typed on a console and shown wherever the widget is | This app |
 | **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
 
-**Notes** and **Checklist** are shared, not per-screen: two people looking at them
-see the same text. See [OSC](../integrations/osc.md) and
-[RossTalk](../integrations/rosstalk.md).
+A **Notes** widget keeps its own text: everyone looking at that widget sees the
+same words, but a second Notes widget, or a copy made by duplicating the view,
+starts empty. It can be typed into on a console and is read-only on a wall
+display. To write on a console and show the note on a wall, put the Notes widget
+in a view of its own and add that view to both layouts with **Embedded view**:
+both embeds are the same widget, so an edit on the console reaches the wall
+within about a second.
+
+Every **Checklist** reading the plan's checklist shows the same rows and ticks,
+wherever it is placed.
+
+See [OSC](../integrations/osc.md) and [RossTalk](../integrations/rosstalk.md).
 
 **Action button** picks an **Action** from the same registry the
 [automation rules editor](../automation.md) offers — every action in
