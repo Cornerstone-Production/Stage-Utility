@@ -30,20 +30,9 @@ import {
   type MessagingConfig,
 } from "../types/messages.js";
 import { DataStore } from "./data-store.js";
+import { MessageRefused, checkedText } from "./message-rules.js";
 import { scrub } from "./scrub.js";
 import { WriteQueue } from "./write-queue.js";
-
-/**
- * The caller's mistake rather than ours: a body the limits refuse. Routes answer
- * it 400 with the message; anything else that throws out of here is a failed
- * write and is not dressed up as one.
- */
-export class MessagingRefused extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "MessagingRefused";
-  }
-}
 
 /**
  * The config this was based on is not the stored one any more: another window
@@ -170,21 +159,13 @@ function newGroupId(taken: ReadonlySet<string>): string {
 }
 
 function asList(value: unknown, field: string, max: number): unknown[] {
-  if (!Array.isArray(value)) throw new MessagingRefused(`${field} (array) is required`);
-  if (value.length > max) throw new MessagingRefused(`${field} can hold at most ${max} (this has ${value.length})`);
+  if (!Array.isArray(value)) throw new MessageRefused(`${field} (array) is required`);
+  if (value.length > max) throw new MessageRefused(`${field} can hold at most ${max} (this has ${value.length})`);
   return value;
 }
 
-function checkedText(value: unknown, what: string, max: number): string {
-  if (typeof value !== "string") throw new MessagingRefused(`${what} must be text`);
-  const text = value.trim();
-  if (text.length < 1) throw new MessagingRefused(`${what} cannot be empty`);
-  if (text.length > max) throw new MessagingRefused(`${what} is at most ${max} characters (this one is ${text.length})`);
-  return text;
-}
-
 /**
- * The strict reading of a body, for PUT. Throws MessagingRefused naming the
+ * The strict reading of a body, for PUT. Throws MessageRefused naming the
  * first thing wrong; returns the config to store.
  *
  * `existing` is the groups as they stand: a group in the body that carries an
@@ -194,13 +175,13 @@ function checkedText(value: unknown, what: string, max: number): string {
  */
 function validate(input: unknown, current: MessagingConfig): MessagingConfig {
   if (input === null || typeof input !== "object" || Array.isArray(input)) {
-    throw new MessagingRefused("body must be { version, groups, quickMessages, quickReplies }");
+    throw new MessageRefused("body must be { version, groups, quickMessages, quickReplies }");
   }
   const body = input as Record<string, unknown>;
   // First, before any other rule: a body built from an older config is stale
   // whatever else is wrong with it, and "reload" is the answer that helps.
   if (typeof body.version !== "number") {
-    throw new MessagingRefused("version (number) is required: send the version the config was read at");
+    throw new MessageRefused("version (number) is required: send the version the config was read at");
   }
   if (body.version !== current.version) throw new MessagingConflict();
   const existing = current.groups;
@@ -210,12 +191,12 @@ function validate(input: unknown, current: MessagingConfig): MessagingConfig {
   const seenNames = new Set<string>();
 
   const groups: MessageGroup[] = asList(body.groups, "groups", GROUPS_MAX).map((entry) => {
-    if (entry === null || typeof entry !== "object") throw new MessagingRefused("every group must be { name } or { id, name }");
+    if (entry === null || typeof entry !== "object") throw new MessageRefused("every group must be { name } or { id, name }");
     const row = entry as { id?: unknown; name?: unknown };
     const name = checkedText(row.name, "a group name", GROUP_NAME_MAX);
     const key = name.toLowerCase();
-    if (key === EVERYONE) throw new MessagingRefused(`"${name}" is built in; pick another group name`);
-    if (seenNames.has(key)) throw new MessagingRefused(`two groups are named "${name}" (names are not case-sensitive)`);
+    if (key === EVERYONE) throw new MessageRefused(`"${name}" is built in; pick another group name`);
+    if (seenNames.has(key)) throw new MessageRefused(`two groups are named "${name}" (names are not case-sensitive)`);
     seenNames.add(key);
 
     let id: string;
@@ -223,9 +204,9 @@ function validate(input: unknown, current: MessagingConfig): MessagingConfig {
       id = newGroupId(taken);
       taken.add(id);
     } else {
-      if (typeof row.id !== "string" || !GROUP_ID.test(row.id)) throw new MessagingRefused("a group id is not one this app issued");
-      if (!known.has(row.id)) throw new MessagingRefused(`no group has the id ${row.id}; reload and try again`);
-      if (seenIds.has(row.id)) throw new MessagingRefused(`the group id ${row.id} appears twice`);
+      if (typeof row.id !== "string" || !GROUP_ID.test(row.id)) throw new MessageRefused("a group id is not one this app issued");
+      if (!known.has(row.id)) throw new MessageRefused(`no group has the id ${row.id}; reload and try again`);
+      if (seenIds.has(row.id)) throw new MessageRefused(`the group id ${row.id} appears twice`);
       id = row.id;
     }
     seenIds.add(id);
@@ -262,7 +243,7 @@ export const messagingStore = {
    * so the caller can take them off the screens that had them and say so to
    * the ones that draw them.
    *
-   * Refuses with MessagingRefused when a limit is broken, and with
+   * Refuses with MessageRefused when a limit is broken, and with
    * MessagingConflict when the body's `version` is not the stored one. The file is written
    * before the live config changes: a write that fails (a full SD card) throws
    * to the caller and leaves what was there, instead of a config every reader

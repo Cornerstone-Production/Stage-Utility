@@ -14,7 +14,8 @@ import { beforeEach, describe, test } from "node:test";
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), "messaging-store-"));
 process.env.STAGE_UTILITY_DATA = DATA;
 
-const { messagingStore, MessagingRefused, MessagingConflict } = await import("./messaging-store.js");
+const { messagingStore, MessagingConflict } = await import("./messaging-store.js");
+const { MessageRefused } = await import("./message-rules.js");
 const { configFiles, runtimeFiles } = await import("./config-snapshot.js");
 const { GROUP_ID } = await import("../types/messages.js");
 
@@ -36,7 +37,7 @@ async function refusal(input: unknown): Promise<string> {
   try {
     await messagingStore.replace(input);
   } catch (err) {
-    assert.ok(err instanceof MessagingRefused, `expected a MessagingRefused, got ${String(err)}`);
+    assert.ok(err instanceof MessageRefused, `expected a MessageRefused, got ${String(err)}`);
     return err.message;
   }
   assert.fail("the body was accepted");

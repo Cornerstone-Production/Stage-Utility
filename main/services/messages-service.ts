@@ -43,6 +43,7 @@ import {
 } from "../types/messages.js";
 import { zonedDateKey } from "./app-timezone.js";
 import { broadcast } from "./broadcaster.js";
+import { MessageRefused, checkedText } from "./message-rules.js";
 import { messagesStore } from "./messages-store.js";
 import { messagingStore } from "./messaging-store.js";
 import { plural } from "./plural.js";
@@ -55,18 +56,6 @@ import { WriteQueue } from "./write-queue.js";
 const CLEAR_CHECK_MS = 60_000;
 /** How much of a message's text one log line carries. */
 const LOG_TEXT_MAX = 120;
-
-/**
- * The caller's mistake: a body the rules refuse. Routes answer it 400 with the
- * message; anything else that throws out of here is a failed write and is not
- * dressed up as one.
- */
-export class MessageRefused extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "MessageRefused";
-  }
-}
 
 /**
  * The config was saved and a group is gone from it, but taking that group off
@@ -87,14 +76,9 @@ export interface SendInput {
   from?: unknown;
 }
 
-/** What a send or a clear refuses to do, as `name` says. */
+/** Who a send or a clear says it is from: `DEFAULT_FROM` when it does not say. */
 function checkedFrom(value: unknown): string {
-  if (value === undefined) return DEFAULT_FROM;
-  if (typeof value !== "string") throw new MessageRefused("from must be text");
-  const from = value.trim();
-  if (from.length < 1) throw new MessageRefused("from cannot be empty");
-  if (from.length > FROM_MAX) throw new MessageRefused(`from is at most ${FROM_MAX} characters (this one is ${from.length})`);
-  return from;
+  return value === undefined ? DEFAULT_FROM : checkedText(value, "from", FROM_MAX);
 }
 
 /**
@@ -130,12 +114,7 @@ export function checkSend(
     to = groups.filter((g) => wanted.has(g.id)).map((g) => g.id);
   }
 
-  if (typeof input.text !== "string") throw new MessageRefused("text must be text");
-  const text = input.text.trim();
-  if (text.length < 1) throw new MessageRefused("a message cannot be empty");
-  if (text.length > MESSAGE_MAX) {
-    throw new MessageRefused(`a message is at most ${MESSAGE_MAX} characters (this one is ${text.length})`);
-  }
+  const text = checkedText(input.text, "a message", MESSAGE_MAX);
 
   if (input.alert !== undefined && typeof input.alert !== "boolean") {
     throw new MessageRefused("alert must be true or false");
@@ -297,7 +276,7 @@ export class MessagesService {
    *
    * A group whose id is gone comes off every screen that held it, in one write,
    * and the state is re-sent because it carries `groups`. Messages already sent
-   * to the group are left alone. Refuses with MessagingRefused like the store,
+   * to the group are left alone. Refuses with MessageRefused like the store,
    * and with MessagingConflict when the body is built from an older config.
    *
    * Every save also takes off the screens any group the config does not have, so

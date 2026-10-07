@@ -24,7 +24,8 @@ process.env.HOME = path.join(DATA, "home");
 // Captured BEFORE any case enables mock timers: the waits below are real.
 const realSetTimeout = globalThis.setTimeout;
 
-const { MessagesService, MessageRefused, GroupsNotCleared, checkSend } = await import("./messages-service.js");
+const { MessagesService, GroupsNotCleared, checkSend } = await import("./messages-service.js");
+const { MessageRefused } = await import("./message-rules.js");
 const { settingsStore } = await import("./settings-store.js");
 const { messagesStore } = await import("./messages-store.js");
 const { messagingStore } = await import("./messaging-store.js");
@@ -163,7 +164,7 @@ describe("send", () => {
     ["Everyone beside a group", () => ({ to: [EVERYONE, stage], text: "x" }), /cannot be combined/],
     ["an id that is not a group id", () => ({ to: ["__proto__"], text: "x" }), /not a group id/],
     ["a group that does not exist", () => ({ to: ["g-00000000"], text: "x" }), /no group has the id g-00000000/],
-    ["text that is not text", () => ({ to: [EVERYONE], text: 5 }), /text must be text/],
+    ["text that is not text", () => ({ to: [EVERYONE], text: 5 }), /a message must be text/],
     ["empty text", () => ({ to: [EVERYONE], text: "   " }), /cannot be empty/],
     ["text past 280 characters", () => ({ to: [EVERYONE], text: "x".repeat(281) }), /at most 280/],
     ["an alert flag that is not a boolean", () => ({ to: [EVERYONE], text: "x", alert: "yes" }), /true or false/],
