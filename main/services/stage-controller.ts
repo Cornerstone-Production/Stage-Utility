@@ -8,6 +8,7 @@ import { getUserDataPath } from "./app-paths.js";
 import { adoptLegacyStoreFiles } from "./store-file-adoption.js";
 import { migrateNeverChosenDefaults, countNeverChosen, migrateCardHairline, countFaintHairlines } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
+import { messagingStore } from "./messaging-store.js";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { checklistTicksStore } from "./checklist-ticks-store.js";
 import {
@@ -3604,6 +3605,65 @@ export class StageController {
     );
   }
 
+  /**
+   * Put a screen in message groups. Every id must be a group that exists in the
+   * messaging config; the answer is deduplicated and kept in that config's order,
+   * so the stored list does not depend on the order a client happened to click.
+   * The output is checked first, so an id naming no screen answers "not found"
+   * whatever else is in the body.
+   */
+  async setOutputGroups(id: string, groups: unknown): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:setGroups — output ${id} not found`);
+    }
+    if (!Array.isArray(groups) || !groups.every((g) => typeof g === "string")) {
+      throw new Error("outputs:setGroups — groups must be an array of group ids");
+    }
+    await messagingStore.init();
+    const known = new Map(messagingStore.get().groups.map((g) => [g.id, g]));
+    for (const g of groups as string[]) {
+      if (!known.has(g)) {
+        throw new Error(`outputs:setGroups — no message group has the id ${g}`);
+      }
+    }
+    const wanted = new Set(groups as string[]);
+    const chosen = [...known.values()].filter((g) => wanted.has(g.id));
+    return this.commitOutputPatch(
+      id,
+      { groups: chosen.map((g) => g.id) },
+      `[stage-controller] setOutputGroups output=${scrub(id)} → ${scrub(chosen.map((g) => g.name).join(", ") || "no groups")}`,
+    );
+  }
+
+  /**
+   * Take deleted message groups off every screen that had them, in ONE settings
+   * write. Returns how many screens changed; nothing is written, and nothing
+   * broadcast, when none did.
+   *
+   * One write rather than one per group per screen: the outputs list is rewritten
+   * whole each time (see outputWrites), so a loop of setOutputGroups calls would
+   * be a write and a broadcast per screen.
+   */
+  async stripOutputGroups(ids: readonly string[]): Promise<number> {
+    const gone = new Set(ids);
+    let changed = 0;
+    await this.outputWrites.enqueue(async () => {
+      const outputs = this.state.outputs.map((o) => {
+        if (!o.groups?.some((g) => gone.has(g))) return o;
+        changed++;
+        return { ...o, groups: o.groups.filter((g) => !gone.has(g)) };
+      });
+      if (changed === 0) return;
+      this.state = { ...this.state, outputs };
+      await settingsStore.patch({ outputs });
+    });
+    if (changed > 0) {
+      this.recomputeResolved();
+      this.broadcast();
+    }
+    return changed;
+  }
+
   /** Keep the ServiceCue text size this output's display shows. Refuses anything
    *  that is not a number from MIN_TEXT_SIZE to MAX_TEXT_SIZE (the caller turns
    *  that into a 400), and writes nothing when the size is already the one kept —
@@ -4246,6 +4306,7 @@ export class StageController {
         locked: output.locked ?? false,
         hideTopBar: output.hideTopBar ?? false,
         allowHls: output.allowHls ?? true,
+        groups: output.groups ?? [],
         textSize: output.textSize ?? null,
       };
     }

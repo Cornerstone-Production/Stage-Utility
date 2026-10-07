@@ -285,6 +285,11 @@ Two stores, split by whose work they are:
 | `messaging.json` | config | The groups (`{ id, name }`), the quick messages and the quick replies. Carried by every backup. |
 | `messages.json` | runtime | The day's messages and `lastClearedDate`. Not restored from a backup: a message is an observation about one day. |
 
+A screen is in any number of groups: `Output.groups` holds their ids, in the
+groups' own order, and is absent when the screen is in none. **Everyone** is
+built in and is not stored; it reaches every screen whether the screen is in a
+group or not. Deleting a group takes its id off every screen that held it.
+
 A group's `id` is `g-` and eight hex characters, issued by the server and never
 changed, so renaming a group moves nothing that points at it. A message's `id` is
 sixteen hex characters. A message holds `to` (group ids, or `["everyone"]`), `text`,
