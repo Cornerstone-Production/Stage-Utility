@@ -457,3 +457,13 @@ test("until the screens are known no count is drawn, and removing a group does n
   assert.match(document.body.textContent ?? "", /Any screens in it will be taken out of it/);
   assert.doesNotMatch(document.body.textContent ?? "", /No screens are in it/);
 });
+
+test("each group row says how many screens are in it: none, one, several", async () => {
+  await mount(outputs([STAGE.id], [STAGE.id, GREEN.id], [STAGE.id]));
+  const label = (id: string) => document.querySelector(`[data-group-row="${id}"] span`)?.textContent;
+  assert.equal(label(STAGE.id), "3 screens");
+  assert.equal(label(GREEN.id), "1 screen");
+  cleanup();
+  await mount(outputs([GREEN.id]));
+  assert.equal(label(STAGE.id), "no screens");
+});
