@@ -13,6 +13,27 @@ or deleted, and no group can be named Everyone.
 
 Up to 20 groups, each name 1–40 characters, unique without regard to case.
 
+### Settings → Messages
+
+**Settings → Messages** holds the groups and the two lists of one-press text:
+
+- **Groups.** Add one, rename it (click the name, type, press Enter), or remove
+  it. Removing asks first and says how many screens are in it ("Remove Green
+  room? 2 screens are in it…"); those screens are taken out of it, and messages
+  already sent to it stay in today's thread.
+- **Quick messages.** Up to 24, 1–280 characters each: the messages a console can
+  send in one press. Six come stocked: *Walk now*, *You're on after this song*,
+  *2 minutes*, *Wrap it up*, *Band back on stage*, *Running 5 min late*.
+- **Quick replies.** Up to 12, 1–60 characters each: the answers a console can
+  send in one press. Three come stocked: *Copy*, *Walking now*, *Need 2 min*.
+
+Both lists are edited the same way: add at the bottom, click a row to edit it,
+and move a row with the arrows to change the order consoles offer it in. Every
+change is saved at once. A change the server refuses — a duplicate group name, a
+list past its limit — says why and leaves what you typed where it is.
+
+These are the operator's own work, so they are carried by every backup.
+
 ### Putting a screen in groups
 
 On the **Screens** page, open a screen's **⋯** menu and choose **Groups**. Each

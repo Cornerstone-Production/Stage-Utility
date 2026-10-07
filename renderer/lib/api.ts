@@ -297,6 +297,13 @@ function patch<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
+function put<T>(path: string, body?: unknown): Promise<T> {
+  return apiFetch<T>(path, {
+    method: "PUT",
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
 function del<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: "DELETE" });
 }
@@ -438,6 +445,8 @@ export type IpcChannel =
   | "layoutTemplates:save"
   | "layoutTemplates:update"
   | "messages:get"
+  | "messaging:get"
+  | "messaging:set"
   | "notes:set"
   | "obs:getStatus"
   | "osc:addTarget"
@@ -1559,6 +1568,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "messages:get":
       return apiFetch<T>("/api/messages");
+    case "messaging:get":
+      return apiFetch<T>("/api/messaging");
+    case "messaging:set":
+      return put<T>("/api/messaging", p);
 
     case "views:setSurface":
       return patch<T>(`/api/views/${encodeURIComponent(String(p.id))}`, { surface: p.surface });
