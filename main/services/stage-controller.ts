@@ -3636,32 +3636,50 @@ export class StageController {
   }
 
   /**
-   * Take deleted message groups off every screen that had them, in ONE settings
-   * write. Returns how many screens changed; nothing is written, and nothing
-   * broadcast, when none did.
+   * Take every message group that is not in `known` off every screen, in ONE
+   * settings write. Returns, per group id taken off, how many screens it was
+   * taken off; empty when nothing was dangling, and then nothing is written or
+   * broadcast.
+   *
+   * Derived from the screens rather than told which groups were deleted, so it
+   * can be run again after it failed (or at boot, over a settings file edited by
+   * hand) and finish the job: a list of "the groups that just went" is empty on
+   * the retry and would leave the ids on the screens for good.
    *
    * One write rather than one per group per screen: the outputs list is rewritten
    * whole each time (see outputWrites), so a loop of setOutputGroups calls would
-   * be a write and a broadcast per screen.
+   * be a write and a broadcast per screen. Counted inside the queue, against the
+   * outputs the write is actually made from.
+   *
+   * A write that fails puts the in-memory outputs back, so the next call finds the
+   * same ids still there and tries the write again; leaving them stripped in
+   * memory would report the job done while the file still held them.
    */
-  async stripOutputGroups(ids: readonly string[]): Promise<number> {
-    const gone = new Set(ids);
-    let changed = 0;
+  async stripUnknownOutputGroups(known: ReadonlySet<string>): Promise<Map<string, number>> {
+    const stripped = new Map<string, number>();
     await this.outputWrites.enqueue(async () => {
-      const outputs = this.state.outputs.map((o) => {
-        if (!o.groups?.some((g) => gone.has(g))) return o;
-        changed++;
-        return { ...o, groups: o.groups.filter((g) => !gone.has(g)) };
+      const previous = this.state.outputs;
+      const outputs = previous.map((o) => {
+        const dangling = new Set(o.groups?.filter((g) => !known.has(g)));
+        if (dangling.size === 0) return o;
+        for (const g of dangling) stripped.set(g, (stripped.get(g) ?? 0) + 1);
+        return { ...o, groups: o.groups?.filter((g) => known.has(g)) };
       });
-      if (changed === 0) return;
+      if (stripped.size === 0) return;
       this.state = { ...this.state, outputs };
-      await settingsStore.patch({ outputs });
+      try {
+        await settingsStore.patch({ outputs });
+      } catch (err) {
+        if (this.state.outputs === outputs) this.state = { ...this.state, outputs: previous };
+        stripped.clear();
+        throw err;
+      }
     });
-    if (changed > 0) {
+    if (stripped.size > 0) {
       this.recomputeResolved();
       this.broadcast();
     }
-    return changed;
+    return stripped;
   }
 
   /** Keep the ServiceCue text size this output's display shows. Refuses anything

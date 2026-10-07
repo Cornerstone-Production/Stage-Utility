@@ -15,6 +15,10 @@
 // saves nothing, because the whole config is replaced at once and a save built
 // from the old one would delete what the other window added.
 //
+// A save the server made but could not finish (taking a deleted group off the
+// screens) answers 500 with code groups-not-cleared: the page reloads what is
+// stored and shows the server's message, which says that saving again retries.
+//
 // A read that fails draws an error and no editor. Showing an empty list in its
 // place and letting the operator add to it would save a list that holds only
 // what they just typed, over the groups and replies they cannot see.
@@ -276,6 +280,15 @@ export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
         toast.error("The groups and quick messages were changed in another window. They have been reloaded; make your change again.");
         load();
         return false;
+      }
+      if ((err as ApiError).code === "groups-not-cleared") {
+        // The config WAS saved; what failed is taking a deleted group off the
+        // screens. The page's copy is out of date either way, and the message
+        // already says that saving again retries.
+        logToServer("messages", `saved the groups, but ${errorMessage(err)}`);
+        toast.error(errorMessage(err));
+        load();
+        return true;
       }
       logToServer("messages", `could not save the groups and quick messages: ${errorMessage(err)}`);
       toast.error(`Couldn't save that: ${errorMessage(err)}`);

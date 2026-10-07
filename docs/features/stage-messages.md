@@ -105,3 +105,12 @@ sent once when a client connects and again on every change. See
 group whose id is gone comes off every screen that held it, in one write, and the
 log says how many: `[messages] group "Green room" deleted; removed from 2
 screen(s)`. Messages already sent to it keep its id.
+
+What comes off the screens is whatever they hold that the config does not, worked
+out afresh on every save and once at start-up, not just the groups that save
+removed. If taking a group off the screens fails (a full disk), the config is
+already saved: the answer is a `500` that says the groups were saved but the
+screens were not cleared, and saving again retries it. A group id a screen holds
+that the config does not have, whether from that failure or a hand-edited
+`settings.json`, is taken off at the next save or start, and the log names it:
+`[messages] group g-0a1b2c3d is not in the config; taken off 2 screens`.

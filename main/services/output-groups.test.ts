@@ -172,8 +172,13 @@ describe("taking deleted groups off every screen", () => {
     await seedGroups();
     const spy = countPatches();
     try {
-      const changed = await stageController.stripOutputGroups([stage, green]);
-      assert.equal(changed, 2, "wall and lobby had a deleted group; foh did not");
+      // Booth is the only group left in the config; Green room and Stage are gone.
+      const stripped = await stageController.stripUnknownOutputGroups(new Set([booth]));
+      assert.deepEqual(
+        [...stripped].sort(),
+        [[green, 1], [stage, 2]].sort(),
+        "counted per group, inside the write: green was on wall, stage on wall and lobby",
+      );
       assert.equal(spy.count(), 1, "one settings write per screen is the loop this exists to avoid");
     } finally {
       spy.restore();
@@ -191,12 +196,46 @@ describe("taking deleted groups off every screen", () => {
     await seedGroups();
     const spy = countPatches();
     try {
-      assert.equal(await stageController.stripOutputGroups(["g-00000000"]), 0);
-      assert.equal(await stageController.stripOutputGroups([]), 0);
+      assert.equal((await stageController.stripUnknownOutputGroups(new Set([green, stage, booth]))).size, 0);
       assert.equal(spy.count(), 0, "a deletion that touched no screen still rewrote settings.json");
     } finally {
       spy.restore();
     }
     assert.equal(broadcasts, 0);
+  });
+
+  it("takes off a group the config never had, not only ones somebody says were deleted", async () => {
+    await stageController.setOutputGroups("wall", [green]);
+    // A settings file edited by hand, or a deletion that never reached the screens.
+    ctl.state = {
+      ...ctl.state,
+      outputs: ctl.state.outputs.map((o) => (o.id === "wall" ? { ...o, groups: [green, "g-deadbeef"] } : o)),
+    };
+    const stripped = await stageController.stripUnknownOutputGroups(new Set([green, stage, booth]));
+    assert.deepEqual([...stripped], [["g-deadbeef", 1]]);
+    assert.deepEqual(ctl.state.outputs.find((o) => o.id === "wall")?.groups, [green]);
+    assert.deepEqual((await storedOutputs()).find((o) => o.id === "wall")?.groups, [green]);
+  });
+
+  it("when the write fails it throws, puts the screens back as they were, and the next call does the job", async () => {
+    await seedGroups();
+    const real = settingsStore.patch.bind(settingsStore);
+    let fail = true;
+    settingsStore.patch = (async (...args: Parameters<typeof real>) => {
+      if (fail) throw new Error("ENOSPC");
+      return real(...args);
+    }) as typeof settingsStore.patch;
+    try {
+      const known = new Set([booth]);
+      await assert.rejects(() => stageController.stripUnknownOutputGroups(known), /ENOSPC/);
+      assert.deepEqual(ctl.state.outputs.find((o) => o.id === "wall")?.groups, [green, stage], "memory says the job is done; the file says it is not");
+      assert.equal(broadcasts, 0, "a failed strip was announced");
+      fail = false;
+      const stripped = await stageController.stripUnknownOutputGroups(known);
+      assert.equal(stripped.size, 2, "the retry found nothing to do");
+      assert.deepEqual((await storedOutputs()).find((o) => o.id === "wall")?.groups, []);
+    } finally {
+      settingsStore.patch = real;
+    }
   });
 });

@@ -11,7 +11,9 @@
 //
 // A rule a body breaks is a 400 that says which (MessageRefused, MessagingRefused).
 // A PUT built from a config another window has since replaced is a 409 and
-// changes nothing (MessagingConflict).
+// changes nothing (MessagingConflict). A PUT that saved but could not take a
+// deleted group off the screens is a 500 with code `groups-not-cleared`
+// (GroupsNotCleared): saving again retries it.
 // Anything else that throws is a failed write and is left to the server's own
 // handler, which answers 500: a send that did not save must not read as a refusal.
 //
@@ -19,7 +21,7 @@
 // anything is looked up, so what reaches the lookup is always sixteen hex digits.
 
 import { MESSAGE_ID } from "../../types/messages.js";
-import { MessageRefused, messagesService } from "../messages-service.js";
+import { GroupsNotCleared, MessageRefused, messagesService } from "../messages-service.js";
 import { MessagingConflict, MessagingRefused, messagingStore } from "../messaging-store.js";
 import { type RouteCtx, error, json, readBodyOrEmpty } from "./context.js";
 
@@ -91,6 +93,13 @@ export async function messagesRoutes(c: RouteCtx): Promise<void> {
       if (err instanceof MessagingConflict) {
         console.warn("[messages] refused a save of the groups and quick messages built from an older version of the config");
         error(res, err.message, 409, "config-changed");
+        return;
+      }
+      if (err instanceof GroupsNotCleared) {
+        // Saved, but the screens still hold a group that is gone. 500 with the
+        // message and a code, so the page can tell it from a save that did not
+        // happen: the config it holds is out of date either way.
+        error(res, err.message, 500, "groups-not-cleared");
         return;
       }
       if (!(err instanceof MessagingRefused)) throw err;

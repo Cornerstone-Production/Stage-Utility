@@ -45,6 +45,7 @@ import { zonedDateKey } from "./app-timezone.js";
 import { broadcast } from "./broadcaster.js";
 import { messagesStore } from "./messages-store.js";
 import { messagingStore } from "./messaging-store.js";
+import { plural } from "./plural.js";
 import { scrub, scrubError } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 import { Ticker } from "./ticker.js";
@@ -64,6 +65,18 @@ export class MessageRefused extends Error {
   constructor(message: string) {
     super(message);
     this.name = "MessageRefused";
+  }
+}
+
+/**
+ * The config was saved and a group is gone from it, but taking that group off
+ * the screens that held it failed. Routes answer it 500 with this message; the
+ * message is the whole instruction, because saving again is the retry.
+ */
+export class GroupsNotCleared extends Error {
+  constructor(cause: unknown) {
+    super("The groups were saved, but taking deleted groups off the screens failed. Saving again retries it.", { cause });
+    this.name = "GroupsNotCleared";
   }
 }
 
@@ -190,6 +203,17 @@ export class MessagesService {
     } catch (err) {
       failure = err instanceof Error ? err : new Error(String(err));
     }
+    // A group id left on a screen that the config no longer has: a deletion that
+    // failed half-way, or a settings file edited by hand. Healed here so it does
+    // not wait for the next save of the groups.
+    try {
+      await this.takeUnknownGroupsOffScreens([]);
+    } catch (err) {
+      const healFailure = err instanceof Error ? err : new Error(String(err));
+      failure = failure
+        ? new Error(`${failure.message}; and taking unknown groups off the screens failed: ${healFailure.message}`, { cause: failure })
+        : healFailure;
+    }
     this.clock.arm(CLEAR_CHECK_MS);
     return failure;
   }
@@ -273,27 +297,28 @@ export class MessagesService {
    *
    * A group whose id is gone comes off every screen that held it, in one write,
    * and the state is re-sent because it carries `groups`. Messages already sent
-   * to the group are left alone. Refuses with MessagingRefused like the store.
+   * to the group are left alone. Refuses with MessagingRefused like the store,
+   * and with MessagingConflict when the body is built from an older config.
+   *
+   * Every save also takes off the screens any group the config does not have, so
+   * a deletion that failed to reach them is finished by the next save; when it
+   * fails again this throws GroupsNotCleared, with the config already saved.
    */
   async updateConfig(input: unknown): Promise<MessagingConfig> {
     await messagingStore.init();
-    const groupsBefore = JSON.stringify(messagingStore.get().groups);
-    const { config, removed } = await messagingStore.replace(input);
+    const { config, removed, groupsChanged } = await messagingStore.replace(input);
     try {
-      if (removed.length > 0) {
-        // Counted per group before the strip, because the strip is one write over
-        // every screen and answers only a total.
-        const outputs = stageController.getState().outputs;
-        const held = new Map(removed.map((g) => [g.id, outputs.filter((o) => o.groups?.includes(g.id)).length]));
-        await stageController.stripOutputGroups(removed.map((g) => g.id));
-        for (const g of removed) {
-          console.log(`[messages] group "${scrub(g.name)}" deleted; removed from ${scrub(held.get(g.id) ?? 0)} screen(s)`);
-        }
-      }
+      // Every time, whether or not this save removed anything: what is taken off
+      // the screens is whatever the screens hold that the config does not, so a
+      // deletion whose strip failed is finished by the next save.
+      await this.takeUnknownGroupsOffScreens(removed);
+    } catch (err) {
+      console.error("[messages] saved the groups but could not take deleted groups off the screens:", scrubError(err));
+      throw new GroupsNotCleared(err);
     } finally {
-      // Re-sent even when the strip failed: the config is saved either way, and
-      // the screens must not keep drawing a group that is gone.
-      if (JSON.stringify(config.groups) !== groupsBefore) this.publish();
+      // Re-sent even when that failed: the config is saved either way, and the
+      // screens must not keep drawing a group that is gone.
+      if (groupsChanged) this.publish();
     }
     return config;
   }
@@ -315,6 +340,25 @@ export class MessagesService {
       await this.loading;
     } finally {
       this.loading = null;
+    }
+  }
+
+  /**
+   * Take every group the config no longer has off every screen, and say which
+   * and from how many. `deleted` are the groups this very save removed, only so
+   * their lines can name them; an id the screens hold that is in neither is one
+   * nobody deleted through here, and its line says so.
+   */
+  private async takeUnknownGroupsOffScreens(deleted: readonly MessageGroup[]): Promise<void> {
+    const known = new Set(messagingStore.get().groups.map((g) => g.id));
+    const stripped = await stageController.stripUnknownOutputGroups(known);
+    const names = new Map(deleted.map((g) => [g.id, g.name]));
+    for (const g of deleted) {
+      console.log(`[messages] group "${scrub(g.name)}" deleted; removed from ${scrub(stripped.get(g.id) ?? 0)} screen(s)`);
+    }
+    for (const [id, screens] of stripped) {
+      if (names.has(id)) continue;
+      console.log(`[messages] group ${scrub(id)} is not in the config; taken off ${scrub(plural(screens, "screen"))}`);
     }
   }
 

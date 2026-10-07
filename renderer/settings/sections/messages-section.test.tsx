@@ -38,6 +38,7 @@ interface Config {
 let server: Config;
 let puts: Config[] = [];
 let refuse: string | null = null;
+let halfDone = false;
 let readFails = false;
 let fetchStub: ReturnType<typeof stubFetchWithLog>;
 
@@ -50,6 +51,7 @@ beforeEach(() => {
   };
   puts = [];
   refuse = null;
+  halfDone = false;
   readFails = false;
   fetchStub = stubFetchWithLog((url, init) => {
     if (url !== "/api/messaging") return ok({});
@@ -68,6 +70,13 @@ beforeEach(() => {
         quickMessages: body.quickMessages,
         quickReplies: body.quickReplies,
       };
+      // Saved, and then the half that takes a deleted group off the screens failed.
+      if (halfDone) {
+        return reply(500, {
+          error: "The groups were saved, but taking deleted groups off the screens failed. Saving again retries it.",
+          code: "groups-not-cleared",
+        });
+      }
       return ok(server);
     }
     if (readFails) throw new TypeError("fetch failed");
@@ -347,4 +356,21 @@ test("a save built from a config another window has since replaced reloads what 
   assert.equal(puts[1].version, 4);
   assert.deepEqual(puts[1].groups.map((g) => g.name), ["Green room", "Stage", "Booth"]);
   assert.deepEqual(server.quickMessages, ["Walk now", "2 minutes", "Wrap it up"]);
+});
+
+test("a save the server made but could not finish shows its message, and the page shows what was saved", async () => {
+  await mount(outputs([STAGE.id]));
+  halfDone = true;
+  fireEvent.click(screen.getByLabelText("Remove Stage"));
+  await flush();
+  fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+  await flush();
+  assert.match(document.body.textContent ?? "", /groups were saved, but taking deleted groups off the screens failed\. Saving again retries it/);
+  assert.doesNotMatch(document.body.textContent ?? "", /Couldn't save that: The groups were saved/, "a saved config was reported as not saved");
+  assert.deepEqual(
+    screen.getAllByLabelText(/^Rename /).map((i) => (i as HTMLInputElement).value),
+    ["Green room"],
+    "the page still shows a group the server has already deleted",
+  );
+  assert.ok(fetchStub.logs.some((l) => l.tag === "messages" && /saved the groups, but/.test(l.message)));
 });

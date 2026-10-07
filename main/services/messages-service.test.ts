@@ -24,7 +24,8 @@ process.env.HOME = path.join(DATA, "home");
 // Captured BEFORE any case enables mock timers: the waits below are real.
 const realSetTimeout = globalThis.setTimeout;
 
-const { MessagesService, MessageRefused, checkSend } = await import("./messages-service.js");
+const { MessagesService, MessageRefused, GroupsNotCleared, checkSend } = await import("./messages-service.js");
+const { settingsStore } = await import("./settings-store.js");
 const { messagesStore } = await import("./messages-store.js");
 const { messagingStore } = await import("./messaging-store.js");
 const { stageController } = await import("./stage-controller.js");
@@ -607,6 +608,33 @@ describe("updateConfig", () => {
     );
   });
 
+  test("start() takes a group the config does not have off the screens, and says which and how many", async () => {
+    ctl.state = {
+      ...ctl.state,
+      outputs: [
+        { id: "wall", name: "Stage wall", viewId: "v1", groups: [green, "g-deadbeef"] },
+        { id: "lobby", name: "Lobby", viewId: "v1", groups: ["g-deadbeef", "g-cafef00d"] },
+        { id: "foh", name: "FOH", viewId: "v1", groups: [booth] },
+      ] as Output[],
+    };
+    lines.length = 0;
+    await boot({ lastClearedDate: "2026-10-07", messages: [] });
+    assert.deepEqual(
+      stageController.getState().outputs.map((o) => [o.id, o.groups]),
+      [["wall", [green]], ["lobby", []], ["foh", [booth]]],
+    );
+    assert.deepEqual(logged("[messages] group").sort(), [
+      "[messages] group g-cafef00d is not in the config; taken off 1 screen",
+      "[messages] group g-deadbeef is not in the config; taken off 2 screens",
+    ]);
+  });
+
+  test("start() with nothing dangling says nothing and writes nothing", async () => {
+    lines.length = 0;
+    await boot({ lastClearedDate: "2026-10-07", messages: [] });
+    assert.deepEqual(logged("[messages] group"), []);
+  });
+
   test("a deleted group is logged with how many screens held it, including none", async () => {
     const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
     await svc.updateConfig(keep(green, stage));
@@ -638,6 +666,24 @@ describe("updateConfig", () => {
     assert.equal(frames.length, 0, "a change the state does not carry was broadcast");
   });
 
+  test("two overlapping saves, the second putting the groups back, each re-send the state", async () => {
+    const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
+    await messagingStore.init();
+    frames.length = 0;
+    const v = messagingStore.get().version;
+    const original = [green, stage, booth].map((id) => ({ id, name: { [green]: "Green room", [stage]: "Stage", [booth]: "Booth" }[id] }));
+    // Called together. The second is built from the version the first leaves, and
+    // takes back what the first did: against the groups as they stood when it was
+    // CALLED it changes nothing, but against the ones it replaced it does, and a
+    // screen that drew the first one's frame is waiting for it.
+    await Promise.all([
+      svc.updateConfig({ version: v, groups: [...original, { name: "Extra" }], quickMessages: [], quickReplies: [] }),
+      svc.updateConfig({ version: v + 1, groups: original, quickMessages: [], quickReplies: [] }),
+    ]);
+    assert.equal(frames.length, 2, "the second save left the screens drawing the first one's groups");
+    assert.deepEqual(frames.at(-1)?.groups.map((g) => g.id), [green, stage, booth]);
+  });
+
   test("a refused config changes nothing", async () => {
     const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
     frames.length = 0;
@@ -646,19 +692,58 @@ describe("updateConfig", () => {
     assert.equal(frames.length, 0);
   });
 
-  test("when taking the group off the screens fails, the screens are still told it is gone", async () => {
+  test("when taking the group off the screens fails, the screens are still told it is gone, and the caller is told plainly", async () => {
     const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
     frames.length = 0;
-    const real = stageController.stripOutputGroups.bind(stageController);
-    stageController.stripOutputGroups = async () => {
+    const real = stageController.stripUnknownOutputGroups.bind(stageController);
+    stageController.stripUnknownOutputGroups = async () => {
       throw new Error("EROFS");
     };
     try {
-      await assert.rejects(() => svc.updateConfig(keep(green, booth)), /EROFS/);
+      await assert.rejects(
+        () => svc.updateConfig(keep(green, booth)),
+        (err: unknown) =>
+          err instanceof GroupsNotCleared &&
+          /groups were saved, but taking deleted groups off the screens failed\. Saving again retries it/.test(err.message),
+      );
     } finally {
-      stageController.stripOutputGroups = real;
+      stageController.stripUnknownOutputGroups = real;
     }
     assert.equal(frames.length, 1);
     assert.deepEqual(frames[0].groups.map((g) => g.id), [green, booth]);
+    assert.deepEqual(messagingStore.get().groups.map((g) => g.id), [green, booth], "the config was not saved");
+  });
+
+  test("a deletion whose strip failed is finished by the next save, though that save removes nothing", async () => {
+    const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
+    // The REAL strip, with the settings write failing once: the case where the
+    // group is gone from the config and still on the screens.
+    const real = settingsStore.patch.bind(settingsStore);
+    let fail = true;
+    settingsStore.patch = (async (...args: Parameters<typeof real>) => {
+      if (fail) throw new Error("ENOSPC");
+      return real(...args);
+    }) as typeof settingsStore.patch;
+    try {
+      await assert.rejects(() => svc.updateConfig(keep(green, booth)), GroupsNotCleared);
+      assert.deepEqual(
+        stageController.getState().outputs.map((o) => [o.id, o.groups]),
+        [["wall", [green, stage]], ["lobby", [stage]], ["foh", [booth]]],
+        "the failed strip changed what the screens hold",
+      );
+      fail = false;
+      lines.length = 0;
+      // The retry the operator makes: Stage is already gone from the config, so
+      // this save removes no group, and the screens must still be cleaned.
+      await svc.updateConfig(keep(green, booth));
+    } finally {
+      settingsStore.patch = real;
+    }
+    assert.deepEqual(
+      stageController.getState().outputs.map((o) => [o.id, o.groups]),
+      [["wall", [green]], ["lobby", []], ["foh", [booth]]],
+      "dangling ids stayed on the screens",
+    );
+    assert.deepEqual(logged("[messages] group"), [`[messages] group ${stage} is not in the config; taken off 2 screens`]);
   });
 });

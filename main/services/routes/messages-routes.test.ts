@@ -261,6 +261,27 @@ describe("GET and PUT /api/messaging", () => {
     assert.ok(messagingStore.get().groups.some((g) => g.name === "Booth"), "the group the stale window had not seen was deleted");
   });
 
+  it("PUT that saved but could not take a deleted group off the screens is a 500 that says so, and a second PUT finishes it", async () => {
+    const real = stageController.stripUnknownOutputGroups.bind(stageController);
+    stageController.stripUnknownOutputGroups = async () => {
+      throw new Error("ENOSPC");
+    };
+    let r;
+    try {
+      r = await put({ groups: [{ id: green, name: "Green room" }], quickMessages: [], quickReplies: [] });
+    } finally {
+      stageController.stripUnknownOutputGroups = real;
+    }
+    assert.equal(r.status, 500);
+    assert.match(err(r), /groups were saved, but taking deleted groups off the screens failed\. Saving again retries it/);
+    assert.equal((r.json as { code?: string }).code, "groups-not-cleared");
+    assert.deepEqual(messagingStore.get().groups.map((g) => g.id), [green], "the config was not saved");
+
+    const again = await put({ groups: [{ id: green, name: "Green room" }], quickMessages: [], quickReplies: [] });
+    assert.equal(again.status, 200);
+    assert.deepEqual(stageController.getState().outputs.map((o) => o.groups), [[green], []]);
+  });
+
   it("PUT with no version is a 400, not a way round the check", async () => {
     const r = await callRoute(messagesRoutes, "/api/messaging", { method: "PUT", body: { groups: [], quickMessages: [], quickReplies: [] } });
     assert.equal(r.status, 400);

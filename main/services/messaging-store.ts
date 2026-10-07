@@ -257,8 +257,10 @@ export const messagingStore = {
   },
 
   /**
-   * Replace the whole config. Returns what is now stored and the groups that
-   * are gone, so the caller can take them off the screens that had them.
+   * Replace the whole config. Returns what is now stored, the groups that are
+   * gone, and whether the groups (names included) differ from what was there,
+   * so the caller can take them off the screens that had them and say so to
+   * the ones that draw them.
    *
    * Refuses with MessagingRefused when a limit is broken, and with
    * MessagingConflict when the body's `version` is not the stored one. The file is written
@@ -266,7 +268,7 @@ export const messagingStore = {
    * to the caller and leaves what was there, instead of a config every reader
    * calls saved that the next restart loses.
    */
-  async replace(input: unknown): Promise<{ config: MessagingConfig; removed: MessageGroup[] }> {
+  async replace(input: unknown): Promise<{ config: MessagingConfig; removed: MessageGroup[]; groupsChanged: boolean }> {
     return writes.enqueue(async () => {
       await ensureLoaded();
       const before = cache ?? defaults();
@@ -274,7 +276,14 @@ export const messagingStore = {
       await store.save(copyOf(next));
       cache = copyOf(next);
       const kept = new Set(next.groups.map((g) => g.id));
-      return { config: copyOf(next), removed: before.groups.filter((g) => !kept.has(g.id)) };
+      return {
+        config: copyOf(next),
+        removed: before.groups.filter((g) => !kept.has(g.id)),
+        // Decided here, against the groups this write replaced, because a caller
+        // that read them before the call can have two overlapping saves each
+        // compare against a list the other has already changed.
+        groupsChanged: JSON.stringify(before.groups) !== JSON.stringify(next.groups),
+      };
     });
   },
 };
