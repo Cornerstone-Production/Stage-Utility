@@ -90,7 +90,7 @@ describe("POST /api/messages", () => {
     const state = (await callRoute(messagesRoutes, "/api/messages")).json as MessagesState;
     assert.deepEqual(state.messages.map((x) => x.id), [m.id]);
     assert.deepEqual(state.groups.map((g) => g.name), ["Green room", "Stage"]);
-    assert.equal(state.alert, null);
+    assert.deepEqual(state.alerts, []);
   });
 
   it("sends an alert to Everyone, and the state names it", async () => {
@@ -99,7 +99,7 @@ describe("POST /api/messages", () => {
     const m = r.json as StageMessage;
     assert.equal(m.alertUntil, m.at + 30_000);
     const state = (await callRoute(messagesRoutes, "/api/messages")).json as MessagesState;
-    assert.equal(state.alert?.id, m.id);
+    assert.deepEqual(state.alerts.map((a) => a.id), [m.id]);
   });
 
   it("cannot choose the fields the server stamps", async () => {
@@ -163,7 +163,7 @@ describe("POST /api/messages/:id/clear-alert", () => {
     const r = await clear(m.id, { from: "Booth" });
     assert.equal(r.status, 200);
     const state = r.json as MessagesState;
-    assert.equal(state.alert, null);
+    assert.deepEqual(state.alerts, []);
     assert.ok(state.messages.find((x) => x.id === m.id)?.clearedAt, "the message must stay, with clearedAt set");
   });
 
@@ -193,7 +193,7 @@ describe("POST /api/messages/:id/clear-alert", () => {
     const m = (await send({ to: [EVERYONE], text: "now", alert: true })).json as StageMessage;
     const r = await clear(m.id, { from: "" });
     assert.equal(r.status, 400);
-    assert.notEqual(messagesService.state().alert, null);
+    assert.equal(messagesService.state().alerts.length, 1);
   });
 
   it("takes no body at all", async () => {
@@ -267,7 +267,7 @@ describe("the hello burst", () => {
     const frame = sink.collected.find((f) => f.channel === "messages:state");
     assert.ok(frame, `the burst did not hydrate messages:state: ${sink.collected.map((f) => f.channel).join(", ")}`);
     const payload = JSON.parse(frame.serialized) as MessagesState;
-    assert.equal(payload.alert?.id, m.id);
+    assert.deepEqual(payload.alerts.map((a) => a.id), [m.id]);
     assert.deepEqual(payload.messages.map((x) => x.id), [m.id]);
     assert.deepEqual(payload.groups.map((g) => g.name), ["Green room", "Stage"]);
   });

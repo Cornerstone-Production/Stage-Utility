@@ -1,5 +1,5 @@
 // main/types/messages.ts — stage messages: groups of screens, the day's thread,
-// and the one alert that may be running.
+// and the alerts that are running.
 //
 // A producer sends a short message to one or more GROUPS of screens (or to
 // Everyone). A screen belongs to any number of groups (`Output.groups`). An
@@ -55,8 +55,9 @@ export interface MessagesState {
   groups: MessageGroup[];
   /** Oldest first, today only. */
   messages: StageMessage[];
-  /** The newest message whose alert is still running, or null. */
-  alert: StageMessage | null;
+  /** Every message whose alert is still running, newest first. Two can run at
+   *  once, to different groups; a screen shows the ones sent to its groups. */
+  alerts: StageMessage[];
 }
 
 /** The SSE channel that carries a {@link MessagesState}. */

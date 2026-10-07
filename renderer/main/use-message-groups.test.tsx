@@ -44,7 +44,7 @@ const state = (names: string[], rev = 1) => ({
   rev,
   groups: names.map((name, i) => ({ id: `g-0000000${i}`, name })),
   messages: [],
-  alert: null,
+  alerts: [],
 });
 
 function mount(): { current: MessageGroups } {

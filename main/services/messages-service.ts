@@ -18,11 +18,10 @@
 // alert down against the server clock, from `alertUntil`, so a Pi with a wrong
 // clock still ends it on time.
 //
-// ONE ALERT IN THE STATE. `alert` is the newest message whose alert is still
-// running. Two alerts can run at once (to different groups), and this field
-// names only the newer; each message still carries its own `alertUntil` and
-// `clearedAt`, so a screen that must know about every running alert reads them
-// from `messages`.
+// EVERY RUNNING ALERT IN THE STATE. `alerts` lists each message whose alert is
+// still running, newest first: two can run at once, to different groups, and a
+// screen draws the ones sent to its own groups. One timer is aimed at whichever
+// ends first, so each alert's end goes out as its own frame.
 
 import { randomBytes } from "node:crypto";
 
@@ -144,6 +143,8 @@ export class MessagesService {
   private loading: Promise<void> | null = null;
   private loaded = false;
   private alertTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The `alertUntil` the timer is aimed at. */
+  private alertTimerFor: number | null = null;
   /** The day the 200-message cap was last logged, so it says so once a day. */
   private capLoggedOn: string | null = null;
   /** Serialises every change to the thread: each builds the next list from the
@@ -164,8 +165,8 @@ export class MessagesService {
   /** The snapshot `messages:state` carries and GET /api/messages answers. */
   state(): MessagesState {
     const now = Date.now();
-    const alert = [...this.messages].reverse().find((m) => alertRunning(m, now)) ?? null;
-    return { rev: this.rev, groups: messagingStore.get().groups, messages: this.messages, alert };
+    const alerts = this.messages.filter((m) => alertRunning(m, now)).reverse();
+    return { rev: this.rev, groups: messagingStore.get().groups, messages: this.messages, alerts };
   }
 
   // ── Life cycle ─────────────────────────────────────────────────────────
@@ -198,6 +199,7 @@ export class MessagesService {
     this.clock.cancel();
     if (this.alertTimer) clearTimeout(this.alertTimer);
     this.alertTimer = null;
+    this.alertTimerFor = null;
   }
 
   // ── Changes ────────────────────────────────────────────────────────────
@@ -342,26 +344,29 @@ export class MessagesService {
   }
 
   /**
-   * One timer, for the alert the state is showing, cleared before it is re-armed.
-   * When it fires the alert is over, so the state is sent again with `alert`
-   * back to null (or to an older alert that is still running).
+   * One timer, aimed at the running alert that ends first, cleared before it is
+   * re-armed. When it fires that alert is over, so the state goes out again
+   * without it, and publishing re-aims the timer at the next one.
    */
   private armAlertTimer(): void {
     if (this.alertTimer) clearTimeout(this.alertTimer);
     this.alertTimer = null;
+    this.alertTimerFor = null;
     if (!this.running) return;
-    const alert = this.state().alert;
-    if (alert?.alertUntil == null) return;
+    const ends = this.state().alerts.map((m) => m.alertUntil).filter((t): t is number => t !== null);
+    if (ends.length === 0) return;
+    const soonest = Math.min(...ends);
+    this.alertTimerFor = soonest;
     // At least 1 ms, and re-checked when it fires: a timer may run a hair early
-    // against Date.now(), and an alert that is still running then is re-armed
+    // against Date.now(), and an alert that has not ended then is re-armed
     // rather than announced over.
-    this.alertTimer = setTimeout(() => this.alertTimerFired(), Math.max(1, alert.alertUntil - Date.now()));
+    this.alertTimer = setTimeout(() => this.alertTimerFired(), Math.max(1, soonest - Date.now()));
     this.alertTimer.unref();
   }
 
   private alertTimerFired(): void {
     this.alertTimer = null;
-    if (this.state().alert) {
+    if (this.alertTimerFor !== null && this.alertTimerFor > Date.now()) {
       this.armAlertTimer();
       return;
     }

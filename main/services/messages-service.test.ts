@@ -151,7 +151,7 @@ describe("send", () => {
     assert.equal(m.at, TEN_AM);
     assert.equal(m.clearedAt, null);
     assert.notEqual(m.id, "mine");
-    assert.equal(svc.state().alert?.id, m.id);
+    assert.deepEqual(svc.state().alerts.map((a) => a.id), [m.id]);
   });
 
   const refusals: [string, () => Parameters<MessagesServiceT["send"]>[0], RegExp][] = [
@@ -267,11 +267,11 @@ describe("clear-alert", () => {
     frames.length = 0;
     mock.timers.tick(5_000);
     assert.equal(await svc.clearAlert(m.id, "Booth"), "cleared");
-    assert.equal(svc.state().alert, null);
+    assert.deepEqual(svc.state().alerts, []);
     const kept = svc.state().messages.find((x) => x.id === m.id);
     assert.equal(kept?.clearedAt, TEN_AM + 5_000, "the message must stay, with the time it was cleared");
     assert.equal(frames.length, 1);
-    assert.equal(frames[0].alert, null);
+    assert.deepEqual(frames[0].alerts, []);
     assert.deepEqual(logged("[messages] alert"), [`[messages] alert ${m.id} cleared by Booth`]);
     assert.equal(onDisk().messages[0].clearedAt, TEN_AM + 5_000);
   });
@@ -307,22 +307,22 @@ describe("clear-alert", () => {
     const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
     const m = await svc.send({ to: [EVERYONE], text: "a", alert: true });
     await assert.rejects(() => svc.clearAlert(m.id, ""), MessageRefused);
-    assert.notEqual(svc.state().alert, null, "a refused clear ended the alert");
+    assert.equal(svc.state().alerts.length, 1, "a refused clear ended the alert");
   });
 });
 
 describe("the alert expiring", () => {
-  test("is broadcast once, at alertUntil, so a screen with no timer of its own sees alert go to null", async () => {
+  test("is broadcast once, at alertUntil, so a screen with no timer of its own sees it leave alerts", async () => {
     const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
     const m = await svc.send({ to: [EVERYONE], text: "now", alert: true });
     assert.equal(frames.length, 1);
-    assert.equal(frames[0].alert?.id, m.id);
+    assert.deepEqual(frames[0].alerts.map((a) => a.id), [m.id]);
 
     mock.timers.tick(ALERT_MS - 1);
     assert.equal(frames.length, 1, "announced the end of an alert that had a millisecond left");
     mock.timers.tick(1);
     assert.equal(frames.length, 2, "the alert ran out and nobody was told");
-    assert.equal(frames[1].alert, null);
+    assert.deepEqual(frames[1].alerts, []);
     assert.ok(frames[1].rev > frames[0].rev);
 
     mock.timers.tick(5 * MIN);
@@ -345,20 +345,20 @@ describe("the alert expiring", () => {
     assert.equal(frames.length, 2, "the timer outlived the alert it was armed for");
   });
 
-  test("a newer alert takes over the state, and the timer follows it", async () => {
+  test("two alerts run side by side, and each one's end goes out on its own", async () => {
     const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
     const first = await svc.send({ to: [green], text: "first", alert: true });
     mock.timers.tick(10_000);
     const second = await svc.send({ to: [stage], text: "second", alert: true });
-    assert.equal(svc.state().alert?.id, second.id, "alert is the newest running one");
+    assert.deepEqual(svc.state().alerts.map((a) => a.id), [second.id, first.id], "both run, newest first");
     assert.equal(first.alertUntil, TEN_AM + ALERT_MS, "the older alert keeps its own end");
     frames.length = 0;
-    // The first runs out at +30 s, while the second is the one the state names.
     mock.timers.tick(20_000);
-    assert.equal(frames.length, 0, "the older alert ending changed nothing the state shows");
+    assert.equal(frames.length, 1, "the first alert ending must reach the screens it was sent to");
+    assert.deepEqual(frames[0].alerts.map((a) => a.id), [second.id]);
     mock.timers.tick(10_000);
-    assert.equal(frames.length, 1);
-    assert.equal(frames[0].alert, null);
+    assert.equal(frames.length, 2);
+    assert.deepEqual(frames[1].alerts, []);
   });
 
   test("a restart mid-alert re-arms the timer for the time left", async () => {
@@ -370,11 +370,11 @@ describe("the alert expiring", () => {
     const again = new MessagesService();
     services.push(again);
     await again.start();
-    assert.equal(again.state().alert?.id, m.id);
+    assert.deepEqual(again.state().alerts.map((a) => a.id), [m.id]);
     frames.length = 0;
     mock.timers.tick(ALERT_MS - 10_000);
     assert.equal(frames.length, 1, "the restarted server never announced the end of the alert");
-    assert.equal(frames[0].alert, null);
+    assert.deepEqual(frames[0].alerts, []);
   });
 
   test("a stopped service arms nothing", async () => {
@@ -536,7 +536,7 @@ describe("persistence", () => {
       second.state().messages.map((m) => [m.id, m.text, m.from, m.alert, m.clearedAt]),
       [[a.id, "one", "FOH", true, TEN_AM], [b.id, "two", "Operator", false, null]],
     );
-    assert.equal(second.state().alert, null);
+    assert.deepEqual(second.state().alerts, []);
   });
 
   test("an entry the file holds that cannot be read is left out and named, not served to every screen", async () => {
