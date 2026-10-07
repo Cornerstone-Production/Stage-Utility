@@ -92,6 +92,7 @@ import { videoRoutes } from "./routes/video-routes.js";
 import { videoProxyRoutes } from "./routes/video-proxy-routes.js";
 import { messagesRoutes } from "./routes/messages-routes.js";
 import { messagesService } from "./messages-service.js";
+import { MESSAGES_CHANNEL } from "../types/messages.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 
 /**
@@ -477,7 +478,10 @@ export function writeHelloBurst(res: EventSink): void {
   // somebody sends, clears an alert or edits a group, which on a quiet Sunday
   // morning is never — so a screen that connects after the last one would
   // otherwise miss a running alert until the next message.
-  sseWrite(res, "messages:state", messagesService.state());
+  // The LITERAL with `satisfies`, as with calendar:grid above: the hydrated-channels
+  // scan can only see a quoted name, and renaming MESSAGES_CHANNEL must stop
+  // compiling here rather than leave this burst writing to a dead channel.
+  sseWrite(res, "messages:state" satisfies typeof MESSAGES_CHANNEL, messagesService.state());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */

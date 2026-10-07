@@ -2,7 +2,7 @@ import { useCallback } from "react";
 
 import { invoke } from "../lib/api";
 import { useStatusChannel } from "./use-status-channel";
-import type { MessageGroup, MessagesState } from "@main/types/messages";
+import { MESSAGES_CHANNEL, type MessageGroup, type MessagesState } from "@main/types/messages";
 
 /** What the Screens page knows about message groups. `known` is false until the
  *  first answer lands; `failed` is a settled read that answered nothing, which is
@@ -20,6 +20,6 @@ export interface MessageGroups {
  */
 export function useMessageGroups(): MessageGroups {
   const read = useCallback(() => invoke<MessagesState>("messages:get"), []);
-  const { value, known } = useStatusChannel<MessagesState>(read, "messages:state");
+  const { value, known } = useStatusChannel<MessagesState>(read, MESSAGES_CHANNEL);
   return { groups: value?.groups ?? [], known, failed: known && value === null };
 }
