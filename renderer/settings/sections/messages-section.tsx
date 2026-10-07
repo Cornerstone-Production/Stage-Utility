@@ -339,7 +339,7 @@ export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
               value={newGroup}
               maxLength={GROUP_NAME_MAX}
               disabled={saving || config.groups.length >= GROUPS_MAX}
-              placeholder={config.groups.length >= GROUPS_MAX ? `At most ${GROUPS_MAX}` : "Green room"}
+              placeholder={config.groups.length >= GROUPS_MAX ? `At most ${GROUPS_MAX}` : "New group"}
               aria-label="New group"
               onChange={(e) => setNewGroup(e.target.value)}
               onKeyDown={(e) => {
@@ -372,7 +372,7 @@ export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
           items={config.quickMessages}
           max={QUICK_MESSAGES_MAX}
           itemMax={MESSAGE_MAX}
-          placeholder="Walk now"
+          placeholder="New quick message"
           busy={saving}
           onChange={(next) => persist(body({ quickMessages: next }))}
         />
@@ -389,7 +389,7 @@ export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
           items={config.quickReplies}
           max={QUICK_REPLIES_MAX}
           itemMax={QUICK_REPLY_MAX}
-          placeholder="Copy"
+          placeholder="New quick reply"
           busy={saving}
           onChange={(next) => persist(body({ quickReplies: next }))}
         />
