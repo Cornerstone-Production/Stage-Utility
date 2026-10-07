@@ -68,6 +68,12 @@ export class GroupsNotCleared extends Error {
   }
 }
 
+/** One thing start() could not do, and what it was. */
+export interface StartFailure {
+  what: string;
+  error: Error;
+}
+
 export interface SendInput {
   to: unknown;
   text: unknown;
@@ -172,36 +178,54 @@ export class MessagesService {
 
   /**
    * Load the day's messages, compare the date against the day they belong to
-   * (a server that was off at midnight clears on boot), and start the
-   * once-a-minute check.
+   * (a server that was off at midnight clears on boot), take off the screens any
+   * group the config does not have, and start the once-a-minute check.
    *
-   * Returns the failure of that first check instead of throwing it: a data
-   * directory that cannot be written must not stop the server booting and
-   * blank every screen, and the caller says so on /log.
+   * Returns what failed, each with what it was, instead of throwing: a data
+   * directory that cannot be written must not stop the server booting and blank
+   * every screen, and the caller says so on /log, in each one's own words. Empty
+   * when everything worked. The second step is skipped, and says so, when the
+   * config did not read cleanly from messaging.json: a config that fell back to
+   * its defaults mentions no group, and every screen would lose its own.
    */
-  async start(): Promise<Error | null> {
+  async start(): Promise<StartFailure[]> {
     await this.ensureLoaded();
     this.running = true;
     this.armAlertTimer();
-    let failure: Error | null = null;
+    const failures: StartFailure[] = [];
     try {
       await this.rollDay();
     } catch (err) {
-      failure = err instanceof Error ? err : new Error(String(err));
+      failures.push({ what: "checking the day's thread", error: err instanceof Error ? err : new Error(String(err)) });
     }
-    // A group id left on a screen that the config no longer has: a deletion that
-    // failed half-way, or a settings file edited by hand. Healed here so it does
-    // not wait for the next save of the groups.
     try {
-      await this.takeUnknownGroupsOffScreens([]);
+      await this.healGroupsAtStart();
     } catch (err) {
-      const healFailure = err instanceof Error ? err : new Error(String(err));
-      failure = failure
-        ? new Error(`${failure.message}; and taking unknown groups off the screens failed: ${healFailure.message}`, { cause: failure })
-        : healFailure;
+      failures.push({ what: "taking unknown groups off the screens", error: err instanceof Error ? err : new Error(String(err)) });
     }
     this.clock.arm(CLEAR_CHECK_MS);
-    return failure;
+    return failures;
+  }
+
+  /**
+   * A group id left on a screen that the config no longer has: a deletion that
+   * failed half-way, or a settings file edited by hand. Healed here so it does
+   * not wait for the next save of the groups. Only on a clean read of
+   * messaging.json (see start()); a save of the groups is the operator's own
+   * decision and runs it regardless.
+   */
+  private async healGroupsAtStart(): Promise<void> {
+    if (messagingStore.readCleanly()) {
+      await this.takeUnknownGroupsOffScreens([]);
+      return;
+    }
+    const known = new Set(messagingStore.get().groups.map((g) => g.id));
+    const held = stageController.unknownOutputGroups(known);
+    // Nothing to protect, so nothing to say: a new install, or screens in no group.
+    if (held.size === 0) return;
+    console.warn(
+      `[messages] taking unknown groups off the screens was skipped at start-up: messaging.json did not read cleanly (missing, unreadable or short of entries), so ${plural(held.size, "group")} on the screens ${held.size === 1 ? "was" : "were"} left alone. Fix or restore messaging.json, or save the groups in Settings -> Messages`,
+    );
   }
 
   stop(): void {

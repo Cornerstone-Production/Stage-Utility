@@ -109,6 +109,10 @@ function attempt<T>(check: () => T): { value: T } | { why: string } {
  * An entry that breaks a rule is left out of the live config and named on /log
  * with the rule it broke, not repaired into something the operator did not write.
  * The file keeps it until the next save.
+ *
+ * Sets `readClean` only when the file gave the groups back whole: an object whose
+ * `groups` is a list, with no entry left out. Anything else, and a file that was
+ * missing or would not parse (which never reaches here), leaves it false.
  */
 function readFile(parsed: unknown): MessagingConfig {
   const out = defaults();
@@ -119,6 +123,15 @@ function readFile(parsed: unknown): MessagingConfig {
   }
   const raw = parsed as Record<string, unknown>;
   if (typeof raw.version === "number" && Number.isSafeInteger(raw.version) && raw.version > 0) out.version = raw.version;
+
+  // A field that is there but is not a list is named, like any other bad shape.
+  // Absent is fine: it is what a file written before the field existed holds.
+  const notAList = (field: string) => {
+    if (raw[field] !== undefined && !Array.isArray(raw[field])) skipped.push(`${field}: not a list`);
+  };
+  notAList("groups");
+  notAList("quickMessages");
+  notAList("quickReplies");
 
   if (Array.isArray(raw.groups)) {
     const ids = new Set<string>();
@@ -165,21 +178,32 @@ function readFile(parsed: unknown): MessagingConfig {
       `[messages] messaging.json: left out ${scrub(plural(skipped.length, "entry", "entries"))} that break a rule: ${scrub(skipped.join(", "), 600)}`,
     );
   }
+  readClean = skipped.length === 0 && Array.isArray(raw.groups);
   return out;
 }
+
+/**
+ * Whether the config in memory is what messaging.json held, whole: the file was
+ * there, parsed, and gave the groups back with nothing left out; or a save in this
+ * process has since put a valid config on disk. False after a file that is
+ * missing, would not parse, was not an object, or lost entries. Set by readFile,
+ * which a missing or unparseable file never reaches.
+ */
+let readClean = false;
 
 const store = new DataStore<MessagingConfig>("messaging.json", defaults(), "config", { normalize: readFile });
 
 /**
  * What get() answers, synchronously. DataStore holds the truth and serialises the
- * writes; this is the copy the rest of the app can read without awaiting. It only
- * moves forward: a replace sets it when it lands, so a write that fails never
- * shows, and two landing out of order cannot leave the older one in place.
+ * writes; this is the copy the rest of the app can read without awaiting. It is
+ * set when a replace lands, so a write that fails never shows.
  */
 let mirror: MessagingConfig | null = null;
 
 function adopt(config: MessagingConfig): void {
-  if (!mirror || config.version > mirror.version) mirror = copyOf(config);
+  mirror = copyOf(config);
+  // The operator's own save, validated: whatever the file was before, this is it.
+  readClean = true;
 }
 
 function newGroupId(taken: ReadonlySet<string>): string {
@@ -249,13 +273,23 @@ function validate(input: unknown, current: MessagingConfig): MessagingConfig {
 export const messagingStore = {
   /** Read the file into memory. Idempotent, and safe to call concurrently. */
   async init(): Promise<void> {
-    if (mirror) return;
-    // A copy taken before the assignment, never `mirror ??= copyOf(await ...)`:
-    // that evaluates the right side only when the mirror is empty NOW, but the
-    // await inside it can finish after a replace has set it, and the assignment
-    // would then put the older config over the newer one.
-    const loaded = copyOf(await store.load());
-    mirror ??= loaded;
+    if (!mirror) mirror = copyOf(await store.load());
+  },
+
+  /**
+   * Whether the config was read whole from disk (or has been saved since). A caller
+   * about to DELETE something because the config does not mention it asks this
+   * first: a config that fell back to its defaults mentions nothing.
+   */
+  readCleanly(): boolean {
+    return readClean;
+  },
+
+  /** Read the file again, discarding what is in memory: after a restore. */
+  async reload(): Promise<void> {
+    readClean = false;
+    mirror = null;
+    mirror = copyOf(await store.reload());
   },
 
   /**

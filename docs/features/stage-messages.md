@@ -111,7 +111,20 @@ What comes off the screens is whatever they hold that the config does not, worke
 out afresh on every save and once at start-up, not just the groups that save
 removed. If taking a group off the screens fails (a full disk), the config is
 already saved: the answer is a `500` that says the groups were saved but the
-screens were not cleared, and saving again retries it. A group id a screen holds
-that the config does not have, whether from that failure or a hand-edited
+screens were not cleared, and saving again retries it. The `500` carries no
+version, and the save has already moved it on, so the retry has to be built from
+a fresh `GET /api/messaging` (a `PUT` with the old version is a `409`); Settings →
+Messages does that by reloading when it shows the message. A group id a screen
+holds that the config does not have, whether from that failure or a hand-edited
 `settings.json`, is taken off at the next save or start, and the log names it:
 `[messages] group g-0a1b2c3d is not in the config; taken off 2 screens`.
+
+**At start-up this only happens when `messaging.json` was read whole.** A file
+that is missing, truncated, not an object, short of a `groups` list, or that lost
+entries reads as an empty config, and taking every group off every screen against
+it would delete memberships that restoring the file afterwards does not bring
+back. Then start-up leaves the screens alone and says so on the log
+(`[messages] taking unknown groups off the screens was skipped at start-up: …`),
+only when a screen actually holds a group. Fix or restore the file and restart, or
+save the groups in Settings → Messages, which is the operator's own decision and
+always runs it.

@@ -3635,6 +3635,19 @@ export class StageController {
   }
 
   /**
+   * How many screens hold each message group that is not in `known`. Read only:
+   * what stripUnknownOutputGroups would take off, for a caller that has to decide
+   * whether to run it and say so.
+   */
+  unknownOutputGroups(known: ReadonlySet<string>): Map<string, number> {
+    const found = new Map<string, number>();
+    for (const o of this.state.outputs) {
+      for (const g of new Set(o.groups?.filter((x) => !known.has(x)))) found.set(g, (found.get(g) ?? 0) + 1);
+    }
+    return found;
+  }
+
+  /**
    * Take every message group that is not in `known` off every screen, in ONE
    * settings write. Returns, per group id taken off, how many screens it was
    * taken off; empty when nothing was dangling, and then nothing is written or

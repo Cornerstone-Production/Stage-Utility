@@ -85,7 +85,7 @@ async function boot(file: { lastClearedDate: string | null; messages: StageMessa
   await messagesStore.reload();
   const svc = new MessagesService();
   services.push(svc);
-  if (opts.start !== false) assert.equal(await svc.start(), null, "start() reported a failure");
+  if (opts.start !== false) assert.deepEqual(await svc.start(), [], "start() reported a failure");
   return svc;
 }
 
@@ -400,7 +400,7 @@ describe("the nightly clear", () => {
     mock.timers.setTime(Date.UTC(2026, 9, 8, 5, 30));
     const svc = await boot({ lastClearedDate: "2026-10-07", messages: two() }, { start: false });
     frames.length = 0;
-    assert.equal(await svc.start(), null);
+    assert.deepEqual(await svc.start(), []);
     assert.deepEqual(svc.state().messages, []);
     assert.deepEqual(logged("[messages] nightly"), ["[messages] nightly clear removed 2 message(s)"]);
     assert.equal(frames.length, 1, "the screens kept the old day's thread");
@@ -491,12 +491,62 @@ describe("the nightly clear", () => {
       throw new Error("EROFS: read-only file system");
     }) as typeof messagesStore.save;
     try {
-      const failure = await svc.start();
-      assert.match(failure?.message ?? "", /EROFS/);
+      const failures = await svc.start();
+      assert.deepEqual(failures.map((f) => f.what), ["checking the day's thread"]);
+      assert.match(failures[0].error.message, /EROFS/);
     } finally {
       messagesStore.save = realSave;
     }
     assert.equal(svc.state().messages.length, 2, "an unsaved clear was applied");
+  });
+
+  test("a failure taking unknown groups off the screens at boot is returned, labelled as that, and does not stop the thread check", async () => {
+    mock.timers.setTime(Date.UTC(2026, 9, 8, 15, 0));
+    const svc = await boot({ lastClearedDate: "2026-10-07", messages: two() }, { start: false });
+    // A screen holding a group the config does not have, so the strip has work.
+    (stageController as unknown as { state: { outputs: Output[] } }).state.outputs = [
+      { id: "wall", name: "Wall", viewId: null, groups: ["g-deadbeef"] },
+    ] as Output[];
+    const real = stageController.stripUnknownOutputGroups.bind(stageController);
+    stageController.stripUnknownOutputGroups = async () => {
+      throw new Error("ENOSPC");
+    };
+    try {
+      const failures = await svc.start();
+      assert.deepEqual(failures.map((f) => f.what), ["taking unknown groups off the screens"]);
+      assert.match(failures[0].error.message, /ENOSPC/);
+    } finally {
+      stageController.stripUnknownOutputGroups = real;
+      (stageController as unknown as { state: { outputs: Output[] } }).state.outputs = [];
+    }
+    assert.deepEqual(svc.state().messages, [], "the day's thread check did not run after the strip failed");
+  });
+
+  test("both failing at boot comes back as two, each with its own label", async () => {
+    mock.timers.setTime(Date.UTC(2026, 9, 8, 15, 0));
+    const svc = await boot({ lastClearedDate: "2026-10-07", messages: two() }, { start: false });
+    (stageController as unknown as { state: { outputs: Output[] } }).state.outputs = [
+      { id: "wall", name: "Wall", viewId: null, groups: ["g-deadbeef"] },
+    ] as Output[];
+    const realSave = messagesStore.save.bind(messagesStore);
+    const realStrip = stageController.stripUnknownOutputGroups.bind(stageController);
+    messagesStore.save = (async () => {
+      throw new Error("EROFS");
+    }) as typeof messagesStore.save;
+    stageController.stripUnknownOutputGroups = async () => {
+      throw new Error("ENOSPC");
+    };
+    try {
+      const failures = await svc.start();
+      assert.deepEqual(failures.map((f) => [f.what, f.error.message]), [
+        ["checking the day's thread", "EROFS"],
+        ["taking unknown groups off the screens", "ENOSPC"],
+      ]);
+    } finally {
+      messagesStore.save = realSave;
+      stageController.stripUnknownOutputGroups = realStrip;
+      (stageController as unknown as { state: { outputs: Output[] } }).state.outputs = [];
+    }
   });
 });
 

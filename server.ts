@@ -120,12 +120,11 @@ await videoService.init();
 await integrationManager.init();
 await baptismTimerService.init();
 // Stage messages: load the day's thread, clear it if the date has moved on while
-// the server was off, and start the once-a-minute check. A failure comes back
-// rather than being thrown: a data directory that cannot be written must not stop
+// the server was off, take unknown groups off the screens, and start the
+// once-a-minute check. Failures come back rather than being thrown: a data directory that cannot be written must not stop
 // the server coming up and blank every screen.
-const messagesStartFailure = await messagesService.start();
-if (messagesStartFailure) {
-  console.error("[messages] could not check the day's thread at boot:", scrubError(messagesStartFailure));
+for (const { what, error } of await messagesService.start()) {
+  console.error(`[messages] ${what} at start-up failed:`, scrubError(error));
 }
 // Unattended backups, if the operator has turned them on.
 backupScheduler.start();
