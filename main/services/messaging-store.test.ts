@@ -14,14 +14,17 @@ import { beforeEach, describe, test } from "node:test";
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), "messaging-store-"));
 process.env.STAGE_UTILITY_DATA = DATA;
 
-const { messagingStore, MessagingRefused } = await import("./messaging-store.js");
+const { messagingStore, MessagingRefused, MessagingConflict } = await import("./messaging-store.js");
 const { configFiles, runtimeFiles } = await import("./config-snapshot.js");
 const { GROUP_ID } = await import("../types/messages.js");
 
 const FILE = path.join(DATA, "messaging.json");
-const onDisk = () => JSON.parse(fs.readFileSync(FILE, "utf8")) as { groups: { id: string; name: string }[] };
+const onDisk = () => JSON.parse(fs.readFileSync(FILE, "utf8")) as { version: number; groups: { id: string; name: string }[] };
 
+// Built at the version the store holds NOW, which is what a client that has just
+// read the config sends.
 const body = (over: Record<string, unknown> = {}) => ({
+  version: messagingStore.get().version,
   groups: [],
   quickMessages: ["Walk now"],
   quickReplies: ["Copy"],
@@ -97,9 +100,11 @@ describe("replace", () => {
 describe("a body the limits refuse leaves the stored config alone", () => {
   const cases: [string, () => unknown, RegExp][] = [
     ["a body that is not an object", () => "groups", /body must be/],
-    ["groups missing", () => ({ quickMessages: [], quickReplies: [] }), /groups \(array\) is required/],
-    ["quickMessages missing", () => ({ groups: [], quickReplies: [] }), /quickMessages \(array\) is required/],
-    ["quickReplies missing", () => ({ groups: [], quickMessages: [] }), /quickReplies \(array\) is required/],
+    ["a body with no version", () => ({ groups: [], quickMessages: [], quickReplies: [] }), /version \(number\) is required/],
+    ["a version that is not a number", () => body({ version: "1" }), /version \(number\) is required/],
+    ["groups missing", () => body({ groups: undefined }), /groups \(array\) is required/],
+    ["quickMessages missing", () => body({ quickMessages: undefined }), /quickMessages \(array\) is required/],
+    ["quickReplies missing", () => body({ quickReplies: undefined }), /quickReplies \(array\) is required/],
     ["a group name that is empty", () => body({ groups: [{ name: "   " }] }), /group name cannot be empty/],
     ["a group name past 40 characters", () => body({ groups: [{ name: "x".repeat(41) }] }), /at most 40/],
     ["21 groups", () => body({ groups: names(21) }), /groups can hold at most 20/],
@@ -129,6 +134,7 @@ describe("a body the limits refuse leaves the stored config alone", () => {
 
   test("the limits are inclusive: 20 groups, 24 quick messages, 12 quick replies, 40/280/60 characters", async () => {
     const out = await messagingStore.replace({
+      version: messagingStore.get().version,
       groups: [{ name: "x".repeat(40) }, ...names(19)],
       quickMessages: ["m".repeat(280), ...Array.from({ length: 23 }, (_, i) => `m${i}`)],
       quickReplies: ["r".repeat(60), ...Array.from({ length: 11 }, (_, i) => `r${i}`)],
@@ -153,15 +159,61 @@ describe("a body the limits refuse leaves the stored config alone", () => {
   });
 });
 
+describe("the version", () => {
+  test("starts at 0 for a config that has never been saved, and goes up by one with every replace", async () => {
+    const before = messagingStore.get().version;
+    const one = await messagingStore.replace(body());
+    const two = await messagingStore.replace(body());
+    assert.equal(one.config.version, before + 1);
+    assert.equal(two.config.version, before + 2);
+    assert.equal(messagingStore.get().version, before + 2);
+    assert.equal(onDisk().version, before + 2, "the version is in the file");
+  });
+
+  test("a body built from an older version is refused as a conflict, and nothing changes", async () => {
+    const { config } = await messagingStore.replace(body({ groups: [{ name: "Kept" }] }));
+    const stale = config.version - 1;
+    const before = JSON.stringify(messagingStore.get());
+    await assert.rejects(
+      () => messagingStore.replace(body({ version: stale, groups: [], quickMessages: ["Gone"] })),
+      (err: unknown) => err instanceof MessagingConflict && /changed in another window/.test(err.message),
+    );
+    assert.equal(JSON.stringify(messagingStore.get()), before, "a conflict changed the live config");
+    assert.equal(JSON.stringify(onDisk()), before, "a conflict changed the file");
+  });
+
+  test("a version AHEAD of the stored one is a conflict too", async () => {
+    await assert.rejects(() => messagingStore.replace(body({ version: messagingStore.get().version + 1 })), MessagingConflict);
+  });
+
+  test("a conflict is decided before the other rules: a stale body that is also invalid says to reload", async () => {
+    await assert.rejects(() => messagingStore.replace(body({ version: -1, groups: [{ name: "" }] })), MessagingConflict);
+  });
+});
+
 describe("concurrent saves", () => {
   test("each decides which groups were removed against the config the one before it left", async () => {
     const { config } = await messagingStore.replace(body({ groups: [{ name: "A" }, { name: "B" }] }));
     const [a, b] = config.groups;
+    // Two calls made together, the second built from the version the first will
+    // leave: the queue has to run them in order or the second is a conflict.
+    const v = config.version;
     const [one, two] = await Promise.all([
-      messagingStore.replace(body({ groups: [b] })),
-      messagingStore.replace(body({ groups: [] })),
+      messagingStore.replace(body({ version: v, groups: [b] })),
+      messagingStore.replace(body({ version: v + 1, groups: [] })),
     ]);
     assert.deepEqual(one.removed, [a]);
     assert.deepEqual(two.removed, [b], "the second save read the config as it stood before the first");
+  });
+
+  test("two saves built from the same version: one lands, the other is a conflict", async () => {
+    const v = messagingStore.get().version;
+    const results = await Promise.allSettled([
+      messagingStore.replace(body({ version: v, groups: [{ name: "First" }] })),
+      messagingStore.replace(body({ version: v, groups: [{ name: "Second" }] })),
+    ]);
+    assert.deepEqual(results.map((r) => r.status), ["fulfilled", "rejected"]);
+    assert.ok((results[1] as PromiseRejectedResult).reason instanceof MessagingConflict);
+    assert.deepEqual(messagingStore.get().groups.map((g) => g.name), ["First"]);
   });
 });

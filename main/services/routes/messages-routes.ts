@@ -6,9 +6,12 @@
 //   POST /api/messages                   send: { to, text, alert?, from? }
 //   POST /api/messages/:id/clear-alert   end a running alert early
 //   GET  /api/messaging                  groups, quick messages, quick replies
-//   PUT  /api/messaging                  replace them
+//   PUT  /api/messaging                  replace them; carries the `version` it was
+//                                        built from
 //
 // A rule a body breaks is a 400 that says which (MessageRefused, MessagingRefused).
+// A PUT built from a config another window has since replaced is a 409 and
+// changes nothing (MessagingConflict).
 // Anything else that throws is a failed write and is left to the server's own
 // handler, which answers 500: a send that did not save must not read as a refusal.
 //
@@ -17,7 +20,7 @@
 
 import { MESSAGE_ID } from "../../types/messages.js";
 import { MessageRefused, messagesService } from "../messages-service.js";
-import { MessagingRefused, messagingStore } from "../messaging-store.js";
+import { MessagingConflict, MessagingRefused, messagingStore } from "../messaging-store.js";
 import { type RouteCtx, error, json, readBodyOrEmpty } from "./context.js";
 
 /** A body that must be a JSON object. A JSON array is not one, and readBodyOrEmpty
@@ -85,6 +88,11 @@ export async function messagesRoutes(c: RouteCtx): Promise<void> {
     try {
       json(res, await messagesService.updateConfig(await readBodyOrEmpty(req)));
     } catch (err) {
+      if (err instanceof MessagingConflict) {
+        console.warn("[messages] refused a save of the groups and quick messages built from an older version of the config");
+        error(res, err.message, 409, "config-changed");
+        return;
+      }
       if (!(err instanceof MessagingRefused)) throw err;
       error(res, err.message);
     }

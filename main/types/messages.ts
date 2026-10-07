@@ -17,6 +17,14 @@ export interface MessageGroup {
 
 /** The operator's own work, in `messaging.json`. */
 export interface MessagingConfig {
+  /**
+   * Bumped by one on every successful replace; a file without one reads as 0.
+   * A save must carry the version it was built from, and one built from an older
+   * version is refused (409): the whole config is replaced at once, so a window
+   * that has not seen another window's new group would otherwise save without
+   * it and delete it.
+   */
+  version: number;
   groups: MessageGroup[];
   /** One-press messages the composer offers. */
   quickMessages: string[];

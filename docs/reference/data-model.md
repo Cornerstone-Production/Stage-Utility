@@ -282,7 +282,7 @@ Two stores, split by whose work they are:
 
 | File | Class | Holds |
 |---|---|---|
-| `messaging.json` | config | The groups (`{ id, name }`), the quick messages and the quick replies. Carried by every backup. |
+| `messaging.json` | config | The groups (`{ id, name }`), the quick messages and the quick replies, and a `version` that goes up by one on every save (a file without one reads as 0). A save must carry the version it was built from, so a window that has not seen another window's change cannot overwrite it. Carried by every backup. |
 | `messages.json` | runtime | The day's messages and `lastClearedDate`. Not restored from a backup: a message is an observation about one day. |
 
 A screen is in any number of groups: `Output.groups` holds their ids, in the

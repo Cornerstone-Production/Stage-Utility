@@ -48,6 +48,7 @@ beforeEach(async () => {
   // Three groups, in the order the config holds them. The ids are issued by the
   // store, so they are read back rather than invented.
   const { config } = await messagingStore.replace({
+    version: messagingStore.get().version,
     groups: [{ name: "Green room" }, { name: "Stage" }, { name: "Booth" }],
     quickMessages: [],
     quickReplies: [],

@@ -45,6 +45,7 @@ beforeEach(async () => {
   // A fresh in-memory thread: the singleton reads the store once, so reset it.
   (messagesService as unknown as { messages: StageMessage[]; loaded: boolean }).messages = [];
   const { config } = await messagingStore.replace({
+    version: messagingStore.get().version,
     groups: [{ name: "Green room" }, { name: "Stage" }],
     quickMessages: ["Walk now"],
     quickReplies: ["Copy"],
@@ -203,7 +204,13 @@ describe("POST /api/messages/:id/clear-alert", () => {
 });
 
 describe("GET and PUT /api/messaging", () => {
-  const put = (body: unknown) => callRoute(messagesRoutes, "/api/messaging", { method: "PUT", body });
+  // Built from the version the store holds now, as a window that has just read
+  // the config would. A body that is not an object goes through as it is.
+  const put = (body: unknown) =>
+    callRoute(messagesRoutes, "/api/messaging", {
+      method: "PUT",
+      body: body !== null && typeof body === "object" ? { version: messagingStore.get().version, ...body } : body,
+    });
 
   it("GET answers the config", async () => {
     const r = await callRoute(messagesRoutes, "/api/messaging");
@@ -230,10 +237,41 @@ describe("GET and PUT /api/messaging", () => {
     assert.deepEqual(state.groups.map((g) => g.id), [green], "GET /api/messages still lists the deleted group");
   });
 
+  it("GET carries the version, and PUT answers with the next one", async () => {
+    const before = ((await callRoute(messagesRoutes, "/api/messaging")).json as MessagingConfig).version;
+    assert.equal(typeof before, "number");
+    const r = await put({ groups: [{ id: green, name: "Green room" }, { id: stage, name: "Stage" }], quickMessages: [], quickReplies: [] });
+    assert.equal((r.json as MessagingConfig).version, before + 1);
+  });
+
+  it("PUT built from a version another window has replaced is a 409 and changes nothing", async () => {
+    const stale = messagingStore.get().version;
+    const first = await put({ groups: [{ id: green, name: "Green room" }, { id: stage, name: "Stage" }, { name: "Booth" }], quickMessages: ["Walk now"], quickReplies: ["Copy"] });
+    assert.equal(first.status, 200);
+    const storedBefore = JSON.stringify(messagingStore.get());
+    // The stale window never saw Booth: saving what it holds would delete it.
+    const r = await callRoute(messagesRoutes, "/api/messaging", {
+      method: "PUT",
+      body: { version: stale, groups: [{ id: green, name: "Green room" }, { id: stage, name: "Stage" }], quickMessages: [], quickReplies: [] },
+    });
+    assert.equal(r.status, 409);
+    assert.match(err(r), /changed in another window/);
+    assert.equal((r.json as { code?: string }).code, "config-changed");
+    assert.equal(JSON.stringify(messagingStore.get()), storedBefore, "the stale save changed the stored config");
+    assert.ok(messagingStore.get().groups.some((g) => g.name === "Booth"), "the group the stale window had not seen was deleted");
+  });
+
+  it("PUT with no version is a 400, not a way round the check", async () => {
+    const r = await callRoute(messagesRoutes, "/api/messaging", { method: "PUT", body: { groups: [], quickMessages: [], quickReplies: [] } });
+    assert.equal(r.status, 400);
+    assert.match(err(r), /version \(number\) is required/);
+    assert.deepEqual(messagingStore.get().groups.map((g) => g.id), [green, stage]);
+  });
+
   it("PUT with a body that is not JSON is a 400 with the reason, and changes nothing", async () => {
     const r = await callRoute(messagesRoutes, "/api/messaging", { method: "PUT", raw: "{nope" });
     assert.equal(r.status, 400);
-    assert.match(err(r), /groups \(array\) is required/);
+    assert.match(err(r), /version \(number\) is required/);
     assert.deepEqual(messagingStore.get().groups.map((g) => g.id), [green, stage]);
   });
 

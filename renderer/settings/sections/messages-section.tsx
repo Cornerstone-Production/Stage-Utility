@@ -10,6 +10,11 @@
 // A save that fails toasts, says so on /log, and KEEPS what was typed: a name
 // that the server refused is still in its box to fix, not gone.
 //
+// Every save carries the version of the config it was built from. A 409 means
+// another window saved first: this one reloads what is stored, says so, and
+// saves nothing, because the whole config is replaced at once and a save built
+// from the old one would delete what the other window added.
+//
 // A read that fails draws an error and no editor. Showing an empty list in its
 // place and letting the operator add to it would save a list that holds only
 // what they just typed, over the groups and replies they cannot see.
@@ -29,13 +34,14 @@ import {
   type MessagingConfig,
 } from "@main/types/messages";
 import { Button, ErrorNote, Input, confirm, toast } from "../../components/ui";
-import { invoke } from "../../lib/api";
+import { invoke, type ApiError } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { useResyncOn } from "../../lib/use-resync-on";
 
 /** What the server takes: a group the server has not met carries no id. */
 type ConfigBody = {
+  version: number;
   groups: { id?: string; name: string }[];
   quickMessages: string[];
   quickReplies: string[];
@@ -265,6 +271,12 @@ export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
       clear("config");
       return true;
     } catch (err) {
+      if ((err as ApiError).status === 409) {
+        logToServer("messages", "the groups and quick messages changed in another window; reloaded");
+        toast.error("The groups and quick messages were changed in another window. They have been reloaded; make your change again.");
+        load();
+        return false;
+      }
       logToServer("messages", `could not save the groups and quick messages: ${errorMessage(err)}`);
       toast.error(`Couldn't save that: ${errorMessage(err)}`);
       return false;
@@ -287,6 +299,7 @@ export function MessagesSection({ outputs }: { outputs: readonly Output[] }) {
   }
 
   const body = (over: Partial<ConfigBody>): ConfigBody => ({
+    version: config.version,
     groups: config.groups,
     quickMessages: config.quickMessages,
     quickReplies: config.quickReplies,

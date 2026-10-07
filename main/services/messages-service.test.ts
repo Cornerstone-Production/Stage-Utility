@@ -106,6 +106,7 @@ beforeEach(async () => {
   setAppTimeZone("America/Chicago");
   mock.timers.enable({ apis: ["Date", "setTimeout"], now: TEN_AM });
   const { config } = await messagingStore.replace({
+    version: messagingStore.get().version,
     groups: [{ name: "Green room" }, { name: "Stage" }, { name: "Booth" }],
     quickMessages: [],
     quickReplies: [],
@@ -580,6 +581,7 @@ describe("updateConfig", () => {
   });
 
   const keep = (...ids: string[]) => ({
+    version: messagingStore.get().version,
     groups: ids.map((id, i) => ({ id, name: ["Green room", "Stage", "Booth"][[green, stage, booth].indexOf(id)] ?? `G${i}` })),
     quickMessages: [],
     quickReplies: [],
@@ -618,6 +620,7 @@ describe("updateConfig", () => {
     const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
     frames.length = 0;
     await svc.updateConfig({
+      version: messagingStore.get().version,
       groups: [{ id: green, name: "Greenroom" }, { id: stage, name: "Stage" }, { id: booth, name: "Booth" }],
       quickMessages: ["Go"],
       quickReplies: ["Ok"],
@@ -627,6 +630,7 @@ describe("updateConfig", () => {
     assert.equal(frames.length, 1, "a rename must reach the screens: the state carries the names");
     frames.length = 0;
     await svc.updateConfig({
+      version: messagingStore.get().version,
       groups: [{ id: green, name: "Greenroom" }, { id: stage, name: "Stage" }, { id: booth, name: "Booth" }],
       quickMessages: ["Go", "Stop"],
       quickReplies: ["Ok"],
@@ -637,7 +641,7 @@ describe("updateConfig", () => {
   test("a refused config changes nothing", async () => {
     const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
     frames.length = 0;
-    await assert.rejects(() => svc.updateConfig({ groups: [{ id: green, name: "" }], quickMessages: [], quickReplies: [] }), /cannot be empty/);
+    await assert.rejects(() => svc.updateConfig({ version: messagingStore.get().version, groups: [{ id: green, name: "" }], quickMessages: [], quickReplies: [] }), /cannot be empty/);
     assert.deepEqual(stageController.getState().outputs.map((o) => o.groups), [[green, stage], [stage], [booth]]);
     assert.equal(frames.length, 0);
   });

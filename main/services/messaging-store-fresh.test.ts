@@ -17,6 +17,7 @@ const { DEFAULT_QUICK_MESSAGES, DEFAULT_QUICK_REPLIES } = await import("../types
 test("a fresh install has no groups and the stock quick lists", async () => {
   await messagingStore.init();
   assert.deepEqual(messagingStore.get(), {
+    version: 0,
     groups: [],
     quickMessages: [...DEFAULT_QUICK_MESSAGES],
     quickReplies: [...DEFAULT_QUICK_REPLIES],

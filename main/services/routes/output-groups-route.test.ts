@@ -22,6 +22,7 @@ let stage = "";
 
 beforeEach(async () => {
   const { config } = await messagingStore.replace({
+    version: messagingStore.get().version,
     groups: [{ name: "Green room" }, { name: "Stage" }],
     quickMessages: [],
     quickReplies: [],

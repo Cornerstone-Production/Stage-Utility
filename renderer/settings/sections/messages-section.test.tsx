@@ -29,6 +29,7 @@ const GREEN = { id: "g-11111111", name: "Green room" };
 const STAGE = { id: "g-22222222", name: "Stage" };
 
 interface Config {
+  version: number;
   groups: { id: string; name: string }[];
   quickMessages: string[];
   quickReplies: string[];
@@ -42,6 +43,7 @@ let fetchStub: ReturnType<typeof stubFetchWithLog>;
 
 beforeEach(() => {
   server = {
+    version: 3,
     groups: [GREEN, STAGE],
     quickMessages: ["Walk now", "2 minutes"],
     quickReplies: ["Copy"],
@@ -52,11 +54,16 @@ beforeEach(() => {
   fetchStub = stubFetchWithLog((url, init) => {
     if (url !== "/api/messaging") return ok({});
     if ((init?.method ?? "GET") === "PUT") {
-      const body = JSON.parse(String(init?.body)) as { groups: { id?: string; name: string }[]; quickMessages: string[]; quickReplies: string[] };
+      const body = JSON.parse(String(init?.body)) as { version: number; groups: { id?: string; name: string }[]; quickMessages: string[]; quickReplies: string[] };
       puts.push(body as Config);
       if (refuse) return reply(400, { error: refuse });
+      // What the real one does: a body built from another version is a 409.
+      if (body.version !== server.version) {
+        return reply(409, { error: "The groups and quick messages were changed in another window. Reload and try again.", code: "config-changed" });
+      }
       let n = 0;
       server = {
+        version: server.version + 1,
         groups: body.groups.map((g) => ({ id: g.id ?? `g-9999999${++n}`, name: g.name })),
         quickMessages: body.quickMessages,
         quickReplies: body.quickReplies,
@@ -114,6 +121,7 @@ test("adding a group sends the WHOLE config, the new group without an id, and sh
   await flush();
   assert.deepEqual(puts, [
     {
+      version: 3,
       groups: [GREEN, STAGE, { name: "Booth" }],
       quickMessages: ["Walk now", "2 minutes"],
       quickReplies: ["Copy"],
@@ -215,7 +223,7 @@ test("adding a quick message sends the whole config with it appended", async () 
   fireEvent.click(within(screen.getByTestId("messages-quick-messages")).getByRole("button", { name: /Add/ }));
   await flush();
   assert.deepEqual(puts, [
-    { groups: [GREEN, STAGE], quickMessages: ["Walk now", "2 minutes", "Wrap it up"], quickReplies: ["Copy"] },
+    { version: 3, groups: [GREEN, STAGE], quickMessages: ["Walk now", "2 minutes", "Wrap it up"], quickReplies: ["Copy"] },
   ]);
 });
 
@@ -270,6 +278,7 @@ test("moving a quick message changes the order consoles offer, and the ends cann
 
 test("the lists stop at their limits: 24 quick messages, 12 quick replies, 20 groups", async () => {
   server = {
+    version: 3,
     groups: Array.from({ length: 20 }, (_, i) => ({ id: `g-${i.toString(16).padStart(8, "0")}`, name: `G${i}` })),
     quickMessages: Array.from({ length: 24 }, (_, i) => `m${i}`),
     quickReplies: Array.from({ length: 12 }, (_, i) => `r${i}`),
@@ -305,8 +314,37 @@ test("Try again reads it again, and the editor appears", async () => {
 });
 
 test("an empty config says none yet rather than drawing nothing", async () => {
-  server = { groups: [], quickMessages: [], quickReplies: [] };
+  server = { version: 3, groups: [], quickMessages: [], quickReplies: [] };
   await mount();
   assert.ok(screen.getByText("No groups yet."));
   assert.equal(screen.getAllByText("None yet.").length, 2);
+});
+
+test("a save built from a config another window has since replaced reloads what is stored, says so, and saves nothing", async () => {
+  await mount();
+  // Another window adds Booth after this one read the config.
+  const booth = { id: "g-33333333", name: "Booth" };
+  server = { ...server, version: 4, groups: [GREEN, STAGE, booth] };
+  type("New quick message", "Wrap it up");
+  fireEvent.click(within(screen.getByTestId("messages-quick-messages")).getByRole("button", { name: /Add/ }));
+  await flush();
+  assert.equal(puts.length, 1, "the stale save was sent once");
+  assert.equal(puts[0].version, 3);
+  assert.match(document.body.textContent ?? "", /changed in another window/);
+  assert.match(document.body.textContent ?? "", /reloaded/);
+  assert.deepEqual(
+    screen.getAllByLabelText(/^Rename /).map((i) => (i as HTMLInputElement).value),
+    ["Green room", "Stage", "Booth"],
+    "the page went on showing the config another window replaced",
+  );
+  assert.deepEqual(server.quickMessages, ["Walk now", "2 minutes"], "the stale save landed");
+  assert.ok(fetchStub.logs.some((l) => l.tag === "messages" && /changed in another window/.test(l.message)));
+
+  // And the next save is built from what was reloaded: it lands, Booth survives.
+  type("New quick message", "Wrap it up");
+  fireEvent.click(within(screen.getByTestId("messages-quick-messages")).getByRole("button", { name: /Add/ }));
+  await flush();
+  assert.equal(puts[1].version, 4);
+  assert.deepEqual(puts[1].groups.map((g) => g.name), ["Green room", "Stage", "Booth"]);
+  assert.deepEqual(server.quickMessages, ["Walk now", "2 minutes", "Wrap it up"]);
 });

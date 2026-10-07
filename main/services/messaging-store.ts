@@ -45,8 +45,20 @@ export class MessagingRefused extends Error {
   }
 }
 
+/**
+ * The config this was based on is not the stored one any more: another window
+ * saved first. Routes answer it 409; nothing was changed.
+ */
+export class MessagingConflict extends Error {
+  constructor() {
+    super("The groups and quick messages were changed in another window. Reload and try again.");
+    this.name = "MessagingConflict";
+  }
+}
+
 function defaults(): MessagingConfig {
   return {
+    version: 0,
     groups: [],
     quickMessages: [...DEFAULT_QUICK_MESSAGES],
     quickReplies: [...DEFAULT_QUICK_REPLIES],
@@ -55,6 +67,7 @@ function defaults(): MessagingConfig {
 
 function copyOf(config: MessagingConfig): MessagingConfig {
   return {
+    version: config.version,
     groups: config.groups.map((g) => ({ id: g.id, name: g.name })),
     quickMessages: [...config.quickMessages],
     quickReplies: [...config.quickReplies],
@@ -77,6 +90,7 @@ function readFile(parsed: unknown): MessagingConfig {
     return out;
   }
   const raw = parsed as Record<string, unknown>;
+  if (typeof raw.version === "number" && Number.isSafeInteger(raw.version) && raw.version > 0) out.version = raw.version;
 
   if (Array.isArray(raw.groups)) {
     const ids = new Set<string>();
@@ -178,11 +192,18 @@ function checkedText(value: unknown, what: string, max: number): string {
  * nobody issued is refused rather than taken — otherwise a stale page could
  * bring a deleted group back under its old id.
  */
-function validate(input: unknown, existing: readonly MessageGroup[]): MessagingConfig {
+function validate(input: unknown, current: MessagingConfig): MessagingConfig {
   if (input === null || typeof input !== "object" || Array.isArray(input)) {
-    throw new MessagingRefused("body must be { groups, quickMessages, quickReplies }");
+    throw new MessagingRefused("body must be { version, groups, quickMessages, quickReplies }");
   }
   const body = input as Record<string, unknown>;
+  // First, before any other rule: a body built from an older config is stale
+  // whatever else is wrong with it, and "reload" is the answer that helps.
+  if (typeof body.version !== "number") {
+    throw new MessagingRefused("version (number) is required: send the version the config was read at");
+  }
+  if (body.version !== current.version) throw new MessagingConflict();
+  const existing = current.groups;
   const known = new Map(existing.map((g) => [g.id, g]));
   const taken = new Set(known.keys());
   const seenIds = new Set<string>();
@@ -217,7 +238,7 @@ function validate(input: unknown, existing: readonly MessageGroup[]): MessagingC
   const quickReplies = asList(body.quickReplies, "quickReplies", QUICK_REPLIES_MAX).map((t) =>
     checkedText(t, "a quick reply", QUICK_REPLY_MAX),
   );
-  return { groups, quickMessages, quickReplies };
+  return { version: current.version + 1, groups, quickMessages, quickReplies };
 }
 
 export const messagingStore = {
@@ -239,7 +260,8 @@ export const messagingStore = {
    * Replace the whole config. Returns what is now stored and the groups that
    * are gone, so the caller can take them off the screens that had them.
    *
-   * Refuses with MessagingRefused when a limit is broken. The file is written
+   * Refuses with MessagingRefused when a limit is broken, and with
+   * MessagingConflict when the body's `version` is not the stored one. The file is written
    * before the live config changes: a write that fails (a full SD card) throws
    * to the caller and leaves what was there, instead of a config every reader
    * calls saved that the next restart loses.
@@ -248,7 +270,7 @@ export const messagingStore = {
     return writes.enqueue(async () => {
       await ensureLoaded();
       const before = cache ?? defaults();
-      const next = validate(input, before.groups);
+      const next = validate(input, before);
       await store.save(copyOf(next));
       cache = copyOf(next);
       const kept = new Set(next.groups.map((g) => g.id));

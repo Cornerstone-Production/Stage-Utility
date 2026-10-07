@@ -15,6 +15,8 @@ process.env.STAGE_UTILITY_DATA = DATA;
 fs.writeFileSync(
   path.join(DATA, "messaging.json"),
   JSON.stringify({
+    // Not a number: reads as 0, the same as a file written before there was one.
+    version: "7",
     groups: [
       { id: "g-0a0a0a0a", name: "Green room" },
       { id: "g-0b0b0b0b", name: "green ROOM" },
@@ -49,6 +51,10 @@ describe("reading a hand-edited file", () => {
 
   test("keeps the quick messages that satisfy the limits", () => {
     assert.deepEqual(messagingStore.get().quickMessages, ["Walk now"]);
+  });
+
+  test("a version that is not a number reads as 0", () => {
+    assert.equal(messagingStore.get().version, 0);
   });
 
   test("a list the file does not have falls back to the stock one", () => {
