@@ -18,11 +18,10 @@
 import { MESSAGE_ID } from "../../types/messages.js";
 import { MessageRefused, messagesService } from "../messages-service.js";
 import { MessagingRefused, messagingStore } from "../messaging-store.js";
-import { type RouteCtx, error, json, readBody, readBodyOrEmpty } from "./context.js";
+import { type RouteCtx, error, json, readBodyOrEmpty } from "./context.js";
 
-/** A body that must be a JSON object. `readBody` answers `null` for the JSON
- *  `null`, and an array or a string for those, none of which a route can read
- *  fields off. */
+/** A body that must be a JSON object. A JSON array is not one, and readBodyOrEmpty
+ *  hands one through, so it is checked here. */
 function objectBody(body: unknown): Record<string, unknown> | null {
   return body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
 }
@@ -36,7 +35,10 @@ export async function messagesRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/messages") {
-    const body = objectBody(await readBody(req));
+    // readBodyOrEmpty: a body that is not JSON reads as empty and is refused below
+    // with the reason, the way every other route in this app answers one, instead
+    // of reaching the server's handler as a 500.
+    const body = objectBody(await readBodyOrEmpty(req));
     if (!body) {
       error(res, "body must be { to, text, alert?, from? }");
       return;
@@ -81,7 +83,7 @@ export async function messagesRoutes(c: RouteCtx): Promise<void> {
 
   if (method === "PUT" && pathname === "/api/messaging") {
     try {
-      json(res, await messagesService.updateConfig(await readBody(req)));
+      json(res, await messagesService.updateConfig(await readBodyOrEmpty(req)));
     } catch (err) {
       if (!(err instanceof MessagingRefused)) throw err;
       error(res, err.message);

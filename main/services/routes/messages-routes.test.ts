@@ -112,7 +112,7 @@ describe("POST /api/messages", () => {
 
   const refused: [string, unknown, RegExp][] = [
     ["a body that is not an object", [1, 2], /body must be/],
-    ["a JSON null", null, /body must be/],
+    ["a JSON null", null, /at least one group/],
     ["no recipients", { to: [], text: "x" }, /at least one group/],
     ["a group that does not exist", { to: ["g-00000000"], text: "x" }, /no group has the id/],
     ["Everyone beside a group", { to: [EVERYONE, "g-00000000"], text: "x" }, /cannot be combined/],
@@ -129,6 +129,13 @@ describe("POST /api/messages", () => {
       assert.deepEqual(messagesService.state().messages, []);
     });
   }
+
+  it("a body that is not JSON is a 400 with the reason, not a 500", async () => {
+    const r = await callRoute(messagesRoutes, "/api/messages", { method: "POST", raw: "{nope" });
+    assert.equal(r.status, 400);
+    assert.match(err(r), /at least one group/);
+    assert.deepEqual(messagesService.state().messages, []);
+  });
 
   it("a failed write is a failure, not a refusal: the error is left for the server's handler", async () => {
     const real = messagesStore.save.bind(messagesStore);
@@ -221,6 +228,13 @@ describe("GET and PUT /api/messaging", () => {
     assert.deepEqual(stageController.getState().outputs.map((o) => [o.id, o.groups]), [["wall", [green]], ["foh", []]]);
     const state = (await callRoute(messagesRoutes, "/api/messages")).json as MessagesState;
     assert.deepEqual(state.groups.map((g) => g.id), [green], "GET /api/messages still lists the deleted group");
+  });
+
+  it("PUT with a body that is not JSON is a 400 with the reason, and changes nothing", async () => {
+    const r = await callRoute(messagesRoutes, "/api/messaging", { method: "PUT", raw: "{nope" });
+    assert.equal(r.status, 400);
+    assert.match(err(r), /groups \(array\) is required/);
+    assert.deepEqual(messagingStore.get().groups.map((g) => g.id), [green, stage]);
   });
 
   const refused: [string, unknown, RegExp][] = [
