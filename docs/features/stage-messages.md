@@ -152,6 +152,9 @@ seconds do. It rises into place when it arrives.
 - Never over **blackout**: a blacked-out screen stays black, because blackout is a
   deliberate choice for that screen. Never on a **preview**, such as a Screens card,
   which is a picture of a screen and not one.
+- A **screen-embed tile** (a picture of another screen on a producer wall) does not
+  draw that screen's alert banner; a Messages widget inside it follows the screen it
+  shows, not the one it sits on, and draws no reply buttons.
 - A screen subscribes to `messages:state` for this whatever it shows. If the banner
   itself fails to draw, it is hidden and `[messages] the alert banner failed to
   draw` is on `/log`; the screen underneath stays up.

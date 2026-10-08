@@ -264,6 +264,8 @@ Kill the server by port when done.
 - The Messages widget's state is read by `useMessagesStatus`, which logs a failed
   read as `[messages]`; `isAlertRunning` lives in `main/types/messages.ts` for the
   server and the screens to share.
+- A screen-embed tile carries the screen it shows (its id and groups) and is not
+  interactive: a picture of a panel cannot answer for it, and it draws no banner.
 - New widgets arrive at the editor's one default size (0.3 x 0.16 of the canvas);
   both want resizing on placement. Not changed here.
 

@@ -183,6 +183,35 @@ describe("a Messages widget follows the screen StageView says it is", () => {
   });
 });
 
+// ---- a tile of another screen ---------------------------------------------------
+
+describe("a Messages widget inside a screen-embed tile", () => {
+  /** display-1 (Green room, panel) draws a tile of display-2 (Stage), whose view holds the widget. */
+  function withTile() {
+    const state = stageState({ type: "screen-embed", outputId: "display-2", showLabel: false }, { groups: [GREEN], mode: "panel" }) as unknown as {
+      views: unknown[]; outputs: unknown[]; resolvedByOutput: Record<string, unknown>;
+    };
+    state.views.push({
+      id: "v2", name: "Stage view", kind: "custom",
+      layout: { canvas: { width: 1920, height: 1080, background: null }, objects: [{ id: "w2", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "messages" } }] },
+    });
+    state.outputs.push({ id: "display-2", name: "Stage monitor", viewId: "v2", groups: [STAGE] });
+    state.resolvedByOutput["display-2"] = {
+      viewId: "v2", kind: "custom", ndiSource: null, viewName: "Stage view", blackout: false, locked: false,
+      hideTopBar: false, allowHls: true, groups: [STAGE], textSize: null,
+    };
+    return state;
+  }
+
+  test("follows the screen it shows, not the one it sits on, and draws no reply buttons", async () => {
+    messagesBody = messagesState([message(1, [GREEN], "for the green room"), message(2, [STAGE], "for the stage")]);
+    const c = await showScreen("/display-1", withTile());
+    assert.ok(says(c, "for the stage"), c.textContent ?? "");
+    assert.ok(!says(c, "for the green room"), "the tile followed the screen it sits on");
+    assert.equal([...c.querySelectorAll("button")].some((b) => b.textContent === "Copy"), false, "a picture of a screen offered to answer for it");
+  });
+});
+
 // ---- the composer signs as the screen it is on --------------------------------
 
 describe("a Message composer on a screen", () => {

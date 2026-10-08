@@ -159,7 +159,8 @@ export interface LayoutRenderCtx {
    *
    * Required, like `allowHls` and for the same reason: a surface that forgot
    * them would read as "not a screen" and a Messages widget on a real wall
-   * would silently follow no group. Embedded views inherit their parent's.
+   * would silently follow no group. Embedded views inherit their parent's; a
+   * screen-embed tile carries the screen it shows (see ScreenEmbedObject).
    */
   screen: OwnScreen | null;
   /** Canvas height in design px — basis for fraction→px font/spacing sizing. */
@@ -2865,7 +2866,18 @@ function ScreenEmbedObject({
     return (
       <EmbeddedView
         view={view}
-        ctx={{ ...ctx, H: childH, insideEmbedTile: where === "tile" }}
+        // A tile of a screen is a picture of it, not that screen. It carries that
+        // screen's own id and message groups (so its Messages widget follows the
+        // screen it shows, not the one the tile sits on) and is not interactive,
+        // so a picture of a panel cannot answer for the panel. Its alert banner is
+        // the screen's own and is not drawn here.
+        ctx={{
+          ...ctx,
+          H: childH,
+          insideEmbedTile: where === "tile",
+          screen: { outputId: output.id, groups: output.groups ?? [] },
+          interactive: false,
+        }}
         displayId={output.id}
       />
     );
