@@ -6,7 +6,7 @@
 // is the only thing that answers them, and the rule editor reads nothing else.
 //
 // ONE RECORD, EXHAUSTIVE OVER THAT SET. `OptionSources` is keyed by the union
-// itself, so a ninth source added to ParamDef.optionsFrom is a compile error
+// itself, so a tenth source added to ParamDef.optionsFrom is a compile error
 // here until it is answered. That is the guarantee this file exists for: two of
 // the eight had no answer at all, and each was a select offering "Pick one…" and
 // nothing else —
@@ -23,6 +23,7 @@
 import { useMemo } from "react";
 
 import type { ParamDef } from "@main/types/automation";
+import { EVERYONE } from "@main/types/messages";
 import { invoke } from "../../lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { useServiceTypes, useStageStateQuery } from "../../app/queries";
@@ -68,7 +69,7 @@ export type OptionSources = Record<OptionSourceKey, OptionSource>;
  * with no case for this URL — reached `.map` and threw inside the useMemo. That
  * is not a missing dropdown: it unmounts the whole Automation section and the
  * operator gets a blank page where their rules were. Every source goes through
- * here rather than eight copies of the same ternary.
+ * here rather than nine copies of the same ternary.
  */
 function list<T>(v: T[] | undefined): T[] {
   return Array.isArray(v) ? v : [];
@@ -99,6 +100,8 @@ export interface OptionSourceAnswers {
   pcoConfigured?: boolean;
   /** The app's own display outputs. See the "displays" source below. */
   outputs?: { id: string; name: string }[];
+  /** The messaging config, of which only the groups matter here. */
+  messagingConfig?: { groups?: { id: string; name: string }[] };
 }
 
 /**
@@ -142,6 +145,15 @@ export function buildOptionSources(a: OptionSourceAnswers): OptionSources {
     // against that set. The param is labelled "Display" and stores an id, so
     // without this list an operator had to read one out of a URL and type it.
     "displays": { options: list(a.outputs).map((o) => ({ value: o.id, label: o.name })) },
+    // Everyone first, then the groups in the config's order; the VALUE is the id
+    // `POST /api/messages` takes in `to`. Empty until the config has answered,
+    // Everyone included: offering one choice while the groups are still loading
+    // would mark a saved group as "no longer offered" for as long as that took.
+    "message-groups": {
+      options: Array.isArray(a.messagingConfig?.groups)
+        ? [{ value: EVERYONE, label: "Everyone" }, ...a.messagingConfig.groups.map((g) => ({ value: g.id, label: g.name }))]
+        : [],
+    },
   };
 }
 
@@ -214,6 +226,13 @@ export function useOptionSources(): OptionSources {
     queryFn: () => invoke<{ items: Option[]; unreachable?: string[] }>("automation:propresenter-macros"),
     staleTime: OPTION_SOURCE_STALE_MS,
   });
+  // Local config, no network. The Messages settings page saves through a path of
+  // its own, so a group added there reaches this list once the 30 seconds pass.
+  const { data: messagingConfig } = useQuery({
+    queryKey: ["messaging:get"],
+    queryFn: () => invoke<{ groups: { id: string; name: string }[] }>("messaging:get"),
+    staleTime: OPTION_SOURCE_STALE_MS,
+  });
   const { data: stageState } = useStageStateQuery();
   const { data: serviceTypes } = useServiceTypes(stageState);
 
@@ -231,6 +250,7 @@ export function useOptionSources(): OptionSources {
         serviceTypes,
         outputs,
         pcoConfigured,
+        messagingConfig,
       }),
     [
       rosstalkTargets,
@@ -242,6 +262,7 @@ export function useOptionSources(): OptionSources {
       serviceTypes,
       outputs,
       pcoConfigured,
+      messagingConfig,
     ],
   );
 }

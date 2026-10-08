@@ -6,6 +6,10 @@
 // one day, never two. It is a MultiSelect now, and the value it writes is the
 // comma-separated string every reader of these params already splits.
 //
+// The same file holds the stage message action's own fields, rendered from the
+// REAL `messages.send` params: a To picker that lists Everyone then the groups,
+// and an Alert that shows "no" while stored blank.
+//
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND. node:assert builds its
 // failure message by inspecting `actual`, and inspecting a live jsdom element
 // does not terminate in any useful time.
@@ -20,6 +24,8 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 import { installRenderDom } from "../../test-dom.js";
 
 const teardown = installRenderDom();
+
+const { AUTOMATION_ACTIONS } = await import("@main/services/automation-actions");
 
 const REGISTRY = {
   triggers: [{ id: "service.live", label: "Service goes live", channel: "pco:live", params: [] }],
@@ -42,10 +48,21 @@ const REGISTRY = {
         },
       ],
     },
+    {
+      id: "messages.send",
+      label: AUTOMATION_ACTIONS["messages.send"]!.label,
+      params: AUTOMATION_ACTIONS["messages.send"]!.params,
+    },
   ],
 };
 
+let actionId = "x.pick";
 let params: Record<string, string | number> = {};
+/** What GET /api/messaging answers, in the config's order. */
+let GROUPS = [
+  { id: "g-0000000b", name: "Stage" },
+  { id: "g-0000000a", name: "Green room" },
+];
 let requests: { method: string; url: string; body: string | null }[] = [];
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
@@ -58,6 +75,7 @@ let requests: { method: string; url: string; body: string | null }[] = [];
       body = { id: "rule-1", issues: [] };
     }
   } else if (url.includes("/api/automation/registry")) body = REGISTRY;
+  else if (url.includes("/api/messaging")) body = { version: 1, groups: GROUPS, quickMessages: [], quickReplies: [] };
   else if (url.includes("/api/automation/rules")) {
     body = {
       rules: [
@@ -67,7 +85,7 @@ let requests: { method: string; url: string; body: string | null }[] = [];
           enabled: true,
           trigger: { id: "service.live", params: {} },
           conditions: [],
-          action: { id: "x.pick", params },
+          action: { id: actionId, params },
           cooldownSec: 0,
           oncePerService: false,
           issues: [],
@@ -132,6 +150,7 @@ const saved = (): { action: { params: Record<string, string> } }[] =>
   requests.filter((r) => r.method === "PATCH").map((r) => JSON.parse(r.body ?? "{}"));
 
 beforeEach(() => {
+  actionId = "x.pick";
   params = {};
   requests = [];
 });
@@ -165,5 +184,60 @@ describe("a multi-enum param", () => {
     await tick("Mon");
     await press(screen.getByRole("button", { name: "Save" }));
     assert.equal(saved()[0]!.action.params.days, "0,2");
+  });
+});
+
+// ── messages.send ────────────────────────────────────────────────────────
+
+/** The labels in the open To list, in order. */
+function toChoices(): string[] {
+  const list = document.querySelector('[role="dialog"][aria-label="To"]') as HTMLElement | null;
+  assert.ok(list, "the To list did not open");
+  return [...list.querySelectorAll("button")]
+    .map((b) => b.textContent?.trim() ?? "")
+    .filter((t) => t !== "All" && t !== "None");
+}
+
+describe("the To picker on Send a stage message", () => {
+  beforeEach(() => {
+    actionId = "messages.send";
+    params = { to: "g-0000000a", text: "Walk now" };
+  });
+
+  test("lists Everyone first, then the groups in the config's order", async () => {
+    await open();
+    await press(screen.getByRole("button", { name: /^To\b/ }));
+    assert.deepEqual(toChoices(), ["Everyone", "Stage", "Green room"]);
+  });
+
+  test("a group ticked is stored by id", async () => {
+    await open();
+    await press(screen.getByRole("button", { name: /^To\b/ }));
+    const list = document.querySelector('[role="dialog"][aria-label="To"]') as HTMLElement;
+    await press(within(list).getByText("Stage").closest("button") as HTMLElement);
+    await press(screen.getByRole("button", { name: "Save" }));
+    assert.equal(saved()[0]!.action.params.to, "g-0000000b,g-0000000a");
+  });
+
+  test("a group deleted since the rule was saved stays in the value, with a note, and the picker still opens", async () => {
+    params = { to: "g-0000000a,g-deadbeef", text: "Walk now" };
+    await open();
+    assert.match(document.body.textContent ?? "", /A saved choice is no longer offered/);
+    await press(screen.getByRole("button", { name: /^To\b/ }));
+    assert.deepEqual(toChoices(), ["Everyone", "Stage", "Green room"]);
+    const list = document.querySelector('[role="dialog"][aria-label="To"]') as HTMLElement;
+    await press(within(list).getByText("Stage").closest("button") as HTMLElement);
+    await press(screen.getByRole("button", { name: "Save" }));
+    // The group that is gone is still there, last: nothing here deletes it.
+    assert.equal(saved()[0]!.action.params.to, "g-0000000b,g-0000000a,g-deadbeef");
+  });
+
+  test("Alert shows No while stored blank, with no blank choice", async () => {
+    await open();
+    const row = [...document.querySelectorAll("label")].find((l) => (l.textContent ?? "").startsWith("Alert"));
+    const select = row?.querySelector("select") as HTMLSelectElement | null;
+    assert.ok(select, "no Alert select");
+    assert.equal(select.value, "no");
+    assert.deepEqual([...select.options].map((o) => o.value), ["no", "yes"]);
   });
 });

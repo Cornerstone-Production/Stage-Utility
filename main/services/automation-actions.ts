@@ -7,12 +7,16 @@
 
 import { errorMessage } from "./errors.js";
 import type { ActionDef, ActionResult } from "../types/automation.js";
+import { EVERYONE } from "../types/messages.js";
 import type { BaptismState, PcoLiveDTO } from "../types/stage.js";
 import { advanceGuard } from "./automation-pco-items.js";
+import { choiceList } from "./automation-param-validation.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { broadcast } from "./broadcaster.js";
 import { companionApi } from "./companion-api.js";
 import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
+import { checkSend, groupNames, messagesService } from "./messages-service.js";
+import { plural } from "./plural.js";
 import { isObsOutputCommand, obsOutput, obsOutputNoun, type ObsOutputKind } from "./obs-service.js";
 import { oscManager } from "./osc-manager.js";
 import { propresenterManager } from "./propresenter-service.js";
@@ -74,6 +78,24 @@ async function runObsOutput(
   if (simulate) return ok(`would ${command} ${obsOutputNoun(kind)}`);
   const result = await obsOutput(kind, command);
   return result.ok ? ok(`${command}: ${result.detail}`) : fail(`${command}: ${result.detail}`);
+}
+
+/** Who a stage message sent from a rule or a console button says it is from.
+ *  The rule's name is not in an action's context, so this is the same for all. */
+const MESSAGE_FROM = "Automation";
+
+/**
+ * What `messages.send` was asked for, as the arguments `checkSend` and
+ * `messagesService.send` take. A blank `to` or `text` is passed on as it is and
+ * refused by the service's own rules, so there is one set of reasons.
+ */
+function messageInput(params: Record<string, unknown>) {
+  return {
+    to: choiceList(params.to),
+    text: String(params.text ?? ""),
+    alert: params.alert === "yes",
+    from: MESSAGE_FROM,
+  };
 }
 
 /**
@@ -544,6 +566,84 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
       if (ctx.simulate) return ok("would finish the baptism session");
       baptismTimerService.finish();
       return ok("finished the baptism session");
+    },
+  },
+
+  "messages.send": {
+    id: "messages.send",
+    label: "Send a stage message",
+    help:
+      "Sends a message to the screens in the groups you pick, or to Everyone, from \"Automation\". An alert takes the " +
+      "screens over for 30 seconds. A group deleted since the rule was saved makes the action fail and say so; " +
+      "nothing is sent.",
+    params: [
+      {
+        key: "to",
+        label: "To",
+        type: "multi-enum",
+        optionsFrom: "message-groups",
+        exclusiveChoice: { value: EVERYONE, message: "Pick Everyone, or one or more groups, not both" },
+        help: "Everyone, or one or more groups.",
+      },
+      { key: "text", label: "Message", type: "string", help: "1 to 280 characters." },
+      {
+        key: "alert",
+        label: "Alert",
+        type: "enum",
+        options: [
+          { value: "no", label: "No" },
+          { value: "yes", label: "Yes, take the screens over" },
+        ],
+        default: "no",
+        optional: true,
+      },
+    ],
+    run: async (params, ctx) => {
+      const input = messageInput(params);
+      try {
+        const { groups } = await messagesService.config();
+        const line = (m: { to: string[]; alert: boolean; text: string }) =>
+          `to ${groupNames(m.to, groups)}${m.alert ? " (alert)" : ""}: "${m.text}"`;
+        // The service's own rules, run without a send: a rule that would be
+        // refused says so while it is being tested, not on Sunday.
+        if (ctx.simulate) return ok(`would send ${line(checkSend(input, groups))}`);
+        return ok(`sent ${line(await messagesService.send(input))}`);
+      } catch (e) {
+        // A refusal (a group deleted since the rule was saved, an empty message)
+        // or a send that could not be saved: RETURNED, naming the reason. The
+        // messages service logs a real refusal on its own tagged line, and the
+        // engine logs this result either way.
+        return fail(`not sent: ${errorMessage(e)}`);
+      }
+    },
+  },
+
+  "messages.clear-alerts": {
+    id: "messages.clear-alerts",
+    label: "Clear stage message alerts",
+    help:
+      "Ends every stage message alert that is running, on every screen. The messages stay in the thread. " +
+      "Nothing running is a success that says so.",
+    params: [],
+    run: async (_params, ctx) => {
+      const running = messagesService.state().alerts;
+      if (running.length === 0) return ok("no alert was running");
+      if (ctx.simulate) return ok(`would end ${plural(running.length, "running alert")}`);
+      let ended = 0;
+      const failures: string[] = [];
+      for (const message of running) {
+        try {
+          // "not-running" is an alert that ran out between the read and here:
+          // over is what was asked for, so it is not a failure.
+          if ((await messagesService.clearAlert(message.id, MESSAGE_FROM)) === "cleared") ended++;
+        } catch (e) {
+          failures.push(errorMessage(e));
+        }
+      }
+      if (failures.length > 0) {
+        return fail(`ended ${ended} of ${plural(running.length, "alert")}; could not end ${failures.length}: ${failures[0]}`);
+      }
+      return ok(ended === 0 ? "no alert was running" : `ended ${plural(ended, "alert")}`);
     },
   },
 
