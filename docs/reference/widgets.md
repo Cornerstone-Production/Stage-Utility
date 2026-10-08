@@ -533,8 +533,9 @@ reply in green below. Which groups it follows is its **Groups** setting. **Follo
 screen**, the default, takes the groups of the screen drawing it, so one
 layout shown in two rooms follows each. **Own groups** is its own list and
 overrides the screen's; it is also the only way for a widget on a console in the
-app to have any, since a console is not a screen. A widget with no groups says
-**Choose groups for this widget** in the layout editor and nothing on the console.
+app to have any, since a console is not a screen. In the layout editor a widget with no groups of its own says **Follows the screen it
+is on**; on a console in the app, which is no screen, it says **Choose groups for
+this widget**; on a wall or a preview it draws only its heading.
 Before the server has answered it draws only its heading, never "No messages".
 
 On a panel or a console in the app, **Messages** also draws the quick replies as

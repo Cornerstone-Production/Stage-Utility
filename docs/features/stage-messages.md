@@ -197,18 +197,19 @@ Which groups it follows is its **Groups** setting in the layout editor's inspect
 - **Own groups** is the widget's own list, and overrides the screen's. It is also
   the only way for a widget on a console in the operator app to follow any, because
   a console is not a screen. With none chosen it says **Choose groups for this
-  widget** in the layout editor and draws nothing but its heading on the console.
+  widget** on the console, and **Follows the screen it is on** in the layout editor.
 
-A Screens-card preview is a picture of a screen, not a screen, so a widget in one
-follows no group.
+A Screens-card preview is a picture of a screen, not a screen, so a Messages widget
+that follows its screen follows no group in one and draws only its heading; one with
+groups of its own shows them.
 
 ### Replies, and who may answer
 
 Where controls are live, the widget also lets a console answer. Under the newest
 message it shows is the line **Answering: <text>** and the quick replies as
 buttons; with nothing to answer it says **Nothing to answer. This console can reply
-only to messages sent to Stage or Booth.** (naming the groups it follows, or
-Everyone). Controls are live on a screen in **panel** mode and on a console in the
+only to messages sent to Stage, Booth or Everyone.** (naming the groups it
+follows, then Everyone). Controls are live on a screen in **panel** mode and on a console in the
 operator app, never on a wall display, which draws no buttons.
 
 A reply is sent with `POST /api/messages/:id/replies`, and the server checks it

@@ -40,6 +40,11 @@ export function shownMessages(state: MessagesState, groups: readonly string[]): 
   return state.messages.filter((m) => messageReaches(m.to, groups)).slice(-MESSAGES_SHOWN).reverse();
 }
 
+/** "Everyone", "Stage or Everyone", "Stage, Booth or Everyone". */
+function orList(items: readonly string[]): string {
+  return items.length < 2 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} or ${items.at(-1)}`;
+}
+
 /** The group names a widget follows, in the config's order, for the line that
  *  says what a console can answer. Deleted groups drop out. */
 export function groupNames(all: readonly MessageGroup[], ids: readonly string[]): string[] {
@@ -113,7 +118,7 @@ export function MessagesObject({ objectId, config, state, known, screen, interac
       >
         Messages
       </div>
-      <Feed groups={groups} state={state} known={known} shown={shown} editing={editing} now={now} />
+      <Feed groups={groups} state={state} known={known} shown={shown} editing={editing} interactive={interactive} now={now} />
       {answering && (
         <Replies
           target={shown?.[0] ?? null}
@@ -134,6 +139,7 @@ function Feed({
   known,
   shown,
   editing,
+  interactive,
   now,
 }: {
   groups: readonly string[] | null;
@@ -141,11 +147,18 @@ function Feed({
   known: boolean;
   shown: StageMessage[] | null;
   editing: boolean;
+  interactive: boolean;
   now: number;
 }) {
-  // No screen and no list of its own. On the console itself there is nothing to
-  // say; in the editor, say what to do.
-  if (groups === null) return editing ? <Quiet>Choose groups for this widget</Quiet> : null;
+  // No screen and no list of its own. In the editor that is just the default (it
+  // follows whichever screen draws it), so say so rather than giving an order. The
+  // instruction belongs where it is needed: a console in the app (controls live),
+  // which is no screen and so has nothing to follow. A preview or a wall says
+  // nothing.
+  if (groups === null) {
+    if (editing) return <Quiet>Follows the screen it is on</Quiet>;
+    return interactive ? <Quiet>Choose groups for this widget</Quiet> : null;
+  }
   // Not answered yet, or the read failed: neither is "no messages".
   if (!known || !state || !shown) return null;
   if (shown.length === 0) return <Quiet>No messages for this screen&apos;s groups</Quiet>;
@@ -208,7 +221,7 @@ function Replies({
       <div className="text-fg-faint" style={{ width: "100%", fontSize: "0.58em" }}>
         {target
           ? `Answering: ${target.text}`
-          : `Nothing to answer. This console can reply only to messages sent to ${names.length > 0 ? names.join(" or ") : "Everyone"}.`}
+          : `Nothing to answer. This console can reply only to messages sent to ${orList([...names, "Everyone"])}.`}
       </div>
       {target && replies.length === 0 && (
         <div className="text-fg-faint" style={{ width: "100%", fontSize: "0.58em" }}>

@@ -132,12 +132,14 @@ describe("what it says with nothing to show", () => {
     assert.ok(draw({ state: stateOf([msg(1, [STAGE])]) }).includes("No messages for this screen's groups"));
   });
 
-  test("a console with no groups of its own says to choose them in the editor, and nothing on the console", () => {
+  test("with no groups of its own the editor says it follows its screen; a console in the app says to choose; a wall or preview says nothing", () => {
     const editor = draw({ screen: null, editing: true });
-    assert.ok(editor.includes("Choose groups for this widget"), editor);
-    const live = draw({ screen: null, editing: false });
-    assert.ok(!live.includes("Choose groups") && !live.includes("No messages"), live);
-    assert.ok(live.includes("Messages"), "the heading still draws");
+    assert.ok(editor.includes("Follows the screen it is on") && !editor.includes("Choose groups"), editor);
+    const console_ = draw({ screen: null, editing: false, interactive: true });
+    assert.ok(console_.includes("Choose groups for this widget") && !console_.includes("No messages"), console_);
+    const quiet = draw({ screen: null, editing: false, interactive: false });
+    assert.ok(!quiet.includes("Choose groups") && !quiet.includes("Follows") && !quiet.includes("No messages"), quiet);
+    assert.ok(quiet.includes("Messages"), "the heading still draws");
   });
 
   test("before the channel has answered it draws no claim, and a failed read is not 'no messages'", () => {
@@ -220,7 +222,7 @@ describe("answering from a console", () => {
     // A message to Stage does not reach a console in Green room and Booth.
     const quiet = mount({ state: stateOf([msg(1, [STAGE])]), interactive: true, screen: { outputId: "panel-1", groups: [GREEN, BOOTH] } });
     assert.deepEqual(buttons(quiet), []);
-    assert.ok((quiet.textContent ?? "").includes("Nothing to answer. This console can reply only to messages sent to Green room or Booth."), quiet.textContent ?? "");
+    assert.ok((quiet.textContent ?? "").includes("Nothing to answer. This console can reply only to messages sent to Green room, Booth or Everyone."), quiet.textContent ?? "");
   });
 
   test("a console in no group can answer only Everyone, and says so", () => {
