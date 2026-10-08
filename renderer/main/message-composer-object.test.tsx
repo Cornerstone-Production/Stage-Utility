@@ -32,7 +32,7 @@ const posts = () => requests.filter((r) => r.method === "POST" && !r.url.startsW
 
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
-const { MessageComposerObject, reachLine, senderName, toggleTarget } = await import("./message-composer-object.js");
+const { MessageComposerObject, liveTargets, reachLine, senderName, toggleTarget } = await import("./message-composer-object.js");
 
 after(() => {
   cleanup();
@@ -121,6 +121,31 @@ describe("who a message goes to", () => {
     assert.deepEqual(["Everyone", "Green room", "Stage"].map((n) => pressed(c, n)), ["false", "true", "true"]);
     await press(button(c, "Everyone"));
     assert.deepEqual(["Everyone", "Green room", "Stage"].map((n) => pressed(c, n)), ["true", "false", "false"]);
+  });
+
+  test("a group deleted while it was picked leaves the choice: it is not sent, counted or named", async () => {
+    cleanup();
+    // Settings removes Green room after it was picked: the chip goes, and the picked id would have stayed.
+    const only = { ...stateOf(), groups: [{ id: STAGE, name: "Stage" }] };
+    const view = render(React.createElement(MessageComposerObject, { state: stateOf(), known: true, outputs: OUTPUTS, from: "Booth console", interactive: true, now: NOW, ts: {} }));
+    await act(async () => { fireEvent.click(button(view.container, "Green room")!); fireEvent.click(button(view.container, "Stage")!); });
+    await act(async () => { fireEvent.change(view.container.querySelector("textarea")!, { target: { value: "Walk now" } }); });
+    view.rerender(React.createElement(MessageComposerObject, { state: only, known: true, outputs: OUTPUTS, from: "Booth console", interactive: true, now: NOW, ts: {} }));
+    await act(async () => {});
+    assert.ok(text(view.container).includes("Reaches 1 screen in Stage."), text(view.container));
+    await press(button(view.container, "Send"));
+    assert.deepEqual(posts().map((r) => r.body?.to), [[STAGE]], "the deleted group was still sent");
+    // And with only the deleted group picked, nothing can be sent and the hint says to pick.
+    requests.length = 0;
+    cleanup();
+    const v2 = render(React.createElement(MessageComposerObject, { state: stateOf(), known: true, outputs: OUTPUTS, from: "x", interactive: true, now: NOW, ts: {} }));
+    await act(async () => { fireEvent.click(button(v2.container, "Green room")!); });
+    await act(async () => { fireEvent.change(v2.container.querySelector("textarea")!, { target: { value: "hi" } }); });
+    v2.rerender(React.createElement(MessageComposerObject, { state: only, known: true, outputs: OUTPUTS, from: "x", interactive: true, now: NOW, ts: {} }));
+    await act(async () => {});
+    assert.ok(text(v2.container).includes("Pick who this goes to."), text(v2.container));
+    assert.equal(button(v2.container, "Send")!.disabled, true);
+    assert.deepEqual(liveTargets([GREEN, STAGE, EVERYONE], only.groups), [STAGE, EVERYONE]);
   });
 
   test("reachLine says how many screens, and what an alert does", () => {

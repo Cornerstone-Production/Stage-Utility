@@ -78,6 +78,16 @@ export function toggleTarget(current: readonly string[], id: string): string[] {
 }
 
 /**
+ * The targets that still exist. A group deleted in Settings while it was picked
+ * leaves its id in the choice, with no chip left to unpick it: every send would
+ * name a group the server refuses, and the hint would print a blank. What is sent,
+ * counted and shown is what is left.
+ */
+export function liveTargets(to: readonly string[], groups: readonly MessageGroup[]): string[] {
+  return to.filter((id) => id === EVERYONE || groups.some((g) => g.id === id));
+}
+
+/**
  * The line under Send: what pressing it will do. "Reaches 2 screens in Green
  * room." / "Takes over every screen for 30 seconds." Counts the screens (outputs)
  * in any chosen group; an in-app console is not a screen and is not counted.
@@ -128,20 +138,21 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
   const [clearing, setClearing] = useState<string | null>(null);
 
   const body = text.trim();
+  const targets = state ? liveTargets(to, state.groups) : [];
   // Nothing can be picked or typed where controls are not live (every handler below
   // checks), so there is nothing to send there and no separate test is needed here.
-  const canSend = !sending && to.length > 0 && body.length > 0;
+  const canSend = !sending && targets.length > 0 && body.length > 0;
 
   async function send() {
     if (!canSend) return;
     setSending(true);
     try {
-      await invoke("messages:send", { to, text: body, alert, from });
+      await invoke("messages:send", { to: targets, text: body, alert, from });
       // Cleared only once the server has it. The targets stay: see the header.
       setText("");
       setAlert(false);
     } catch (e) {
-      reportActionFailure("send that message", e, `to ${to.join(", ")}`);
+      reportActionFailure("send that message", e, `to ${targets.join(", ")}`);
     } finally {
       setSending(false);
     }
@@ -187,13 +198,13 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
             <Field cap="To">
               <div role="group" aria-label="Send to" style={{ display: "flex", flexWrap: "wrap", gap: "0.41em" }}>
                 {[{ id: EVERYONE, name: "Everyone" }, ...state.groups].map((g) => {
-                  const on = to.includes(g.id);
+                  const on = targets.includes(g.id);
                   return (
                     <button
                       key={g.id}
                       type="button"
                       aria-pressed={on}
-                      onClick={() => interactive && setTo((cur) => toggleTarget(cur, g.id))}
+                      onClick={() => interactive && setTo((cur) => toggleTarget(liveTargets(cur, state.groups), g.id))}
                       className={cn(
                         "rounded-full border hover:text-fg",
                         on ? "border-accent/45 bg-accent/15 text-accent" : "border-line-strong bg-surface text-fg-muted",
@@ -308,7 +319,7 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
             </div>
 
             <div className="text-fg-subtle" style={{ fontSize: "0.86em" }}>
-              {reachLine(to, alert, state.groups, outputs)}
+              {reachLine(targets, alert, state.groups, outputs)}
             </div>
           </div>
 
