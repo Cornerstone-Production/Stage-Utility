@@ -19,7 +19,8 @@ import { viewSurface, KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/view
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
 import { isPreviewSlug, previewOutputId, previewViewIdFromSlug } from "./preview-url";
-import { resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
+import { ownScreen, resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
+import { MessageAlertOverlay } from "./message-alert-overlay";
 import { anyPlaying, drainReportsInTime, onAnyPlayingChange, VIDEO_HEARTBEAT_MS } from "./video/playback-reports";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
@@ -608,7 +609,17 @@ export function StageView() {
     }
   })();
 
-  return <StageErrorBoundary>{body}</StageErrorBoundary>;
+  // A stage-message alert draws over whatever this screen shows, whatever the
+  // layout or the kind. Here, below the blackout return above, so a blacked-out
+  // screen stays black; and never on a preview, which is a picture of a screen and
+  // not one (ownScreen answers null there).
+  const own = ownScreen({ state, displayId, previewViewId });
+  return (
+    <>
+      <StageErrorBoundary>{body}</StageErrorBoundary>
+      {own && <MessageAlertOverlay groups={own.groups} />}
+    </>
+  );
 }
 
 /**

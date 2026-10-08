@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 
 import { invoke } from "../lib/api";
+import { logReadFailure } from "../lib/client-log";
 import { useStatusChannel, type StatusChannelResult } from "./use-status-channel";
 import { MESSAGES_CHANNEL, type MessagesState } from "@main/types/messages";
 
@@ -15,6 +16,15 @@ import { MESSAGES_CHANNEL, type MessagesState } from "@main/types/messages";
  * failed — which is not "nothing was sent".
  */
 export function useMessagesStatus(enabled = true): StatusChannelResult<MessagesState> {
-  const read = useCallback(() => invoke<MessagesState>("messages:get"), []);
+  // A failed read is said on /log and then handed on: the channel settles as
+  // answered-with-nothing (never "no messages"), and the live pushes still apply.
+  const read = useCallback(
+    () =>
+      invoke<MessagesState>("messages:get").catch((err: unknown) => {
+        logReadFailure("messages", "the stage messages", err);
+        throw err;
+      }),
+    [],
+  );
   return useStatusChannel<MessagesState>(read, MESSAGES_CHANNEL, enabled);
 }

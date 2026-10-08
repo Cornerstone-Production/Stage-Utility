@@ -46,7 +46,10 @@ one) or either quick list, once as each alert runs out, and at midnight only whe
 something. Between those it is silent, and with no messages sent it is a single small
 frame when a client connects. It is part of the connect-time snapshot, so a
 screen that connects while an alert is running shows it. A client that has named
-the channels it renders and left this one out is not sent the changes.
+the channels it renders and left this one out is not sent the changes. Every kiosk
+screen names this channel, whatever it shows, so that an alert can draw over it;
+a Screens-card preview does not. In a layout it is otherwise named only by one
+that holds a Messages or Message composer widget.
 
 ## What keeps it small
 

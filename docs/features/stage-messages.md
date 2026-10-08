@@ -134,6 +134,28 @@ always runs it.
 
 ## On screens
 
+### Alerts on screens
+
+Every kiosk screen draws a running alert over whatever it is showing, whatever the
+layout or the kind of view, with no widget needed: the word **Alert** and the
+message large and white on a deep red banner across the bottom (3% in from each
+side, 4% up), with a bar along its foot that runs down to nothing as the 30
+seconds do. It rises into place when it arrives.
+
+- Which alert: the newest running one sent to Everyone or to a group the screen is
+  in. When it ends, the next one sent to this screen, if any, shows. A screen in no
+  group still gets Everyone's.
+- How long: counted against the **server's** clock from the server-stamped
+  `alertUntil`, so a wall whose own clock is wrong still ends it on time, and the
+  banner goes at that moment without waiting for the server's frame that says the
+  alert ran out. A screen with no alert keeps no timer.
+- Never over **blackout**: a blacked-out screen stays black, because blackout is a
+  deliberate choice for that screen. Never on a **preview**, such as a Screens card,
+  which is a picture of a screen and not one.
+- A screen subscribes to `messages:state` for this whatever it shows. If the banner
+  itself fails to draw, it is hidden and `[messages] the alert banner failed to
+  draw` is on `/log`; the screen underneath stays up.
+
 ### The Message composer widget
 
 The **Message composer** [widget](../reference/widgets.md#control) is where a

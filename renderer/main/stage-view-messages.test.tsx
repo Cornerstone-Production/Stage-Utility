@@ -49,6 +49,7 @@ const React = (await import("react")).default;
 const { StageView } = await import("./stage-view.js");
 const { __resetForTests } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests } = await import("../lib/api.js");
+const { serverClock } = await import("../lib/server-clock.js");
 const { TooltipProvider } = await import("../components/ui/tooltip-provider.js");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
@@ -61,6 +62,7 @@ after(async () => {
 });
 beforeEach(() => {
   cleanup();
+  serverClock.reset();
   __resetForTests();
   __resetReplayCacheForTests();
   posted.length = 0;
@@ -212,5 +214,118 @@ describe("a Message composer on a screen", () => {
   test("a Screens-card preview of a panel cannot send either", async () => {
     await sendFrom("/preview-v1?output=display-1", stageState(composer, { groups: [GREEN], mode: "panel" }));
     assert.equal(posted.filter((p) => p.url === "/api/messages").length, 0, "the Screens page sent a message by being looked at");
+  });
+});
+
+// ---- the alert overlay ---------------------------------------------------------
+
+describe("a stage-message alert on a screen", () => {
+  const BLACK = '<div class="fixed inset-0 z-50 bg-black"></div>';
+  const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
+
+  /** A running alert, `leftMs` from ending on the clock the screen reads. */
+  function running(n: number, to: string[], text: string, leftMs: number, serverNow = Date.now()): StageMessage {
+    return { ...message(n, to, text), at: serverNow - (30_000 - leftMs), alert: true, alertUntil: serverNow + leftMs };
+  }
+
+  const withAlerts = (...alerts: StageMessage[]) => {
+    messagesBody = { ...messagesState(alerts), alerts };
+  };
+
+  /** A custom view with no widget at all: the alert is not a widget's doing. */
+  const bare = (over: { groups?: string[]; blackout?: boolean } = {}) =>
+    stageState({ type: "clock" }, over);
+
+  test("draws over a screen with no Messages widget, for a group the screen is in", async () => {
+    withAlerts(running(1, [GREEN], "Walk now", 20_000));
+    const c = await showScreen("/display-1", bare({ groups: [GREEN] }));
+    const banner = c.querySelector('[role="alert"]');
+    assert.ok(banner, "no banner");
+    assert.ok(says(c, "Walk now") && says(c, "Alert"), c.textContent ?? "");
+  });
+
+  test("not for a group the screen is not in, but Everyone reaches a screen in no group", async () => {
+    withAlerts(running(1, [STAGE], "for the stage", 20_000));
+    assert.ok(!says(await showScreen("/display-1", bare({ groups: [GREEN] })), "for the stage"));
+    cleanup();
+    withAlerts(running(2, [EVERYONE], "for everyone", 20_000));
+    assert.ok(says(await showScreen("/display-1", bare({ groups: [] })), "for everyone"));
+  });
+
+  test("draws on every kind of view, and on a screen with nothing routed to it", async () => {
+    withAlerts(running(1, [EVERYONE], "for everyone", 20_000));
+    const slots = stageState({ type: "clock" }, {});
+    (slots as { views: { kind: string }[] }).views[0].kind = "slots";
+    (slots as { resolvedByOutput: Record<string, { kind: string }> }).resolvedByOutput["display-1"].kind = "slots";
+    assert.ok(says(await showScreen("/display-1", slots), "for everyone"), "not over a slots view");
+    cleanup();
+    const unrouted = stageState({ type: "clock" }, {});
+    (unrouted as { resolvedByOutput: Record<string, { viewId: string | null }> }).resolvedByOutput["display-1"].viewId = null;
+    assert.ok(says(await showScreen("/display-1", unrouted), "for everyone"), "not over an unrouted screen");
+  });
+
+  test("not on a Screens-card preview", async () => {
+    withAlerts(running(1, [EVERYONE], "for everyone", 20_000));
+    const c = await showScreen("/preview-v1?output=display-1", bare({ groups: [GREEN] }));
+    assert.ok(!c.querySelector('[role="alert"]') && !says(c, "for everyone"), "an alert in a thumbnail");
+  });
+
+  test("not over blackout: a blacked-out screen stays black", async () => {
+    withAlerts(running(1, [EVERYONE], "for everyone", 20_000));
+    const c = await showScreen("/display-1", bare({ blackout: true }));
+    assert.equal(c.innerHTML, BLACK);
+  });
+
+  test("an alert that has ended is not drawn, though the frame still lists it", async () => {
+    withAlerts(running(1, [EVERYONE], "too late", -1));
+    assert.ok(!(await showScreen("/display-1", bare())).querySelector('[role="alert"]'));
+  });
+
+  test("the bar runs down with what is left of the alert", async () => {
+    withAlerts(running(1, [EVERYONE], "half", 15_000));
+    const bar = (await showScreen("/display-1", bare())).querySelector('[data-testid="alert-bar"]') as HTMLElement;
+    const scale = Number(/scaleX\(([\d.]+)\)/.exec(bar.style.transform)?.[1]);
+    assert.ok(scale > 0.45 && scale <= 0.5, bar.style.transform);
+  });
+
+  test("it ends at alertUntil on the SERVER's clock, with no frame to say so", async () => {
+    // A wall whose own clock is an hour fast: by the host's clock this alert ended
+    // long ago and would never draw; by the server's it has under a second left.
+    const serverNow = Date.now() - 3_600_000;
+    serverClock.observe(serverNow, 0);
+    withAlerts(running(1, [EVERYONE], "on server time", 900, serverNow));
+    const c = await showScreen("/display-1", bare());
+    assert.ok(says(c, "on server time"), "ended by the host's clock instead of the server's");
+    await wait(1300);
+    assert.ok(!c.querySelector('[role="alert"]'), "still on the wall after alertUntil on the server's clock");
+  });
+
+  test("a banner that fails to draw is hidden and reported, and the screen under it stays up", async () => {
+    // An object where text belongs makes React throw while drawing the banner.
+    withAlerts({ ...running(1, [EVERYONE], "x", 20_000), text: { not: "text" } as unknown as string });
+    const quiet = console.error;
+    console.error = () => {};
+    let c: HTMLElement;
+    try {
+      c = await showScreen("/display-1", bare());
+    } finally {
+      console.error = quiet;
+    }
+    assert.ok(!c.querySelector('[role="alert"]'), "a broken banner stayed up");
+    assert.ok(!says(c, "Display error"), "a banner bug took the whole screen down");
+    const logged = posted.find((p) => p.url === "/api/log/client");
+    assert.ok(logged, "the failure never reached /log");
+    assert.equal((logged!.body as { tag: string }).tag, "messages");
+    assert.match((logged!.body as { message: string }).message, /the alert banner failed to draw/);
+  });
+
+  test("when the newest ends, the next one sent to this screen shows", async () => {
+    // Newest first, as the server lists them: the Green room alert ends first.
+    withAlerts(running(2, [GREEN], "the newer", 600), running(1, [EVERYONE], "the older", 60_000), running(0, [STAGE], "other room", 90_000));
+    const c = await showScreen("/display-1", bare({ groups: [GREEN] }));
+    assert.ok(says(c, "the newer") && !says(c, "the older"), c.textContent ?? "");
+    await wait(1000);
+    assert.ok(says(c, "the older"), "the next alert did not follow");
+    assert.ok(!says(c, "the newer") && !says(c, "other room"), c.textContent ?? "");
   });
 });

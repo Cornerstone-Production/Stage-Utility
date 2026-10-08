@@ -169,6 +169,13 @@ key) for the same set.
 The console shares one icon with any Screens card pointed at it, so changing it
 in either place changes both.
 
+**Messages.** A console can carry the [Message composer and Messages
+widgets](stage-messages.md#on-screens): the composer sends messages
+and alerts and shows the day's thread, and Messages shows what was sent to the
+groups you give it with the quick replies as buttons under the newest. A console
+in the app is not a screen, so give a Messages widget on one its own groups in the
+inspector. Replies and sends are signed with the console's name.
+
 **Editing one.** A quiet **Edit** button appears near the console's top-right
 corner when the pointer comes within reach. It opens the layout editor on the
 same URL, and **Done** returns you to the live console. See
