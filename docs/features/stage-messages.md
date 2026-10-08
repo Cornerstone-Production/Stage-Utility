@@ -130,3 +130,15 @@ back. Then start-up leaves the screens alone and says so on the log
 only when a screen actually holds a group. Fix or restore the file and restart, or
 save the groups in Settings → Messages, which is the operator's own decision and
 always runs it.
+
+## From automation and Companion
+
+A rule, or an **Action button** on any console, can send a message and clear the
+running alerts: the automation actions **Send a stage message** and **Clear stage
+message alerts**, sent from `Automation`. See
+[Automation](../automation.md#actions).
+
+The [Companion](../integrations/companion.md#what-the-module-exposes) module sends
+messages from a button, shows an alert on one, and puts the newest message and
+reply into variables. It sends from `Companion`, through the same
+`POST /api/messages` a console uses.

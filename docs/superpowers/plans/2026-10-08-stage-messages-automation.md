@@ -75,8 +75,20 @@ existing endpoints. Talks only to routes PR 1 shipped.
 | `message_send_quick` | Send quick message | Quick message (dropdown of the quick messages), Groups, Alert | the same |
 | `message_clear_alerts` | Clear alerts | none | `POST /api/messages/:id/clear-alert` `{ from: "Companion" }` for each running alert |
 
-Dropdowns follow the state live: a renamed group or edited quick list updates the
-choices without reconnecting.
+Dropdowns follow the state live for groups: a renamed group updates the choices
+without reconnecting.
+
+**Open, found while building the app half:** the quick messages are not in
+`messages:state` or `GET /api/messages` (`state()` is `{ rev, groups, messages,
+alerts }`), and a change to the quick lists sends no frame at all, by PR 1's
+design (see `docs/ops/network-traffic.md`). So the quick-message dropdown and the
+per-quick-message presets cannot follow an edit "without reconnecting" from the
+channels listed here. The module has to read `GET /api/messaging` too (a route PR
+1 shipped), which makes the connect-time hydrate eleven endpoints, not ten, and
+means an edited quick list reaches a button on the next reconnect. If live
+following is wanted, the app has to send a frame for it, which is a PR 1 change.
+`docs/integrations/companion.md` says ten endpoints and promises no live quick
+list; update its "Network cost" if the module reads `/api/messaging`.
 
 **Feedback**
 
