@@ -289,7 +289,9 @@ for "idle", because before it runs we do not know that it is idle.
 >
 > **Send a stage message** takes **To** (Everyone, or one or more groups — not
 > both), **Message** (1–280 characters) and **Alert** (No unless set; an alert
-> takes the screens over for 30 seconds). It goes through the same rules as a
+> takes the screens over for 30 seconds; from `POST /api/action/invoke` it may be
+> `yes`, `true` or `"true"` for an alert and `no`, `false` or blank for none, and
+> anything else fails and sends nothing). It goes through the same rules as a
 > console's send. A rule saved with no groups or a blank message shows **Needs
 > setup**, and so does one that ticks Everyone beside a group. A group deleted
 > since the rule was saved does not stop the editor opening: the field says the
