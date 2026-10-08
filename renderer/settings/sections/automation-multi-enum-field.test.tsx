@@ -83,6 +83,8 @@ let GROUPS = [
   { id: "g-0000000b", name: "Stage" },
   { id: "g-0000000a", name: "Green room" },
 ];
+/** GET /api/messaging answers 500. */
+let MESSAGING_DOWN = false;
 let requests: { method: string; url: string; body: string | null }[] = [];
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
@@ -95,7 +97,9 @@ let requests: { method: string; url: string; body: string | null }[] = [];
       body = { id: "rule-1", issues: [] };
     }
   } else if (url.includes("/api/automation/registry")) body = REGISTRY;
-  else if (url.includes("/api/messaging")) body = { version: 1, groups: GROUPS, quickMessages: [], quickReplies: [] };
+  else if (url.includes("/api/messaging") && MESSAGING_DOWN) {
+    return { ok: false, status: 500, statusText: "Server Error", json: async () => ({ error: "boom" }), text: async () => '{"error":"boom"}' };
+  } else if (url.includes("/api/messaging")) body = { version: 1, groups: GROUPS, quickMessages: [], quickReplies: [] };
   else if (url.includes("/api/automation/rules")) {
     body = {
       rules: [
@@ -170,6 +174,7 @@ const saved = (): { action: { params: Record<string, string> } }[] =>
   requests.filter((r) => r.method === "PATCH").map((r) => JSON.parse(r.body ?? "{}"));
 
 beforeEach(() => {
+  MESSAGING_DOWN = false;
   actionId = "x.pick";
   params = {};
   requests = [];
@@ -308,5 +313,21 @@ describe("the To picker on Send a stage message", () => {
     await press(within(list).getByText("Everyone").closest("button") as HTMLElement);
     await press(screen.getByRole("button", { name: "Save" }));
     assert.equal(saved()[0]!.action.params.to, "everyone");
+  });
+
+  test("a groups read that failed is said under the field and reaches /log", async () => {
+    MESSAGING_DOWN = true;
+    await open();
+    assert.match(document.body.textContent ?? "", /The message groups could not be read\./);
+    const logged = requests.filter((r) => r.url.endsWith("/api/log/client")).map((r) => JSON.parse(r.body ?? "{}") as { tag: string; message: string });
+    assert.ok(
+      logged.some((l) => l.tag === "messages" && /could not read the groups for the rule editor/.test(l.message)),
+      `expected a [messages] line, got ${JSON.stringify(logged)}`,
+    );
+  });
+
+  test("with the groups read, there is no such note", async () => {
+    await open();
+    assert.doesNotMatch(document.body.textContent ?? "", /could not be read/);
   });
 });

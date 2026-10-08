@@ -150,4 +150,18 @@ describe("runtime option sources", () => {
     assert.deepEqual(buildOptionSources({})["message-groups"].options, []);
     assert.deepEqual(buildOptionSources({ messagingConfig: {} })["message-groups"].options, []);
   });
+
+  test("a failed read of the groups says so under the field, until an answer is held", () => {
+    // An empty To list otherwise reads as a config with no groups.
+    assert.equal(
+      buildOptionSources({ messagingFailed: true })["message-groups"].notice,
+      "The message groups could not be read.",
+    );
+    assert.equal(buildOptionSources({})["message-groups"].notice, undefined);
+    // A refetch that failed while an earlier answer is still held: the list is whole.
+    assert.equal(
+      buildOptionSources({ messagingConfig: { groups: [] }, messagingFailed: true })["message-groups"].notice,
+      undefined,
+    );
+  });
 });

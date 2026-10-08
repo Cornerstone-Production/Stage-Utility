@@ -100,12 +100,12 @@ const outputs = (...groups: string[][]): Output[] =>
   groups.map((g, i) => ({ id: `display-${i}`, name: `Screen ${i}`, viewId: null, groups: g }));
 
 /** `null`: the screens have not been read. */
-async function mount(screens: Output[] | null = []) {
+async function mount(screens: Output[] | null = [], onConfigSaved?: () => void) {
   render(
     React.createElement(
       TooltipProvider,
       null,
-      React.createElement(MessagesSection, { outputs: screens ?? undefined }),
+      React.createElement(MessagesSection, { outputs: screens ?? undefined, onConfigSaved }),
       React.createElement(ConfirmHost),
       React.createElement(Toaster),
     ),
@@ -547,4 +547,30 @@ test("editing a quick message and then moving it does move it, under its new tex
   release();
   await flush();
   assert.deepEqual(server.quickMessages, ["3 minutes", "Walk now"]);
+});
+
+// Anything else holding a copy of the groups (the rule editor's To list) is told,
+// so a group added here is on offer there at once.
+test("a save that lands tells the page's owner, once; a refused one does not", async () => {
+  let saved = 0;
+  await mount([], () => saved++);
+  refuse = "groups can hold at most 20 (this has 21)";
+  type("New group", "Booth");
+  fireEvent.click(within(screen.getByTestId("messages-groups")).getByRole("button", { name: /Add/ }));
+  await flush();
+  assert.equal(saved, 0, "a refused save was announced");
+  refuse = null;
+  fireEvent.click(within(screen.getByTestId("messages-groups")).getByRole("button", { name: /Add/ }));
+  await flush();
+  assert.equal(saved, 1);
+});
+
+test("a save the server made but could not finish is announced too: the config did change", async () => {
+  let saved = 0;
+  await mount([], () => saved++);
+  halfDone = true;
+  type("New group", "Booth");
+  fireEvent.click(within(screen.getByTestId("messages-groups")).getByRole("button", { name: /Add/ }));
+  await flush();
+  assert.equal(saved, 1);
 });
