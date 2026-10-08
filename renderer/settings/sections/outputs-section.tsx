@@ -29,7 +29,7 @@ import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
 import { viewSurface, outputMode, KIND_DRAWS_TOP_BAR } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
-import { classifyWindow, worstLag } from "@main/services/video/playback-health";
+import { classifyWindow, LAGGING_ADVICE, worstLag } from "@main/services/video/playback-health";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -120,8 +120,8 @@ interface ScreenLag {
 
 /**
  * The warn box for a feed this screen is holding delay for in its own browser.
- * The lead names how much; the sentence after says where to look, because a
- * delay the screen itself holds is not one the encoder or relay can fix.
+ * The lead names how much; the sentence after says where to look, and claims
+ * no more than the figures show (see LAGGING_ADVICE).
  */
 function ScreenLagBox({ lag }: { lag: ScreenLag }) {
   return (
@@ -129,7 +129,7 @@ function ScreenLagBox({ lag }: { lag: ScreenLag }) {
       <span className="font-semibold">
         Holding {(lag.holdingMs / 1000).toFixed(1)} s of {lag.feedName} in its own buffer.
       </span>{" "}
-      Check this screen&apos;s network or decoding; the encoder is not the cause.
+      {LAGGING_ADVICE}
     </p>
   );
 }

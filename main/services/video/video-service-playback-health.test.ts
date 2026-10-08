@@ -291,7 +291,7 @@ test("a screen name and a feed name carrying a control character are scrubbed be
 
 // ── lagging: the screen holding the delay in its own browser ───────────────
 
-const LAG_SUFFIX = "the delay is on this screen, not the relay or the encoder";
+const LAG_SUFFIX = "The delay is held on this screen: check its network or decoding.";
 
 test("logs the lagging and no-longer-lagging flips, once per episode, naming the worst figure", async (t: TestContext) => {
   const id = await addRelayFeed("Lag wall");
@@ -315,7 +315,7 @@ test("logs the lagging and no-longer-lagging flips, once per episode, naming the
     assert.deepEqual(
       lines.filter((l) => l.includes("Lag wall")),
       [
-        `[video] ${OUTPUT_NAME} is lagging on Lag wall: holding 1.4 s in its own buffer (jitter buffer); ${LAG_SUFFIX}`,
+        `[video] ${OUTPUT_NAME} is lagging on Lag wall: holding 1.4 s in its own buffer (jitter buffer). ${LAG_SUFFIX}`,
         `[video] ${OUTPUT_NAME} is no longer lagging on Lag wall`,
       ],
     );
@@ -332,7 +332,7 @@ test("the lagging line names behind-newest when that is the worse figure", async
     await settle();
     assert.deepEqual(
       lines.filter((l) => l.includes("Behind wall")),
-      [`[video] ${OUTPUT_NAME} is lagging on Behind wall: holding 3.2 s in its own buffer (behind the newest frame); ${LAG_SUFFIX}`],
+      [`[video] ${OUTPUT_NAME} is lagging on Behind wall: holding 3.2 s in its own buffer (behind the newest frame). ${LAG_SUFFIX}`],
     );
   } finally {
     await videoService.removeFeed(id);
@@ -366,7 +366,7 @@ test("a heartbeat whose own sweep clears the lagging flag and whose own report r
     await settle();
     assert.deepEqual(lines, [
       `[video] ${OUTPUT_NAME} is no longer lagging on Relag wall`,
-      `[video] ${OUTPUT_NAME} is lagging on Relag wall: holding 1.8 s in its own buffer (jitter buffer); ${LAG_SUFFIX}`,
+      `[video] ${OUTPUT_NAME} is lagging on Relag wall: holding 1.8 s in its own buffer (jitter buffer). ${LAG_SUFFIX}`,
     ]);
   } finally {
     await videoService.removeFeed(id);
@@ -383,7 +383,7 @@ test("lagging and struggling are separate lines: a pair over both lines logs eac
       lines.filter((l) => l.includes("Both wall")),
       [
         `[video] ${OUTPUT_NAME} is struggling with Both wall: dropped 51 frames for 1000 decoded, 0 stalls in the last minute`,
-        `[video] ${OUTPUT_NAME} is lagging on Both wall: holding 1.5 s in its own buffer (jitter buffer); ${LAG_SUFFIX}`,
+        `[video] ${OUTPUT_NAME} is lagging on Both wall: holding 1.5 s in its own buffer (jitter buffer). ${LAG_SUFFIX}`,
       ],
     );
   } finally {

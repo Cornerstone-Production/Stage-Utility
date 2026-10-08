@@ -224,7 +224,7 @@ test("a lagging feed renders its own box: how much the screen holds, and where t
   const lead = screen.getByText("Holding 2.4 s of Program (IMAG) in its own buffer.");
   assert.equal(
     lead.parentElement!.textContent,
-    "Holding 2.4 s of Program (IMAG) in its own buffer. Check this screen's network or decoding; the encoder is not the cause.",
+    "Holding 2.4 s of Program (IMAG) in its own buffer. The delay is held on this screen: check its network or decoding.",
   );
 });
 

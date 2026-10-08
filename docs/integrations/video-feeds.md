@@ -471,14 +471,20 @@ the last report over the line, with its own **episode** — the worst of each
 figure since it started lagging. Two widgets on one screen showing the same
 feed fold to the worse of each figure, not a sum. HLS is never lagging.
 
-A lagging flag means the delay is inside that screen's browser, so the cause
-is the screen's own network or decoding, not the relay or the encoder. A
-screen that looks seconds behind while holding well under a second means the
-delay is upstream of the browser, at the relay or the encoder, and nothing on
-the screen will fix it. The figures are the worst over the minute, and each
-report's jitter buffer figure is an average over its own 10 seconds, so a
-brief spike inside one report is smoothed; behind newest is a single reading
-and can catch it.
+A lagging flag means that screen's own browser is holding the delay, so look
+at that screen first: its network (bursty delivery shows up as a deep jitter
+buffer) or its decoding. It does not clear the relay or the encoder. The other
+way round, a screen that looks seconds behind while its figures read well
+under a second means the delay is upstream of the browser, at the relay or the
+encoder, and nothing on the screen will fix it. That reading holds only for a
+WebRTC screen whose reports carried figures (not null) within the last minute.
+An HLS screen, a browser that cannot measure, a hidden tab and a screen that
+is not reporting are not measured, and "not lagging" there does not mean
+upstream. The figures are the worst over the minute, and each report's jitter
+buffer figure is an average over its own 10 seconds, so a brief spike inside
+one report is smoothed; behind newest is a single reading and can catch it.
+Like struggling, a lagging flag holds for its 60 seconds, so a card can still
+show a lagging feed for up to a minute after the screen falls back to HLS.
 
 While a pair holds struggling, the server also holds its **episode**: the
 worst window since it started struggling, not the live one — the live
@@ -500,9 +506,9 @@ decode advice and a stall-only episode says nothing about decode load. The
 
 A lagging screen's card reads the lagging episode the same way, in its own
 box beside any struggling one: **Holding N.N s of \<feed\> in its own
-buffer.** — the worse of the episode's two figures — followed by **Check this
-screen's network or decoding; the encoder is not the cause.** The `[video]`
-lagging line below reads from the same episode.
+buffer.** — the worse of the episode's two figures — followed by **The delay
+is held on this screen: check its network or decoding.** The `[video]` lagging
+line below reads from the same episode.
 
 The Video feeds list's own meta line reads **On N screens** for any feed
 currently playing anywhere, struggling or not — every distinct screen a
@@ -585,7 +591,8 @@ from the server:
   for two minutes. The heartbeat itself still counts either way.
 - A screen lagging on a feed — `is lagging on <feed>: holding N.N s in its
   own buffer`, naming whether the worse figure is the jitter buffer or the
-  distance behind the newest frame — the moment either figure crosses 1000 ms,
+  distance behind the newest frame, then the same sentence the card ends with
+  — the moment either figure crosses 1000 ms,
   and `is no longer lagging on <feed>` once the hold clears; each once per
   episode, not repeated while it stays true or as the peak rises. A WebRTC feed
   that stays under the line logs nothing, however many reports it sends.

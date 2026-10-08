@@ -89,6 +89,14 @@ function maxOrNull(a: number | null, b: number | null): number | null {
   return a === null ? b : b === null ? a : Math.max(a, b);
 }
 
+/** The one sentence the Screens card, the `[video]` lagging line and the docs
+ *  all say about a lagging pair. It claims only what the figures show: this
+ *  screen's own browser is holding the delay. It does not say the relay or the
+ *  encoder are fine — a jitter buffer over a second can come from bursty
+ *  delivery on the path to the screen, and behind-newest can be a decoder
+ *  freeze — so the advice stops at this screen. */
+export const LAGGING_ADVICE = "The delay is held on this screen: check its network or decoding.";
+
 /** The worse of a lagging pair's two figures and which one it is: the one
  *  number the Screens card and the `[video]` lagging line both state, so the
  *  two cannot name different delays. Ties go to the jitter buffer. */

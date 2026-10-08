@@ -36,7 +36,7 @@ import {
 } from "./feed-transfer.js";
 import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
 import { EpisodeLog } from "./episode-log.js";
-import { pairKey, PlaybackHealth, worstLag } from "./playback-health.js";
+import { LAGGING_ADVICE, pairKey, PlaybackHealth, worstLag } from "./playback-health.js";
 import { parsePorts } from "./ports.js";
 import { probeFeed, type ProbeResult } from "./probe.js";
 import { ProbeScheduler } from "./probe-scheduler.js";
@@ -2380,7 +2380,7 @@ class VideoService {
           const { ms, what } = worstLag(peak);
           console.log(
             `[video] ${scrub(name)} is lagging on ${scrub(feed)}: ` +
-              `holding ${scrub((ms / 1000).toFixed(1))} s in its own buffer (${scrub(what)}); the delay is on this screen, not the relay or the encoder`,
+              `holding ${scrub((ms / 1000).toFixed(1))} s in its own buffer (${scrub(what)}). ${scrub(LAGGING_ADVICE)}`,
           );
         },
         ended: () => console.log(`[video] ${scrub(name)} is no longer lagging on ${scrub(feed)}`),
