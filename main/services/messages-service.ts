@@ -106,6 +106,35 @@ export interface SendInput {
   from?: unknown;
 }
 
+/** An id that rides in a body but is not one the service issued: only its shape is checked here. */
+function wireId(value: unknown, must: string): string {
+  if (typeof value !== "string" || !WIRE_ID.test(value)) throw new MessageRefused(must);
+  return value;
+}
+
+/**
+ * The rules for a reply's body, pure like checkSend: 1 to 60 characters of text,
+ * the id of the widget it is pressed on, and the screen that widget is on when
+ * there is one. Shapes only; who may answer is decided against the stored layouts.
+ */
+export function checkReply(input: ReplyInput): { text: string; objectId: string; outputId: string | null } {
+  const text = checkedText(input.text, "a reply", QUICK_REPLY_MAX);
+  const objectId = wireId(input.objectId, "objectId must be the id of the Messages widget the reply is pressed on");
+  const outputId =
+    input.outputId === undefined || input.outputId === null ? null : wireId(input.outputId, "outputId must be the id of a screen");
+  return { text, objectId, outputId };
+}
+
+/** Run a body's check; when it refuses, say so on the log under `what` and hand the refusal on. */
+function checkedOrLogged<T>(what: string, check: () => T): T {
+  try {
+    return check();
+  } catch (err) {
+    if (err instanceof MessageRefused) console.warn(`[messages] ${what}: ${scrub(err.message)}`);
+    throw err;
+  }
+}
+
 /** Who a send or a clear says it is from: `DEFAULT_FROM` when it does not say. */
 function checkedFrom(value: unknown): string {
   return value === undefined ? DEFAULT_FROM : checkedText(value, "from", FROM_MAX);
@@ -159,21 +188,19 @@ interface FoundWidget {
 }
 
 /**
- * The widget with this id, across every view's layout, containers included. The
- * id is a layout object's, unique across layouts; the first found wins. `"other"`
- * is an id that names a widget of some other type, which is not an answer to
- * anything, and null is no widget at all.
+ * The Messages widget with this id, across every view's layout, containers
+ * included. Ids are a layout object's, unique across layouts; the first found
+ * wins. An id that names some other type of widget is no Messages widget.
  */
-function findMessagesWidget(views: readonly View[], objectId: string): FoundWidget | "other" | null {
-  let found: FoundWidget | "other" | null = null;
+function findMessagesWidget(views: readonly View[], objectId: string): FoundWidget | null {
   for (const view of views) {
+    let found: FoundWidget | null = null;
     walkLayoutObjects(view.layout?.objects ?? [], (o) => {
-      if (found !== null || o.id !== objectId) return;
-      found = o.config.type === "messages" ? { viewName: view.name, groups: o.config.groups } : "other";
+      if (!found && o.id === objectId && o.config.type === "messages") found = { viewName: view.name, groups: o.config.groups };
     });
-    if (found !== null) break;
+    if (found) return found;
   }
-  return found;
+  return null;
 }
 
 export class MessagesService {
@@ -286,13 +313,7 @@ export class MessagesService {
   /** Send a message. Refuses with MessageRefused, naming the reason. */
   async send(input: SendInput): Promise<StageMessage> {
     await this.ensureLoaded();
-    let checked: ReturnType<typeof checkSend>;
-    try {
-      checked = checkSend(input, messagingStore.get().groups);
-    } catch (err) {
-      if (err instanceof MessageRefused) console.warn(`[messages] refused: ${scrub(err.message)}`);
-      throw err;
-    }
+    const checked = checkedOrLogged("refused", () => checkSend(input, messagingStore.get().groups));
     return this.writes.enqueue(async () => {
       await this.rollDayLocked();
       const at = Date.now();
@@ -371,25 +392,7 @@ export class MessagesService {
       console.warn(`[messages] reply to ${scrub(messageId)} refused: ${scrub(reason)}`);
       return { ok: false, status, reason };
     };
-    let text: string;
-    let objectId: string;
-    let outputId: string | null = null;
-    try {
-      text = checkedText(input.text, "a reply", QUICK_REPLY_MAX);
-      if (typeof input.objectId !== "string" || !WIRE_ID.test(input.objectId)) {
-        throw new MessageRefused("objectId must be the id of the Messages widget the reply is pressed on");
-      }
-      objectId = input.objectId;
-      if (input.outputId !== undefined && input.outputId !== null) {
-        if (typeof input.outputId !== "string" || !WIRE_ID.test(input.outputId)) {
-          throw new MessageRefused("outputId must be the id of a screen");
-        }
-        outputId = input.outputId;
-      }
-    } catch (err) {
-      if (err instanceof MessageRefused) console.warn(`[messages] reply refused: ${scrub(err.message)}`);
-      throw err;
-    }
+    const { text, objectId, outputId } = checkedOrLogged("reply refused", () => checkReply(input));
 
     return this.writes.enqueue(async (): Promise<ReplyResult> => {
       await this.rollDayLocked();
@@ -398,9 +401,9 @@ export class MessagesService {
 
       const state = stageController.getState();
       const widget = findMessagesWidget(state.views ?? [], objectId);
-      if (widget === null || widget === "other") return refuse(404, "no Messages widget has that id");
+      if (!widget) return refuse(404, "no Messages widget has that id");
 
-      const output = outputId === null ? undefined : new Map((state.outputs ?? []).map((o) => [o.id, o])).get(outputId);
+      const output = outputId === null ? undefined : (state.outputs ?? []).find((o) => o.id === outputId);
       if (output && output.mode !== "panel") return refuse(403, `${output.name} is a display, and a display cannot reply`);
       const groups = widgetGroups(widget.groups, output ? (output.groups ?? []) : null) ?? [];
       if (!messageReaches(message.to, groups)) {
