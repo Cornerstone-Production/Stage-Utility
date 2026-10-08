@@ -324,6 +324,15 @@ describe("who it signs as", () => {
     assert.equal(senderName({ home: true, outputId: null, embedChain: ["home"], outputs, views }), "Home");
   });
 
+  test("in an embedded view it signs as the view that holds it, as the server signs a reply", () => {
+    // Console -> embedded view: the composer lives in the second, and the server
+    // names that one (the view holding the widget), so the two must agree.
+    const two = [{ id: "root", name: "Producer" }, { id: "inner", name: "Booth strip" }];
+    assert.equal(senderName({ home: false, outputId: null, embedChain: ["root", "inner"], outputs, views: two }), "Booth strip");
+    // Embedded on Home, the embedded view holds it and Home does not.
+    assert.equal(senderName({ home: false, outputId: null, embedChain: ["home", "inner"], outputs, views: [...two, { id: "home", name: "Home" }] }), "Booth strip");
+  });
+
   test("falls back to the server's default rather than sending a blank, and cuts a long name to the limit", () => {
     assert.equal(senderName({ home: false, outputId: "gone", embedChain: ["gone"], outputs, views }), "Operator");
     assert.equal(senderName({ home: false, outputId: null, embedChain: [], outputs, views }), "Operator");

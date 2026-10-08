@@ -53,7 +53,7 @@ import { reportActionFailure } from "./report-action-failure";
 export function senderName(where: {
   home: boolean;
   outputId: string | null;
-  /** The views being drawn, outermost first: the console's own view is the first. */
+  /** The views being drawn, outermost first: the view HOLDING the composer is the last. */
   embedChain: readonly string[];
   outputs: readonly { id: string; name: string }[];
   views: readonly { id: string; name: string }[];
@@ -62,7 +62,7 @@ export function senderName(where: {
     ? "Home"
     : where.outputId !== null
       ? where.outputs.find((o) => o.id === where.outputId)?.name
-      : where.views.find((v) => v.id === where.embedChain[0])?.name;
+      : where.views.find((v) => v.id === where.embedChain.at(-1))?.name;
   return (named ?? "").trim().slice(0, FROM_MAX) || DEFAULT_FROM;
 }
 
