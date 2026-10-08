@@ -560,13 +560,25 @@ test("lagging: record()'s changed flag — a flip is a change, a healthy pair's 
   assert.equal(h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0 + 80_000), true, "the flag clearing by time does");
 });
 
-test("lagging: two widgets on one feed fold to the worse figure, not a sum", () => {
+test("lagging: two widgets on one feed fold to the worse figure of each, whichever is listed first, never a sum", () => {
+  // The FIRST widget carries the larger value of each figure and the second a
+  // smaller one or none: a fold that keeps the last report's value (or sums)
+  // reads differently from the max on both.
   const h = new PlaybackHealth();
-  h.record("out1", [report({ feedId: "shared", jitterBufferMs: 700, behindNewestMs: null }), report({ feedId: "shared", jitterBufferMs: 600, behindNewestMs: 400 })], LAG_T0);
+  h.record("out1", [report({ feedId: "shared", jitterBufferMs: 700, behindNewestMs: 800 }), report({ feedId: "shared", jitterBufferMs: 600, behindNewestMs: null })], LAG_T0);
   const e = h.snapshot(LAG_T0)[0]!;
-  assert.equal(e.jitterBufferMsInWindow, 700, "700 and 600 are not 1300");
-  assert.equal(e.behindNewestMsInWindow, 400);
+  assert.equal(e.jitterBufferMsInWindow, 700, "700 and 600 are not 1300, and not the last one's 600");
+  assert.equal(e.behindNewestMsInWindow, 800, "a later widget with no figure does not erase the first one's");
   assert.equal(e.lagging, false, "a sum over the line would have said lagging");
+
+  const other = new PlaybackHealth();
+  other.record("out1", [report({ feedId: "shared", jitterBufferMs: 100, behindNewestMs: 900 }), report({ feedId: "shared", jitterBufferMs: 300, behindNewestMs: 200 })], LAG_T0);
+  assert.equal(other.snapshot(LAG_T0)[0]!.behindNewestMsInWindow, 900, "a smaller later figure does not replace the larger earlier one");
+  assert.equal(other.snapshot(LAG_T0)[0]!.jitterBufferMsInWindow, 300, "and the larger later one wins where it is the larger");
+
+  const third = new PlaybackHealth();
+  third.record("out1", [report({ feedId: "shared", behindNewestMs: null }), report({ feedId: "shared", behindNewestMs: 150 }), report({ feedId: "shared", behindNewestMs: 600 })], LAG_T0);
+  assert.equal(third.snapshot(LAG_T0)[0]!.behindNewestMsInWindow, 600, "a figure first seen on a later widget, and a larger one after that, both count");
 });
 
 test("lagging: a burst of heartbeats at the sample cap still carries the worst figure, even when it landed in the sample the cap merges into", () => {
