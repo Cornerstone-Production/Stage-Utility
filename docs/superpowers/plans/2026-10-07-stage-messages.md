@@ -243,6 +243,28 @@ Kill the server by port when done.
 
 ## PR 2 — On screens (`feat/stage-messages-screens`)
 
+**As built, where it differs from the text below.**
+- The reply route takes `{ text, objectId, outputId? }` as written here; the spec's
+  `viewId` is not used, because the widget is found by its object id across every
+  view. An output that is not in panel mode is refused (403) whatever its groups,
+  which is the spec's "a wall display never replies" enforced on the server. Replies
+  answer 201 with the reply.
+- A Messages widget's `groups` is `null`/absent to follow the screen, and a list,
+  even an empty one, to override it (an empty list follows nothing, so only
+  Everyone's messages). The inspector's choice is "Follow screen" / "Own groups".
+- The composer starts with no group picked and keeps the choice after a send. It
+  draws **Clear alert** on a running alert, which the mockup lists as planned.
+- `StageView` computes the screen once (`ownScreen`: null on a preview) and hands it
+  to both the layout renderer and the alert overlay. The overlay's clock only ticks
+  while a banner is up, and a banner that fails to draw is hidden and logged.
+- The alert banner keeps the mockup's sizes (container-query widths against the
+  whole screen) with a floor on the text so a phone-sized screen still reads it.
+- The Messages widget's state is read by `useMessagesStatus`, which logs a failed
+  read as `[messages]`; `isAlertRunning` lives in `main/types/messages.ts` for the
+  server and the screens to share.
+- New widgets arrive at the editor's one default size (0.3 x 0.16 of the canvas);
+  both want resizing on placement. Not changed here.
+
 What lands: the **Message composer** and **Messages** widgets, the **alert**
 drawn over any screen in the target groups, **replies** from consoles, and the
 plumbing that tells a layout which screen it is on. After this PR, stage
