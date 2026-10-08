@@ -423,6 +423,10 @@ class VideoService {
    *  the CURRENT generation, not just truthiness, so a stale poll finishing
    *  late can never block — or clear — a newer generation's own guard. */
   private pollingGeneration: number | null = null;
+  /** Every poll past its guards and not yet finished: the promise, so
+   *  whenPollsIdle() can await the real thing. A set, because a stale
+   *  generation's poll can still be running beside a newer one's. */
+  private readonly pollsInFlight = new Set<Promise<void>>();
   /** Set by reportPollFailure(), which pollOnce() calls only for a failure
    *  pollFailureIsNews() lets through; cleared by reportPollSuccess() and by
    *  every supervisor status change. Overrides the supervisor's own status in
@@ -1033,7 +1037,26 @@ class VideoService {
     // the swap and nothing ever cleared it for the new attachment.
     if (this.pollingGeneration === generation) return;
     this.pollingGeneration = generation;
-    const relay = this.relay;
+    const run = this.runPoll(generation, this.relay);
+    this.pollsInFlight.add(run);
+    const done = () => void this.pollsInFlight.delete(run);
+    run.then(done, done);
+    await run;
+  }
+
+  /** Resolves once no poll is running, including one started while waiting.
+   *  For the caller that needs a poll nobody handed it the promise of
+   *  (reconcileOnce() and the interval timer both start one unawaited) to
+   *  have landed. No count of event-loop turns can say that: a poll reads the
+   *  feed file, and a disk read takes however many turns the machine's load
+   *  makes it. */
+  async whenPollsIdle(): Promise<void> {
+    while (this.pollsInFlight.size > 0) await Promise.allSettled([...this.pollsInFlight]);
+  }
+
+  /** The body of pollOnce(), past its guards: the poll for `generation`,
+   *  already marked in flight in `pollingGeneration`, which this clears. */
+  private async runPoll(generation: number, relay: VideoRelay): Promise<void> {
     try {
       let paths: RelayPath[];
       try {

@@ -967,7 +967,7 @@ test("a pull feed removed mid-outage and added again under the same name logs it
     assert.equal(current, id, "sanity: the same name mints the same id");
     // The add reconciled the relay, which starts a poll of its own; one still in
     // flight would swallow the poll below.
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    await videoService.whenPollsIdle();
 
     t.mock.timers.tick(RECENT_REQUEST_MS);
     await dialOnce();
@@ -999,7 +999,7 @@ test("a successful reconcile is followed by a poll, so a feed it just set up rea
     await pollOnce();
     assert.equal(await stateOf(), "offline", "sanity: a polled relay with no path for the feed");
     assert.equal(await videoService.reconcileRelay(), true);
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    await videoService.whenPollsIdle(); // the poll the reconcile started
     assert.equal(await stateOf(), "standby");
   } finally {
     await videoService.detachRelay();
