@@ -25,7 +25,6 @@ after(() => teardown());
 const { SHARED_READ_PATHS } = await import("./api.js");
 const { HYDRATED_CHANNELS } = await import("./sse-channels.js");
 const { statusRoutes } = await import("../../main/services/routes/status-routes.js");
-const { messagesRoutes } = await import("../../main/services/routes/messages-routes.js");
 const { callRoute } = await import("../../main/services/routes/route-harness.js");
 const { presenceSnapshot } = await import("../../main/services/display-presence.js");
 
@@ -39,7 +38,6 @@ describe("SHARED_READ_PATHS", () => {
         "/api/displays/presence displays:presence rev",
         "/api/integrations integrations:state-changed no-rev",
         "/api/integrations/wireless/channels wireless:channels no-rev",
-        "/api/messages messages:state rev",
         "/api/obs/status obs:status rev",
         "/api/pco/live pco:live no-rev",
         "/api/people/count people:count rev",
@@ -76,7 +74,7 @@ describe("SHARED_READ_PATHS", () => {
       const body =
         path === "/api/displays/presence"
           ? (presenceSnapshot() as unknown) // answered in remote-server.ts, from this
-          : (await callRoute(path === "/api/messages" ? messagesRoutes : statusRoutes, path)).json;
+          : (await callRoute(statusRoutes, path)).json;
       if (typeof (body as { rev?: unknown } | null)?.rev !== "number") missing.push(`${path} -> ${JSON.stringify(body)?.slice(0, 80)}`);
     }
     assert.deepEqual(missing, [], "a path marked rev whose answer carries none");

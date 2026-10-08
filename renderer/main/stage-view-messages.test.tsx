@@ -96,7 +96,7 @@ function message(n: number, to: string[], text: string): StageMessage {
 }
 
 function messagesState(messages: StageMessage[]): MessagesState {
-  return { rev: 1, groups: GROUPS, quickMessages: [], quickReplies: ["Copy"], messages, alerts: [] };
+  return { rev: 1, serverNow: Date.now(), groups: GROUPS, quickMessages: [], quickReplies: ["Copy"], messages, alerts: [] };
 }
 
 /** A display routed to one custom view holding one widget. */
@@ -344,13 +344,46 @@ describe("a stage-message alert on a screen", () => {
   test("it ends at alertUntil on the SERVER's clock, with no frame to say so", async () => {
     // A wall whose own clock is an hour fast: by the host's clock this alert ended
     // long ago and would never draw; by the server's it has under a second left.
+    // The clock is NOT fed by hand: the page has to learn it from the messages it
+    // reads, which is what a slots view or an unrouted screen has to do.
     const serverNow = Date.now() - 3_600_000;
-    serverClock.observe(serverNow, 0);
     withAlerts(running(1, [EVERYONE], "on server time", 900, serverNow));
+    messagesBody!.serverNow = serverNow;
     const c = await showScreen("/display-1", bare());
     assert.ok(says(c, "on server time"), "ended by the host's clock instead of the server's");
     await wait(1300);
     assert.ok(!c.querySelector('[role="alert"]'), "still on the wall after alertUntil on the server's clock");
+  });
+
+  test("a slots view and an unrouted screen, which hold no other server timestamp, still learn the server's time", async () => {
+    const serverNow = Date.now() - 3_600_000;
+    for (const make of [
+      () => {
+        const s = stageState({ type: "clock" }, {}) as { views: { kind: string }[]; resolvedByOutput: Record<string, { kind: string }> };
+        s.views[0].kind = "slots";
+        s.resolvedByOutput["display-1"].kind = "slots";
+        return s;
+      },
+      () => {
+        const s = stageState({ type: "clock" }, {}) as { resolvedByOutput: Record<string, { viewId: string | null }> };
+        s.resolvedByOutput["display-1"].viewId = null;
+        return s;
+      },
+    ]) {
+      cleanup();
+      serverClock.reset();
+      withAlerts(running(1, [EVERYONE], "twenty-five seconds left", 25_000, serverNow));
+      messagesBody!.serverNow = serverNow;
+      const c = await showScreen("/display-1", make());
+      assert.ok(says(c, "twenty-five seconds left"), "an alert with time left on the server's clock never drew");
+    }
+  });
+
+  test("a Messages widget counts a message's age on the clock the channel taught the page", async () => {
+    const serverNow = Date.now() - 3_600_000;
+    messagesBody = { ...messagesState([{ ...message(1, [EVERYONE], "three minutes ago"), at: serverNow - 3 * 60_000 }]), serverNow };
+    const c = await showScreen("/display-1", stageState({ type: "messages" }, {}));
+    assert.ok(says(c, "3 min"), `age was not counted on the server's clock: ${c.textContent}`);
   });
 
   test("a banner that fails to draw is hidden and reported, and the screen under it stays up", async () => {

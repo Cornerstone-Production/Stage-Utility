@@ -98,8 +98,8 @@ service keeps them.
 
 ### How screens receive them
 
-One channel, `messages:state`, carries `{ rev, groups, quickMessages, quickReplies,
-messages, alerts }`. It is
+One channel, `messages:state`, carries `{ rev, serverNow, groups, quickMessages,
+quickReplies, messages, alerts }`. It is
 sent once when a client connects and again on every change. See
 [Network traffic](../ops/network-traffic.md#stage-messages).
 
@@ -146,7 +146,10 @@ seconds do. It rises into place when it arrives.
   in. When it ends, the next one sent to this screen, if any, shows. A screen in no
   group still gets Everyone's.
 - How long: counted against the **server's** clock from the server-stamped
-  `alertUntil`, so a wall whose own clock is wrong still ends it on time, and the
+  `alertUntil`, so a wall whose own clock is wrong still ends it on time. Every
+  messages frame and read carries `serverNow`, and a screen sets its clock from them
+  (the first read measures its own round trip, so one is enough), so this holds on a
+  slots view or an unrouted screen as on a layout. The
   banner goes at that moment without waiting for the server's frame that says the
   alert ran out. A screen with no alert keeps no timer.
 - Never over **blackout**: a blacked-out screen stays black, because blackout is a

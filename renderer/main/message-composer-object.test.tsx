@@ -67,7 +67,7 @@ function msg(n: number, over: Partial<StageMessage> = {}): StageMessage {
 }
 
 function stateOf(messages: StageMessage[] = [], quickMessages = ["Walk now", "2 minutes"]): MessagesState {
-  return { rev: 1, groups: GROUPS, quickMessages, quickReplies: ["Copy"], messages, alerts: [] };
+  return { rev: 1, serverNow: NOW, groups: GROUPS, quickMessages, quickReplies: ["Copy"], messages, alerts: [] };
 }
 
 const OUTPUTS = [{ groups: [GREEN] }, { groups: [GREEN, STAGE] }, { groups: [] }];

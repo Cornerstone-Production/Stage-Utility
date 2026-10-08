@@ -266,6 +266,12 @@ Kill the server by port when done.
   server and the screens to share.
 - A screen-embed tile carries the screen it shows (its id and groups) and is not
   interactive: a picture of a panel cannot answer for it, and it draws no banner.
+- Every snapshot carries `serverNow`, and `useMessagesStatus` sets the page's server
+  clock from it: the hydrate read is a measured pair (so `GET /api/messages` is
+  deliberately NOT in `SHARED_READ_PATHS`: a read joined to an earlier caller's is
+  older than its request, and a pairing over it would be a lie), live frames refine
+  it, replays are ignored. A slots view or an unrouted screen no longer needs
+  `pco:live` to count an alert down.
 - New widgets arrive at the editor's one default size (0.3 x 0.16 of the canvas);
   both want resizing on placement. Not changed here.
 

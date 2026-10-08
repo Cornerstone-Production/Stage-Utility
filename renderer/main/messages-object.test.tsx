@@ -64,7 +64,7 @@ function msg(n: number, to: string[], over: Partial<StageMessage> = {}): StageMe
 }
 
 function stateOf(messages: StageMessage[], quickReplies: string[] = ["Copy", "Walking now", "Need 2 min"]): MessagesState {
-  return { rev: 1, groups: GROUPS, quickMessages: [], quickReplies, messages, alerts: [] };
+  return { rev: 1, serverNow: NOW, groups: GROUPS, quickMessages: [], quickReplies, messages, alerts: [] };
 }
 
 function mount(over: Partial<React.ComponentProps<typeof MessagesObject>> = {}): HTMLElement {

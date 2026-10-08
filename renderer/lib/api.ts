@@ -104,7 +104,6 @@ export const SHARED_READ_PATHS: ReadonlyMap<string, { channel: string; rev: bool
   ["/api/displays/presence", { channel: "displays:presence", rev: true }],
   ["/api/integrations", { channel: "integrations:state-changed", rev: false }],
   ["/api/integrations/wireless/channels", { channel: "wireless:channels", rev: false }],
-  ["/api/messages", { channel: "messages:state", rev: true }],
   ["/api/obs/status", { channel: "obs:status", rev: true }],
   ["/api/pco/live", { channel: "pco:live", rev: false }],
   ["/api/people/count", { channel: "people:count", rev: true }],

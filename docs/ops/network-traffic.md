@@ -33,8 +33,8 @@ re-send the plan, slot configuration and layouts along with it.
 ### Stage messages
 
 `messages:state` carries the day's [stage messages](../features/stage-messages.md)
-and what the screens offer for it: `{ rev, groups, quickMessages, quickReplies,
-messages, alerts }`. The groups and the two quick lists are a few hundred bytes to
+and what the screens offer for it: `{ rev, serverNow, groups, quickMessages,
+quickReplies, messages, alerts }`. The groups and the two quick lists are a few hundred bytes to
 1 KB together; a short message adds about 0.2 KB and a 280-character alert about 0.45 KB,
 so a day with twenty messages is under 4 KB. The 200-message cap is the ceiling:
 about 36 KB of short messages, 90 KB if every one were a full-length alert. The

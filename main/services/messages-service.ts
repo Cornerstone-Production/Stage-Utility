@@ -234,7 +234,8 @@ export class MessagesService {
   /** The snapshot `messages:state` carries and GET /api/messages answers. */
   state(): MessagesState {
     const { groups, quickMessages, quickReplies } = messagingStore.get();
-    return { rev: this.rev, groups, quickMessages, quickReplies, messages: this.messages, alerts: this.runningAlerts(Date.now()) };
+    const now = Date.now();
+    return { rev: this.rev, serverNow: now, groups, quickMessages, quickReplies, messages: this.messages, alerts: this.runningAlerts(now) };
   }
 
   /** The messages whose alert is still holding the screens at `now`, newest first. */

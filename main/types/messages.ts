@@ -60,6 +60,13 @@ export interface StageMessage {
 export interface MessagesState {
   /** Bumped by the server on every frame it sends. A new process starts at 0. */
   rev: number;
+  /**
+   * The server's clock, ms, when this snapshot was built. Every frame and every
+   * read carries it, so a screen with no other timestamp to correct its clock from
+   * (a slots view, an unrouted screen, a layout with no Planning Center) still
+   * learns the server's time from the one channel every kiosk screen subscribes to.
+   */
+  serverNow: number;
   groups: MessageGroup[];
   /** The composer's one-press messages, so a composer placed on a screen offers
    *  the list as Settings has it now. */
