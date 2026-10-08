@@ -25,6 +25,7 @@ import { streamers, streamIndicator, STREAMER_FOR, type StreamerName } from "../
 import { usePvpState } from "./use-pvp-state";
 import { useMessagesStatus } from "./use-messages-state";
 import { MessagesObject } from "./messages-object";
+import type { OwnScreen } from "./stage-screen";
 import { MessageComposerObject, senderName } from "./message-composer-object";
 import type { MessagesState } from "@main/types/messages";
 import { useReaperStatus } from "./use-reaper-state";
@@ -152,7 +153,7 @@ export interface LayoutRenderCtx {
   allowHls: boolean;
   /**
    * The screen (output) this layout is being drawn ON: its id, and the message
-   * groups it is in. Both null where the surface is not a screen — an in-app
+   * groups it is in. Null where the surface is not a screen — an in-app
    * console, Home, the layout editor, and a Screens-card preview, which is a
    * picture of another screen and not that screen.
    *
@@ -160,8 +161,7 @@ export interface LayoutRenderCtx {
    * them would read as "not a screen" and a Messages widget on a real wall
    * would silently follow no group. Embedded views inherit their parent's.
    */
-  outputId: string | null;
-  screenGroups: readonly string[] | null;
+  screen: OwnScreen | null;
   /** Canvas height in design px — basis for fraction→px font/spacing sizing. */
   H: number;
   /** True only on a real display route. Interactive objects (live controls)
@@ -1648,7 +1648,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           outputs={ctx.state.outputs ?? []}
           from={senderName({
             home: ctx.home,
-            outputId: ctx.outputId,
+            outputId: ctx.screen?.outputId ?? null,
             embedChain: ctx.embedChain,
             outputs: ctx.state.outputs ?? [],
             views: ctx.state.views ?? [],
@@ -1665,8 +1665,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           config={c}
           state={ctx.messages}
           known={ctx.messagesKnown}
-          screenGroups={ctx.screenGroups}
-          outputId={ctx.outputId}
+          screen={ctx.screen}
           interactive={ctx.interactive}
           editing={ctx.editing === true}
           now={ctx.now}
@@ -3361,8 +3360,7 @@ export function LayoutRenderer({
   ndiSource,
   interactive = false,
   allowHls,
-  outputId,
-  screenGroups,
+  screen,
   surface,
   viewId,
 }: {
@@ -3377,8 +3375,7 @@ export function LayoutRenderer({
   /** The screen this layout is drawn on, and the groups it is in — see
    *  LayoutRenderCtx. Null/null for anything that is not a real screen; every
    *  caller says which, as it does for `allowHls`. */
-  outputId: string | null;
-  screenGroups: readonly string[] | null;
+  screen: OwnScreen | null;
   /** The View's surface, so a console can respond to the window while a display
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
@@ -3478,7 +3475,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, messages: messagesStatus.value, messagesKnown: messagesStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, outputId, screenGroups, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, messages: messagesStatus.value, messagesKnown: messagesStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, screen, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

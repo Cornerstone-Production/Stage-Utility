@@ -129,8 +129,7 @@ export function ConsoleRoute() {
             // and not a screen in any message group: a Messages widget here
             // follows its own groups.
             allowHls
-            outputId={null}
-            screenGroups={null}
+            screen={null}
           />
         ) : (
           <EmptyState

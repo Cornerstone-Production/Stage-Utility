@@ -71,10 +71,6 @@ export type StageScreen =
        *  on a preview: a settings-page card is not the real screen and must
        *  not refuse to play a feed the wall it stands in for cannot. */
       allowHls: boolean;
-      /** The screen this one IS, for the message groups it is in — `own`'s, so
-       *  null on a preview, which is a picture of another screen and not in any
-       *  group of its own. See ownScreen. */
-      own: OwnScreen | null;
       /** The ServiceCue text size kept for the screen this one IS or is a picture
        *  of — `standingIn`'s, so a Screens preview draws what the display draws.
        *  Null when none is kept (and on a preview that is not a screen): whoever
@@ -241,7 +237,6 @@ export function resolveScreen(input: ScreenInput): StageScreen {
     isPreview: !!previewViewId,
     outputMode: currentDisplay?.mode,
     allowHls: resolved?.allowHls ?? true,
-    own: ownScreen(input),
     textSize: standingIn?.textSize ?? null,
     ...chrome,
   });

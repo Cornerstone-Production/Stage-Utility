@@ -31,6 +31,7 @@ import { messageReaches, widgetGroups, type MessageGroup, type MessagesState, ty
 import { toast } from "../components/ui";
 import { invoke } from "../lib/api";
 import { logToServer } from "../lib/client-log";
+import type { OwnScreen } from "./stage-screen";
 
 /** How many messages the widget draws. */
 export const MESSAGES_SHOWN = 3;
@@ -67,10 +68,8 @@ export interface MessagesObjectProps {
   /** The channel's value, and whether it has answered — see useMessagesStatus. */
   state: MessagesState | null;
   known: boolean;
-  /** The groups of the screen this is drawn on; null when it is not on a screen. */
-  screenGroups: readonly string[] | null;
-  /** The screen this is drawn on, which the server reads the output's groups and mode from. */
-  outputId: string | null;
+  /** The screen this is drawn on (its id, and the groups it is in); null when it is not on one. */
+  screen: OwnScreen | null;
   /** Controls are live here: a panel or a console in the app, never a wall. */
   interactive: boolean;
   /** The layout editor's own canvas. */
@@ -81,8 +80,8 @@ export interface MessagesObjectProps {
 }
 
 /** The eyebrow, the feed and the quiet states share one card body. */
-export function MessagesObject({ objectId, config, state, known, screenGroups, outputId, interactive, editing, now, ts }: MessagesObjectProps) {
-  const groups = widgetGroups(config.groups, screenGroups);
+export function MessagesObject({ objectId, config, state, known, screen, interactive, editing, now, ts }: MessagesObjectProps) {
+  const groups = widgetGroups(config.groups, screen?.groups ?? null);
   const shown = groups && state ? shownMessages(state, groups) : null;
   // One answer at a time: pressing a second button while the first is in flight
   // would send two replies for one tap on a touch panel that registered twice.
@@ -93,7 +92,7 @@ export function MessagesObject({ objectId, config, state, known, screenGroups, o
     if (sending) return;
     setSending(true);
     try {
-      await invoke("messages:reply", { id: target.id, text, objectId, outputId });
+      await invoke("messages:reply", { id: target.id, text, objectId, outputId: screen?.outputId ?? null });
     } catch (e) {
       // Told, and logged: a reply that did not go must not read as sent. The
       // thread shows replies only once the server has them, so a failure leaves

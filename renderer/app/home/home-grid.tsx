@@ -191,8 +191,7 @@ function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderC
     // on this screen" switch.
     allowHls: true,
     // Home is not a screen, so it is in no message group.
-    outputId: null,
-    screenGroups: null,
+    screen: null,
     H: NOMINAL_H,
     // Home is the operator's own screen: controls fire and drill-downs work.
     interactive: true,
