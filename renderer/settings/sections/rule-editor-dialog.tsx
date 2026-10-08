@@ -21,6 +21,7 @@
 import { errorMessage } from "@main/services/errors";
 import { CALL_TRIGGER_ID, encodeAliases, parseAliases } from "@main/services/cue-aliases";
 import {
+  choiceList,
   fieldsNeedAttention,
   numberParamDefault,
   ruleIssues,
@@ -75,6 +76,7 @@ import {
   DialogTitle,
   InfoHint,
   Input,
+  MultiSelect,
   NOT_OFFERED,
   NumberInput,
   Select,
@@ -391,7 +393,35 @@ export function ParamField({
       </Row>
     );
   }
-  if (spec.type === "enum" || spec.type === "multi-enum") {
+  if (spec.type === "multi-enum") {
+    // Stored as one comma-separated string, the shape every multi-enum reader
+    // (a day-of-week condition, a plan-time trigger, a send's groups) splits. A
+    // Select held ONE value here, so a rule could name one day, never two.
+    const selected = choiceList(value);
+    // Saved choices the list no longer has — a group deleted since the rule was
+    // written. Kept in the value and said so, as the enum branch does.
+    const stale = spec.optionsFrom && options.length > 0 && selected.some((v) => !options.some((o) => o.value === v));
+    return (
+      <Row label={spec.label} hint={spec.help}>
+        <>
+          <MultiSelect
+            label={spec.label}
+            options={options}
+            selected={selected}
+            // Options' order, unknown values last: the stored string does not
+            // depend on the order the boxes were ticked in.
+            onChange={(next) =>
+              onChange([...options.filter((o) => next.includes(o.value)).map((o) => o.value), ...next.filter((v) => !options.some((o) => o.value === v))].join(","))
+            }
+            placeholder={spec.optional ? "Any" : "Pick…"}
+            className={invalidClass("w-full", invalid)}
+          />
+          {fieldIssue ?? (stale ? <span className="block pt-0.5 text-caption2 text-amber-11">A saved choice is no longer offered: kept as it is.</span> : notice)}
+        </>
+      </Row>
+    );
+  }
+  if (spec.type === "enum") {
     const current = String(value ?? "");
     return (
       <Row label={spec.label} hint={spec.help}>

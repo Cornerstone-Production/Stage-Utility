@@ -75,6 +75,13 @@ export function seedNumberDefaults(specs: ParamDef[]): Record<string, number> {
   return out;
 }
 
+/** A multi-enum param's stored value as a list: the comma-separated string every
+ *  multi-enum is kept as, trimmed, blanks dropped. One reader for the rule editor,
+ *  the validator and the actions that take a list. */
+export function choiceList(value: unknown): string[] {
+  return String(value ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+}
+
 /** A "key-value" param's stored JSON, as key/value pairs — [] for blank, null for
  *  text that is not a JSON object at all. A row with a blank key can never reach
  *  here: KeyValueField filters one out before it ever calls onChange, so "every
@@ -168,7 +175,7 @@ export function validateParams(specs: ParamDef[], params: Record<string, unknown
         const raw = String(value ?? "").trim();
         if (!raw || spec.optionsFrom) break;
         if (spec.options && spec.options.length > 0) {
-          const picked = raw.split(",").map((v) => v.trim()).filter(Boolean);
+          const picked = choiceList(raw);
           const bad = picked.some((v) => !spec.options!.some((o) => o.value === v));
           if (bad) issues.push({ key: spec.key, message: `Pick a ${spec.label.toLowerCase()}` });
         }
