@@ -997,6 +997,11 @@ class VideoService {
     return this.probes.current();
   }
 
+  /** Resolves once no camera-check round is running. See ProbeScheduler.whenIdle(). */
+  whenProbesIdle(): Promise<void> {
+    return this.probes.whenIdle();
+  }
+
   /** integration-manager.ts's applyVideo(): the Video feeds switch. Off, no
    *  camera is asked and none is claimed about. */
   setVideoEnabled(enabled: boolean): void {
