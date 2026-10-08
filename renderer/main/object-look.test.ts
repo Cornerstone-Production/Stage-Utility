@@ -41,6 +41,45 @@ const BARE = [
   "service-order",
 ] as const;
 
+/** Every type that wears a card by default, sorted, one per line. */
+const CARDED = [
+  "action-button",
+  "baptism-timer",
+  "charger-battery",
+  "checklist",
+  "clock",
+  "container",
+  "countdown-timer",
+  "cue-button",
+  "integration-status",
+  "live-controls",
+  "message-composer",
+  "messages",
+  "notes",
+  "obs-status",
+  "osc-button",
+  "people-counter",
+  "people-graph",
+  "people-panel",
+  "plan-attachment",
+  "pp-timer",
+  "pvp-layers",
+  "pvp-now",
+  "reaper-status",
+  "record-status",
+  "rosstalk-button",
+  "screen-embed",
+  "section-chip",
+  "service-pacing",
+  "shape",
+  "slide-progress",
+  "spl-meter",
+  "stream-status",
+  "view-embed",
+  "wireless-channel",
+  "wireless-summary",
+];
+
 const hasCard = (t: string) => {
   const s = LAYOUT_OBJECTS[t as keyof typeof LAYOUT_OBJECTS].style() as Record<string, unknown>;
   return ["background", "borderColor", "cornerRadius"].some((k) => s[k] != null);
@@ -62,13 +101,7 @@ describe("a widget you just added", () => {
     // and add it here or to BARE — do not bump the number.
 
     const all = Object.keys(LAYOUT_OBJECTS);
-    // 59/31 before the two ProVideoPlayer "what is on now" widgets: `pvp-now`
-    // is carded like every other wall readout, `home-pvp-now` is bare because
-    // Home's grid frames it.
-    // 61/32 before the cue button, which is carded: it is a pill on a panel,
-    // and it paints no box of its own.
-    //
-    // The set, not the count: two counts that both hold steady cannot tell an
+    // The sets, not their counts: two counts that both hold steady cannot tell an
     // add plus a remove from no change, and a bare number is a merge conflict
     // waiting to happen the next time two branches each add a type.
     assert.deepStrictEqual(
@@ -76,9 +109,7 @@ describe("a widget you just added", () => {
       LAYOUT_OBJECT_TYPES,
       "a type was added or removed; update LAYOUT_OBJECT_TYPES deliberately",
     );
-    // 34 with Messages, which is a card like Notes and the checklist, and 35 with
-    // the Message composer beside it.
-    assert.equal(all.filter(hasCard).length, 35);
+    assert.deepStrictEqual(all.filter(hasCard).sort(), CARDED, "a type moved between carded and bare; update CARDED or BARE");
     assert.equal(all.filter((t) => !hasCard(t)).length, BARE.length);
   });
 
