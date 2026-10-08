@@ -441,7 +441,13 @@ describe("once the relay is attached and running", () => {
     proxyOutage.forget();
     const warns = captureConsole(t, "warn");
     await assert.rejects(fetchSu(`/video/${camId}/dying.m3u8`).then((r) => r.text()));
-    // Give the server side time to notice the torn-down connection and log.
+    // The server side notices the torn-down connection on its own schedule:
+    // the first line is waited for, bounded, rather than guessed. Then a
+    // fixed window for a second one, which only time can rule out.
+    const deadline = performance.now() + 2000;
+    while (!warns.some((l) => l.includes("proxy to relay failed")) && performance.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
     await new Promise((r) => setTimeout(r, 200));
     const relayFailureLines = warns.filter((l) => l.includes("proxy to relay failed"));
     assert.equal(relayFailureLines.length, 1, `expected exactly one relay-failure line for a relay that died mid-segment; got: ${JSON.stringify(warns)}`);
