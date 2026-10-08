@@ -183,6 +183,30 @@ describe("a Messages widget follows the screen StageView says it is", () => {
   });
 });
 
+// ---- answering from a panel, through the whole path -----------------------------
+
+describe("a reply pressed on a panel", () => {
+  test("goes to the message's replies route with this widget and this screen", async () => {
+    // Reached through StageView and the layout renderer, not by mounting the
+    // widget: what the widget is HANDED (the screen) is the thing under test, and a
+    // unit mount supplies it itself.
+    messagesBody = messagesState([message(1, [GREEN], "for the green room")]);
+    const c = await showScreen("/display-1", stageState({ type: "messages" }, { groups: [GREEN], mode: "panel" }));
+    const copy = [...c.querySelectorAll("button")].find((b) => b.textContent === "Copy");
+    assert.ok(copy, "a panel in the group drew no reply button");
+    await act(async () => { fireEvent.click(copy!); });
+    const sent = posted.filter((p) => p.url === `/api/messages/${(1).toString(16).padStart(16, "0")}/replies`);
+    assert.equal(sent.length, 1, "the press did not reach the replies route");
+    assert.deepEqual(sent[0].body, { text: "Copy", objectId: "w1", outputId: "display-1" });
+  });
+
+  test("a display in the same group draws no button at all", async () => {
+    messagesBody = messagesState([message(1, [GREEN], "for the green room")]);
+    const c = await showScreen("/display-1", stageState({ type: "messages" }, { groups: [GREEN] }));
+    assert.equal([...c.querySelectorAll("button")].some((b) => b.textContent === "Copy"), false);
+  });
+});
+
 // ---- a tile of another screen ---------------------------------------------------
 
 describe("a Messages widget inside a screen-embed tile", () => {
