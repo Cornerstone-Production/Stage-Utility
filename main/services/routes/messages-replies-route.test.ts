@@ -73,6 +73,9 @@ beforeEach(async () => {
       viewOf("v-follow", "Booth console", [widget("w-follow")]),
       // Its own list, on a console.
       viewOf("v-own", "Green room iPad", [widget("w-green", [green]), widget("w-none", [])]),
+      viewOf("v-elsewhere", "Elsewhere", [{ id: "clock-2", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "clock" } }]),
+      viewOf("v-embeds", "Embeds", [{ id: "tile", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "view-embed", viewId: "v-follow" } }]),
+      viewOf("v-screen-embeds", "Screen embeds", [{ id: "stile", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "screen-embed", outputId: "panel-1" } }]),
       // Nested in a container, and a widget of another type beside it.
       viewOf("v-nested", "Nested", [
         {
@@ -86,6 +89,15 @@ beforeEach(async () => {
       { id: "panel-1", name: "Booth panel", viewId: "v-follow", mode: "panel", groups: [booth, stage] },
       { id: "wall", name: "Stage wall", viewId: "v-follow", mode: "display", groups: [stage] },
       { id: "plain", name: "Plain", viewId: "v-follow", groups: [stage] },
+      // A real panel in Stage that draws a view with no Messages widget in it: not
+      // somewhere w-follow is drawn, whatever a request says.
+      { id: "victim", name: "Victim panel", viewId: "v-elsewhere", mode: "panel", groups: [stage, booth] },
+      // A display showing the view that holds the own-groups widgets.
+      { id: "own-wall", name: "Own wall", viewId: "v-own", mode: "display", groups: [green] },
+      // A panel whose view embeds the follow view by view-embed, and one that
+      // embeds another screen's view by screen-embed.
+      { id: "embedder", name: "Embedder panel", viewId: "v-embeds", mode: "panel", groups: [booth] },
+      { id: "screen-embedder", name: "Screen embedder", viewId: "v-screen-embeds", mode: "panel", groups: [booth] },
     ] as Output[],
   };
   (stageController as unknown as { recomputeResolved: () => void }).recomputeResolved();
@@ -109,10 +121,16 @@ describe("who may answer", () => {
     assert.equal((r.json as MessageReply).from, "Booth panel");
   });
 
-  it("Everyone reaches any Messages widget, with no screen and no groups of its own", async () => {
+  it("Everyone reaches any Messages widget a screen draws, and any with a list of its own", async () => {
     const m = await send([EVERYONE]);
-    assert.equal((await reply(m.id, { text: "Copy", objectId: "w-follow" })).status, 201);
+    assert.equal((await reply(m.id, { text: "Copy", objectId: "w-follow", outputId: "panel-1" })).status, 201);
     assert.equal((await reply(m.id, { text: "Copy", objectId: "w-none" })).status, 201);
+  });
+
+  it("a screen that draws the widget through a view-embed or a screen-embed answers for it", async () => {
+    const m = await send([booth]);
+    assert.equal((await reply(m.id, { text: "Copy", objectId: "w-follow", outputId: "embedder" })).status, 201, "view-embed");
+    assert.equal((await reply(m.id, { text: "Copy", objectId: "w-follow", outputId: "screen-embedder" })).status, 201, "screen-embed");
   });
 
   it("a widget nested in a container is found", async () => {
@@ -134,10 +152,30 @@ describe("who may answer", () => {
     assert.equal(r.status, 403);
   });
 
-  it("refuses 403 a following widget with no screen at all: it follows nothing", async () => {
+  it("refuses 403 a following widget with no screen named: it has none to follow, Everyone's messages too", async () => {
     const m = await send([stage]);
-    assert.equal((await reply(m.id, { text: "Copy", objectId: "w-follow" })).status, 403);
+    const r = await reply(m.id, { text: "Copy", objectId: "w-follow" });
+    assert.equal(r.status, 403);
+    assert.match(err(r), /follows a screen's groups/);
+    const all = await send([EVERYONE]);
+    assert.equal((await reply(all.id, { text: "Copy", objectId: "w-follow" })).status, 403);
     assert.equal((await reply(m.id, { text: "Copy", objectId: "w-follow", outputId: "nowhere" })).status, 403);
+  });
+
+  it("refuses 403 a request that names a real panel which does not draw the widget (the forged claim)", async () => {
+    // w-follow is drawn by panel-1 and nobody called victim: naming victim must not
+    // let the caller sign as it, though victim is in Stage and the message went there.
+    const m = await send([stage]);
+    const r = await reply(m.id, { text: "Copy", objectId: "w-follow", outputId: "victim" });
+    assert.equal(r.status, 403);
+    assert.match(err(r), /does not draw that widget/);
+    assert.deepEqual(thread()[0].replies, []);
+  });
+
+  it("the same for a widget with groups of its own: a screen that does not draw it cannot claim it", async () => {
+    const m = await send([green]);
+    assert.equal((await reply(m.id, { text: "Copy", objectId: "w-green", outputId: "victim" })).status, 403);
+    assert.equal((await reply(m.id, { text: "Copy", objectId: "w-green", outputId: "panel-1" })).status, 403);
   });
 
   it("an empty list of its own follows nothing, so only Everyone gets through", async () => {
@@ -152,7 +190,13 @@ describe("who may answer", () => {
       assert.equal(r.status, 403, outputId);
       assert.match(err(r), /display cannot reply/);
     }
-    assert.deepEqual(thread()[0].replies, []);
+    // And a widget with groups of its own, drawn by a display that holds it: the
+    // panel check is what refuses it, not the groups.
+    const g = await send([green]);
+    const own = await reply(g.id, { text: "Copy", objectId: "w-green", outputId: "own-wall" });
+    assert.equal(own.status, 403);
+    assert.match(err(own), /display cannot reply/);
+    assert.deepEqual(thread().flatMap((x) => x.replies), []);
   });
 });
 

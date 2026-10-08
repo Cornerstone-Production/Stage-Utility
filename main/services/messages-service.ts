@@ -55,6 +55,7 @@ import { plural } from "./plural.js";
 import { scrub, scrubError } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 import { Ticker } from "./ticker.js";
+import { viewsDrawnBy } from "./screen-reach.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { WriteQueue } from "./write-queue.js";
 
@@ -183,6 +184,7 @@ export function checkSend(
 
 /** A Messages widget as the layouts hold it: the view it is in and its own groups. */
 interface FoundWidget {
+  viewId: string;
   viewName: string;
   groups: readonly string[] | null | undefined;
 }
@@ -196,7 +198,7 @@ function findMessagesWidget(views: readonly View[], objectId: string): FoundWidg
   for (const view of views) {
     let found: FoundWidget | null = null;
     walkLayoutObjects(view.layout?.objects ?? [], (o) => {
-      if (!found && o.id === objectId && o.config.type === "messages") found = { viewName: view.name, groups: o.config.groups };
+      if (!found && o.id === objectId && o.config.type === "messages") found = { viewId: view.id, viewName: view.name, groups: o.config.groups };
     });
     if (found) return found;
   }
@@ -370,14 +372,18 @@ export class MessagesService {
   /**
    * Answer a message from a Messages widget.
    *
-   * WHO MAY ANSWER is decided here, from the stored layouts and outputs, never
-   * from what the browser says it is:
+   * WHO MAY ANSWER is checked here against the stored layouts and outputs. The
+   * app has no logins, so this keeps honest clients honest and is not
+   * authentication: anyone who knows a real panel and a widget it draws can still
+   * sign as it.
    *   - the widget is found by `objectId` across every view's layout and must be
    *     a Messages widget: 404 otherwise;
-   *   - its groups are its own list when it has one, else the groups of the
-   *     output `outputId` names, else none (see widgetGroups);
-   *   - an output that is not in panel mode never replies, because a wall is
-   *     read-only and draws no buttons: 403;
+   *   - with an `outputId`, that output must be in panel mode (a wall is
+   *     read-only and draws no buttons) and must DRAW the widget, in its routed
+   *     view or one it embeds: 403 otherwise;
+   *   - with no `outputId` (a console in the app, which is no screen) the widget
+   *     must have groups of its own: 403 for one that follows a screen;
+   *   - its groups are its own list when it has one, else the output's;
    *   - 403 unless the message went to Everyone or to one of those groups. The
    *     message's own `to` decides.
    * `from` is the output's name, else the name of the view holding the widget.
@@ -403,8 +409,21 @@ export class MessagesService {
       const widget = findMessagesWidget(state.views ?? [], objectId);
       if (!widget) return refuse(404, "no Messages widget has that id");
 
-      const output = outputId === null ? undefined : (state.outputs ?? []).find((o) => o.id === outputId);
-      if (output && output.mode !== "panel") return refuse(403, `${output.name} is a display, and a display cannot reply`);
+      // The screen it says it is on, if it says. The app has no logins, so this is
+      // not authentication: it keeps an honest client honest, because a forged
+      // request has to name a real panel that really draws this widget.
+      let output: Output | undefined;
+      if (outputId !== null) {
+        output = (state.outputs ?? []).find((o) => o.id === outputId);
+        if (!output) return refuse(403, "that screen does not draw that widget");
+        if (output.mode !== "panel") return refuse(403, `${output.name} is a display, and a display cannot reply`);
+        if (!viewsDrawnBy(output, state.views ?? [], state.outputs ?? []).has(widget.viewId)) {
+          return refuse(403, "that screen does not draw that widget");
+        }
+      } else if (!widget.groups) {
+        // A widget that follows its screen's groups has no screen to follow here.
+        return refuse(403, "that widget follows a screen's groups, and no screen was named");
+      }
       const groups = widgetGroups(widget.groups, output ? (output.groups ?? []) : null) ?? [];
       if (!messageReaches(message.to, groups)) {
         return refuse(403, "that widget does not follow a group this message was sent to");

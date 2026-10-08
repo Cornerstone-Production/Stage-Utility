@@ -246,9 +246,11 @@ Kill the server by port when done.
 **As built, where it differs from the text below.**
 - The reply route takes `{ text, objectId, outputId? }` as written here; the spec's
   `viewId` is not used, because the widget is found by its object id across every
-  view. An output that is not in panel mode is refused (403) whatever its groups,
-  which is the spec's "a wall display never replies" enforced on the server. Replies
-  answer 201 with the reply.
+  view. A reply that names a screen must name a panel-mode one that draws the widget
+  (its routed view, or one it embeds by view-embed or screen-embed); a reply that
+  names none must come from a widget with groups of its own. That keeps honest
+  clients honest; it is not authentication, as the app has no logins. Replies answer
+  201 with the reply.
 - A Messages widget's `groups` is `null`/absent to follow the screen, and a list,
   even an empty one, to override it (an empty list follows nothing, so only
   Everyone's messages). The inspector's choice is "Follow screen" / "Own groups".

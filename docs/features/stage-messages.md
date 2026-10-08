@@ -204,17 +204,24 @@ only to messages sent to Stage or Booth.** (naming the groups it follows, or
 Everyone). Controls are live on a screen in **panel** mode and on a console in the
 operator app, never on a wall display, which draws no buttons.
 
-A reply is sent with `POST /api/messages/:id/replies`, and the server decides
-whether it may be, from the stored layouts and screens rather than anything the
-browser claims:
+A reply is sent with `POST /api/messages/:id/replies`, and the server checks it
+against the stored layouts and screens:
 
 - the widget the reply is pressed on is found by its id in every view's layout, and
   must be a Messages widget;
-- its groups are its own list when it has one, else the groups of the screen it is
-  drawn on;
-- the message must have gone to Everyone or to one of those groups, otherwise the
-  answer is `403` and nothing is recorded;
-- a screen that is not in panel mode is refused outright.
+- a reply that names a screen must name one in **panel** mode that actually draws
+  that widget, in the view it is routed to or one that view embeds. A display never
+  replies, and a screen that does not draw the widget cannot answer for it;
+- a reply that names no screen (a console in the app) must come from a widget with
+  groups of its own, because a widget that follows its screen has no screen to
+  follow;
+- the widget's groups are its own list when it has one, else the screen's, and the
+  message must have gone to Everyone or to one of them, otherwise the answer is
+  `403` and nothing is recorded.
+
+This keeps honest clients honest. It is not authentication: the app has no logins,
+so anyone who knows a real panel and a Messages widget that panel draws can still
+send a reply that is signed as that panel.
 
 The reply is signed with the screen's name, or the name of the view holding the
 widget when it is not on a screen, and appears under the message in the composer's
