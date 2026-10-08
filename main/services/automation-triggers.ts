@@ -940,6 +940,8 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
         key: "timeTypes",
         label: "Applies to",
         type: "multi-enum",
+        // Blank is both: didFire() reads it that way.
+        optional: true,
         options: [
           { value: "rehearsal", label: "Rehearsal" },
           { value: "service", label: "Service" },

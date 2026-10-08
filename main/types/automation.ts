@@ -25,6 +25,10 @@ export interface ParamDef {
     | "propresenter-instances"
     | "propresenter-macros";
   optional?: boolean;
+  /** A "multi-enum" choice that stands for everything and cannot be picked beside
+   *  another ("Everyone" next to a group). Saving both is a Needs setup issue
+   *  carrying `message`. */
+  exclusiveChoice?: { value: string; message: string };
   help?: string;
   /** Column headings for a "key-value" param. */
   keyLabel?: string;

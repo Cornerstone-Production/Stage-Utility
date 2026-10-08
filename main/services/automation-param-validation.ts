@@ -18,13 +18,13 @@
 // `undefined` in storage while the field displayed a default, so a required
 // threshold could be saved unset and never fire.
 //
-// multi-enum is deliberately NEVER "required" here, regardless of `optional`. Every
-// multi-enum in the registry today (`time.day-of-week`'s `days`,
-// `pco.before-plan-time`'s `timeTypes`) treats a blank selection as "matches
-// everything" — see the "Unconfigured means both" comment on the latter — so
-// flagging a blank one as needing setup would mark every rule using the intended
-// default as broken. Only a POPULATED-but-invalid multi-enum value is checked
-// against a static option list.
+// A multi-enum follows `optional` like every other field: required unless it says
+// otherwise. The two that treat a blank selection as "matches everything"
+// (`time.day-of-week`'s `days`, `pco.before-plan-time`'s `timeTypes` — see the
+// "Unconfigured means both" comment on the latter) are declared `optional`, so a
+// rule using that intended default is not marked as needing setup. A multi-enum
+// that must name something (a stage message's groups) leaves it off. A POPULATED
+// value is checked against a static option list, and against `exclusiveChoice`.
 
 import type { ParamDef } from "../types/automation.js";
 
@@ -171,11 +171,19 @@ export function validateParams(specs: ParamDef[], params: Record<string, unknown
       }
 
       case "multi-enum": {
-        // Never "required" — see the module doc.
-        const raw = String(value ?? "").trim();
-        if (!raw || spec.optionsFrom) break;
+        const picked = choiceList(value);
+        if (picked.length === 0) {
+          if (!spec.optional) issues.push({ key: spec.key, message: "Pick at least one" });
+          break;
+        }
+        // One choice that stands for everything, and so cannot be ticked beside
+        // the others ("Everyone" next to a group).
+        if (spec.exclusiveChoice && picked.length > 1 && picked.includes(spec.exclusiveChoice.value)) {
+          issues.push({ key: spec.key, message: spec.exclusiveChoice.message });
+          break;
+        }
+        if (spec.optionsFrom) break;
         if (spec.options && spec.options.length > 0) {
-          const picked = choiceList(raw);
           const bad = picked.some((v) => !spec.options!.some((o) => o.value === v));
           if (bad) issues.push({ key: spec.key, message: `Pick a ${spec.label.toLowerCase()}` });
         }
