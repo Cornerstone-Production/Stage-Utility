@@ -338,6 +338,16 @@ class VideoService {
    * `lastLoggedStruggling` still says true — is what tells logPlaybackFlips()
    * a clear it never announced happened in between. */
   private readonly lastLoggedEpisodeId = new Map<string, number | null>();
+  /**
+   * The lagging episode (playbackHealth.laggingEpisodeIdFor()) the pair's last
+   * log line announced as ON — absent or null when the last word was "no
+   * longer lagging", or nothing yet. One map instead of two because lagging
+   * has no separate "was it on" flag to keep beside the id: the id IS
+   * whether it is on, and a different id than before is a clear-and-re-flag
+   * the same call never saw (see logPlaybackFlips for why that happens).
+   * Pruned beside the two maps above, in the same two places.
+   */
+  private readonly lastLoggedLaggingEpisodeId = new Map<string, number | null>();
 
   // ── The relay, attached when video is switched on ───────────────────────
   private relay: VideoRelay | null = null;
@@ -1885,6 +1895,9 @@ class VideoService {
     for (const key of this.lastLoggedEpisodeId.keys()) {
       if (key.endsWith(`\u0000${id}`)) this.lastLoggedEpisodeId.delete(key);
     }
+    for (const key of this.lastLoggedLaggingEpisodeId.keys()) {
+      if (key.endsWith(`\u0000${id}`)) this.lastLoggedLaggingEpisodeId.delete(key);
+    }
     // forgetFeed() just changed what playbackHealth itself would say, but
     // `cachedScreens` — what state() actually reports — only refreshes on a
     // heartbeat's own change or the expiry timer; neither has any reason to
@@ -2368,6 +2381,9 @@ class VideoService {
     for (const key of this.lastLoggedEpisodeId.keys()) {
       if (!afterKeys.has(key)) this.lastLoggedEpisodeId.delete(key);
     }
+    for (const key of this.lastLoggedLaggingEpisodeId.keys()) {
+      if (!afterKeys.has(key)) this.lastLoggedLaggingEpisodeId.delete(key);
+    }
 
     const outputs = stageController.getOutputs();
     const screenName = (id: string) => outputs.find((o) => o.id === id)?.name ?? id;
@@ -2405,8 +2421,37 @@ class VideoService {
       }
       this.lastLoggedStruggling.set(key, health.struggling);
       this.lastLoggedEpisodeId.set(key, currentEpisodeId);
+
+      // Lagging, once per episode: the line goes out when the episode id
+      // differs from the one last announced, and a clear when it goes back
+      // to none. A healthy WebRTC pair (both figures well under the line)
+      // is neither, and logs nothing at all.
+      const lagId = this.playbackHealth.laggingEpisodeIdFor(health.outputId, health.feedId);
+      const lastLagId = this.lastLoggedLaggingEpisodeId.get(key) ?? null;
+      if (lagId !== lastLagId) {
+        if (lastLagId !== null) console.log(`[video] ${scrub(screenName(health.outputId))} is no longer lagging on ${scrub(feedName(health.feedId))}`);
+        if (lagId !== null) {
+          // `laggingEpisode` is non-null exactly when `lagging` is, and the
+          // id is non-null exactly then too; the fallback is defensive only.
+          const peak = health.laggingEpisode ?? { jitterBufferMs: health.jitterBufferMsInWindow, behindNewestMs: health.behindNewestMsInWindow };
+          const [ms, what] = laggingFigure(peak);
+          console.log(
+            `[video] ${scrub(screenName(health.outputId))} is lagging on ${scrub(feedName(health.feedId))}: ` +
+              `holding ${scrub((ms / 1000).toFixed(1))} s in its own buffer (${scrub(what)}); the delay is on this screen, not the relay or the encoder`,
+          );
+        }
+      }
+      this.lastLoggedLaggingEpisodeId.set(key, lagId);
     }
   }
+}
+
+/** The worse of a lagging episode's two figures, and which one it is — what the
+ *  `[video]` lagging line names. */
+function laggingFigure(peak: { jitterBufferMs: number | null; behindNewestMs: number | null }): [ms: number, what: string] {
+  const jitter = peak.jitterBufferMs ?? -1;
+  const behind = peak.behindNewestMs ?? -1;
+  return behind > jitter ? [behind, "behind the newest frame"] : [jitter, "jitter buffer"];
 }
 
 export const videoService = new VideoService();

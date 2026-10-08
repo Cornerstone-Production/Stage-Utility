@@ -570,6 +570,12 @@ from the server:
   numbers cannot be saved, once per outage for each screen, and `recording
   <screen>'s playback reports is working again` once they have saved again
   for two minutes. The heartbeat itself still counts either way.
+- A screen lagging on a feed — `is lagging on <feed>: holding N.N s in its
+  own buffer`, naming whether the worse figure is the jitter buffer or the
+  distance behind the newest frame — the moment either figure crosses 1000 ms,
+  and `is no longer lagging on <feed>` once the hold clears; each once per
+  episode, not repeated while it stays true or as the peak rises. A WebRTC feed
+  that stays under the line logs nothing, however many reports it sends.
 
 The relay's own error text can echo a feed's address back, so before any of
 it reaches `/log`, the status line or an API error, a username and password

@@ -288,3 +288,161 @@ test("a screen name and a feed name carrying a control character are scrubbed be
 // video-service-screens-cache.test.ts for what replaced this: the poll must
 // not broadcast or fire the relay status listener on its own, which is the
 // bug this used to be papering over one symptom of.
+
+// ── lagging: the screen holding the delay in its own browser ───────────────
+
+const LAG_SUFFIX = "the delay is on this screen, not the relay or the encoder";
+
+test("logs the lagging and no-longer-lagging flips, once per episode, naming the worst figure", async (t: TestContext) => {
+  const id = await addRelayFeed("Lag wall");
+  const lines = captureConsole(t, "log");
+  try {
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 1400, behindNewestMs: 300 })], 0);
+    await settle();
+    // Still lagging, and worse: not a second line.
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 2300, behindNewestMs: 200 })], 10_000);
+    await settle();
+    // Clean heartbeats at the real cadence; the sixth lands exactly 60 s after
+    // the last report over the line and clears it.
+    for (let i = 2; i <= 7; i++) {
+      videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 30, behindNewestMs: 34 })], i * 10_000);
+      await settle();
+    }
+    // Still smooth: no repeat of the clear.
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 30, behindNewestMs: 34 })], 80_000);
+    await settle();
+
+    assert.deepEqual(
+      lines.filter((l) => l.includes("Lag wall")),
+      [
+        `[video] ${OUTPUT_NAME} is lagging on Lag wall: holding 1.4 s in its own buffer (jitter buffer); ${LAG_SUFFIX}`,
+        `[video] ${OUTPUT_NAME} is no longer lagging on Lag wall`,
+      ],
+    );
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+test("the lagging line names behind-newest when that is the worse figure", async (t: TestContext) => {
+  const id = await addRelayFeed("Behind wall");
+  const lines = captureConsole(t, "log");
+  try {
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 400, behindNewestMs: 3200 })], 0);
+    await settle();
+    assert.deepEqual(
+      lines.filter((l) => l.includes("Behind wall")),
+      [`[video] ${OUTPUT_NAME} is lagging on Behind wall: holding 3.2 s in its own buffer (behind the newest frame); ${LAG_SUFFIX}`],
+    );
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+test("a healthy WebRTC feed, both figures well under the line, logs nothing at all", async (t: TestContext) => {
+  const id = await addRelayFeed("Healthy wall");
+  const lines = captureConsole(t, "log", "warn");
+  try {
+    for (let i = 0; i < 8; i++) {
+      videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, via: "webrtc", jitterBufferMs: 12 + i, behindNewestMs: 34 })], i * 10_000);
+      await settle();
+    }
+    // Over the whole minute, and past the point a hold would have cleared.
+    assert.deepEqual(lines.filter((l) => l.includes("Healthy wall") || l.includes("lagging")), [], "healthy is not news");
+    const pair = (await videoService.state()).screens.find((s) => s.feedId === id);
+    assert.equal(pair?.lagging, false);
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+test("a heartbeat whose own sweep clears the lagging flag and whose own report re-flags it logs the clear and the new episode's line, in that order", async (t: TestContext) => {
+  const id = await addRelayFeed("Relag wall");
+  try {
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 1500 })], 0);
+    await settle();
+    const lines = captureConsole(t, "log");
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 1800 })], CLEAR_AFTER_MS);
+    await settle();
+    assert.deepEqual(lines, [
+      `[video] ${OUTPUT_NAME} is no longer lagging on Relag wall`,
+      `[video] ${OUTPUT_NAME} is lagging on Relag wall: holding 1.8 s in its own buffer (jitter buffer); ${LAG_SUFFIX}`,
+    ]);
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+test("lagging and struggling are separate lines: a pair over both lines logs each once", async (t: TestContext) => {
+  const id = await addRelayFeed("Both wall");
+  const lines = captureConsole(t, "log");
+  try {
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, decoded: 1000, dropped: 51, jitterBufferMs: 1500 })], 0);
+    await settle();
+    assert.deepEqual(
+      lines.filter((l) => l.includes("Both wall")),
+      [
+        `[video] ${OUTPUT_NAME} is struggling with Both wall: dropped 51 frames for 1000 decoded, 0 stalls in the last minute`,
+        `[video] ${OUTPUT_NAME} is lagging on Both wall: holding 1.5 s in its own buffer (jitter buffer); ${LAG_SUFFIX}`,
+      ],
+    );
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+test("a lagging screen is exposed in video state with its figures and episode, and publishes only on a flip or a rising peak", async (t: TestContext) => {
+  const id = await addRelayFeed("Exposed wall");
+  captureConsole(t, "log");
+  try {
+    const before = frames.length;
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 1500, behindNewestMs: 200 })], Date.now());
+    await settleUntil(() => frames.length >= before + 1, "the lagging flip to publish");
+    await settle();
+    const pair = (await videoService.state()).screens.find((s) => s.feedId === id)!;
+    assert.equal(pair.lagging, true);
+    assert.equal(pair.jitterBufferMsInWindow, 1500);
+    assert.equal(pair.behindNewestMsInWindow, 200);
+    assert.deepEqual(pair.laggingEpisode, { jitterBufferMs: 1500, behindNewestMs: 200 });
+
+    const afterFlip = frames.length;
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 1100, behindNewestMs: 100 })], Date.now() + 1);
+    await settle();
+    assert.equal(frames.length, afterFlip, "a milder report inside the same episode changes nothing to publish");
+
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 4000, behindNewestMs: 100 })], Date.now() + 2);
+    await settleUntil(() => frames.length >= afterFlip + 1, "the rising peak to publish");
+    assert.equal((await videoService.state()).screens.find((s) => s.feedId === id)?.laggingEpisode?.jitterBufferMs, 4000);
+  } finally {
+    await videoService.removeFeed(id);
+  }
+});
+
+test("removeFeed and a departed pair's own cleanup both forget the lagging-episode bookkeeping", async (t: TestContext) => {
+  const removed = await addRelayFeed("Removed lag");
+  const departed = await addRelayFeed("Departed lag");
+  captureConsole(t, "log");
+  const ids = (videoService as unknown as { lastLoggedLaggingEpisodeId: Map<string, number | null> }).lastLoggedLaggingEpisodeId;
+  try {
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: removed, jitterBufferMs: 1500 })], 0);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: departed, jitterBufferMs: 1500 })], 0);
+    await settle();
+    assert.equal(ids.get(`${OUTPUT_ID}\u0000${removed}`) != null, true, "sanity: a lagging line was logged for the removed feed");
+    assert.equal(ids.get(`${OUTPUT_ID}\u0000${departed}`) != null, true, "sanity: and for the departed one");
+
+    await videoService.removeFeed(removed);
+    assert.equal(ids.has(`${OUTPUT_ID}\u0000${removed}`), false, "removeFeed must forget the removed feed's lagging episode");
+
+    const other = await addRelayFeed("Unrelated lag");
+    try {
+      videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: other })], WINDOW_MS);
+      await settle();
+      assert.equal(ids.has(`${OUTPUT_ID}\u0000${departed}`), false, "a pair that ages out of playbackHealth must also forget its lagging episode");
+    } finally {
+      await videoService.removeFeed(other);
+    }
+  } finally {
+    await videoService.removeFeed(removed);
+    await videoService.removeFeed(departed);
+  }
+});
