@@ -5,9 +5,16 @@
 //   GET  /api/messages                   the messages:state snapshot
 //   POST /api/messages                   send: { to, text, alert?, from? }
 //   POST /api/messages/:id/clear-alert   end a running alert early
+//   POST /api/messages/:id/replies       answer: { text, objectId, outputId? }; the
+//                                        widget named by objectId decides who may
 //   GET  /api/messaging                  groups, quick messages, quick replies
 //   PUT  /api/messaging                  replace them; carries the `version` it was
 //                                        built from
+//
+// A reply is 403 when the widget it comes from does not follow a group the message
+// went to (or the output is not a panel), and 404 for a message or a Messages
+// widget that is not there; the server works that out from the stored layouts, not
+// from anything the browser claims.
 //
 // A rule a body breaks is a 400 that says which (MessageRefused). A PUT built from
 // a config another window has since replaced is a 409 and changes nothing
@@ -90,6 +97,28 @@ export async function messagesRoutes(c: RouteCtx): Promise<void> {
       } else {
         json(res, messagesService.state());
       }
+    } catch (err) {
+      answerFailure(res, err);
+    }
+    return;
+  }
+
+  const replyMatch = pathname.match(/^\/api\/messages\/([^/]+)\/replies$/);
+  if (method === "POST" && replyMatch) {
+    const id = replyMatch[1];
+    if (!MESSAGE_ID.test(id)) {
+      error(res, "that is not a message id");
+      return;
+    }
+    const body = objectBody(await readBodyOrEmpty(req));
+    if (!body) {
+      error(res, "body must be { text, objectId, outputId? }");
+      return;
+    }
+    try {
+      const result = await messagesService.reply(id, { text: body.text, objectId: body.objectId, outputId: body.outputId });
+      if (result.ok) json(res, result.reply, 201);
+      else error(res, result.reason, result.status);
     } catch (err) {
       answerFailure(res, err);
     }

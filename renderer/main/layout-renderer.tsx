@@ -1642,10 +1642,13 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "messages":
       return (
         <MessagesObject
+          objectId={o.id}
           config={c}
           state={ctx.messages}
           known={ctx.messagesKnown}
           screenGroups={ctx.screenGroups}
+          outputId={ctx.outputId}
+          interactive={ctx.interactive}
           editing={ctx.editing === true}
           now={ctx.now}
           ts={ts}

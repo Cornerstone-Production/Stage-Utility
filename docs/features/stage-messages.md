@@ -153,3 +153,31 @@ Which groups it follows is its **Groups** setting in the layout editor's inspect
 
 A Screens-card preview is a picture of a screen, not a screen, so a widget in one
 follows no group.
+
+### Replies, and who may answer
+
+Where controls are live, the widget also lets a console answer. Under the newest
+message it shows is the line **Answering: <text>** and the quick replies as
+buttons; with nothing to answer it says **Nothing to answer. This console can reply
+only to messages sent to Stage or Booth.** (naming the groups it follows, or
+Everyone). Controls are live on a screen in **panel** mode and on a console in the
+operator app, never on a wall display, which draws no buttons.
+
+A reply is sent with `POST /api/messages/:id/replies`, and the server decides
+whether it may be, from the stored layouts and screens rather than anything the
+browser claims:
+
+- the widget the reply is pressed on is found by its id in every view's layout, and
+  must be a Messages widget;
+- its groups are its own list when it has one, else the groups of the screen it is
+  drawn on;
+- the message must have gone to Everyone or to one of those groups, otherwise the
+  answer is `403` and nothing is recorded;
+- a screen that is not in panel mode is refused outright.
+
+The reply is signed with the screen's name, or the name of the view holding the
+widget when it is not on a screen, and appears under the message in the composer's
+thread and in green under it on every Messages widget showing it. A message cleared
+at midnight cannot be answered. Each reply, and each refusal with its reason, is
+logged as `[messages]`; a console that could not send one says so and logs it from
+the browser.

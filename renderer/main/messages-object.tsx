@@ -14,12 +14,23 @@
 // screen, before any group is chosen — shows nothing, and says to choose in the
 // editor.
 //
+// ANSWERING. Where controls are live (a panel, a console in the app) the newest
+// message shown gets the quick replies as buttons, under "Answering: <text>". A
+// wall display draws none. The server decides whether the press is allowed — from
+// the widget's stored groups and the output's, not from anything sent here — so
+// the buttons are only ever offered for a message this widget follows, and a
+// refusal is told to the operator rather than swallowed.
+//
 // AGE is counted against the SERVER's clock (`now`), the one every widget draws
 // from: a wall Pi's own is as wrong as the last time anyone set it.
 
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 
+import { errorMessage } from "@main/services/errors";
 import { messageReaches, widgetGroups, type MessageGroup, type MessagesState, type StageMessage } from "@main/types/messages";
+import { toast } from "../components/ui";
+import { invoke } from "../lib/api";
+import { logToServer } from "../lib/client-log";
 
 /** How many messages the widget draws. */
 export const MESSAGES_SHOWN = 3;
@@ -50,12 +61,18 @@ export function groupNames(all: readonly MessageGroup[], ids: readonly string[])
 }
 
 export interface MessagesObjectProps {
+  /** This widget's own id: the server finds it in the stored layouts to decide who it answers for. */
+  objectId: string;
   config: { groups?: string[] | null };
   /** The channel's value, and whether it has answered — see useMessagesStatus. */
   state: MessagesState | null;
   known: boolean;
   /** The groups of the screen this is drawn on; null when it is not on a screen. */
   screenGroups: readonly string[] | null;
+  /** The screen this is drawn on, which the server reads the output's groups and mode from. */
+  outputId: string | null;
+  /** Controls are live here: a panel or a console in the app, never a wall. */
+  interactive: boolean;
   /** The layout editor's own canvas. */
   editing: boolean;
   /** The server's clock, ms. */
@@ -64,9 +81,29 @@ export interface MessagesObjectProps {
 }
 
 /** The eyebrow, the feed and the quiet states share one card body. */
-export function MessagesObject({ config, state, known, screenGroups, editing, now, ts }: MessagesObjectProps) {
+export function MessagesObject({ objectId, config, state, known, screenGroups, outputId, interactive, editing, now, ts }: MessagesObjectProps) {
   const groups = widgetGroups(config.groups, screenGroups);
   const shown = groups && state ? shownMessages(state, groups) : null;
+  // One answer at a time: pressing a second button while the first is in flight
+  // would send two replies for one tap on a touch panel that registered twice.
+  const [sending, setSending] = useState(false);
+  const canAnswer = interactive && groups !== null && known && state !== null;
+
+  async function answer(target: StageMessage, text: string) {
+    if (sending) return;
+    setSending(true);
+    try {
+      await invoke("messages:reply", { id: target.id, text, objectId, outputId });
+    } catch (e) {
+      // Told, and logged: a reply that did not go must not read as sent. The
+      // thread shows replies only once the server has them, so a failure leaves
+      // nothing on screen to mistake for success.
+      toast.error(`Could not send that reply: ${errorMessage(e)}`);
+      logToServer("messages", `could not send a reply to ${target.id}: ${errorMessage(e)}`);
+    } finally {
+      setSending(false);
+    }
+  }
 
   return (
     <div
@@ -107,6 +144,15 @@ export function MessagesObject({ config, state, known, screenGroups, editing, no
       ) : (
         <Quiet>No messages for this screen&apos;s groups</Quiet>
       )}
+      {canAnswer && state && groups && (
+        <Replies
+          target={shown?.[0] ?? null}
+          replies={state.quickReplies}
+          names={groupNames(state.groups, groups)}
+          sending={sending}
+          onAnswer={answer}
+        />
+      )}
     </div>
   );
 }
@@ -132,6 +178,64 @@ function Message({ m, now, newest }: { m: StageMessage; now: number; newest: boo
           {reply.from}: {reply.text}
         </span>
       )}
+    </div>
+  );
+}
+
+/**
+ * The quick replies under the newest message, or what this console can answer
+ * when there is nothing to answer. The mockup draws the buttons as raised pills
+ * and the line above them faint.
+ */
+function Replies({
+  target,
+  replies,
+  names,
+  sending,
+  onAnswer,
+}: {
+  target: StageMessage | null;
+  replies: readonly string[];
+  names: readonly string[];
+  sending: boolean;
+  onAnswer: (target: StageMessage, text: string) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.46em", marginTop: "auto", paddingTop: "0.46em" }}>
+      <div className="text-fg-faint" style={{ width: "100%", fontSize: "0.58em" }}>
+        {target
+          ? `Answering: ${target.text}`
+          : `Nothing to answer. This console can reply only to messages sent to ${names.length > 0 ? names.join(" or ") : "Everyone"}.`}
+      </div>
+      {target && replies.length === 0 && (
+        <div className="text-fg-faint" style={{ width: "100%", fontSize: "0.58em" }}>
+          No quick replies are set up. Add some in Settings, Messages.
+        </div>
+      )}
+      {target &&
+        replies.map((r) => (
+          <button
+            key={r}
+            type="button"
+            disabled={sending}
+            onClick={() => onAnswer(target, r)}
+            style={{
+              font: "inherit",
+              fontSize: "0.81em",
+              fontWeight: 600,
+              color: "inherit",
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.09)",
+              borderRadius: "0.38em",
+              padding: "0.38em 0.77em",
+              cursor: sending ? "default" : "pointer",
+              opacity: sending ? 0.6 : 1,
+              touchAction: "manipulation",
+            }}
+          >
+            {r}
+          </button>
+        ))}
     </div>
   );
 }

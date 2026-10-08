@@ -35,7 +35,12 @@ import {
   MESSAGE_MAX,
   MESSAGES_CAP,
   MESSAGES_CHANNEL,
+  QUICK_REPLY_MAX,
+  WIRE_ID,
+  messageReaches,
+  widgetGroups,
   type MessageGroup,
+  type MessageReply,
   type MessagesState,
   type MessagingConfig,
   type StageMessage,
@@ -49,6 +54,7 @@ import { plural } from "./plural.js";
 import { scrub, scrubError } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 import { Ticker } from "./ticker.js";
+import { walkLayoutObjects } from "./view-refs.js";
 import { WriteQueue } from "./write-queue.js";
 
 /** How often the date is compared against the day the thread was last cleared. */
@@ -73,6 +79,24 @@ export interface StartFailure {
   what: string;
   error: Error;
 }
+
+export interface ReplyInput {
+  text: unknown;
+  /** The Messages widget the answer is pressed on. */
+  objectId: unknown;
+  /** The screen that widget is drawn on, when it is drawn on one. */
+  outputId?: unknown;
+}
+
+/**
+ * What a reply came to. A refusal the caller can act on is returned, with the
+ * status a route answers it, rather than thrown: it is not a failure of ours. (A
+ * body that breaks a rule still throws MessageRefused, as a send does, and a
+ * write that failed still throws.)
+ */
+export type ReplyResult =
+  | { ok: true; reply: MessageReply }
+  | { ok: false; status: 403 | 404; reason: string };
 
 export interface SendInput {
   to: unknown;
@@ -125,6 +149,30 @@ export function checkSend(
     throw new MessageRefused("alert must be true or false");
   }
   return { to, text, alert: input.alert === true, from: checkedFrom(input.from) };
+}
+
+/** A Messages widget as the layouts hold it: the view it is in and its own groups. */
+interface FoundWidget {
+  viewName: string;
+  groups: readonly string[] | null | undefined;
+}
+
+/**
+ * The widget with this id, across every view's layout, containers included. The
+ * id is a layout object's, unique across layouts; the first found wins. `"other"`
+ * is an id that names a widget of some other type, which is not an answer to
+ * anything, and null is no widget at all.
+ */
+function findMessagesWidget(views: readonly View[], objectId: string): FoundWidget | "other" | null {
+  let found: FoundWidget | "other" | null = null;
+  for (const view of views) {
+    walkLayoutObjects(view.layout?.objects ?? [], (o) => {
+      if (found !== null || o.id !== objectId) return;
+      found = o.config.type === "messages" ? { viewName: view.name, groups: o.config.groups } : "other";
+    });
+    if (found !== null) break;
+  }
+  return found;
 }
 
 /** Is this message's alert still holding the screens at `now`? */
@@ -299,6 +347,81 @@ export class MessagesService {
       console.log(`[messages] alert ${scrub(found.id)} cleared by ${scrub(by)}`);
       this.publish();
       return "cleared";
+    });
+  }
+
+  /**
+   * Answer a message from a Messages widget.
+   *
+   * WHO MAY ANSWER is decided here, from the stored layouts and outputs, never
+   * from what the browser says it is:
+   *   - the widget is found by `objectId` across every view's layout and must be
+   *     a Messages widget: 404 otherwise;
+   *   - its groups are its own list when it has one, else the groups of the
+   *     output `outputId` names, else none (see widgetGroups);
+   *   - an output that is not in panel mode never replies, because a wall is
+   *     read-only and draws no buttons: 403;
+   *   - 403 unless the message went to Everyone or to one of those groups. The
+   *     message's own `to` decides.
+   * `from` is the output's name, else the name of the view holding the widget.
+   *
+   * A message that is not there is 404 too: an id nobody issued, or one cleared
+   * at midnight (the day is rolled first, so a reply cannot land on a thread the
+   * nightly check had not yet swept).
+   */
+  async reply(messageId: string, input: ReplyInput): Promise<ReplyResult> {
+    await this.ensureLoaded();
+    const refuse = (status: 403 | 404, reason: string): ReplyResult => {
+      console.warn(`[messages] reply to ${scrub(messageId)} refused: ${scrub(reason)}`);
+      return { ok: false, status, reason };
+    };
+    let text: string;
+    let objectId: string;
+    let outputId: string | null = null;
+    try {
+      text = checkedText(input.text, "a reply", QUICK_REPLY_MAX);
+      if (typeof input.objectId !== "string" || !WIRE_ID.test(input.objectId)) {
+        throw new MessageRefused("objectId must be the id of the Messages widget the reply is pressed on");
+      }
+      objectId = input.objectId;
+      if (input.outputId !== undefined && input.outputId !== null) {
+        if (typeof input.outputId !== "string" || !WIRE_ID.test(input.outputId)) {
+          throw new MessageRefused("outputId must be the id of a screen");
+        }
+        outputId = input.outputId;
+      }
+    } catch (err) {
+      if (err instanceof MessageRefused) console.warn(`[messages] reply refused: ${scrub(err.message)}`);
+      throw err;
+    }
+
+    return this.writes.enqueue(async (): Promise<ReplyResult> => {
+      await this.rollDayLocked();
+      const message = this.messages.find((m) => m.id === messageId);
+      if (!message) return refuse(404, "no message has that id (it may have been cleared at midnight)");
+
+      const state = stageController.getState();
+      const widget = findMessagesWidget(state.views ?? [], objectId);
+      if (widget === null || widget === "other") return refuse(404, "no Messages widget has that id");
+
+      const output = outputId === null ? undefined : new Map((state.outputs ?? []).map((o) => [o.id, o])).get(outputId);
+      if (output && output.mode !== "panel") return refuse(403, `${output.name} is a display, and a display cannot reply`);
+      const groups = widgetGroups(widget.groups, output ? (output.groups ?? []) : null) ?? [];
+      if (!messageReaches(message.to, groups)) {
+        return refuse(403, "that widget does not follow a group this message was sent to");
+      }
+
+      const reply: MessageReply = {
+        id: randomBytes(8).toString("hex"),
+        at: Date.now(),
+        from: (output?.name ?? widget.viewName).slice(0, FROM_MAX),
+        text,
+      };
+      const next = this.messages.map((m) => (m.id === messageId ? { ...m, replies: [...m.replies, reply] } : m));
+      await this.persist(this.lastClearedDate, next);
+      console.log(`[messages] reply to ${scrub(messageId)} from ${scrub(reply.from)}: "${scrub(reply.text, LOG_TEXT_MAX)}"`);
+      this.publish();
+      return { ok: true, reply };
     });
   }
 

@@ -446,6 +446,7 @@ export type IpcChannel =
   | "layoutTemplates:save"
   | "layoutTemplates:update"
   | "messages:get"
+  | "messages:reply"
   | "messaging:get"
   | "messaging:set"
   | "notes:set"
@@ -1569,6 +1570,12 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "messages:get":
       return apiFetch<T>("/api/messages");
+    case "messages:reply":
+      return post<T>(`/api/messages/${encodeURIComponent(String(p.id))}/replies`, {
+        text: p.text,
+        objectId: p.objectId,
+        outputId: p.outputId,
+      });
     case "messaging:get":
       return apiFetch<T>("/api/messaging");
     case "messaging:set":

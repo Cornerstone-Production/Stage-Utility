@@ -524,6 +524,11 @@ app to have any, since a console is not a screen. A widget with no groups says
 **Choose groups for this widget** in the layout editor and nothing on the console.
 Before the server has answered it draws only its heading, never "No messages".
 
+On a panel or a console in the app, **Messages** also draws the quick replies as
+buttons under the newest message it shows, and the server checks the press against
+the widget's groups ([Replies](../features/stage-messages.md#replies-and-who-may-answer)).
+A wall display draws no buttons.
+
 ## Layout
 
 | Widget | What it is |

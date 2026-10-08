@@ -14,7 +14,21 @@ import { EVERYONE, type MessagesState, type StageMessage } from "@main/types/mes
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup } = await import("@testing-library/react");
+/** Every request the widget makes, and how the reply route should answer. */
+const requests: { url: string; method: string; body: unknown }[] = [];
+let replyStatus = 201;
+(globalThis as unknown as { fetch: unknown }).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+  requests.push({ url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+  if (url.includes("/replies")) {
+    const ok = replyStatus < 400;
+    const body = ok ? { id: "r" } : { error: "that widget does not follow a group this message was sent to" };
+    return { ok, status: replyStatus, statusText: "", json: async () => body, text: async () => JSON.stringify(body) };
+  }
+  return { ok: true, status: 200, statusText: "", json: async () => ({}), text: async () => "{}" };
+};
+
+const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { MessagesObject, ageLabel, groupNames, shownMessages } = await import("./messages-object.js");
 
@@ -48,25 +62,32 @@ function msg(n: number, to: string[], over: Partial<StageMessage> = {}): StageMe
   };
 }
 
-function stateOf(messages: StageMessage[]): MessagesState {
-  return { rev: 1, groups: GROUPS, quickMessages: [], quickReplies: [], messages, alerts: [] };
+function stateOf(messages: StageMessage[], quickReplies: string[] = ["Copy", "Walking now", "Need 2 min"]): MessagesState {
+  return { rev: 1, groups: GROUPS, quickMessages: [], quickReplies, messages, alerts: [] };
 }
 
-function draw(over: Partial<React.ComponentProps<typeof MessagesObject>> = {}): string {
+function mount(over: Partial<React.ComponentProps<typeof MessagesObject>> = {}): HTMLElement {
   cleanup();
   const { container } = render(
     React.createElement(MessagesObject, {
+      objectId: "w1",
       config: {},
       state: stateOf([]),
       known: true,
       screenGroups: [GREEN],
+      outputId: null,
+      interactive: false,
       editing: false,
       now: NOW,
       ts: {},
       ...over,
     }),
   );
-  return container.textContent ?? "";
+  return container;
+}
+
+function draw(over: Partial<React.ComponentProps<typeof MessagesObject>> = {}): string {
+  return mount(over).textContent ?? "";
 }
 
 describe("which messages it shows", () => {
@@ -156,5 +177,87 @@ describe("a message's line", () => {
 
   test("groupNames keeps the config's order and drops a deleted group", () => {
     assert.deepEqual(groupNames(GROUPS, [BOOTH, GREEN, "g-deadbeef"]), ["Green room", "Booth"]);
+  });
+});
+
+// ---- answering ----------------------------------------------------------------
+
+const buttons = (c: HTMLElement) => [...c.querySelectorAll("button")].map((b) => b.textContent);
+
+describe("answering from a console", () => {
+  const thread = stateOf([
+    msg(1, [GREEN], { text: "an older one for the green room" }),
+    msg(2, [STAGE], { text: "for the stage" }),
+    msg(3, [GREEN], { text: "for the green room" }),
+  ]);
+
+  test("a console offers the quick replies under the newest message it shows", () => {
+    const c = mount({ state: thread, interactive: true, screenGroups: [GREEN] });
+    assert.deepEqual(buttons(c), ["Copy", "Walking now", "Need 2 min"]);
+    assert.ok((c.textContent ?? "").includes("Answering: for the green room"), c.textContent ?? "");
+  });
+
+  test("a wall display shows no buttons and no answering line", () => {
+    const c = mount({ state: thread, interactive: false, screenGroups: [GREEN] });
+    assert.deepEqual(buttons(c), []);
+    assert.ok(!(c.textContent ?? "").includes("Answering"), c.textContent ?? "");
+  });
+
+  test("with nothing to answer it says which groups this console can answer for", () => {
+    // A message to Stage does not reach a console in Green room and Booth.
+    const quiet = mount({ state: stateOf([msg(1, [STAGE])]), interactive: true, screenGroups: [GREEN, BOOTH] });
+    assert.deepEqual(buttons(quiet), []);
+    assert.ok((quiet.textContent ?? "").includes("Nothing to answer. This console can reply only to messages sent to Green room or Booth."), quiet.textContent ?? "");
+  });
+
+  test("a console in no group can answer only Everyone, and says so", () => {
+    const c = mount({ state: stateOf([msg(1, [STAGE])]), interactive: true, screenGroups: [] });
+    assert.ok((c.textContent ?? "").includes("messages sent to Everyone."), c.textContent ?? "");
+  });
+
+  test("no buttons before the channel has answered, or where it follows no group", () => {
+    assert.deepEqual(buttons(mount({ state: null, known: false, interactive: true })), []);
+    assert.deepEqual(buttons(mount({ state: thread, interactive: true, screenGroups: null })), []);
+  });
+
+  test("with no quick replies set up it says where to add them", () => {
+    const c = mount({ state: stateOf([msg(1, [GREEN])], []), interactive: true });
+    assert.deepEqual(buttons(c), []);
+    assert.ok((c.textContent ?? "").includes("No quick replies are set up"), c.textContent ?? "");
+  });
+
+  test("pressing one sends the reply with this widget's id and screen, for the message it answers", async () => {
+    requests.length = 0;
+    replyStatus = 201;
+    const c = mount({ state: thread, interactive: true, screenGroups: [GREEN], objectId: "w-7", outputId: "panel-1" });
+    await act(async () => {
+      fireEvent.click([...c.querySelectorAll("button")].find((b) => b.textContent === "Walking now")!);
+    });
+    const posts = requests.filter((r) => r.method === "POST" && r.url.includes("/replies"));
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].url, `/api/messages/${thread.messages[2].id}/replies`, "answered a message that is not the newest this widget shows");
+    assert.deepEqual(posts[0].body, { text: "Walking now", objectId: "w-7", outputId: "panel-1" });
+  });
+
+  test("a refused reply is told and logged, and the buttons stay for another try", async () => {
+    requests.length = 0;
+    replyStatus = 403;
+    const quiet = console.warn;
+    console.warn = () => {};
+    try {
+      const c = mount({ state: thread, interactive: true, screenGroups: [GREEN] });
+      await act(async () => {
+        fireEvent.click([...c.querySelectorAll("button")].find((b) => b.textContent === "Copy")!);
+      });
+      assert.deepEqual(buttons(c), ["Copy", "Walking now", "Need 2 min"], "the buttons went away after a failed reply");
+      assert.ok((c.querySelector("button") as HTMLButtonElement).disabled === false, "left disabled after the failure");
+    } finally {
+      console.warn = quiet;
+      replyStatus = 201;
+    }
+    const logged = requests.find((r) => r.url === "/api/log/client");
+    assert.ok(logged, "the failure was not sent to /log");
+    assert.deepEqual((logged!.body as { tag: string }).tag, "messages");
+    assert.match((logged!.body as { message: string }).message, /could not send a reply to .*does not follow a group/);
   });
 });
