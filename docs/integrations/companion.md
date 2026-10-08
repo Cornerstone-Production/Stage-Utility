@@ -906,7 +906,8 @@ keeps working.
 **Stage messages** — the day's [stage messages](../features/stage-messages.md),
 sent and read from a button. The module follows the `messages:state` channel, so
 a renamed group, a new message or a running alert reaches a button without
-reconnecting.
+reconnecting. The quick messages are read when the connection starts and again
+whenever the app sends them with a messages update.
 
 | Actions | |
 |---|---|
@@ -1026,13 +1027,14 @@ It listens to eight channels: `server:hello`, `stage:state-changed`, `pco:live`,
 `people:count`, `messages:state`.
 
 REST is used for two things: writes (every action is a POST), and a hydrate on
-connect that fetches ten endpoints in one burst — state, views, outputs, service
-types, presets, wireless channels, PCO live, ProPresenter status, people count
-and `GET /api/messages`.
+connect that fetches seventeen endpoints in one burst — state, views, outputs,
+service types, presets, wireless channels, PCO live, ProPresenter, people count,
+OBS, REAPER, Resi, YouTube, ProVideoPlayer, baptism, `GET /api/messaging` and
+`GET /api/messages` — plus the plan list when a service type is chosen.
 
 **Poll fallback is off by default** (`0` seconds) and should stay that way unless
-an SSE connection cannot be kept open. When enabled it re-runs that ten-endpoint
-hydrate on every tick, so a five-second fallback is 120 requests a minute, most
+an SSE connection cannot be kept open. When enabled it re-runs that
+hydrate on every tick, so a five-second fallback is over 200 requests a minute, most
 of them for configuration that rarely changes.
 
 The module reports those channels to the server. It sends a `cid` on the event
