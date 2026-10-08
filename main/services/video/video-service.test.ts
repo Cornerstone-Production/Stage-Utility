@@ -6,6 +6,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { captureConsole } from "../fixtures/capture-console.js";
+import { within } from "../fixtures/within.js";
 
 // Before any store is constructed: every import below builds its stores
 // against this directory, never the default data folder.
@@ -41,6 +42,18 @@ type RelaySupervisorLike = import("./video-service.js").RelaySupervisorLike;
  */
 const attach = (relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts = DEFAULT_VIDEO_PORTS) =>
   videoService.attachRelay(relay, supervisor, ports);
+
+/** Real wall-clock polling, never affected by a test's own mocked setTimeout
+ *  or Date (performance.now() is neither), for a condition the service offers
+ *  no seam for: a real supervisor's respawn timer, a line through a stream. */
+async function waitUntil(predicate: () => boolean, what: string, timeoutMs = 2000): Promise<void> {
+  const start = performance.now();
+  for (;;) {
+    if (predicate()) return;
+    if (performance.now() - start > timeoutMs) throw new Error(`still waiting after ${timeoutMs} ms for ${what}`);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
 
 // Every test here shares the one videoService, and so its OutageLog: an outage
 // one test leaves open would swallow, as a repeat of the same failure, the
@@ -194,6 +207,19 @@ const notReadyPath = (overrides: Partial<RelayPath> = {}): RelayPath => ({
  *  actually assert on the timer wiring or the in-flight guard itself. */
 const pollOnce = () => (videoService as unknown as { pollOnce(): Promise<void> }).pollOnce();
 
+/** Resolves once the poll holding the in-flight guard has finished. A poll
+ *  the service started itself — a reconcile's, the timer's first read — holds
+ *  it, and a pollOnce() called meanwhile returns at once having polled
+ *  nothing. A stale generation's poll can outlive the guard, but changes
+ *  nothing when it lands. Read off the guard itself because the service has
+ *  no seam for polls yet. */
+const pollsIdle = () =>
+  waitUntil(() => (videoService as unknown as { pollingGeneration: number | null }).pollingGeneration === null, "the poll in flight to finish");
+
+/** The service's own unawaited work — a status change's settle, a log
+ *  line's B-frames mark, every publish — has landed. */
+const backgroundIdle = () => within(videoService.whenBackgroundIdle(), "the video service's background work to land");
+
 /** Restores videoPollDeps to whatever it was before a test overrides it. */
 const restorePollDeps = (saved: typeof videoPollDeps) => Object.assign(videoPollDeps, saved);
 
@@ -253,11 +279,11 @@ test("nothing polls until something is watching; the timer starts, reads immedia
     videoService.subscriptionsChanged();
     assert.equal(everyMs, STATUS_POLL_MS, "the timer must run at STATUS_POLL_MS");
     assert.equal(String(tick === null), "false", "the interval was never armed");
-    await new Promise((r) => setTimeout(r, 30)); // let the immediate first read settle
+    await pollsIdle(); // the immediate first read has finished, so its in-flight guard cannot swallow the tick below
     assert.equal(calls, 1, "the first read must go out at once, not after a full interval");
 
     callTick();
-    await new Promise((r) => setTimeout(r, 30));
+    await pollsIdle();
     assert.equal(calls, 2, "the scheduled tick must read again");
 
     videoPollDeps.inDemand = () => false;
@@ -355,6 +381,7 @@ async function liveThenEdited(
     assert.deepEqual(lines.filter((l) => l.includes(name)), [`[video] ${name} is live (1920×1080 H264)`]);
     answer = typeof afterEdit === "function" ? afterEdit(id) : afterEdit;
     assert.ok((await videoService.updateFeed(id, body)).ok);
+    await pollsIdle(); // the poll the edit's reconcile started
     await pollOnce();
     return lines.filter((l) => l.includes(name));
   } finally {
@@ -400,6 +427,7 @@ test("an import that replaces a feed with one from another address forgets the o
     assert.ok(here, "the preview gave no fingerprint for the feed");
     const result = await videoService.importFeeds({ bundle, choices: { [id]: "replace" }, expect: { [id]: here } });
     assert.ok(result.ok && result.report.replaced.length === 1, JSON.stringify(result));
+    await pollsIdle(); // the poll the import's reconcile started
     await pollOnce();
     assert.deepEqual(
       lines.filter((l) => l.includes("Porch cam")),
@@ -424,15 +452,14 @@ test("a relay restart logs a live feed going offline once, not again as the new 
   videoPollDeps.inDemand = () => false;
   attach(fakeRelay({ status: async () => answer }), supervisor);
   const lines = captureConsole(t, "log");
-  const settleStatus = () => new Promise((r) => setTimeout(r, 20));
   try {
     await pollOnce(); // live
     supervisor.current = { state: "failing", reason: "exit code 1", retryAt: 1, neverStarted: false };
     supervisor.emit("status", supervisor.current); // the relay exits: offline
-    await settleStatus();
+    await backgroundIdle();
     supervisor.current = { state: "running", since: 2 };
     supervisor.emit("status", supervisor.current); // respawned: standby until it answers
-    await settleStatus();
+    await backgroundIdle();
     answer = [notReadyPath({ name: id })];
     await pollOnce(); // the new relay answers: the device has not reconnected yet
     assert.equal((await videoService.state()).feeds.find((f) => f.id === id)?.status.state, "offline");
@@ -455,7 +482,7 @@ test("a push feed that was never live logs nothing when the relay exits", async 
     await pollOnce(); // waiting
     supervisor.current = { state: "failing", reason: "exit code 1", retryAt: 1, neverStarted: false };
     supervisor.emit("status", supervisor.current);
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
     assert.equal((await videoService.state()).feeds.find((f) => f.id === id)?.status.state, "offline");
     assert.deepEqual(lines.filter((l) => l.includes("Never-live push")), [], "waiting to offline is not going offline");
   } finally {
@@ -524,7 +551,7 @@ test("a B-frames close on an ALREADY-ready feed marks it delayed, and logs once 
 
     supervisor.emit("line", `[WebRTC] [session abcd1234] is reading from path '${id}'`);
     supervisor.emit("line", `[WebRTC] [session abcd1234] closed: WebRTC doesn't support H264 streams with B-frames`);
-    await new Promise((r) => setTimeout(r, 20)); // markBFrames() has one async hop, for the feed's name
+    await backgroundIdle(); // markBFrames() reads the feed file, for the feed's name
 
     const feed = (await videoService.state()).feeds.find((f) => f.id === id);
     assert.deepEqual(
@@ -540,7 +567,7 @@ test("a B-frames close on an ALREADY-ready feed marks it delayed, and logs once 
     // same fact restated, not news.
     supervisor.emit("line", `[WebRTC] [session ef567890] is reading from path '${id}'`);
     supervisor.emit("line", `[WebRTC] [session ef567890] closed: WebRTC doesn't support H264 streams with B-frames`);
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
     assert.equal(lines.filter((l) => l.includes("B-frames")).length, 1, "the line must not repeat for the same session");
   } finally {
     await videoService.detachRelay();
@@ -570,7 +597,7 @@ test("binding an ALREADY-ready B-frames mark publishes immediately, not waiting 
     const before = frames.length;
     supervisor.emit("line", `[WebRTC] [session 11aa22bb] is reading from path '${id}'`);
     supervisor.emit("line", `[WebRTC] [session 11aa22bb] closed: WebRTC doesn't support H264 streams with B-frames`);
-    await new Promise((r) => setTimeout(r, 20)); // no pollOnce() call in between
+    await backgroundIdle(); // no pollOnce() call in between
 
     assert.ok(frames.length > before, "binding an already-ready mark must publish on its own, not wait for the next poll");
     const feed = frames.at(-1)?.feeds.find((f) => f.id === id);
@@ -600,7 +627,7 @@ test("a B-frames close on an on-demand pull feed that is not yet ready binds on 
 
     supervisor.emit("line", `[WebRTC] [session bbbb2222] is reading from path '${id}'`);
     supervisor.emit("line", `[WebRTC] [session bbbb2222] closed: WebRTC doesn't support H264 streams with B-frames`);
-    await new Promise((r) => setTimeout(r, 20)); // the mark is pending; there is no readyTime to bind to yet
+    await backgroundIdle(); // the mark is pending; there is no readyTime to bind to yet
 
     let feed = (await videoService.state()).feeds.find((f) => f.id === id);
     assert.notEqual(feed?.status.state, "delayed", "there is nothing to bind the mark to yet");
@@ -632,7 +659,7 @@ test("a B-frames close on an on-demand pull feed that is not yet ready binds on 
     // A later new WebRTC attempt on the SAME still-open readyTime is not news.
     supervisor.emit("line", `[WebRTC] [session cccc3333] is reading from path '${id}'`);
     supervisor.emit("line", `[WebRTC] [session cccc3333] closed: WebRTC doesn't support H264 streams with B-frames`);
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
     assert.equal(lines.filter((l) => l.includes("B-frames")).length, 1);
   } finally {
     await videoService.detachRelay();
@@ -655,7 +682,7 @@ test("a pending B-frames mark does not survive a detach — it cannot bind to a 
     await pollOnce();
     supervisor.emit("line", `[WebRTC] [session dd44ee55] is reading from path '${id}'`);
     supervisor.emit("line", `[WebRTC] [session dd44ee55] closed: WebRTC doesn't support H264 streams with B-frames`);
-    await new Promise((r) => setTimeout(r, 30));
+    await backgroundIdle();
     await pollOnce(); // still not ready — the on-demand source closed again, the mark is still pending
 
     await videoService.detachRelay(); // relay turned off / reconfigured
@@ -691,7 +718,7 @@ test("a pending B-frames mark expires after PENDING_MARK_TTL_MS without a ready 
     await pollOnce();
     supervisor.emit("line", `[WebRTC] [session ff11aa22] is reading from path '${id}'`);
     supervisor.emit("line", `[WebRTC] [session ff11aa22] closed: WebRTC doesn't support H264 streams with B-frames`);
-    await new Promise((r) => setTimeout(r, 30));
+    await backgroundIdle();
 
     t.mock.timers.tick(PENDING_MARK_TTL_MS + 1000); // well past 30 s, with no ready poll in between
     await pollOnce(); // still not ready — this poll is what sweeps the expiry
@@ -725,7 +752,7 @@ test("a B-frames line for a path that is not a real feed is never logged, and ne
 
     supervisor.emit("line", `[WebRTC] [session aaaa1111] is reading from path 'orphaned-path'`);
     supervisor.emit("line", `[WebRTC] [session aaaa1111] closed: WebRTC doesn't support H264 streams with B-frames`);
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
 
     assert.deepEqual(
       lines.filter((l) => l.includes("B-frames") || l.includes("orphaned-path")),
@@ -1706,13 +1733,13 @@ test("between the supervisor reaching running and the first successful poll, a r
   try {
     supervisor.current = { state: "starting" };
     supervisor.emit("status", supervisor.current);
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
     let feed = videoService.current().feeds.find((f) => f.id === id);
     assert.equal(feed?.status.state, "standby", "still starting — nothing has answered a poll yet");
 
     supervisor.current = { state: "running", since: 0 };
     supervisor.emit("status", supervisor.current);
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
     feed = videoService.current().feeds.find((f) => f.id === id);
     assert.equal(feed?.status.state, "standby", "just reached running — no poll has answered for THIS process yet");
     assert.equal(
@@ -1775,14 +1802,14 @@ test("the attached supervisor's status events publish immediately, without waiti
   try {
     supervisor.current = { state: "starting" };
     supervisor.emit("status", supervisor.current);
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
     assert.ok(frames.length >= 1, "a status event must publish without a poll ever running");
     assert.deepEqual(frames.at(-1)?.relay, { state: "starting", version: null });
 
     const before = frames.length;
     supervisor.current = { state: "failing", reason: "boom", retryAt: 999, neverStarted: false };
     supervisor.emit("status", supervisor.current);
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
     assert.ok(frames.length > before, "every status event must publish, not only the first");
     assert.deepEqual(frames.at(-1)?.relay, { state: "failing", reason: "boom", kind: "crash-loop", retryAt: 999 });
   } finally {
@@ -1814,7 +1841,7 @@ test("an in-flight SUCCESS against a process the supervisor has since reported f
 
     supervisor.current = { state: "failing", reason: "crashed", retryAt: 1, neverStarted: false };
     supervisor.emit("status", supervisor.current);
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
     assert.equal(
       videoService.current().feeds.find((f) => f.id === id)?.status.state,
       "offline",
@@ -1852,7 +1879,7 @@ test("an in-flight REJECTION against the old process, landing after a respawn, d
     supervisor.emit("status", supervisor.current);
     supervisor.current = { state: "running", since: 2 };
     supervisor.emit("status", supervisor.current); // respawned
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
     assert.equal(videoService.current().relay.state, "running", "the respawn must already be published");
 
     callRejectA(new Error("timeout")); // the OLD process's rejection lands late
@@ -1889,7 +1916,7 @@ test("a status change alone, with no detach, still lets the next poll run even w
 
     supervisor.current = { state: "failing", reason: "crashed", retryAt: 1, neverStarted: false };
     supervisor.emit("status", supervisor.current); // bumps the generation with no detach at all
-    await new Promise((r) => setTimeout(r, 10));
+    await backgroundIdle();
 
     await pollOnce(); // the new generation's own poll
     assert.equal(calls, 2, "a status change must free the reentry guard for a new poll, not leave it blocked by the still-hung first one");
@@ -1915,7 +1942,7 @@ test("a status event to a non-running state clears lastPaths immediately — a d
     // The supervisor's OWN crash detection reports failing — no new poll has run.
     supervisor.current = { state: "failing", reason: "crashed", retryAt: 123, neverStarted: false };
     supervisor.emit("status", supervisor.current);
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
 
     const snap = videoService.current();
     assert.equal(
@@ -1955,12 +1982,13 @@ test("against a real supervisor: an exit publishes failing at once, and running 
   attach(fakeRelay({ status: async () => [] }), sup);
   try {
     await sup.start("/bin/mediamtx", "/tmp/cfg.yml");
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
     recording = true;
     children[0]!.emit("exit", null, "SIGKILL");
-    await new Promise((r) => setTimeout(r, 50)); // well inside the 1 s backoff
+    await backgroundIdle(); // the exit's own publish, well inside the 1 s backoff
     assert.deepEqual(published, ["failing"], "the exit must reach every client before anything else happens");
-    await new Promise((r) => setTimeout(r, 1100)); // the respawn
+    await waitUntil(() => published.includes("running"), "the respawn's running status", 5000); // after the 1 s backoff
+    await backgroundIdle(); // and anything it published after, which the exact list below must see
     assert.deepEqual(published, ["failing", "running"]);
   } finally {
     recording = false;
@@ -1997,20 +2025,20 @@ test("against a real supervisor: the not-answering flag does not carry over into
   try {
     await sup.start("/bin/mediamtx", "/tmp/cfg.yml");
     children[0].stdout.write("2026/09/28 10:00:00 INF MediaMTX v1.21.1, ...\n");
-    await new Promise((r) => setTimeout(r, 20));
+    await waitUntil(() => sup.version() !== null, "the banner to reach the line reader"); // through a stream
     await pollOnce();
     assert.equal(videoService.current().relay.state, "running");
     assert.equal(videoService.current().feeds.find((f) => f.id === id)?.status.state, "live");
 
     apiUp = false;
     children[0].emit("exit", 1); // the process crashes — onExit(): status "failing", then "exit"
-    await new Promise((r) => setTimeout(r, 20)); // the status listener's own publish
+    await backgroundIdle(); // the status listener's own publish
 
     await pollOnce(); // a poll during backoff — fails; the supervisor already says failing on its own
     assert.equal(videoService.current().relay.state, "failing");
 
-    await new Promise((r) => setTimeout(r, 1100)); // restartDelayMs(0) = 1 s — the real respawn
-    await new Promise((r) => setTimeout(r, 20)); // spawnChild()'s status event -> publish
+    await waitUntil(() => sup.status().state === "running", "the real respawn", 5000); // restartDelayMs(0) = 1 s
+    await backgroundIdle(); // spawnChild()'s status event -> publish
 
     apiUp = true; // the fresh process's API is reachable, but nothing has POLLED it yet
     const afterRespawn = videoService.current();
@@ -2050,7 +2078,7 @@ test("against a real supervisor: a poll failing during its crash backoff logs no
   try {
     await sup.start("/bin/mediamtx", "/tmp/cfg.yml");
     children[0].emit("exit", 1); // the process crashes; the supervisor backs off 1 s before respawning
-    await new Promise((r) => setTimeout(r, 20));
+    await backgroundIdle();
     assert.equal(sup.status().state, "failing", "the supervisor must be in its backoff, or this proves nothing");
     assert.equal(warns.filter((l) => l.includes("relay exited")).length, 1, "the supervisor reports the crash itself");
 
@@ -2630,7 +2658,10 @@ test("reconciles are single-flight — a change arriving mid-reconcile is folded
     // arrives here, finds one already running, and marks dirty rather than
     // firing a second overlapping relay.reconcile() call.
     const addB = videoService.addFeed({ name: "Interleave B", source: { kind: "push", protocol: "rtmp" } });
-    await new Promise((r) => setTimeout(r, 20)); // let B's own write + reconcileRelay() call actually reach "mark dirty"
+    await waitUntil(
+      () => (videoService as unknown as { reconcileDirty: boolean }).reconcileDirty,
+      "B's own write and reconcileRelay() call to reach \"mark dirty\" (a second, overlapping reconcile never marks it)",
+    );
 
     releaseFirst.fn!();
     const [madeA, madeB] = await Promise.all([addA, addB]);
@@ -3254,6 +3285,29 @@ async function waitForCount(seen: unknown[], count: number, timeoutMs = 2000): P
     await new Promise((resolve) => setImmediate(resolve));
   }
 }
+
+test("a failed publish is one rejection, for whoever awaits it, however many callers voided it", async (t) => {
+  // publish() coalesces: every caller shares one promise. Tracked per caller,
+  // each voided caller's copy rejected on its own, and a store read failing
+  // once logged an unhandled rejection per caller, beside the awaiting caller
+  // that handled it. The test runner fails a test that leaves one.
+  const { videoFeedsStore } = await import("./feed-store.js");
+  const load = t.mock.method(videoFeedsStore, "load", async () => {
+    throw new Error("EIO: i/o error, read");
+  });
+  try {
+    videoService.setPreAttachStatus({ state: "downloading", receivedBytes: 1, totalBytes: 2 });
+    videoService.setPreAttachStatus({ state: "downloading", receivedBytes: 2, totalBytes: 2 });
+    const publish = (videoService as unknown as { publish(): Promise<void> }).publish();
+    await assert.rejects(publish, /EIO/);
+    await backgroundIdle();
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    load.mock.restore();
+    videoService.setPreAttachStatus(null);
+    await backgroundIdle();
+  }
+});
 
 test("setRelayStatusListener fires on every publish that actually changes the relay, with the fresh RelayStatus", async () => {
   const seen: RelayStatus[] = [];

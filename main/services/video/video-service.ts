@@ -38,6 +38,7 @@ import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
 import { pairKey, PlaybackHealth } from "./playback-health.js";
 import { parsePorts } from "./ports.js";
 import { probeFeed, type ProbeResult } from "./probe.js";
+import { InFlight } from "./in-flight.js";
 import { ProbeScheduler } from "./probe-scheduler.js";
 import { PULL_START_TIMEOUT_MS, pullSource } from "./reconcile-plan.js";
 import { withoutCredentials } from "./redact-url.js";
@@ -784,6 +785,21 @@ class VideoService {
   private publishing: Promise<void> | null = null;
   private publishAgain = false;
 
+  /** Work this service started and has not finished — every publish, and
+   *  the status change's settle, B-frames mark and playback report nobody
+   *  awaits. Polls are not here; they have their own in-flight guard. */
+  private readonly background = new InFlight();
+
+  /** Resolves once none of that work is running, including any started
+   *  while waiting. For the caller that needs a supervisor event's effects
+   *  (the status listener's settle and publish, a log line's B-frames mark)
+   *  to have landed: no count of event-loop turns or milliseconds can say
+   *  that, because each reads the feed file, and a disk read takes however
+   *  long the machine's load makes it. */
+  whenBackgroundIdle(): Promise<void> {
+    return this.background.whenIdle();
+  }
+
   /**
    * Publishes only when the computed snapshot actually differs from the last
    * one published (everything but `rev`) — otherwise a poll every
@@ -803,7 +819,9 @@ class VideoService {
       this.publishAgain = true;
       return this.publishing;
     }
-    this.publishing = this.publishLoop();
+    // Tracked once here, not by each caller: every caller shares this one
+    // promise, and a failure is one rejection however many voided it.
+    this.publishing = this.background.track(this.publishLoop());
     return this.publishing;
   }
 
@@ -974,7 +992,7 @@ class VideoService {
     this.requestedAt.clear();
     this.unansweredSince.clear();
     if (status.state !== "running") this.lastPaths = new Map();
-    void this.settleFeeds();
+    void this.background.track(this.settleFeeds());
     // Last: a reconcile the readiness poll starts from here captures the
     // generation just bumped, so its success counts for this process.
     this.relayProcessListener?.(status);
@@ -1301,7 +1319,7 @@ class VideoService {
 
   private handleLine(text: string): void {
     const event = this.logWatcher.line(text);
-    if (event?.kind === "b-frames") void this.markBFrames(event.path);
+    if (event?.kind === "b-frames") void this.background.track(this.markBFrames(event.path));
     // The supervisor's own version() is
     // updated (supervisor.ts's attachReader()) BEFORE this listener ever
     // runs, so the moment the relay's startup banner is the line just read,
@@ -2241,7 +2259,7 @@ class VideoService {
   recordPlaybackReports(outputId: string, reports: VideoPlaybackReport[], now = Date.now()): void {
     const output = stageController.getOutputs().find((o) => o.id === outputId);
     if (!output) return;
-    void this.recordPlaybackReportsAsync(outputId, reports, now).then(
+    const recording = this.recordPlaybackReportsAsync(outputId, reports, now).then(
       () => {
         const d = this.playbackRecordOutage.ok(outputId, now);
         if (d.log) console.log(`[video] recording ${scrub(output.name)}'s playback reports is working again${scrub(d.note)}`);
@@ -2252,6 +2270,7 @@ class VideoService {
         if (d.log) console.warn(`[video] could not record ${scrub(output.name)}'s playback report: ${scrub(message)}${scrub(d.note)}`);
       },
     );
+    void this.background.track(recording);
   }
 
   /**

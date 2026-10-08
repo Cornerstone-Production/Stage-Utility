@@ -5,6 +5,7 @@
 import { strict as assert } from "node:assert";
 
 import type { VideoPlaybackReport } from "../../types/video.js";
+import { within } from "./within.js";
 
 /** One report, everything defaulted to "nothing wrong" — each test overrides
  *  only what it is testing. */
@@ -24,14 +25,15 @@ export async function addRelayFeed(name: string): Promise<string> {
 }
 
 /**
- * recordPlaybackReports() records fire-and-forget, behind a feed-store read
- * that resolves from memory once anything has loaded it. Iteration-bounded,
- * not wall-clock-bounded: several tests fake Date to jump a full minute in
- * zero real time. Enough for a log line; not for a publish — see
- * settleUntil().
+ * recordPlaybackReports() records fire-and-forget, behind a feed-store read,
+ * and may publish after it. Awaits that work itself, through the service's
+ * own seam, rather than a count of event-loop turns: a read takes however
+ * long the machine's load makes it. Bounded on the real clock, which the
+ * tests that fake Date do not touch.
  */
-export async function settle(iterations = 20): Promise<void> {
-  for (let i = 0; i < iterations; i++) await new Promise((resolve) => setImmediate(resolve));
+export async function settle(): Promise<void> {
+  const { videoService } = await import("../video/video-service.js");
+  await within(videoService.whenBackgroundIdle(), "the playback report to be recorded and published");
 }
 
 /**
