@@ -141,6 +141,12 @@ describe("validateParams — enum", () => {
     assert.deepEqual(validateParams([anchor], { anchor: "item" }), []);
   });
 
+  test("an enum with a default is not unset when blank, even if not optional", () => {
+    const withDefault: ParamDef = { ...target, options: [{ value: "a", label: "A" }], default: "a" };
+    assert.deepEqual(validateParams([withDefault], {}), []);
+    assert.deepEqual(validateParams([{ ...target, options: [{ value: "a", label: "A" }] }], {}).length, 1);
+  });
+
   test("an optional enum left blank is never an issue", () => {
     const optional: ParamDef = { ...target, optional: true };
     assert.deepEqual(validateParams([optional], {}), []);

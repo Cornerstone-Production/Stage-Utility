@@ -156,7 +156,8 @@ export function validateParams(specs: ParamDef[], params: Record<string, unknown
       case "enum": {
         const current = String(value ?? "").trim();
         if (!current) {
-          if (!spec.optional) issues.push({ key: spec.key, message: `Pick a ${spec.label.toLowerCase()}` });
+          // A default stands for a blank, so a blank is not unset.
+          if (!spec.optional && !spec.default) issues.push({ key: spec.key, message: `Pick a ${spec.label.toLowerCase()}` });
           break;
         }
         // A RUNTIME list (optionsFrom) answering without the stored value is
