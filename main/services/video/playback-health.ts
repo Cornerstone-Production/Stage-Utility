@@ -79,7 +79,7 @@ interface Sample {
 }
 
 /** The two receive-delay figures, each null when nothing carried one. */
-interface LagFigures {
+export interface LagFigures {
   jitterBufferMs: number | null;
   behindNewestMs: number | null;
 }
@@ -87,6 +87,15 @@ interface LagFigures {
 /** The larger of two figures, null only when both are. */
 function maxOrNull(a: number | null, b: number | null): number | null {
   return a === null ? b : b === null ? a : Math.max(a, b);
+}
+
+/** The worse of a lagging pair's two figures and which one it is: the one
+ *  number the Screens card and the `[video]` lagging line both state, so the
+ *  two cannot name different delays. Ties go to the jitter buffer. */
+export function worstLag(figures: LagFigures): { ms: number; what: "jitter buffer" | "behind the newest frame" } {
+  const jitter = figures.jitterBufferMs ?? -1;
+  const behind = figures.behindNewestMs ?? -1;
+  return behind > jitter ? { ms: behind, what: "behind the newest frame" } : { ms: jitter, what: "jitter buffer" };
 }
 
 /** The worst of each figure across `samples`. */

@@ -76,6 +76,7 @@ function cardFor(kind: ViewKind | null, overrides: Partial<OutputRowProps["outpu
     baseUrl: "http://display.invalid",
     online: false,
     struggles: [],
+    lags: [],
     canRemove: true,
     iconKey: "display-1",
     onRename: noop,

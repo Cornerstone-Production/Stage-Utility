@@ -35,7 +35,7 @@ import {
   type FeedPlan,
 } from "./feed-transfer.js";
 import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
-import { pairKey, PlaybackHealth } from "./playback-health.js";
+import { pairKey, PlaybackHealth, worstLag } from "./playback-health.js";
 import { parsePorts } from "./ports.js";
 import { probeFeed, type ProbeResult } from "./probe.js";
 import { ProbeScheduler } from "./probe-scheduler.js";
@@ -2434,7 +2434,7 @@ class VideoService {
           // `laggingEpisode` is non-null exactly when `lagging` is, and the
           // id is non-null exactly then too; the fallback is defensive only.
           const peak = health.laggingEpisode ?? { jitterBufferMs: health.jitterBufferMsInWindow, behindNewestMs: health.behindNewestMsInWindow };
-          const [ms, what] = laggingFigure(peak);
+          const { ms, what } = worstLag(peak);
           console.log(
             `[video] ${scrub(screenName(health.outputId))} is lagging on ${scrub(feedName(health.feedId))}: ` +
               `holding ${scrub((ms / 1000).toFixed(1))} s in its own buffer (${scrub(what)}); the delay is on this screen, not the relay or the encoder`,
@@ -2444,14 +2444,6 @@ class VideoService {
       this.lastLoggedLaggingEpisodeId.set(key, lagId);
     }
   }
-}
-
-/** The worse of a lagging episode's two figures, and which one it is — what the
- *  `[video]` lagging line names. */
-function laggingFigure(peak: { jitterBufferMs: number | null; behindNewestMs: number | null }): [ms: number, what: string] {
-  const jitter = peak.jitterBufferMs ?? -1;
-  const behind = peak.behindNewestMs ?? -1;
-  return behind > jitter ? [behind, "behind the newest frame"] : [jitter, "jitter buffer"];
 }
 
 export const videoService = new VideoService();

@@ -19,6 +19,7 @@ import {
   PlaybackHealth,
   STALLS_IN_WINDOW,
   WINDOW_MS,
+  worstLag,
 } from "./playback-health.js";
 import { report } from "../fixtures/video-playback.js";
 
@@ -579,6 +580,15 @@ test("lagging: a burst of heartbeats at the sample cap still carries the worst f
   assert.equal(h.samplesHeld("out1", "feed-1"), MAX_SAMPLES_PER_PAIR);
   assert.equal(h.snapshot(LAG_T0 + 100)[0]?.jitterBufferMsInWindow, 900);
   assert.equal(h.snapshot(LAG_T0 + 100)[0]?.behindNewestMsInWindow, 700);
+});
+
+test("worstLag: the larger figure and its name, a tie to the jitter buffer, a lone figure as itself", () => {
+  assert.deepEqual(worstLag({ jitterBufferMs: 1200, behindNewestMs: 3200 }), { ms: 3200, what: "behind the newest frame" });
+  assert.deepEqual(worstLag({ jitterBufferMs: 1500, behindNewestMs: 300 }), { ms: 1500, what: "jitter buffer" });
+  assert.deepEqual(worstLag({ jitterBufferMs: 900, behindNewestMs: 900 }), { ms: 900, what: "jitter buffer" });
+  assert.deepEqual(worstLag({ jitterBufferMs: null, behindNewestMs: 1100 }), { ms: 1100, what: "behind the newest frame" });
+  assert.deepEqual(worstLag({ jitterBufferMs: 0, behindNewestMs: null }), { ms: 0, what: "jitter buffer" }, "a zero reading is a reading");
+  assert.deepEqual(worstLag({ jitterBufferMs: null, behindNewestMs: 0 }), { ms: 0, what: "behind the newest frame" }, "a missing figure is never named, even against a zero");
 });
 
 test("Maps, not property lookups — an outputId or feedId shaped like a prototype key is just another key, not a pollution vector", () => {

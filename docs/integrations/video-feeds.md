@@ -491,6 +491,12 @@ leaves out the dropped-frames and resolution sentences, since those are
 decode advice and a stall-only episode says nothing about decode load. The
 `[video]` struggling log line below reads from the same episode.
 
+A lagging screen's card reads the lagging episode the same way, in its own
+box beside any struggling one: **Holding N.N s of \<feed\> in its own
+buffer.** — the worse of the episode's two figures — followed by **Check this
+screen's network or decoding; the encoder is not the cause.** The `[video]`
+lagging line below reads from the same episode.
+
 The Video feeds list's own meta line reads **On N screens** for any feed
 currently playing anywhere, struggling or not — every distinct screen a
 heartbeat has reported that feed's playback for in the last minute.
