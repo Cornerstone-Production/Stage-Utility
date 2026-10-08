@@ -809,6 +809,18 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     homeSize: "m",
   },
 
+  // The producer's panel. Sized in em off the font size: 0.022 of the canvas
+  // height is 14.5px at the 660px-tall panel the approved mockup was drawn at.
+  "message-composer": {
+    label: "Message composer",
+    blurb: "Send stage messages and alerts, and read the replies",
+    group: "Control",
+    config: () => ({ type: "message-composer" }),
+    style: () => CARD({ fontSize: 0.022, fontWeight: 400, textAlign: "left", vAlign: "top" }),
+    stylingOnly: true,
+    homeSize: "l",
+  },
+
   // Status
   "integration-status": {
     label: "Integration status",

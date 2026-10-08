@@ -32,6 +32,7 @@ import {
   FROM_MAX,
   GROUP_ID,
   GROUPS_MAX,
+  isAlertRunning,
   MESSAGE_MAX,
   MESSAGES_CAP,
   MESSAGES_CHANNEL,
@@ -175,11 +176,6 @@ function findMessagesWidget(views: readonly View[], objectId: string): FoundWidg
   return found;
 }
 
-/** Is this message's alert still holding the screens at `now`? */
-function alertRunning(m: StageMessage, now: number): boolean {
-  return m.alert && m.clearedAt === null && m.alertUntil !== null && m.alertUntil > now;
-}
-
 export class MessagesService {
   private messages: StageMessage[] = [];
   private lastClearedDate: string | null = null;
@@ -214,7 +210,7 @@ export class MessagesService {
 
   /** The messages whose alert is still holding the screens at `now`, newest first. */
   private runningAlerts(now: number): StageMessage[] {
-    return this.messages.filter((m) => alertRunning(m, now)).reverse();
+    return this.messages.filter((m) => isAlertRunning(m, now)).reverse();
   }
 
   /** The messaging config, loaded: the groups, quick messages and quick replies. */
@@ -341,7 +337,7 @@ export class MessagesService {
       const found = this.messages.find((m) => m.id === id);
       if (!found) return "not-found";
       const now = Date.now();
-      if (!alertRunning(found, now)) return "not-running";
+      if (!isAlertRunning(found, now)) return "not-running";
       const next = this.messages.map((m) => (m.id === id ? { ...m, clearedAt: now } : m));
       await this.persist(this.lastClearedDate, next);
       console.log(`[messages] alert ${scrub(found.id)} cleared by ${scrub(by)}`);

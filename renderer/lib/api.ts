@@ -445,8 +445,10 @@ export type IpcChannel =
   | "layoutTemplates:list"
   | "layoutTemplates:save"
   | "layoutTemplates:update"
+  | "messages:clearAlert"
   | "messages:get"
   | "messages:reply"
+  | "messages:send"
   | "messaging:get"
   | "messaging:set"
   | "notes:set"
@@ -1570,6 +1572,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "messages:get":
       return apiFetch<T>("/api/messages");
+    case "messages:send":
+      return post<T>("/api/messages", { to: p.to, text: p.text, alert: p.alert, from: p.from });
+    case "messages:clearAlert":
+      return post<T>(`/api/messages/${encodeURIComponent(String(p.id))}/clear-alert`, { from: p.from });
     case "messages:reply":
       return post<T>(`/api/messages/${encodeURIComponent(String(p.id))}/replies`, {
         text: p.text,

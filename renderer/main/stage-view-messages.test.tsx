@@ -44,7 +44,7 @@ const posted: { url: string; body: unknown }[] = [];
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, act } = await import("@testing-library/react");
+const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { StageView } = await import("./stage-view.js");
 const { __resetForTests } = await import("./use-stage-state.js");
@@ -178,5 +178,39 @@ describe("a Messages widget follows the screen StageView says it is", () => {
     messagesBody = messagesState([message(1, [GREEN], "for the green room"), message(2, [STAGE], "for the stage")]);
     const c = await showScreen("/display-1", stageState({ type: "messages", groups: [STAGE] }, { groups: [GREEN] }));
     assert.ok(says(c, "for the stage") && !says(c, "for the green room"), c.textContent ?? "");
+  });
+});
+
+// ---- the composer signs as the screen it is on --------------------------------
+
+describe("a Message composer on a screen", () => {
+  const composer = { type: "message-composer" };
+  const press = (el: Element | undefined) => act(async () => { fireEvent.click(el!); });
+  const named = (c: HTMLElement, name: string) => [...c.querySelectorAll("button")].find((b) => b.textContent?.trim() === name);
+
+  async function sendFrom(path: string, state: unknown): Promise<HTMLElement> {
+    messagesBody = { ...messagesState([]), quickMessages: ["Walk now"] };
+    const c = await showScreen(path, state);
+    await press(named(c, "Green room"));
+    await press(named(c, "Walk now"));
+    await press(named(c, "Send"));
+    return c;
+  }
+
+  test("a panel sends as the screen's own name", async () => {
+    await sendFrom("/display-1", stageState(composer, { groups: [GREEN], mode: "panel" }));
+    const sent = posted.filter((p) => p.url === "/api/messages");
+    assert.equal(sent.length, 1, "the press did not reach the server");
+    assert.deepEqual(sent[0].body, { to: [GREEN], text: "Walk now", alert: false, from: "Stage left" });
+  });
+
+  test("a display (the default mode) draws it and cannot send", async () => {
+    await sendFrom("/display-1", stageState(composer, { groups: [GREEN] }));
+    assert.equal(posted.filter((p) => p.url === "/api/messages").length, 0, "a wall display sent a message");
+  });
+
+  test("a Screens-card preview of a panel cannot send either", async () => {
+    await sendFrom("/preview-v1?output=display-1", stageState(composer, { groups: [GREEN], mode: "panel" }));
+    assert.equal(posted.filter((p) => p.url === "/api/messages").length, 0, "the Screens page sent a message by being looked at");
   });
 });

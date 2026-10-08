@@ -134,6 +134,25 @@ always runs it.
 
 ## On screens
 
+### The Message composer widget
+
+The **Message composer** [widget](../reference/widgets.md#control) is where a
+message is sent from. It goes on Home, a console or a panel like any other widget,
+so a producer's phone, the booth's panel and Home can each be a composer. It draws
+**To** chips, the quick messages, a text box, the **Alert** switch and **Send**, a
+line saying how many screens the message reaches, and **Today**, the day's thread
+with every reply under its message.
+
+- **To**: Everyone, and each group. Everyone stands alone; several groups can be
+  picked; the choice stays after a send.
+- **Alert** turns **Send** into a red **Send alert**; the message then takes the
+  screens in those groups over for 30 seconds ([Alerts](#alerts)). **Clear alert**
+  on a message in the thread ends one early.
+- The message is signed with the **screen's name** on a screen, the **console's
+  name** on a console in the app, and **Home** on Home.
+- A send that fails keeps what was typed, the groups and the alert switch, and says
+  why; the failure is also on `/log` as `[messages]`.
+
 ### The Messages widget
 
 The **Messages** [widget](../reference/widgets.md#control) draws the newest three

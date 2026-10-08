@@ -467,6 +467,7 @@ nothing.
 | **Cue button** | Fires a cue and shows its device's state: on, off, settling after a press, stale when Companion has lost the device, dimmed when the cue refuses | This app, via Companion |
 | **Notes** | A shared note anyone can type into | This app |
 | **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
+| **Message composer** | Where a producer sends [stage messages](../features/stage-messages.md): who it goes to, quick messages, the text, an alert switch, and the day's thread with its replies | This app |
 | **Messages** | The newest three [stage messages](../features/stage-messages.md) sent to this screen's groups, each with its sender, its age and the latest reply under it | This app |
 
 **Notes** and **Checklist** are shared, not per-screen: two people looking at them
@@ -512,6 +513,17 @@ Two colour schemes, by what the switch means:
 The live scheme is carried by the OBS recording, OBS stream and REAPER recording
 built-ins. Everything else draws the ordinary way, and both draw an unreadable
 state as the amber dashed ring.
+
+**Message composer** has no options. It draws, top to bottom: **To** (Everyone and
+each group; Everyone stands alone, several groups can be picked, and the choice is
+kept after a send), **Quick messages** (pressing one fills the box, it does not
+send), the text box, **Alert: takes over the screen** beside **Send** (red, and
+**Send alert**, while the alert switch is on), a line saying how many screens the
+message reaches, and **Today**: the thread, newest first, each reply under its
+message, with **Clear alert** on any alert still running. A message signs with the
+screen's name on a screen, the console's name on a console in the app, and **Home**
+on Home. A send that fails keeps the text and the choices and says why. Like every
+control it does nothing on a wall display.
 
 **Messages** shows the [stage messages](../features/stage-messages.md) that went
 to Everyone or to a group it follows: up to three, newest first and largest, with

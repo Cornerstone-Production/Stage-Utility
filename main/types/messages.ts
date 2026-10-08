@@ -135,3 +135,13 @@ export function messageReaches(to: readonly string[], groups: readonly string[])
   const mine = new Set(groups);
   return to.some((id) => mine.has(id));
 }
+
+/**
+ * Is this message's alert still holding the screens at `now`? The server asks it
+ * of its own clock to decide what `alerts` lists; a screen asks it of the server
+ * clock it draws from, so a frame that is late reaching it still ends the alert
+ * on time.
+ */
+export function isAlertRunning(m: StageMessage, now: number): boolean {
+  return m.alert && m.clearedAt === null && m.alertUntil !== null && m.alertUntil > now;
+}

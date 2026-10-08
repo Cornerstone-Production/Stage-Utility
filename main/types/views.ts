@@ -506,6 +506,11 @@ export type LayoutObjectConfig =
   // a widget on an in-app console, which is no screen, gets any. Message group
   // ids, from /api/messaging; one that has since been deleted matches nothing.
   | { type: "messages"; groups?: string[] | null }
+  // Where a producer sends stage messages from: who it goes to, quick messages,
+  // the text, an alert switch, and the day's thread with its replies and Clear
+  // alert. No options — the groups, the quick messages and the sender all come
+  // from elsewhere (Settings, and the screen or console it is placed on).
+  | { type: "message-composer" }
   // No `resetDaily`: it was declared here and read by nothing, for its whole
   // life. The rows come from the plan's notes now, and their ticks are stored
   // per plan — so the reset happens because a new plan is a new set of keys,

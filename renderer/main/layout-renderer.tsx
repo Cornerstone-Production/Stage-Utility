@@ -25,6 +25,7 @@ import { streamers, streamIndicator, STREAMER_FOR, type StreamerName } from "../
 import { usePvpState } from "./use-pvp-state";
 import { useMessagesStatus } from "./use-messages-state";
 import { MessagesObject } from "./messages-object";
+import { MessageComposerObject, senderName } from "./message-composer-object";
 import type { MessagesState } from "@main/types/messages";
 import { useReaperStatus } from "./use-reaper-state";
 import { useScoresStatus } from "./use-scores-state";
@@ -1639,6 +1640,24 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     }
     case "scores":
       return <ScoresObject config={c} scores={ctx.scores} known={ctx.scoresKnown} />;
+    case "message-composer":
+      return (
+        <MessageComposerObject
+          state={ctx.messages}
+          known={ctx.messagesKnown}
+          outputs={ctx.state.outputs ?? []}
+          from={senderName({
+            home: ctx.home,
+            outputId: ctx.outputId,
+            embedChain: ctx.embedChain,
+            outputs: ctx.state.outputs ?? [],
+            views: ctx.state.views ?? [],
+          })}
+          interactive={ctx.interactive}
+          now={ctx.now}
+          ts={ts}
+        />
+      );
     case "messages":
       return (
         <MessagesObject
@@ -3227,7 +3246,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   const scoresStatus = useScoresStatus(want(["scores", "home-scores"]));
   // The stage messages: only a layout that holds a widget that draws them opens
   // the channel. (The alert overlay is not a widget and has its own read.)
-  const messagesStatus = useMessagesStatus(want(["messages"]));
+  const messagesStatus = useMessagesStatus(want(["messages", "message-composer"]));
   // Both gated on the streaming objects (`streamWanted`, declared above the
   // recorder gates): a clock-only wall screen must not hold a poll open against
   // two cloud APIs, one of which has a daily quota.
