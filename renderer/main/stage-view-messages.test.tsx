@@ -238,6 +238,55 @@ describe("a Messages widget inside a screen-embed tile", () => {
   });
 });
 
+// ---- a view embedded in a view ---------------------------------------------------
+
+describe("a Messages widget inside a view-embed tile", () => {
+  const copy = (c: HTMLElement) => [...c.querySelectorAll("button")].find((b) => b.textContent === "Copy");
+
+  /** display-1 routes to a view whose only object embeds v2; v2 holds the widget. */
+  function withEmbed() {
+    const state = stageState({ type: "view-embed", viewId: "v2", showHeader: false }, { groups: [GREEN], mode: "panel" }) as unknown as {
+      views: unknown[]; outputs: unknown[]; resolvedByOutput: Record<string, unknown>;
+    };
+    state.views.push({
+      id: "v2", name: "Inner view", kind: "custom",
+      layout: { canvas: { width: 1920, height: 1080, background: null }, objects: [{ id: "w2", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "messages" } }] },
+    });
+    return state;
+  }
+
+  test("follows the screen that draws it and offers to answer on a panel, signed as that panel", async () => {
+    messagesBody = messagesState([message(1, [GREEN], "for the green room"), message(2, [STAGE], "for the stage")]);
+    const c = await showScreen("/display-1", withEmbed());
+    assert.ok(says(c, "for the green room") && !says(c, "for the stage"), `the embedded widget did not follow the panel's groups: ${c.textContent}`);
+    assert.ok(copy(c), "an embedded widget on a panel offered no way to answer");
+    await act(async () => { fireEvent.click(copy(c)!); });
+    const sent = posted.filter((p) => p.url.endsWith("/replies"));
+    assert.deepEqual(sent.map((p) => p.body), [{ text: "Copy", objectId: "w2", outputId: "display-1" }]);
+  });
+
+  test("a view embedded inside a screen tile stays a monitor of the screen it shows", async () => {
+    // display-1 (Green, panel) tiles display-2 (Stage); display-2's view embeds v3, which holds the widget.
+    const state = stageState({ type: "screen-embed", outputId: "display-2", showLabel: false }, { groups: [GREEN], mode: "panel" }) as unknown as {
+      views: unknown[]; outputs: unknown[]; resolvedByOutput: Record<string, unknown>;
+    };
+    const canvas = { width: 1920, height: 1080, background: null };
+    state.views.push(
+      { id: "v2", name: "Stage view", kind: "custom", layout: { canvas, objects: [{ id: "e2", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "view-embed", viewId: "v3", showHeader: false } }] } },
+      { id: "v3", name: "Inner", kind: "custom", layout: { canvas, objects: [{ id: "w3", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "messages" } }] } },
+    );
+    state.outputs.push({ id: "display-2", name: "Stage monitor", viewId: "v2", groups: [STAGE], mode: "panel" });
+    state.resolvedByOutput["display-2"] = {
+      viewId: "v2", kind: "custom", ndiSource: null, viewName: "Stage view", blackout: false, locked: false,
+      hideTopBar: false, allowHls: true, groups: [STAGE], textSize: null,
+    };
+    messagesBody = messagesState([message(1, [GREEN], "for the green room"), message(2, [STAGE], "for the stage")]);
+    const c = await showScreen("/display-1", state);
+    assert.ok(says(c, "for the stage") && !says(c, "for the green room"), `the nested widget did not follow the screen the tile shows: ${c.textContent}`);
+    assert.equal(!!copy(c), false, "a view inside a tile of a panel offered to answer for the panel");
+  });
+});
+
 // ---- the composer signs as the screen it is on --------------------------------
 
 describe("a Message composer on a screen", () => {
