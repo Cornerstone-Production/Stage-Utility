@@ -203,7 +203,7 @@ describe("a reply pressed on a panel", () => {
 
 describe("a Messages widget inside a screen-embed tile", () => {
   /** display-1 (Green room, panel) draws a tile of display-2 (Stage), whose view holds the widget. */
-  function withTile() {
+  function withTile(tileMode?: string) {
     const state = stageState({ type: "screen-embed", outputId: "display-2", showLabel: false }, { groups: [GREEN], mode: "panel" }) as unknown as {
       views: unknown[]; outputs: unknown[]; resolvedByOutput: Record<string, unknown>;
     };
@@ -211,20 +211,33 @@ describe("a Messages widget inside a screen-embed tile", () => {
       id: "v2", name: "Stage view", kind: "custom",
       layout: { canvas: { width: 1920, height: 1080, background: null }, objects: [{ id: "w2", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "messages" } }] },
     });
-    state.outputs.push({ id: "display-2", name: "Stage monitor", viewId: "v2", groups: [STAGE] });
+    state.outputs.push({ id: "display-2", name: "Stage monitor", viewId: "v2", groups: [STAGE], ...(tileMode ? { mode: tileMode } : {}) });
     state.resolvedByOutput["display-2"] = {
       viewId: "v2", kind: "custom", ndiSource: null, viewName: "Stage view", blackout: false, locked: false,
       hideTopBar: false, allowHls: true, groups: [STAGE], textSize: null,
     };
     return state;
   }
+  const copy = (c: HTMLElement) => [...c.querySelectorAll("button")].find((b) => b.textContent === "Copy");
 
-  test("follows the screen it shows, not the one it sits on, and draws no reply buttons", async () => {
+  test("follows the screen it shows, not the one it sits on", async () => {
     messagesBody = messagesState([message(1, [GREEN], "for the green room"), message(2, [STAGE], "for the stage")]);
     const c = await showScreen("/display-1", withTile());
     assert.ok(says(c, "for the stage"), c.textContent ?? "");
     assert.ok(!says(c, "for the green room"), "the tile followed the screen it sits on");
-    assert.equal([...c.querySelectorAll("button")].some((b) => b.textContent === "Copy"), false, "a picture of a screen offered to answer for it");
+  });
+
+  test("offers reply buttons only for a tile of a panel, and answers as that panel", async () => {
+    // The buttons would be refused for a display, so they are not drawn there.
+    messagesBody = messagesState([message(2, [STAGE], "for the stage")]);
+    const display = await showScreen("/display-1", withTile());
+    assert.equal(!!copy(display), false, "a tile of a display offered buttons that are always refused");
+    cleanup();
+    const panel = await showScreen("/display-1", withTile("panel"));
+    assert.ok(copy(panel), "a tile of a panel offered no way to answer");
+    await act(async () => { fireEvent.click(copy(panel)!); });
+    const sent = posted.filter((p) => p.url.endsWith("/replies"));
+    assert.deepEqual(sent.map((p) => p.body), [{ text: "Copy", objectId: "w2", outputId: "display-2" }], "signed as the screen the tile sits on");
   });
 });
 

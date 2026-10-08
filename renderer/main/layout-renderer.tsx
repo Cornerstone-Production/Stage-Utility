@@ -2866,17 +2866,18 @@ function ScreenEmbedObject({
     return (
       <EmbeddedView
         view={view}
-        // A tile of a screen is a picture of it, not that screen. It carries that
-        // screen's own id and message groups (so its Messages widget follows the
-        // screen it shows, not the one the tile sits on) and is not interactive,
-        // so a picture of a panel cannot answer for the panel. Its alert banner is
-        // the screen's own and is not drawn here.
+        // A tile of a screen carries that screen's own id and message groups, so a
+        // Messages widget in it follows the screen it shows and not the one the
+        // tile sits on. Controls in a tile stay live (that is what a producer wall
+        // is for), and a reply from one is signed as the panel it shows: the
+        // server accepts it only for a panel that draws the widget, and the widget
+        // offers the buttons only for one (`panel`). The screen's alert banner is
+        // its own and is not drawn here.
         ctx={{
           ...ctx,
           H: childH,
           insideEmbedTile: where === "tile",
-          screen: { outputId: output.id, groups: output.groups ?? [] },
-          interactive: false,
+          screen: { outputId: output.id, groups: output.groups ?? [], panel: output.mode === "panel" },
         }}
         displayId={output.id}
       />

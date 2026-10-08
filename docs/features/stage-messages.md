@@ -160,7 +160,8 @@ seconds do. It rises into place when it arrives.
   which is a picture of a screen and not one.
 - A **screen-embed tile** (a picture of another screen on a producer wall) does not
   draw that screen's alert banner; a Messages widget inside it follows the screen it
-  shows, not the one it sits on, and draws no reply buttons.
+  shows, not the one it sits on. It draws reply buttons only when that screen is a
+  panel, and a reply from one is signed as that panel.
 - A screen subscribes to `messages:state` for this whatever view it shows, once it has
   loaded (a screen still loading, showing an error, or blacked out draws no banner). If the banner
   itself fails to draw, it is hidden and `[messages] the alert banner failed to

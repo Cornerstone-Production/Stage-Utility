@@ -132,7 +132,7 @@ function checkedOrLogged<T>(what: string, check: () => T): T {
   try {
     return check();
   } catch (err) {
-    if (err instanceof MessageRefused) console.warn(`[messages] ${what}: ${scrub(err.message)}`);
+    if (err instanceof MessageRefused) console.warn(`[messages] ${scrub(what)}: ${scrub(err.message)}`);
     throw err;
   }
 }

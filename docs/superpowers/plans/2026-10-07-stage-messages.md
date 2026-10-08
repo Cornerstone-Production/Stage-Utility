@@ -264,8 +264,11 @@ Kill the server by port when done.
 - The Messages widget's state is read by `useMessagesStatus`, which logs a failed
   read as `[messages]`; `isAlertRunning` lives in `main/types/messages.ts` for the
   server and the screens to share.
-- A screen-embed tile carries the screen it shows (its id and groups) and is not
-  interactive: a picture of a panel cannot answer for it, and it draws no banner.
+- A screen-embed tile carries the screen it shows (its id, groups and whether it is
+  a panel) and draws no banner. Its controls stay live, as the producer wall needs
+  (so a tile is NOT made non-interactive); a Messages widget there offers reply
+  buttons only for a panel, and the server accepts the reply only from a panel that
+  draws the widget.
 - Every snapshot carries `serverNow`, and `useMessagesStatus` sets the page's server
   clock from it: the hydrate read is a measured pair (so `GET /api/messages` is
   deliberately NOT in `SHARED_READ_PATHS`: a read joined to an earlier caller's is

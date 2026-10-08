@@ -77,8 +77,10 @@ export function MessagesObject({ objectId, config, state, known, screen, interac
   // One answer at a time: pressing a second button while the first is in flight
   // would send two replies for one tap on a touch panel that registered twice.
   const [sending, setSending] = useState(false);
-  // The buttons: only where controls are live, once the channel has answered, and for a widget that follows something.
-  const answering = interactive && groups !== null && known ? state : null;
+  // The buttons: only where controls are live, on a screen that can answer (a panel;
+  // a tile of a display on a producer wall cannot), once the channel has answered,
+  // and for a widget that follows something.
+  const answering = interactive && (screen === null || screen.panel) && groups !== null && known ? state : null;
 
   async function answer(target: StageMessage, text: string) {
     if (sending) return;

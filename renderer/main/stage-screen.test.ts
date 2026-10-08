@@ -556,7 +556,7 @@ describe("the view kind", () => {
     const state = stageState({
       resolvedByOutput: { "display-1": resolvedOutput({ groups }), "preview-v1": resolvedOutput({ groups }) },
     });
-    assert.deepEqual(ownScreen({ state, displayId: "display-1", previewViewId: null }), { outputId: "display-1", groups });
+    assert.deepEqual(ownScreen({ state, displayId: "display-1", previewViewId: null }), { outputId: "display-1", groups, panel: false });
     assert.equal(
       ownScreen({ state, displayId: "preview-v1", previewViewId: "v1" }),
       null,
@@ -566,9 +566,9 @@ describe("the view kind", () => {
 
   test("ownScreen: a page whose id matches no output is a screen in no group, and a preview is none", () => {
     const state = stageState();
-    assert.deepEqual(ownScreen({ state, displayId: "nowhere", previewViewId: null }), { outputId: "nowhere", groups: [] });
+    assert.deepEqual(ownScreen({ state, displayId: "nowhere", previewViewId: null }), { outputId: "nowhere", groups: [], panel: false });
     assert.equal(ownScreen({ state, displayId: "preview-v1", previewViewId: "v1" }), null);
-    assert.deepEqual(ownScreen({ state: null, displayId: "display-1", previewViewId: null }), { outputId: "display-1", groups: [] });
+    assert.deepEqual(ownScreen({ state: null, displayId: "display-1", previewViewId: null }), { outputId: "display-1", groups: [], panel: false });
   });
 
   test("a preview of a View that no longer exists says so, instead of drawing slots", () => {
