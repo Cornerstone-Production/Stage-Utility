@@ -160,7 +160,8 @@ seconds do. It rises into place when it arrives.
   shows, not the one it sits on, and draws no reply buttons.
 - A screen subscribes to `messages:state` for this whatever it shows. If the banner
   itself fails to draw, it is hidden and `[messages] the alert banner failed to
-  draw` is on `/log`; the screen underneath stays up.
+  draw` is on `/log`; the screen underneath stays up, and the next alert gets a fresh
+  try.
 
 ### The Message composer widget
 

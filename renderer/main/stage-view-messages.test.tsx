@@ -19,16 +19,8 @@ import { EVERYONE, type MessagesState, type StageMessage } from "@main/types/mes
 
 const teardown = installDom();
 
-class StubEventSource {
-  static readonly CONNECTING = 0;
-  readyState = 0;
-  onmessage: unknown = null;
-  onerror: unknown = null;
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  close(): void {}
-}
-(globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
+const { FakeEventSource } = await import("../test-fixtures/fake-event-source.js");
+(globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 let stateBody: unknown = null;
 let messagesBody: MessagesState | null = null;
@@ -403,6 +395,22 @@ describe("a stage-message alert on a screen", () => {
     assert.ok(logged, "the failure never reached /log");
     assert.equal((logged!.body as { tag: string }).tag, "messages");
     assert.match((logged!.body as { message: string }).message, /the alert banner failed to draw/);
+  });
+
+  test("a banner that failed does not hide the next alert", async () => {
+    withAlerts({ ...running(1, [EVERYONE], "x", 20_000), text: { not: "text" } as unknown as string });
+    const quiet = console.error;
+    console.error = () => {};
+    let c: HTMLElement;
+    try {
+      c = await showScreen("/display-1", bare());
+      assert.ok(!c.querySelector('[role="alert"]'));
+      const next = running(2, [EVERYONE], "the next one draws", 20_000);
+      await act(async () => FakeEventSource.last!.push("messages:state", { ...messagesState([next]), alerts: [next], rev: 2 }));
+    } finally {
+      console.error = quiet;
+    }
+    assert.ok(says(c, "the next one draws"), "one failed alert hid every later one until a reload");
   });
 
   test("when the newest ends, the next one sent to this screen shows", async () => {

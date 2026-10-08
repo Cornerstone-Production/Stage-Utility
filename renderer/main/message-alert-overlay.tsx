@@ -53,7 +53,7 @@ class AlertBoundary extends Component<{ children: ReactNode }, { failed: boolean
     return { failed: true };
   }
   componentDidCatch(error: unknown): void {
-    logToServer("messages", `the alert banner failed to draw and is hidden until reload: ${errorMessage(error)}`);
+    logToServer("messages", `the alert banner failed to draw and is hidden until the next alert: ${errorMessage(error)}`);
   }
   render(): ReactNode {
     return this.state.failed ? null : this.props.children;
@@ -62,19 +62,17 @@ class AlertBoundary extends Component<{ children: ReactNode }, { failed: boolean
 
 /** The groups are this screen's own; Everyone's alerts reach it whatever they are. */
 export function MessageAlertOverlay({ groups }: { groups: readonly string[] }) {
-  return (
-    <AlertBoundary>
-      <Alerts groups={groups} />
-    </AlertBoundary>
-  );
-}
-
-function Alerts({ groups }: { groups: readonly string[] }) {
   const { value } = useMessagesStatus();
   // The running alerts sent to this screen, newest first, as the server lists them.
   const candidates = (value?.alerts ?? []).filter((a) => messageReaches(a.to, groups));
   if (candidates.length === 0) return null;
-  return <Banner candidates={candidates} />;
+  // Keyed by the newest alert, so one that failed to draw does not hide the next:
+  // each alert gets a fresh try.
+  return (
+    <AlertBoundary key={candidates[0].id}>
+      <Banner candidates={candidates} />
+    </AlertBoundary>
+  );
 }
 
 /** How much of the alert is left, 1 down to 0, from its own length. */
