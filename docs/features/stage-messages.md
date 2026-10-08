@@ -140,10 +140,12 @@ Every kiosk screen (a display, or a panel running a console) draws a running ale
 over whatever it is showing, whatever the layout or the kind of view, with no
 widget needed. A console open in the operator app is not a kiosk screen and draws
 no banner; its Messages and Message composer widgets show the messages and the
-alert in the thread: the word **Alert** and the
-message large and white on a deep red banner across the bottom (3% in from each
-side, 4% up), with a bar along its foot that runs down to nothing as the 30
-seconds do. It rises into place when it arrives.
+alert in the thread.
+
+The banner is the word **Alert** and the message large and white on a deep red
+banner across the bottom (3% in from each side, 4% up), with a bar along its foot
+that runs down to nothing as the 30 seconds do. It rises into place when it
+arrives.
 
 - Which alert: the newest running one sent to Everyone or to a group the screen is
   in. When it ends, the next one sent to this screen, if any, shows. A screen in no
