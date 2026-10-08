@@ -529,8 +529,8 @@ control it does nothing on a wall display.
 to Everyone or to a group it follows: up to three, newest first and largest, with
 the sender and how long ago (against the server's clock) above each and the latest
 reply in green below. Which groups it follows is its **Groups** setting. **Follow
-this screen**, the default, takes the groups of the screen drawing it, so one
-layout shown in two rooms follows each. **Chosen groups** is its own list and
+screen**, the default, takes the groups of the screen drawing it, so one
+layout shown in two rooms follows each. **Own groups** is its own list and
 overrides the screen's; it is also the only way for a widget on a console in the
 app to have any, since a console is not a screen. A widget with no groups says
 **Choose groups for this widget** in the layout editor and nothing on the console.

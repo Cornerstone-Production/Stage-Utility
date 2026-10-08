@@ -1,8 +1,8 @@
 // messages-groups-picker.tsx — which groups a Messages widget answers for.
 //
-// "Follow this screen" is the default and the right answer on a wall or a panel:
+// "Follow screen" is the default and the right answer on a wall or a panel:
 // the widget takes the groups of whichever screen draws it, so one layout shown
-// in two rooms follows each. "Chosen groups" is the escape hatch, and the only
+// in two rooms follows each. "Own groups" is the escape hatch, and the only
 // way for a widget on an in-app console to have any — a console is not a screen.
 //
 // Its own component so it can be rendered in a test and so the group list is
@@ -38,8 +38,8 @@ export function MessagesGroupsPicker({
         hint="Which messages this shows, and which it can answer. Following the screen takes the groups the screen is in (set on the Screens page); a console in the app is not a screen, so give it groups here."
         value={own === null ? "follow" : "chosen"}
         options={[
-          { value: "follow", label: "Follow this screen" },
-          { value: "chosen", label: "Chosen groups" },
+          { value: "follow", label: "Follow screen" },
+          { value: "chosen", label: "Own groups" },
         ]}
         onChange={(v) => onChange(v === "follow" ? null : [])}
       />

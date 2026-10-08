@@ -1,4 +1,4 @@
-// The Groups picker in the inspector of a Messages widget: Follow this screen, or
+// The Groups picker in the inspector of a Messages widget: Follow screen, or
 // a list of its own. Driven through the real group hook over a stubbed fetch.
 
 import { strict as assert } from "node:assert";
@@ -55,17 +55,17 @@ const button = (c: HTMLElement, name: string) =>
 describe("MessagesGroupsPicker", () => {
   test("follows the screen by default, and offers no list until it is asked to", async () => {
     const { view } = await mount(null);
-    assert.ok(button(view.container, "Follow this screen") && button(view.container, "Chosen groups"), "both choices are offered");
+    assert.ok(button(view.container, "Follow screen") && button(view.container, "Own groups"), "both choices are offered");
     assert.equal(view.container.querySelectorAll('[role="checkbox"]').length, 0);
   });
 
-  test("choosing groups starts an empty list of its own, and following again clears it", async () => {
+  test("choosing its own groups starts an empty list, and following again clears it", async () => {
     const { view, changes } = await mount(null);
-    await act(async () => { fireEvent.click(button(view.container, "Chosen groups")!); });
+    await act(async () => { fireEvent.click(button(view.container, "Own groups")!); });
     assert.deepEqual(changes, [[]]);
     cleanup();
     const again = await mount(["g-00000001"]);
-    await act(async () => { fireEvent.click(button(again.view.container, "Follow this screen")!); });
+    await act(async () => { fireEvent.click(button(again.view.container, "Follow screen")!); });
     assert.deepEqual(again.changes, [null]);
   });
 

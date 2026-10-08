@@ -184,10 +184,10 @@ reply in green below. Ages are counted against the server's clock.
 
 Which groups it follows is its **Groups** setting in the layout editor's inspector:
 
-- **Follow this screen** (the default) takes the groups of the screen that draws it,
+- **Follow screen** (the default) takes the groups of the screen that draws it,
   set on the Screens page. One layout shown on screens in different rooms follows
   each of them.
-- **Chosen groups** is the widget's own list, and overrides the screen's. It is also
+- **Own groups** is the widget's own list, and overrides the screen's. It is also
   the only way for a widget on a console in the operator app to follow any, because
   a console is not a screen. With none chosen it says **Choose groups for this
   widget** in the layout editor and draws nothing but its heading on the console.
