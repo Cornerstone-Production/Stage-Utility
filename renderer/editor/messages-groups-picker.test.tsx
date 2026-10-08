@@ -12,10 +12,15 @@ const teardown = installDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 let groups: { id: string; name: string }[] = [];
+/** The read answers nothing: a read that failed. */
+let readAnswersNothing = false;
+/** When set, the read waits for it: the groups have not arrived yet. */
+let readGate: Promise<void> | null = null;
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: RequestInfo | URL) => {
   const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
   if (!url.startsWith("/api/messages")) throw new Error(`unexpected fetch in messages-groups-picker.test.tsx: ${url}`);
-  const body = { rev: 1, groups, quickMessages: [], quickReplies: [], messages: [], alerts: [] };
+  if (readGate) await readGate;
+  const body = readAnswersNothing ? null : { rev: 1, serverNow: Date.now(), groups, quickMessages: [], quickReplies: [], messages: [], alerts: [] };
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
 
@@ -28,6 +33,7 @@ after(() => unmountAndTeardown(cleanup, teardown));
 beforeEach(() => {
   cleanup();
   __resetReplayCacheForTests();
+  readAnswersNothing = false;
   groups = [
     { id: "g-00000001", name: "Green room" },
     { id: "g-00000002", name: "Stage" },
@@ -92,6 +98,36 @@ describe("MessagesGroupsPicker", () => {
     const boxes = [...view.container.querySelectorAll('[role="checkbox"]')] as HTMLElement[];
     await act(async () => { fireEvent.click(boxes[0]); });
     assert.deepEqual(changes, [["g-00000001", "g-00000002", "g-deadbeef", "g-cafef00d"]], "the unknown ids were dropped from the value");
+  });
+
+  test("no note while the groups are still being read, and none after a read that failed", async () => {
+    // Every saved id would look unknown against a list that has not arrived, or
+    // that never will: claiming they no longer exist would be false.
+    cleanup();
+    let release!: () => void;
+    readGate = new Promise<void>((r) => { release = r; });
+    let view!: ReturnType<typeof render>;
+    try {
+      await act(async () => {
+        view = render(React.createElement(MessagesGroupsPicker, { groups: ["g-00000001", "g-deadbeef"], onChange: () => {} }));
+      });
+      const early = view.container.textContent ?? "";
+      assert.ok(!early.includes("no longer exist"), `warned before the groups were read: ${early}`);
+    } finally {
+      readGate = null;
+      release();
+    }
+    cleanup();
+    readAnswersNothing = true;
+    const quiet = console.warn;
+    console.warn = () => {};
+    try {
+      const failed = await mount(["g-00000001", "g-deadbeef"]);
+      assert.ok(!(failed.view.container.textContent ?? "").includes("no longer exist"), "warned off a read that failed");
+      assert.ok((failed.view.container.textContent ?? "").includes("Could not read the groups"));
+    } finally {
+      console.warn = quiet;
+    }
   });
 
   test("no note when every saved group exists", async () => {
