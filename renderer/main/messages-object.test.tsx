@@ -167,6 +167,19 @@ describe("a message's line", () => {
     assert.ok(draw({ state: stateOf([m]), now: NOW + 60_000 }).includes("4 min"));
   });
 
+  test("an older message is muted but its reply keeps the green, as the mockup draws it", () => {
+    const older = msg(1, [GREEN], { text: "older words", replies: [{ id: "r1", at: NOW - 30_000, from: "Booth console", text: "Copy" }] });
+    const c = mount({ state: stateOf([older, msg(2, [GREEN])]) });
+    const spans = [...c.querySelectorAll("span")];
+    const words = spans.find((e) => e.textContent === "older words")!;
+    const reply = spans.find((e) => e.textContent === "Booth console: Copy")!;
+    assert.equal(words.style.opacity, "0.6", "the older message's words were not muted");
+    // Nothing between the reply and the card may dim it: no ancestor carries an opacity.
+    for (let el: HTMLElement | null = reply; el && el !== c; el = el.parentElement) {
+      assert.equal(el.style.opacity, "", `the reply is dimmed by ${el.tagName} ${el.getAttribute("style")}`);
+    }
+  });
+
   test("ageLabel", () => {
     assert.equal(ageLabel(NOW, NOW - 10_000), "now");
     assert.equal(ageLabel(NOW, NOW + 5_000), "now", "a message stamped ahead of the clock is never negative");

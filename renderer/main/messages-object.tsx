@@ -168,11 +168,13 @@ function Message({ m, now, newest }: { m: StageMessage; now: number; newest: boo
   const em = (x: number) => `${x / f}em`;
   const reply = m.replies.at(-1);
   return (
-    <div style={{ fontSize: `${f}em`, opacity: newest ? 1 : 0.6, overflowWrap: "anywhere" }}>
-      <small style={{ display: "block", fontSize: em(0.58), opacity: 0.45, marginBottom: em(0.08) }}>
+    <div style={{ fontSize: `${f}em`, overflowWrap: "anywhere" }}>
+      {/* The sender line is as faint on an older message as on the newest, and the
+          reply keeps its green: only the words of an older message are muted. */}
+      <small style={{ display: "block", fontSize: em(0.58), opacity: 0.33, marginBottom: em(0.08) }}>
         {m.from} &middot; {ageLabel(now, m.at)}
       </small>
-      {m.text}
+      <span style={{ opacity: newest ? 1 : 0.6 }}>{m.text}</span>
       {reply && (
         <span className="text-live-11" style={{ display: "block", fontSize: em(0.62), marginTop: em(0.12) }}>
           {reply.from}: {reply.text}
