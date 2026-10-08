@@ -31,16 +31,23 @@ let failWith: { status: number; error: string } | null = null;
 const posts = () => requests.filter((r) => r.method === "POST" && !r.url.startsWith("/api/log"));
 
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
+const { toast } = await import("../components/ui/index.js");
 const React = (await import("react")).default;
 const { MessageComposerObject, liveTargets, reachLine, senderName, toggleTarget } = await import("./message-composer-object.js");
 
 after(() => {
+  toast.error = realToastError;
   cleanup();
   teardown();
 });
+/** What the operator was told: toast.error is spied, not drawn. */
+const toasts: string[] = [];
+const realToastError = toast.error;
 beforeEach(() => {
   requests.length = 0;
   failWith = null;
+  toasts.length = 0;
+  toast.error = (m: string) => void toasts.push(m);
 });
 
 const GREEN = "g-00000001";
@@ -236,6 +243,7 @@ describe("composing", () => {
     assert.ok(logged, "the failure never reached /log");
     assert.equal(logged!.body!.tag, "messages");
     assert.match(String(logged!.body!.message), /could not send that message \(to g-00000002\): no group has the id/);
+    assert.deepEqual(toasts, ["Could not send that message: no group has the id g-00000009"], "the operator was not told");
   });
 
   test("on a wall display it draws and does nothing: nothing can be picked, typed or sent", async () => {
@@ -322,6 +330,7 @@ describe("the thread", () => {
     }
     const logged = requests.find((r) => r.url === "/api/log/client");
     assert.match(String(logged?.body?.message), /could not clear that alert \(/);
+    assert.deepEqual(toasts, ["Could not clear that alert: could not save"], "the operator was not told");
   });
 });
 

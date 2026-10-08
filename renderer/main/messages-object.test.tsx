@@ -6,7 +6,7 @@
 // it was compared to the approved mockup in a browser. These are the decisions.
 
 import { strict as assert } from "node:assert";
-import { after, describe, test } from "node:test";
+import { after, beforeEach, describe, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
 import { EVERYONE, type MessagesState, type StageMessage } from "@main/types/messages";
@@ -29,11 +29,21 @@ let replyStatus = 201;
 };
 
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
+const { toast } = await import("../components/ui/index.js");
 const React = (await import("react")).default;
 const { MessagesObject, groupNames, shownMessages } = await import("./messages-object.js");
 const { ageLabel } = await import("../lib/age-label.js");
 
+/** What the operator was told: toast.error is spied, not drawn. */
+const toasts: string[] = [];
+const realToastError = toast.error;
+beforeEach(() => {
+  toasts.length = 0;
+  toast.error = (m: string) => void toasts.push(m);
+});
+
 after(() => {
+  toast.error = realToastError;
   cleanup();
   teardown();
 });
@@ -274,5 +284,6 @@ describe("answering from a console", () => {
     assert.ok(logged, "the failure was not sent to /log");
     assert.deepEqual((logged!.body as { tag: string }).tag, "messages");
     assert.match((logged!.body as { message: string }).message, /could not send that reply \(to .*\): .*does not follow a group/);
+    assert.deepEqual(toasts, ["Could not send that reply: that widget does not follow a group this message was sent to"], "the operator was not told");
   });
 });
