@@ -76,7 +76,8 @@ describe("a widget you just added", () => {
       LAYOUT_OBJECT_TYPES,
       "a type was added or removed; update LAYOUT_OBJECT_TYPES deliberately",
     );
-    assert.equal(all.filter(hasCard).length, 33);
+    // 34 with Messages, which is a card like Notes and the checklist.
+    assert.equal(all.filter(hasCard).length, 34);
     assert.equal(all.filter((t) => !hasCard(t)).length, BARE.length);
   });
 

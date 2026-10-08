@@ -89,6 +89,7 @@ import {
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
 import { CuePicker } from "./cue-picker";
+import { MessagesGroupsPicker } from "./messages-groups-picker";
 import { ActionButtonInspector } from "./action-button-inspector";
 import { cn } from "../lib/cn";
 import { ColorField } from "../components/ui/color-field";
@@ -1698,6 +1699,9 @@ export function Inspector({
           )}
           <p className="text-caption2 text-fg-muted leading-snug">Driven by the Baptisms tab. &ldquo;Live&rdquo; ticks the current testimony/baptism; others summarize the session.</p>
         </>
+      )}
+      {c.type === "messages" && (
+        <MessagesGroupsPicker groups={c.groups} onChange={(groups) => onConfig({ ...c, groups })} />
       )}
       {c.type === "image" && (
         <ImageConfig src={c.src} onChange={(v) => onConfig({ type: "image", src: v })} />

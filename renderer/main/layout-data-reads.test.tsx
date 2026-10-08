@@ -161,6 +161,7 @@ const PRO_TYPES = Object.keys(LAYOUT_OBJECTS).filter((t) => usesPropInstance(t a
 const SOURCES: Record<string, { read: string; channel: string | null; openers: readonly string[] }> = {
   baptism: { read: "/api/baptism", channel: "baptism:state", openers: ["baptism-timer"] },
   integrations: { read: "/api/integrations", channel: "integrations:state-changed", openers: ["integration-status"] },
+  messages: { read: "/api/messages", channel: "messages:state", openers: ["messages"] },
   planItems: { read: "/api/pco/plan-items", channel: null, openers: ["service-order", "service-pacing"] },
   propInstances: { read: "/api/propresenter/instances", channel: "propresenter:instances", openers: PRO_TYPES },
   propresenter: { read: "/api/propresenter/status", channel: "propresenter:status", openers: PRO_TYPES },

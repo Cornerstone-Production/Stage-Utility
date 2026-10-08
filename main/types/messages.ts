@@ -84,6 +84,12 @@ export const ALERT_MS = 30_000;
 export const GROUP_ID = /^g-[0-9a-f]{8}$/;
 export const MESSAGE_ID = /^[0-9a-f]{16}$/;
 
+/** A layout object's id or an output's id as a reply names them. These are not
+ *  issued by the messages service, so this is only the shape a wire id may have
+ *  (the one notes-store.ts accepts): it is looked up in a Map of what exists, and
+ *  never used as a property name. */
+export const WIRE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
 /** The limits, in one place so the Settings page can say them too. */
 export const MESSAGE_MAX = 280;
 export const MESSAGES_CAP = 200;
@@ -107,3 +113,25 @@ export const DEFAULT_QUICK_MESSAGES: readonly string[] = [
 ];
 
 export const DEFAULT_QUICK_REPLIES: readonly string[] = ["Copy", "Walking now", "Need 2 min"];
+
+/**
+ * The groups a Messages widget answers for and shows: its own list when it has
+ * one, else the screen's. Null when neither applies — an in-app console whose
+ * widget has no list yet.
+ *
+ * One function for the widget and for the server's reply check, so what a
+ * console offers to answer and what the server lets it answer cannot drift.
+ */
+export function widgetGroups(
+  own: readonly string[] | null | undefined,
+  screen: readonly string[] | null,
+): readonly string[] | null {
+  return own ?? screen;
+}
+
+/** Did a message go to Everyone, or to at least one of these groups? */
+export function messageReaches(to: readonly string[], groups: readonly string[]): boolean {
+  if (to.includes(EVERYONE)) return true;
+  const mine = new Set(groups);
+  return to.some((id) => mine.has(id));
+}

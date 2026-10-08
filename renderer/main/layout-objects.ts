@@ -796,6 +796,19 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: () => PILL({ fontSize: 0.12 }),
   },
 
+  // The newest three stage messages for the screen's groups. Sized so a message
+  // reads from across a room: 0.046 of the canvas height is 2.6% of a 16:9
+  // canvas's width, which is what the approved mockup draws it at. Top-left
+  // aligned: it is a feed, not a readout.
+  messages: {
+    label: "Messages",
+    blurb: "Stage messages for this screen's groups, with replies",
+    group: "Control",
+    config: () => ({ type: "messages" }),
+    style: () => CARD({ fontSize: 0.046, fontWeight: 400, textAlign: "left", vAlign: "top" }),
+    homeSize: "m",
+  },
+
   // Status
   "integration-status": {
     label: "Integration status",

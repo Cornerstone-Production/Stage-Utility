@@ -23,6 +23,9 @@ import { useResiStatus, useYouTubeStatus } from "./use-stream-state";
 import { obsRecordTimecode } from "@main/services/obs-record-clock";
 import { streamers, streamIndicator, STREAMER_FOR, type StreamerName } from "../app/recording-status";
 import { usePvpState } from "./use-pvp-state";
+import { useMessagesStatus } from "./use-messages-state";
+import { MessagesObject } from "./messages-object";
+import type { MessagesState } from "@main/types/messages";
 import { useReaperStatus } from "./use-reaper-state";
 import { useScoresStatus } from "./use-scores-state";
 import { ScoresObject } from "./scores-object";
@@ -94,6 +97,11 @@ export interface LayoutRenderCtx {
   pvp: PvpStatusDTO | null;
   scores: ScoresStatusDTO | null;
   scoresKnown: boolean;
+  /** The day's stage messages, the groups and the quick lists — for the Messages
+   *  and Message composer widgets. Whether it has answered is `messagesKnown`:
+   *  "No messages" is a claim only once it has. */
+  messages: MessagesState | null;
+  messagesKnown: boolean;
   resi: StreamStatusDTO | null;
   resiKnown: boolean;
   youtube: YouTubeStatusDTO | null;
@@ -1631,6 +1639,18 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     }
     case "scores":
       return <ScoresObject config={c} scores={ctx.scores} known={ctx.scoresKnown} />;
+    case "messages":
+      return (
+        <MessagesObject
+          config={c}
+          state={ctx.messages}
+          known={ctx.messagesKnown}
+          screenGroups={ctx.screenGroups}
+          editing={ctx.editing === true}
+          now={ctx.now}
+          ts={ts}
+        />
+      );
 
     default: {
       // Exhaustiveness guard: every LayoutObjectType must have a case above. Add
@@ -3202,6 +3222,9 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // Gated like every other integration hook: a clock-only wall screen must not
   // hold a poll open against ESPN.
   const scoresStatus = useScoresStatus(want(["scores", "home-scores"]));
+  // The stage messages: only a layout that holds a widget that draws them opens
+  // the channel. (The alert overlay is not a widget and has its own read.)
+  const messagesStatus = useMessagesStatus(want(["messages"]));
   // Both gated on the streaming objects (`streamWanted`, declared above the
   // recorder gates): a clock-only wall screen must not hold a poll open against
   // two cloud APIs, one of which has a daily quota.
@@ -3261,7 +3284,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // as wrong as the last time anyone set it.
   const now = useServerClock(pcoLive?.serverNow);
 
-  return { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
+  return { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
 }
 
 type LayoutData = ReturnType<typeof useLayoutData>;
@@ -3277,7 +3300,7 @@ type LayoutData = ReturnType<typeof useLayoutData>;
  * gate-render-parity.test.ts reads it to map each ctx field to its gate.
  */
 export function statusCtx(
-  d: Pick<LayoutData, "obsStatus" | "reaperStatus" | "resiStatus" | "youtubeStatus" | "scoresStatus" | "baptismStatus" | "cuesStatus" | "planItemsStatus" | "integrationsSnap" | "onlinePresence">,
+  d: Pick<LayoutData, "obsStatus" | "reaperStatus" | "resiStatus" | "youtubeStatus" | "scoresStatus" | "messagesStatus" | "baptismStatus" | "cuesStatus" | "planItemsStatus" | "integrationsSnap" | "onlinePresence">,
 ) {
   return {
     obs: d.obsStatus.value,
@@ -3290,6 +3313,8 @@ export function statusCtx(
     youtubeKnown: d.youtubeStatus.known,
     scores: d.scoresStatus.value,
     scoresKnown: d.scoresStatus.known,
+    messages: d.messagesStatus.value,
+    messagesKnown: d.messagesStatus.known,
     baptism: d.baptismStatus.value,
     baptismKnown: d.baptismStatus.known,
     cues: d.cuesStatus.value,
@@ -3349,7 +3374,7 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
+  const { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -3431,7 +3456,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, outputId, screenGroups, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, messages: messagesStatus.value, messagesKnown: messagesStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, outputId, screenGroups, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

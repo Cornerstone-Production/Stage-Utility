@@ -467,6 +467,7 @@ nothing.
 | **Cue button** | Fires a cue and shows its device's state: on, off, settling after a press, stale when Companion has lost the device, dimmed when the cue refuses | This app, via Companion |
 | **Notes** | A shared note anyone can type into | This app |
 | **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
+| **Messages** | The newest three [stage messages](../features/stage-messages.md) sent to this screen's groups, each with its sender, its age and the latest reply under it | This app |
 
 **Notes** and **Checklist** are shared, not per-screen: two people looking at them
 see the same text. See [OSC](../integrations/osc.md) and
@@ -511,6 +512,17 @@ Two colour schemes, by what the switch means:
 The live scheme is carried by the OBS recording, OBS stream and REAPER recording
 built-ins. Everything else draws the ordinary way, and both draw an unreadable
 state as the amber dashed ring.
+
+**Messages** shows the [stage messages](../features/stage-messages.md) that went
+to Everyone or to a group it follows: up to three, newest first and largest, with
+the sender and how long ago (against the server's clock) above each and the latest
+reply in green below. Which groups it follows is its **Groups** setting. **Follow
+this screen**, the default, takes the groups of the screen drawing it, so one
+layout shown in two rooms follows each. **Chosen groups** is its own list and
+overrides the screen's; it is also the only way for a widget on a console in the
+app to have any, since a console is not a screen. A widget with no groups says
+**Choose groups for this widget** in the layout editor and nothing on the console.
+Before the server has answered it draws only its heading, never "No messages".
 
 ## Layout
 

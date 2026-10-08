@@ -90,6 +90,8 @@ export function makeRenderCtx(overrides: Partial<LayoutRenderCtx> = {}): LayoutR
     cuesKnown: true,
     scores: null,
     scoresKnown: true,
+    messages: null,
+    messagesKnown: true,
     peopleCount: null,
     serviceLow: null,
     serviceAttendance: null,

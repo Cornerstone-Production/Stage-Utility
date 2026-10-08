@@ -131,3 +131,25 @@ back. Then start-up leaves the screens alone and says so on the log
 only when a screen actually holds a group. Fix or restore the file and restart, or
 save the groups in Settings → Messages, which is the operator's own decision and
 always runs it.
+
+## On screens
+
+### The Messages widget
+
+The **Messages** [widget](../reference/widgets.md#control) draws the newest three
+messages sent to Everyone or to a group it follows: the newest large, the older two
+smaller and muted, each with its sender and how long ago above it and the latest
+reply in green below. Ages are counted against the server's clock.
+
+Which groups it follows is its **Groups** setting in the layout editor's inspector:
+
+- **Follow this screen** (the default) takes the groups of the screen that draws it,
+  set on the Screens page. One layout shown on screens in different rooms follows
+  each of them.
+- **Chosen groups** is the widget's own list, and overrides the screen's. It is also
+  the only way for a widget on a console in the operator app to follow any, because
+  a console is not a screen. With none chosen it says **Choose groups for this
+  widget** in the layout editor and draws nothing but its heading on the console.
+
+A Screens-card preview is a picture of a screen, not a screen, so a widget in one
+follows no group.
