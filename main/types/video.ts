@@ -119,14 +119,13 @@ export interface VideoFeedView {
  * zero delta rather than a negative one. `width`/`height` are the frame's
  * current size, never a delta.
  *
- * `jitterBufferMs` and `behindNewestMs` are WebRTC-only receive-delay
- * figures, in milliseconds, measured over this report's interval: how long
- * the average frame waited in the browser's own jitter buffer, and how far
- * the frame on screen trails the newest frame the receiver has taken in.
- * Together they say whether a lagging picture's delay is held by the screen
- * itself or lives upstream. Null when the browser could not measure one
- * (HLS never can, nor can a browser without the needed stats); absent on a
- * report from a page older than the figures, which the server reads as null.
+ * `jitterBufferMs` is the WebRTC-only receive-delay figure, in milliseconds,
+ * measured over this report's interval: how long the average frame waited in
+ * the browser's own jitter buffer. It says whether a lagging picture's delay
+ * is held by the screen itself or lives upstream. Null when the browser could
+ * not measure it (a WebRTC report without the needed stats); absent on an HLS
+ * report, which never can, and on a report from a page older than the figure.
+ * The server reads absent as null.
  */
 export interface VideoPlaybackReport {
   feedId: string;
@@ -137,7 +136,6 @@ export interface VideoPlaybackReport {
   width: number;
   height: number;
   jitterBufferMs?: number | null;
-  behindNewestMs?: number | null;
 }
 
 /**
@@ -165,17 +163,14 @@ export interface ScreenVideoHealth {
   decodedInWindow: number;
   stallsInWindow: number;
   /** Sticky, like `struggling` and separate from it — a pair can be either,
-   *  both or neither: the window's worst `jitterBufferMs` or `behindNewestMs`
-   *  went over 1000 ms, held for CLEAR_AFTER_MS after the last sample that
-   *  did. The screen is holding that much delay in its own browser, so the
-   *  cause is this screen's network or decode, not the relay or encoder. */
+   *  both or neither: the window's worst `jitterBufferMs` went over 1000 ms,
+   *  held for CLEAR_AFTER_MS after the last sample that did. The screen's own
+   *  browser is holding that much delay, so look at its network or decoding. */
   lagging: boolean;
   /** The worst `jitterBufferMs` any report in the window carried, or null when
    *  none carried one (HLS, or a browser that does not report it). A window
    *  figure, so as of the last re-read like the totals above. */
   jitterBufferMsInWindow: number | null;
-  /** The worst `behindNewestMs` in the window, the same way. */
-  behindNewestMsInWindow: number | null;
   /** The frame's current size, as of the pair's last report — never a delta,
    *  same as VideoPlaybackReport's own width/height. */
   width: number;
@@ -207,15 +202,12 @@ export interface ScreenVideoHealth {
     height: number;
   } | null;
   /**
-   * The worst of each figure since `lagging` last turned true — what the card
+   * The worst `jitterBufferMs` since `lagging` last turned true — what the card
    * and the `[video]` lagging line read, for the same reason `episode` exists:
    * the live window's figures age out from under a flag that is still holding.
    * Null while not lagging.
    */
-  laggingEpisode: {
-    jitterBufferMs: number | null;
-    behindNewestMs: number | null;
-  } | null;
+  laggingEpisode: { jitterBufferMs: number } | null;
 }
 
 /**

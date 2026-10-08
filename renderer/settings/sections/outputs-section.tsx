@@ -29,7 +29,7 @@ import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
 import { viewSurface, outputMode, KIND_DRAWS_TOP_BAR } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
-import { classifyWindow, LAGGING_ADVICE, worstLag } from "@main/services/video/playback-health";
+import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -109,8 +109,8 @@ function ScreenStruggleBox({ struggle }: { struggle: ScreenStruggle }) {
   );
 }
 
-/** A pair's lagging episode reduced to what its card box says: the worse of
- *  the two receive-delay figures, in ms. From the EPISODE, never the live
+/** A pair's lagging episode reduced to what its card box says: the worst
+ *  jitter buffer figure, in ms. From the EPISODE, never the live
  *  window, for the same reason ScreenStruggle is (see it). */
 interface ScreenLag {
   feedId: string;
@@ -972,7 +972,7 @@ export function OutputsSection({
     // Lagging reads its own episode the same way, for the same reason.
     if (health.lagging && health.laggingEpisode) {
       const list = lagsByOutput.get(health.outputId) ?? [];
-      list.push({ feedId: health.feedId, feedName, holdingMs: worstLag(health.laggingEpisode).ms });
+      list.push({ feedId: health.feedId, feedName, holdingMs: health.laggingEpisode.jitterBufferMs });
       lagsByOutput.set(health.outputId, list);
     }
   }

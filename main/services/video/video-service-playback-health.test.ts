@@ -293,46 +293,31 @@ test("a screen name and a feed name carrying a control character are scrubbed be
 
 const LAG_SUFFIX = "The delay is held on this screen: check its network or decoding.";
 
-test("logs the lagging and no-longer-lagging flips, once per episode, naming the worst figure", async (t: TestContext) => {
+test("logs the lagging and no-longer-lagging flips, once per episode, naming how much", async (t: TestContext) => {
   const id = await addRelayFeed("Lag wall");
   const lines = captureConsole(t, "log");
   try {
-    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 1400, behindNewestMs: 300 })], 0);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 1400 })], 0);
     await settle();
     // Still lagging, and worse: not a second line.
-    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 2300, behindNewestMs: 200 })], 10_000);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 2300 })], 10_000);
     await settle();
     // Clean heartbeats at the real cadence; the sixth lands exactly 60 s after
     // the last report over the line and clears it.
     for (let i = 2; i <= 7; i++) {
-      videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 30, behindNewestMs: 34 })], i * 10_000);
+      videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 30 })], i * 10_000);
       await settle();
     }
     // Still smooth: no repeat of the clear.
-    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 30, behindNewestMs: 34 })], 80_000);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 30 })], 80_000);
     await settle();
 
     assert.deepEqual(
       lines.filter((l) => l.includes("Lag wall")),
       [
-        `[video] ${OUTPUT_NAME} is lagging on Lag wall: holding 1.4 s in its own buffer (jitter buffer). ${LAG_SUFFIX}`,
+        `[video] ${OUTPUT_NAME} is lagging on Lag wall: holding 1.4 s in its own buffer. ${LAG_SUFFIX}`,
         `[video] ${OUTPUT_NAME} is no longer lagging on Lag wall`,
       ],
-    );
-  } finally {
-    await videoService.removeFeed(id);
-  }
-});
-
-test("the lagging line names behind-newest when that is the worse figure", async (t: TestContext) => {
-  const id = await addRelayFeed("Behind wall");
-  const lines = captureConsole(t, "log");
-  try {
-    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 400, behindNewestMs: 3200 })], 0);
-    await settle();
-    assert.deepEqual(
-      lines.filter((l) => l.includes("Behind wall")),
-      [`[video] ${OUTPUT_NAME} is lagging on Behind wall: holding 3.2 s in its own buffer (behind the newest frame). ${LAG_SUFFIX}`],
     );
   } finally {
     await videoService.removeFeed(id);
@@ -344,7 +329,7 @@ test("a healthy WebRTC feed, both figures well under the line, logs nothing at a
   const lines = captureConsole(t, "log", "warn");
   try {
     for (let i = 0; i < 8; i++) {
-      videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, via: "webrtc", jitterBufferMs: 12 + i, behindNewestMs: 34 })], i * 10_000);
+      videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, via: "webrtc", jitterBufferMs: 12 + i })], i * 10_000);
       await settle();
     }
     // Over the whole minute, and past the point a hold would have cleared.
@@ -366,7 +351,7 @@ test("a heartbeat whose own sweep clears the lagging flag and whose own report r
     await settle();
     assert.deepEqual(lines, [
       `[video] ${OUTPUT_NAME} is no longer lagging on Relag wall`,
-      `[video] ${OUTPUT_NAME} is lagging on Relag wall: holding 1.8 s in its own buffer (jitter buffer). ${LAG_SUFFIX}`,
+      `[video] ${OUTPUT_NAME} is lagging on Relag wall: holding 1.8 s in its own buffer. ${LAG_SUFFIX}`,
     ]);
   } finally {
     await videoService.removeFeed(id);
@@ -383,7 +368,7 @@ test("lagging and struggling are separate lines: a pair over both lines logs eac
       lines.filter((l) => l.includes("Both wall")),
       [
         `[video] ${OUTPUT_NAME} is struggling with Both wall: dropped 51 frames for 1000 decoded, 0 stalls in the last minute`,
-        `[video] ${OUTPUT_NAME} is lagging on Both wall: holding 1.5 s in its own buffer (jitter buffer). ${LAG_SUFFIX}`,
+        `[video] ${OUTPUT_NAME} is lagging on Both wall: holding 1.5 s in its own buffer. ${LAG_SUFFIX}`,
       ],
     );
   } finally {
@@ -396,21 +381,20 @@ test("a lagging screen is exposed in video state with its figures and episode, a
   captureConsole(t, "log");
   try {
     const before = frames.length;
-    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 1500, behindNewestMs: 200 })], Date.now());
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 1500 })], Date.now());
     await settleUntil(() => frames.length >= before + 1, "the lagging flip to publish");
     await settle();
     const pair = (await videoService.state()).screens.find((s) => s.feedId === id)!;
     assert.equal(pair.lagging, true);
     assert.equal(pair.jitterBufferMsInWindow, 1500);
-    assert.equal(pair.behindNewestMsInWindow, 200);
-    assert.deepEqual(pair.laggingEpisode, { jitterBufferMs: 1500, behindNewestMs: 200 });
+    assert.deepEqual(pair.laggingEpisode, { jitterBufferMs: 1500 });
 
     const afterFlip = frames.length;
-    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 1100, behindNewestMs: 100 })], Date.now() + 1);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 1100 })], Date.now() + 1);
     await settle();
     assert.equal(frames.length, afterFlip, "a milder report inside the same episode changes nothing to publish");
 
-    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 4000, behindNewestMs: 100 })], Date.now() + 2);
+    videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: id, jitterBufferMs: 4000 })], Date.now() + 2);
     await settleUntil(() => frames.length >= afterFlip + 1, "the rising peak to publish");
     assert.equal((await videoService.state()).screens.find((s) => s.feedId === id)?.laggingEpisode?.jitterBufferMs, 4000);
   } finally {

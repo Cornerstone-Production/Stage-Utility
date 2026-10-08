@@ -36,7 +36,7 @@ import {
 } from "./feed-transfer.js";
 import { loadFeedsFile, videoFeedsStore } from "./feed-store.js";
 import { EpisodeLog } from "./episode-log.js";
-import { LAGGING_ADVICE, pairKey, PlaybackHealth, worstLag } from "./playback-health.js";
+import { LAGGING_ADVICE, pairKey, PlaybackHealth } from "./playback-health.js";
 import { parsePorts } from "./ports.js";
 import { probeFeed, type ProbeResult } from "./probe.js";
 import { ProbeScheduler } from "./probe-scheduler.js";
@@ -2370,17 +2370,16 @@ class VideoService {
         ended: () => console.log(`[video] ${scrub(name)} is playing ${scrub(feed)} smoothly again`),
       });
 
-      // A healthy WebRTC pair (both figures well under the line) is never
+      // A healthy WebRTC pair (its figure well under the line) is never
       // in an episode, so it logs nothing at all.
       this.lagLog.note(key, this.playbackHealth.laggingEpisodeIdFor(health.outputId, health.feedId), {
         started: () => {
           // `laggingEpisode` is non-null exactly when the flag is on; the
           // fallback is defensive only.
-          const peak = health.laggingEpisode ?? { jitterBufferMs: health.jitterBufferMsInWindow, behindNewestMs: health.behindNewestMsInWindow };
-          const { ms, what } = worstLag(peak);
+          const ms = health.laggingEpisode?.jitterBufferMs ?? health.jitterBufferMsInWindow ?? 0;
           console.log(
             `[video] ${scrub(name)} is lagging on ${scrub(feed)}: ` +
-              `holding ${scrub((ms / 1000).toFixed(1))} s in its own buffer (${scrub(what)}). ${scrub(LAGGING_ADVICE)}`,
+              `holding ${scrub((ms / 1000).toFixed(1))} s in its own buffer. ${scrub(LAGGING_ADVICE)}`,
           );
         },
         ended: () => console.log(`[video] ${scrub(name)} is no longer lagging on ${scrub(feed)}`),

@@ -364,15 +364,15 @@ test("\"On N screens\" counts DISTINCT outputIds reporting a feed, never raw scr
   const ptz = pushFeed({ id: "feed-push", name: "Stage PTZ", status: { state: "waiting" } });
   const g = stubGlobals(
     makeState([program, ptz], [
-      { outputId: "display-1", feedId: "feed-pull", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, behindNewestMsInWindow: null, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
-      { outputId: "display-2", feedId: "feed-pull", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, behindNewestMsInWindow: null, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
+      { outputId: "display-1", feedId: "feed-pull", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
+      { outputId: "display-2", feedId: "feed-pull", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
       // A third entry for feed-pull naming the SAME outputId as the first —
       // never a shape the real server produces (PlaybackHealth holds one
       // entry per outputId+feedId pair), but exactly what tells "count
       // distinct outputIds" apart from "count entries": a raw-length count
       // would read 3, not 2.
-      { outputId: "display-1", feedId: "feed-pull", via: "hls", struggling: false, lagging: false, jitterBufferMsInWindow: null, behindNewestMsInWindow: null, droppedInWindow: 0, decodedInWindow: 50, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
-      { outputId: "display-3", feedId: "feed-push", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, behindNewestMsInWindow: null, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
+      { outputId: "display-1", feedId: "feed-pull", via: "hls", struggling: false, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 0, decodedInWindow: 50, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
+      { outputId: "display-3", feedId: "feed-push", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
     ]),
   );
   try {
@@ -391,7 +391,7 @@ test("\"On N screens\" shows for an external feed too — a screen's own playbac
   const relay = externalFeed({ id: "feed-external", name: "Lobby relay" });
   const g = stubGlobals(
     makeState([relay], [
-      { outputId: "display-1", feedId: "feed-external", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, behindNewestMsInWindow: null, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: null, laggingEpisode: null },
+      { outputId: "display-1", feedId: "feed-external", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 0, decodedInWindow: 100, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: null, laggingEpisode: null },
     ]),
   );
   try {

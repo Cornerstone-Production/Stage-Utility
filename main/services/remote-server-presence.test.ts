@@ -31,7 +31,7 @@ function deps() {
   };
 }
 
-const REPORT: VideoPlaybackReport = { feedId: "feed-1", via: "webrtc", decoded: 100, dropped: 0, stalls: 0, width: 1920, height: 1080, jitterBufferMs: 240, behindNewestMs: null };
+const REPORT: VideoPlaybackReport = { feedId: "feed-1", via: "webrtc", decoded: 100, dropped: 0, stalls: 0, width: 1920, height: 1080, jitterBufferMs: 240 };
 
 test("the display heartbeat lands first, and unconditionally — a body with no video field at all", () => {
   const { heartbeats, videoRecords, d } = deps();

@@ -16,6 +16,7 @@
 
 import { errorMessage } from "@main/services/errors";
 import { OutageLog } from "@main/services/repeat-log";
+import { MAX_LAG_MS } from "@main/services/video/playback-health";
 import type { VideoPlaybackReport } from "@main/types/video";
 
 /** How long one stats read may take before it counts as a failed read. Under
@@ -110,102 +111,14 @@ async function readWebrtcCounts(pc: RTCPeerConnection): Promise<RawCounts | null
   return found;
 }
 
-/** The RTP timestamp of the newest frame the video receiver has taken in:
- *  the synchronization source it heard from most recently. Null for a
- *  browser that has no `getSynchronizationSources`, or has not yet heard from
- *  one. A throw from the browser is NOT caught here — it reads as a failed
- *  stats read, the same as `getStats()` rejecting. */
-function newestRtpTimestamp(pc: RTCPeerConnection): number | null {
-  if (typeof pc.getReceivers !== "function") return null;
-  for (const receiver of pc.getReceivers()) {
-    if (receiver.track.kind !== "video" || typeof receiver.getSynchronizationSources !== "function") continue;
-    let newest: RTCRtpSynchronizationSource | null = null;
-    for (const source of receiver.getSynchronizationSources()) {
-      if (newest === null || source.timestamp > newest.timestamp) newest = source;
-    }
-    if (newest?.rtpTimestamp !== undefined) return newest.rtpTimestamp;
-  }
-  return null;
-}
-
-/** How far the displayed frame trails the newest received, in ms at the video
- *  RTP clock's 90 kHz. The two are 32-bit and wrap, so the difference is
- *  taken modulo 2^32 and read signed: a displayed frame that is somehow ahead
- *  (a sample landing between two reads) is 0, never a 13-hour lag. */
-export function rtpBehindMs(newest: number, displayed: number): number {
-  const ticks = (newest - displayed) | 0;
-  return ticks <= 0 ? 0 : ticks / 90;
-}
-
-/** A figure at or past this is not a measurement. Two clocks that are
- *  unrelated (a source change leaves the older source in the receiver's list
- *  for a while, and its RTP clock starts anywhere), or a stats counter that
- *  restarted, produce differences of any size; no live picture holds a minute
- *  of delay in the browser. */
-export const NOT_A_MEASUREMENT_MS = 60_000;
-
-/** A figure as the report carries it: whole milliseconds, or null when it is
- *  not a measurement (see NOT_A_MEASUREMENT_MS). */
-function measuredMs(ms: number): number | null {
+/** A jitter-buffer figure as the report carries it: whole milliseconds, or
+ *  null past what the server will accept. The server refuses a whole report
+ *  array over MAX_LAG_MS, so a freak counter reading (a browser reporting
+ *  nonsense) must not cost the screen every widget's health for that
+ *  heartbeat; null says the figure was not usable. */
+function reportedMs(ms: number): number | null {
   const whole = Math.round(ms);
-  return Number.isFinite(whole) && whole < NOT_A_MEASUREMENT_MS ? Math.max(0, whole) : null;
-}
-
-/** How long sample() waits for the next frame to reach the screen before it
- *  reports behindNewestMs as null: a hidden tab, a paused or frozen picture
- *  and a stream with no frames all deliver none. A frame normally arrives
- *  within one frame interval (33 ms at 30 fps). Well under the stats read's
- *  own cap, and the two run side by side, so waiting costs the heartbeat
- *  nothing it was not already allowed. */
-export const FRAME_WAIT_MS = 300;
-
-/** The one frame metadata field this reads, which lib.dom does not type. */
-type FrameMetadata = { rtpTimestamp?: number };
-type FrameCallbackVideo = HTMLVideoElement & {
-  requestVideoFrameCallback?: (cb: (now: number, metadata?: FrameMetadata) => void) => number;
-  cancelVideoFrameCallback?: (handle: number) => void;
-};
-
-/** How far the NEXT frame to reach the screen trails the newest the receiver
- *  has taken in, read in that frame's own callback: the displayed frame's
- *  timestamp and the receiver's newest are both read at the same instant, so
- *  neither can be older than the other. Null when no frame arrives within
- *  FRAME_WAIT_MS (or `cancel()` runs first), when the browser has no
- *  requestVideoFrameCallback or the frame carries no RTP timestamp, or when
- *  the two clocks are not comparable. Rejects if the browser throws reading
- *  the receiver — a failed stats read, like getStats() rejecting. */
-function watchNextFrame(video: FrameCallbackVideo, pc: RTCPeerConnection): { result: Promise<number | null>; cancel: () => void } {
-  if (typeof video.requestVideoFrameCallback !== "function") return { result: Promise.resolve(null), cancel: () => {} };
-  let finish: (behindMs: number | null) => void = () => {};
-  let fail: (err: unknown) => void = () => {};
-  const result = new Promise<number | null>((resolve, reject) => {
-    finish = resolve;
-    fail = reject;
-  });
-  // Settled once: the callback delivered, or the wait ended first. A cancel
-  // after that does nothing, so the browser is never asked to cancel a
-  // callback it already ran.
-  let settled = false;
-  const timer = setTimeout(() => cancel(), FRAME_WAIT_MS);
-  const handle = video.requestVideoFrameCallback((_now, metadata) => {
-    settled = true;
-    clearTimeout(timer);
-    try {
-      const displayed = metadata?.rtpTimestamp;
-      const newest = typeof displayed === "number" ? newestRtpTimestamp(pc) : null;
-      finish(typeof displayed === "number" && newest !== null ? measuredMs(rtpBehindMs(newest, displayed)) : null);
-    } catch (err) {
-      fail(err);
-    }
-  });
-  function cancel(): void {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timer);
-    video.cancelVideoFrameCallback?.(handle);
-    finish(null);
-  }
-  return { result, cancel };
+  return Number.isFinite(whole) && whole <= MAX_LAG_MS ? Math.max(0, whole) : null;
 }
 
 /** `decoded` is `totalVideoFrames` less `droppedVideoFrames`: the total counts
@@ -295,35 +208,19 @@ export function createSampler(
   // inbound-rtp video report: freezeCount if that report has one, `waiting`
   // otherwise, for the rest of the session whatever later reports carry.
   let stallSource: "freezeCount" | "waiting" | null = source.via === "hls" ? "waiting" : null;
-  // WebRTC's receive delay. `jitterBufferMs` is the average time a frame
+  // WebRTC's receive delay: `jitterBufferMs` is the average time a frame
   // waited in the browser's jitter buffer THIS interval, from two cumulative
-  // counters read as deltas. `behindNewestMs` is read once per sample from
-  // the next frame to reach the screen (see watchNextFrame).
+  // counters read as deltas.
   const jitterDelayDelta = trackDelta();
   const jitterEmittedDelta = trackDelta();
-  const frameVideo = video as FrameCallbackVideo;
-  let cancelFrameWatch: () => void = () => {};
   const statsOutage = new OutageLog();
   const read = (): Promise<RawCounts | null> => (source.via === "webrtc" ? inTime(readWebrtcCounts(source.pc)) : Promise.resolve(readHlsCounts(video)));
 
   return {
     sample: async () => {
       let raw: RawCounts | null;
-      let behindNewestMs: number | null = null;
       try {
-        if (source.via === "webrtc") {
-          // Side by side, so waiting for a frame adds nothing to a read that
-          // was already allowed STATS_READ_TIMEOUT_MS.
-          const watch = watchNextFrame(frameVideo, source.pc);
-          cancelFrameWatch = watch.cancel;
-          try {
-            [raw, behindNewestMs] = await Promise.all([read(), watch.result]);
-          } finally {
-            watch.cancel();
-          }
-        } else {
-          raw = await read();
-        }
+        raw = await read();
       } catch (err) {
         // Stopped between the call going out and its rejection landing: the
         // session is closing on purpose, and `getStats()` failing on a
@@ -361,24 +258,22 @@ export function createSampler(
         height: raw.height,
       };
       if (source.via === "webrtc") {
-        // Both figures are null, not zero, when this interval could not
-        // measure them: a counter the browser does not report, a buffer that
-        // emitted nothing, no frame reaching the screen, an implausible one.
+        // Null, not zero, when this interval could not measure it: a counter
+        // the browser does not report, a buffer that emitted nothing, or a
+        // reading past what the server accepts.
         let jitterBufferMs: number | null = null;
         if (raw.jitterBufferDelay !== undefined && raw.jitterBufferEmittedCount !== undefined) {
           const waited = jitterDelayDelta(raw.jitterBufferDelay);
           const emitted = jitterEmittedDelta(raw.jitterBufferEmittedCount);
-          if (emitted > 0) jitterBufferMs = measuredMs((waited / emitted) * 1000);
+          if (emitted > 0) jitterBufferMs = reportedMs((waited / emitted) * 1000);
         }
         report.jitterBufferMs = jitterBufferMs;
-        report.behindNewestMs = behindNewestMs;
       }
       return report;
     },
     stop: () => {
       stopped = true;
       video.removeEventListener("waiting", onWaiting);
-      cancelFrameWatch();
     },
   };
 }

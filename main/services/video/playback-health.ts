@@ -2,7 +2,7 @@
 // each (output, feed) pair's playback deltas, and whether that pair is
 // struggling or lagging. Struggling is about dropped frames and stalls;
 // lagging is about delay the screen's own browser is holding (the WebRTC
-// receive-delay figures a report may carry) — separate flags, so a pair can
+// receive-delay figure a report may carry) — separate flags, so a pair can
 // be either, both or neither.
 //
 // video-service.ts is the one caller: recordPlaybackReports() there parses a
@@ -34,9 +34,8 @@ export const STALLS_IN_WINDOW = 3;
  *  rather than the same read twice. Currently equal in value; the two mean
  *  different things and are named separately on purpose. */
 export const CLEAR_AFTER_MS = 60_000;
-/** A window whose worst `jitterBufferMs` or `behindNewestMs` is strictly ABOVE
- *  this is lagging: over a second of delay held inside the screen's own
- *  browser. Held for CLEAR_AFTER_MS after the last report over it, the same
+/** A window whose worst `jitterBufferMs` is strictly ABOVE this is lagging:
+ *  over a second of delay held inside the screen's own browser. Held for CLEAR_AFTER_MS after the last report over it, the same
  *  hold struggling has. */
 export const LAGGING_MS = 1_000;
 
@@ -52,11 +51,10 @@ export const MAX_REPORTS = 32;
 export const MAX_COUNT_PER_REPORT = 100_000;
 /** The largest width or height one report may carry. */
 export const MAX_DIMENSION = 16_384;
-/** The most `jitterBufferMs` or `behindNewestMs` one report may carry: ten
- *  minutes, a bound on what the server will hold, far past anything real. The
- *  page itself sends null for a figure of a minute or more (see
- *  NOT_A_MEASUREMENT_MS in playback-stats.ts), so a report over this is not
- *  from this build's page and is refused whole like any other bad field. */
+/** The most `jitterBufferMs` one report may carry: ten minutes, a bound on
+ *  what the server will hold, far past anything real. The page sends null for
+ *  a reading past it (see reportedMs in playback-stats.ts), so one over it is
+ *  not from this build's page and is refused whole like any other bad field. */
 export const MAX_LAG_MS = 600_000;
 
 /** Samples held per pair, capped — see the merge branch in record(). A LAN
@@ -75,13 +73,11 @@ interface Sample {
   dropped: number;
   stalls: number;
   jitterBufferMs: number | null;
-  behindNewestMs: number | null;
 }
 
-/** The two receive-delay figures, each null when nothing carried one. */
-export interface LagFigures {
-  jitterBufferMs: number | null;
-  behindNewestMs: number | null;
+/** A lagging pair's peak: the worst `jitterBufferMs` since it started lagging. */
+export interface LagPeak {
+  jitterBufferMs: number;
 }
 
 /** The larger of two figures, null only when both are. */
@@ -90,49 +86,32 @@ function maxOrNull(a: number | null, b: number | null): number | null {
 }
 
 /** The one sentence the Screens card, the `[video]` lagging line and the docs
- *  all say about a lagging pair. It claims only what the figures show: this
+ *  all say about a lagging pair. It claims only what the figure shows: this
  *  screen's own browser is holding the delay. It does not say the relay or the
  *  encoder are fine — a jitter buffer over a second can come from bursty
- *  delivery on the path to the screen, and behind-newest can be a decoder
- *  freeze — so the advice stops at this screen. */
+ *  delivery on the path to the screen — so the advice stops at this screen. */
 export const LAGGING_ADVICE = "The delay is held on this screen: check its network or decoding.";
-
-/** The worse of a lagging pair's two figures and which one it is: the one
- *  number the Screens card and the `[video]` lagging line both state, so the
- *  two cannot name different delays. Ties go to the jitter buffer. */
-export function worstLag(figures: LagFigures): { ms: number; what: "jitter buffer" | "behind the newest frame" } {
-  const jitter = figures.jitterBufferMs ?? -1;
-  const behind = figures.behindNewestMs ?? -1;
-  return behind > jitter ? { ms: behind, what: "behind the newest frame" } : { ms: jitter, what: "jitter buffer" };
-}
 
 /** A figure in the tenths of a second the card and the log line state it in,
  *  so a peak creeping up inside one displayed tenth is not a moved peak. */
-function tenths(ms: number | null): number {
-  return ms === null ? -1 : Math.round(ms / 100);
+function tenths(ms: number): number {
+  return Math.round(ms / 100);
 }
 
-/** The lagging peak after one more window: each figure keeps its own worst.
- *  Returns `held` itself unless a figure rose by a whole displayed tenth of a
- *  second — a creeping 1001, 1002, 1003 ms would otherwise be a new episode
- *  object, and so a published `video:state` frame, on every heartbeat for a
- *  number that reads "1.0 s" throughout. */
-function raisePeak(held: LagFigures, fresh: LagFigures): LagFigures {
-  const jitterBufferMs = maxOrNull(held.jitterBufferMs, fresh.jitterBufferMs);
-  const behindNewestMs = maxOrNull(held.behindNewestMs, fresh.behindNewestMs);
-  const rose = tenths(jitterBufferMs) > tenths(held.jitterBufferMs) || tenths(behindNewestMs) > tenths(held.behindNewestMs);
-  return rose ? { jitterBufferMs, behindNewestMs } : held;
+/** The lagging peak after one more window. Returns `held` itself unless the
+ *  figure rose by a whole displayed tenth of a second — a creeping 1001, 1002,
+ *  1003 ms would otherwise be a new episode object, and so a published
+ *  `video:state` frame, on every heartbeat for a number that reads "1.0 s"
+ *  throughout. */
+function raisePeak(held: LagPeak, fresh: LagPeak): LagPeak {
+  return tenths(fresh.jitterBufferMs) > tenths(held.jitterBufferMs) ? { jitterBufferMs: Math.max(held.jitterBufferMs, fresh.jitterBufferMs) } : held;
 }
 
-/** The worst of each figure across `samples`. */
-function worstFigures(samples: readonly Sample[]): LagFigures {
-  let jitterBufferMs: number | null = null;
-  let behindNewestMs: number | null = null;
-  for (const s of samples) {
-    jitterBufferMs = maxOrNull(jitterBufferMs, s.jitterBufferMs);
-    behindNewestMs = maxOrNull(behindNewestMs, s.behindNewestMs);
-  }
-  return { jitterBufferMs, behindNewestMs };
+/** The worst `jitterBufferMs` across `samples`, null when none carried one. */
+function worstJitter(samples: readonly Sample[]): number | null {
+  let worst: number | null = null;
+  for (const s of samples) worst = maxOrNull(worst, s.jitterBufferMs);
+  return worst;
 }
 
 /**
@@ -256,8 +235,8 @@ interface Pair {
   samples: Sample[];
   /** Whether this pair is struggling, and its peak window — see Sticky. */
   struggle: Sticky<StruggleEpisode>;
-  /** Whether this pair is lagging, and its worst figures — see Sticky. */
-  lag: Sticky<LagFigures>;
+  /** Whether this pair is lagging, and its worst figure — see Sticky. */
+  lag: Sticky<LagPeak>;
 }
 
 export interface Totals {
@@ -428,9 +407,9 @@ export class PlaybackHealth {
     // decides which report's via/width/height wins for a shared feed; there
     // is no single "right" answer when two widgets genuinely differ; both
     // report the same decoder's own frame size in every real case.
-    // The receive-delay figures fold as a MAX, not a sum: they are not counts,
+    // The receive-delay figure folds as a MAX, not a sum: it is not a count,
     // and the worse of two widgets' views of one feed is the one to act on.
-    const merged = new Map<string, { via: "webrtc" | "hls"; width: number; height: number; decoded: number; dropped: number; stalls: number } & LagFigures>();
+    const merged = new Map<string, { via: "webrtc" | "hls"; width: number; height: number; decoded: number; dropped: number; stalls: number; jitterBufferMs: number | null }>();
     for (const r of reports) {
       const acc = merged.get(r.feedId);
       if (acc) {
@@ -441,7 +420,6 @@ export class PlaybackHealth {
         acc.width = r.width;
         acc.height = r.height;
         acc.jitterBufferMs = maxOrNull(acc.jitterBufferMs, r.jitterBufferMs ?? null);
-        acc.behindNewestMs = maxOrNull(acc.behindNewestMs, r.behindNewestMs ?? null);
       } else {
         merged.set(r.feedId, {
           via: r.via,
@@ -451,7 +429,6 @@ export class PlaybackHealth {
           dropped: r.dropped,
           stalls: r.stalls,
           jitterBufferMs: r.jitterBufferMs ?? null,
-          behindNewestMs: r.behindNewestMs ?? null,
         });
       }
     }
@@ -471,10 +448,9 @@ export class PlaybackHealth {
           dropped: newest.dropped + r.dropped,
           stalls: newest.stalls + r.stalls,
           jitterBufferMs: maxOrNull(newest.jitterBufferMs, r.jitterBufferMs),
-          behindNewestMs: maxOrNull(newest.behindNewestMs, r.behindNewestMs),
         };
       } else {
-        samples.push({ at: now, decoded: r.decoded, dropped: r.dropped, stalls: r.stalls, jitterBufferMs: r.jitterBufferMs, behindNewestMs: r.behindNewestMs });
+        samples.push({ at: now, decoded: r.decoded, dropped: r.dropped, stalls: r.stalls, jitterBufferMs: r.jitterBufferMs });
       }
       const totals = sumSamples(samples);
       // Re-arm only when THIS sample itself is bad — not merely when the
@@ -498,16 +474,15 @@ export class PlaybackHealth {
         () => this.nextEpisodeId++,
       );
 
-      // Lagging: re-armed only by THIS report's own figures (the window's
+      // Lagging: re-armed only by THIS report's own figure (the window's
       // worst is over the line exactly when some report in it was, so
       // reading the window instead would re-arm on every clean heartbeat for
-      // as long as one old bad report stayed inside it). The peak keeps each
-      // figure's own worst.
+      // as long as one old bad report stayed inside it).
       const lag = advanceSticky(
-        existing?.lag ?? newSticky<LagFigures>(),
-        (r.jitterBufferMs ?? 0) > LAGGING_MS || (r.behindNewestMs ?? 0) > LAGGING_MS,
+        existing?.lag ?? newSticky<LagPeak>(),
+        (r.jitterBufferMs ?? 0) > LAGGING_MS,
         now,
-        worstFigures(samples),
+        { jitterBufferMs: worstJitter(samples) ?? 0 },
         raisePeak,
         () => this.nextEpisodeId++,
       );
@@ -583,7 +558,7 @@ export class PlaybackHealth {
         const struggling = isHeldAt(pair.struggle.lastBadAt, now);
         const lagging = isHeldAt(pair.lag.lastBadAt, now);
         const struggleEpisode = struggling ? pair.struggle.episode : null;
-        const worst = worstFigures(this.pruneSamples(pair.samples, now));
+        const worstJitterMs = worstJitter(this.pruneSamples(pair.samples, now));
         out.push({
           outputId,
           feedId,
@@ -593,8 +568,7 @@ export class PlaybackHealth {
           decodedInWindow: totals.decoded,
           stallsInWindow: totals.stalls,
           lagging,
-          jitterBufferMsInWindow: worst.jitterBufferMs,
-          behindNewestMsInWindow: worst.behindNewestMs,
+          jitterBufferMsInWindow: worstJitterMs,
           width: pair.width,
           height: pair.height,
           reportedAt: pair.reportedAt,
@@ -669,8 +643,8 @@ function isCountUpTo(max: number): (n: unknown) => n is number {
 }
 const isReportCount = isCountUpTo(MAX_COUNT_PER_REPORT);
 const isDimension = isCountUpTo(MAX_DIMENSION);
-/** A receive-delay figure: absent or null (a page older than the figures, HLS,
- *  or a browser that cannot measure one) reads as null; anything else must be
+/** A receive-delay figure: absent or null (a page older than the figure, HLS,
+ *  or a browser that cannot measure it) reads as null; anything else must be
  *  a finite number from 0 to MAX_LAG_MS, or the whole array is refused. */
 function lagFigure(n: unknown): number | null | undefined {
   if (n === undefined || n === null) return null;
@@ -682,9 +656,9 @@ function lagFigure(n: unknown): number | null | undefined {
  * or any single entry with a non-string/empty `feedId`, a `via` other than
  * "webrtc"/"hls", a decoded/dropped/stalls that is not a whole number from 0
  * to MAX_COUNT_PER_REPORT, or a width/height that is not a whole number from
- * 0 to MAX_DIMENSION, or a `jitterBufferMs`/`behindNewestMs` that is neither
- * absent/null nor a finite number from 0 to MAX_LAG_MS, refuses the WHOLE array — `null`, never a
- * partial one. A malformed screen must not be able to poison one pair's
+ * 0 to MAX_DIMENSION, or a `jitterBufferMs` that is neither absent/null nor a
+ * finite number from 0 to MAX_LAG_MS, refuses the WHOLE array — `null`, never
+ * a partial one. A malformed screen must not be able to poison one pair's
  * numbers while its others look normal, and the caller reads `null` the
  * same way it reads "no `video` field at all": nothing to record this
  * heartbeat. The heartbeat's PRESENCE half (displayHeartbeat) is untouched
@@ -701,8 +675,7 @@ export function parseVideoReports(body: unknown): VideoPlaybackReport[] | null {
     if (![r.decoded, r.dropped, r.stalls].every(isReportCount)) return null;
     if (![r.width, r.height].every(isDimension)) return null;
     const jitterBufferMs = lagFigure(r.jitterBufferMs);
-    const behindNewestMs = lagFigure(r.behindNewestMs);
-    if (jitterBufferMs === undefined || behindNewestMs === undefined) return null;
+    if (jitterBufferMs === undefined) return null;
     out.push({
       feedId: r.feedId,
       via: r.via,
@@ -712,7 +685,6 @@ export function parseVideoReports(body: unknown): VideoPlaybackReport[] | null {
       width: r.width as number,
       height: r.height as number,
       jitterBufferMs,
-      behindNewestMs,
     });
   }
   return out;

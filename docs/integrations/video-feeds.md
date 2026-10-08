@@ -423,32 +423,19 @@ more at 30 fps; on HLS it is the buffer running dry. An embed's platform
 player, and a probe merely testing whether WebRTC works, report nothing —
 only a widget actually showing a picture does.
 
-A WebRTC report also carries two receive-delay figures, in milliseconds, so
-an operator can tell whether a screen that looks behind is holding that delay
-in its own browser or is simply being sent a late picture:
+A WebRTC report also carries one receive-delay figure, **jitter buffer**
+(`jitterBufferMs`): how long the frames of that report's interval waited in
+this screen's own receive buffer, on average, in milliseconds — the change in
+Chrome's `jitterBufferDelay` over the change in `jitterBufferEmittedCount`. It
+is how an operator tells whether a screen that looks behind is holding that
+delay in its own browser or is simply being sent a late picture. A healthy
+picture waits tens of milliseconds or less.
 
-- **Jitter buffer** (`jitterBufferMs`) is how long the average frame waited
-  in the browser's jitter buffer during that report's interval — the change
-  in Chrome's `jitterBufferDelay` over the change in `jitterBufferEmittedCount`.
-- **Behind newest** (`behindNewestMs`) is how far the frame on screen trails
-  the newest frame the browser has received. It is read once per report, from
-  the next frame to reach the screen: that frame's RTP timestamp (from
-  `requestVideoFrameCallback`) against the receiver's most recently heard
-  synchronization source, both read in the same callback, at the 90 kHz video
-  clock.
-
-A WebRTC report sends `null` for a figure it could not measure. Jitter buffer
-is `null` when the browser reports neither counter or no frame left the
-buffer in the interval. Behind newest is `null` when no frame reaches the
-screen within 300 milliseconds (a hidden tab, a paused or frozen picture), on a
-browser without either API, or when the two clocks are not comparable. A
-figure of a minute or more is `null` too: no live picture holds that much in
-the browser, and a source change can leave two unrelated clocks in the
-receiver. An HLS report carries neither key.
-
-A healthy picture holds tens of milliseconds in the jitter buffer and is a
-frame or two behind newest. HLS reports neither figure; its delay is the "N s
-behind" badge on the widget.
+A WebRTC report sends `null` for the figure when the browser reports neither
+counter or no frame left the buffer in the interval, and for a reading past
+10 minutes, which the server would refuse and which no live picture holds. An
+HLS report carries no such key; its delay is the "N s behind" badge on the
+widget.
 
 A widget whose stats take longer than 1.5 seconds to read is left out of that
 heartbeat and counts as a failed read (see Logging below). If the widgets
@@ -463,28 +450,28 @@ that way for 60 seconds after the last sample that kept it bad, even through
 cleaner reports arriving in between, so one bad spike cannot flap the warning
 on and off as the window's own totals dilute it.
 
-Over the same window the server keeps the worst of each of the two
-receive-delay figures a WebRTC report carries, and marks the pair **lagging**
-when either goes over 1000 ms. That is a separate flag from struggling, so a
-pair can be one, both or neither, but it holds the same way: 60 seconds after
-the last report over the line, with its own **episode** — the worst of each
-figure since it started lagging. Two widgets on one screen showing the same
-feed fold to the worse of each figure, not a sum. HLS is never lagging.
+Over the same window the server keeps the worst jitter buffer figure the
+pair's reports carried, and marks the pair **lagging** when it goes over
+1000 ms. That is a separate flag from struggling, so a pair can be one, both
+or neither, but it holds the same way: 60 seconds after the last report over
+the line, with its own **episode** — the worst figure since it started
+lagging, which moves only when it rises by a tenth of a second. Two widgets on
+one screen showing the same feed fold to the worse figure, not a sum. HLS is
+never lagging.
 
 A lagging flag means that screen's own browser is holding the delay, so look
 at that screen first: its network (bursty delivery shows up as a deep jitter
 buffer) or its decoding. It does not clear the relay or the encoder. The other
-way round, a screen that looks seconds behind while its figures read well
+way round, a screen that looks seconds behind while its figure reads well
 under a second means the delay is upstream of the browser, at the relay or the
 encoder, and nothing on the screen will fix it. That reading holds only for a
-WebRTC screen whose reports carried figures (not null) within the last minute.
-An HLS screen, a browser that cannot measure, a hidden tab and a screen that
-is not reporting are not measured, and "not lagging" there does not mean
-upstream. The figures are the worst over the minute, and each report's jitter
-buffer figure is an average over its own 10 seconds, so a brief spike inside
-one report is smoothed; behind newest is a single reading and can catch it.
-Like struggling, a lagging flag holds for its 60 seconds, so a card can still
-show a lagging feed for up to a minute after the screen falls back to HLS.
+WebRTC screen whose reports carried a figure (not null) within the last
+minute. An HLS screen, a browser that cannot measure it and a screen that is
+not reporting are not measured, and "not lagging" there does not mean
+upstream. Each report's figure is an average over its own 10 seconds, so a
+brief spike inside one report is smoothed. Like struggling, a lagging flag
+holds for its 60 seconds, so a card can still show a lagging feed for up to a
+minute after the screen falls back to HLS.
 
 While a pair holds struggling, the server also holds its **episode**: the
 worst window since it started struggling, not the live one — the live
@@ -506,16 +493,16 @@ decode advice and a stall-only episode says nothing about decode load. The
 
 A lagging screen's card reads the lagging episode the same way, in its own
 box beside any struggling one: **Holding N.N s of \<feed\> in its own
-buffer.** — the worse of the episode's two figures — followed by **The delay
-is held on this screen: check its network or decoding.** The `[video]` lagging
+buffer.** — the episode's worst figure — followed by **The delay is held on
+this screen: check its network or decoding.** The `[video]` lagging
 line below reads from the same episode.
 
 The Video feeds list's own meta line reads **On N screens** for any feed
 currently playing anywhere, struggling or not — every distinct screen a
 heartbeat has reported that feed's playback for in the last minute.
 
-Each transition into or out of struggling is a `[video]` line on the
-server's own log; see Logging below.
+Each transition into or out of struggling or lagging is a `[video]` line on
+the server's own log; see Logging below.
 
 ## Logging
 
@@ -590,12 +577,11 @@ from the server:
   <screen>'s playback reports is working again` once they have saved again
   for two minutes. The heartbeat itself still counts either way.
 - A screen lagging on a feed — `is lagging on <feed>: holding N.N s in its
-  own buffer`, naming whether the worse figure is the jitter buffer or the
-  distance behind the newest frame, then the same sentence the card ends with
-  — the moment either figure crosses 1000 ms,
-  and `is no longer lagging on <feed>` once the hold clears; each once per
-  episode, not repeated while it stays true or as the peak rises. A WebRTC feed
-  that stays under the line logs nothing, however many reports it sends.
+  own buffer.`, then the same sentence the card ends with — the moment the
+  jitter buffer figure crosses 1000 ms, and `is no longer lagging on <feed>`
+  once the hold clears; each once per episode, not repeated while it stays true
+  or as the peak rises. A WebRTC feed that stays under the line logs nothing,
+  however many reports it sends.
 
 The relay's own error text can echo a feed's address back, so before any of
 it reaches `/log`, the status line or an API error, a username and password
