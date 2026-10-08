@@ -516,6 +516,17 @@ test("lagging episode: seeded at the flip with the window's worst, rises with a 
   assert.deepEqual(h.snapshot(LAG_T0 + 20_000)[0]!.laggingEpisode, { jitterBufferMs: 1200, behindNewestMs: 2600 }, "each figure keeps its own worst");
 });
 
+test("lagging episode: a peak creeping inside one displayed tenth of a second is not a change; a whole tenth is", () => {
+  const h = new PlaybackHealth();
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1001 })], LAG_T0), true, "the flip");
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1002 })], LAG_T0 + 1_000), false, "1002 reads 1.0 s like 1001");
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1040 })], LAG_T0 + 2_000), false, "1040 still reads 1.0 s");
+  assert.equal(h.record("out1", [report({ behindNewestMs: 400, jitterBufferMs: 1040 })], LAG_T0 + 3_000), true, "a figure first appearing is a rise");
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1100, behindNewestMs: 400 })], LAG_T0 + 4_000), true, "1100 reads 1.1 s");
+  assert.deepEqual(h.snapshot(LAG_T0 + 4_000)[0]!.laggingEpisode, { jitterBufferMs: 1100, behindNewestMs: 400 });
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1140, behindNewestMs: 440 })], LAG_T0 + 5_000), false, "both still under the next tenth");
+});
+
 test("lagging episode: survives the bad report leaving the live window while the flag holds, and starts fresh the next time", () => {
   const h = new PlaybackHealth();
   h.record("out1", [report({ jitterBufferMs: 5000 })], LAG_T0);

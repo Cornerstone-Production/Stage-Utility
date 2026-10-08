@@ -98,12 +98,22 @@ export function worstLag(figures: LagFigures): { ms: number; what: "jitter buffe
   return behind > jitter ? { ms: behind, what: "behind the newest frame" } : { ms: jitter, what: "jitter buffer" };
 }
 
+/** A figure in the tenths of a second the card and the log line state it in,
+ *  so a peak creeping up inside one displayed tenth is not a moved peak. */
+function tenths(ms: number | null): number {
+  return ms === null ? -1 : Math.round(ms / 100);
+}
+
 /** The lagging peak after one more window: each figure keeps its own worst.
- *  Returns `held` itself when neither figure rose, so a flat peak is no change. */
+ *  Returns `held` itself unless a figure rose by a whole displayed tenth of a
+ *  second — a creeping 1001, 1002, 1003 ms would otherwise be a new episode
+ *  object, and so a published `video:state` frame, on every heartbeat for a
+ *  number that reads "1.0 s" throughout. */
 function raisePeak(held: LagFigures, fresh: LagFigures): LagFigures {
   const jitterBufferMs = maxOrNull(held.jitterBufferMs, fresh.jitterBufferMs);
   const behindNewestMs = maxOrNull(held.behindNewestMs, fresh.behindNewestMs);
-  return jitterBufferMs === held.jitterBufferMs && behindNewestMs === held.behindNewestMs ? held : { jitterBufferMs, behindNewestMs };
+  const rose = tenths(jitterBufferMs) > tenths(held.jitterBufferMs) || tenths(behindNewestMs) > tenths(held.behindNewestMs);
+  return rose ? { jitterBufferMs, behindNewestMs } : held;
 }
 
 /** The worst of each figure across `samples`. */
