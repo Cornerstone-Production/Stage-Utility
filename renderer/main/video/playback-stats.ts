@@ -16,6 +16,7 @@
 
 import { errorMessage } from "@main/services/errors";
 import { OutageLog } from "@main/services/repeat-log";
+import { MAX_LAG_MS } from "@main/services/video/playback-health";
 import type { VideoPlaybackReport } from "@main/types/video";
 
 /** How long one stats read may take before it counts as a failed read. Under
@@ -51,6 +52,15 @@ interface RawCounts {
    *  and counts `waiting` events instead, which a genuine zero-freezes
    *  reading must not be confused with. */
   freezeCount?: number;
+  /** WebRTC only: the cumulative seconds frames have waited in the jitter
+   *  buffer and how many frames have left it. Undefined when the browser's
+   *  report carries either, so `jitterBufferMs` reads null rather than a
+   *  zero that never was measured. */
+  jitterBufferDelay?: number;
+  jitterBufferEmittedCount?: number;
+  /** WebRTC only: the RTP timestamp of the newest frame the receiver has
+   *  taken in, null when the browser cannot say. */
+  newestRtpTimestamp?: number | null;
 }
 
 type StatsEntry = {
@@ -61,6 +71,8 @@ type StatsEntry = {
   frameWidth?: number;
   frameHeight?: number;
   freezeCount?: number;
+  jitterBufferDelay?: number;
+  jitterBufferEmittedCount?: number;
 };
 
 /** `read`, or a rejection once STATS_READ_TIMEOUT_MS passes without it. A
@@ -88,11 +100,60 @@ async function readWebrtcCounts(pc: RTCPeerConnection): Promise<RawCounts | null
   let found: RawCounts | null = null;
   report.forEach((r: StatsEntry) => {
     if (r.type === "inbound-rtp" && r.kind === "video") {
-      found = { decoded: r.framesDecoded ?? 0, dropped: r.framesDropped ?? 0, width: r.frameWidth ?? 0, height: r.frameHeight ?? 0, freezeCount: r.freezeCount };
+      found = {
+        decoded: r.framesDecoded ?? 0,
+        dropped: r.framesDropped ?? 0,
+        width: r.frameWidth ?? 0,
+        height: r.frameHeight ?? 0,
+        freezeCount: r.freezeCount,
+        jitterBufferDelay: r.jitterBufferDelay,
+        jitterBufferEmittedCount: r.jitterBufferEmittedCount,
+        newestRtpTimestamp: newestRtpTimestamp(pc),
+      };
     }
   });
   return found;
 }
+
+/** The RTP timestamp of the newest frame the video receiver has taken in:
+ *  the synchronization source it heard from most recently. Null for a
+ *  browser that has no `getSynchronizationSources`, or has not yet heard from
+ *  one. A throw from the browser is NOT caught here — it reads as a failed
+ *  stats read, the same as `getStats()` rejecting. */
+function newestRtpTimestamp(pc: RTCPeerConnection): number | null {
+  if (typeof pc.getReceivers !== "function") return null;
+  for (const receiver of pc.getReceivers()) {
+    if (receiver.track.kind !== "video" || typeof receiver.getSynchronizationSources !== "function") continue;
+    let newest: RTCRtpSynchronizationSource | null = null;
+    for (const source of receiver.getSynchronizationSources()) {
+      if (newest === null || source.timestamp > newest.timestamp) newest = source;
+    }
+    if (newest?.rtpTimestamp !== undefined) return newest.rtpTimestamp;
+  }
+  return null;
+}
+
+/** How far the displayed frame trails the newest received, in ms at the video
+ *  RTP clock's 90 kHz. The two are 32-bit and wrap, so the difference is
+ *  taken modulo 2^32 and read signed: a displayed frame that is somehow ahead
+ *  (a sample landing between two reads) is 0, never a 13-hour lag. */
+export function rtpBehindMs(newest: number, displayed: number): number {
+  const ticks = (newest - displayed) | 0;
+  return ticks <= 0 ? 0 : ticks / 90;
+}
+
+/** A figure as the report carries it: whole milliseconds, never past the
+ *  bound the server refuses above. */
+function wholeMs(ms: number): number {
+  return Math.min(MAX_LAG_MS, Math.max(0, Math.round(ms)));
+}
+
+/** The one frame metadata field this reads, which lib.dom does not type. */
+type FrameMetadata = { rtpTimestamp?: number };
+type FrameCallbackVideo = HTMLVideoElement & {
+  requestVideoFrameCallback?: (cb: (now: number, metadata?: FrameMetadata) => void) => number;
+  cancelVideoFrameCallback?: (handle: number) => void;
+};
 
 /** `decoded` is `totalVideoFrames` less `droppedVideoFrames`: the total counts
  *  every frame the element received, dropped ones included, where WebRTC's
@@ -181,6 +242,28 @@ export function createSampler(
   // inbound-rtp video report: freezeCount if that report has one, `waiting`
   // otherwise, for the rest of the session whatever later reports carry.
   let stallSource: "freezeCount" | "waiting" | null = source.via === "hls" ? "waiting" : null;
+  // WebRTC's receive delay. `jitterBufferMs` is the average time a frame
+  // waited in the browser's jitter buffer THIS interval, from two cumulative
+  // counters read as deltas. `behindNewestMs` compares the frame on screen
+  // (the RTP timestamp rVFC reports for the last frame presented) with the
+  // newest the receiver has taken in, so it needs the presented frames
+  // watched continuously — one callback per frame, doing one assignment.
+  const jitterDelayDelta = trackDelta();
+  const jitterEmittedDelta = trackDelta();
+  let displayedRtp: number | null = null;
+  let presentedSinceSample = 0;
+  let frameHandle: number | undefined;
+  const frameVideo = video as FrameCallbackVideo;
+  const onFrame = (_now: number, metadata?: FrameMetadata) => {
+    if (stopped) return;
+    const rtp = metadata?.rtpTimestamp;
+    if (typeof rtp === "number") {
+      displayedRtp = rtp;
+      presentedSinceSample += 1;
+    }
+    frameHandle = frameVideo.requestVideoFrameCallback?.(onFrame);
+  };
+  if (source.via === "webrtc") frameHandle = frameVideo.requestVideoFrameCallback?.(onFrame);
   const statsOutage = new OutageLog();
   const read = (): Promise<RawCounts | null> => (source.via === "webrtc" ? inTime(readWebrtcCounts(source.pc)) : Promise.resolve(readHlsCounts(video)));
 
@@ -216,7 +299,7 @@ export function createSampler(
       stallSource ??= raw.freezeCount !== undefined ? "freezeCount" : "waiting";
       const stallCount =
         stallSource === "waiting" ? stallsDelta(stalls) : raw.freezeCount === undefined ? 0 : freezeCountDelta(raw.freezeCount);
-      return {
+      const report: VideoPlaybackReport = {
         feedId,
         via: source.via,
         decoded: decodedDelta(raw.decoded),
@@ -225,10 +308,30 @@ export function createSampler(
         width: raw.width,
         height: raw.height,
       };
+      if (source.via === "webrtc") {
+        // Both figures are null, not zero, when this interval could not
+        // measure them: a counter the browser does not report, a buffer that
+        // emitted nothing, no frame presented since the last report.
+        let jitterBufferMs: number | null = null;
+        if (raw.jitterBufferDelay !== undefined && raw.jitterBufferEmittedCount !== undefined) {
+          const waited = jitterDelayDelta(raw.jitterBufferDelay);
+          const emitted = jitterEmittedDelta(raw.jitterBufferEmittedCount);
+          if (emitted > 0) jitterBufferMs = wholeMs((waited / emitted) * 1000);
+        }
+        const behindNewestMs =
+          displayedRtp !== null && presentedSinceSample > 0 && raw.newestRtpTimestamp != null
+            ? wholeMs(rtpBehindMs(raw.newestRtpTimestamp, displayedRtp))
+            : null;
+        presentedSinceSample = 0;
+        report.jitterBufferMs = jitterBufferMs;
+        report.behindNewestMs = behindNewestMs;
+      }
+      return report;
     },
     stop: () => {
       stopped = true;
       video.removeEventListener("waiting", onWaiting);
+      if (frameHandle !== undefined) frameVideo.cancelVideoFrameCallback?.(frameHandle);
     },
   };
 }

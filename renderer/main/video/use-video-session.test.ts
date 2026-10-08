@@ -1730,14 +1730,14 @@ test("sample() reports a live webrtc session's stats: feedId, via, deltas and cu
     pc.frameWidth = 1280;
     pc.frameHeight = 720;
     const first = await result.current.sample();
-    assert.deepEqual(first, { feedId: "cam", via: "webrtc", decoded: 30, dropped: 1, stalls: 0, width: 1280, height: 720 });
+    assert.deepEqual(first, { feedId: "cam", via: "webrtc", decoded: 30, dropped: 1, stalls: 0, width: 1280, height: 720, jitterBufferMs: null, behindNewestMs: null });
 
     pc.framesDecoded = 90;
     pc.framesDropped = 2;
     const second = await result.current.sample();
     assert.deepEqual(
       second,
-      { feedId: "cam", via: "webrtc", decoded: 60, dropped: 1, stalls: 0, width: 1280, height: 720 },
+      { feedId: "cam", via: "webrtc", decoded: 60, dropped: 1, stalls: 0, width: 1280, height: 720, jitterBufferMs: null, behindNewestMs: null },
       "expected the delta since the FIRST sample, not the running total",
     );
   } finally {

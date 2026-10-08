@@ -423,6 +423,26 @@ more at 30 fps; on HLS it is the buffer running dry. An embed's platform
 player, and a probe merely testing whether WebRTC works, report nothing —
 only a widget actually showing a picture does.
 
+A WebRTC report also carries two receive-delay figures, in milliseconds, so
+an operator can tell whether a screen that looks behind is holding that delay
+in its own browser or is simply being sent a late picture:
+
+- **Jitter buffer** (`jitterBufferMs`) is how long the average frame waited
+  in the browser's jitter buffer during that report's interval — the change
+  in Chrome's `jitterBufferDelay` over the change in `jitterBufferEmittedCount`.
+  It is left out when the browser reports neither counter or no frame left
+  the buffer in the interval.
+- **Behind newest** (`behindNewestMs`) is how far the frame on screen trails
+  the newest frame the browser has received, read at the moment of the report:
+  the displayed frame's RTP timestamp (from `requestVideoFrameCallback`)
+  against the receiver's most recently heard synchronization source, at the
+  90 kHz video clock. It is left out on a browser without either, and when no
+  frame was presented since the last report.
+
+A healthy picture holds tens of milliseconds in the jitter buffer and is a
+frame or two behind newest. HLS reports neither figure; its delay is the "N s
+behind" badge on the widget.
+
 A widget whose stats take longer than 1.5 seconds to read is left out of that
 heartbeat and counts as a failed read (see Logging below). If the widgets
 have not all answered within 2 seconds, the heartbeat goes without any
@@ -435,6 +455,23 @@ of decoded frames dropped, or 3 or more stalls. Once struggling, it stays
 that way for 60 seconds after the last sample that kept it bad, even through
 cleaner reports arriving in between, so one bad spike cannot flap the warning
 on and off as the window's own totals dilute it.
+
+Over the same window the server keeps the worst of each of the two
+receive-delay figures a WebRTC report carries, and marks the pair **lagging**
+when either goes over 1000 ms. That is a separate flag from struggling, so a
+pair can be one, both or neither, but it holds the same way: 60 seconds after
+the last report over the line, with its own **episode** — the worst of each
+figure since it started lagging. Two widgets on one screen showing the same
+feed fold to the worse of each figure, not a sum. HLS is never lagging.
+
+A lagging flag means the delay is inside that screen's browser, so the cause
+is the screen's own network or decoding, not the relay or the encoder. A
+screen that looks seconds behind while holding well under a second means the
+delay is upstream of the browser, at the relay or the encoder, and nothing on
+the screen will fix it. The figures are the worst over the minute, and each
+report's jitter buffer figure is an average over its own 10 seconds, so a
+brief spike inside one report is smoothed; behind newest is a single reading
+and can catch it.
 
 While a pair holds struggling, the server also holds its **episode**: the
 worst window since it started struggling, not the live one — the live
