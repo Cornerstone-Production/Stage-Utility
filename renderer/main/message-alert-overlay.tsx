@@ -47,32 +47,47 @@ import { useMessagesStatus } from "./use-messages-state";
  * reported, not hidden — the screen under the banner is the thing that matters
  * on a Sunday, and a banner bug taking it down is the worse outcome.
  */
-class AlertBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+class AlertBoundary extends Component<{ children: ReactNode; resetKey: unknown }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError(): { failed: boolean } {
     return { failed: true };
   }
   componentDidCatch(error: unknown): void {
-    logToServer("messages", `the alert banner failed to draw and is hidden until the next alert: ${errorMessage(error)}`);
+    logToServer("messages", `the alert banner failed to draw and is hidden until the next update: ${errorMessage(error)}`);
+  }
+  componentDidUpdate(prev: { resetKey: unknown }): void {
+    // The next frame from the server is a fresh try: one malformed or undrawable
+    // alert must not silence every later one on this screen.
+    if (this.state.failed && prev.resetKey !== this.props.resetKey) this.setState({ failed: false });
   }
   render(): ReactNode {
     return this.state.failed ? null : this.props.children;
   }
 }
 
-/** The groups are this screen's own; Everyone's alerts reach it whatever they are. */
+/**
+ * The groups are this screen's own; Everyone's alerts reach it whatever they are.
+ *
+ * The WHOLE of the overlay's work is inside the boundary, the filtering of the
+ * frame as much as the drawing: a frame that is not the shape it should be must hide
+ * the banner and be said on /log, not blank the wall. It is reset by each new frame
+ * (`rev`), so the next update gets a fresh try.
+ */
 export function MessageAlertOverlay({ groups }: { groups: readonly string[] }) {
   const { value } = useMessagesStatus();
-  // The running alerts sent to this screen, newest first, as the server lists them.
-  const candidates = (value?.alerts ?? []).filter((a) => messageReaches(a.to, groups));
-  if (candidates.length === 0) return null;
-  // Keyed by the newest alert, so one that failed to draw does not hide the next:
-  // each alert gets a fresh try.
   return (
-    <AlertBoundary key={candidates[0].id}>
-      <Banner candidates={candidates} />
+    <AlertBoundary resetKey={value?.rev}>
+      <Alerts alerts={value?.alerts} groups={groups} />
     </AlertBoundary>
   );
+}
+
+function Alerts({ alerts, groups }: { alerts: readonly StageMessage[] | undefined; groups: readonly string[] }) {
+  // The running alerts sent to this screen, newest first, as the server lists them.
+  const candidates = (alerts ?? []).filter((a) => messageReaches(a.to, groups));
+  if (candidates.length === 0) return null;
+  // Keyed by the newest alert, so the next one rises in rather than swapping text.
+  return <Banner key={candidates[0].id} candidates={candidates} />;
 }
 
 /** How much of the alert is left, 1 down to 0, from its own length. */

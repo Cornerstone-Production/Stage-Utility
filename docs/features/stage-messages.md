@@ -168,8 +168,8 @@ arrives.
 - A screen subscribes to `messages:state` for this whatever view it shows, once it has
   loaded (a screen still loading, showing an error, or blacked out draws no banner). If the banner
   itself fails to draw, it is hidden and `[messages] the alert banner failed to
-  draw` is on `/log`; the screen underneath stays up, and the next alert gets a fresh
-  try.
+  draw` is on `/log`; the screen underneath stays up, and the next update from the server gets a fresh
+  try. A frame that is not the shape it should be is handled the same way.
 
 ### The Message composer widget
 

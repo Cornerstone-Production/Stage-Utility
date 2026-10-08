@@ -472,6 +472,29 @@ describe("a stage-message alert on a screen", () => {
     assert.ok(says(c, "the next one draws"), "one failed alert hid every later one until a reload");
   });
 
+  test("a malformed alert frame hides the banner and is reported; the wall still renders, and the next frame is a fresh try", async () => {
+    // `to` is not a list: the filter that decides who it is for throws before any banner draws.
+    const broken = { ...running(1, [EVERYONE], "x", 20_000), to: 5 as unknown as string[] };
+    withAlerts();
+    const quiet = console.error;
+    console.error = () => {};
+    let c: HTMLElement;
+    try {
+      c = await showScreen("/display-1", bare());
+      await act(async () => FakeEventSource.last!.push("messages:state", { ...messagesState([]), alerts: [broken], rev: 2 }));
+      assert.ok(!c.querySelector('[role="alert"]'));
+      assert.ok(!says(c, "Display error"), "a malformed frame took the whole screen down");
+      assert.ok(says(c, "Stage Utility"), "the screen went blank");
+      const logged = posted.find((p) => p.url === "/api/log/client");
+      assert.match((logged?.body as { message?: string } | undefined)?.message ?? "", /the alert banner failed to draw/);
+      const good = running(2, [EVERYONE], "back to normal", 20_000);
+      await act(async () => FakeEventSource.last!.push("messages:state", { ...messagesState([good]), alerts: [good], rev: 3 }));
+    } finally {
+      console.error = quiet;
+    }
+    assert.ok(says(c, "back to normal"), "the next frame did not get a fresh try");
+  });
+
   test("when the newest ends, the next one sent to this screen shows", async () => {
     // Newest first, as the server lists them: the Green room alert ends first.
     withAlerts(running(2, [GREEN], "the newer", 600), running(1, [EVERYONE], "the older", 60_000), running(0, [STAGE], "other room", 90_000));
