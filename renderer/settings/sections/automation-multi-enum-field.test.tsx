@@ -49,6 +49,26 @@ const REGISTRY = {
       ],
     },
     {
+      // A default that is NOT the first option: with the first one the select
+      // would show it by falling back to option 0, whatever the code does.
+      id: "x.default",
+      label: "Has a default",
+      params: [
+        {
+          key: "mode",
+          label: "Mode",
+          type: "enum",
+          options: [
+            { value: "a", label: "A" },
+            { value: "b", label: "B" },
+            { value: "c", label: "C" },
+          ],
+          default: "b",
+          optional: true,
+        },
+      ],
+    },
+    {
       id: "messages.send",
       label: AUTOMATION_ACTIONS["messages.send"]!.label,
       params: AUTOMATION_ACTIONS["messages.send"]!.params,
@@ -250,6 +270,17 @@ describe("the To picker on Send a stage message", () => {
     assert.ok(select, "no Alert select");
     assert.equal(select.value, "no");
     assert.deepEqual([...select.options].map((o) => o.value), ["no", "yes"]);
+  });
+
+  test("an enum's default is what a blank one shows, when the default is not the first option", async () => {
+    actionId = "x.default";
+    params = {};
+    await open();
+    const row = [...document.querySelectorAll("label")].find((l) => (l.textContent ?? "").startsWith("Mode"));
+    const select = row?.querySelector("select") as HTMLSelectElement | null;
+    assert.ok(select, "no Mode select");
+    assert.equal(select.value, "b");
+    assert.deepEqual([...select.options].map((o) => o.value), ["a", "b", "c"]);
   });
 
   test("there is no All link: it would tick Everyone beside every group", async () => {
