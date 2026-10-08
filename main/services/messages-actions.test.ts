@@ -209,18 +209,42 @@ describe("messages.clear-alerts", () => {
     assert.equal(messagesService.state().alerts.length, 1);
   });
 
-  test("an alert that could not be ended is a returned failure naming how many, and the rest are still ended", async () => {
-    const a = await messagesService.send({ to: [green], text: "one", alert: true });
-    await messagesService.send({ to: [stage], text: "two", alert: true });
+  test("an alert that could not be ended is a returned failure, and the others are still ended", async () => {
+    const older = await messagesService.send({ to: [green], text: "one", alert: true });
+    const newest = await messagesService.send({ to: [stage], text: "two", alert: true });
     const realClear = messagesService.clearAlert.bind(messagesService);
+    // The NEWEST throws, and it is tried first: stopping at the first failure
+    // would leave the older one running.
     mock.method(messagesService, "clearAlert", async (id: string, from?: unknown) => {
-      if (id === a.id) throw new Error("disk full");
+      if (id === newest.id) throw new Error("disk full");
       return realClear(id, from);
     });
     const r = await clearAlerts.run({}, { simulate: false });
     assert.equal(r.ok, false);
     assert.match(r.detail, /^ended 1 of 2 alerts; could not end 1: disk full$/);
-    assert.equal(messagesService.state().alerts.length, 1);
+    assert.deepEqual(messagesService.state().alerts.map((a) => a.id), [newest.id]);
+    assert.notEqual(thread().find((m) => m.id === older.id)!.clearedAt, null, "the older alert was left running");
+  });
+
+  test("when every alert fails it says how many could not be ended", async () => {
+    await messagesService.send({ to: [green], text: "one", alert: true });
+    await messagesService.send({ to: [stage], text: "two", alert: true });
+    mock.method(messagesService, "clearAlert", async () => {
+      throw new Error("disk full");
+    });
+    const r = await clearAlerts.run({}, { simulate: false });
+    assert.deepEqual(r, { ok: false, detail: "ended 0 of 2 alerts; could not end 2: disk full" });
+  });
+
+  test("an alert that ran out between the read and the clear is not a failure", async () => {
+    await messagesService.send({ to: [green], text: "one", alert: true });
+    const newest = await messagesService.send({ to: [stage], text: "two", alert: true });
+    const realClear = messagesService.clearAlert.bind(messagesService);
+    mock.method(messagesService, "clearAlert", async (id: string, from?: unknown) =>
+      id === newest.id ? "not-running" : realClear(id, from),
+    );
+    const r = await clearAlerts.run({}, { simulate: false });
+    assert.deepEqual(r, { ok: true, detail: "ended 1 alert" });
   });
 
   test("takes no params", () => {
