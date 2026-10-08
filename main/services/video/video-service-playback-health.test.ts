@@ -229,11 +229,11 @@ test("a heartbeat whose own record() call clears the sticky flag in its sweep an
   }
 });
 
-test("removeFeed and a departed pair's own cleanup both forget the episode-id bookkeeping, not only lastLoggedStruggling", async (t: TestContext) => {
+test("removeFeed and a departed pair's own cleanup both forget the struggling bookkeeping", async (t: TestContext) => {
   const removed = await addRelayFeed("Removed screen");
   const departed = await addRelayFeed("Departed screen");
   captureConsole(t, "log"); // both feeds cross into struggling on purpose; not asserting on the lines
-  const episodeIds = (videoService as unknown as { lastLoggedEpisodeId: Map<string, number | null> }).lastLoggedEpisodeId;
+  const episodeIds = (videoService as unknown as { struggleLog: { has(key: string): boolean } }).struggleLog;
   try {
     videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: removed, decoded: 1000, dropped: 51, stalls: 0 })], 0);
     videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: departed, decoded: 1000, dropped: 51, stalls: 0 })], 0);
@@ -242,7 +242,7 @@ test("removeFeed and a departed pair's own cleanup both forget the episode-id bo
     assert.equal(episodeIds.has(`${OUTPUT_ID}\u0000${departed}`), true, "sanity: the departed pair's own logged a struggling line first");
 
     await videoService.removeFeed(removed);
-    assert.equal(episodeIds.has(`${OUTPUT_ID}\u0000${removed}`), false, "removeFeed must forget the removed feed's episode id, not only lastLoggedStruggling");
+    assert.equal(episodeIds.has(`${OUTPUT_ID}\u0000${removed}`), false, "removeFeed must forget the removed feed's struggling bookkeeping");
 
     // The departed pair ages out of playbackHealth entirely with no
     // removeFeed of its own — a heartbeat for a THIRD, unrelated feed at
@@ -422,13 +422,13 @@ test("removeFeed and a departed pair's own cleanup both forget the lagging-episo
   const removed = await addRelayFeed("Removed lag");
   const departed = await addRelayFeed("Departed lag");
   captureConsole(t, "log");
-  const ids = (videoService as unknown as { lastLoggedLaggingEpisodeId: Map<string, number | null> }).lastLoggedLaggingEpisodeId;
+  const ids = (videoService as unknown as { lagLog: { has(key: string): boolean } }).lagLog;
   try {
     videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: removed, jitterBufferMs: 1500 })], 0);
     videoService.recordPlaybackReports(OUTPUT_ID, [report({ feedId: departed, jitterBufferMs: 1500 })], 0);
     await settle();
-    assert.equal(ids.get(`${OUTPUT_ID}\u0000${removed}`) != null, true, "sanity: a lagging line was logged for the removed feed");
-    assert.equal(ids.get(`${OUTPUT_ID}\u0000${departed}`) != null, true, "sanity: and for the departed one");
+    assert.equal(ids.has(`${OUTPUT_ID}\u0000${removed}`), true, "sanity: a lagging line was logged for the removed feed");
+    assert.equal(ids.has(`${OUTPUT_ID}\u0000${departed}`), true, "sanity: and for the departed one");
 
     await videoService.removeFeed(removed);
     assert.equal(ids.has(`${OUTPUT_ID}\u0000${removed}`), false, "removeFeed must forget the removed feed's lagging episode");
