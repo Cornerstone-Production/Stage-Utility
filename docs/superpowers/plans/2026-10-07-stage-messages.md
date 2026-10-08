@@ -243,7 +243,10 @@ Kill the server by port when done.
 
 ## PR 2 — On screens (`feat/stage-messages-screens`)
 
-**As built, where it differs from the text below.**
+**As built, where it differs from the text below.** The final shapes: the render
+context carries `screen: OwnScreen | null` (not `outputId` and `screenGroups`);
+`MessagesState` carries `serverNow` and the quick lists; `GET /api/messages` is not
+in `SHARED_READ_PATHS` (see the clock bullet below).
 - The reply route takes `{ text, objectId, outputId? }` as written here; the spec's
   `viewId` is not used, because the widget is found by its object id across every
   view. A reply that names a screen must name a panel-mode one that draws the widget
@@ -292,28 +295,29 @@ The composer needs the quick messages and the Messages widget the quick
 replies, live. Add `quickMessages` and `quickReplies` to `MessagesState`, and
 publish when either changes (extend `replace()`'s `groupsChanged` to a
 `stateChanged` that covers groups and both lists). `rev`, hydration and the
-hello burst are unchanged. Register `GET /api/messages` in `SHARED_READ_PATHS`
-now that widgets read it.
+hello burst are unchanged. (`GET /api/messages` is NOT registered in
+`SHARED_READ_PATHS` after all: see the As-built note.)
 
 ### Which screen a layout is drawing
 
-- `LayoutRenderCtx` gains `outputId: string | null` and
-  `screenGroups: readonly string[] | null`. `null` means "not a screen": an
-  in-app console, Home, the editor, a preview. Required on `LayoutRenderer`'s
-  props, so no surface can forget them — the `allowHls` pattern.
+- `LayoutRenderCtx` gains `screen: OwnScreen | null` (`{ outputId, groups,
+  monitor? }`). `null` means "not a screen": an in-app console, Home, the editor, a
+  preview. Required on `LayoutRenderer`'s props, so no surface can forget it — the
+  `allowHls` pattern.
 - `StageView` passes the resolved output's id and `groups` for a real screen
-  (displays and panel consoles), and `null`/`null` for a preview (`standingIn`
-  is a picture of another screen, not that screen). Every other builder passes
-  `null`/`null`: `console-route.tsx`, `home-grid.tsx`, `layout-editor.tsx`,
-  `embedded-view.tsx` inherits its parent's.
+  (displays and panel consoles), and `null` for a preview (`standingIn` is a
+  picture of another screen, not that screen). Every other builder passes `null`:
+  `console-route.tsx`, `home-grid.tsx`, `layout-editor.tsx`; `embedded-view.tsx`
+  inherits its parent's, and a screen-embed tile passes the screen it shows,
+  marked `monitor`.
 - `ResolvedOutput.groups` already exists from PR 1.
 
 ### The Messages widget (`messages`)
 
 - Config: `{ type: "messages"; groups?: string[] | null }`. `null`/absent
   follows the screen's groups; a list overrides them. On an in-app console
-  (`screenGroups === null`) with no list, the widget draws "Choose groups for
-  this widget" in the editor and nothing on the console.
+  (`screen === null`) with no list, the widget draws "Choose groups for this
+  widget" (see the As-built note for where).
 - Shows the newest three messages sent to its groups or to Everyone: sender and
   age on a small line, the newest larger, older ones muted, and under each the
   latest reply in green — as the mockup's green room TV draws it. Age is counted
@@ -349,7 +353,9 @@ now that widgets read it.
 - The server finds the Messages widget by `objectId` across every view's layout
   (recursing into containers; ids are unique), refusing 404 when there is none
   or it is not a `messages` widget. Its groups are its own list when set, else
-  the output's groups when `outputId` names an output, else none.
+  the output's groups when `outputId` names an output, else none (as built: a
+  reply naming no screen needs a widget with its own list, and one naming a screen
+  needs a panel that draws the widget; see the As-built note).
 - 403 unless the message went to Everyone or to one of those groups. The
   message's own `to` decides, never the client.
 - `from` is server-derived: the output's name, else the name of the view that

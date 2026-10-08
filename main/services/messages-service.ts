@@ -9,7 +9,11 @@
 //   - one timer for the alert that is running, so the state goes back to "no
 //     alert" at the moment the alert runs out on screens that keep no timer of
 //     their own;
-//   - the nightly clear, and the 200-message cap.
+//   - the nightly clear, and the 200-message cap;
+//   - replies: who may answer from which widget (the stored layouts and outputs
+//     decide, see reply()), and the 20-reply cap on one message;
+//   - the server's clock, stamped as `serverNow` on every snapshot, which screens
+//     correct their own clock from.
 //
 // THE CLOCK. "What day is it" is asked of app-timezone.ts and never of the host:
 // a UTC box rolls its date at 19:00 in Chicago, and clearing the thread in the
@@ -57,6 +61,7 @@ import { scrub, scrubError } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 import { Ticker } from "./ticker.js";
 import { viewsDrawnBy } from "./screen-reach.js";
+import { outputMode } from "../types/views.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { WriteQueue } from "./write-queue.js";
 
@@ -418,7 +423,7 @@ export class MessagesService {
       if (outputId !== null) {
         output = (state.outputs ?? []).find((o) => o.id === outputId);
         if (!output) return refuse(403, "that screen does not draw that widget");
-        if (output.mode !== "panel") return refuse(403, `${output.name} is a display, and a display cannot reply`);
+        if (outputMode(output) !== "panel") return refuse(403, `${output.name} is a display, and a display cannot reply`);
         if (!viewsDrawnBy(output, state.views ?? [], state.outputs ?? []).has(widget.viewId)) {
           return refuse(403, "that screen does not draw that widget");
         }
