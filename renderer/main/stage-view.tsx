@@ -625,7 +625,7 @@ function renderView(
   previewViewId: string | null,
   previewDraftSlots: Slot[] | null,
 ): ReactNode {
-  const { kind, view: activeView, displayId, isPreview, outputMode, allowHls } = screen;
+  const { kind, view: activeView, displayId, isPreview, outputMode, allowHls, own } = screen;
 
   switch (kind) {
     // Custom-layout views render the visual-editor layout below the same kiosk top
@@ -657,6 +657,10 @@ function renderView(
               interactive={capabilityLive(contextForOutput(outputMode, isPreview), "control")}
               surface={viewSurface(activeView)}
               allowHls={allowHls}
+              // Which screen this is and the message groups it is in; null on a
+              // preview, which is a picture of a screen and not one.
+              outputId={own?.outputId ?? null}
+              screenGroups={own?.groups ?? null}
             />
           </div>
         </div>

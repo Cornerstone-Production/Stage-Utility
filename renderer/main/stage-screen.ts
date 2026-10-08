@@ -71,6 +71,10 @@ export type StageScreen =
        *  on a preview: a settings-page card is not the real screen and must
        *  not refuse to play a feed the wall it stands in for cannot. */
       allowHls: boolean;
+      /** The screen this one IS, for the message groups it is in — `own`'s, so
+       *  null on a preview, which is a picture of another screen and not in any
+       *  group of its own. See ownScreen. */
+      own: OwnScreen | null;
       /** The ServiceCue text size kept for the screen this one IS or is a picture
        *  of — `standingIn`'s, so a Screens preview draws what the display draws.
        *  Null when none is kept (and on a preview that is not a screen): whoever
@@ -90,6 +94,35 @@ export interface ScreenInput {
    *  in. Null on a real display, and null for a preview that is not a screen (the
    *  View editor's own). See preview-url.ts for how it travels. */
   previewOutputId: string | null;
+}
+
+/** The screen a kiosk page IS: its id and the message groups it is in. */
+export interface OwnScreen {
+  outputId: string;
+  groups: readonly string[];
+}
+
+/**
+ * Which screen this page is, for what is addressed to a screen's groups.
+ *
+ * Null on a preview, and that is load-bearing: a Screens-card iframe is a
+ * picture of another screen (`standingIn`, above), not that screen, so it must
+ * not answer for its groups — an alert drawn into a thumbnail, or a Messages
+ * widget offering replies for a group the thumbnail is not in, would be the
+ * Screens page acting as a screen. It reads `resolved`'s side of the decision
+ * for the same reason blackout does.
+ *
+ * A real page whose id matches no output is still a screen — it is simply in no
+ * group, and Everyone still reaches it.
+ */
+export function ownScreen(
+  input: Pick<ScreenInput, "state" | "displayId" | "previewViewId">,
+): OwnScreen | null {
+  if (input.previewViewId) return null;
+  return {
+    outputId: input.displayId,
+    groups: input.state?.resolvedByOutput?.[input.displayId]?.groups ?? [],
+  };
 }
 
 export function resolveScreen(input: ScreenInput): StageScreen {
@@ -208,6 +241,7 @@ export function resolveScreen(input: ScreenInput): StageScreen {
     isPreview: !!previewViewId,
     outputMode: currentDisplay?.mode,
     allowHls: resolved?.allowHls ?? true,
+    own: ownScreen(input),
     textSize: standingIn?.textSize ?? null,
     ...chrome,
   });

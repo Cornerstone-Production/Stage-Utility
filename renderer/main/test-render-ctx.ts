@@ -105,6 +105,8 @@ export function makeRenderCtx(overrides: Partial<LayoutRenderCtx> = {}): LayoutR
     now: 0,
     ndiSource: null,
     allowHls: true,
+    outputId: null,
+    screenGroups: null,
     H: 1080,
     interactive: false,
     placed: undefined,

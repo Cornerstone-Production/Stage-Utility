@@ -125,8 +125,12 @@ export function ConsoleRoute() {
             ndiSource={view.ndiSource ?? null}
             interactive={capabilityLive("shell", "control")}
             surface="console"
-            // The operator's console page, not a screen with its own HLS switch.
+            // The operator's console page, not a screen with its own HLS switch
+            // and not a screen in any message group: a Messages widget here
+            // follows its own groups.
             allowHls
+            outputId={null}
+            screenGroups={null}
           />
         ) : (
           <EmptyState

@@ -190,6 +190,9 @@ function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderC
     // must never refuse to play a B-frame feed because of a WALL's own "Use HLS
     // on this screen" switch.
     allowHls: true,
+    // Home is not a screen, so it is in no message group.
+    outputId: null,
+    screenGroups: null,
     H: NOMINAL_H,
     // Home is the operator's own screen: controls fire and drill-downs work.
     interactive: true,

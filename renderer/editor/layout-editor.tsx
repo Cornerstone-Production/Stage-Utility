@@ -2383,7 +2383,7 @@ export function LayoutEditor({
               // must preview what that surface will draw.
               // The editor's own canvas is never the real screen a switched-off
               // display would refuse HLS on, so a Video widget here always may.
-              ctx={{ ...data, ...statusCtx(data), state: data.state, propresenter: data.propresenterStatus.value, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, allowHls: true }}
+              ctx={{ ...data, ...statusCtx(data), state: data.state, propresenter: data.propresenterStatus.value, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, allowHls: true, outputId: null, screenGroups: null }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}
