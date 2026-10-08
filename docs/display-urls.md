@@ -91,6 +91,7 @@ They follow the light/dark theme, unlike the always-dark display URLs above.
 | `/history` | Service history, timing and attendance — read-only |
 | `/baptism` | Baptism operator |
 | `/settings/integrations` | Connected devices and services |
+| `/settings/messages` | Groups of screens, quick messages and quick replies |
 | `/settings/branding` | App name, logos, accent colour |
 | `/settings/advanced` | Updates, network, backups, kiosk devices |
 

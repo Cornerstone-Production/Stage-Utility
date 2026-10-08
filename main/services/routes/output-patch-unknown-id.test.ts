@@ -25,6 +25,7 @@ const FIELDS: [name: string, body: Record<string, unknown>][] = [
   ["locked", { locked: true }],
   ["hideTopBar", { hideTopBar: true }],
   ["allowHls", { allowHls: false }],
+  ["groups", { groups: [] }],
   ["textSize", { textSize: 150 }],
 ];
 

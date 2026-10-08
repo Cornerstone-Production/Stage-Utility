@@ -12,6 +12,7 @@ import { Loader2Icon } from "lucide-react";
 import { BrandingSection } from "../settings/sections/branding-section";
 import { AdvancedSection } from "../settings/sections/advanced-section";
 import { PlanSection } from "../settings/sections/plan-section";
+import { MessagesSection } from "../settings/sections/messages-section";
 import { useStageSettings } from "./use-stage-settings";
 import { takeJustUpdated } from "./update-lifecycle";
 
@@ -29,6 +30,14 @@ export function BrandingRoute() {
   const s = useStageSettings();
   if (s.stageLoading || !s.stageState) return <Loading />;
   return <BrandingSection stageState={s.stageState} handlers={s.handlers} />;
+}
+
+export function MessagesRoute() {
+  const s = useStageSettings();
+  // The outputs only say how many screens are in each group, so the page does not
+  // wait for them: a stage state that is slow, or never comes, must not leave it
+  // on a spinner. Counts appear when they are known.
+  return <MessagesSection outputs={s.stageState?.outputs} />;
 }
 
 export function AdvancedRoute() {

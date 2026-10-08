@@ -21,6 +21,7 @@ function resolvedOutput(over: Partial<ResolvedOutput> = {}): ResolvedOutput {
     locked: false,
     hideTopBar: false,
     allowHls: true,
+    groups: [],
     textSize: null,
     ...over,
   };

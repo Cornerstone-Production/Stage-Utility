@@ -273,6 +273,28 @@ object box fitted to its aspect ratio.
 presets** snapshot a slot arrangement by name. Both are global and can be recalled
 onto any view or service type.
 
+## Stage messages
+
+A producer sends a short message to one or more **groups** of screens, or to
+**Everyone**. This is what is stored.
+
+Two stores, split by whose work they are:
+
+| File | Class | Holds |
+|---|---|---|
+| `messaging.json` | config | The groups (`{ id, name }`), the quick messages and the quick replies, and a `version` that goes up by one on every save (a file without one reads as 0). A save must carry the version it was built from, so a window that has not seen another window's change cannot overwrite it. Carried by every backup. |
+| `messages.json` | runtime | The day's messages and `lastClearedDate`. Not restored from a backup: a message is an observation about one day. |
+
+A screen is in any number of groups: `Output.groups` holds their ids, in the
+groups' own order, and is empty or absent when the screen is in none. **Everyone** is
+built in and is not stored; it reaches every screen whether the screen is in a
+group or not. Deleting a group takes its id off every screen that held it.
+
+A group's `id` is `g-` and eight hex characters, issued by the server and never
+changed, so renaming a group moves nothing that points at it. A message's `id` is
+sixteen hex characters. A message holds `to` (group ids, or `["everyone"]`), `text`,
+`alert` and `alertUntil`, `clearedAt`, `from` and its `replies`.
+
 ## How state reaches a screen
 
 The base state is pushed over one event stream. High-frequency data — the

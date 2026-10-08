@@ -1171,6 +1171,11 @@ export interface Output {
    *  this existed: a Pi 4 can freeze decoding HLS, and this is the per-screen
    *  escape hatch rather than turning HLS off everywhere. */
   allowHls?: boolean;
+  /** The message groups this screen belongs to (ids from messaging.json, in that
+   *  file's order). Absent means none; a message to Everyone still reaches it.
+   *  Set from the Screens card, never by the kiosk, and read through
+   *  {@link ResolvedOutput.groups}. See main/types/messages.ts. */
+  groups?: string[];
   /** The ServiceCue text size this screen shows its rundown at, 50 to 300 percent
    *  (see main/types/text-size.ts). Absent means 100. Kept here, not in the
    *  browser, so a Screens preview of the display draws the same size and a
@@ -1195,6 +1200,10 @@ export interface ResolvedOutput {
    *  reason `hideTopBar` does: the kiosk reads this descriptor, never the Output
    *  list, to decide what a Video widget on it may attempt. */
   allowHls: boolean;
+  /** {@link Output.groups}, `[]` when absent. Rides here for the same reason
+   *  `allowHls` does: the kiosk reads this descriptor, never the Output list, to
+   *  learn which messages are for it. */
+  groups: string[];
   /** {@link Output.textSize}, or null while none has been set. Null rather than
    *  100 because a display with no saved size may still hold one of its own to
    *  hand over (see use-servicecue-text-size.ts), and "never set" has to be told

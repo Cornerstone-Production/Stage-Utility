@@ -609,7 +609,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // PATCH /api/outputs/:id — { name? }, { viewId? } (string|null = routing),
     // { blackout? } (boolean = full black screen), { locked? }, { hideTopBar? }
     // (boolean = draw no kiosk top bar), { allowHls? } (boolean = whether a Video
-    // widget here may play over HLS), { textSize? } (number 50-300 = the ServiceCue
+    // widget here may play over HLS), { groups? } (string[] = the message groups this
+    // screen belongs to), { textSize? } (number 50-300 = the ServiceCue
     // text size this display shows), and/or { slug? } (string; "" clears the
     // friendly URL alias)
     const outputPatchMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
@@ -623,6 +624,10 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasLocked = typeof body.locked === "boolean";
       const hasHideTopBar = typeof body.hideTopBar === "boolean";
       const hasAllowHls = typeof body.allowHls === "boolean";
+      // Present at all counts, for the same reason as textSize below:
+      // setOutputGroups says what is wrong with a value that is not a list of
+      // group ids, where an ignored field would answer 200 having done nothing.
+      const hasGroups = "groups" in body;
       // Present at all counts: setOutputTextSize refuses a value that is not a
       // number from 50 to 300, so junk is a 400 with the reason rather than an
       // ignored field.
@@ -630,8 +635,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasSlug = typeof body.slug === "string";
       const mode = body.mode === "panel" ? "panel" : body.mode === "display" ? "display" : null;
       const hasMode = mode !== null;
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasTextSize && !hasSlug && !hasMode) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.textSize (number, 50 to 300), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasGroups && !hasTextSize && !hasSlug && !hasMode) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.groups (string[]), body.textSize (number, 50 to 300), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
@@ -650,6 +655,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
         if (hasHideTopBar) state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
         if (hasAllowHls) state = await stageController.setOutputAllowHls(id, body.allowHls as boolean);
+        if (hasGroups) state = await stageController.setOutputGroups(id, body.groups);
         if (hasTextSize) state = await stageController.setOutputTextSize(id, body.textSize);
         if (hasSlug) state = await stageController.setOutputSlug(id, body.slug as string);
       } catch (err) {

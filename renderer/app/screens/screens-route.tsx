@@ -44,6 +44,7 @@ export function ScreensRoute() {
         stageState={s.stageState}
         handlers={s.handlers}
         serviceTypes={s.serviceTypes}
+        onOpenMessagingSettings={() => router.navigate({ to: "/settings/messages" as never })}
         onEditLayout={(viewId) => {
           // Select it too, so the editor's slot state resolves against the right
           // view the moment it mounts.

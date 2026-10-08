@@ -101,6 +101,7 @@ export interface SectionHandlers {
   handleSetOutputLocked: (id: string, locked: boolean) => Promise<void>;
   handleSetOutputHideTopBar: (id: string, hideTopBar: boolean) => Promise<void>;
   handleSetOutputAllowHls: (id: string, allowHls: boolean) => Promise<void>;
+  handleSetOutputGroups: (id: string, groups: string[]) => Promise<void>;
   handleSetOutputMode: (id: string, mode: "display" | "panel") => Promise<void>;
   handleSetViewSurface: (id: string, surface: "display" | "console") => Promise<void>;
   handleRemoveOutput: (id: string) => Promise<void>;

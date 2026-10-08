@@ -1,0 +1,550 @@
+// Settings -> Messages, driven through the real section against a fake server
+// that does what the real one does with the body: it keeps the whole config,
+// hands a group with no id one, and refuses a duplicate name.
+//
+// What matters here is the PUT's body, because it is the whole config every
+// time: a rename that sent only the renamed group would delete the rest. And
+// what an operator is told when a save fails, and that what they typed is
+// still there to fix.
+//
+// Every name and id below is INVENTED. This is a public repository.
+
+import { strict as assert } from "node:assert";
+import { after, afterEach, beforeEach, test } from "node:test";
+
+import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { alerts, ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
+
+const teardown = installRenderDom();
+
+const { render, screen, cleanup, fireEvent, act, within } = await import("@testing-library/react");
+const React = await import("react");
+const { MessagesSection } = await import("./messages-section.js");
+const { TooltipProvider, ConfirmHost, Toaster } = await import("../../components/ui/index.js");
+
+after(() => unmountAndTeardown(cleanup, teardown));
+afterEach(() => cleanup());
+
+const GREEN = { id: "g-11111111", name: "Green room" };
+const STAGE = { id: "g-22222222", name: "Stage" };
+
+interface Config {
+  version: number;
+  groups: { id: string; name: string }[];
+  quickMessages: string[];
+  quickReplies: string[];
+}
+
+let server: Config;
+let puts: Config[] = [];
+let refuse: string | null = null;
+let halfDone = false;
+/** While set, every PUT waits for it: a save that is still in flight. */
+let gate: Promise<void> | null = null;
+let readFails = false;
+let fetchStub: ReturnType<typeof stubFetchWithLog>;
+
+type PutBody = { version: number; groups: { id?: string; name: string }[]; quickMessages: string[]; quickReplies: string[] };
+
+/** What the real server does with a PUT: a body built from another version is a
+ *  409, otherwise it is stored whole and answered. */
+function answerPut(body: PutBody) {
+  // What the real one does: a body built from another version is a 409.
+  if (body.version !== server.version) {
+    return reply(409, { error: "The groups and quick messages were changed in another window. Reload and try again.", code: "config-changed" });
+  }
+  let n = 0;
+  server = {
+    version: server.version + 1,
+    groups: body.groups.map((g) => ({ id: g.id ?? `g-9999999${++n}`, name: g.name })),
+    quickMessages: body.quickMessages,
+    quickReplies: body.quickReplies,
+  };
+  // Saved, and then the half that takes a deleted group off the screens failed.
+  if (halfDone) {
+    return reply(500, {
+      error: "The groups were saved, but taking deleted groups off the screens failed. Saving again retries it.",
+      code: "groups-not-cleared",
+    });
+  }
+  return ok(server);
+}
+
+beforeEach(() => {
+  server = {
+    version: 3,
+    groups: [GREEN, STAGE],
+    quickMessages: ["Walk now", "2 minutes"],
+    quickReplies: ["Copy"],
+  };
+  puts = [];
+  refuse = null;
+  halfDone = false;
+  gate = null;
+  readFails = false;
+  fetchStub = stubFetchWithLog((url, init) => {
+    if (url !== "/api/messaging") return ok({});
+    if ((init?.method ?? "GET") === "PUT") {
+      const body = JSON.parse(String(init?.body)) as PutBody;
+      puts.push(body as Config);
+      if (refuse) return reply(400, { error: refuse });
+      return gate ? gate.then(() => answerPut(body)) : answerPut(body);
+    }
+    if (readFails) throw new TypeError("fetch failed");
+    return ok(server);
+  });
+});
+afterEach(() => fetchStub.restore());
+
+const outputs = (...groups: string[][]): Output[] =>
+  groups.map((g, i) => ({ id: `display-${i}`, name: `Screen ${i}`, viewId: null, groups: g }));
+
+/** `null`: the screens have not been read. */
+async function mount(screens: Output[] | null = []) {
+  render(
+    React.createElement(
+      TooltipProvider,
+      null,
+      React.createElement(MessagesSection, { outputs: screens ?? undefined }),
+      React.createElement(ConfirmHost),
+      React.createElement(Toaster),
+    ),
+  );
+  await settle();
+  await settle();
+}
+
+/** The change handler fires on React's synthetic input event. */
+function type(label: string | RegExp, value: string) {
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+}
+async function flush() {
+  await settle();
+  await settle();
+}
+
+test("shows the groups and both lists the server holds", async () => {
+  await mount();
+  assert.deepEqual(
+    screen.getAllByLabelText(/^Rename /).map((i) => (i as HTMLInputElement).value),
+    ["Green room", "Stage"],
+  );
+  assert.deepEqual(
+    screen.getAllByLabelText(/^Edit /).map((i) => (i as HTMLInputElement).value),
+    ["Walk now", "2 minutes", "Copy"],
+  );
+});
+
+test("adding a group sends the WHOLE config, the new group without an id, and shows the id the server gave it", async () => {
+  await mount();
+  type("New group", "Booth");
+  fireEvent.click(within(screen.getByTestId("messages-groups")).getByRole("button", { name: /Add/ }));
+  await flush();
+  assert.deepEqual(puts, [
+    {
+      version: 3,
+      groups: [GREEN, STAGE, { name: "Booth" }],
+      quickMessages: ["Walk now", "2 minutes"],
+      quickReplies: ["Copy"],
+    },
+  ]);
+  assert.deepEqual(
+    screen.getAllByLabelText(/^Rename /).map((i) => (i as HTMLInputElement).value),
+    ["Green room", "Stage", "Booth"],
+  );
+  assert.equal((screen.getByLabelText("New group") as HTMLInputElement).value, "", "the box clears once it saved");
+});
+
+test("renaming a group keeps its id, so the screens in it stay in it", async () => {
+  await mount();
+  const box = screen.getByLabelText("Rename Stage");
+  fireEvent.change(box, { target: { value: "Main stage" } });
+  fireEvent.blur(box);
+  await flush();
+  assert.deepEqual(puts[0].groups, [GREEN, { id: STAGE.id, name: "Main stage" }]);
+});
+
+test("a rename left unchanged, or emptied, sends nothing and puts the name back", async () => {
+  await mount();
+  const box = screen.getByLabelText("Rename Stage") as HTMLInputElement;
+  fireEvent.change(box, { target: { value: "  Stage " } });
+  fireEvent.blur(box);
+  fireEvent.change(box, { target: { value: "   " } });
+  fireEvent.blur(box);
+  await flush();
+  assert.equal(puts.length, 0, "something was saved");
+  assert.equal(box.value, "Stage");
+});
+
+test("a refused save says why, reaches /log, and leaves what was typed where it is", async () => {
+  await mount();
+  refuse = 'two groups are named "Stage" (names are not case-sensitive)';
+  const box = screen.getByLabelText("Rename Green room") as HTMLInputElement;
+  fireEvent.change(box, { target: { value: "stage" } });
+  fireEvent.blur(box);
+  await flush();
+  assert.equal(puts.length, 1);
+  assert.match(document.body.textContent ?? "", /Couldn't save that: two groups are named "Stage"/);
+  assert.equal((screen.getByLabelText("Rename Green room") as HTMLInputElement).value, "stage", "the refused name was thrown away");
+  assert.ok(
+    fetchStub.logs.some((l) => l.tag === "messages" && /could not save the groups and quick messages: two groups are named/.test(l.message)),
+    `expected a [messages] line, got ${JSON.stringify(fetchStub.logs)}`,
+  );
+});
+
+test("a group that failed to add stays in the box", async () => {
+  await mount();
+  refuse = "groups can hold at most 20 (this has 21)";
+  type("New group", "Booth");
+  fireEvent.click(within(screen.getByTestId("messages-groups")).getByRole("button", { name: /Add/ }));
+  await flush();
+  assert.equal((screen.getByLabelText("New group") as HTMLInputElement).value, "Booth");
+});
+
+test("removing a group asks first and says how many screens are in it", async () => {
+  await mount(outputs([STAGE.id], [STAGE.id, GREEN.id], []));
+  fireEvent.click(screen.getByLabelText("Remove Stage"));
+  await flush();
+  assert.match(document.body.textContent ?? "", /Remove Stage\?/);
+  assert.match(document.body.textContent ?? "", /2 screens are in it/);
+  assert.equal(puts.length, 0, "removed before anyone said yes");
+});
+
+test("a group with one screen says 'is', and one with none says so", async () => {
+  await mount(outputs([GREEN.id]));
+  fireEvent.click(screen.getByLabelText("Remove Green room"));
+  await flush();
+  assert.match(document.body.textContent ?? "", /1 screen is in it/);
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await flush();
+  fireEvent.click(screen.getByLabelText("Remove Stage"));
+  await flush();
+  assert.match(document.body.textContent ?? "", /No screens are in it/);
+});
+
+test("cancelling the removal changes nothing; confirming saves the list without it", async () => {
+  await mount(outputs([STAGE.id]));
+  fireEvent.click(screen.getByLabelText("Remove Stage"));
+  await flush();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await flush();
+  assert.equal(puts.length, 0, "something was saved");
+
+  fireEvent.click(screen.getByLabelText("Remove Stage"));
+  await flush();
+  fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+  await flush();
+  assert.deepEqual(puts[0].groups, [GREEN]);
+  assert.equal(screen.queryByLabelText("Rename Stage"), null);
+});
+
+test("adding a quick message sends the whole config with it appended", async () => {
+  await mount();
+  type("New quick message", "Wrap it up");
+  fireEvent.click(within(screen.getByTestId("messages-quick-messages")).getByRole("button", { name: /Add/ }));
+  await flush();
+  assert.deepEqual(puts, [
+    { version: 3, groups: [GREEN, STAGE], quickMessages: ["Walk now", "2 minutes", "Wrap it up"], quickReplies: ["Copy"] },
+  ]);
+});
+
+test("editing a quick reply saves it trimmed, in place", async () => {
+  await mount();
+  const box = screen.getByLabelText("Edit Copy");
+  fireEvent.change(box, { target: { value: "  Got it " } });
+  fireEvent.blur(box);
+  await flush();
+  assert.deepEqual(puts[0].quickReplies, ["Got it"]);
+});
+
+test("an emptied quick message is put back, not saved: removing is the trash can", async () => {
+  await mount();
+  const box = screen.getByLabelText("Edit Walk now") as HTMLInputElement;
+  fireEvent.change(box, { target: { value: "   " } });
+  fireEvent.blur(box);
+  await flush();
+  assert.equal(puts.length, 0, "an empty quick message was sent to the server");
+  assert.equal(box.value, "Walk now");
+});
+
+test("a quick message left as it was sends nothing", async () => {
+  await mount();
+  const box = screen.getByLabelText("Edit Walk now");
+  fireEvent.change(box, { target: { value: " Walk now " } });
+  fireEvent.blur(box);
+  await flush();
+  assert.equal(puts.length, 0);
+});
+
+test("removing a quick message needs no confirmation and saves the list without it", async () => {
+  await mount();
+  fireEvent.click(screen.getByLabelText("Remove Walk now"));
+  await flush();
+  assert.deepEqual(puts[0].quickMessages, ["2 minutes"]);
+});
+
+test("moving a quick message changes the order consoles offer, and the ends cannot move past themselves", async () => {
+  await mount();
+  assert.equal((screen.getByLabelText("Move Walk now up") as HTMLButtonElement).disabled, true);
+  assert.equal((screen.getByLabelText("Move 2 minutes down") as HTMLButtonElement).disabled, true);
+  fireEvent.click(screen.getByLabelText("Move 2 minutes up"));
+  await flush();
+  assert.deepEqual(puts[0].quickMessages, ["2 minutes", "Walk now"]);
+  assert.deepEqual(
+    within(screen.getByTestId("messages-quick-messages")).getAllByLabelText(/^Edit /).map((i) => (i as HTMLInputElement).value),
+    ["2 minutes", "Walk now"],
+    "the list on screen did not follow the save",
+  );
+});
+
+test("the lists stop at their limits: 24 quick messages, 12 quick replies, 20 groups", async () => {
+  server = {
+    version: 3,
+    groups: Array.from({ length: 20 }, (_, i) => ({ id: `g-${i.toString(16).padStart(8, "0")}`, name: `G${i}` })),
+    quickMessages: Array.from({ length: 24 }, (_, i) => `m${i}`),
+    quickReplies: Array.from({ length: 12 }, (_, i) => `r${i}`),
+  };
+  await mount();
+  assert.equal((screen.getByLabelText("New group") as HTMLInputElement).disabled, true);
+  assert.equal((screen.getByLabelText("New quick message") as HTMLInputElement).disabled, true);
+  assert.equal((screen.getByLabelText("New quick reply") as HTMLInputElement).disabled, true);
+  assert.ok(screen.getByText("24 of 24"));
+  assert.ok(screen.getByText("12 of 12"));
+  assert.ok(screen.getByText("20 of 20"));
+});
+
+test("a read that failed says so, offers no editor, and never claims there are no groups", async () => {
+  readFails = true;
+  await mount();
+  assert.match(alerts(), /Couldn't load the groups and quick messages/);
+  assert.equal(screen.queryByText(/No groups yet/), null);
+  assert.equal(screen.queryByLabelText("New group"), null, "an editor over a list nobody could read would save over it");
+  assert.ok(fetchStub.logs.some((l) => l.tag === "messages" && /could not read the groups and quick messages/.test(l.message)));
+});
+
+test("Try again reads it again, and the editor appears", async () => {
+  readFails = true;
+  await mount();
+  readFails = false;
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  });
+  await flush();
+  assert.ok(screen.getByLabelText("New group"));
+  assert.equal(alerts(), "");
+});
+
+test("an empty config says none yet rather than drawing nothing", async () => {
+  server = { version: 3, groups: [], quickMessages: [], quickReplies: [] };
+  await mount();
+  assert.ok(screen.getByText("No groups yet."));
+  assert.equal(screen.getAllByText("None yet.").length, 2);
+});
+
+test("a save built from a config another window has since replaced reloads what is stored, says so, and saves nothing", async () => {
+  await mount();
+  // Another window adds Booth after this one read the config.
+  const booth = { id: "g-33333333", name: "Booth" };
+  server = { ...server, version: 4, groups: [GREEN, STAGE, booth] };
+  type("New quick message", "Wrap it up");
+  fireEvent.click(within(screen.getByTestId("messages-quick-messages")).getByRole("button", { name: /Add/ }));
+  await flush();
+  assert.equal(puts.length, 1, "the stale save was sent once");
+  assert.equal(puts[0].version, 3);
+  assert.match(document.body.textContent ?? "", /changed since this page loaded/);
+  assert.match(document.body.textContent ?? "", /reloaded/);
+  assert.deepEqual(
+    screen.getAllByLabelText(/^Rename /).map((i) => (i as HTMLInputElement).value),
+    ["Green room", "Stage", "Booth"],
+    "the page went on showing the config another window replaced",
+  );
+  assert.deepEqual(server.quickMessages, ["Walk now", "2 minutes"], "the stale save landed");
+  assert.ok(fetchStub.logs.some((l) => l.tag === "messages" && /changed since this page loaded/.test(l.message)));
+
+  // And the next save is built from what was reloaded: it lands, Booth survives.
+  type("New quick message", "Wrap it up");
+  fireEvent.click(within(screen.getByTestId("messages-quick-messages")).getByRole("button", { name: /Add/ }));
+  await flush();
+  assert.equal(puts[1].version, 4);
+  assert.deepEqual(puts[1].groups.map((g) => g.name), ["Green room", "Stage", "Booth"]);
+  assert.deepEqual(server.quickMessages, ["Walk now", "2 minutes", "Wrap it up"]);
+});
+
+test("a save the server made but could not finish shows its message, and the page shows what was saved", async () => {
+  await mount(outputs([STAGE.id]));
+  halfDone = true;
+  fireEvent.click(screen.getByLabelText("Remove Stage"));
+  await flush();
+  fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+  await flush();
+  assert.match(document.body.textContent ?? "", /groups were saved, but taking deleted groups off the screens failed\. Saving again retries it/);
+  assert.doesNotMatch(document.body.textContent ?? "", /Couldn't save that: The groups were saved/, "a saved config was reported as not saved");
+  assert.deepEqual(
+    screen.getAllByLabelText(/^Rename /).map((i) => (i as HTMLInputElement).value),
+    ["Green room"],
+    "the page still shows a group the server has already deleted",
+  );
+  assert.ok(fetchStub.logs.some((l) => l.tag === "messages" && /the save landed but did not finish: The groups were saved, but taking/.test(l.message)));
+});
+
+test("a click on another row while a save is in flight is not lost, and is built on what the first save left", async () => {
+  await mount();
+  let release!: () => void;
+  gate = new Promise<void>((r) => (release = r));
+
+  // Typing a new name and then clicking elsewhere blurs the box, which saves.
+  const box = screen.getByLabelText("Rename Stage");
+  fireEvent.change(box, { target: { value: "Main stage" } });
+  fireEvent.blur(box);
+  await flush();
+  assert.equal(puts.length, 1, "the rename was not sent");
+
+  // The click that caused the blur lands while that save is still in flight.
+  const trash = screen.getByLabelText("Remove Walk now") as HTMLButtonElement;
+  assert.equal(trash.disabled, false, "another row's button is off while a save is in flight");
+  fireEvent.click(trash);
+  await flush();
+  assert.equal(puts.length, 1, "the second save went out before the first had landed");
+
+  release();
+  await flush();
+  assert.equal(puts.length, 2, "the click was lost");
+  assert.equal(puts[1].version, 4, "the second save was built from the config as it was before the first");
+  assert.deepEqual(puts[1].groups, [GREEN, { id: STAGE.id, name: "Main stage" }], "the second save undid the rename");
+  assert.deepEqual(puts[1].quickMessages, ["2 minutes"]);
+  assert.deepEqual(server.groups.map((g) => g.name), ["Green room", "Main stage"]);
+  assert.deepEqual(server.quickMessages, ["2 minutes"]);
+});
+
+test("a queued move that names a row the first save has since moved changes nothing", async () => {
+  await mount();
+  let release!: () => void;
+  gate = new Promise<void>((r) => (release = r));
+  // Two clicks on the same arrow, the second before the first has landed: the
+  // second names what was at that place when it was clicked, and that is no
+  // longer there, so it must not move whatever is.
+  fireEvent.click(screen.getByLabelText("Move 2 minutes up"));
+  await flush();
+  fireEvent.click(screen.getByLabelText("Move 2 minutes up"));
+  await flush();
+  release();
+  await flush();
+  assert.equal(puts.length, 1, "the stale second move was sent");
+  assert.deepEqual(server.quickMessages, ["2 minutes", "Walk now"]);
+});
+
+test("the add box stays off only while its own add is in flight, so one click cannot add twice", async () => {
+  await mount();
+  let release!: () => void;
+  gate = new Promise<void>((r) => (release = r));
+  type("New quick message", "Wrap it up");
+  const add = within(screen.getByTestId("messages-quick-messages")).getByRole("button", { name: /Add/ });
+  fireEvent.click(add);
+  await flush();
+  fireEvent.click(add);
+  await flush();
+  assert.equal(puts.length, 1, "a second click added it again");
+  release();
+  await flush();
+  assert.deepEqual(server.quickMessages, ["Walk now", "2 minutes", "Wrap it up"]);
+});
+
+test("until the screens are known no count is drawn, and removing a group does not claim none are in it", async () => {
+  await mount(null);
+  assert.equal(document.querySelector(`[data-group-row="${STAGE.id}"]`)?.textContent, "", "a count was drawn for screens nobody has read");
+  fireEvent.click(screen.getByLabelText("Remove Stage"));
+  await flush();
+  assert.match(document.body.textContent ?? "", /Any screens in it will be taken out of it/);
+  assert.doesNotMatch(document.body.textContent ?? "", /No screens are in it/);
+});
+
+test("each group row says how many screens are in it: none, one, several", async () => {
+  await mount(outputs([STAGE.id], [STAGE.id, GREEN.id], [STAGE.id]));
+  const label = (id: string) => document.querySelector(`[data-group-row="${id}"] span`)?.textContent;
+  assert.equal(label(STAGE.id), "3 screens");
+  assert.equal(label(GREEN.id), "1 screen");
+  cleanup();
+  await mount(outputs([GREEN.id]));
+  assert.equal(label(STAGE.id), "no screens");
+});
+
+test("the 409 reloads BEFORE the next queued save runs, so that one is built on the reloaded config and lands", async () => {
+  await mount();
+  // Another window has replaced the config since this page read it.
+  const booth = { id: "g-33333333", name: "Booth" };
+  server = { ...server, version: 4, groups: [GREEN, STAGE, booth] };
+  let release!: () => void;
+  gate = new Promise<void>((r) => (release = r));
+  type("New quick message", "Wrap it up");
+  fireEvent.click(within(screen.getByTestId("messages-quick-messages")).getByRole("button", { name: /Add/ }));
+  await flush();
+  // Queued behind it while it is in flight.
+  fireEvent.click(screen.getByLabelText("Remove Walk now"));
+  await flush();
+  release();
+  await flush();
+  assert.deepEqual(puts.map((p) => p.version), [3, 4], "the queued save did not wait for the reload and was refused the same way");
+  assert.deepEqual(puts[1].groups.map((g) => g.name), ["Green room", "Stage", "Booth"], "the queued save was built from the stale groups");
+  assert.deepEqual(server.quickMessages, ["2 minutes"]);
+});
+
+test("a save the server could not finish also reloads before the next queued save runs", async () => {
+  await mount();
+  halfDone = true;
+  let release!: () => void;
+  gate = new Promise<void>((r) => (release = r));
+  const box = screen.getByLabelText("Rename Stage");
+  fireEvent.change(box, { target: { value: "Main stage" } });
+  fireEvent.blur(box);
+  await flush();
+  fireEvent.click(screen.getByLabelText("Remove Walk now"));
+  await flush();
+  release();
+  await flush();
+  assert.deepEqual(puts.map((p) => p.version), [3, 4], "the queued save was built before the reload and refused");
+  assert.deepEqual(puts[1].groups, [GREEN, { id: STAGE.id, name: "Main stage" }], "the queued save undid the rename");
+});
+
+test("a group that WAS saved clears the add box, though the server could not finish the save", async () => {
+  await mount();
+  halfDone = true;
+  type("New group", "Booth");
+  fireEvent.click(within(screen.getByTestId("messages-groups")).getByRole("button", { name: /Add/ }));
+  await flush();
+  assert.equal(puts.length, 1);
+  assert.equal((screen.getByLabelText("New group") as HTMLInputElement).value, "", "a saved group stayed in the box to be added again");
+  assert.ok(screen.getByLabelText("Rename Booth"), "the reloaded page does not show the group that was saved");
+});
+
+test("editing a quick message and then clicking its trash can in the same breath removes the row", async () => {
+  await mount();
+  let release!: () => void;
+  gate = new Promise<void>((r) => (release = r));
+  const box = screen.getByLabelText("Edit Walk now");
+  fireEvent.change(box, { target: { value: "Go now" } });
+  fireEvent.blur(box);
+  await flush();
+  // The click that blurred the box: the row still says "Walk now" on screen.
+  fireEvent.click(screen.getByLabelText("Remove Walk now"));
+  await flush();
+  release();
+  await flush();
+  assert.equal(puts.length, 2, "the remove was dropped");
+  assert.deepEqual(puts[1].quickMessages, ["2 minutes"]);
+  assert.deepEqual(server.quickMessages, ["2 minutes"]);
+});
+
+test("editing a quick message and then moving it does move it, under its new text", async () => {
+  await mount();
+  let release!: () => void;
+  gate = new Promise<void>((r) => (release = r));
+  const box = screen.getByLabelText("Edit 2 minutes");
+  fireEvent.change(box, { target: { value: "3 minutes" } });
+  fireEvent.blur(box);
+  await flush();
+  fireEvent.click(screen.getByLabelText("Move 2 minutes up"));
+  await flush();
+  release();
+  await flush();
+  assert.deepEqual(server.quickMessages, ["3 minutes", "Walk now"]);
+});

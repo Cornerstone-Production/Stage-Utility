@@ -68,6 +68,7 @@ the running server prints its own path in **Settings → Advanced**:
 | `bar-config.json`, `saved-colors.json` | the context bar's arrangement, and your colours |
 | `baptism-triggers.json`, `scores-favourites.json` | per-plan baptism items, followed teams |
 | `history-milestones.json` | the dates you marked on the History trend chart |
+| `messaging.json` | the stage-message groups, quick messages and quick replies |
 | `branding-images/`, `layout-images/` | uploaded images, named by content hash |
 
 **What it observed** — deliberately not restored, because it describes this
@@ -78,6 +79,7 @@ machine's history rather than how you set it up:
 | `spl-history/`, `attendance-history/`, `service-timeline/` | recorded services, one file each |
 | `archive/` | the raw samples behind them — see [data archive](../data-archive.md) |
 | `baptism.json` | baptism sessions |
+| `messages.json` | the day's stage messages: a message describes one day, and last winter's would only reappear on this Sunday's screens |
 | `checklist-ticks.json` | which checklist rows are ticked, per plan |
 | `automation-log.json` | the Activity log |
 | `signals.json` | the values Companion reads |

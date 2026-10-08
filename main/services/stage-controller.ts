@@ -8,6 +8,7 @@ import { getUserDataPath } from "./app-paths.js";
 import { adoptLegacyStoreFiles } from "./store-file-adoption.js";
 import { migrateNeverChosenDefaults, countNeverChosen, migrateCardHairline, countFaintHairlines } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
+import { messagingStore } from "./messaging-store.js";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { checklistTicksStore } from "./checklist-ticks-store.js";
 import {
@@ -3604,6 +3605,95 @@ export class StageController {
     );
   }
 
+  /**
+   * Put a screen in message groups. Every id must be a group that exists in the
+   * messaging config; the answer is deduplicated and kept in that config's order,
+   * so the stored list does not depend on the order a client happened to click.
+   * The output is checked first, so an id naming no screen answers "not found"
+   * whatever else is in the body.
+   */
+  async setOutputGroups(id: string, groups: unknown): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:setGroups — output ${id} not found`);
+    }
+    if (!Array.isArray(groups) || !groups.every((g) => typeof g === "string")) {
+      throw new Error("outputs:setGroups — groups must be an array of group ids");
+    }
+    await messagingStore.init();
+    const config = messagingStore.get().groups;
+    const known = new Set(config.map((g) => g.id));
+    const missing = groups.find((g) => !known.has(g));
+    if (missing !== undefined) {
+      throw new Error(`outputs:setGroups — no message group has the id ${missing}`);
+    }
+    const chosen = config.filter((g) => groups.includes(g.id));
+    return this.commitOutputPatch(
+      id,
+      { groups: chosen.map((g) => g.id) },
+      `[stage-controller] setOutputGroups output=${scrub(id)} → ${scrub(chosen.map((g) => g.name).join(", ") || "no groups")}`,
+    );
+  }
+
+  /**
+   * How many screens hold each message group that is not in `known`. Read only:
+   * what stripUnknownOutputGroups would take off, for a caller that has to decide
+   * whether to run it and say so.
+   */
+  unknownOutputGroups(known: ReadonlySet<string>): Map<string, number> {
+    const found = new Map<string, number>();
+    for (const o of this.state.outputs) {
+      for (const g of new Set(o.groups?.filter((x) => !known.has(x)))) found.set(g, (found.get(g) ?? 0) + 1);
+    }
+    return found;
+  }
+
+  /**
+   * Take every message group that is not in `known` off every screen, in ONE
+   * settings write. Returns, per group id taken off, how many screens it was
+   * taken off; empty when nothing was dangling, and then nothing is written or
+   * broadcast.
+   *
+   * Derived from the screens rather than told which groups were deleted, so it
+   * can be run again after it failed (or at boot, over a settings file edited by
+   * hand) and finish the job: a list of "the groups that just went" is empty on
+   * the retry and would leave the ids on the screens for good.
+   *
+   * One write rather than one per group per screen: the outputs list is rewritten
+   * whole each time (see outputWrites), so a loop of setOutputGroups calls would
+   * be a write and a broadcast per screen. Counted inside the queue, against the
+   * outputs the write is actually made from.
+   *
+   * A write that fails puts the in-memory outputs back, so the next call finds the
+   * same ids still there and tries the write again; leaving them stripped in
+   * memory would report the job done while the file still held them.
+   */
+  async stripUnknownOutputGroups(known: ReadonlySet<string>): Promise<Map<string, number>> {
+    const stripped = new Map<string, number>();
+    await this.outputWrites.enqueue(async () => {
+      const previous = this.state.outputs;
+      const outputs = previous.map((o) => {
+        const dangling = new Set(o.groups?.filter((g) => !known.has(g)));
+        if (dangling.size === 0) return o;
+        for (const g of dangling) stripped.set(g, (stripped.get(g) ?? 0) + 1);
+        return { ...o, groups: o.groups?.filter((g) => known.has(g)) };
+      });
+      if (stripped.size === 0) return;
+      this.state = { ...this.state, outputs };
+      try {
+        await settingsStore.patch({ outputs });
+      } catch (err) {
+        if (this.state.outputs === outputs) this.state = { ...this.state, outputs: previous };
+        stripped.clear();
+        throw err;
+      }
+    });
+    if (stripped.size > 0) {
+      this.recomputeResolved();
+      this.broadcast();
+    }
+    return stripped;
+  }
+
   /** Keep the ServiceCue text size this output's display shows. Refuses anything
    *  that is not a number from MIN_TEXT_SIZE to MAX_TEXT_SIZE (the caller turns
    *  that into a 400), and writes nothing when the size is already the one kept —
@@ -4246,6 +4336,7 @@ export class StageController {
         locked: output.locked ?? false,
         hideTopBar: output.hideTopBar ?? false,
         allowHls: output.allowHls ?? true,
+        groups: output.groups ?? [],
         textSize: output.textSize ?? null,
       };
     }

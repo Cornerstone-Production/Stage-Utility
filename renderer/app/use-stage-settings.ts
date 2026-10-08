@@ -778,6 +778,18 @@ export function useStageSettings(pinnedViewId?: string) {
     );
   }
 
+  /** Put one screen in message groups. Optimistic like the lock: the server only
+   *  refuses an id that does not exist, and the chips under the name have to
+   *  follow the menu under the operator's finger. */
+  async function handleSetOutputGroups(id: string, groups: string[]) {
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { groups }) }),
+      () => ipc<StageState>("outputs:setGroups", { id, groups }),
+      "Failed to update the screen's groups",
+    );
+  }
+
   /**
    * Make a screen a read-only display or an interactive control surface.
    *
@@ -922,6 +934,7 @@ export function useStageSettings(pinnedViewId?: string) {
     handleSetOutputLocked,
     handleSetOutputHideTopBar,
     handleSetOutputAllowHls,
+    handleSetOutputGroups,
     handleSetOutputMode,
     handleSetViewSurface,
     handleRemoveOutput,

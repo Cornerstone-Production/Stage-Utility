@@ -31,7 +31,7 @@ done. Dismiss it and it stays dismissed.
 | Screens | **Screens**, **Video feeds** |
 | Devices | **Automation** |
 | Services | **Plan**, **History**, **Baptisms** |
-| Settings | **Integrations**, **Branding**, **Advanced** |
+| Settings | **Integrations**, **Messages**, **Branding**, **Advanced** |
 
 Consoles you have built get a row each, above the groups — see
 [Consoles](#consoles). The running version sits at the foot of the sidebar. Drag
