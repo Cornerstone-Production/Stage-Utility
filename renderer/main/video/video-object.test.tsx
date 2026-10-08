@@ -21,6 +21,7 @@ import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js"
 import { FAKE_SDP, FakePeerConnection, installFakePeerConnection } from "../../test-fixtures/fake-peer-connection.js";
 import { installFakeHls } from "../../test-fixtures/fake-hls.js";
 import { captureConsole } from "../../../main/services/fixtures/capture-console.js";
+import { FRAME_WAIT_MS } from "./playback-stats.js";
 
 const teardown = installRenderDom();
 
@@ -679,7 +680,11 @@ test("a live relay picture registers with the presence heartbeat; going off scre
     act(() => frames.fire());
     await settleFake();
     assert.equal(anyPlaying(), true, "expected the live picture registered");
-    const reports = await drainReports();
+    // No frame reaches a jsdom screen on its own, so the sample's frame wait
+    // runs out on the mocked clock.
+    const draining = drainReports();
+    mock.timers.tick(FRAME_WAIT_MS);
+    const reports = await draining;
     assert.equal(reports.length, 1);
     assert.equal(reports[0]!.feedId, "feed-1");
     assert.equal(reports[0]!.via, "webrtc");

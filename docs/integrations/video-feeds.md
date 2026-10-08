@@ -430,14 +430,21 @@ in its own browser or is simply being sent a late picture:
 - **Jitter buffer** (`jitterBufferMs`) is how long the average frame waited
   in the browser's jitter buffer during that report's interval — the change
   in Chrome's `jitterBufferDelay` over the change in `jitterBufferEmittedCount`.
-  It is left out when the browser reports neither counter or no frame left
-  the buffer in the interval.
 - **Behind newest** (`behindNewestMs`) is how far the frame on screen trails
-  the newest frame the browser has received, read at the moment of the report:
-  the displayed frame's RTP timestamp (from `requestVideoFrameCallback`)
-  against the receiver's most recently heard synchronization source, at the
-  90 kHz video clock. It is left out on a browser without either, and when no
-  frame was presented since the last report.
+  the newest frame the browser has received. It is read once per report, from
+  the next frame to reach the screen: that frame's RTP timestamp (from
+  `requestVideoFrameCallback`) against the receiver's most recently heard
+  synchronization source, both read in the same callback, at the 90 kHz video
+  clock.
+
+A WebRTC report sends `null` for a figure it could not measure. Jitter buffer
+is `null` when the browser reports neither counter or no frame left the
+buffer in the interval. Behind newest is `null` when no frame reaches the
+screen within 300 milliseconds (a hidden tab, a paused or frozen picture), on a
+browser without either API, or when the two clocks are not comparable. A
+figure of a minute or more is `null` too: no live picture holds that much in
+the browser, and a source change can leave two unrelated clocks in the
+receiver. An HLS report carries neither key.
 
 A healthy picture holds tens of milliseconds in the jitter buffer and is a
 frame or two behind newest. HLS reports neither figure; its delay is the "N s

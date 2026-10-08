@@ -53,10 +53,10 @@ export const MAX_COUNT_PER_REPORT = 100_000;
 /** The largest width or height one report may carry. */
 export const MAX_DIMENSION = 16_384;
 /** The most `jitterBufferMs` or `behindNewestMs` one report may carry: ten
- *  minutes, far past anything a live picture holds. The page clamps to this
- *  before sending, so a freak figure (a screen asleep for an hour, whose
- *  displayed frame is that old) reports as the cap rather than getting its
- *  whole heartbeat refused. */
+ *  minutes, a bound on what the server will hold, far past anything real. The
+ *  page itself sends null for a figure of a minute or more (see
+ *  NOT_A_MEASUREMENT_MS in playback-stats.ts), so a report over this is not
+ *  from this build's page and is refused whole like any other bad field. */
 export const MAX_LAG_MS = 600_000;
 
 /** Samples held per pair, capped — see the merge branch in record(). A LAN

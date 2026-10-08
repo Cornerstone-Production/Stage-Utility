@@ -16,7 +16,6 @@
 
 import { errorMessage } from "@main/services/errors";
 import { OutageLog } from "@main/services/repeat-log";
-import { MAX_LAG_MS } from "@main/services/video/playback-health";
 import type { VideoPlaybackReport } from "@main/types/video";
 
 /** How long one stats read may take before it counts as a failed read. Under
@@ -58,9 +57,6 @@ interface RawCounts {
    *  zero that never was measured. */
   jitterBufferDelay?: number;
   jitterBufferEmittedCount?: number;
-  /** WebRTC only: the RTP timestamp of the newest frame the receiver has
-   *  taken in, null when the browser cannot say. */
-  newestRtpTimestamp?: number | null;
 }
 
 type StatsEntry = {
@@ -108,7 +104,6 @@ async function readWebrtcCounts(pc: RTCPeerConnection): Promise<RawCounts | null
         freezeCount: r.freezeCount,
         jitterBufferDelay: r.jitterBufferDelay,
         jitterBufferEmittedCount: r.jitterBufferEmittedCount,
-        newestRtpTimestamp: newestRtpTimestamp(pc),
       };
     }
   });
@@ -142,11 +137,27 @@ export function rtpBehindMs(newest: number, displayed: number): number {
   return ticks <= 0 ? 0 : ticks / 90;
 }
 
-/** A figure as the report carries it: whole milliseconds, never past the
- *  bound the server refuses above. */
-function wholeMs(ms: number): number {
-  return Math.min(MAX_LAG_MS, Math.max(0, Math.round(ms)));
+/** A figure at or past this is not a measurement. Two clocks that are
+ *  unrelated (a source change leaves the older source in the receiver's list
+ *  for a while, and its RTP clock starts anywhere), or a stats counter that
+ *  restarted, produce differences of any size; no live picture holds a minute
+ *  of delay in the browser. */
+export const NOT_A_MEASUREMENT_MS = 60_000;
+
+/** A figure as the report carries it: whole milliseconds, or null when it is
+ *  not a measurement (see NOT_A_MEASUREMENT_MS). */
+function measuredMs(ms: number): number | null {
+  const whole = Math.round(ms);
+  return Number.isFinite(whole) && whole < NOT_A_MEASUREMENT_MS ? Math.max(0, whole) : null;
 }
+
+/** How long sample() waits for the next frame to reach the screen before it
+ *  reports behindNewestMs as null: a hidden tab, a paused or frozen picture
+ *  and a stream with no frames all deliver none. A frame normally arrives
+ *  within one frame interval (33 ms at 30 fps). Well under the stats read's
+ *  own cap, and the two run side by side, so waiting costs the heartbeat
+ *  nothing it was not already allowed. */
+export const FRAME_WAIT_MS = 300;
 
 /** The one frame metadata field this reads, which lib.dom does not type. */
 type FrameMetadata = { rtpTimestamp?: number };
@@ -154,6 +165,48 @@ type FrameCallbackVideo = HTMLVideoElement & {
   requestVideoFrameCallback?: (cb: (now: number, metadata?: FrameMetadata) => void) => number;
   cancelVideoFrameCallback?: (handle: number) => void;
 };
+
+/** How far the NEXT frame to reach the screen trails the newest the receiver
+ *  has taken in, read in that frame's own callback: the displayed frame's
+ *  timestamp and the receiver's newest are both read at the same instant, so
+ *  neither can be older than the other. Null when no frame arrives within
+ *  FRAME_WAIT_MS (or `cancel()` runs first), when the browser has no
+ *  requestVideoFrameCallback or the frame carries no RTP timestamp, or when
+ *  the two clocks are not comparable. Rejects if the browser throws reading
+ *  the receiver — a failed stats read, like getStats() rejecting. */
+function watchNextFrame(video: FrameCallbackVideo, pc: RTCPeerConnection): { result: Promise<number | null>; cancel: () => void } {
+  if (typeof video.requestVideoFrameCallback !== "function") return { result: Promise.resolve(null), cancel: () => {} };
+  let finish: (behindMs: number | null) => void = () => {};
+  let fail: (err: unknown) => void = () => {};
+  const result = new Promise<number | null>((resolve, reject) => {
+    finish = resolve;
+    fail = reject;
+  });
+  // Settled once: the callback delivered, or the wait ended first. A cancel
+  // after that does nothing, so the browser is never asked to cancel a
+  // callback it already ran.
+  let settled = false;
+  const timer = setTimeout(() => cancel(), FRAME_WAIT_MS);
+  const handle = video.requestVideoFrameCallback((_now, metadata) => {
+    settled = true;
+    clearTimeout(timer);
+    try {
+      const displayed = metadata?.rtpTimestamp;
+      const newest = typeof displayed === "number" ? newestRtpTimestamp(pc) : null;
+      finish(typeof displayed === "number" && newest !== null ? measuredMs(rtpBehindMs(newest, displayed)) : null);
+    } catch (err) {
+      fail(err);
+    }
+  });
+  function cancel(): void {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    video.cancelVideoFrameCallback?.(handle);
+    finish(null);
+  }
+  return { result, cancel };
+}
 
 /** `decoded` is `totalVideoFrames` less `droppedVideoFrames`: the total counts
  *  every frame the element received, dropped ones included, where WebRTC's
@@ -244,34 +297,33 @@ export function createSampler(
   let stallSource: "freezeCount" | "waiting" | null = source.via === "hls" ? "waiting" : null;
   // WebRTC's receive delay. `jitterBufferMs` is the average time a frame
   // waited in the browser's jitter buffer THIS interval, from two cumulative
-  // counters read as deltas. `behindNewestMs` compares the frame on screen
-  // (the RTP timestamp rVFC reports for the last frame presented) with the
-  // newest the receiver has taken in, so it needs the presented frames
-  // watched continuously — one callback per frame, doing one assignment.
+  // counters read as deltas. `behindNewestMs` is read once per sample from
+  // the next frame to reach the screen (see watchNextFrame).
   const jitterDelayDelta = trackDelta();
   const jitterEmittedDelta = trackDelta();
-  let displayedRtp: number | null = null;
-  let presentedSinceSample = 0;
-  let frameHandle: number | undefined;
   const frameVideo = video as FrameCallbackVideo;
-  const onFrame = (_now: number, metadata?: FrameMetadata) => {
-    if (stopped) return;
-    const rtp = metadata?.rtpTimestamp;
-    if (typeof rtp === "number") {
-      displayedRtp = rtp;
-      presentedSinceSample += 1;
-    }
-    frameHandle = frameVideo.requestVideoFrameCallback?.(onFrame);
-  };
-  if (source.via === "webrtc") frameHandle = frameVideo.requestVideoFrameCallback?.(onFrame);
+  let cancelFrameWatch: () => void = () => {};
   const statsOutage = new OutageLog();
   const read = (): Promise<RawCounts | null> => (source.via === "webrtc" ? inTime(readWebrtcCounts(source.pc)) : Promise.resolve(readHlsCounts(video)));
 
   return {
     sample: async () => {
       let raw: RawCounts | null;
+      let behindNewestMs: number | null = null;
       try {
-        raw = await read();
+        if (source.via === "webrtc") {
+          // Side by side, so waiting for a frame adds nothing to a read that
+          // was already allowed STATS_READ_TIMEOUT_MS.
+          const watch = watchNextFrame(frameVideo, source.pc);
+          cancelFrameWatch = watch.cancel;
+          try {
+            [raw, behindNewestMs] = await Promise.all([read(), watch.result]);
+          } finally {
+            watch.cancel();
+          }
+        } else {
+          raw = await read();
+        }
       } catch (err) {
         // Stopped between the call going out and its rejection landing: the
         // session is closing on purpose, and `getStats()` failing on a
@@ -311,18 +363,13 @@ export function createSampler(
       if (source.via === "webrtc") {
         // Both figures are null, not zero, when this interval could not
         // measure them: a counter the browser does not report, a buffer that
-        // emitted nothing, no frame presented since the last report.
+        // emitted nothing, no frame reaching the screen, an implausible one.
         let jitterBufferMs: number | null = null;
         if (raw.jitterBufferDelay !== undefined && raw.jitterBufferEmittedCount !== undefined) {
           const waited = jitterDelayDelta(raw.jitterBufferDelay);
           const emitted = jitterEmittedDelta(raw.jitterBufferEmittedCount);
-          if (emitted > 0) jitterBufferMs = wholeMs((waited / emitted) * 1000);
+          if (emitted > 0) jitterBufferMs = measuredMs((waited / emitted) * 1000);
         }
-        const behindNewestMs =
-          displayedRtp !== null && presentedSinceSample > 0 && raw.newestRtpTimestamp != null
-            ? wholeMs(rtpBehindMs(raw.newestRtpTimestamp, displayedRtp))
-            : null;
-        presentedSinceSample = 0;
         report.jitterBufferMs = jitterBufferMs;
         report.behindNewestMs = behindNewestMs;
       }
@@ -331,7 +378,7 @@ export function createSampler(
     stop: () => {
       stopped = true;
       video.removeEventListener("waiting", onWaiting);
-      if (frameHandle !== undefined) frameVideo.cancelVideoFrameCallback?.(frameHandle);
+      cancelFrameWatch();
     },
   };
 }

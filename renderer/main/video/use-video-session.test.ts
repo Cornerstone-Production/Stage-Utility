@@ -16,6 +16,7 @@ import type { VideoFeedView } from "@main/types/video";
 import { installRenderDom, unmountAndTeardown } from "../../test-dom.js";
 import { FAKE_SDP, FakePeerConnection, installFakePeerConnection, NodeEvent } from "../../test-fixtures/fake-peer-connection.js";
 import { FakeHls, installFakeHls } from "../../test-fixtures/fake-hls.js";
+import { FRAME_WAIT_MS } from "./playback-stats.js";
 
 const teardown = installRenderDom();
 
@@ -1798,10 +1799,16 @@ test("a probe beside a live HLS picture is never sampled: sample() stays via 'hl
     // poll (PROBE_POLL_MS = 500ms — it adopts the instant that poll sees any
     // frame at all), so it is on the order of half a second of frames, not
     // this test's magnitude.
-    const afterAdopt = await result.current.sample();
+    // The frame wait runs on the mocked clock (no frame reaches a jsdom screen).
+    const sampleNow = () => {
+      const pending = result.current.sample();
+      mock.timers.tick(FRAME_WAIT_MS);
+      return pending;
+    };
+    const afterAdopt = await sampleNow();
     assert.equal(afterAdopt?.via, "webrtc", "expected the swap to webrtc reflected in the report");
     assert.equal(afterAdopt?.decoded, 9999, "the first read of a NEW sampler is its own baseline, not a delta against nothing");
-    const nextSample = await result.current.sample();
+    const nextSample = await sampleNow();
     assert.equal(nextSample?.decoded, 0, "expected the SECOND read to be a delta since the first, not the running total again");
   } finally {
     cleanup();

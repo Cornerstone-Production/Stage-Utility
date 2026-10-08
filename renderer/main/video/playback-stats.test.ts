@@ -10,8 +10,7 @@ import { mock, test } from "node:test";
 
 import { DEFAULT_SETTLE_MS } from "@main/services/repeat-log";
 import { DRAIN_TIMEOUT_MS } from "./playback-reports.js";
-import { MAX_LAG_MS } from "@main/services/video/playback-health";
-import { createSampler, rtpBehindMs, STATS_READ_TIMEOUT_MS, trackDelta } from "./playback-stats.js";
+import { createSampler, FRAME_WAIT_MS, NOT_A_MEASUREMENT_MS, rtpBehindMs, STATS_READ_TIMEOUT_MS, trackDelta } from "./playback-stats.js";
 
 /** Most tests here are not about logging at all. */
 const noLog = () => {};
@@ -215,10 +214,11 @@ test("webrtc: a session that started on `waiting` stays on it when a later repor
 // ── createSampler: webrtc receive delay ──────────────────────────────────
 //
 // jitterBufferMs is two cumulative counters read as deltas; behindNewestMs
-// compares the RTP timestamp of the frame last presented (requestVideoFrame
-// Callback metadata) with the newest the receiver has heard (getSynchronization
-// Sources). Neither can be seen on a real clock here: the real browser figures
-// were measured against a live relay, see docs/integrations/video-feeds.md.
+// compares the RTP timestamp of the NEXT frame to reach the screen
+// (requestVideoFrameCallback metadata) with the newest the receiver has heard
+// (getSynchronizationSources), both read in that frame's own callback.
+// Neither can be seen on a real clock here: the real browser figures were
+// measured against a live relay, see docs/integrations/video-feeds.md.
 
 type SyncSource = { timestamp: number; rtpTimestamp: number };
 
@@ -246,29 +246,35 @@ class FakeRvfcVideo extends EventTarget {
   videoWidth = 0;
   videoHeight = 0;
   private cb: ((now: number, metadata?: { rtpTimestamp?: number }) => void) | null = null;
+  requested = 0;
   cancelled: number[] = [];
-  /** The last callback ever requested, kept past cancelVideoFrameCallback —
-   *  a frame already queued when stop() ran can still be delivered. */
-  lastCb: ((now: number, metadata?: { rtpTimestamp?: number }) => void) | null = null;
   requestVideoFrameCallback(cb: (now: number, metadata?: { rtpTimestamp?: number }) => void): number {
     this.cb = cb;
-    this.lastCb = cb;
+    this.requested += 1;
     return 7;
   }
   cancelVideoFrameCallback(handle: number): void {
     this.cancelled.push(handle);
     this.cb = null;
   }
-  /** A frame reaches the screen: fires the pending callback, which re-arms itself. */
+  /** A frame reaches the screen: fires the pending callback, if one is armed.
+   *  A hidden tab never calls this, and a frame with nothing armed goes
+   *  nowhere, as in a browser. */
   present(metadata?: { rtpTimestamp?: number }): void {
     const cb = this.cb;
-    assert.ok(cb, "no callback armed");
     this.cb = null;
-    cb(0, metadata);
+    cb?.(0, metadata);
   }
   get armed(): boolean {
     return this.cb !== null;
   }
+}
+
+/** Samples once while a frame reaches the screen with `metadata`. */
+async function sampleWithFrame(sampler: ReturnType<typeof createSampler>, video: FakeRvfcVideo, metadata?: { rtpTimestamp?: number }) {
+  const pending = sampler.sample();
+  video.present(metadata);
+  return pending;
 }
 
 test("webrtc: jitterBufferMs is the average wait per frame THIS interval, from the delta of the two counters", async () => {
@@ -316,11 +322,18 @@ test("webrtc: jitterBufferMs is null — never zero — when the counters are mi
   }
 });
 
-test("webrtc: jitterBufferMs is capped at what the server accepts", async () => {
-  const pc = fakePcDelay([{ jitterBufferDelay: 5_000, jitterBufferEmittedCount: 1 }]);
-  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, new FakeVideoEl() as unknown as HTMLVideoElement, noLog);
+test("webrtc: a figure at or past a minute is not a measurement — null, not a clamp", async () => {
+  const sampler = createSampler(
+    "feed-1",
+    "Feed",
+    { via: "webrtc", pc: fakePcDelay([{ jitterBufferDelay: 59.999, jitterBufferEmittedCount: 1 }, { jitterBufferDelay: 119.999, jitterBufferEmittedCount: 2 }]) },
+    new FakeVideoEl() as unknown as HTMLVideoElement,
+    noLog,
+  );
   try {
-    assert.equal((await sampler.sample())!.jitterBufferMs, MAX_LAG_MS);
+    assert.equal(NOT_A_MEASUREMENT_MS, 60_000);
+    assert.equal((await sampler.sample())!.jitterBufferMs, 59_999, "just under is reported as it is");
+    assert.equal((await sampler.sample())!.jitterBufferMs, null, "a full minute per frame is not what the buffer held");
   } finally {
     sampler.stop();
   }
@@ -346,19 +359,22 @@ test("rtpBehindMs: ticks at 90 kHz, across the 32-bit wrap, never negative", () 
   assert.equal(rtpBehindMs(8_000, 0xffffff00), (256 + 8_000) / 90);
 });
 
-test("webrtc: behindNewestMs is the displayed frame's RTP timestamp against the receiver's newest, across the wrap", async () => {
+test("the frame wait fits inside the stats read, which fits inside the heartbeat's drain", () => {
+  assert.ok(FRAME_WAIT_MS < STATS_READ_TIMEOUT_MS && STATS_READ_TIMEOUT_MS < DRAIN_TIMEOUT_MS);
+});
+
+test("webrtc: behindNewestMs is the next presented frame's RTP timestamp against the receiver's newest, across the wrap", async () => {
   const video = new FakeRvfcVideo();
   const pc = fakePcDelay([{}], { sources: () => [{ timestamp: 1000, rtpTimestamp: 8_000 }] });
   const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video as unknown as HTMLVideoElement, noLog);
   try {
-    video.present({ rtpTimestamp: 0xffffff00 });
-    assert.equal((await sampler.sample())!.behindNewestMs, 92, "(256 + 8000) ticks / 90, rounded");
+    assert.equal((await sampleWithFrame(sampler, video, { rtpTimestamp: 0xffffff00 }))!.behindNewestMs, 92, "(256 + 8000) ticks / 90, rounded");
   } finally {
     sampler.stop();
   }
 });
 
-test("webrtc: behindNewestMs reads the LAST presented frame and the most recently heard source", async () => {
+test("webrtc: behindNewestMs reads the most recently heard source, not the first listed", async () => {
   const video = new FakeRvfcVideo();
   const pc = fakePcDelay([{}], {
     sources: () => [
@@ -368,30 +384,109 @@ test("webrtc: behindNewestMs reads the LAST presented frame and the most recentl
   });
   const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video as unknown as HTMLVideoElement, noLog);
   try {
-    video.present({ rtpTimestamp: 1 });
-    video.present({ rtpTimestamp: 90_000 });
-    assert.equal((await sampler.sample())!.behindNewestMs, 500, "45000 ticks behind the source heard at 900, from the frame presented last");
+    assert.equal((await sampleWithFrame(sampler, video, { rtpTimestamp: 90_000 }))!.behindNewestMs, 500);
   } finally {
     sampler.stop();
   }
 });
 
 test("webrtc: behindNewestMs is null when either side cannot be read", async () => {
-  const cases: [string, FakeRvfcVideo, RTCPeerConnection, boolean][] = [
-    ["no frame has been presented", new FakeRvfcVideo(), fakePcDelay([{}], { sources: () => [{ timestamp: 1, rtpTimestamp: 5 }] }), false],
-    ["the presented frame carries no rtpTimestamp", new FakeRvfcVideo(), fakePcDelay([{}], { sources: () => [{ timestamp: 1, rtpTimestamp: 5 }] }), true],
-    ["the receiver has heard no source", new FakeRvfcVideo(), fakePcDelay([{}], { sources: () => [] }), true],
-    ["the receiver has no getSynchronizationSources", new FakeRvfcVideo(), fakePcDelay([{}], { noMethod: true }), true],
-    ["the only receiver is audio", new FakeRvfcVideo(), fakePcDelay([{}], { kind: "audio", sources: () => [{ timestamp: 1, rtpTimestamp: 5 }] }), true],
+  const cases: [why: string, pc: RTCPeerConnection, metadata: { rtpTimestamp?: number }][] = [
+    ["the frame carries no rtpTimestamp", fakePcDelay([{}], { sources: () => [{ timestamp: 1, rtpTimestamp: 5 }] }), {}],
+    ["the receiver has heard no source", fakePcDelay([{}], { sources: () => [] }), { rtpTimestamp: 1 }],
+    ["the receiver has no getSynchronizationSources", fakePcDelay([{}], { noMethod: true }), { rtpTimestamp: 1 }],
+    ["the only receiver is audio", fakePcDelay([{}], { kind: "audio", sources: () => [{ timestamp: 1, rtpTimestamp: 5 }] }), { rtpTimestamp: 1 }],
   ];
-  for (const [why, video, pc, present] of cases) {
+  for (const [why, pc, metadata] of cases) {
+    const video = new FakeRvfcVideo();
     const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video as unknown as HTMLVideoElement, noLog);
     try {
-      if (present) video.present(why.includes("no rtpTimestamp") ? {} : { rtpTimestamp: 1 });
-      assert.equal((await sampler.sample())!.behindNewestMs, null, why);
+      assert.equal((await sampleWithFrame(sampler, video, metadata))!.behindNewestMs, null, why);
     } finally {
       sampler.stop();
     }
+  }
+});
+
+test("webrtc: a frame callback delivered with no metadata object is tolerated and reads null", async () => {
+  // A shim or older engine may call back with nothing; reading `.rtpTimestamp`
+  // off undefined once threw out of the browser's frame loop.
+  const video = new FakeRvfcVideo();
+  const pc = fakePcDelay([{}], { sources: () => [{ timestamp: 1, rtpTimestamp: 90_000 }] });
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video as unknown as HTMLVideoElement, noLog);
+  try {
+    assert.equal((await sampleWithFrame(sampler, video))!.behindNewestMs, null);
+  } finally {
+    sampler.stop();
+  }
+});
+
+test("webrtc: no frame reaching the screen (a hidden tab, a paused picture) is null after FRAME_WAIT_MS — and the rest of the report still goes out", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const video = new FakeRvfcVideo();
+  const pc = fakePcDelay([{ framesDecoded: 90, jitterBufferDelay: 1, jitterBufferEmittedCount: 10 }], { sources: () => [{ timestamp: 1, rtpTimestamp: 720_000 }] });
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video as unknown as HTMLVideoElement, noLog);
+  try {
+    let report: Awaited<ReturnType<typeof sampler.sample>> = null;
+    let done = false;
+    void sampler.sample().then((r) => {
+      report = r;
+      done = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(done, false, "the sample waits for a frame before giving up");
+    mock.timers.tick(FRAME_WAIT_MS);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(done, true);
+    assert.equal(report!.behindNewestMs, null, "no frame was presented, so nothing says how far behind the screen is");
+    assert.equal(report!.jitterBufferMs, 100);
+    assert.equal(report!.decoded, 90);
+    assert.deepEqual(video.cancelled, [7], "the unanswered callback is cancelled, not left pending on the element");
+  } finally {
+    sampler.stop();
+    mock.timers.reset();
+  }
+});
+
+test("webrtc: a frame presented long ago cannot stand in for a figure — only a frame arriving during THIS sample counts", async () => {
+  // A frame at timestamp 0 reached the screen, then the tab stopped drawing
+  // while the receiver kept taking frames in (newest 720000, eight seconds
+  // on). Reading the old frame against the new newest gave a false
+  // 8000 ms behind; a sample now waits for a frame of its own, and none comes.
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const video = new FakeRvfcVideo();
+  const pc = fakePcDelay([{}], { sources: () => [{ timestamp: 1, rtpTimestamp: 720_000 }] });
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video as unknown as HTMLVideoElement, noLog);
+  try {
+    video.present({ rtpTimestamp: 0 }); // the last frame ever drawn
+    let report: Awaited<ReturnType<typeof sampler.sample>> = null;
+    void sampler.sample().then((r) => {
+      report = r;
+    });
+    mock.timers.tick(FRAME_WAIT_MS);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(report!.behindNewestMs, null);
+  } finally {
+    sampler.stop();
+    mock.timers.reset();
+  }
+});
+
+test("webrtc: clocks that are not comparable (a source change leaves two SSRCs) read null, not a made-up lag", async () => {
+  const video = new FakeRvfcVideo();
+  const pc = fakePcDelay([{}], { sources: () => [{ timestamp: 1, rtpTimestamp: 90 * NOT_A_MEASUREMENT_MS }] });
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video as unknown as HTMLVideoElement, noLog);
+  try {
+    assert.equal((await sampleWithFrame(sampler, video, { rtpTimestamp: 0 }))!.behindNewestMs, null, "exactly a minute is out");
+    const just = fakePcDelay([{}], { sources: () => [{ timestamp: 1, rtpTimestamp: 90 * (NOT_A_MEASUREMENT_MS - 1) }] });
+    const second = createSampler("feed-1", "Feed", { via: "webrtc", pc: just }, video as unknown as HTMLVideoElement, noLog);
+    try {
+      assert.equal((await sampleWithFrame(second, video, { rtpTimestamp: 0 }))!.behindNewestMs, NOT_A_MEASUREMENT_MS - 1, "a millisecond under is a figure");
+    } finally {
+      second.stop();
+    }
+  } finally {
+    sampler.stop();
   }
 });
 
@@ -407,64 +502,67 @@ test("webrtc: behindNewestMs is null without requestVideoFrameCallback at all, a
   }
 });
 
-test("webrtc: a frame presented before the previous report does not stand in for this interval's", async () => {
+test("webrtc: a sample requests one frame callback, not a standing loop — nothing is armed between samples", async () => {
   const video = new FakeRvfcVideo();
   const pc = fakePcDelay([{}], { sources: () => [{ timestamp: 1, rtpTimestamp: 90_000 }] });
   const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video as unknown as HTMLVideoElement, noLog);
   try {
-    video.present({ rtpTimestamp: 0 });
-    assert.equal((await sampler.sample())!.behindNewestMs, 1000);
-    assert.equal((await sampler.sample())!.behindNewestMs, null, "the screen presented nothing since: that is a freeze, which stalls already report");
+    assert.equal(video.requested, 0, "creating a sampler wakes the page for nothing");
+    await sampleWithFrame(sampler, video, { rtpTimestamp: 0 });
+    assert.equal(video.requested, 1);
+    assert.equal(video.armed, false, "a delivered callback does not re-arm itself");
+    await sampleWithFrame(sampler, video, { rtpTimestamp: 0 });
+    assert.equal(video.requested, 2);
   } finally {
     sampler.stop();
   }
 });
 
-test("webrtc: a frame callback delivered with no metadata object is tolerated, and keeps watching", async () => {
-  // A shim or older engine may call back with nothing; reading `.rtpTimestamp`
-  // off undefined once threw out of the browser's frame loop.
-  const video = new FakeRvfcVideo();
-  const pc = fakePcDelay([{}], { sources: () => [{ timestamp: 1, rtpTimestamp: 90_000 }] });
-  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video as unknown as HTMLVideoElement, noLog);
-  try {
-    video.present();
-    assert.equal(video.armed, true);
-    assert.equal((await sampler.sample())!.behindNewestMs, null, "a frame with no RTP timestamp is not a displayed timestamp");
-  } finally {
-    sampler.stop();
-  }
-});
-
-test("webrtc: stop() cancels the frame callback, and a frame after it is ignored", async () => {
+test("webrtc: stop() during a sample cancels the pending callback, and the sample still settles", async () => {
   const video = new FakeRvfcVideo();
   const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc: fakePcDelay([{}]) }, video as unknown as HTMLVideoElement, noLog);
-  assert.equal(video.armed, true, "the sampler watches presented frames from the start");
+  const pending = sampler.sample();
+  assert.equal(video.armed, true);
   sampler.stop();
   assert.deepEqual(video.cancelled, [7]);
-  assert.equal(video.armed, false);
-  // A frame the browser had already queued when stop() ran: it must not
-  // re-arm the loop on an element the sampler no longer owns.
-  video.lastCb!(0, { rtpTimestamp: 1 });
-  assert.equal(video.armed, false, "a late frame must not start the watching again");
+  assert.equal((await pending)!.behindNewestMs, null);
 });
 
-test("hls: no frame callback is ever requested", () => {
+test("webrtc: a getStats() that rejects does not leave a frame callback armed", async () => {
   const video = new FakeRvfcVideo();
-  const sampler = createSampler("feed-2", "Feed", { via: "hls" }, video as unknown as HTMLVideoElement, noLog);
-  assert.equal(video.armed, false);
-  sampler.stop();
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc: rejectingPc() }, video as unknown as HTMLVideoElement, noLog);
+  try {
+    assert.equal(await sampler.sample(), null);
+    assert.deepEqual(video.cancelled, [7]);
+    assert.equal(video.armed, false);
+  } finally {
+    sampler.stop();
+  }
+});
+
+test("hls: no frame callback is ever requested", async () => {
+  const video = new FakeRvfcVideo() as unknown as HTMLVideoElement & FakeRvfcVideo;
+  (video as unknown as { getVideoPlaybackQuality: () => unknown }).getVideoPlaybackQuality = () => ({ totalVideoFrames: 1, droppedVideoFrames: 0 });
+  const sampler = createSampler("feed-2", "Feed", { via: "hls" }, video, noLog);
+  try {
+    await sampler.sample();
+    assert.equal(video.requested, 0);
+  } finally {
+    sampler.stop();
+  }
 });
 
 test("webrtc: getSynchronizationSources() throwing is a failed stats read — null report, logged — not a silent null figure", async () => {
   const logs: string[] = [];
+  const video = new FakeRvfcVideo();
   const pc = fakePcDelay([{}], {
     sources: () => {
       throw new Error("receiver gone");
     },
   });
-  const sampler = createSampler("feed-1", "Program", { via: "webrtc", pc }, new FakeVideoEl() as unknown as HTMLVideoElement, (r) => logs.push(r));
+  const sampler = createSampler("feed-1", "Program", { via: "webrtc", pc }, video as unknown as HTMLVideoElement, (r) => logs.push(r));
   try {
-    assert.equal(await sampler.sample(), null);
+    assert.equal(await sampleWithFrame(sampler, video, { rtpTimestamp: 1 }), null);
     assert.deepEqual(logs, ["Program: could not read playback stats: receiver gone"]);
   } finally {
     sampler.stop();
