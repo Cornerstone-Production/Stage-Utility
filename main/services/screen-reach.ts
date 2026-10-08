@@ -30,7 +30,7 @@ export function viewsDrawnBy(output: Output, views: readonly View[], outputs: re
   let visited = 0;
   while (queue.length > 0) {
     if (++visited > MAX_VIEWS_VISITED) {
-      console.warn(`[messages] the views screen ${scrub(output.id)} draws run past ${MAX_VIEWS_VISITED}; stopped looking for the widget there`);
+      console.warn(`[messages] the views screen ${scrub(output.id)} draws run past ${scrub(MAX_VIEWS_VISITED)}; stopped looking for the widget there`);
       break;
     }
     const id = queue.shift() as string;
