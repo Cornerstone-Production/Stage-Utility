@@ -314,6 +314,17 @@ function KeyValueField({
   );
 }
 
+/**
+ * A multi-enum's next selection once its exclusive choice (Everyone) is honoured.
+ * Ticking the exclusive value while others are held leaves only it; ticking
+ * another while it is held drops it. The validator still refuses a stored
+ * combination: this keeps the picker from making one.
+ */
+function withExclusiveChoice(next: string[], held: string[], exclusive: string | undefined): string[] {
+  if (!exclusive || !next.includes(exclusive) || next.length < 2) return next;
+  return held.includes(exclusive) ? next.filter((v) => v !== exclusive) : [exclusive];
+}
+
 /** Renders one param from its spec — the reason a new provider needs no UI work.
  *  Exported so the layout editor's action-button inspector renders the SAME
  *  fields the rule editor does for the same action, rather than a second copy
@@ -410,9 +421,15 @@ export function ParamField({
             selected={selected}
             // Options' order, unknown values last: the stored string does not
             // depend on the order the boxes were ticked in.
-            onChange={(next) =>
-              onChange([...options.filter((o) => next.includes(o.value)).map((o) => o.value), ...next.filter((v) => !options.some((o) => o.value === v))].join(","))
-            }
+            onChange={(next) => {
+              const kept = withExclusiveChoice(next, selected, spec.exclusiveChoice?.value);
+              onChange(
+                [...options.filter((o) => kept.includes(o.value)).map((o) => o.value), ...kept.filter((v) => !options.some((o) => o.value === v))].join(","),
+              );
+            }}
+            // "All" would tick the exclusive choice beside everything else, or
+            // mean "every group", which is not what Everyone is.
+            allowAll={!spec.exclusiveChoice}
             placeholder={spec.optional ? "Any" : "Pick…"}
             className={invalidClass("w-full", invalid)}
           />

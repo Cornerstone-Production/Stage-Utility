@@ -25,6 +25,7 @@ export function MultiSelect({
   summary,
   className,
   disabled,
+  allowAll = true,
 }: {
   /**
    * What this picker is FOR. Required, and the type checker is the enforcement:
@@ -46,6 +47,9 @@ export function MultiSelect({
   summary?: string;
   className?: string;
   disabled?: boolean;
+  /** Offer the "All" link. Off where ticking everything is not a meaningful
+   *  choice, as when one option stands for everything and excludes the rest. */
+  allowAll?: boolean;
 }) {
   // One prefix per instance — these fields come in pairs on the same page, and
   // two triggers sharing an id would name each other.
@@ -116,7 +120,9 @@ export function MultiSelect({
           <div className="flex items-center justify-between gap-2 border-b border-line px-2.5 py-1.5">
             <span className="text-caption2 text-gray-9">{chosen.length} of {options.length}</span>
             <div className="flex items-center gap-3 text-caption2">
-              <button className="text-accent hover:text-accent-hover" onClick={() => onChange(options.map((o) => o.value))}>All</button>
+              {allowAll && (
+                <button className="text-accent hover:text-accent-hover" onClick={() => onChange(options.map((o) => o.value))}>All</button>
+              )}
               <button className="text-gray-10 hover:text-gray-12" onClick={() => onChange([])}>None</button>
             </div>
           </div>

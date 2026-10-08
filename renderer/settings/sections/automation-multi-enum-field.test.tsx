@@ -187,6 +187,17 @@ describe("a multi-enum param", () => {
   });
 });
 
+describe("the All link", () => {
+  test("a plain multi-enum offers it, and it ticks everything", async () => {
+    await open();
+    await press(trigger());
+    const list = document.querySelector('[role="dialog"][aria-label="Days"]') as HTMLElement;
+    await press(within(list).getByText("All", { exact: true }));
+    await press(screen.getByRole("button", { name: "Save" }));
+    assert.equal(saved()[0]!.action.params.days, "0,1,2");
+  });
+});
+
 // ── messages.send ────────────────────────────────────────────────────────
 
 /** The labels in the open To list, in order. */
@@ -239,5 +250,32 @@ describe("the To picker on Send a stage message", () => {
     assert.ok(select, "no Alert select");
     assert.equal(select.value, "no");
     assert.deepEqual([...select.options].map((o) => o.value), ["no", "yes"]);
+  });
+
+  test("there is no All link: it would tick Everyone beside every group", async () => {
+    await open();
+    await press(screen.getByRole("button", { name: /^To\b/ }));
+    const list = document.querySelector('[role="dialog"][aria-label="To"]') as HTMLElement;
+    assert.equal(within(list).queryByText("All", { exact: true }), null);
+  });
+
+  test("ticking a group while Everyone is held drops Everyone", async () => {
+    params = { to: "everyone", text: "Walk now" };
+    await open();
+    await press(screen.getByRole("button", { name: /^To\b/ }));
+    const list = document.querySelector('[role="dialog"][aria-label="To"]') as HTMLElement;
+    await press(within(list).getByText("Stage").closest("button") as HTMLElement);
+    await press(screen.getByRole("button", { name: "Save" }));
+    assert.equal(saved()[0]!.action.params.to, "g-0000000b");
+  });
+
+  test("ticking Everyone while groups are held leaves only Everyone", async () => {
+    params = { to: "g-0000000a,g-0000000b", text: "Walk now" };
+    await open();
+    await press(screen.getByRole("button", { name: /^To\b/ }));
+    const list = document.querySelector('[role="dialog"][aria-label="To"]') as HTMLElement;
+    await press(within(list).getByText("Everyone").closest("button") as HTMLElement);
+    await press(screen.getByRole("button", { name: "Save" }));
+    assert.equal(saved()[0]!.action.params.to, "everyone");
   });
 });
