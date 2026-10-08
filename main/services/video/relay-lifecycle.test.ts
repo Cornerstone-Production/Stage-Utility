@@ -458,6 +458,7 @@ test("a throw from busyPorts (not from ensureBinary) is caught the same way, by 
 
 test("a busy port, then switched off — the failing status clears and the retry stops", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
+  const logs = captureConsole(t, "log");
   const seen: { state: string; message: string | null }[] = [];
   const { deps } = makeDeps({ busyPorts: async () => [{ port: 1935, proto: "tcp", holder: OBS_STUDIO }] });
   const lifecycle = activate(new RelayLifecycle(deps));
@@ -478,12 +479,18 @@ test("a busy port, then switched off — the failing status clears and the retry
   assert.equal((await videoService.state()).relay.state, "off", "the failing status must clear once switched off");
   assert.equal(seen.at(-1)?.state, "disconnected");
 
-  // The retry timer must be gone too — ticking past where it would have
-  // fired must not resurrect anything (busyPorts would still refuse it).
+  // The retry timer must be gone too. A retry that fires anyway finds video
+  // switched off and only stops again, which changes no connection state;
+  // what it does leave is a second stop line. Idle first: the "off" publish
+  // can land before the first stop line does.
+  await idle(lifecycle);
   const before = seen.length;
+  const stops = () => logs.filter((l) => l.includes("relay stopped")).length;
+  const stopsBefore = stops();
   t.mock.timers.tick(restartDelayMs(0) + 1000);
   await idle(lifecycle);
   assert.equal(seen.length, before, "a cancelled retry timer fired anyway");
+  assert.equal(stops(), stopsBefore, "a cancelled retry timer fired anyway, and stopped the relay a second time");
 });
 
 test("a busy port, then the last relay feed removed — same clearing", async (t: TestContext) => {
