@@ -7,7 +7,15 @@
 // reply check asks. Pure: it reads the settings it is handed and nothing else.
 
 import type { Output, View } from "../types/views.js";
+import { scrub } from "./scrub.js";
 import { walkLayoutObjects } from "./view-refs.js";
+
+/**
+ * The most views one walk will visit. A real wall nests a handful; past this it is
+ * a loop the seen set failed to cut or a layout nobody drew, and a reply check must
+ * answer rather than spin. Hitting it is said on the log and the walk stops there.
+ */
+export const MAX_VIEWS_VISITED = 256;
 
 /**
  * The ids of every view `output` draws: its routed view and everything reached
@@ -19,7 +27,12 @@ export function viewsDrawnBy(output: Output, views: readonly View[], outputs: re
   const seen = new Set<string>();
   const byId = new Map(views.map((v) => [v.id, v]));
   const queue = output.viewId ? [output.viewId] : [];
+  let visited = 0;
   while (queue.length > 0) {
+    if (++visited > MAX_VIEWS_VISITED) {
+      console.warn(`[messages] the views screen ${scrub(output.id)} draws run past ${MAX_VIEWS_VISITED}; stopped looking for the widget there`);
+      break;
+    }
     const id = queue.shift() as string;
     if (seen.has(id)) continue;
     seen.add(id);
