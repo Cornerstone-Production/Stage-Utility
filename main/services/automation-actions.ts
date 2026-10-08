@@ -85,15 +85,29 @@ async function runObsOutput(
 const MESSAGE_FROM = "Automation";
 
 /**
+ * The Alert param as a flag: "yes" or true is an alert, "no", false or blank is
+ * not, and anything else is null. A button or a script calling
+ * POST /api/action/invoke sends JSON, where a boolean is natural, and reading
+ * `true` as "not an alert" would send a message nobody wanted as a quiet one.
+ */
+function alertFlag(value: unknown): boolean | null {
+  if (value === true || value === "yes" || value === "true") return true;
+  if (value === undefined || value === null || value === false || value === "" || value === "no" || value === "false") {
+    return false;
+  }
+  return null;
+}
+
+/**
  * What `messages.send` was asked for, as the arguments `checkSend` and
  * `messagesService.send` take. A blank `to` or `text` is passed on as it is and
  * refused by the service's own rules, so there is one set of reasons.
  */
-function messageInput(params: Record<string, unknown>) {
+function messageInput(params: Record<string, unknown>, alert: boolean) {
   return {
     to: choiceList(params.to),
     text: String(params.text ?? ""),
-    alert: params.alert === "yes",
+    alert,
     from: MESSAGE_FROM,
   };
 }
@@ -599,7 +613,9 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
       },
     ],
     run: async (params, ctx) => {
-      const input = messageInput(params);
+      const alert = alertFlag(params.alert);
+      if (alert === null) return fail(`not sent: alert must be yes or no, not ${JSON.stringify(params.alert)}`);
+      const input = messageInput(params, alert);
       try {
         const { groups } = await messagesService.config();
         const line = (m: { to: string[]; alert: boolean; text: string }) =>

@@ -78,6 +78,27 @@ describe("messages.send", () => {
     assert.match(r.detail, /^sent to Everyone \(alert\)/);
   });
 
+  test("alert reads yes, true and \"true\" as an alert, and no, false, \"false\" and blank as none", async () => {
+    // POST /api/action/invoke carries JSON, where a boolean is the natural way to say it.
+    for (const [alert, expected] of [["yes", true], [true, true], ["true", true], ["no", false], [false, false], ["false", false], ["", false], [undefined, false]] as const) {
+      const r = await send.run({ to: EVERYONE, text: "hi", alert }, { simulate: false });
+      assert.equal(r.ok, true, `${String(alert)}: ${r.detail}`);
+      assert.equal(last().alert, expected, `alert ${JSON.stringify(alert)}`);
+      for (const m of messagesService.state().alerts) await messagesService.clearAlert(m.id);
+    }
+  });
+
+  test("an alert value it does not recognise is a returned failure naming it, and nothing is sent", async () => {
+    const before = thread().length;
+    for (const alert of ["maybe", 1, "Yes please"]) {
+      const real = await send.run({ to: EVERYONE, text: "hi", alert }, { simulate: false });
+      assert.deepEqual(real, { ok: false, detail: `not sent: alert must be yes or no, not ${JSON.stringify(alert)}` });
+      const dry = await send.run({ to: EVERYONE, text: "hi", alert }, { simulate: true });
+      assert.equal(dry.ok, false);
+    }
+    assert.equal(thread().length, before);
+  });
+
   test("a blank alert is no alert", async () => {
     const r = await send.run({ to: EVERYONE, text: "hi" }, { simulate: false });
     assert.equal(r.ok, true, r.detail);
