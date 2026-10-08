@@ -514,7 +514,8 @@ The live scheme is carried by the OBS recording, OBS stream and REAPER recording
 built-ins. Everything else draws the ordinary way, and both draw an unreadable
 state as the amber dashed ring.
 
-**Message composer** has no options. It draws, top to bottom: **To** (Everyone and
+**Message composer** has no options. It draws, top to bottom: a header with the
+name **Messages** and who a message from it is signed as, **To** (Everyone and
 each group; Everyone stands alone, several groups can be picked, and the choice is
 kept after a send), **Quick messages** (pressing one fills the box, it does not
 send), the text box, **Alert: takes over the screen** beside **Send** (red, and

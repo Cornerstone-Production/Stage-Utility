@@ -96,6 +96,16 @@ const press = (b: HTMLElement | undefined) => act(async () => { fireEvent.click(
 const type = (c: HTMLElement, value: string) => act(async () => { fireEvent.change(box(c), { target: { value } }); });
 const pressed = (c: HTMLElement, name: string) => button(c, name)?.getAttribute("aria-pressed");
 
+describe("the header", () => {
+  test("names the panel and who a message from it is signed as, before the channel has answered too", () => {
+    const c = mount({ from: "Booth panel" });
+    const head = c.firstElementChild!.firstElementChild!;
+    assert.deepEqual([...head.children].map((e) => e.textContent), ["Messages", "Booth panel"]);
+    const cold = mount({ state: null, known: false, from: "Home" });
+    assert.deepEqual([...cold.firstElementChild!.firstElementChild!.children].map((e) => e.textContent), ["Messages", "Home"]);
+  });
+});
+
 describe("who a message goes to", () => {
   test("Everyone stands alone; groups add up; pressing a group swaps Everyone out", () => {
     assert.deepEqual(toggleTarget([], EVERYONE), [EVERYONE]);
@@ -265,7 +275,8 @@ describe("the thread", () => {
     });
     const t = text(c);
     assert.ok(t.indexOf("third") < t.indexOf("second") && t.indexOf("second") < t.indexOf("first"), t);
-    assert.ok(t.indexOf("first") < t.indexOf("Booth console") && t.includes("Copy"), "the reply is not under its message");
+    // (The header names who it signs as, which is also "Booth console" here, so look past the message.)
+    assert.ok(t.indexOf("first") < t.indexOf("Booth console", t.indexOf("first")) && t.includes("Copy"), "the reply is not under its message");
     assert.ok(t.includes("(deleted group)"), t);
     assert.ok(t.includes("Companion") && t.includes("Everyone") && t.includes("alert"), t);
     assert.ok(t.includes("Producer console") && t.includes("Green room"), t);

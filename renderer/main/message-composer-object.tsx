@@ -188,6 +188,15 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
         pointerEvents: interactive ? undefined : "none",
       }}
     >
+      {/* The mockup's header row: the panel's name, and who a message from it is
+          signed as, so a producer sees who they send as before they send. */}
+      <div
+        className="border-b border-line"
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.69em", paddingBottom: "0.83em", marginBottom: "0.83em", flex: "none" }}
+      >
+        <span className="text-fg" style={{ fontSize: "0.93em", fontWeight: 600 }}>Messages</span>
+        <span className="text-fg-subtle" style={{ fontSize: "0.83em", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{from}</span>
+      </div>
       {!state ? (
         <div className="text-fg-faint" style={{ fontSize: "0.9em" }}>
           {known ? "Could not read the messages." : "Reading the messages..."}
