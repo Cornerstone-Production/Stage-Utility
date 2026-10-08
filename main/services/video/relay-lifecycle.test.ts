@@ -1095,15 +1095,16 @@ test("a normal start logs no reconcile failure: the first attempt lands before t
 
 test("the readiness poll stops on a successful reconcile ALONE, even before the version is known", async (t: TestContext) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  const { deps, order, supervisors } = makeDeps();
+  const { deps, order } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  await waitUntil(() => supervisors.length > 0);
   // version() is left null the whole time — reconcile still applied on the
   // very first attempt (the fake relay's reconcile always succeeds), and
-  // that alone must be enough to stop the poll.
-  await settle();
+  // that alone must be enough to stop the poll. Waited on, not settle()d: the
+  // start sequence reads the feed file and a secrets key first, and no fixed
+  // number of turns covers how long that takes under load.
+  await waitUntil(() => order.includes("reconcile") && videoService.current().relay.state === "running");
   const relay = (await videoService.state()).relay;
   assert.equal(relay.state, "running");
 

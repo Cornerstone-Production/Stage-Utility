@@ -1195,13 +1195,20 @@ test("a reconcile that finishes after a respawn does not count for the new proce
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
   let release: () => void = () => {};
-  const relay = fakeRelay({ reconcile: () => new Promise<void>((resolve) => (release = resolve)) });
+  let entered: () => void = () => {};
+  const inReconcile = new Promise<void>((resolve) => (entered = resolve));
+  const relay = fakeRelay({
+    reconcile: () => {
+      entered();
+      return new Promise<void>((resolve) => (release = resolve));
+    },
+  });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
   try {
     const pending = videoService.reconcileRelay();
-    await new Promise((r) => setImmediate(r)); // into relay.reconcile()
+    await inReconcile; // relayFeeds() reads the feed file first: no fixed number of turns reaches this
     supervisor.current = { state: "running", since: 2 };
     supervisor.emit("status", supervisor.current); // the process it was talking to is gone
     release();
