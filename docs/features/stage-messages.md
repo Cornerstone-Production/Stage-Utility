@@ -232,6 +232,7 @@ send a reply that is signed as that panel.
 The reply is signed with the screen's name, or the name of the view holding the
 widget when it is not on a screen, and appears under the message in the composer's
 thread and in green under it on every Messages widget showing it. A message cleared
-at midnight cannot be answered. Each reply, and each refusal with its reason, is
+at midnight cannot be answered, and a message keeps at most 20 replies: the 21st is
+refused with `409` and the reason, so nothing a console sent silently disappears. Each reply, and each refusal with its reason, is
 logged as `[messages]`; a console that could not send one says so and logs it from
 the browser.

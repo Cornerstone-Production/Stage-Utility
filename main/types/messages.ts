@@ -100,6 +100,8 @@ export const WIRE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 /** The limits, in one place so the Settings page can say them too. */
 export const MESSAGE_MAX = 280;
 export const MESSAGES_CAP = 200;
+/** Replies one message keeps. The next is refused with the reason, so nothing a console sent vanishes. */
+export const MESSAGE_REPLIES_MAX = 20;
 export const GROUPS_MAX = 20;
 export const GROUP_NAME_MAX = 40;
 export const QUICK_MESSAGES_MAX = 24;

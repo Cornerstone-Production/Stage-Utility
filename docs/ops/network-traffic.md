@@ -34,11 +34,14 @@ re-send the plan, slot configuration and layouts along with it.
 
 `messages:state` carries the day's [stage messages](../features/stage-messages.md)
 and what the screens offer for it: `{ rev, serverNow, groups, quickMessages,
-quickReplies, messages, alerts }`. The groups and the two quick lists are a few hundred bytes to
-1 KB together; a short message adds about 0.2 KB and a 280-character alert about 0.45 KB,
-so a day with twenty messages is under 4 KB. The 200-message cap is the ceiling:
-about 36 KB of short messages, 90 KB if every one were a full-length alert. The
-whole state is sent on every change, not just the new message.
+quickReplies, messages, alerts }`. The stock groups and quick lists are about 0.5 KB;
+at their limits (20 groups, 24 quick messages of 280 characters, 12 quick replies
+of 60) they are about 9 KB. A short message adds about 0.2 KB, a 280-character alert
+about 0.45 KB and each reply about 0.2 KB, so a day with twenty messages and a few
+replies is under 5 KB. The ceiling is 200 messages (the cap) of full-length alerts
+each carrying 20 replies (the most one keeps) of full length, about 0.85 MB; a real
+day is a small fraction of it. The whole state is sent on every change, not just
+the new message.
 
 It changes only when somebody acts: one frame per send, per cleared alert, per
 save of the messaging config that changed a group (adding, renaming or removing

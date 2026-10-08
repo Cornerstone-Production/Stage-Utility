@@ -36,6 +36,7 @@ import {
   MESSAGE_MAX,
   MESSAGES_CAP,
   MESSAGES_CHANNEL,
+  MESSAGE_REPLIES_MAX,
   QUICK_REPLY_MAX,
   WIRE_ID,
   messageReaches,
@@ -98,7 +99,7 @@ export interface ReplyInput {
  */
 export type ReplyResult =
   | { ok: true; reply: MessageReply }
-  | { ok: false; status: 403 | 404; reason: string };
+  | { ok: false; status: 403 | 404 | 409; reason: string };
 
 export interface SendInput {
   to: unknown;
@@ -395,7 +396,7 @@ export class MessagesService {
    */
   async reply(messageId: string, input: ReplyInput): Promise<ReplyResult> {
     await this.ensureLoaded();
-    const refuse = (status: 403 | 404, reason: string): ReplyResult => {
+    const refuse = (status: 403 | 404 | 409, reason: string): ReplyResult => {
       console.warn(`[messages] reply to ${scrub(messageId)} refused: ${scrub(reason)}`);
       return { ok: false, status, reason };
     };
@@ -428,6 +429,13 @@ export class MessagesService {
       const groups = widgetGroups(widget.groups, output ? (output.groups ?? []) : null) ?? [];
       if (!messageReaches(message.to, groups)) {
         return refuse(403, "that widget does not follow a group this message was sent to");
+      }
+
+      // Last, after who may answer: someone who may not should hear that, not that
+      // the thread is full. Refused, not trimmed, so no reply a console sent
+      // silently vanishes.
+      if (message.replies.length >= MESSAGE_REPLIES_MAX) {
+        return refuse(409, `that message already has ${MESSAGE_REPLIES_MAX} replies, the most one keeps`);
       }
 
       const reply: MessageReply = {

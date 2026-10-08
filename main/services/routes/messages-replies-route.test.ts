@@ -251,6 +251,28 @@ describe("what it does not trust", () => {
   });
 });
 
+describe("how many replies a message keeps", () => {
+  it("keeps 20, refuses the 21st with a 409 that says why, and records nothing more", async () => {
+    const m = await send([EVERYONE]);
+    for (let i = 0; i < 20; i++) {
+      const r = await reply(m.id, { text: `r${i}`, objectId: "w-none" });
+      assert.equal(r.status, 201, `reply ${i + 1}`);
+    }
+    const over = await reply(m.id, { text: "one too many", objectId: "w-none" });
+    assert.equal(over.status, 409);
+    assert.match(err(over), /already has 20 replies/);
+    assert.equal(thread()[0].replies.length, 20);
+    assert.ok(!thread()[0].replies.some((r) => r.text === "one too many"));
+  });
+
+  it("tells someone who may not answer that, rather than that the thread is full", async () => {
+    const m = await send([stage]);
+    // Fill it with answers the Stage widget may give.
+    for (let i = 0; i < 20; i++) await reply(m.id, { text: `r${i}`, objectId: "w-deep" });
+    assert.equal((await reply(m.id, { text: "x", objectId: "w-green" })).status, 403);
+  });
+});
+
 describe("what it leaves behind", () => {
   it("persists the reply, publishes the state with it, and logs who answered what", async () => {
     const m = await send([booth]);
