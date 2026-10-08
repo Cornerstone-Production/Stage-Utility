@@ -12,6 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, test, type TestContext } from "node:test";
 import { captureConsole } from "../fixtures/capture-console.js";
+import { within } from "../fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-relay-lifecycle-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -46,6 +47,11 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<vo
     await settle();
   }
 }
+
+/** The lifecycle's chain, readiness ticks and the publishes they set off have
+ *  all landed. Bounded: a step that never finishes fails the test that waited
+ *  on it, rather than hanging the suite. */
+const idle = (lifecycle: InstanceType<typeof RelayLifecycle>) => within(lifecycle.whenIdle(), "the relay lifecycle to go idle");
 
 class FakeSupervisor extends EventEmitter implements RelayLifecycleSupervisor {
   current: SupervisorStatus = { state: "off" };
@@ -197,7 +203,7 @@ test("enabling with no relay feeds starts nothing", async () => {
   const { deps, supervisors } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
   lifecycle.setEnabled(true);
-  await settle();
+  await idle(lifecycle);
   assert.equal(supervisors.length, 0, "a supervisor was created with no relay feed to serve");
   assert.equal((await videoService.state()).relay.state, "off");
 });
@@ -206,7 +212,7 @@ test("adding the first relay feed starts it", async () => {
   const { deps, supervisors } = makeDeps();
   const lifecycle = activate(new RelayLifecycle(deps));
   lifecycle.setEnabled(true);
-  await settle();
+  await idle(lifecycle);
   assert.equal(supervisors.length, 0);
 
   await setRelayFeeds(1);
@@ -476,7 +482,7 @@ test("a busy port, then switched off — the failing status clears and the retry
   // fired must not resurrect anything (busyPorts would still refuse it).
   const before = seen.length;
   t.mock.timers.tick(restartDelayMs(0) + 1000);
-  await settle();
+  await idle(lifecycle);
   assert.equal(seen.length, before, "a cancelled retry timer fired anyway");
 });
 
@@ -486,13 +492,15 @@ test("a busy port, then the last relay feed removed — same clearing", async (t
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  await settle();
-  assert.equal((await videoService.state()).relay.state, "failing");
+  await idle(lifecycle);
+  // current(), the published snapshot every page is sent, not a fresh
+  // state(): the clearing has to reach the wire, not only the service.
+  assert.equal(videoService.current().relay.state, "failing");
 
   await setRelayFeeds(0);
   lifecycle.feedsChanged();
-  await settle();
-  assert.equal((await videoService.state()).relay.state, "off");
+  await idle(lifecycle);
+  assert.equal(videoService.current().relay.state, "off");
 });
 
 // ── 5. Logging: once per outage, never once per retry ──────────────────────
@@ -504,11 +512,11 @@ test("a repeated busy-port failure logs once, not once per retry", async (t: Tes
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  await settle();
+  await idle(lifecycle);
   t.mock.timers.tick(restartDelayMs(0));
-  await settle();
+  await idle(lifecycle);
   t.mock.timers.tick(restartDelayMs(1));
-  await settle();
+  await idle(lifecycle);
   const busyLines = logs.filter((l) => l.includes("Port 1935 is in use by OBS Studio"));
   assert.equal(busyLines.length, 1, `expected exactly one busy-port line across three failures, got: ${JSON.stringify(busyLines)}`);
 });
@@ -542,11 +550,11 @@ test("downloading MediaMTX logs once per download STREAK, not once per retry", a
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  await settle();
+  await idle(lifecycle);
   t.mock.timers.tick(restartDelayMs(0));
-  await settle();
+  await idle(lifecycle);
   t.mock.timers.tick(restartDelayMs(1));
-  await settle();
+  await idle(lifecycle);
   assert.equal(ensureBinaryCalls, 3, "the retry loop itself must still run three times");
   const downloadLines = logs.filter((l) => l.includes("downloading MediaMTX"));
   assert.equal(downloadLines.length, 1, `expected one "downloading" line across three attempts, got: ${JSON.stringify(downloadLines)}`);
@@ -568,7 +576,7 @@ test("recovering from a pre-supervisor outage logs once, at the attempt that pas
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  await settle();
+  await idle(lifecycle);
   assert.equal(supervisors.length, 0, "the first attempt must have failed on the busy port");
 
   t.mock.timers.tick(restartDelayMs(0));
@@ -606,12 +614,12 @@ test("a ports change restarts a running relay, logging its own reason (not the g
 
 test("a ports change while the relay is off does not start it", async () => {
   const { deps, supervisors } = makeDeps();
-  activate(new RelayLifecycle(deps));
+  const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(0);
 
   const r = await videoService.setPorts({ rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997 });
   assert.ok(r.ok);
-  await settle();
+  await idle(lifecycle);
   assert.equal(supervisors.length, 0);
 });
 
@@ -626,7 +634,7 @@ test("a busy port, then a ports change that fixes it — retries immediately, no
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  await settle();
+  await idle(lifecycle);
   assert.equal((await videoService.state()).relay.state, "failing");
   assert.equal(supervisors.length, 0);
 
@@ -697,8 +705,7 @@ test("a step that rejects while the relay is up logs once, stays quiet on a repe
   lifecycle.feedsChanged();
   await waitUntil(() => stepLines().length === 1);
   lifecycle.feedsChanged(); // the same failure, inside the same run
-  await settle();
-  await settle();
+  await idle(lifecycle);
   assert.deepEqual(stepLines(), ["[video] could not start the relay: EIO: i/o error, read"]);
 
   failReads = false;
@@ -974,7 +981,7 @@ test("the readiness poll backs off with restartDelayMs between retries while the
   t.mock.timers.tick(restartDelayMs(1));
   await waitUntil(() => reconcileCalls === 2);
   t.mock.timers.tick(restartDelayMs(2) - 1);
-  await settle();
+  await idle(lifecycle);
   assert.equal(reconcileCalls, 2, "the THIRD attempt must wait restartDelayMs(2), not fire on the same delay as the first retry");
   t.mock.timers.tick(1);
   await waitUntil(() => reconcileCalls === 3);
@@ -1007,8 +1014,7 @@ test("a stop during an in-flight readiness tick cancels it, and the next start r
   lifecycle.setEnabled(false);
   await waitUntil(() => videoService.current().relay.state === "off");
   releaseFirst(); // the in-flight reconcile comes back failed, after the stop
-  await settle();
-  await settle();
+  await idle(lifecycle);
 
   // Switched straight back on, with no time passing: the new relay's own
   // poll must make its first attempt at once. A stale timer re-armed by the
@@ -1021,8 +1027,7 @@ test("a stop during an in-flight readiness tick cancels it, and the next start r
   // And the stopped tick never comes back: nothing re-armed it, so once the
   // new relay has answered, no stale timer reconciles it again later.
   t.mock.timers.tick(60_000);
-  await settle();
-  await settle();
+  await idle(lifecycle);
   assert.deepEqual(calls, ["reconcile relay 1", "reconcile relay 2"], "the stopped relay's readiness tick re-armed and ran again");
 });
 
@@ -1054,7 +1059,7 @@ test("a respawn whose first reconcile succeeds serves its feeds, with no feed ed
   supervisors[0]!.setStatus({ state: "running", since: Date.now() });
   await waitUntil(() => reconciles === 2);
   await waitUntil(() => videoService.current().relay.state === "running");
-  await settle();
+  await idle(lifecycle);
 
   assert.deepEqual(videoService.relayTarget("f0", "whep"), {
     host: "127.0.0.1",
@@ -1089,7 +1094,7 @@ test("a normal start logs no reconcile failure: the first attempt lands before t
   apiOpen = true;
   t.mock.timers.tick(restartDelayMs(1));
   await waitUntil(() => reconcileCalls === 2);
-  await settle();
+  await idle(lifecycle);
   assert.deepEqual(lines.filter((l) => l.includes("reconcil")), [], "the relay opening its API a moment late is not news");
 });
 
@@ -1115,15 +1120,15 @@ test("the readiness poll stops on a successful reconcile ALONE, even before the 
   // well past several more backoff windows must add NONE.
   const reconcileCallsAtStop = order.filter((o) => o === "reconcile").length;
   assert.equal(reconcileCallsAtStop, 1, "reconcile ran more than once before the poll had any reason to retry");
-  // Several ticks, each with a settle() — a mocked clock's tick() advances
-  // time synchronously, but startReadinessPoll()'s own tick() is async
-  // (awaits reconcileRelay()); a bare tick() with no settle() in between
+  // Several ticks, each awaited with whenIdle() — a mocked clock's tick()
+  // advances time synchronously, but startReadinessPoll()'s own tick() is
+  // async (awaits reconcileRelay()); a bare tick() with no wait in between
   // asserts before that continuation has actually run, which is exactly
   // how this assertion stayed green with the re-gating bug reintroduced —
   // its own reconcile call had not happened yet by the time it ran.
   for (let i = 0; i < 8; i++) {
     t.mock.timers.tick(30_000);
-    await settle();
+    await idle(lifecycle);
   }
   assert.equal(
     order.filter((o) => o === "reconcile").length,
@@ -1284,7 +1289,7 @@ test("an unsupported platform never retries — no 'Next try at', and ensureBina
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(1);
   lifecycle.setEnabled(true);
-  await settle();
+  await idle(lifecycle);
 
   const relay = (await videoService.state()).relay;
   assert.equal(relay.state, "failing");
@@ -1294,7 +1299,7 @@ test("an unsupported platform never retries — no 'Next try at', and ensureBina
   // Tick well past every backoff this class ever schedules (its cap is
   // 60 s) — a real retry timer would have fired several times by now.
   t.mock.timers.tick(120_000);
-  await settle();
+  await idle(lifecycle);
   assert.equal(ensureBinaryCalls, 1, "ensureBinary was called again — a retry was scheduled for a platform that can never fix itself");
 });
 
@@ -1360,7 +1365,7 @@ test("logs the relay started line with its version and ports, once per process �
   supervisors[0]!.setStatus({ state: "failing", reason: "exited with code 1", retryAt: Date.now() + 1000, neverStarted: false });
   supervisors[0]!.setStatus({ state: "running", since: Date.now() });
   await waitUntil(() => logs.some((l) => l.includes("relay started")));
-  await settle();
+  await idle(lifecycle);
   assert.equal(logs.filter((l) => l.includes("relay started")).length, 1, "expected the respawned process announced once");
 });
 
@@ -1384,10 +1389,9 @@ test("a respawned process that exits before its API ever answers is not announce
   supervisors[0]!.ver = "v1.21.1";
   supervisors[0]!.setStatus({ state: "failing", reason: "exited with code 1", retryAt: Date.now() + 1000, neverStarted: false });
   supervisors[0]!.setStatus({ state: "running", since: Date.now() });
-  await settle();
-  await settle();
+  await idle(lifecycle);
   supervisors[0]!.setStatus({ state: "failing", reason: "exited with code 1", retryAt: Date.now() + 2000, neverStarted: false });
-  await settle();
+  await idle(lifecycle);
   assert.deepEqual(logs.filter((l) => l.includes("relay started")), [], "a process that never answered was announced as started");
 });
 

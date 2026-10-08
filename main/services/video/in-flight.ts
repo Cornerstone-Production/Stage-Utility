@@ -20,6 +20,11 @@ export class InFlight {
     return work.finally(() => this.running.delete(work));
   }
 
+  /** Whether nothing tracked is running right now. */
+  isIdle(): boolean {
+    return this.running.size === 0;
+  }
+
   /** Resolves once nothing tracked is running, including work started while
    *  waiting. Never rejects: whether the work failed is its caller's news. */
   async whenIdle(): Promise<void> {

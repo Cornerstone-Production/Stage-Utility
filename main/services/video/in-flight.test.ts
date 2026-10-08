@@ -52,9 +52,11 @@ test("whenIdle() waits for work started while it waited, not only what was runni
   first.resolve();
   await turn();
   assert.equal(idle, false, "whenIdle() resolved with the second piece of work still running");
+  assert.equal(inFlight.isIdle(), false);
   second.resolve();
   await turn();
   assert.equal(idle, true);
+  assert.equal(inFlight.isIdle(), true);
 });
 
 test("whenIdle() resolves, never rejects, when the work fails", async () => {
