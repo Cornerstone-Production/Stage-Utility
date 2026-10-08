@@ -8,6 +8,7 @@
 // Its own component so it can be rendered in a test and so the group list is
 // read (and subscribed to) only while a Messages widget is selected.
 
+import { plural } from "@main/services/plural";
 import { Checkbox } from "../components/ui/checkbox";
 import { useMessageGroups } from "../main/use-message-groups";
 import { RowToggle } from "./inspector-rows";
@@ -23,12 +24,20 @@ export function MessagesGroupsPicker({
   const all = useMessageGroups();
   const own = groups ?? null;
 
+  // Saved ids this install has no group for: a widget imported from another
+  // install, or a group deleted since. Only once the groups have been read, or every
+  // id would look unknown. They are kept in the value (an operator's data is not
+  // tidied away) and named in a note, like the rule editor's "no longer offered".
+  const known = new Set(all.groups.map((g) => g.id));
+  const unknown = all.known && !all.failed ? (own ?? []).filter((id) => !known.has(id)) : [];
+
   function toggle(id: string, on: boolean) {
     const mine = new Set(own ?? []);
     if (on) mine.add(id);
     else mine.delete(id);
-    // The config's order, so the stored list does not depend on click order.
-    onChange(all.groups.filter((g) => mine.has(g.id)).map((g) => g.id));
+    // The config's order, so the stored list does not depend on click order; the
+    // ids with no group here stay after them.
+    onChange([...all.groups.filter((g) => mine.has(g.id)).map((g) => g.id), ...unknown]);
   }
 
   return (
@@ -67,6 +76,13 @@ export function MessagesGroupsPicker({
             <p className="text-caption2 text-fg-muted leading-snug">Everyone's messages always show.</p>
           </div>
         )
+      )}
+      {own !== null && unknown.length > 0 && (
+        <p className="text-caption2 text-warn-11 leading-snug">
+          {plural(unknown.length, "saved group no longer exists", "saved groups no longer exist")} on this install and
+          {unknown.length === 1 ? " matches" : " match"} nothing. {unknown.length === 1 ? "It is" : "They are"} kept in
+          case the group comes back.
+        </p>
       )}
     </>
   );

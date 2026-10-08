@@ -85,6 +85,26 @@ describe("MessagesGroupsPicker", () => {
     assert.deepEqual(changes, [[]]);
   });
 
+  test("saved groups this install does not have are named and kept, and ticking another keeps them", async () => {
+    const { view, changes } = await mount(["g-00000002", "g-deadbeef", "g-cafef00d"]);
+    const note = view.container.textContent ?? "";
+    assert.ok(note.includes("2 saved groups no longer exist"), note);
+    const boxes = [...view.container.querySelectorAll('[role="checkbox"]')] as HTMLElement[];
+    await act(async () => { fireEvent.click(boxes[0]); });
+    assert.deepEqual(changes, [["g-00000001", "g-00000002", "g-deadbeef", "g-cafef00d"]], "the unknown ids were dropped from the value");
+  });
+
+  test("no note when every saved group exists", async () => {
+    const all = await mount(["g-00000001"]);
+    assert.ok(!(all.view.container.textContent ?? "").includes("no longer exist"));
+  });
+
+  test("with no groups at all the saved ones are still named", async () => {
+    groups = [];
+    const { view } = await mount(["g-deadbeef"]);
+    assert.ok((view.container.textContent ?? "").includes("1 saved group no longer exists"), view.container.textContent ?? "");
+  });
+
   test("with no groups yet it says where to make them", async () => {
     groups = [];
     const { view } = await mount([]);
