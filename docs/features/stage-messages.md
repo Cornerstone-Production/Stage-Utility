@@ -136,8 +136,11 @@ always runs it.
 
 ### Alerts on screens
 
-Every kiosk screen draws a running alert over whatever it is showing, whatever the
-layout or the kind of view, with no widget needed: the word **Alert** and the
+Every kiosk screen (a display, or a panel running a console) draws a running alert
+over whatever it is showing, whatever the layout or the kind of view, with no
+widget needed. A console open in the operator app is not a kiosk screen and draws
+no banner; its Messages and Message composer widgets show the messages and the
+alert in the thread: the word **Alert** and the
 message large and white on a deep red banner across the bottom (3% in from each
 side, 4% up), with a bar along its foot that runs down to nothing as the 30
 seconds do. It rises into place when it arrives.
@@ -158,7 +161,8 @@ seconds do. It rises into place when it arrives.
 - A **screen-embed tile** (a picture of another screen on a producer wall) does not
   draw that screen's alert banner; a Messages widget inside it follows the screen it
   shows, not the one it sits on, and draws no reply buttons.
-- A screen subscribes to `messages:state` for this whatever it shows. If the banner
+- A screen subscribes to `messages:state` for this whatever view it shows, once it has
+  loaded (a screen still loading, showing an error, or blacked out draws no banner). If the banner
   itself fails to draw, it is hidden and `[messages] the alert banner failed to
   draw` is on `/log`; the screen underneath stays up, and the next alert gets a fresh
   try.
