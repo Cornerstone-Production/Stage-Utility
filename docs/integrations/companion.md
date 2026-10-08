@@ -906,8 +906,8 @@ keeps working.
 **Stage messages** — the day's [stage messages](../features/stage-messages.md),
 sent and read from a button. The module follows the `messages:state` channel, so
 a renamed group, a new message or a running alert reaches a button without
-reconnecting. The quick messages are read when the connection starts and again
-whenever the app sends them with a messages update.
+reconnecting. The quick messages are read when the connection starts, so an
+edited quick list reaches Companion on the next reconnect.
 
 | Actions | |
 |---|---|
@@ -929,8 +929,8 @@ whenever the app sends them with a messages update.
 | `message_alert_active` | `true` while any alert runs, else `false` |
 | `message_alert_text` | the newest running alert's text, else empty |
 
-Every one is an empty string when there is nothing yet, and after the nightly
-clear.
+Every one except `message_alert_active` is an empty string when there is nothing
+yet, and after the nightly clear; `message_alert_active` reads `false`.
 
 **Presets** — a **Messages** category: one **Send** button per quick message,
 addressed to Everyone and editable after it is placed, and a **Clear alerts**
@@ -1022,9 +1022,11 @@ but it does mean a crosspoint someone changed by hand will be put back.
 and re-evaluates the two time-relative feedbacks — that runs in the module's own
 memory and puts nothing on the network.
 
-It listens to eight channels: `server:hello`, `stage:state-changed`, `pco:live`,
+It listens to fifteen channels: `server:hello`, `stage:state-changed`, `pco:live`,
 `propresenter:status`, `prodcom:transcript`, `wireless:connections-changed`,
-`people:count`, `messages:state`.
+`people:count`, `companion:signals`, `obs:status`, `reaper:status`,
+`resi:status`, `youtube:status`, `pvp:status`, `baptism:state` and
+`messages:state`.
 
 REST is used for two things: writes (every action is a POST), and a hydrate on
 connect that fetches seventeen endpoints in one burst — state, views, outputs,
