@@ -11,7 +11,7 @@ import { installRenderDom, unmountAndTeardown } from "../test-dom.js";
 const teardown = installRenderDom();
 const { cleanup } = await import("@testing-library/react");
 const { makeObject } = await import("./layout-editor.js");
-const { defaultSizeFor } = await import("./drag-to-place.js");
+const { defaultSizeFor, nestedGeometry } = await import("./drag-to-place.js");
 const { LAYOUT_OBJECTS } = await import("../main/layout-objects.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
@@ -52,5 +52,25 @@ test("every other type arrives exactly where it always did", () => {
     for (const k of ["x", "y", "w", "h"] as const) {
       assert.ok(Math.abs(at[k] - expected[k]) < 1e-9, `${type} moved: ${k} is ${at[k]}, was ${expected[k]}`);
     }
+  }
+});
+
+test("inside a container, the composer and Messages arrive at their size, held inside it; every other type is placed as before", () => {
+  const parent = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+  const messages = nestedGeometry("messages", parent);
+  // 0.3 of the canvas across a container 0.8 wide is 0.375 of the container, 0.8 of it tall; centred.
+  assert.ok(Math.abs(messages.w - 0.3 / 0.8) < 1e-9 && Math.abs(messages.h - 0.8 / 0.8) < 1e-9, JSON.stringify(messages));
+  const composer = nestedGeometry("message-composer", parent);
+  assert.ok(Math.abs(composer.w - 0.34 / 0.8) < 1e-9, `the composer was not given its width: ${composer.w}`);
+  assert.equal(composer.h, 1, "taller than the container is held to it");
+  for (const g of [messages, composer]) {
+    assert.ok(g.x >= 0 && g.y >= 0 && g.x + g.w <= 1 + 1e-9 && g.y + g.h <= 1 + 1e-9, `${JSON.stringify(g)} falls out of the container`);
+    assert.ok(Math.abs(g.x + g.w / 2 - 0.5) < 1e-9, "not centred across the container");
+  }
+  for (const type of Object.keys(LAYOUT_OBJECTS) as LayoutObjectType[]) {
+    if (LAYOUT_OBJECTS[type].defaultSize) continue;
+    const expected = type === "container" ? { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } : { x: 0.1, y: 0.3, w: 0.8, h: 0.4 };
+    assert.deepEqual(nestedGeometry(type, parent), expected, `${type} moved inside a container`);
+    assert.deepEqual(nestedGeometry(type, { x: 0, y: 0, w: 0.2, h: 0.2 }), expected, `${type} depends on the container's size`);
   }
 });

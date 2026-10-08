@@ -94,7 +94,7 @@ import { useCoarsePointer } from "../lib/use-media-query";
 import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
 import { Palette } from "./palette";
-import { rectForDrop, localiseToParent, defaultSizeFor } from "./drag-to-place";
+import { rectForDrop, localiseToParent, defaultSizeFor, nestedGeometry } from "./drag-to-place";
 import { rectFrom } from "./draw-to-create";
 import { ShapePreview, PREVIEW_SHAPES, type PreviewShape } from "./preview-shape";
 import { AlignmentGuides } from "./alignment-guides";
@@ -1753,8 +1753,10 @@ export function LayoutEditor({
       intoId != null && targetDepth <= MAX_DEPTH && !(type === "container" && targetDepth >= MAX_DEPTH);
     if (canNest && intoId) {
       const siblingMaxZ = (selected?.children ?? []).reduce((m, o) => Math.max(m, o.z), 0);
-      // Default a new child to a centered box inside the container's local space.
-      const geom = type === "container" ? { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } : { x: 0.1, y: 0.3, w: 0.8, h: 0.4 };
+      // Default a new child inside the container's local space (see nestedGeometry).
+      let parentAbs: FracRect = CANVAS_FRAC;
+      forEachWithRect(objects, (n) => { if (n.o.id === intoId) parentAbs = n.abs; });
+      const geom = nestedGeometry(type, parentAbs);
       const child = makeObject(type, siblingMaxZ + 1, geom, view.id === HOME_VIEW_ID);
       setObjects((prev) => insertChild(prev, intoId, child));
       setSelectedIds(new Set([child.id]));

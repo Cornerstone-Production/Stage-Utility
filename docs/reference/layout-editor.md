@@ -133,7 +133,9 @@ handles are drawn the same 9&nbsp;px but accept a finger anywhere within about
 spot it should occupy, or tapped to drop it at the default position.
 A new widget arrives at one default size (0.3 by 0.16 of the canvas, a container 0.4 by
 0.32), except the [Message composer and Messages](widgets.md#control) widgets, which
-arrive at the size their content needs (0.34 by 0.9 and 0.3 by 0.8).
+arrive at the size their content needs (0.34 by 0.9 and 0.3 by 0.8). Added into a
+selected container they keep that size, centred and held inside it; every other
+widget added into a container is a band across its middle, as before.
 
 That larger target extends *outside* the object as well, so a tap just outside a
 selected object's corner resizes it; tap further away to select something else.
