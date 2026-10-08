@@ -16,10 +16,13 @@ const teardown = installDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 let answer: () => Promise<unknown> = async () => ({});
-(globalThis as unknown as { fetch: unknown }).fetch = async (input: RequestInfo | URL) => {
+/** The init each read of the messages was sent with. */
+const inits: (RequestInit | undefined)[] = [];
+(globalThis as unknown as { fetch: unknown }).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
   if (url.startsWith("/api/log/client")) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
   if (!url.startsWith("/api/messages")) throw new Error(`unexpected fetch: ${url}`);
+  inits.push(init);
   const body = await answer();
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
@@ -92,6 +95,14 @@ describe("the messages channel and the server clock", () => {
       console.warn = warn;
     }
   };
+
+  test("the read is never served from a cache: it is a clock sample", async () => {
+    answer = async () => state(Date.now());
+    inits.length = 0;
+    mount();
+    await settle();
+    assert.ok(inits.length > 0 && inits.every((i) => i?.cache === "no-store"), `the read went out as ${JSON.stringify(inits)}`);
+  });
 
   test("a live frame is a reading, unpaired, and two components subscribing to one frame feed it once", async () => {
     readFails();

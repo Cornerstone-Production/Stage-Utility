@@ -1570,7 +1570,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/notes", p);
 
     case "messages:get":
-      return apiFetch<T>("/api/messages");
+      // no-store, as the poll transport does: this read is also a clock sample (see
+      // useMessagesStatus), so it must come from the server now and not a cache.
+      return apiFetch<T>("/api/messages", { cache: "no-store" });
     case "messages:send":
       return post<T>("/api/messages", { to: p.to, text: p.text, alert: p.alert, from: p.from });
     case "messages:clearAlert":

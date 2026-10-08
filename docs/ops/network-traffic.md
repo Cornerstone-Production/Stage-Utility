@@ -43,6 +43,12 @@ each carrying 20 replies (the most one keeps) of full length, about 0.85 MB; a r
 day is a small fraction of it. The whole state is sent on every change, not just
 the new message.
 
+A page that holds both the alert overlay and a Messages widget (a kiosk screen
+showing one) issues one small `GET /api/messages` per subscriber when it loads,
+deliberately: the read is a measured request and answer, which is how a screen with
+no other server timestamp learns the server's clock, so it is not shared between
+subscribers and is sent `no-store`.
+
 It changes only when somebody acts: one frame per send, per cleared alert, per
 save of the messaging config that changed a group (adding, renaming or removing
 one) or either quick list, once as each alert runs out, and at midnight only when the clear removed
