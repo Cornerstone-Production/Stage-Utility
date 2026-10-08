@@ -272,8 +272,9 @@ Kill the server by port when done.
   older than its request, and a pairing over it would be a lie), live frames refine
   it, replays are ignored. A slots view or an unrouted screen no longer needs
   `pco:live` to count an alert down.
-- New widgets arrive at the editor's one default size (0.3 x 0.16 of the canvas);
-  both want resizing on placement. Not changed here.
+- A widget spec may carry a `defaultSize`; the composer (0.34 x 0.9) and Messages
+  (0.3 x 0.8) do, and every other type keeps the editor's one default. A drawn box
+  is whatever the operator draws: its type is chosen after.
 
 What lands: the **Message composer** and **Messages** widgets, the **alert**
 drawn over any screen in the target groups, **replies** from consoles, and the

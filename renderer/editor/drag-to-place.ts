@@ -9,6 +9,8 @@
 
 import { clamp } from "@main/services/clamp";
 import type { FracRect } from "../main/layout-tree";
+import { LAYOUT_OBJECTS } from "../main/layout-objects";
+import type { LayoutObjectType } from "@main/types/views";
 
 /**
  * Default size for a newly dropped widget, as a fraction of the canvas.
@@ -29,6 +31,14 @@ export function defaultDropSize(isContainer: boolean): { w: number; h: number } 
   return isContainer
     ? { w: DROP_CONTAINER_W, h: DROP_CONTAINER_H }
     : { w: DROP_W, h: DROP_H };
+}
+
+/**
+ * The size a newly placed widget of this type starts at, from the toolbar or a
+ * drop: its own `defaultSize` when its spec has one, else the shared default.
+ */
+export function defaultSizeFor(type: LayoutObjectType): { w: number; h: number } {
+  return LAYOUT_OBJECTS[type].defaultSize ?? defaultDropSize(type === "container");
 }
 
 /**

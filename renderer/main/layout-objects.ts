@@ -66,6 +66,13 @@ export interface LayoutObjectSpec {
   integration?: { id: string; label: string };
   /** No per-object options; the inspector shows a "styling only" hint. */
   stylingOnly?: boolean;
+  /**
+   * How big this widget is when it is first placed, as fractions of the canvas, for
+   * a widget whose content does not fit the editor's one default (0.3 x 0.16, or
+   * 0.4 x 0.32 for a container). Absent for every other type, which keeps that
+   * default: an operator's muscle memory for where a clock lands is not disturbed.
+   */
+  defaultSize?: { w: number; h: number };
   /** Reads from one ProPresenter machine — offers the instance picker when
    *  more than one is configured. */
   propInstance?: boolean;
@@ -806,6 +813,9 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     group: "Control",
     config: () => ({ type: "messages" }),
     style: () => CARD({ fontSize: 0.046, fontWeight: 400, textAlign: "left", vAlign: "top" }),
+    // Three messages and the reply buttons at that type size: the mockup's Green
+    // room card is 0.305 wide and runs most of the height.
+    defaultSize: { w: 0.3, h: 0.8 },
     homeSize: "m",
   },
 
@@ -818,6 +828,9 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     config: () => ({ type: "message-composer" }),
     style: () => CARD({ fontSize: 0.022, fontWeight: 400, textAlign: "left", vAlign: "top" }),
     stylingOnly: true,
+    // The mockup's producer panel: 400px of 14.5px type is about 27 em across, and
+    // at 0.022 of the height that is a third of the canvas; tall, for the thread.
+    defaultSize: { w: 0.34, h: 0.9 },
     homeSize: "l",
   },
 
