@@ -74,8 +74,8 @@ export interface MessagesObjectProps {
 export function MessagesObject({ objectId, config, state, known, screen, interactive, editing, now, ts }: MessagesObjectProps) {
   const groups = widgetGroups(config.groups, screen?.groups ?? null);
   const shown = groups && state ? shownMessages(state, groups) : null;
-  // One answer at a time: pressing a second button while the first is in flight
-  // would send two replies for one tap on a touch panel that registered twice.
+  // One answer at a time: while one is in flight every button is disabled, so a
+  // touch panel that registers a tap twice cannot send two replies.
   const [sending, setSending] = useState(false);
   // The buttons: only where controls are live, never in a tile of a screen (a
   // monitor of it: only the screen itself answers), once the channel has answered,
@@ -83,7 +83,6 @@ export function MessagesObject({ objectId, config, state, known, screen, interac
   const answering = interactive && !screen?.monitor && groups !== null && known ? state : null;
 
   async function answer(target: StageMessage, text: string) {
-    if (sending) return;
     setSending(true);
     try {
       await invoke("messages:reply", { id: target.id, text, objectId, outputId: screen?.outputId ?? null });

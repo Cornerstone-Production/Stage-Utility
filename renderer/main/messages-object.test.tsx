@@ -17,10 +17,13 @@ const teardown = installDom();
 /** Every request the widget makes, and how the reply route should answer. */
 const requests: { url: string; method: string; body: unknown }[] = [];
 let replyStatus = 201;
+/** When set, a reply waits for it: lets a test look at the widget while one is in flight. */
+let replyGate: Promise<void> | null = null;
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
   requests.push({ url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
   if (url.includes("/replies")) {
+    if (replyGate) await replyGate;
     const ok = replyStatus < 400;
     const body = ok ? { id: "r" } : { error: "that widget does not follow a group this message was sent to" };
     return { ok, status: replyStatus, statusText: "", json: async () => body, text: async () => JSON.stringify(body) };
@@ -262,6 +265,25 @@ describe("answering from a console", () => {
     assert.equal(posts.length, 1);
     assert.equal(posts[0].url, `/api/messages/${thread.messages[2].id}/replies`, "answered a message that is not the newest this widget shows");
     assert.deepEqual(posts[0].body, { text: "Walking now", objectId: "w-7", outputId: "panel-1" });
+  });
+
+  test("while a reply is in flight every button is disabled, so a double tap cannot send two", async () => {
+    requests.length = 0;
+    let release!: () => void;
+    replyGate = new Promise<void>((r) => { release = r; });
+    try {
+      const c = mount({ state: thread, interactive: true, screen: { outputId: "panel-1", groups: [GREEN] } });
+      const copy = () => [...c.querySelectorAll("button")].find((b) => b.textContent === "Copy")!;
+      await act(async () => { fireEvent.click(copy()); });
+      assert.deepEqual([...c.querySelectorAll("button")].map((b) => b.disabled), [true, true, true], "buttons stayed live during a send");
+      await act(async () => { fireEvent.click(copy()); });
+      assert.equal(requests.filter((r) => r.url.includes("/replies")).length, 1, "a second tap sent a second reply");
+      await act(async () => { release(); });
+      assert.deepEqual([...c.querySelectorAll("button")].map((b) => b.disabled), [false, false, false], "the buttons stayed disabled after the answer");
+    } finally {
+      replyGate = null;
+      release();
+    }
   });
 
   test("a refused reply is told and logged, and the buttons stay for another try", async () => {
