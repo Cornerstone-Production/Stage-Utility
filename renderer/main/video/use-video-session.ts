@@ -76,6 +76,9 @@ export type SessionPhase = "connecting" | "waiting" | "live" | "delayed" | "offl
 interface AttemptCallbacks {
   onPhase: (phase: "connecting" | "live" | "delayed") => void;
   onLatency: (seconds: number | null) => void;
+  /** An HLS picture had fallen behind and jumped back to live, skipping
+   *  this many seconds — see hls-player.ts's LIVE_JUMP_MARGIN_S. */
+  onCaughtUp: (skippedSeconds: number) => void;
   /**
    * WebRTC cannot be carried on THIS screen for THIS relay feed: it
    * connected but no frame ever arrived, or a working handshake never
@@ -229,6 +232,8 @@ export function startPlaybackAttempt(
         cb.onPhase("delayed");
         const hlsSession = session.s;
         const tick = () => {
+          const skipped = hlsSession.catchUp();
+          if (skipped !== null) cb.onCaughtUp(skipped);
           const l = hlsSession.latencySeconds();
           cb.onLatency(l === null ? null : Math.max(1, Math.round(l)));
         };
@@ -798,6 +803,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
           }
         },
         onLatency: setLatency,
+        onCaughtUp: (skipped) => onLogRef.current?.(`"${name}" fell behind over HLS; jumped ${skipped.toFixed(1)} s back to live on this screen`),
         onSession: (activeSession) => {
           // A fresh sampler for THIS session, whatever the last one was —
           // every counter restarts at zero rather than carrying a prior

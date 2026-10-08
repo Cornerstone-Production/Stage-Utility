@@ -568,6 +568,14 @@ tries WebRTC again every 5 minutes, beside the HLS picture rather than in its
 place, and moves over only once WebRTC is carrying frames — the picture never
 drops for the attempt.
 
+An HLS picture keeps itself near live. A stall in the source or the network
+resumes where it stopped, so the picture can fall behind. Slightly behind,
+with enough buffered, it plays a little fast (at most 1.25×) until it is back.
+More than 2 seconds past where it should sit, it jumps straight to live,
+holding for a moment while the new position loads. A jump is logged, and
+happens at most once every 10 seconds. iPhones and iPads before iOS 17.1 play
+HLS natively and do neither.
+
 A pull feed reading standby is connected to all the same: the relay dials a
 pull feed's source only once something asks to watch it, so the widget's own
 request is what brings it up.

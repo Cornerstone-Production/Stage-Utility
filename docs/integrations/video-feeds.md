@@ -549,6 +549,8 @@ Each screen writes its own `[video]` lines from the browser:
 - A relay feed falling back to HLS on a screen because WebRTC did not carry
   it there, once per outage, and a line when WebRTC is carrying it again.
   Its retries every 5 minutes are not logged.
+- An HLS picture jumping back to live after falling behind, with how many
+  seconds it skipped. At most one every 10 seconds per feed on a screen.
 - A feed that needs HLS refused by a screen's own **Use HLS on this screen**
   switch, once per outage, and a line once it can play again — the screen
   allows HLS again, or the feed stops needing it. Nothing repeats while the
