@@ -97,12 +97,11 @@ export interface OwnScreen {
   outputId: string;
   groups: readonly string[];
   /**
-   * Whether this screen is in panel mode, the only mode that can answer a message.
-   * A tile of a screen on a producer wall carries it so a Messages widget there
-   * offers reply buttons only for a panel, rather than buttons that are always
-   * refused.
+   * True only for a tile of a screen on a producer wall: a monitor of that screen,
+   * not the screen. A Messages widget in one shows the screen's messages but never
+   * answers for it; only the screen itself does.
    */
-  panel: boolean;
+  monitor?: true;
 }
 
 /**
@@ -125,7 +124,6 @@ export function ownScreen(
   return {
     outputId: input.displayId,
     groups: input.state?.resolvedByOutput?.[input.displayId]?.groups ?? [],
-    panel: input.state?.outputs?.find((o) => o.id === input.displayId)?.mode === "panel",
   };
 }
 

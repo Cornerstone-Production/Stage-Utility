@@ -227,17 +227,14 @@ describe("a Messages widget inside a screen-embed tile", () => {
     assert.ok(!says(c, "for the green room"), "the tile followed the screen it sits on");
   });
 
-  test("offers reply buttons only for a tile of a panel, and answers as that panel", async () => {
-    // The buttons would be refused for a display, so they are not drawn there.
+  test("shows a panel's messages but never offers to answer for it: a tile is a monitor", async () => {
     messagesBody = messagesState([message(2, [STAGE], "for the stage")]);
-    const display = await showScreen("/display-1", withTile());
-    assert.equal(!!copy(display), false, "a tile of a display offered buttons that are always refused");
-    cleanup();
-    const panel = await showScreen("/display-1", withTile("panel"));
-    assert.ok(copy(panel), "a tile of a panel offered no way to answer");
-    await act(async () => { fireEvent.click(copy(panel)!); });
-    const sent = posted.filter((p) => p.url.endsWith("/replies"));
-    assert.deepEqual(sent.map((p) => p.body), [{ text: "Copy", objectId: "w2", outputId: "display-2" }], "signed as the screen the tile sits on");
+    for (const mode of [undefined, "panel"]) {
+      cleanup();
+      const c = await showScreen("/display-1", withTile(mode));
+      assert.ok(says(c, "for the stage"), `the tile (${mode ?? "display"}) did not show the screen's message`);
+      assert.equal(!!copy(c), false, `a tile of a ${mode ?? "display"} offered to answer for it`);
+    }
   });
 });
 

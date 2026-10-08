@@ -75,7 +75,7 @@ function mount(over: Partial<React.ComponentProps<typeof MessagesObject>> = {}):
       config: {},
       state: stateOf([]),
       known: true,
-      screen: { outputId: "panel-1", panel: true, groups: [GREEN] },
+      screen: { outputId: "panel-1", groups: [GREEN] },
       interactive: false,
       editing: false,
       now: NOW,
@@ -110,18 +110,18 @@ describe("which messages it shows", () => {
   });
 
   test("a screen's groups decide, so a message to another group is not drawn", () => {
-    const text = draw({ state, screen: { outputId: "panel-1", panel: true, groups: [STAGE] } });
+    const text = draw({ state, screen: { outputId: "panel-1", groups: [STAGE] } });
     assert.ok(text.includes("message 4") && text.includes("message 2"), text);
     assert.ok(!text.includes("message 6") && !text.includes("message 1"), text);
   });
 
   test("its own groups override the screen's", () => {
-    const text = draw({ state, screen: { outputId: "panel-1", panel: true, groups: [STAGE] }, config: { groups: [GREEN] } });
+    const text = draw({ state, screen: { outputId: "panel-1", groups: [STAGE] }, config: { groups: [GREEN] } });
     assert.ok(text.includes("message 6") && !text.includes("message 4"), text);
   });
 
   test("an empty list of its own is a list: only Everyone's messages", () => {
-    const text = draw({ state, screen: { outputId: "panel-1", panel: true, groups: [GREEN] }, config: { groups: [] } });
+    const text = draw({ state, screen: { outputId: "panel-1", groups: [GREEN] }, config: { groups: [] } });
     assert.ok(text.includes("message 3"), text);
     assert.ok(!text.includes("message 6") && !text.includes("message 5"), text);
   });
@@ -207,26 +207,26 @@ describe("answering from a console", () => {
   ]);
 
   test("a console offers the quick replies under the newest message it shows", () => {
-    const c = mount({ state: thread, interactive: true, screen: { outputId: "panel-1", panel: true, groups: [GREEN] } });
+    const c = mount({ state: thread, interactive: true, screen: { outputId: "panel-1", groups: [GREEN] } });
     assert.deepEqual(buttons(c), ["Copy", "Walking now", "Need 2 min"]);
     assert.ok((c.textContent ?? "").includes("Answering: for the green room"), c.textContent ?? "");
   });
 
   test("a wall display shows no buttons and no answering line", () => {
-    const c = mount({ state: thread, interactive: false, screen: { outputId: "panel-1", panel: true, groups: [GREEN] } });
+    const c = mount({ state: thread, interactive: false, screen: { outputId: "panel-1", groups: [GREEN] } });
     assert.deepEqual(buttons(c), []);
     assert.ok(!(c.textContent ?? "").includes("Answering"), c.textContent ?? "");
   });
 
   test("with nothing to answer it says which groups this console can answer for", () => {
     // A message to Stage does not reach a console in Green room and Booth.
-    const quiet = mount({ state: stateOf([msg(1, [STAGE])]), interactive: true, screen: { outputId: "panel-1", panel: true, groups: [GREEN, BOOTH] } });
+    const quiet = mount({ state: stateOf([msg(1, [STAGE])]), interactive: true, screen: { outputId: "panel-1", groups: [GREEN, BOOTH] } });
     assert.deepEqual(buttons(quiet), []);
     assert.ok((quiet.textContent ?? "").includes("Nothing to answer. This console can reply only to messages sent to Green room, Booth or Everyone."), quiet.textContent ?? "");
   });
 
   test("a console in no group can answer only Everyone, and says so", () => {
-    const c = mount({ state: stateOf([msg(1, [STAGE])]), interactive: true, screen: { outputId: "panel-1", panel: true, groups: [] } });
+    const c = mount({ state: stateOf([msg(1, [STAGE])]), interactive: true, screen: { outputId: "panel-1", groups: [] } });
     assert.ok((c.textContent ?? "").includes("messages sent to Everyone."), c.textContent ?? "");
   });
 
@@ -244,7 +244,7 @@ describe("answering from a console", () => {
   test("pressing one sends the reply with this widget's id and screen, for the message it answers", async () => {
     requests.length = 0;
     replyStatus = 201;
-    const c = mount({ state: thread, interactive: true, screen: { outputId: "panel-1", panel: true, groups: [GREEN] }, objectId: "w-7" });
+    const c = mount({ state: thread, interactive: true, screen: { outputId: "panel-1", groups: [GREEN] }, objectId: "w-7" });
     await act(async () => {
       fireEvent.click([...c.querySelectorAll("button")].find((b) => b.textContent === "Walking now")!);
     });
@@ -260,7 +260,7 @@ describe("answering from a console", () => {
     const quiet = console.warn;
     console.warn = () => {};
     try {
-      const c = mount({ state: thread, interactive: true, screen: { outputId: "panel-1", panel: true, groups: [GREEN] } });
+      const c = mount({ state: thread, interactive: true, screen: { outputId: "panel-1", groups: [GREEN] } });
       await act(async () => {
         fireEvent.click([...c.querySelectorAll("button")].find((b) => b.textContent === "Copy")!);
       });
