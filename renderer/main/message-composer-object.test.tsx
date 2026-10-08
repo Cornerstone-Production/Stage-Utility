@@ -353,6 +353,12 @@ describe("who it signs as", () => {
     assert.equal(senderName({ home: false, outputId: null, embedChain: ["home", "inner"], outputs, views: [...two, { id: "home", name: "Home" }] }), "Booth strip");
   });
 
+  test("in a tile of a screen it signs as the view that holds it, not as the screen it monitors", () => {
+    const tile = { home: false, outputId: "panel-1", monitor: true, embedChain: ["console-1"], outputs, views };
+    assert.equal(senderName(tile), "Green room iPad");
+    assert.equal(senderName({ ...tile, monitor: false }), "Booth panel", "a composer on the screen itself still signs as the screen");
+  });
+
   test("falls back to the server's default rather than sending a blank, and cuts a long name to the limit", () => {
     assert.equal(senderName({ home: false, outputId: "gone", embedChain: ["gone"], outputs, views }), "Operator");
     assert.equal(senderName({ home: false, outputId: null, embedChain: [], outputs, views }), "Operator");

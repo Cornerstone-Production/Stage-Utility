@@ -53,6 +53,8 @@ import { reportActionFailure } from "./report-action-failure";
 export function senderName(where: {
   home: boolean;
   outputId: string | null;
+  /** In a tile of a screen: a monitor of it, so the screen's name is not this composer's. */
+  monitor?: boolean;
   /** The views being drawn, outermost first: the view HOLDING the composer is the last. */
   embedChain: readonly string[];
   outputs: readonly { id: string; name: string }[];
@@ -60,7 +62,7 @@ export function senderName(where: {
 }): string {
   const named = where.home
     ? "Home"
-    : where.outputId !== null
+    : where.outputId !== null && !where.monitor
       ? where.outputs.find((o) => o.id === where.outputId)?.name
       : where.views.find((v) => v.id === where.embedChain.at(-1))?.name;
   return (named ?? "").trim().slice(0, FROM_MAX) || DEFAULT_FROM;

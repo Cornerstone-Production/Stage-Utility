@@ -1650,6 +1650,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           from={senderName({
             home: ctx.home,
             outputId: ctx.screen?.outputId ?? null,
+            monitor: ctx.screen?.monitor === true,
             embedChain: ctx.embedChain,
             outputs: ctx.state.outputs ?? [],
             views: ctx.state.views ?? [],
