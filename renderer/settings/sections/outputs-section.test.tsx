@@ -235,8 +235,8 @@ function stageStateWith(outputs: Output[]) {
 test("OutputsSection shows the struggling feed's box, correctly naming it from video:state.feeds — and nothing for a feed reporting clean", async () => {
   stubVideoState(
     videoState([
-      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: { droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080 } },
-      { outputId: OUTPUT.id, feedId: "ptz", via: "webrtc", struggling: false, droppedInWindow: 5, decodedInWindow: 4000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: null },
+      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, lagging: false, jitterBufferMsInWindow: null, behindNewestMsInWindow: null, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: { droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080 }, laggingEpisode: null },
+      { outputId: OUTPUT.id, feedId: "ptz", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, behindNewestMsInWindow: null, droppedInWindow: 5, decodedInWindow: 4000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: null, laggingEpisode: null },
     ]),
   );
   render(
@@ -259,7 +259,7 @@ test("OutputsSection builds the box from the pair's episode, not its live window
   // episode. Every number in the box must be the episode's.
   stubVideoState(
     videoState([
-      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 240, decodedInWindow: 10000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: { droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 4, width: 1920, height: 1080 } },
+      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, lagging: false, jitterBufferMsInWindow: null, behindNewestMsInWindow: null, droppedInWindow: 240, decodedInWindow: 10000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: { droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 4, width: 1920, height: 1080 }, laggingEpisode: null },
     ]),
   );
   render(
@@ -280,8 +280,8 @@ test("OutputsSection routes each screen's own struggles to its own card — a se
   const OTHER: Output = { id: "display-2", name: "Right Mic Display", viewId: null };
   stubVideoState(
     videoState([
-      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: { droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080 } },
-      { outputId: OTHER.id, feedId: "program", via: "webrtc", struggling: false, droppedInWindow: 0, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null },
+      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, lagging: false, jitterBufferMsInWindow: null, behindNewestMsInWindow: null, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: { droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080 }, laggingEpisode: null },
+      { outputId: OTHER.id, feedId: "program", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, behindNewestMsInWindow: null, droppedInWindow: 0, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
     ]),
   );
   render(
