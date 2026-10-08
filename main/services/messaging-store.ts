@@ -303,9 +303,10 @@ export const messagingStore = {
 
   /**
    * Replace the whole config. Returns what is now stored, the groups that are
-   * gone, and whether the groups (names included) differ from what was there,
-   * so the caller can take them off the screens that had them and say so to
-   * the ones that draw them.
+   * gone, and whether anything `messages:state` carries (the groups, names
+   * included, or either quick list) differs from what was there, so the caller
+   * can take the groups off the screens that had them and say so to the ones
+   * that draw them.
    *
    * Refuses with MessageRefused when a rule is broken, and with MessagingConflict
    * when the body's `version` is not the stored one. Runs through the store's own
@@ -315,17 +316,21 @@ export const messagingStore = {
    * saved that the next restart loses. Which groups are gone is decided inside
    * that serialised step, against the config this write replaces.
    */
-  async replace(input: unknown): Promise<{ config: MessagingConfig; removed: MessageGroup[]; groupsChanged: boolean }> {
+  async replace(input: unknown): Promise<{ config: MessagingConfig; removed: MessageGroup[]; stateChanged: boolean }> {
     let removed: MessageGroup[] = [];
-    let groupsChanged = false;
+    let stateChanged = false;
     const stored = await store.update((current) => {
       const next = validate(input, current);
       const kept = new Set(next.groups.map((g) => g.id));
       removed = current.groups.filter((g) => !kept.has(g.id));
-      groupsChanged = JSON.stringify(current.groups) !== JSON.stringify(next.groups);
+      // The three things the channel carries, not `version`: a save that changed
+      // nothing a screen draws sends no frame.
+      stateChanged =
+        JSON.stringify([current.groups, current.quickMessages, current.quickReplies]) !==
+        JSON.stringify([next.groups, next.quickMessages, next.quickReplies]);
       return next;
     });
     adopt(stored);
-    return { config: copyOf(stored), removed, groupsChanged };
+    return { config: copyOf(stored), removed, stateChanged };
   },
 };

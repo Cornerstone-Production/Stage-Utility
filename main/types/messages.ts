@@ -61,6 +61,11 @@ export interface MessagesState {
   /** Bumped by the server on every frame it sends. A new process starts at 0. */
   rev: number;
   groups: MessageGroup[];
+  /** The composer's one-press messages, so a composer placed on a screen offers
+   *  the list as Settings has it now. */
+  quickMessages: string[];
+  /** A console's one-press answers, for the same reason. */
+  quickReplies: string[];
   /** Oldest first, today only. */
   messages: StageMessage[];
   /** Every message whose alert is still running, newest first. Two can run at

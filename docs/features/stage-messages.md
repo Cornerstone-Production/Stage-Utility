@@ -98,7 +98,8 @@ service keeps them.
 
 ### How screens receive them
 
-One channel, `messages:state`, carries `{ rev, groups, messages, alerts }`. It is
+One channel, `messages:state`, carries `{ rev, groups, quickMessages, quickReplies,
+messages, alerts }`. It is
 sent once when a client connects and again on every change. See
 [Network traffic](../ops/network-traffic.md#stage-messages).
 

@@ -695,7 +695,7 @@ describe("updateConfig", () => {
     assert.equal(logged("[messages] group").at(-1), '[messages] group "Stage" deleted; removed from 0 screen(s)');
   });
 
-  test("editing only the quick lists, or renaming a group, removes nothing from any screen", async () => {
+  test("editing only the quick lists, or renaming a group, removes nothing from any screen and says so to the ones that draw them", async () => {
     const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
     frames.length = 0;
     await svc.updateConfig({
@@ -714,7 +714,17 @@ describe("updateConfig", () => {
       quickMessages: ["Go", "Stop"],
       quickReplies: ["Ok"],
     });
-    assert.equal(frames.length, 0, "a change the state does not carry was broadcast");
+    assert.equal(frames.length, 1, "a changed quick list must reach the composers and consoles that offer it");
+    assert.deepEqual([frames[0].quickMessages, frames[0].quickReplies], [["Go", "Stop"], ["Ok"]]);
+    assert.deepEqual([svc.state().quickMessages, svc.state().quickReplies], [["Go", "Stop"], ["Ok"]]);
+    frames.length = 0;
+    await svc.updateConfig({
+      version: messagingStore.get().version,
+      groups: [{ id: green, name: "Greenroom" }, { id: stage, name: "Stage" }, { id: booth, name: "Booth" }],
+      quickMessages: ["Go", "Stop"],
+      quickReplies: ["Ok"],
+    });
+    assert.equal(frames.length, 0, "a save that changed nothing the state carries was broadcast");
   });
 
   test("two overlapping saves, the second putting the groups back, each re-send the state", async () => {

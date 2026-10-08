@@ -160,7 +160,8 @@ export class MessagesService {
 
   /** The snapshot `messages:state` carries and GET /api/messages answers. */
   state(): MessagesState {
-    return { rev: this.rev, groups: messagingStore.get().groups, messages: this.messages, alerts: this.runningAlerts(Date.now()) };
+    const { groups, quickMessages, quickReplies } = messagingStore.get();
+    return { rev: this.rev, groups, quickMessages, quickReplies, messages: this.messages, alerts: this.runningAlerts(Date.now()) };
   }
 
   /** The messages whose alert is still holding the screens at `now`, newest first. */
@@ -305,7 +306,8 @@ export class MessagesService {
    * Replace the messaging config (groups, quick messages, quick replies).
    *
    * A group whose id is gone comes off every screen that held it, in one write,
-   * and the state is re-sent because it carries `groups`. Messages already sent
+   * and the state is re-sent when the groups or either quick list changed,
+   * because it carries all three. Messages already sent
    * to the group are left alone. Refuses with MessageRefused like the store,
    * and with MessagingConflict when the body is built from an older config.
    *
@@ -315,7 +317,7 @@ export class MessagesService {
    */
   async updateConfig(input: unknown): Promise<MessagingConfig> {
     await messagingStore.init();
-    const { config, removed, groupsChanged } = await messagingStore.replace(input);
+    const { config, removed, stateChanged } = await messagingStore.replace(input);
     try {
       // Every time, whether or not this save removed anything: what is taken off
       // the screens is whatever the screens hold that the config does not, so a
@@ -327,7 +329,7 @@ export class MessagesService {
     } finally {
       // Re-sent even when that failed: the config is saved either way, and the
       // screens must not keep drawing a group that is gone.
-      if (groupsChanged) this.publish();
+      if (stateChanged) this.publish();
     }
     return config;
   }

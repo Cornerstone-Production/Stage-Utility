@@ -20,7 +20,7 @@ page first loads.
 | `slots:devices` | 4.5 KB | up to 6.7/s during a service — RF, battery, audio level |
 | `stage:state-changed` | ~35 KB | only when something structural changes |
 | `pco:live` | ~1.2 KB | on change, else a 15s keepalive |
-| `messages:state` | see below | when a message is sent, an alert is cleared or runs out, a group changes, or the nightly clear removes messages |
+| `messages:state` | see below | when a message is sent, an alert is cleared or runs out, a group or a quick list changes, or the nightly clear removes messages |
 | `spl:metrics` | under 1 KB | up to 4 Hz while Smaart is connected |
 | People's photos | ~1.3 MB total | once, then cached |
 | App bundle | ~900 KB | once per deploy |
@@ -33,15 +33,16 @@ re-send the plan, slot configuration and layouts along with it.
 ### Stage messages
 
 `messages:state` carries the day's [stage messages](../features/stage-messages.md)
-and the groups: `{ rev, groups, messages, alerts }`. The groups are a few hundred
-bytes; a short message adds about 0.2 KB and a 280-character alert about 0.45 KB,
+and what the screens offer for it: `{ rev, groups, quickMessages, quickReplies,
+messages, alerts }`. The groups and the two quick lists are a few hundred bytes to
+1 KB together; a short message adds about 0.2 KB and a 280-character alert about 0.45 KB,
 so a day with twenty messages is under 4 KB. The 200-message cap is the ceiling:
 about 36 KB of short messages, 90 KB if every one were a full-length alert. The
 whole state is sent on every change, not just the new message.
 
 It changes only when somebody acts: one frame per send, per cleared alert, per
-group edit (adding, renaming or removing one; a change to the quick lists is not
-sent), once as each alert runs out, and at midnight only when the clear removed
+save of the messaging config that changed a group (adding, renaming or removing
+one) or either quick list, once as each alert runs out, and at midnight only when the clear removed
 something. Between those it is silent, and with no messages sent it is a single small
 frame when a client connects. It is part of the connect-time snapshot, so a
 screen that connects while an alert is running shows it. A client that has named
