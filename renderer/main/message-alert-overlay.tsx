@@ -32,7 +32,7 @@
 // channel's own frames alone; the clock hook lives in the banner, which exists
 // only while an alert is on this screen's list.
 
-import { Component, useMemo, type ReactNode } from "react";
+import { Component, type ReactNode } from "react";
 
 import { isAlertRunning, messageReaches, type StageMessage } from "@main/types/messages";
 import { clamp } from "@main/services/clamp";
@@ -40,22 +40,6 @@ import { errorMessage } from "@main/services/errors";
 import { useServerNow } from "../lib/server-clock";
 import { logToServer } from "../lib/client-log";
 import { useMessagesStatus } from "./use-messages-state";
-
-/** The alerts sent to this screen, newest first, from the state's running ones. */
-export function alertsFor(alerts: readonly StageMessage[], groups: readonly string[]): StageMessage[] {
-  return alerts.filter((a) => messageReaches(a.to, groups));
-}
-
-/** The one to draw at `now` on the server's clock: the newest still running. */
-export function pickAlert(candidates: readonly StageMessage[], now: number): StageMessage | null {
-  return candidates.find((a) => isAlertRunning(a, now)) ?? null;
-}
-
-/** How much of the alert is left, 1 down to 0, from its own length. */
-export function alertLeft(a: StageMessage, now: number): number {
-  const length = (a.alertUntil ?? 0) - a.at;
-  return length > 0 ? clamp(((a.alertUntil ?? 0) - now) / length, 0, 1) : 0;
-}
 
 /**
  * A failure drawing the banner must not blank the wall: this renders nothing and
@@ -87,16 +71,24 @@ export function MessageAlertOverlay({ groups }: { groups: readonly string[] }) {
 
 function Alerts({ groups }: { groups: readonly string[] }) {
   const { value } = useMessagesStatus();
-  const candidates = useMemo(() => alertsFor(value?.alerts ?? [], groups), [value, groups]);
+  // The running alerts sent to this screen, newest first, as the server lists them.
+  const candidates = (value?.alerts ?? []).filter((a) => messageReaches(a.to, groups));
   if (candidates.length === 0) return null;
   return <Banner candidates={candidates} />;
+}
+
+/** How much of the alert is left, 1 down to 0, from its own length. */
+function alertLeft(a: StageMessage, now: number): number {
+  const length = (a.alertUntil ?? 0) - a.at;
+  return length > 0 ? clamp(((a.alertUntil ?? 0) - now) / length, 0, 1) : 0;
 }
 
 function Banner({ candidates }: { candidates: readonly StageMessage[] }) {
   // A quarter-second: the bar moves in steps the transition below smooths, and the
   // end is noticed within a quarter-second of the server clock passing it.
   const now = useServerNow(250);
-  const alert = pickAlert(candidates, now);
+  // The newest still running on the server's clock; the list may hold ones that ended.
+  const alert = candidates.find((a) => isAlertRunning(a, now)) ?? null;
   if (!alert) return null;
   return (
     <div

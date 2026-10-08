@@ -26,11 +26,10 @@
 
 import { useState, type CSSProperties } from "react";
 
-import { errorMessage } from "@main/services/errors";
 import { messageReaches, widgetGroups, type MessageGroup, type MessagesState, type StageMessage } from "@main/types/messages";
-import { toast } from "../components/ui";
 import { invoke } from "../lib/api";
-import { logToServer } from "../lib/client-log";
+import { ageLabel } from "../lib/age-label";
+import { reportActionFailure } from "./report-action-failure";
 import type { OwnScreen } from "./stage-screen";
 
 /** How many messages the widget draws. */
@@ -39,19 +38,6 @@ export const MESSAGES_SHOWN = 3;
 /** The newest messages that reached these groups, newest first. */
 export function shownMessages(state: MessagesState, groups: readonly string[]): StageMessage[] {
   return state.messages.filter((m) => messageReaches(m.to, groups)).slice(-MESSAGES_SHOWN).reverse();
-}
-
-/**
- * "now", "3 min", "2 h": how long ago, off the server's clock. Under 45 seconds
- * is "now"; a message's age is never shown as negative however far a wall's own
- * clock is out, because it is `now` and `at` that are compared and both are the
- * server's.
- */
-export function ageLabel(now: number, at: number): string {
-  const s = Math.max(0, Math.round((now - at) / 1000));
-  if (s < 45) return "now";
-  const m = Math.max(1, Math.round(s / 60));
-  return m < 90 ? `${m} min` : `${Math.round(m / 60)} h`;
 }
 
 /** The group names a widget follows, in the config's order, for the line that
@@ -86,7 +72,8 @@ export function MessagesObject({ objectId, config, state, known, screen, interac
   // One answer at a time: pressing a second button while the first is in flight
   // would send two replies for one tap on a touch panel that registered twice.
   const [sending, setSending] = useState(false);
-  const canAnswer = interactive && groups !== null && known && state !== null;
+  // The buttons: only where controls are live, once the channel has answered, and for a widget that follows something.
+  const answering = interactive && groups !== null && known ? state : null;
 
   async function answer(target: StageMessage, text: string) {
     if (sending) return;
@@ -97,8 +84,7 @@ export function MessagesObject({ objectId, config, state, known, screen, interac
       // Told, and logged: a reply that did not go must not read as sent. The
       // thread shows replies only once the server has them, so a failure leaves
       // nothing on screen to mistake for success.
-      toast.error(`Could not send that reply: ${errorMessage(e)}`);
-      logToServer("messages", `could not send a reply to ${target.id}: ${errorMessage(e)}`);
+      reportActionFailure("send that reply", e, `to ${target.id}`);
     } finally {
       setSending(false);
     }
@@ -127,31 +113,47 @@ export function MessagesObject({ objectId, config, state, known, screen, interac
       >
         Messages
       </div>
-      {groups === null ? (
-        // No screen and no list of its own. On the console itself there is
-        // nothing to say; in the editor, say what to do.
-        editing ? <Quiet>Choose groups for this widget</Quiet> : null
-      ) : !known || !state ? (
-        // Not answered yet, or the read failed: neither is "no messages".
-        null
-      ) : shown && shown.length > 0 ? (
-        <div style={{ display: "grid", gap: "0.5em", marginTop: "0.54em", minHeight: 0 }}>
-          {shown.map((m, i) => (
-            <Message key={m.id} m={m} now={now} newest={i === 0} />
-          ))}
-        </div>
-      ) : (
-        <Quiet>No messages for this screen&apos;s groups</Quiet>
-      )}
-      {canAnswer && state && groups && (
+      <Feed groups={groups} state={state} known={known} shown={shown} editing={editing} now={now} />
+      {answering && (
         <Replies
           target={shown?.[0] ?? null}
-          replies={state.quickReplies}
-          names={groupNames(state.groups, groups)}
+          replies={answering.quickReplies}
+          names={groupNames(answering.groups, groups ?? [])}
           sending={sending}
           onAnswer={answer}
         />
       )}
+    </div>
+  );
+}
+
+/** What goes under the heading: the messages, or the one quiet line that says why not. */
+function Feed({
+  groups,
+  state,
+  known,
+  shown,
+  editing,
+  now,
+}: {
+  groups: readonly string[] | null;
+  state: MessagesState | null;
+  known: boolean;
+  shown: StageMessage[] | null;
+  editing: boolean;
+  now: number;
+}) {
+  // No screen and no list of its own. On the console itself there is nothing to
+  // say; in the editor, say what to do.
+  if (groups === null) return editing ? <Quiet>Choose groups for this widget</Quiet> : null;
+  // Not answered yet, or the read failed: neither is "no messages".
+  if (!known || !state || !shown) return null;
+  if (shown.length === 0) return <Quiet>No messages for this screen&apos;s groups</Quiet>;
+  return (
+    <div style={{ display: "grid", gap: "0.5em", marginTop: "0.54em", minHeight: 0 }}>
+      {shown.map((m, i) => (
+        <Message key={m.id} m={m} now={now} newest={i === 0} />
+      ))}
     </div>
   );
 }

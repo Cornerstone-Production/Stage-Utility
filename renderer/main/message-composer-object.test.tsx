@@ -200,7 +200,7 @@ describe("composing", () => {
     const logged = requests.find((r) => r.url === "/api/log/client");
     assert.ok(logged, "the failure never reached /log");
     assert.equal(logged!.body!.tag, "messages");
-    assert.match(String(logged!.body!.message), /could not send a message to g-00000002: no group has the id/);
+    assert.match(String(logged!.body!.message), /could not send that message \(to g-00000002\): no group has the id/);
   });
 
   test("on a wall display it draws and does nothing: nothing can be picked, typed or sent", async () => {
@@ -285,7 +285,7 @@ describe("the thread", () => {
       console.warn = quiet;
     }
     const logged = requests.find((r) => r.url === "/api/log/client");
-    assert.match(String(logged?.body?.message), /could not clear alert/);
+    assert.match(String(logged?.body?.message), /could not clear that alert \(/);
   });
 });
 

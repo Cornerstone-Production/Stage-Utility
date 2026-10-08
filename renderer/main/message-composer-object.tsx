@@ -26,7 +26,6 @@
 
 import { useState, type CSSProperties } from "react";
 
-import { errorMessage } from "@main/services/errors";
 import {
   ALERT_MS,
   DEFAULT_FROM,
@@ -38,11 +37,12 @@ import {
   type MessagesState,
   type StageMessage,
 } from "@main/types/messages";
-import { toast } from "../components/ui";
+import { plural } from "@main/services/plural";
+import { ageLabel } from "../lib/age-label";
 import { cn } from "../lib/cn";
 import { invoke } from "../lib/api";
-import { logToServer } from "../lib/client-log";
-import { ageLabel } from "./messages-object";
+import { joinWithAnd } from "../lib/join-with-and";
+import { reportActionFailure } from "./report-action-failure";
 
 /**
  * Who a message from this composer says it is from: the output's name on a
@@ -77,11 +77,6 @@ export function toggleTarget(current: readonly string[], id: string): string[] {
   return groups.includes(id) ? groups.filter((t) => t !== id) : [...groups, id];
 }
 
-/** "Green room", "Green room and Stage", "Green room, Stage and Booth". */
-function listOf(names: readonly string[]): string {
-  return names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
-
 /**
  * The line under Send: what pressing it will do. "Reaches 2 screens in Green
  * room." / "Takes over every screen for 30 seconds." Counts the screens (outputs)
@@ -99,9 +94,9 @@ export function reachLine(
   if (to.includes(EVERYONE)) return `${verb} every screen${tail}`;
   const chosen = new Set(to);
   const n = outputs.filter((o) => (o.groups ?? []).some((g) => chosen.has(g))).length;
-  const names = listOf(groups.filter((g) => chosen.has(g.id)).map((g) => g.name));
+  const names = joinWithAnd(groups.filter((g) => chosen.has(g.id)).map((g) => g.name));
   if (n === 0) return `No screens are in ${names} yet.`;
-  return `${verb} ${n} screen${n === 1 ? "" : "s"} in ${names}${tail}`;
+  return `${verb} ${plural(n, "screen")} in ${names}${tail}`;
 }
 
 /** Where a message went, for its header: group names, or Everyone, in the config's order. */
@@ -146,8 +141,7 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
       setText("");
       setAlert(false);
     } catch (e) {
-      toast.error(`Could not send that message: ${errorMessage(e)}`);
-      logToServer("messages", `could not send a message to ${to.join(", ")}: ${errorMessage(e)}`);
+      reportActionFailure("send that message", e, `to ${to.join(", ")}`);
     } finally {
       setSending(false);
     }
@@ -159,8 +153,7 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
     try {
       await invoke("messages:clearAlert", { id: m.id, from });
     } catch (e) {
-      toast.error(`Could not clear that alert: ${errorMessage(e)}`);
-      logToServer("messages", `could not clear alert ${m.id}: ${errorMessage(e)}`);
+      reportActionFailure("clear that alert", e, m.id);
     } finally {
       setClearing(null);
     }

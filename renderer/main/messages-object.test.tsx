@@ -30,7 +30,8 @@ let replyStatus = 201;
 
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
-const { MessagesObject, ageLabel, groupNames, shownMessages } = await import("./messages-object.js");
+const { MessagesObject, groupNames, shownMessages } = await import("./messages-object.js");
+const { ageLabel } = await import("../lib/age-label.js");
 
 after(() => {
   cleanup();
@@ -270,6 +271,6 @@ describe("answering from a console", () => {
     const logged = requests.find((r) => r.url === "/api/log/client");
     assert.ok(logged, "the failure was not sent to /log");
     assert.deepEqual((logged!.body as { tag: string }).tag, "messages");
-    assert.match((logged!.body as { message: string }).message, /could not send a reply to .*does not follow a group/);
+    assert.match((logged!.body as { message: string }).message, /could not send that reply \(to .*\): .*does not follow a group/);
   });
 });
