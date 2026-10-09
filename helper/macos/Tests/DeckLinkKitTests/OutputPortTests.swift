@@ -440,21 +440,24 @@ let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a so
   }
 
   /// The pre-roll of a reopening repeats by necessity: it is the baseline, not
-  /// falling behind.
+  /// falling behind. The second after the reopening has two genuine repeats of 60,
+  /// 3.3%, jitter; counted with the pre-roll's two it would be 4 of 62, 6.5%, over
+  /// the server's 5%.
   @Test func aReopeningsPreRollIsNotFallingBehind() {
     let log = LogLines()
-    let source = NumberedSource()
+    let source = NumberedSource(missing: [30, 31])
     let port = softwarePort(source, log: log)
     defer { port.close() }
     port.open(videoMode: nil)
-    port.fakeTick(10)
-    port.pollForTest()
+    port.fakeTick(60)
+    port.pollForTest()  // the first second drawn in: not judged
     source.missingNow = true
-    port.open(videoMode: nil)
+    port.open(videoMode: nil)  // a pre-roll of two repeats
     source.missingNow = false
-    port.fakeTick(10)
+    port.fakeTick(60)
     port.pollForTest()
-    #expect(!log.lines.contains { $0.contains("falling behind") })
+    #expect(port.counters.repeated == 2 + 2 + 2)  // 30 and 31 in each second, and the pre-roll
+    #expect(!log.lines.contains { $0.contains("falling behind") }, "\(log.lines)")
   }
 
   /// A source with no new picture for five polls in a row is reported once, so its
