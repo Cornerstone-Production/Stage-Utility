@@ -46,6 +46,8 @@ public enum StatusText {
 
   public enum Connection: Equatable {
     case searching
+    /// No output is turned on, so nothing is looking.
+    case noOutputs
     /// A `server` file names the server; nothing has been heard from it yet.
     case configured(address: String)
     case connected(name: String, address: String)
@@ -57,6 +59,7 @@ public enum StatusText {
   public static func connectionLine(_ c: Connection) -> (prefix: String, name: String?, middle: String?, address: String?) {
     switch c {
     case .searching: return ("Looking for Stage Utility on the network", nil, nil, nil)
+    case .noOutputs: return ("No outputs are turned on", nil, nil, nil)
     case .configured(let a): return ("Using the server file: ", nil, nil, a)
     case .connected(let name, let a): return ("Connected to ", name, " at ", a)
     case .unreachable(let a): return ("Cannot reach Stage Utility at ", nil, nil, a)
