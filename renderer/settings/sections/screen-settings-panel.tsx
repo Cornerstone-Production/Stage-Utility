@@ -843,7 +843,15 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
       id={SCREEN_PANEL_ID}
       tabIndex={-1}
       aria-label="Screen settings"
-      onKeyDown={(e) => { if (e.key === "Escape" && !e.defaultPrevented) onClose(); }}
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || e.defaultPrevented) return;
+        // Leave the field first, as pressing the X does: the name and the text
+        // size save when they are left, and closing without leaving them dropped
+        // what had been typed.
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && e.currentTarget.contains(active)) active.blur();
+        onClose();
+      }}
       className="flex min-h-0 min-w-0 flex-col border-line bg-surface max-lg:bg-bg max-lg:fixed max-lg:inset-y-0 max-lg:right-0 max-lg:z-40 max-lg:w-full max-lg:max-w-[400px] max-lg:border-l max-lg:shadow-2xl focus:outline-none lg:rounded-xl lg:border"
     >
       <div className="flex items-start gap-3 border-b border-line px-[18px] pb-2.5 pt-3.5">

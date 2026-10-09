@@ -190,6 +190,26 @@ describe("edit mode", () => {
     await act(async () => { fireEvent.keyDown(screen.getByRole("button", { name: "Close" }), { key: "Escape" }); await settle(); });
     assert.deepEqual(calls, [["close"]]);
   });
+
+  test("Escape in a field saves what was typed there before closing, as the X does", async () => {
+    // The X commits because pressing it blurs the field first. Escape used to
+    // close straight away, and a typed name or text size was lost.
+    const { calls } = mount({});
+    const name = screen.getByLabelText("Name") as HTMLInputElement;
+    await act(async () => { name.focus(); await settle(); });
+    await type(name, "Atrium TV");
+    await act(async () => { fireEvent.keyDown(name, { key: "Escape" }); await settle(); });
+    assert.deepEqual(calls, [["rename", "display-1", "Atrium TV"], ["close"]]);
+  });
+
+  test("Escape in the text size saves the typed size before closing", async () => {
+    const { calls } = mount({});
+    const size = screen.getByLabelText("Text size") as HTMLInputElement;
+    await act(async () => { size.focus(); await settle(); });
+    await type(size, "150");
+    await act(async () => { fireEvent.keyDown(size, { key: "Escape" }); await settle(); });
+    assert.deepEqual(calls, [["textSize", "display-1", 150], ["close"]]);
+  });
 });
 
 describe("the top bar and the lock follow the bar", () => {
