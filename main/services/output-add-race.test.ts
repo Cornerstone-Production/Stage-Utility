@@ -51,7 +51,7 @@ async function outputsOnDisk(): Promise<{ id: string; name: string }[]> {
 
 describe("a screen added mid-edit is not lost", () => {
   it("keeps BOTH the new display and the rename in settings.json", async () => {
-    const adding = stageController.addOutput("Lobby");
+    const adding = stageController.addOutput({ name: "Lobby" });
 
     // One macrotask in: the allocation has run and the settings write is in
     // flight — exactly the window an operator's next click lands in.

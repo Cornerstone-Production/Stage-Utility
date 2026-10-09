@@ -19,7 +19,7 @@ import {
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
-import { viewSurface, viewShownInSidebar, outputMode, type CreateScreenInput, type ViewSurface, type OutputMode } from "../types/views.js";
+import { viewSurface, viewShownInSidebar, outputMode, surfaceForMode, copyViewName, type CreateScreenInput, type ViewSurface, type OutputMode } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
@@ -3415,13 +3415,14 @@ export class StageController {
    * claim the same screen and the second silently displaces the first.
    */
   async addOutput(
-    name?: string,
-    viewId?: string | null,
-    /** Fields a new screen can be born with. `slug` must already have passed
-     *  validateSlug against the ids and slugs in use; only the new id, which does
-     *  not exist until the allocation below, is checked here. */
-    extra?: { mode?: OutputMode; slug?: string },
+    /** What a new screen is born with. Every field is optional: no name is
+     *  "Display N" from the id, no view is unrouted, no mode is a display. `slug`
+     *  must already have passed validateSlug against the ids and slugs in use;
+     *  only the new id, which does not exist until the allocation below, is
+     *  checked here. */
+    fields: Partial<Pick<Output, "name" | "viewId" | "mode" | "slug">> = {},
   ): Promise<{ state: StageState; output: Output }> {
+    const { name, viewId, mode, slug } = fields;
     // One write: the id, the floor that stops it ever coming back, and the
     // outputs list that could not be built until the id existed. The whole
     // read-allocate-write happens inside the settings write queue, so two
@@ -3434,15 +3435,15 @@ export class StageController {
           const num = parseInt(id.replace("display-", ""), 10);
           // Thrown before `this.state` is touched, so nothing has been assigned
           // or written when it fires.
-          if (extra?.slug && extra.slug.toLowerCase() === id.toLowerCase()) {
-            throw new Error(`"/${extra.slug}" is already used by another display.`);
+          if (slug && slug.toLowerCase() === id.toLowerCase()) {
+            throw new Error(`"/${slug}" is already used by another display.`);
           }
           const created: Output = {
             id,
             name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
             viewId: viewId ?? null,
-            ...(extra?.mode ? { mode: extra.mode } : {}),
-            ...(extra?.slug ? { slug: extra.slug } : {}),
+            ...(mode ? { mode } : {}),
+            ...(slug ? { slug } : {}),
           };
           const outputs = [...this.state.outputs, created];
           // State FIRST, in the same synchronous turn as the read above and
@@ -3530,15 +3531,7 @@ export class StageController {
       throw new Error(`outputs:slug — output ${id} not found`);
     }
     const trimmed = slug.trim().toLowerCase();
-
-    // Every id and slug in use EXCEPT this output's own, or re-saving would reject
-    // its existing slug.
-    const taken: string[] = [];
-    for (const o of this.state.outputs) {
-      if (o.id !== id) taken.push(o.id);
-      if (o.slug && o.id !== id) taken.push(o.slug);
-    }
-    const verdict = validateSlug(trimmed, taken);
+    const verdict = validateSlug(trimmed, this.takenSlugs(id));
     if (!verdict.ok) throw new Error(verdict.reason);
 
     return this.commitOutputPatch(
@@ -3546,6 +3539,12 @@ export class StageController {
       { slug: trimmed === "" ? undefined : trimmed },
       `[stage-controller] setOutputSlug id=${scrub(id)} slug="${scrub(trimmed)}"`,
     );
+  }
+
+  /** Every screen id and friendly link in use, except `exceptId`'s own: re-saving
+   *  a screen's slug must not collide with itself. */
+  private takenSlugs(exceptId?: string): string[] {
+    return this.state.outputs.filter((o) => o.id !== exceptId).flatMap((o) => (o.slug ? [o.id, o.slug] : [o.id]));
   }
 
   /** Route an output to a View (or null to unroute). The recall operation. */
@@ -3679,37 +3678,21 @@ export class StageController {
     if (mode !== undefined && mode !== "display" && mode !== "panel") {
       throw new Error('outputs:add — mode must be "display" or "panel"');
     }
-    if (input.showInSidebar !== undefined && typeof input.showInSidebar !== "boolean") {
-      throw new Error("outputs:add — showInSidebar must be a boolean");
-    }
     if (typeof input.viewId === "string" && input.newView) {
       throw new Error("outputs:add — viewId and newView are alternatives: name an existing view, or ask for a new one");
     }
     // The view is checked only when the caller states a role. Without one this is
     // the original `{ name, viewId }` call, which took the id as given.
-    const existing = typeof input.viewId === "string" ? this.state.views.find((v) => v.id === input.viewId) : undefined;
-    if (mode !== undefined && typeof input.viewId === "string") {
-      if (input.viewId === HOME_VIEW_ID) {
-        throw new Error(`"Home" is the operator's front page, not a screen. Make a view for this screen instead.`);
-      }
-      if (!existing) throw new Error(`outputs:add — view ${input.viewId} not found`);
-      const wants: ViewSurface = mode === "panel" ? "console" : "display";
-      if (viewSurface(existing) !== wants) {
-        throw new Error(
-          mode === "panel"
-            ? `"${existing.name}" is a wall-screen view, and a control surface needs a control-surface view.`
-            : `"${existing.name}" has live controls, so it can only go on a control surface. A wall display needs a wall-screen view.`,
-        );
-      }
-    }
+    const existing =
+      mode !== undefined && typeof input.viewId === "string"
+        ? this.requireViewForRole(input.viewId, mode)
+        : typeof input.viewId === "string" ? this.state.views.find((v) => v.id === input.viewId) : undefined;
     const slug = (input.slug ?? "").trim().toLowerCase();
     if (slug !== "") {
-      const taken = this.state.outputs.flatMap((o) => [o.id, ...(o.slug ? [o.slug] : [])]);
-      const verdict = validateSlug(slug, taken);
+      const verdict = validateSlug(slug, this.takenSlugs());
       if (!verdict.ok) throw new Error(verdict.reason);
     }
     const name = input.name?.trim() || undefined;
-    const surface: ViewSurface = mode === "panel" ? "console" : "display";
 
     let createdViewId: string | null = null;
     let output: Output | undefined;
@@ -3721,7 +3704,7 @@ export class StageController {
             label: "make the view",
             run: async () => {
               // Custom, because only a custom view has a layout to put anything on.
-              const view = await this.createViewRecord(name, "custom", surface);
+              const view = await this.createViewRecord(name, "custom", surfaceForMode(mode ?? "display"));
               createdViewId = view.id;
               viewId = view.id;
             },
@@ -3731,7 +3714,7 @@ export class StageController {
       {
         label: "add the screen",
         run: async () => {
-          output = (await this.addOutput(name, viewId, { mode, slug: slug || undefined })).output;
+          output = (await this.addOutput({ name, viewId, mode, slug: slug || undefined })).output;
         },
         undo: async () => { if (!output) return false; await this.removeOutput(output.id); },
       },
@@ -3787,6 +3770,27 @@ export class StageController {
   }
 
   /**
+   * The view a screen of `mode` is about to be pointed at, refused unless it
+   * exists, is not Home, and already fits the role. One check and one wording for
+   * createScreen and setOutputRole, which used to word the same refusal two ways.
+   */
+  private requireViewForRole(viewId: string, mode: OutputMode): View {
+    if (viewId === HOME_VIEW_ID) {
+      throw new Error(`"Home" is the operator's front page, not a screen. Choose another view.`);
+    }
+    const view = this.state.views.find((v) => v.id === viewId);
+    if (!view) throw new Error(`view ${viewId} not found`);
+    if (viewSurface(view) !== surfaceForMode(mode)) {
+      throw new Error(
+        mode === "panel"
+          ? `"${view.name}" is a wall-screen view, so it cannot go on a control surface. Choose a control-surface view.`
+          : `"${view.name}" has live controls, so it cannot go on a wall display. Choose a wall-screen view.`,
+      );
+    }
+    return view;
+  }
+
+  /**
    * Change a screen between a wall display and a control surface, without
    * changing any OTHER screen.
    *
@@ -3815,20 +3819,8 @@ export class StageController {
     if (opts.copyView && opts.viewId !== undefined) {
       throw new Error("outputs:setRole — copyView and viewId are alternatives");
     }
-    const wants: ViewSurface = mode === "panel" ? "console" : "display";
-    let chosen: View | undefined;
-    if (opts.viewId !== undefined) {
-      if (opts.viewId === HOME_VIEW_ID) {
-        throw new Error(`"Home" is the operator's front page, not a screen. Choose another view.`);
-      }
-      chosen = this.state.views.find((v) => v.id === opts.viewId);
-      if (!chosen) throw new Error(`outputs:setRole — view ${opts.viewId} not found`);
-      if (viewSurface(chosen) !== wants) {
-        throw new Error(
-          `"${chosen.name}" does not fit ${mode === "panel" ? "a control surface" : "a wall display"}. Choose a ${mode === "panel" ? "control-surface" : "wall-screen"} view.`,
-        );
-      }
-    }
+    const wants = surfaceForMode(mode);
+    const chosen = opts.viewId !== undefined ? this.requireViewForRole(opts.viewId, mode) : undefined;
 
     const view = output.viewId ? this.state.views.find((v) => v.id === output.viewId) : undefined;
     const misfit = view !== undefined && viewSurface(view) !== wants;
@@ -3852,34 +3844,35 @@ export class StageController {
         `[stage-controller] setOutputRole output=${scrub(id)} restored mode=${scrub(before.mode ?? "(display)")} view=${scrub(before.viewId ?? "(none)")}`,
       );
     };
-    const setMode = { label: "set the screen's role", run: () => this.setOutputMode(id, mode), undo: restore };
-    const setView = (target: string) => ({ label: "point the screen at the view", run: () => this.setOutputView(id, target), undo: restore });
+    const setMode: ScreenStep = { label: "set the screen's role", run: () => this.setOutputMode(id, mode), undo: restore };
+    // The two guards wait for each other (setOutputMode refuses a display while
+    // its view is a console; setViewSurface refuses a console while a screen
+    // showing it is not a panel), so whichever side is being made MORE permissive
+    // goes first: becoming a control surface the screen leads, becoming a wall
+    // display the view does. The other order is refused by the server's own
+    // guards, however the steps are undone.
+    const inGuardOrder = (viewStep: ScreenStep): ScreenStep[] => (mode === "panel" ? [setMode, viewStep] : [viewStep, setMode]);
 
     let copy: View | undefined;
     const steps: ScreenStep[] = [];
     if (chosen) {
-      // The target view fits the new role. Panel: the screen leads. Display: the
-      // view leads, or the screen is still on a console when it is asked to leave.
-      steps.push(...(mode === "panel" ? [setMode, setView(chosen.id)] : [setView(chosen.id), setMode]));
+      steps.push(...inGuardOrder({ label: "point the screen at the view", run: () => this.setOutputView(id, chosen.id), undo: restore }));
     } else if (view && misfit && opts.copyView) {
-      const copyName = `${view.name} (${mode === "panel" ? "control surface" : "wall"})`;
       steps.push(
         {
           label: "copy the view",
-          run: async () => { copy = await this.copyViewRecord(view.id, copyName); },
+          run: async () => { copy = await this.copyViewRecord(view.id, copyViewName(view, mode)); },
           undo: async () => { if (!copy) return false; await this.dropView(copy.id); },
         },
         // Nobody shows the copy yet, so neither guard can refuse this.
         { label: "give the copy its role", run: () => this.setViewSurface(copy!.id, wants) },
-        ...(mode === "panel"
-          ? [setMode, { label: "point the screen at the copy", run: () => this.setOutputView(id, copy!.id), undo: restore }]
-          : [{ label: "point the screen at the copy", run: () => this.setOutputView(id, copy!.id), undo: restore }, setMode]),
+        ...inGuardOrder({ label: "point the screen at the copy", run: () => this.setOutputView(id, copy!.id), undo: restore }),
       );
     } else if (view && misfit) {
       // Only this screen shows it (checked above): the role and the view's kind
-      // change together, in the guard-safe order.
+      // change together.
       const was = viewSurface(view);
-      const flip = {
+      steps.push(...inGuardOrder({
         label: "change the view's kind",
         run: () => this.setViewSurface(view.id, wants),
         undo: async () => {
@@ -3887,8 +3880,7 @@ export class StageController {
           if (!now || viewSurface(now) === was) return false;
           await this.setViewSurface(view.id, was);
         },
-      };
-      steps.push(...(mode === "panel" ? [setMode, flip] : [flip, setMode]));
+      }));
     } else {
       steps.push(setMode);
     }

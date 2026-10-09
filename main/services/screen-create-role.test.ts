@@ -127,7 +127,7 @@ describe("createScreen — a stated role", () => {
     const before = snapshot(outputs().map((o) => o.id), views().map((v) => v.id));
     await assert.rejects(
       () => stageController.createScreen({ name: "Nope", mode: "panel", viewId: "wall-a" }),
-      /control surface needs a control-surface view/,
+      /cannot go on a control surface/,
     );
     assert.equal(snapshot(outputs().map((o) => o.id), views().map((v) => v.id)), before);
     assert.equal(outputs().length, 5);
@@ -384,7 +384,7 @@ describe("setOutputRole — a view other screens also show", () => {
 
   it("refuses a chosen view that does not fit, and changes nothing", async () => {
     const before = snapshot(["display-4"], ["ctl-a"]);
-    await assert.rejects(() => stageController.setOutputRole("display-4", "display", { viewId: "ctl-b" }), /does not fit a wall display/);
+    await assert.rejects(() => stageController.setOutputRole("display-4", "display", { viewId: "ctl-b" }), /cannot go on a wall display/);
     await assert.rejects(() => stageController.setOutputRole("display-4", "display", { viewId: "ghost" }), /not found/);
     assert.equal(snapshot(["display-4"], ["ctl-a"]), before);
   });

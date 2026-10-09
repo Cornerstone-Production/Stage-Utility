@@ -20,7 +20,7 @@ import {
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
-import { isLayoutShape } from "../../types/views.js";
+import { isLayoutShape, type OutputMode } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
@@ -617,14 +617,11 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
 
     // POST /api/outputs/:id/role — { mode, copyView?, viewId? }. Change a screen
     // between a wall display and a control surface without changing any other
-    // screen: see stageController.setOutputRole.
+    // screen: see stageController.setOutputRole, which refuses a mode that is
+    // neither. The checks here are the body's shape only.
     const outputRoleMatch = pathname.match(/^\/api\/outputs\/([^/]+)\/role$/);
     if (method === "POST" && outputRoleMatch) {
       const body = await readBody(req) as Record<string, unknown>;
-      if (body.mode !== "display" && body.mode !== "panel") {
-        error(res, 'body.mode ("display"|"panel") required');
-        return;
-      }
       if ("copyView" in body && typeof body.copyView !== "boolean") {
         error(res, "body.copyView must be a boolean");
         return;
@@ -634,7 +631,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       try {
-        const { state } = await stageController.setOutputRole(outputRoleMatch[1], body.mode, {
+        const { state } = await stageController.setOutputRole(outputRoleMatch[1], body.mode as OutputMode, {
           copyView: body.copyView as boolean | undefined,
           viewId: body.viewId as string | undefined,
         });

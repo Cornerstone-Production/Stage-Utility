@@ -21,16 +21,17 @@ export const CREATE_SCREEN_FIELDS = ["mode", "viewId", "newView", "slug", "showI
  * body of only `{ name, viewId }` is the call it has always been (a value of the
  * wrong type is ignored, not refused). The fields added since are strict: one
  * that is present and the wrong type is a 400, not a field quietly dropped.
+ *
+ * Shape only. What a value MEANS — a mode that is neither role, a view that does
+ * not fit, a slug that is taken — is createScreen's to refuse, so `mode` goes
+ * through as sent and is checked once, there.
  */
 export function readCreateScreenBody(body: Record<string, unknown>): CreateScreenInput | { error: string } {
   const input: CreateScreenInput = {
     name: typeof body.name === "string" ? body.name : undefined,
     viewId: typeof body.viewId === "string" ? body.viewId : null,
   };
-  if ("mode" in body) {
-    if (body.mode !== "display" && body.mode !== "panel") return { error: 'body.mode must be "display" or "panel"' };
-    input.mode = body.mode;
-  }
+  if ("mode" in body) input.mode = body.mode as CreateScreenInput["mode"];
   if ("newView" in body) {
     if (typeof body.newView !== "boolean") return { error: "body.newView must be a boolean" };
     input.newView = body.newView;

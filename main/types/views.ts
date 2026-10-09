@@ -1185,6 +1185,64 @@ export function outputMode(o: Pick<Output, "mode">): OutputMode {
   return o.mode === "panel" ? "panel" : "display";
 }
 
+/** The surface of the views a screen of this role shows: a control surface shows
+ *  consoles, a wall display shows display views. */
+export function surfaceForMode(mode: OutputMode): ViewSurface {
+  return mode === "panel" ? "console" : "display";
+}
+
+/**
+ * Can this view, or a copy of it, be made into what a screen of `mode` shows?
+ *
+ * Any view can be a wall screen. Only a custom view can be a console: it is the
+ * only kind with a layout to put a control on, which is why createView makes
+ * anything else a display whatever it was asked for, and why the view card does
+ * not offer the switch for one. A calendar "console" is a promise nothing keeps.
+ */
+export function viewCanTakeRole(view: Pick<View, "kind">, mode: OutputMode): boolean {
+  return mode === "display" || view.kind === "custom";
+}
+
+/** Does this view already fit a screen of `mode`, with nothing to change? */
+export function viewFitsRole(view: Pick<View, "kind" | "surface">, mode: OutputMode): boolean {
+  return viewSurface(view) === surfaceForMode(mode) && viewCanTakeRole(view, mode);
+}
+
+/** What the copy of a view made for one screen's new role is called. */
+export function copyViewName(view: Pick<View, "name">, mode: OutputMode): string {
+  return `${view.name} (${mode === "panel" ? "control surface" : "wall"})`;
+}
+
+/**
+ * Would changing this screen to `mode` change its view in a way that is not this
+ * screen's to make? The panel's preview and the server's decision, so the two
+ * cannot disagree about when to ask.
+ *
+ * Null when the change is plain: the screen shows nothing, its view already has
+ * the surface the role needs, or only this screen shows the view and the view can
+ * take the role (it then changes with the screen). Otherwise:
+ *
+ *   others    the other screens showing the view, which changing it would change
+ *             too. Empty when only this screen shows it but it cannot take the
+ *             role at all.
+ *   copyName  what a copy made for this screen would be called, or null when a
+ *             copy could not take the role either. Then the only way is a
+ *             different view.
+ */
+export function roleChangeConflict(
+  output: Pick<Output, "id" | "viewId">,
+  outputs: readonly Output[],
+  views: readonly View[],
+  mode: OutputMode,
+): { view: View; others: Output[]; copyName: string | null } | null {
+  const view = output.viewId ? views.find((v) => v.id === output.viewId) : undefined;
+  if (!view || viewSurface(view) === surfaceForMode(mode)) return null;
+  const others = outputs.filter((o) => o.id !== output.id && o.viewId === view.id);
+  const convertible = viewCanTakeRole(view, mode);
+  if (others.length === 0 && convertible) return null;
+  return { view, others, copyName: convertible ? copyViewName(view, mode) : null };
+}
+
 /** A physical screen at a URL slug, routed to exactly one View (or none). */
 export interface Output {
   /** Permanent. Never rewritten after creation — slots.json and every other store
