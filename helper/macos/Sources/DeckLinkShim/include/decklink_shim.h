@@ -105,9 +105,9 @@ void dl_port_list_free(dl_port_list *list);
 // MARK: An output
 
 /// The memory of the frame about to be scheduled: 8-bit UYVY, `row_bytes` per
-/// line, `length` long. The helper's own frames are page-aligned and a whole number
-/// of pages; the card's need not be. `slot` names which of the output's frames it
-/// is, and stays the same memory for the life of the output.
+/// line (which may be longer than the picture's), `length` long. `slot` names which
+/// of the output's frames it is, and stays the same memory for the life of the
+/// output. The source copies its picture in.
 typedef struct {
   void *bytes;
   size_t length;

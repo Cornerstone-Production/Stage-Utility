@@ -29,9 +29,7 @@ PoolFrame::PoolFrame(int32_t width, int32_t height, int32_t slot)
   const size_t used = static_cast<size_t>(rowBytes_) * static_cast<size_t>(height_);
   length_ = (used + page - 1) / page * page;
   vm_address_t address = 0;
-  // vm_allocate gives page-aligned, zeroed memory, which a Metal buffer can wrap
-  // without a copy (makeBuffer(bytesNoCopy:) wants both the start and the length
-  // page-aligned).
+  // Zeroed, in whole pages, from vm_allocate.
   if (vm_allocate(mach_task_self(), &address, length_, VM_FLAGS_ANYWHERE) == KERN_SUCCESS) {
     bytes_ = reinterpret_cast<uint8_t *>(address);
     fillBlack();

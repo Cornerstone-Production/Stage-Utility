@@ -38,7 +38,7 @@ func bgraSurface(width: Int, height: Int, _ pixels: [RGB]) -> IOSurfaceRef {
   return surface
 }
 
-/// Page-aligned frame memory, as the shim hands it over.
+/// A frame's memory, as the shim hands it to a fill.
 final class FrameMemory {
   let target: CardFrameTarget
   init(width: Int, height: Int) {
@@ -74,11 +74,17 @@ extension SurfaceFrameSource {
   let converter: UYVYConverter
   init() throws { converter = try UYVYConverter() }
 
+  /// The path a picture takes: into a buffer of the converter's own
+  /// (`makeFrameBuffer`), as `SurfaceFrameSource` converts it, then read back into
+  /// `frame` to be checked.
   func convert(_ width: Int, _ height: Int, _ pixels: [RGB], rotation: Rotation = .none, into frame: FrameMemory)
     throws
   {
     let texture = try #require(converter.texture(for: bgraSurface(width: width, height: height, pixels)))
-    try converter.convert(texture, rotation: rotation, into: frame.target)
+    let t = frame.target
+    let buffer = try converter.makeFrameBuffer(rowBytes: t.rowBytes, height: t.height)
+    try converter.convert(texture, rotation: rotation, into: buffer, width: t.width, height: t.height, rowBytes: t.rowBytes)
+    t.bytes.copyMemory(from: buffer.contents(), byteCount: t.rowBytes * t.height)
   }
 
   @Test func whiteAndBlackAreTheEndsOfVideoRange() throws {
@@ -160,12 +166,10 @@ extension SurfaceFrameSource {
   }
 
   @Test func anOddWidthIsRefused() throws {
-    let frame = FrameMemory(width: 4, height: 1)
-    var target = frame.target
-    target.width = 3
+    let buffer = try converter.makeFrameBuffer(rowBytes: 8, height: 1)
     let texture = try #require(converter.texture(for: bgraSurface(width: 3, height: 1, Array(repeating: .grey(0), count: 3))))
     #expect(throws: UYVYConverter.Failure.notPixelPairs(width: 3)) {
-      try converter.convert(texture, rotation: .none, into: target)
+      try converter.convert(texture, rotation: .none, into: buffer, width: 3, height: 1, rowBytes: 8)
     }
   }
 

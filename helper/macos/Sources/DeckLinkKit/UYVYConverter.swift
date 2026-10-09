@@ -5,7 +5,8 @@ import StageUtilityOutputCore
 
 /// Turns a BGRA picture into the 8-bit UYVY 4:2:2 a DeckLink port takes, on the
 /// GPU: Rec. 709, video range (Y 16-235, Cb and Cr 16-240), turned 0, 90, 180 or
-/// 270 degrees clockwise, written straight into the frame's own memory.
+/// 270 degrees clockwise, into a buffer of its own (`makeFrameBuffer`), which
+/// `SurfaceFrameSource` copies into the card's frame at the fill.
 ///
 /// The picture is the page as the browser drew it, upright. For a quarter turn
 /// it is laid out at the turned size (1080 x 1920 for a 1920 x 1080 frame), as a
@@ -51,20 +52,6 @@ public final class UYVYConverter {
     descriptor.usage = [.shaderRead]
     descriptor.storageMode = .shared
     return device.makeTexture(descriptor: descriptor, iosurface: surface, plane: 0)
-  }
-
-  /// Convert `source` into `target`, turned by `rotation`. Returns once the GPU has
-  /// written the frame.
-  public func convert(_ source: MTLTexture, rotation: Rotation, into target: CardFrameTarget) throws {
-    try check(width: target.width, height: target.height, rowBytes: target.rowBytes, length: target.length)
-    // The frame's memory is page-aligned and a whole number of pages, so Metal maps
-    // it rather than copying it. Made per frame: a buffer kept over memory that is
-    // later freed would point the GPU at pages that are no longer the frame's.
-    guard
-      let buffer = device.makeBuffer(
-        bytesNoCopy: target.bytes, length: target.length, options: .storageModeShared, deallocator: nil)
-    else { throw Failure.gpu("could not make a buffer over the frame") }
-    try encode(source, rotation: rotation, into: buffer, width: target.width, height: target.height, rowBytes: target.rowBytes)
   }
 
   /// Convert `source` into `buffer`, `rowBytes` a line, turned by `rotation`.

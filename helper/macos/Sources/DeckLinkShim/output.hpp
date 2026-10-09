@@ -18,9 +18,9 @@
 
 namespace dlshim {
 
-/// One frame of an output: memory the helper owns, which the card reads. The SDK
-/// lets an application hand over its own IDeckLinkVideoFrame; owning the memory is
-/// what lets Metal write the picture straight into it.
+/// One frame of an output in the helper's own memory, which the card reads: the SDK
+/// lets an application hand over its own IDeckLinkVideoFrame. Used when the card
+/// will not make frames of its own; the picture is copied into it at the fill.
 class PoolFrame final : public IDeckLinkVideoFrame {
  public:
   PoolFrame(int32_t width, int32_t height, int32_t slot);
