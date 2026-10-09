@@ -20,7 +20,7 @@ if options.listOutputs {
   let store = OutputStateStore(directory: paths.userDir)
   let lines = OutputListing.lines(
     identity: MacIdentity.stored(paths: paths),
-    displays: DisplayEnumerator.current().map(\.descriptor),
+    displays: DisplayEnumerator.current().map(\.descriptor) + VirtualCards.outputs(count: options.virtualSDI),
     record: { store.record(for: $0) }, readProblem: store.readProblem)
   for line in lines { print(line) }
   exit(0)

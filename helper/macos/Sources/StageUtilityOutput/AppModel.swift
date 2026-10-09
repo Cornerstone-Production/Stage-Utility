@@ -148,9 +148,11 @@ final class AppModel: ObservableObject {
     DispatchQueue.main.asyncAfter(deadline: .now() + AppModel.displayChangeSettle, execute: work)
   }
 
-  /// Make the runtimes match the displays macOS lists now.
+  /// Make the runtimes match the displays macOS lists now, and the virtual card
+  /// outputs `--virtual-sdi` asks for.
   private func reconcile() {
     let outputs = DisplayEnumerator.current().map(PresentOutput.init(display:))
+      + VirtualCards.outputs(count: options.virtualSDI).map { PresentOutput(descriptor: $0, screen: nil) }
     let present = Set(outputs.map { $0.descriptor.key })
     for key in order where !present.contains(key) {
       Log.notice(.output, "\(runtimes[key]?.descriptor.port ?? key) is gone; its window is closed")
@@ -219,8 +221,12 @@ final class AppModel: ObservableObject {
   private func activate(_ key: String) {
     guard let rt = runtimes[key], rt.sink == nil else { return }
     let d = rt.descriptor
-    guard let screen = rt.output.screen else { return }
-    let sink: OutputSink = DisplaySink(descriptor: d, screen: screen)
+    let sink: OutputSink
+    if let screen = rt.output.screen {
+      sink = DisplaySink(descriptor: d, screen: screen)
+    } else {
+      sink = CardOutput(descriptor: d, card: NullCardSink())
+    }
     rt.sink = sink
     if !sink.surfaceProblems.isEmpty {
       for problem in sink.surfaceProblems { Log.error(.output, "\(d.port): \(problem)") }
