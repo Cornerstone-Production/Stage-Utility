@@ -240,7 +240,32 @@ describe("--dry-run", () => {
   it("stops with the way out when it has no server to download from", async () => {
     const r = await dryRun(scratch, [], { STAGE_INSTALL_TEST_UNAME_S: "Darwin", STAGE_INSTALL_TEST_OS_VERSION: "15.0", STAGE_INSTALL_TEST_UNAME_M: "arm64" });
     assert.equal(r.status, 1);
-    assert.match(r.err, /no server address to download from.*STAGE_SERVER=http/);
+    assert.match(r.err, /no server address to download from.*for this download only: sudo STAGE_DOWNLOAD_FROM=http/);
+    assert.match(r.err, /STAGE_SERVER=http:\/\/<server> also works, but it pins this Mac to that server for good/);
+  });
+
+  it("downloads from STAGE_DOWNLOAD_FROM without pinning the Mac to it", async () => {
+    const env = { STAGE_INSTALL_TEST_UNAME_S: "Darwin", STAGE_INSTALL_TEST_OS_VERSION: "14.5", STAGE_INSTALL_TEST_CONSOLE_USER: ME, STAGE_INSTALL_TEST_UNAME_M: "arm64" };
+    const only = await dryRun(scratch, [], { ...env, STAGE_DOWNLOAD_FROM: "http://192.0.2.20:8788" });
+    assert.equal(only.status, 0, only.err);
+    assert.match(only.out, /download http:\/\/192\.0\.2\.20:8788\/kiosk\/StageUtilityOutput-arm64\.zip/);
+    assert.doesNotMatch(only.out, /to .*\/server\b/, "STAGE_DOWNLOAD_FROM writes no server file");
+    // STAGE_SERVER is the separate choice: it is written, and is the download source unless overridden.
+    const both = await dryRun(scratch, [], { ...env, STAGE_DOWNLOAD_FROM: "http://192.0.2.20:8788", STAGE_SERVER: "http://192.0.2.10:8788" });
+    assert.match(both.out, /download http:\/\/192\.0\.2\.20:8788\//);
+    assert.match(both.out, /write http:\/\/192\.0\.2\.10:8788 to .*\/server/);
+  });
+
+  it("writes no server file for STAGE_DOWNLOAD_FROM, for real", { skip: !(has("uuidgen") && has("xxd")) && "needs uuidgen and xxd" }, async () => {
+    const r = await sh(`. "${SCRIPT}"; DRY=0; CONSOLE_USER=""; write_state; printf 'origin=%s\\n' "$(server_origin)"`, {
+      STAGE_INSTALL_SOURCED: "1",
+      STAGE_INSTALL_TEST_ROOT: scratch,
+      STAGE_DOWNLOAD_FROM: "http://192.0.2.20:8788",
+      ...makeShims().env,
+    });
+    assert.equal(r.status, 0, r.err);
+    assert.match(r.out, /origin=http:\/\/192\.0\.2\.20:8788\n/);
+    assert.ok(!fs.existsSync(path.join(scratch, "Library", "Application Support", "StageUtility", "server")), "nothing pins the Mac");
   });
 
   it("keeps the Chrome kiosk path behind --browser, and it needs no helper download", async () => {

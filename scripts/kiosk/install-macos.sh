@@ -15,11 +15,15 @@
 #   --dry-run    print every step and change nothing. Needs no sudo.
 #   --help       this text
 #
-#   STAGE_SERVER=http://<server>   where to download from and, for the Chrome
-#                                  kiosk, a server to use instead of discovery.
+#   STAGE_DOWNLOAD_FROM=http://<server>
+#                                  where to download the helper from, for this run
+#                                  only. Nothing is saved.
+#   STAGE_SERVER=http://<server>   a separate choice: pin this Mac to that server.
 #                                  Written to the `server` file, which skips
-#                                  discovery: set it only where broadcast does not
-#                                  cross.
+#                                  discovery for good, so the Mac will not follow the
+#                                  server if it moves. Set it only where broadcast
+#                                  does not cross. It is also where this run downloads
+#                                  from, unless STAGE_DOWNLOAD_FROM names another.
 #   STAGE_KIOSK_PORT=8789          the discovery port of the Chrome kiosk
 #
 # Running it again upgrades in place. It never mints a second device id.
@@ -52,7 +56,10 @@ AGENT_DIR="$ROOT/Library/LaunchAgents"
 KIOSK_LABEL=com.stageutility.kiosk
 AGENT="$AGENT_DIR/$KIOSK_LABEL.plist"
 PORT="${STAGE_KIOSK_PORT:-8789}"
+# SERVER is written to the `server` file and pins the Mac to it; DOWNLOAD_FROM only
+# says where this run downloads the app from and is never saved.
 SERVER="${STAGE_SERVER:-}"
+DOWNLOAD_FROM="${STAGE_DOWNLOAD_FROM:-}"
 
 APP_NAME=StageUtilityOutput.app
 APP_EXEC=StageUtilityOutput
@@ -109,7 +116,8 @@ Usage: install-macos.sh [--browser] [--dry-run]
 
 Run as root: curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
 Options go after -s --:  ... | sudo sh -s -- --dry-run
-STAGE_SERVER=http://<server> names the server to download from.
+STAGE_DOWNLOAD_FROM=http://<server> names the server to download from, for this run only.
+STAGE_SERVER=http://<server> pins this Mac to a server (see the top of this file).
 USAGE
 }
 
@@ -317,11 +325,13 @@ write_state() {
 }
 
 # ── Getting the app ────────────────────────────────────────────────────────
-# Where the server is, for the download: the operator's STAGE_SERVER, else the
-# address this script was served from, else the server file of an earlier
-# install. Empty when none of them is known.
+# Where the server is, for the download: the operator's STAGE_DOWNLOAD_FROM, else
+# their STAGE_SERVER, else the address this script was served from, else the server
+# file of an earlier install. Empty when none of them is known.
 server_origin() {
-  if [ -n "$SERVER" ]; then
+  if [ -n "$DOWNLOAD_FROM" ]; then
+    printf '%s' "$DOWNLOAD_FROM"
+  elif [ -n "$SERVER" ]; then
     printf '%s' "$SERVER"
   elif [ -n "$FETCHED_FROM" ]; then
     printf '%s' "$FETCHED_FROM"
@@ -331,7 +341,7 @@ server_origin() {
 }
 
 no_server_address() {
-  die "no server address to download from. Run the command from the server's Settings page, or: sudo STAGE_SERVER=http://<server> sh install-macos.sh"
+  die "no server address to download from. Run the command from the server's Settings page, or name the server for this download only: sudo STAGE_DOWNLOAD_FROM=http://<server> sh install-macos.sh (STAGE_SERVER=http://<server> also works, but it pins this Mac to that server for good and skips discovery, which is a separate choice)."
 }
 
 sha256_of() {

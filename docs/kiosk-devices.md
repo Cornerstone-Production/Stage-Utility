@@ -93,8 +93,14 @@ curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
 Running it again upgrades in place.
 
 **Where the app comes from.** The installer asks the server first: the address in
-`STAGE_SERVER` if set, else the one the server stamped into the script when it served
-it, else the `server` file of an earlier install. If that server cannot supply a zip
+`STAGE_DOWNLOAD_FROM` if set, else `STAGE_SERVER`, else the one the server stamped into
+the script when it served it, else the `server` file of an earlier install. A script
+saved and run by hand has no stamped address, so it needs one of the first two:
+`sudo STAGE_DOWNLOAD_FROM=http://<server> sh install-macos.sh`. That names the server for
+this run and saves nothing. `STAGE_SERVER` is a different choice: it also writes the
+`server` file, which pins the Mac to that server and skips discovery for good, so the
+Mac does not follow the server if it moves. Use it only where discovery's broadcast
+does not cross. If that server cannot supply a zip
 that matches its checksum, it falls back to the GitHub release for the version in the
 server's `/api/update/status`. If neither works, it installs nothing and says what each
 answered.
