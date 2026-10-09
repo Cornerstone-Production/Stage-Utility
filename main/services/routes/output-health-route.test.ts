@@ -55,10 +55,10 @@ describe("who may post health", () => {
     assert.deepEqual(healthList().map((h) => [h.deviceId, h.fps, h.repeated, h.dropped]), [[ID, 59.94, 0.2, 0]]);
   });
 
-  it("or with it as ?token=, as /enroll takes it", async () => {
+  it("and not as ?token=: the helper sends the header only", async () => {
     const r = await post(ID, REPORT, { query: `?token=${SECRET}` });
-    assert.equal(r.status, 200);
-    assert.equal(healthList().length, 1);
+    assert.equal(r.status, 401);
+    assert.deepEqual(healthList(), [], "a secret in the query string was accepted");
   });
 
   it("not without a secret: 401, and nothing is recorded", async () => {
@@ -68,17 +68,26 @@ describe("who may post health", () => {
   });
 
   it("not with somebody else's secret: 401, and nothing is recorded", async () => {
-    for (const opts of [{ token: "not-the-secret" }, { query: "?token=not-the-secret" }]) {
-      const r = await post(ID, REPORT, opts);
-      assert.equal(r.status, 401, JSON.stringify(opts));
-    }
+    const r = await post(ID, REPORT, { token: "not-the-secret" });
+    assert.equal(r.status, 401);
     assert.deepEqual(healthList(), []);
   });
 
-  it("not for a device this server holds no binding for: 404", async () => {
-    const r = await post("someone-else.sdi-9", REPORT, { token: SECRET });
-    assert.equal(r.status, 404);
+  it("not for a device this server holds no binding for: the same 401, so ids cannot be enumerated", async () => {
+    const unknown = await post("someone-else.sdi-9", REPORT, { token: SECRET });
+    const wrong = await post(ID, REPORT, { token: "not-the-secret" });
+    assert.equal(unknown.status, 401);
+    assert.equal(unknown.body, wrong.body, "an unknown id and a wrong secret answered differently");
     assert.deepEqual(healthList(), []);
+  });
+
+  it("not for a binding whose secret is not pinned yet, whatever it presents", async () => {
+    await updateDevices((cur) => [...cur, { id: "unpinned.sdi-2", token: "", outputId: "display-2", macs: [], output: { kind: "decklink", name: "SDI 2", port: "SDI 2" } }]);
+    for (const token of ["anything", ""]) {
+      const r = await post("unpinned.sdi-2", REPORT, token ? { token } : {});
+      assert.equal(r.status, 401, `token ${JSON.stringify(token)}`);
+    }
+    assert.deepEqual(healthList(), [], "an unpinned binding took a health report");
   });
 });
 

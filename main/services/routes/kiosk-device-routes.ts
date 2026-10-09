@@ -148,10 +148,10 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
 
   // ── An output helper's health, from the device itself ──────────────────
   // Authenticated by the device's own secret, the one /enroll checks, not by the
-  // same-origin gate a browser is held to: the caller is a native app. The secret
-  // travels in the `x-device-token` header, or as `?token=` as it does to
-  // /enroll. An id this server holds no binding for is 404, a wrong or missing
-  // secret is 401, and neither says anything about the other.
+  // same-origin gate a browser is held to: the caller is a native app, and it
+  // sends the secret in `x-device-token` only. An id this server holds no binding
+  // for, a binding with no secret pinned yet, and a wrong or missing secret are
+  // all the same 401, so the route cannot be used to ask which ids exist.
   const healthMatch = method === "POST" ? pathname.match(/^\/api\/devices\/([^/]+)\/health$/) : null;
   if (healthMatch) {
     let id: string;
@@ -163,13 +163,11 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     }
     const devices = await kioskDevicesStore.load();
     const known = findById(devices, id);
-    if (!known) {
-      error(res, "no device is set up with that id", 404);
-      return;
-    }
-    const secret = clean(headerValue(req.headers, "x-device-token") || null) ?? clean(url.searchParams.get("token"));
-    if (!authorise(devices, id, secret)) {
-      error(res, "the device secret is missing or wrong", 401);
+    const secret = clean(headerValue(req.headers, "x-device-token") || null);
+    // authorise() trusts the first secret an UNPINNED binding is shown, which is
+    // right for /enroll and would let anyone who knew an id report for it here.
+    if (!known || known.token === "" || !authorise(devices, id, secret)) {
+      error(res, "the device id or secret is missing or wrong", 401);
       return;
     }
     const parsed = parseHealthReport(await readBody(req));
