@@ -234,8 +234,8 @@ Profile baseline, or Keyframe interval 1 s with B-frames 0); a pulled camera
 or an SRT/RTMP push feed is not necessarily OBS, so the same message names
 "the device" instead.
 
-That fallback needs a screen willing to play HLS. A screen's own **Use HLS on
-this screen** switch (its overflow menu on the Screens page) can turn it off —
+That fallback needs a screen willing to play HLS. A screen's own **Use HLS**
+switch (in its **Screen settings** on the Screens page) can turn it off —
 a Pi 4 can freeze decoding HLS, so this keeps a struggling screen on WebRTC
 only. With it off, a feed that needs HLS shows **This screen can't play
 video** there instead, while it keeps playing normally on every other screen.
@@ -600,8 +600,8 @@ Each screen writes its own `[video]` lines from the browser:
   Its retries every 5 minutes are not logged.
 - An HLS picture jumping back to live after falling behind, with how many
   seconds it skipped. At most one every 10 seconds per feed on a screen.
-- A feed that needs HLS refused by a screen's own **Use HLS on this screen**
-  switch, once per outage, and a line once it can play again — the screen
+- A feed that needs HLS refused by a screen's own **Use HLS** switch (Screen
+  settings), once per outage, and a line once it can play again — the screen
   allows HLS again, or the feed stops needing it. Nothing repeats while the
   switch stays off.
 - A playing widget's own stats failing to read (for the health report

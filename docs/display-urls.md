@@ -57,8 +57,8 @@ address.
 
 Append `?kiosk=1` to any display's address and its top bar drops the escape
 hatches — the QR/settings link and the clickable brand logo — while leaving
-the rest of the bar alone. It is the same effect as that screen's own **Lock
-display** toggle on Screens, as a link rather than a setting: use it for a
+the rest of the bar alone. It is the same effect as the **Lock** switch in that screen's
+**Screen settings** on Screens, as a link rather than a setting: use it for a
 one-off address handed to someone outside Production, so opening it can't lead
 to Settings or another display. Soft by design, like the toggle it matches —
 editing the URL undoes it — a guardrail, not access control.

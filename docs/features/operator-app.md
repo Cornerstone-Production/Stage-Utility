@@ -171,9 +171,9 @@ the panel covers the page instead.
 
 | Section | |
 |---|---|
-| **What this screen is** | **Wall display** (read from across the room; buttons draw but do nothing) or **Control surface** (a touch screen whose buttons work for anyone at it). Choosing a control surface asks first. For a control surface, **List in the sidebar** keeps the console it shows in the sidebar's list, or out of it: see [Consoles](#consoles) |
-| **What it shows** | the view, from the views that fit the role: control-surface views for a control surface, wall-screen views for a wall display |
-| **Name and address** | the name; the **friendly link** (an alias such as `lobby`, saved with **Save** so a refusal stays on screen: see [Friendly URLs](../display-urls.md#friendly-urls)); and the permanent address, which never changes |
+| **What this screen is** | **Wall display** (read from across the room; buttons draw but do nothing) or **Control surface** (a touch screen whose buttons work for anyone at it). Choosing a control surface asks first. For a control surface showing a console, **List in the sidebar** keeps that console in the sidebar's list, or out of it: see [Consoles](#consoles) |
+| **What it shows** | the view, from the views that fit the role: custom control-surface views for a control surface, wall-screen views for a wall display |
+| **Name and address** | the name; the **friendly link** (an alias such as `lobby`, saved with **Save** so a refusal stays on screen: see [Friendly URLs](../display-urls.md#friendly-urls)); and the permanent address, which never changes, with a button that copies it |
 | **On the screen** | **Top bar** (the brand, plan and QR strip along the top), **Lock** (keeps the top bar but removes its links, so the screen cannot be navigated away from) and **Text size** (50 to 300 %, for ServiceCue and readouts). Top bar and Lock are offered only where the view draws a bar; a calendar or a script wall draws none |
 | **Messages** | the [message groups](stage-messages.md#putting-a-screen-in-groups) the screen is in |
 | **Video** | **Use HLS**. Off, the screen plays only WebRTC, and a feed that needs HLS says it can't play there |
@@ -186,7 +186,12 @@ ways forward. **Use a copy on this screen** (the default) duplicates the view,
 gives the copy the new role and points only this screen at it; the copy is named
 `<view> (control surface)` or `<view> (wall)`, and every other screen keeps the
 original. **Choose a different view** offers only views that fit. A view only
-this screen shows changes with it.
+this screen shows changes with it. If the other screens stop showing the view
+while you decide, the panel says so and **Apply** makes the plain change.
+
+Only a custom view can be a control surface, so a calendar, script or other
+built-in view is never turned into one, and neither is a copy of it: making a
+screen showing one a control surface asks for a different view instead.
 
 ### Adding a screen
 
@@ -200,10 +205,14 @@ this screen shows changes with it.
 3. **Name it.** The name and an optional friendly link.
 
 **Nothing is created until Create screen**, which is available on every step
-because every step has a default: a wall display, no view, a numbered name.
-Closing the panel creates nothing. A refusal (a link another screen holds, say)
-leaves the panel open with the reason. A device is claimed by the same step that
-creates its screen, and if that fails the screen made for it is taken back.
+because every step has a default: a wall display, no view, and no name, which
+names the screen **Display** and its number (a device is named for its
+hostname). Closing the panel creates nothing. A refusal (a link another screen
+holds, say) leaves the panel open with the reason. A device is claimed by the
+same step that creates its screen, and if that fails everything made for it is
+taken back. If another operator sets the same device up while the panel is
+open, the panel says which screen it became and **Create screen** is turned
+off.
 
 ## Consoles
 
