@@ -122,6 +122,16 @@ describe("--dry-run", () => {
     assert.ok(fs.existsSync(path.join(agents, "com.stageutility.kiosk.plist")), "a dry run removes nothing");
   });
 
+  it("shows the migration marker in the plan, and writes nothing", async () => {
+    const agents = path.join(scratch, "Library", "LaunchAgents");
+    fs.mkdirSync(agents, { recursive: true });
+    fs.writeFileSync(path.join(agents, "com.stageutility.kiosk.plist"), "<plist/>");
+    const r = await dryRun(scratch, [], { ...server, STAGE_INSTALL_TEST_UNAME_M: "arm64" });
+    assert.match(r.out, /write .*migrated-from-kiosk, which tells the helper/);
+    assert.match(r.out, /main display comes back as the screen the Chrome kiosk showed/);
+    assert.ok(!fs.existsSync(path.join(scratch, "Library", "Application Support")), "a dry run writes no marker");
+  });
+
   it("refuses a Mac the helper cannot run on, and points at --browser", async () => {
     const old = await dryRun(scratch, [], { ...server, STAGE_INSTALL_TEST_UNAME_M: "arm64", STAGE_INSTALL_TEST_OS_VERSION: "13.6.1" });
     assert.equal(old.status, 1);
@@ -387,5 +397,48 @@ describe("the device identity survives a re-run", () => {
     assert.match(first, /^[0-9a-f-]{36}\n$/);
     assert.equal((await run()).status, 0);
     assert.equal(fs.readFileSync(path.join(state(), "device-id"), "utf8"), first);
+  });
+});
+
+describe("the migration marker", () => {
+  const state = () => path.join(scratch, "Library", "Application Support", "StageUtility");
+  const marker = () => path.join(state(), "migrated-from-kiosk");
+  const migrate = () =>
+    sh(`. "${SCRIPT}"; DRY=0; CONSOLE_UID=""; migrate_kiosk`, { STAGE_INSTALL_SOURCED: "1", STAGE_INSTALL_TEST_ROOT: scratch });
+
+  it("is written, 0644, when the Chrome kiosk agent is removed, and the identity files stay", async () => {
+    const agents = path.join(scratch, "Library", "LaunchAgents");
+    const bin = path.join(scratch, "usr", "local", "bin");
+    fs.mkdirSync(agents, { recursive: true });
+    fs.mkdirSync(bin, { recursive: true });
+    fs.mkdirSync(state(), { recursive: true });
+    fs.writeFileSync(path.join(agents, "com.stageutility.kiosk.plist"), "<plist/>");
+    fs.writeFileSync(path.join(bin, "stage-utility-kiosk"), "#!/bin/sh\n");
+    fs.writeFileSync(path.join(state(), "device-id"), "keep-me\n");
+    fs.writeFileSync(path.join(state(), "token"), "keep-me-too");
+
+    const r = await migrate();
+    assert.equal(r.status, 0, r.err);
+    assert.ok(fs.existsSync(marker()), "the marker is how the helper learns this Mac was a kiosk");
+    assert.equal(fs.statSync(marker()).mode & 0o777, 0o644);
+    assert.match(fs.readFileSync(marker(), "utf8"), /^\d{4}-\d{2}-\d{2}T/);
+    assert.ok(!fs.existsSync(path.join(agents, "com.stageutility.kiosk.plist")));
+    assert.ok(!fs.existsSync(path.join(bin, "stage-utility-kiosk")));
+    assert.equal(fs.readFileSync(path.join(state(), "device-id"), "utf8"), "keep-me\n");
+    assert.equal(fs.readFileSync(path.join(state(), "token"), "utf8"), "keep-me-too");
+  });
+
+  it("is not written on a fresh install, nor on a re-run after the agent is gone", async () => {
+    const r = await migrate();
+    assert.equal(r.status, 0, r.err);
+    assert.ok(!fs.existsSync(marker()), "a Mac that was never a kiosk must not be told it was");
+    assert.ok(!fs.existsSync(state()), "and nothing else is made either");
+  });
+
+  it("leaves an existing marker alone when run again", async () => {
+    fs.mkdirSync(state(), { recursive: true });
+    fs.writeFileSync(marker(), "earlier\n");
+    assert.equal((await migrate()).status, 0);
+    assert.equal(fs.readFileSync(marker(), "utf8"), "earlier\n");
   });
 });

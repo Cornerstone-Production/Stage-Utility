@@ -112,11 +112,14 @@ release made before the helper existed has no zip, and answers `404` the same wa
 `.sha256` files when the build ran for it; see [distribution](ops/distribution.md#what-a-release-contains).
 
 **Coming from the Chrome kiosk.** If the earlier agent is there
-(`com.stageutility.kiosk`), the installer stops it, removes its LaunchAgent and
-launcher, and says so, once the helper is in. The Mac keeps its device id, token and
-Chrome profile. The helper's outputs have ids of their own, `<the Mac's id>.<output>`,
-so the screen the Chrome kiosk showed does not come back by itself: it appears under
-*Not set up yet*, and **Use for an existing screen** puts it on the screen it had.
+(`com.stageutility.kiosk`), the installer writes
+`/Library/Application Support/StageUtility/migrated-from-kiosk`, stops the agent,
+removes its LaunchAgent and launcher, and says so, once the helper is in. The file is
+written only then, never on a fresh install. The Mac keeps its device id, token and
+Chrome profile. The helper reads the file and gives the Mac's main display the kiosk's
+own id and token, and turns it on, so the screen the Chrome kiosk showed comes back by
+itself on that display. The Mac's other displays are new outputs under *Not set up
+yet*. Deleting the file stops the helper doing this.
 
 **What a person still has to do, once, at the Mac.** macOS does not let a script:
 
@@ -130,8 +133,9 @@ so the screen the Chrome kiosk showed does not come back by itself: it appears u
   *Never*, and the screen saver and display-off times read *Never*. The installer sets
   them where macOS accepts it, and a managed Mac may not.
 
-The installer prints this list when it finishes. The Mac's main display, the one with
-the menu bar, is off until you turn it on in the helper's window.
+The installer prints this list when it finishes. On a Mac that is not coming from the
+Chrome kiosk, the main display, the one with the menu bar, is off until you turn it on
+in the helper's window.
 
 ## Size
 

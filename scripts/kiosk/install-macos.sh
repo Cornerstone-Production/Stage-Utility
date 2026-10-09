@@ -72,6 +72,10 @@ STAGING=""
 OLD_APP=""
 AGENT_STOPPED=0
 FINISHED=0
+MIGRATED=0
+# Tells the helper this Mac was a Chrome kiosk, so its main display takes over the
+# kiosk's binding (the bare device id and the installer's token) and starts on.
+MARKER="$STATE_DIR/migrated-from-kiosk"
 
 say() { printf '%s\n' "$*"; }
 warn() { printf 'install-macos.sh: %s\n' "$*" >&2; }
@@ -443,11 +447,19 @@ install_helper_agent() {
 migrate_kiosk() {
   if [ ! -f "$AGENT" ] && [ ! -f "$BIN" ]; then return 0; fi
   say "==> Replacing the Chrome kiosk agent from an earlier install"
+  MIGRATED=1
   if [ "$DRY" -eq 1 ]; then
+    would "write $MARKER, which tells the helper to give this Mac's main display the kiosk's screen"
     would "stop $KIOSK_LABEL for the console user, then remove $AGENT and $BIN"
     would "keep the device id, the token and the Chrome profile in $STATE_DIR"
     return 0
   fi
+  # First, so a failure to write it leaves the kiosk running, not a Mac that has
+  # lost its screen and carries no word of why. Root-owned and world-readable: the
+  # helper only reads it. Written only here, so a fresh install never has one.
+  mkdir -p "$STATE_DIR"
+  date -u +%Y-%m-%dT%H:%M:%SZ >"$MARKER" || die "could not write $MARKER; the Chrome kiosk was left as it was."
+  chmod 644 "$MARKER"
   if [ -n "$CONSOLE_UID" ] && launchctl print "gui/$CONSOLE_UID/$KIOSK_LABEL" >/dev/null 2>&1; then
     if launchctl bootout "gui/$CONSOLE_UID/$KIOSK_LABEL"; then
       say "    stopped the running kiosk"
@@ -457,9 +469,8 @@ migrate_kiosk() {
   fi
   rm -f "$AGENT" "$BIN"
   say "    removed $AGENT and $BIN"
-  say "    this Mac keeps its device id. If the screen it used to show is listed under"
-  say "    \"Not set up yet\" instead of coming back by itself, choose \"Use for an existing screen\"."
-  say "    The Chrome profile in $STATE_DIR is left in place."
+  say "    this Mac keeps its device id and its screen: the helper brings it back by itself"
+  say "    on the main display. The Chrome profile in $STATE_DIR is left in place."
 }
 
 # ── What an output Mac needs ───────────────────────────────────────────────
@@ -509,9 +520,14 @@ notes() {
   say "        begins or display is turned off\" -> Never, and check that the screen saver"
   say "        and display-off times read Never. This installer sets them where macOS"
   say "        accepts it; a managed Mac may ignore it."
-  say "    Then open Screens in Stage Utility: this Mac's displays are listed under"
-  say "    \"Not set up yet\". The Mac's main display (the one with the menu bar) is off"
-  say "    until you switch it on in the helper's window."
+  if [ "$MIGRATED" -eq 1 ]; then
+    say "    This Mac's main display comes back as the screen the Chrome kiosk showed. Its"
+    say "    other displays are listed under \"Not set up yet\" in Screens."
+  else
+    say "    Then open Screens in Stage Utility: this Mac's displays are listed under"
+    say "    \"Not set up yet\". The Mac's main display (the one with the menu bar) is off"
+    say "    until you switch it on in the helper's window."
+  fi
 }
 
 # ── The two installs ───────────────────────────────────────────────────────
