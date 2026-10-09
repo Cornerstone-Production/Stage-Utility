@@ -230,6 +230,25 @@ let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a so
       ])
   }
 
+  /// A reopening says the leads as the first opening did, when they are not the
+  /// standard ones: the log is where a run's settings are read back from.
+  @Test func aReopenedPortSaysItsLeads() {
+    let log = LogLines()
+    let port = softwarePort(NumberedSource(), log: log, leads: CardLeads(headStartMs: 16, fillLeadMs: 4))
+    defer { port.close() }
+    port.open(videoMode: nil)
+    port.fakeUnplug()
+    port.sync()
+    port.retry()
+    port.sync()
+    #expect(
+      log.lines == [
+        "SDI test: opened in 16x4 at 59.94 on a software clock; pictures asked for 16 ms and filled 4 ms before air",
+        "SDI test: lost (the device was removed); trying again every 3600 s",
+        "SDI test: reopened in 16x4 at 59.94 on a software clock; pictures asked for 16 ms and filled 4 ms before air",
+      ])
+  }
+
   static let p50 = CardMode(
     code: 0x4870_3530, driverName: "1080p50", width: 1920, height: 1080, frameDuration: 1000, timeScale: 50000,
     field: .progressive, supportsYUV8: true)

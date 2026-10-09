@@ -154,19 +154,7 @@ public final class DeckLinkOutputPort: CardSink {
       stopTimers()
       closeHandle()
       self.videoMode = videoMode
-      switch attempt() {
-      case .opened(let mode, let frames):
-        current = .running(mode: mode, frames: frames)
-        log(.info, "\(label): opened in \(mode)\(frames == .helper ? " with the helper's frames" : "")\(leads.text)")
-        startPolling()
-      case .refused(let why):
-        current = .refused(why)
-        log(.error, "\(label): refused \(videoMode ?? VideoModes.defaultMode): \(why)")
-      case .failed(let why):
-        current = .lost(why)
-        log(.error, "\(label): could not open (\(why)); trying again every \(Int(retryInterval)) s")
-        startRetrying()
-      }
+      openNow(retrying: false)
       return current
     }
   }
@@ -230,56 +218,101 @@ public final class DeckLinkOutputPort: CardSink {
     case failed(String)
   }
 
-  private func attempt() -> Attempt {
-    var why = [CChar](repeating: 0, count: 256)
-    let box: CallbackBox
-    let opened: OpaquePointer?
-    let modeName: String
+  /// Open, and say how it went: the one path for a first open and a lost port's
+  /// retry. A retry that fails again says nothing more; the line that said the port
+  /// was lost is enough, and its timer keeps trying.
+  private func openNow(retrying: Bool) {
+    switch attempt() {
+    case .opened(let mode, let frames):
+      stopTimers()
+      current = .running(mode: mode, frames: frames)
+      log(
+        .info,
+        "\(label): \(retrying ? "reopened" : "opened") in \(mode)\(frames == .helper ? " with the helper's frames" : "")\(leads.text)"
+      )
+      startPolling()
+    case .refused(let why):
+      stopTimers()
+      current = .refused(why)
+      log(.error, "\(label): refused \(videoMode ?? VideoModes.defaultMode): \(why)")
+    case .failed(let why):
+      current = .lost(why)
+      guard !retrying else { return }
+      log(.error, "\(label): could not open (\(why)); trying again every \(Int(retryInterval)) s")
+      startRetrying()
+    }
+  }
+
+  /// What opening the hardware takes: the mode's name for the log, its frame size
+  /// and time scale, and the call that opens it with the callbacks.
+  private struct Plan {
+    var modeName: String
+    var width: Int
+    var height: Int
+    var timeScale: Int64
+    var open: (UnsafePointer<dl_callbacks>, UnsafeMutablePointer<CChar>, Int) -> OpaquePointer?
+  }
+
+  private func plan() -> Result<Plan, ModeRefusal> {
     switch hardware {
     case .port(let port):
-      let mode: CardMode
-      switch VideoModes.resolve(videoMode, among: port.modes) {
-      case .failure(let refusal): return .refused(refusal.reason)
-      case .success(let m): mode = m
+      return VideoModes.resolve(videoMode, among: port.modes).map { mode in
+        Plan(
+          modeName: VideoModes.name(of: mode) ?? mode.driverName, width: mode.width, height: mode.height,
+          timeScale: mode.timeScale
+        ) { callbacks, why, length in
+          var id = port.id.shim
+          return dl_output_open(&id, mode.code, callbacks, why, length)
+        }
       }
-      modeName = VideoModes.name(of: mode) ?? mode.driverName
-      box = CallbackBox(source: source, timeScale: mode.timeScale, port: self, queue: queue)
-      var id = port.id.shim
-      var callbacks = box.callbacks(depth: depth, leads: leads, frames: preferredFrames)
-      opened = dl_output_open(&id, mode.code, &callbacks, &why, why.count)
-      if opened != nil { openSize = (mode.width, mode.height) }
     case .virtual:
-      let mode: CardMode
-      switch VideoModes.resolve(videoMode, among: VideoModes.standard) {
-      case .failure(let refusal): return .refused(refusal.reason)
-      case .success(let m): mode = m
+      return VideoModes.resolve(videoMode, among: VideoModes.standard).map { mode in
+        Self.softwarePlan(
+          name: "\(mode.driverName) on a software clock", width: mode.width, height: mode.height,
+          frameDuration: mode.frameDuration, timeScale: mode.timeScale,
+          behaviour: dl_fake_behaviour(
+            timer: true, refuse_helper_frames: false, make_no_frames: false, min_lead_us: 0, count_frames: false,
+            clock_unknown: false))
       }
-      modeName = "\(mode.driverName) on a software clock"
-      box = CallbackBox(source: source, timeScale: mode.timeScale, port: self, queue: queue)
-      var callbacks = box.callbacks(depth: depth, leads: leads, frames: preferredFrames)
-      var behaviour = dl_fake_behaviour(
-        timer: true, refuse_helper_frames: false, make_no_frames: false, min_lead_us: 0, count_frames: false,
-        clock_unknown: false)
-      opened = dl_fake_output_open(
-        Int32(mode.width), Int32(mode.height), mode.frameDuration, mode.timeScale, &behaviour, &callbacks, &why,
-        why.count)
-      if opened != nil { openSize = (mode.width, mode.height) }
     case .softwareClock(
       let width, let height, let duration, let scale, let ticks, let refuses, let noFrames, let lead, let counts,
       let unknown):
-      modeName = "\(width)x\(height) at \(VideoModes.rateText(Double(scale) / Double(duration))) on a software clock"
-      box = CallbackBox(source: source, timeScale: scale, port: self, queue: queue)
-      var callbacks = box.callbacks(depth: depth, leads: leads, frames: preferredFrames)
-      var behaviour = dl_fake_behaviour(
-        timer: ticks, refuse_helper_frames: refuses, make_no_frames: noFrames, min_lead_us: Int64(lead * 1000),
-        count_frames: counts, clock_unknown: unknown)
-      opened = dl_fake_output_open(
-        Int32(width), Int32(height), duration, scale, &behaviour, &callbacks, &why, why.count)
-      if opened != nil { openSize = (width, height) }
+      return .success(
+        Self.softwarePlan(
+          name: "\(width)x\(height) at \(VideoModes.rateText(Double(scale) / Double(duration))) on a software clock",
+          width: width, height: height, frameDuration: duration, timeScale: scale,
+          behaviour: dl_fake_behaviour(
+            timer: ticks, refuse_helper_frames: refuses, make_no_frames: noFrames, min_lead_us: Int64(lead * 1000),
+            count_frames: counts, clock_unknown: unknown)))
+    }
+  }
+
+  private static func softwarePlan(
+    name: String, width: Int, height: Int, frameDuration: Int64, timeScale: Int64, behaviour: dl_fake_behaviour
+  ) -> Plan {
+    Plan(modeName: name, width: width, height: height, timeScale: timeScale) { callbacks, why, length in
+      var behaviour = behaviour
+      return dl_fake_output_open(
+        Int32(width), Int32(height), frameDuration, timeScale, &behaviour, callbacks, why, length)
+    }
+  }
+
+  private func attempt() -> Attempt {
+    let plan: Plan
+    switch self.plan() {
+    case .failure(let refusal): return .refused(refusal.reason)
+    case .success(let p): plan = p
+    }
+    let box = CallbackBox(source: source, timeScale: plan.timeScale, port: self, queue: queue)
+    var callbacks = box.callbacks(depth: depth, leads: leads, frames: preferredFrames)
+    var why = [CChar](repeating: 0, count: 256)
+    let opened = why.withUnsafeMutableBufferPointer { buffer in
+      plan.open(&callbacks, buffer.baseAddress!, buffer.count)
     }
     guard let opened else { return .failed(String(cString: why)) }
     handle = opened
     self.box = box
+    openSize = (plan.width, plan.height)
     let frames: Frames = dl_output_frames(opened) == DL_FRAMES_CARD ? .card : .helper
     if frames != preferredFrames, !saidSwitch {
       saidSwitch = true
@@ -293,25 +326,12 @@ public final class DeckLinkOutputPort: CardSink {
     // baseline, not falling behind. Being behind goes on across a reopening.
     lastPolled = countsNow()
     stalledPolls = 0
-    return .opened(modeName, frames)
+    return .opened(plan.modeName, frames)
   }
 
   private func retryNow() {
     guard case .lost = current else { return }
-    switch attempt() {
-    case .opened(let mode, let frames):
-      current = .running(mode: mode, frames: frames)
-      stopTimers()
-      log(.info, "\(label): reopened in \(mode)\(frames == .helper ? " with the helper's frames" : "")")
-      startPolling()
-    case .refused(let why):
-      current = .refused(why)
-      stopTimers()
-      log(.error, "\(label): refused \(videoMode ?? VideoModes.defaultMode): \(why)")
-    case .failed:
-      // Still gone. The line that said it was lost is enough.
-      break
-    }
+    openNow(retrying: true)
   }
 
   /// On the queue. `from` is the output the news is about: a loss reported by an
