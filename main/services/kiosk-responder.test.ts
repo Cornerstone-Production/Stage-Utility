@@ -17,7 +17,7 @@ process.env.HOME = path.join(TMP, "home");
 const { startKioskResponder, stopKioskResponder } = await import("./kiosk-responder.js");
 const { encodeProbe, decodeReply } = await import("./kiosk-discovery.js");
 const { startScan, seenDevices, resetKioskPresence } = await import("./kiosk-presence.js");
-const { updateDevices, release } = await import("./kiosk-devices-store.js");
+const { kioskDevicesStore, updateDevices, release } = await import("./kiosk-devices-store.js");
 
 const THIS_MAC = "02:00:00:00:00:aa";
 const OTHER_MAC = "02:00:00:00:00:bb";
@@ -164,6 +164,18 @@ describe("a helper output bound to this server", () => {
     }
     assert.equal(seenLines().length, 1, `expected one line:\n${seenLines().join("\n")}`);
     assert.match(seenLines()[0], /^\[output-helper\] output seen: other-mac\.sdi-1 \(decklink "SDI 1 · Card A"\) on booth-mini$/);
+  });
+
+  test("a probe keeps the stored output current", async () => {
+    // A card reporting new modes, or an output renamed, must reach the binding the
+    // Screen settings read it from: the responder hands the probe's output to
+    // touch(), and a probe that did not would leave the stored one as it was
+    // claimed.
+    await bind();
+    const renamed = { kind: "decklink" as const, name: "SDI 1 · Card B", port: "SDI 1", modes: ["1080p59.94", "720p60"] };
+    await probe({ ...bound, output: renamed });
+    const stored = (await kioskDevicesStore.load()).find((d) => d.id === ID);
+    assert.deepEqual(stored?.output, renamed, "the stored binding kept the output it was claimed with");
   });
 
   test("a released output is listed at its very next probe", async () => {
