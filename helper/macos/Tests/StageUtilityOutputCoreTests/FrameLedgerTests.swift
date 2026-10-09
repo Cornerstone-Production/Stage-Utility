@@ -105,18 +105,25 @@ import Testing
     for _ in 0..<10 { #expect(w.second(repeated: 0, dropped: 0) == .none) }
   }
 
-  @Test func theFirstSecondWithARepeatOrADropFallsBehindOnce() {
+  /// The server's line: 5% of a second's frames repeated is late. Fewer is jitter.
+  @Test func aFewRepeatsAreJitterNotFallingBehind() {
+    var w = LagWatch()
+    for _ in 0..<10 { #expect(w.second(repeated: LagWatch.badRepeats - 1, dropped: 0) == .none) }
+    #expect(!w.isBehind)
+  }
+
+  @Test func theFirstBadSecondFallsBehindOnce() {
     var w = LagWatch()
     #expect(w.second(repeated: 3, dropped: 0) == .fellBehind(repeated: 3, dropped: 0))
     #expect(w.second(repeated: 9, dropped: 1) == .none)
     var d = LagWatch()
-    #expect(d.second(repeated: 0, dropped: 2) == .fellBehind(repeated: 0, dropped: 2))
+    #expect(d.second(repeated: 0, dropped: 1) == .fellBehind(repeated: 0, dropped: 1))
   }
 
-  @Test func itCatchesUpAfterEnoughCleanSecondsInARow() {
+  @Test func itCatchesUpAfterEnoughGoodSecondsInARow() {
     var w = LagWatch()
-    _ = w.second(repeated: 1, dropped: 0)
-    for _ in 1..<LagWatch.recoverySeconds { #expect(w.second(repeated: 0, dropped: 0) == .none) }
+    _ = w.second(repeated: 5, dropped: 0)
+    for _ in 1..<LagWatch.recoverySeconds { #expect(w.second(repeated: 1, dropped: 0) == .none) }
     #expect(w.second(repeated: 0, dropped: 0) == .caughtUp(afterSeconds: LagWatch.recoverySeconds + 1))
     #expect(!w.isBehind)
   }
@@ -125,9 +132,9 @@ import Testing
   /// second "fell behind" line.
   @Test func aStutterWhileBehindRestartsTheCleanCount() {
     var w = LagWatch()
-    _ = w.second(repeated: 1, dropped: 0)
+    _ = w.second(repeated: 4, dropped: 0)
     for _ in 0..<(LagWatch.recoverySeconds - 1) { _ = w.second(repeated: 0, dropped: 0) }
-    #expect(w.second(repeated: 2, dropped: 0) == .none)
+    #expect(w.second(repeated: 0, dropped: 1) == .none)
     for _ in 0..<(LagWatch.recoverySeconds - 1) { #expect(w.second(repeated: 0, dropped: 0) == .none) }
     #expect(w.second(repeated: 0, dropped: 0) == .caughtUp(afterSeconds: 2 * LagWatch.recoverySeconds + 1))
   }

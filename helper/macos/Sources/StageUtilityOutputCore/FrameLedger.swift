@@ -90,9 +90,13 @@ public struct FrameLedger: Equatable {
 /// Whether a card output is keeping up, decided once a second from that second's
 /// repeats and drops, and worth a log line only when it changes.
 ///
-/// It falls behind on the first second with any repeat or drop, and is back once
-/// `recoverySeconds` seconds in a row have had none, so a page that stutters now and
-/// then is one pair of lines, not a line a second.
+/// A second is bad when it dropped any slot, or repeated `badRepeats` or more: 5% of
+/// 59.94, the server's own line between late and merely jittery
+/// (`REPEATED_BAD_PERCENT` in output-health.ts, "one frame in twenty is plain to the
+/// eye"). A single repeat when the main thread was busy for a moment is not falling
+/// behind. It falls behind on the first bad second, and is back once
+/// `recoverySeconds` seconds in a row have been good, so a page that stutters now
+/// and then is one pair of lines, not a line a second.
 public struct LagWatch: Equatable {
   public enum Event: Equatable {
     case none
@@ -103,6 +107,7 @@ public struct LagWatch: Equatable {
   }
 
   public static let recoverySeconds = 5
+  public static let badRepeats = 3
 
   public private(set) var isBehind = false
   private var cleanRun = 0
@@ -111,7 +116,7 @@ public struct LagWatch: Equatable {
   public init() {}
 
   public mutating func second(repeated: Int, dropped: Int) -> Event {
-    let clean = repeated == 0 && dropped == 0
+    let clean = repeated < LagWatch.badRepeats && dropped == 0
     if !isBehind {
       if clean { return .none }
       isBehind = true
