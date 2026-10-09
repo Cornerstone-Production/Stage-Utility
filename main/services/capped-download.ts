@@ -45,7 +45,8 @@ export interface DownloadTimeouts {
 /** An abort signal that fires after `idleMs` without a `touch()`, or after
  *  `totalMs` outright, carrying the reason as its Error. `stop()` clears both
  *  timers. Both are unref'd as well, so a `stop()` that was missed can never
- *  hold the process open for the length of the ceiling (an hour). */
+ *  hold the process open for the length of the ceiling, which the caller sets
+ *  (the video relay passes an hour, the output helper two). */
 export function downloadWatchdog({ idleMs, totalMs, timers }: DownloadTimeouts): { signal: AbortSignal; touch: () => void; stop: () => void } {
   const t = timers ?? { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer) };
   const controller = new AbortController();
