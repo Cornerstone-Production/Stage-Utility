@@ -252,7 +252,7 @@ describe("output health", () => {
 
   test("a healthy output reporting for a long time logs nothing", () => {
     try {
-      for (let i = 0; i < 30; i++) recordHealth("mac1.sdi-1", report(), 1_000_000 + i * 10_000);
+      for (let i = 0; i < 30; i++) recordHealth("mac1.sdi-1", report(), "decklink", 1_000_000 + i * 10_000);
     } finally {
       quiet();
     }
@@ -263,7 +263,7 @@ describe("output health", () => {
     const t0 = 1_000_000;
     try {
       let n = 0;
-      for (const dropped of [0, 4, 9, 15, 15, 15, 15]) recordHealth("mac1.sdi-1", report({ dropped }), t0 + n++ * 10_000);
+      for (const dropped of [0, 4, 9, 15, 15, 15, 15]) recordHealth("mac1.sdi-1", report({ dropped }), "decklink", t0 + n++ * 10_000);
     } finally {
       quiet();
     }
@@ -272,21 +272,37 @@ describe("output health", () => {
     assert.match(lines[1], /^\[output-helper\] mac1\.sdi-1 has recovered/);
   });
 
+  test("a display output is never struggling: its figures come from a display link that sleeps", () => {
+    // A display asleep or a screen locked reports 0 fps, and its dropped count
+    // has no card behind it. The same run that marks a DeckLink port struggling
+    // must leave it alone.
+    try {
+      let n = 0;
+      for (const dropped of [0, 4, 9, 15]) {
+        recordHealth("mac1.hdmi-1", report({ fps: 0, repeated: 30, dropped }), "display", 1_000_000 + n++ * 10_000);
+      }
+    } finally {
+      quiet();
+    }
+    assert.deepEqual(lines, [], "a display output was logged as struggling");
+    assert.equal(healthList(1_000_000 + 40_000)[0].struggling, false);
+  });
+
   test("a reading is shown while it is fresh and not after", () => {
     const t0 = 1_000_000;
-    recordHealth("mac1.sdi-1", report(), t0);
+    recordHealth("mac1.sdi-1", report(), "decklink", t0);
     assert.deepEqual(healthList(t0 + HEALTH_TTL_MS - 1).map((h) => h.deviceId), ["mac1.sdi-1"]);
     assert.deepEqual(healthList(t0 + HEALTH_TTL_MS + 1), [], "a reading that stopped being refreshed stayed on the page");
   });
 
   test("forgetting a device takes its reading away", () => {
-    recordHealth("mac1.sdi-1", report());
+    recordHealth("mac1.sdi-1", report(), "decklink");
     forgetHealth("mac1.sdi-1");
     assert.deepEqual(healthList(), []);
   });
 
   test("readings come back in id order", () => {
-    for (const id of ["mac1.sdi-2", "mac1.hdmi-1", "mac1.sdi-1"]) recordHealth(id, report());
+    for (const id of ["mac1.sdi-2", "mac1.hdmi-1", "mac1.sdi-1"]) recordHealth(id, report(), "decklink");
     assert.deepEqual(healthList().map((h) => h.deviceId), ["mac1.hdmi-1", "mac1.sdi-1", "mac1.sdi-2"]);
   });
 
@@ -297,7 +313,7 @@ describe("output health", () => {
       if (channel === "kiosk:devices") sentHere.push(payload);
     });
     try {
-      recordHealth("mac1.sdi-1", report());
+      recordHealth("mac1.sdi-1", report(), "decklink");
       const before = sentHere.length;
       mock.timers.tick(HEALTH_TTL_MS + 30_000);
       assert.equal(healthList().length, 0);

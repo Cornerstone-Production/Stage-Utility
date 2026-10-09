@@ -12,7 +12,7 @@ import { broadcast } from "./broadcaster.js";
 import { mergeScreen, sameScreen } from "./kiosk-screen-size.js";
 import { scrub } from "./scrub.js";
 import { displaySignature, FRESH_TREND, HEALTH_TTL_MS, judge, type HealthTrend } from "./output-health.js";
-import type { SeenDevice } from "../types/kiosk.js";
+import type { DeviceOutputKind, SeenDevice } from "../types/kiosk.js";
 import type { OutputHealth, OutputHealthReport } from "../types/output-health.js";
 
 /** Longest gap before a device is considered gone. The agent probes every 2s and
@@ -137,8 +137,13 @@ export function recordSeen(
  * healthy output reporting every ten seconds is not an SSE every ten seconds.
  * Logs the verdict changing, never the reports themselves.
  */
-export function recordHealth(deviceId: string, report: OutputHealthReport, now = Date.now()): OutputHealth {
-  const trend = judge(health.get(deviceId)?.trend ?? FRESH_TREND, report);
+export function recordHealth(
+  deviceId: string,
+  report: OutputHealthReport,
+  kind: DeviceOutputKind | undefined,
+  now = Date.now(),
+): OutputHealth {
+  const trend = judge(health.get(deviceId)?.trend ?? FRESH_TREND, report, kind);
   const latest: OutputHealth = { ...report, deviceId, receivedAt: now, struggling: trend.struggling };
   const was = health.get(deviceId)?.trend.struggling ?? false;
   health.set(deviceId, { latest, trend });

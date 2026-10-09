@@ -136,7 +136,10 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       matches: Object.fromEntries(
         seen
           .filter((s) => !bound.some((b) => b.id === s.id))
-          .map((s) => [s.id, matchByMac(bound, s.macs).map((d) => d.id)])
+          // An output of a helper Mac shares its MAC with every sibling output, so
+          // matching it against them would flag each as a look-alike of the others.
+          // Only a device that is not an output can be what it is replacing.
+          .map((s) => [s.id, matchByMac(s.output ? bound.filter((b) => !b.output) : bound, s.macs).map((d) => d.id)])
           .filter(([, ids]) => (ids as string[]).length > 0),
       ),
     });
@@ -146,7 +149,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   // ── An output helper's health, from the device itself ──────────────────
   // Authenticated by the device's own secret, the one /enroll checks, not by the
   // same-origin gate a browser is held to: the caller is a native app. The secret
-  // travels as `Authorization: Bearer <secret>` or as `?token=`, as it does to
+  // travels in the `x-device-token` header, or as `?token=` as it does to
   // /enroll. An id this server holds no binding for is 404, a wrong or missing
   // secret is 401, and neither says anything about the other.
   const healthMatch = method === "POST" ? pathname.match(/^\/api\/devices\/([^/]+)\/health$/) : null;
@@ -159,12 +162,13 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     const devices = await kioskDevicesStore.load();
-    if (!findById(devices, id)) {
+    const known = findById(devices, id);
+    if (!known) {
       error(res, "no device is set up with that id", 404);
       return;
     }
-    const bearer = /^Bearer\s+(\S+)$/i.exec(headerValue(req.headers, "authorization"))?.[1];
-    if (!authorise(devices, id, clean(bearer ?? null) ?? clean(url.searchParams.get("token")))) {
+    const secret = clean(headerValue(req.headers, "x-device-token") || null) ?? clean(url.searchParams.get("token"));
+    if (!authorise(devices, id, secret)) {
       error(res, "the device secret is missing or wrong", 401);
       return;
     }
@@ -173,7 +177,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       error(res, parsed.error, 400);
       return;
     }
-    recordHealth(id, parsed.report);
+    recordHealth(id, parsed.report, known.output?.kind);
     json(res, { ok: true });
     return;
   }

@@ -48,7 +48,7 @@ describe("a health report off the wire", () => {
 const run = (reports: OutputHealthReport[], from: HealthTrend = FRESH_TREND): HealthTrend[] => {
   const out: HealthTrend[] = [];
   let t = from;
-  for (const r of reports) out.push((t = judge(t, r)));
+  for (const r of reports) out.push((t = judge(t, r, "decklink")));
   return out;
 };
 const good = (dropped = 0) => ok({ dropped });
@@ -97,6 +97,20 @@ describe("whether an output is struggling", () => {
     assert.equal(after.at(-1)?.struggling, true, "recovery was declared on good reports that were not in a row");
     const recovered = run([good(), good(), good()], struggling);
     assert.deepEqual(recovered.map((x) => x.struggling), [true, true, false]);
+  });
+});
+
+describe("a display output", () => {
+  it("is never struggling, however its figures read", () => {
+    let t = FRESH_TREND;
+    for (const dropped of [0, 5, 10, 20, 40]) t = judge(t, { fps: 0, repeated: 50, dropped, at: 1 }, "display");
+    assert.equal(t.struggling, false);
+  });
+
+  it("nor is a device that is not an output at all", () => {
+    let t = FRESH_TREND;
+    for (const dropped of [0, 5, 10, 20, 40]) t = judge(t, { fps: 0, repeated: 50, dropped, at: 1 }, undefined);
+    assert.equal(t.struggling, false);
   });
 });
 

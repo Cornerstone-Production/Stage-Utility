@@ -41,16 +41,16 @@ beforeEach(async () => {
   sent.length = 0;
 });
 
-const post = (id: string, body: unknown, opts: { bearer?: string; query?: string } = {}) =>
+const post = (id: string, body: unknown, opts: { token?: string; query?: string } = {}) =>
   callRoute(kioskDeviceRoutes, `/api/devices/${encodeURIComponent(id)}/health${opts.query ?? ""}`, {
     method: "POST",
     body,
-    headers: opts.bearer ? { authorization: `Bearer ${opts.bearer}` } : {},
+    headers: opts.token ? { "x-device-token": opts.token } : {},
   });
 
 describe("who may post health", () => {
-  it("the device itself, with its secret as a bearer token", async () => {
-    const r = await post(ID, REPORT, { bearer: SECRET });
+  it("the device itself, with its secret in x-device-token", async () => {
+    const r = await post(ID, REPORT, { token: SECRET });
     assert.equal(r.status, 200);
     assert.deepEqual(healthList().map((h) => [h.deviceId, h.fps, h.repeated, h.dropped]), [[ID, 59.94, 0.2, 0]]);
   });
@@ -68,7 +68,7 @@ describe("who may post health", () => {
   });
 
   it("not with somebody else's secret: 401, and nothing is recorded", async () => {
-    for (const opts of [{ bearer: "not-the-secret" }, { query: "?token=not-the-secret" }]) {
+    for (const opts of [{ token: "not-the-secret" }, { query: "?token=not-the-secret" }]) {
       const r = await post(ID, REPORT, opts);
       assert.equal(r.status, 401, JSON.stringify(opts));
     }
@@ -76,7 +76,7 @@ describe("who may post health", () => {
   });
 
   it("not for a device this server holds no binding for: 404", async () => {
-    const r = await post("someone-else.sdi-9", REPORT, { bearer: SECRET });
+    const r = await post("someone-else.sdi-9", REPORT, { token: SECRET });
     assert.equal(r.status, 404);
     assert.deepEqual(healthList(), []);
   });
@@ -85,7 +85,7 @@ describe("who may post health", () => {
 describe("what it refuses to record", () => {
   it("a body that is not a report: 400, and nothing is recorded", async () => {
     for (const body of [{}, { ...REPORT, fps: "fast" }, { ...REPORT, dropped: -1 }, { ...REPORT, repeated: 400 }]) {
-      const r = await post(ID, body, { bearer: SECRET });
+      const r = await post(ID, body, { token: SECRET });
       assert.equal(r.status, 400, JSON.stringify(body));
       assert.ok(((r.json as { error?: string }) ?? {}).error, "a refusal must say why");
     }
@@ -100,28 +100,42 @@ describe("what it refuses to record", () => {
 
 describe("what Screens is told", () => {
   it("the first report is broadcast, an unchanged one is not, a changed one is", async () => {
-    await post(ID, REPORT, { bearer: SECRET });
+    await post(ID, REPORT, { token: SECRET });
     assert.equal(sent.length, 1, "the first report never reached Screens");
     assert.deepEqual(sent[0].payload.health?.map((h) => h.deviceId), [ID]);
 
     // Ten seconds later, the same picture: not news.
-    await post(ID, { ...REPORT, fps: 59.93, at: REPORT.at + 10_000 }, { bearer: SECRET });
+    await post(ID, { ...REPORT, fps: 59.93, at: REPORT.at + 10_000 }, { token: SECRET });
     assert.equal(sent.length, 1, "a steady output broadcast on every report");
 
-    await post(ID, { ...REPORT, dropped: 3, at: REPORT.at + 20_000 }, { bearer: SECRET });
+    await post(ID, { ...REPORT, dropped: 3, at: REPORT.at + 20_000 }, { token: SECRET });
     assert.equal(sent.length, 2, "a rising dropped count never reached Screens");
   });
 
   it("GET /api/devices carries it, and never the secret", async () => {
-    await post(ID, REPORT, { bearer: SECRET });
+    await post(ID, REPORT, { token: SECRET });
     const r = await callRoute(kioskDeviceRoutes, "/api/devices");
     const body = r.json as { health: { deviceId: string; fps: number }[]; bound: { id: string }[] };
     assert.deepEqual(body.health.map((h) => [h.deviceId, h.fps]), [[ID, 59.94]]);
     assert.equal(r.body.includes(SECRET), false, "the device secret was listed");
   });
 
+  it("a DeckLink output on a run of dropped frames is struggling, and a display output is not", async () => {
+    const DISPLAY_ID = "02aa00bb11cc.hdmi-1";
+    await updateDevices((cur) => [
+      ...cur,
+      { id: DISPLAY_ID, token: "secret-hdmi", outputId: "display-2", macs: [], output: { kind: "display", name: "HDMI 1", port: "HDMI 1" } },
+    ]);
+    for (const dropped of [0, 5, 10, 15]) {
+      await post(ID, { ...REPORT, dropped }, { token: SECRET });
+      await post(DISPLAY_ID, { ...REPORT, fps: 0, dropped }, { token: "secret-hdmi" });
+    }
+    const byId = Object.fromEntries(healthList().map((h) => [h.deviceId, h.struggling]));
+    assert.deepEqual(byId, { [ID]: true, [DISPLAY_ID]: false });
+  });
+
   it("releasing the device forgets what it reported", async () => {
-    await post(ID, REPORT, { bearer: SECRET });
+    await post(ID, REPORT, { token: SECRET });
     const released = await callRoute(kioskDeviceRoutes, "/api/devices/release", { method: "POST", body: { deviceId: ID } });
     assert.equal(released.status, 200);
     assert.deepEqual(healthList(), [], "a released output still showed its old health");

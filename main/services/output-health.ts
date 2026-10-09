@@ -6,6 +6,7 @@
 // on the same channel; keeping the decisions here is what lets the part that is
 // worth testing be tested.
 
+import type { DeviceOutputKind } from "../types/kiosk.js";
 import type { OutputHealthReport } from "../types/output-health.js";
 
 /** A report older than this is no longer a reading. The helper posts every ten
@@ -59,14 +60,20 @@ export const FRESH_TREND: HealthTrend = { dropped: null, run: 0, struggling: fal
 /**
  * Fold one report into the trend.
  *
- * A report is bad when the card dropped frames since the last one, or when the
+ * Only for a DeckLink output: see the first line of the function. A report is bad when the card dropped frames since the last one, or when the
  * page ran late for too many frames. The dropped count is cumulative and resets
  * when the helper reopens the output, so a count that goes DOWN is a fresh
  * baseline, not a drop. Three bad reports in a row make the output struggling;
  * three good ones in a row end it. Anything between changes nothing, so one slow
  * page does not flicker a warning on and off.
  */
-export function judge(trend: HealthTrend, report: OutputHealthReport): HealthTrend {
+export function judge(trend: HealthTrend, report: OutputHealthReport, kind: DeviceOutputKind | undefined): HealthTrend {
+  // Only a DeckLink port has a card that can fall behind. A display output's
+  // figures come from the display link, which does not tick while the display is
+  // asleep or the screen is locked, so a healthy one reports 0 fps and a rule on
+  // its numbers would call it struggling. Its baseline still tracks, for an
+  // output that is later reported as a port.
+  if (kind !== "decklink") return { dropped: report.dropped, run: 0, struggling: false };
   const dropped = trend.dropped !== null && report.dropped > trend.dropped;
   const late = report.repeated >= REPEATED_BAD_PERCENT;
   const bad = dropped || late;

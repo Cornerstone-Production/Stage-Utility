@@ -198,8 +198,10 @@ reads them from the stage state it already receives. See the
 own secret, and the server keeps the latest in memory only. It is shown with the
 screen: frames per second, the percent of frames repeated because the page was
 late, and the frames the card has dropped. Three reports running with frames
-dropped or 5% or more repeated mark the output **struggling**, and three clean
-ones in a row clear it. A reading that stops being refreshed is dropped after 60
+dropped or 5% or more repeated mark a DeckLink output **struggling**, and three
+clean ones in a row clear it. A display output is never marked: its rate comes
+from the display link, which stops while the display sleeps or the screen is
+locked, so it can report 0 fps while healthy, and Screens shows that as a dash. A reading that stops being refreshed is dropped after 60
 seconds.
 
 ## Removing one
