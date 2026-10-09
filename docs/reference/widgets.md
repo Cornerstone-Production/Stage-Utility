@@ -100,10 +100,13 @@ until it has one. A plan with no matching file shows a notice and is asked
 again every two minutes, so a stage plot attached after the display loaded
 appears by itself. A load that fails (Planning Center unreachable, a download
 link that expired) is retried after 5, 15 and 45 seconds and then every two
-minutes. A picture already drawn is left alone, and a failed check never swaps
-it, or the notice on screen, for another one; switching plans loads the new
-plan's file at once. A display that is still failing after its quick retries
-logs a `[plan-file]` line once, so `/log` says which page and which file.
+minutes. Once the file is up it is checked every five minutes, so a revised file
+on the same plan replaces it within about that long; a check that finds the same
+file does nothing, and the old picture stays until the new one is ready. A failed
+check never swaps a picture, or the notice on screen, for another one. Switching
+plans loads the new plan's file at once. A display that is still failing after
+its quick retries logs a `[plan-file]` line once, so `/log` says which page and
+which file, and one more when the file draws again.
 
 **Embedded view** and **Embedded screen** can be expanded: on an operator
 surface each tile carries a control in its bottom-right corner that grows it to

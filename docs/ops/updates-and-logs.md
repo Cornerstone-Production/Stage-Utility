@@ -210,7 +210,7 @@ as such rather than given a doc link it doesn't need.
 | `[pco-calendar]` | Calendar instances with no start time, left undrawn: [Calendar](../integrations/planning-center.md#calendar) |
 | `[photo-cache]` | Person photos cached from Planning Center: prunes, fetch/redirect/size refusals, and a smaller copy PCO would not give, with what was served instead: [Planning Center](../integrations/planning-center.md#photos) |
 | `[plan-export]` | A view bundle built for export to another install, and its counts: [Moving a view between installs](../moving-a-view.md) |
-| `[plan-file]` | Browser-side: a Plan file widget still failing to load after its quick retries, with the page it is on and the file name, once per outage rather than on every slow re-check: [Plan file](../reference/widgets.md#pco--service) |
+| `[plan-file]` | Browser-side: a Plan file widget still failing to load after its quick retries, with the page it is on and the file name, once per outage rather than on every slow re-check, and one line when that file draws again: [Plan file](../reference/widgets.md#pco--service) |
 | `[plans]` | The upcoming-plans list refreshing or failing, and the plan switcher's mode: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
 | `[prodcom]` | Connection state, transcript source (websocket vs. SSE fallback), and idle/heartbeat timeouts: [ProdCom](../integrations/prodcom.md) |
 | `[propresenter]` | Macro triggers and their failures, and unsupported status endpoints: [ProPresenter](../integrations/propresenter.md) |
