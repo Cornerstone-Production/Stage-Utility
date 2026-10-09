@@ -26,18 +26,33 @@ const state = {
   ],
 } as unknown as Slim;
 
-/** A harness: what was asked, what was sent, and how the operator answers. */
-function run(viewId: string, surface: "display" | "console", answer: boolean, sendOk = true) {
+/** A harness: what was asked, what was sent, and how the operator answers.
+ *  `replies` answers each send in turn: undefined lands, an Error is thrown. */
+function run(viewId: string, surface: "display" | "console", answer: boolean | boolean[], replies: (Error | undefined)[] = []) {
   const asked: { title: string; message?: string; confirmLabel?: string }[] = [];
-  let sent = 0;
+  const sent: string[][] = [];
+  const answers = Array.isArray(answer) ? [...answer] : null;
   const result = changeViewRole({
     state,
     viewId,
     surface,
-    ask: async (q) => { asked.push(q); return answer; },
-    send: async () => { sent += 1; return sendOk; },
+    ask: async (q) => { asked.push(q); return answers ? answers.shift()! : (answer as boolean); },
+    send: async (screens) => {
+      sent.push(screens);
+      const reply = replies[sent.length - 1];
+      if (reply) throw reply;
+    },
   });
-  return { result, asked, sent: () => sent };
+  return { result, asked, sent: () => sent.length, sentScreens: () => sent };
+}
+
+/** The 409 the server answers when the screens asked about are stale. */
+function screensChanged(screens: { id: string; name: string }[]): Error {
+  return Object.assign(new Error("The screens showing this view changed while you were deciding."), {
+    status: 409,
+    code: "screens-changed",
+    body: { error: "x", code: "screens-changed", screens },
+  });
 }
 
 describe("changing a view to a control surface", () => {
@@ -51,10 +66,10 @@ describe("changing a view to a control surface", () => {
     }]);
   });
 
-  it("sends the change once it is confirmed", async () => {
+  it("sends the change once it is confirmed, with the ids of the screens it named", async () => {
     const h = run("wall-a", "console", true);
     assert.equal(await h.result, true);
-    assert.equal(h.sent(), 1);
+    assert.deepEqual(h.sentScreens(), [["display-1", "display-2"]]);
   });
 
   it("sends NOTHING when it is declined", async () => {
@@ -65,7 +80,10 @@ describe("changing a view to a control surface", () => {
 
   it("does not name a screen already a control surface, or one on another view", () => {
     assert.deepEqual(screensChangedBy(state, "ctl-a", "console"), []);
-    assert.deepEqual(screensChangedBy(state, "wall-a", "console"), ["Lobby TV", "Hallway TV"]);
+    assert.deepEqual(screensChangedBy(state, "wall-a", "console"), [
+      { id: "display-1", name: "Lobby TV" },
+      { id: "display-2", name: "Hallway TV" },
+    ]);
   });
 });
 
@@ -107,11 +125,11 @@ describe("changing a view to a wall display", () => {
 });
 
 describe("a view no screen shows, or one already as asked", () => {
-  it("asks nothing and sends the change", async () => {
+  it("asks nothing and sends the change, saying it asked about no screens", async () => {
     const h = run("wall-b", "console", false);
     assert.equal(await h.result, true);
     assert.deepEqual(h.asked, []);
-    assert.equal(h.sent(), 1);
+    assert.deepEqual(h.sentScreens(), [[]]);
   });
 
   it("asks nothing when every screen already matches", async () => {
@@ -120,8 +138,48 @@ describe("a view no screen shows, or one already as asked", () => {
     assert.deepEqual(h.asked, []);
   });
 
-  it("answers false when the server refused, so the caller can tell", async () => {
-    const h = run("wall-b", "console", true, false);
+  it("throws what the server refused with, so the caller can tell the operator", async () => {
+    const h = run("wall-b", "console", true, [new Error("disk full")]);
+    await assert.rejects(h.result, /disk full/);
+    assert.equal(h.sent(), 1, "an ordinary refusal is not asked about again");
+  });
+});
+
+describe("the screens changed while the question was open", () => {
+  const now = [
+    { id: "display-1", name: "Lobby TV" },
+    { id: "display-2", name: "Hallway TV" },
+    { id: "display-5", name: "Spare" },
+  ];
+
+  it("asks again, naming the screens as the server has them, and sends those", async () => {
+    const h = run("wall-a", "console", true, [screensChanged(now)]);
+    assert.equal(await h.result, true);
+    assert.equal(h.asked.length, 2);
+    assert.equal(
+      h.asked[1]!.message,
+      "The screens showing it changed while you were deciding. Lobby TV, Hallway TV and Spare will become control surfaces. Anyone at them can press their buttons.",
+    );
+    assert.deepEqual(h.sentScreens(), [["display-1", "display-2"], ["display-1", "display-2", "display-5"]]);
+  });
+
+  it("sends nothing more when the second question is declined", async () => {
+    const h = run("wall-a", "console", [true, false], [screensChanged(now)]);
     assert.equal(await h.result, false);
+    assert.equal(h.sent(), 1);
+  });
+
+  it("asks once more and no further: a second refusal is thrown", async () => {
+    const h = run("wall-a", "console", true, [screensChanged(now), screensChanged(now)]);
+    await assert.rejects(h.result, /changed while you were deciding/);
+    assert.equal(h.sent(), 2);
+  });
+
+  it("asked about nothing, it asks now that there is a screen", async () => {
+    const h = run("wall-b", "console", true, [screensChanged([{ id: "display-5", name: "Spare" }])]);
+    assert.equal(await h.result, true);
+    assert.equal(h.asked.length, 1);
+    assert.match(h.asked[0]!.message!, /Spare will become a control surface/);
+    assert.deepEqual(h.sentScreens(), [[], ["display-5"]]);
   });
 });

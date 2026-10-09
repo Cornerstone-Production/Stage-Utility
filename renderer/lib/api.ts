@@ -22,10 +22,17 @@ const REQUEST_TIMEOUT_MS = 15000;
 export interface ApiError extends Error {
   status?: number;
   code?: string;
+  /** The whole answer, for a refusal that carries more than its message: a 409
+   *  `screens-changed` carries the screens as they are now. */
+  body?: Record<string, unknown>;
 }
 
+/** What a non-2xx answer carries: a message, a machine-readable code, and
+ *  whatever else that refusal needs. */
+type ErrorBody = { error?: string; code?: string; [k: string]: unknown };
+
 /** A non-2xx answer's body, or null when it is not JSON — never fatal. */
-async function errorBody(res: Response): Promise<{ error?: string; code?: string } | null> {
+async function errorBody(res: Response): Promise<ErrorBody | null> {
   try {
     return await res.json();
   } catch {
@@ -39,10 +46,11 @@ function timeoutError(path: string, cause: unknown): Error {
 }
 
 /** The Error a non-2xx answer becomes, from its status and parsed body. */
-function httpError(status: number, statusText: string, body: { error?: string; code?: string } | null): ApiError {
+function httpError(status: number, statusText: string, body: ErrorBody | null): ApiError {
   const err = new Error(typeof body?.error === "string" ? body.error : statusText) as ApiError;
   err.status = status;
   if (typeof body?.code === "string") err.code = body.code;
+  if (body && typeof body === "object") err.body = body;
   return err;
 }
 
@@ -134,7 +142,7 @@ function noteContent(channel: string, at: number): void {
  *  caller in another frame. */
 type SharedRead =
   | { kind: "ok"; body: unknown }
-  | { kind: "http"; status: number; statusText: string; body: { error?: string; code?: string } | null }
+  | { kind: "http"; status: number; statusText: string; body: ErrorBody | null }
   | { kind: "timeout" }
   | { kind: "failed"; name: string; message: string; cause: string | null };
 
@@ -1603,10 +1611,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return put<T>("/api/messaging", p);
 
     // Changes the view AND every screen showing it, in one call the server undoes
-    // if it fails part-way. PATCH /api/views/:id { surface } is the other route,
-    // and refuses a view that screens are showing.
+    // if it fails part-way. `screens` is the ids the operator was shown; a 409
+    // `screens-changed` answers when they are stale. PATCH /api/views/:id
+    // { surface } is the other route, and refuses a view that screens are showing.
     case "views:setRole":
-      return post<T>(`/api/views/${encodeURIComponent(String(p.id))}/surface`, { surface: p.surface });
+      return post<T>(`/api/views/${encodeURIComponent(String(p.id))}/surface`, { surface: p.surface, screens: p.screens });
 
     case "osc:getFeedback":
       return apiFetch<T>("/api/osc/feedback");

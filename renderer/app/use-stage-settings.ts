@@ -143,9 +143,9 @@ export function useStageSettings(pinnedViewId?: string) {
    *  the time a click arrives, which is how a handler comes to pick the wrong
    *  side to move first.
    *
-   *  It is NOT a re-read between the two writes. Both of the paired handlers
-   *  below decide everything from one read, before either write goes out; this
-   *  used to claim otherwise, and so did the test guarding it. */
+   *  It is a read at the moment of the click, not a promise about what the
+   *  server holds when the write lands. handleSetViewSurface sends the screens it
+   *  asked about with its write, so the server can refuse when they are stale. */
   const stateNow = () => queryClient.getQueryData<StageState>(["stage:getState"]);
 
   /** The same, for the writes that return a fresh StageState. */
@@ -837,19 +837,26 @@ export function useStageSettings(pinnedViewId?: string) {
    * ONE server call. The server makes the view and each screen the matching role
    * in the order its own guards allow and puts back what landed if one fails, so
    * nothing here orders writes or loops over screens. What is left is the
-   * question: when screens would change, they are named first, and declining
-   * sends nothing.
+   * question: when screens would change, they are named first, declining sends
+   * nothing, and the ids of the screens named go with the call. The server
+   * refuses when they are stale, and changeViewRole asks once more with its list.
    *
    * Not optimistic, for the reason handleSetOutputRole gives.
    */
   async function handleSetViewSurface(id: string, surface: "display" | "console") {
-    await changeViewRole({
-      state: stateNow(),
-      viewId: id,
-      surface,
-      ask: confirm,
-      send: () => writeState("views:setRole", { id, surface }, { fail: "Failed to change what the view is for" }),
-    });
+    try {
+      await changeViewRole({
+        state: stateNow(),
+        viewId: id,
+        surface,
+        ask: confirm,
+        send: async (screens) => {
+          queryClient.setQueryData(["stage:getState"], await ipc<StageState>("views:setRole", { id, surface, screens }));
+        },
+      });
+    } catch (err) {
+      toast.error(`Failed to change what the view is for: ${errorMessage(err)}`);
+    }
   }
 
   async function handleRemoveOutput(id: string) {

@@ -23,7 +23,7 @@ describe("the view card's handler", () => {
   const src = handlerBody("handleSetViewSurface");
 
   test("is ONE call to the view-role route, not a loop over screens", () => {
-    assert.match(src, /writeState\("views:setRole"/);
+    assert.match(src, /"views:setRole"/);
     assert.doesNotMatch(src, /for \(|\.forEach\(|outputs:/, "the handler writes screens itself again");
   });
 
