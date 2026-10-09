@@ -1,0 +1,38 @@
+import Foundation
+import Testing
+@testable import StageUtilityOutputCore
+
+@Suite struct EnrollURLTests {
+  @Test func buildsTheEnrollUrl() {
+    let url = EnrollURL.make(server: "http://192.0.2.10:8788", deviceId: "mac.disp", token: "abc123")
+    #expect(url?.absoluteString == "http://192.0.2.10:8788/enroll?device=mac.disp&token=abc123")
+  }
+
+  @Test func dropsTrailingSlashesAndWhitespace() {
+    let url = EnrollURL.make(server: " http://host:8788//\n", deviceId: "d", token: "t")
+    #expect(url?.absoluteString == "http://host:8788/enroll?device=d&token=t")
+  }
+
+  /// A server file written by hand says "host:8788", not a URL.
+  @Test func assumesHttpWhenThereIsNoScheme() {
+    #expect(EnrollURL.make(server: "booth.local:8788", deviceId: "d", token: "t")?.absoluteString
+      == "http://booth.local:8788/enroll?device=d&token=t")
+    #expect(EnrollURL.make(server: "https://su.example", deviceId: "d", token: "t")?.absoluteString
+      == "https://su.example/enroll?device=d&token=t")
+  }
+
+  @Test func escapesWhatWouldBreakTheQuery() {
+    let url = EnrollURL.make(server: "http://h:1", deviceId: "a b&c+d", token: "t=1")
+    #expect(url?.absoluteString == "http://h:1/enroll?device=a%20b%26c%2Bd&token=t%3D1")
+  }
+
+  @Test func refusesAnEmptyServer() {
+    #expect(EnrollURL.make(server: "  \n", deviceId: "d", token: "t") == nil)
+    #expect(EnrollURL.normalise(server: "") == nil)
+  }
+
+  @Test func displayAddressIsHostAndPort() {
+    #expect(EnrollURL.displayAddress("http://192.0.2.10:8788/") == "192.0.2.10:8788")
+    #expect(EnrollURL.displayAddress("https://su.example") == "su.example")
+  }
+}

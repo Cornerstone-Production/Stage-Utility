@@ -9,6 +9,10 @@ node_modules
 build/
 .vite/
 
+# The Mac output helper's SwiftPM build and the .app it assembles
+helper/macos/.build/
+helper/macos/StageUtilityOutput.app/
+
 # Env / secrets
 .env
 .env.local
