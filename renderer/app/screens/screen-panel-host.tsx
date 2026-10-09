@@ -7,11 +7,12 @@
 // handler each callback is.
 
 import { useState } from "react";
-import { screensListViews } from "@main/services/home-view";
 import { errorMessage } from "@main/services/errors";
+import { outputMode, surfaceForMode } from "@main/types/views";
 
 import { SCREEN_PANEL_ID, ScreenSettingsPanel, type PanelDevice, type PanelTarget, type ScreenPanelActions } from "../../settings/sections/screen-settings-panel";
 import { NewViewDialog } from "../../settings/sections/new-view-dialog";
+import { screenPickerViews } from "../../settings/sections/outputs-section";
 import type { SectionHandlers } from "../../settings/types";
 import { toast } from "../../components/ui";
 import { invoke } from "../../lib/api";
@@ -34,7 +35,7 @@ export function ScreenPanelHost({
 }) {
   const outputs = stageState.outputs ?? [];
   // The same list the cards' pickers use: Home left out, by name.
-  const views = screensListViews(stageState.views ?? []).sort((a, b) => a.name.localeCompare(b.name));
+  const views = screenPickerViews(stageState.views ?? []);
   const connected = useDisplayPresence();
   const messageGroups = useMessageGroups();
   // Which screen asked for a new view, so the one made is pointed at it.
@@ -63,19 +64,22 @@ export function ScreenPanelHost({
     return null;
   }
 
+  // The handlers themselves: each already reports its own failure, so there is
+  // nothing to wrap. Only the slug is not one of them, because the panel shows a
+  // refused link beside the field rather than in a toast.
   const actions: ScreenPanelActions = {
-    onRename: (id, name) => void handlers.handleRenameOutput(id, name),
+    onRename: handlers.handleRenameOutput,
     onSetSlug: async (id, slug) => {
       await invoke("outputs:setSlug", { id, slug });
     },
-    onSetView: (id, viewId) => void handlers.handleSetOutputView(id, viewId),
-    onSetRole: (id, mode, opts) => handlers.handleSetOutputRole(id, mode, opts),
-    onSetLocked: (id, locked) => void handlers.handleSetOutputLocked(id, locked),
-    onSetHideTopBar: (id, hide) => void handlers.handleSetOutputHideTopBar(id, hide),
-    onSetTextSize: (id, size) => void handlers.handleSetOutputTextSize(id, size),
-    onSetAllowHls: (id, allow) => void handlers.handleSetOutputAllowHls(id, allow),
-    onSetGroups: (id, groups) => void handlers.handleSetOutputGroups(id, groups),
-    onSetShowInSidebar: (viewId, show) => void handlers.handleSetViewShowInSidebar(viewId, show),
+    onSetView: handlers.handleSetOutputView,
+    onSetRole: handlers.handleSetOutputRole,
+    onSetLocked: handlers.handleSetOutputLocked,
+    onSetHideTopBar: handlers.handleSetOutputHideTopBar,
+    onSetTextSize: handlers.handleSetOutputTextSize,
+    onSetAllowHls: handlers.handleSetOutputAllowHls,
+    onSetGroups: handlers.handleSetOutputGroups,
+    onSetShowInSidebar: handlers.handleSetViewShowInSidebar,
     onOpenMessagingSettings,
     onRequestNewView: setNewViewFor,
     onCreate: create,
@@ -99,7 +103,7 @@ export function ScreenPanelHost({
       <NewViewDialog
         handlers={handlers}
         open={newViewFor !== null}
-        fixedSurface={newViewScreen && newViewScreen.mode === "panel" ? "console" : "display"}
+        fixedSurface={newViewScreen ? surfaceForMode(outputMode(newViewScreen)) : "display"}
         onOpenChange={(o) => { if (!o) setNewViewFor(null); }}
         onCreated={(id) => {
           if (newViewFor) void handlers.handleSetOutputView(newViewFor, id);

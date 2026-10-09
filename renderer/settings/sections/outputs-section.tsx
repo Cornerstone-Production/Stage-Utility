@@ -250,6 +250,12 @@ function MenuCheckboxItem({
   );
 }
 
+/** The views a screen picker lists: Home left out, sorted by name. The cards and
+ *  the Screen settings panel offer the same list, so it is built in one place. */
+export function screenPickerViews(views: readonly View[]): View[] {
+  return screensListViews(views).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function OutputRow({ output, views, baseUrl, online, struggles, lags, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, onSetRole, onOpenSettings, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
@@ -790,7 +796,7 @@ export function OutputsSection({
   // an order that needs no maintaining. See docs/design/app-shell-redesign.md.
   // Home is filtered out: it is the operator's front door, edited in its own
   // tab, and it has no geometry — see main/services/home-view.ts.
-  const views = screensListViews(stageState.views ?? []).sort((a, b) => a.name.localeCompare(b.name));
+  const views = screenPickerViews(stageState.views ?? []);
 
   // Which output asked for a new view, so the created view can be assigned back
   // to it. "" means the dialog was opened from the unassigned section, where
