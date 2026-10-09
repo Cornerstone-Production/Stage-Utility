@@ -226,6 +226,32 @@ find_console_user() {
   if [ -z "$CONSOLE_UID" ]; then CONSOLE_USER=""; fi
 }
 
+# ── Writing as root into a directory somebody else owns ────────────────────
+# The state directory is handed to the console user (the Chrome kiosk writes its
+# binding and profile there), so that user can leave a symbolic link in it. A root
+# `>file` or `chmod` through a link to /etc/anything would then clobber or loosen
+# it. Four files are written as root there: the marker, `server`, `device-id` and
+# `token`. A link where one is to be written is removed first (rm -f takes the
+# link, not what it points at), and the write is exclusive (noclobber is O_EXCL, so
+# it cannot be made to follow a link planted after the removal). One already
+# there that must be kept, an identity file, is refused rather than replaced: a
+# link in its place means the directory was tampered with, and the id is a claim.
+# put_file DEST MODE, the content on stdin.
+put_file() {
+  rm -f "$1" || return 1
+  (
+    set -C
+    cat >"$1"
+  ) || return 1
+  chmod "$2" "$1"
+}
+
+refuse_link() {
+  if [ -L "$1" ]; then
+    die "$1 is a symbolic link, which this installer will not write through as root. Remove it and run the installer again."
+  fi
+}
+
 # ── The device's identity, kept across installs ────────────────────────────
 # Shared by both modes. The id is generated ONCE: re-running must never mint a
 # new one, or this Mac's bindings are orphaned and need claiming again.
@@ -245,10 +271,22 @@ write_state() {
     return 0
   fi
   mkdir -p "$STATE_DIR"
-  [ -f "$STATE_DIR/device-id" ] || uuidgen | tr '[:upper:]' '[:lower:]' >"$STATE_DIR/device-id"
+  refuse_link "$STATE_DIR/device-id"
+  refuse_link "$STATE_DIR/token"
+  if [ ! -f "$STATE_DIR/device-id" ]; then
+    new_id="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+    [ -n "$new_id" ] || die "could not make a device id (uuidgen printed nothing)."
+    printf '%s\n' "$new_id" | put_file "$STATE_DIR/device-id" 644 || die "could not write $STATE_DIR/device-id."
+  fi
   # The device's own secret: pinned by the server the first time it is claimed.
-  [ -f "$STATE_DIR/token" ] || head -c 24 /dev/urandom | xxd -p | tr -d '\n' >"$STATE_DIR/token"
-  [ -n "$SERVER" ] && printf '%s' "$SERVER" >"$STATE_DIR/server" || true
+  if [ ! -f "$STATE_DIR/token" ]; then
+    new_token="$(head -c 24 /dev/urandom | xxd -p | tr -d '\n')"
+    [ -n "$new_token" ] || die "could not make a token."
+    printf '%s' "$new_token" | put_file "$STATE_DIR/token" 600 || die "could not write $STATE_DIR/token."
+  fi
+  if [ -n "$SERVER" ]; then
+    printf '%s' "$SERVER" | put_file "$STATE_DIR/server" 644 || die "could not write $STATE_DIR/server."
+  fi
   chmod 644 "$STATE_DIR/device-id"
   # The token is readable ONLY by the account that runs the app.
   #
@@ -550,13 +588,12 @@ write_kiosk_marker() {
   say "==> Marking this Mac as coming from the Chrome kiosk"
   MIGRATED=1
   mkdir -p "$STATE_DIR" || die "could not create $STATE_DIR; nothing was changed."
-  if [ -f "$MARKER" ]; then
+  if [ -f "$MARKER" ] && [ ! -L "$MARKER" ]; then
     say "    $MARKER is already there"
     return 0
   fi
-  date -u +%Y-%m-%dT%H:%M:%SZ >"$MARKER" || die "could not write $MARKER; nothing was changed, and the Chrome kiosk is as it was."
   MARKER_CREATED=1
-  chmod 644 "$MARKER" || die "could not set the mode of $MARKER; nothing was changed."
+  date -u +%Y-%m-%dT%H:%M:%SZ | put_file "$MARKER" 644 || die "could not write $MARKER; nothing was changed, and the Chrome kiosk is as it was."
 }
 
 # Step two, after the helper's agent is in. Only the kiosk's agent goes here.

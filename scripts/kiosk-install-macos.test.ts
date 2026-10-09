@@ -687,10 +687,12 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
 
 describe("the device identity survives a re-run", () => {
   const state = () => path.join(scratch, "Library", "Application Support", "StageUtility");
-  const run = () =>
+  const run = (extra: Record<string, string> = {}) =>
     sh(`. "${SCRIPT}"; DRY=0; CONSOLE_USER=""; write_state`, {
       STAGE_INSTALL_SOURCED: "1",
       STAGE_INSTALL_TEST_ROOT: scratch,
+      ...makeShims().env,
+      ...extra,
     });
 
   it("keeps an existing id and token byte for byte", async () => {
@@ -710,6 +712,59 @@ describe("the device identity survives a re-run", () => {
     assert.match(first, /^[0-9a-f-]{36}\n$/);
     assert.equal((await run()).status, 0);
     assert.equal(fs.readFileSync(path.join(state(), "device-id"), "utf8"), first);
+  });
+});
+
+// The state directory belongs to the console user, who can leave a symbolic link in
+// it. Root writes four files there (the marker, server, device-id, token); none may
+// be written through a link, and none may be chmod-ed through one.
+describe("root does not write through a link left in the state directory", () => {
+  const state = () => path.join(scratch, "Library", "Application Support", "StageUtility");
+  const victim = () => path.join(scratch, "victim");
+  const plant = (name: string) => {
+    fs.mkdirSync(state(), { recursive: true });
+    fs.writeFileSync(victim(), "precious\n", { mode: 0o600 });
+    fs.symlinkSync(victim(), path.join(state(), name));
+  };
+  const untouched = () => {
+    assert.equal(fs.readFileSync(victim(), "utf8"), "precious\n", "what the link pointed at was written");
+    assert.equal(fs.statSync(victim()).mode & 0o777, 0o600, "what the link pointed at was chmod-ed");
+  };
+  const stateEnv = () => ({ STAGE_INSTALL_SOURCED: "1", STAGE_INSTALL_TEST_ROOT: scratch });
+  const writeState = (extra: Record<string, string> = {}) =>
+    sh(`. "${SCRIPT}"; DRY=0; CONSOLE_USER=""; write_state`, { ...stateEnv(), ...makeShims().env, ...extra });
+
+  it("the marker: replaced by a file of its own, the link's target untouched", async () => {
+    fs.mkdirSync(path.join(scratch, "usr", "local", "bin"), { recursive: true });
+    fs.writeFileSync(path.join(scratch, "usr", "local", "bin", "stage-utility-kiosk"), "#!/bin/sh\n");
+    plant("migrated-from-kiosk");
+    const r = await sh(`. "${SCRIPT}"; DRY=0; write_kiosk_marker`, stateEnv());
+    assert.equal(r.status, 0, r.err);
+    untouched();
+    const m = fs.lstatSync(path.join(state(), "migrated-from-kiosk"));
+    assert.ok(m.isFile() && !m.isSymbolicLink(), "the marker is a real file now");
+    assert.match(fs.readFileSync(path.join(state(), "migrated-from-kiosk"), "utf8"), /^\d{4}-/);
+  });
+
+  it("the server file: replaced by a file of its own, the link's target untouched", { skip: !(has("uuidgen") && has("xxd")) && "needs uuidgen and xxd" }, async () => {
+    plant("server");
+    const r = await writeState({ STAGE_SERVER: "http://192.0.2.10:8788" });
+    assert.equal(r.status, 0, r.out + r.err);
+    untouched();
+    const f = path.join(state(), "server");
+    assert.ok(fs.lstatSync(f).isFile());
+    assert.equal(fs.readFileSync(f, "utf8"), "http://192.0.2.10:8788");
+  });
+
+  it("device-id and token: refused, and neither written nor chmod-ed through", { skip: !(has("uuidgen") && has("xxd")) && "needs uuidgen and xxd" }, async () => {
+    for (const name of ["device-id", "token"]) {
+      fs.rmSync(state(), { recursive: true, force: true });
+      plant(name);
+      const r = await writeState();
+      assert.equal(r.status, 1, `${name}: ${r.out}${r.err}`);
+      assert.match(r.err, new RegExp(`${name} is a symbolic link`));
+      untouched();
+    }
   });
 });
 
