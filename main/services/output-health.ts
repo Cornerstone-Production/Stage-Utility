@@ -60,12 +60,13 @@ export const FRESH_TREND: HealthTrend = { dropped: null, run: 0, struggling: fal
 /**
  * Fold one report into the trend.
  *
- * Only for a DeckLink output: see the first line of the function. A report is bad when the card dropped frames since the last one, or when the
- * page ran late for too many frames. The dropped count is cumulative and resets
- * when the helper reopens the output, so a count that goes DOWN is a fresh
- * baseline, not a drop. Three bad reports in a row make the output struggling;
- * three good ones in a row end it. Anything between changes nothing, so one slow
- * page does not flicker a warning on and off.
+ * Only a DeckLink output is ever judged struggling; any other kind only has its
+ * baseline kept. A report is bad when the card dropped frames since the last one,
+ * or when the page ran late for too many frames. The dropped count is cumulative
+ * and resets when the helper reopens the output, so a count that goes DOWN is a
+ * fresh baseline, not a drop. Three bad reports in a row make the output
+ * struggling; three good ones in a row end it. Anything between changes nothing,
+ * so one slow page does not flicker a warning on and off.
  */
 export function judge(trend: HealthTrend, report: OutputHealthReport, kind: DeviceOutputKind | undefined): HealthTrend {
   // Only a DeckLink port has a card that can fall behind. A display output's
