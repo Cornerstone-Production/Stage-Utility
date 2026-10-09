@@ -207,21 +207,19 @@ func softwarePort(
     #expect(log.lines == ["DeckLink Duo (1): refused 1080p59.94: the port has no 1080p59.94 (it offers 1080p50)"])
   }
 
-  /// With no driver the port's mode resolves, the open fails, and the port waits
-  /// to try again, as it would for a card that is not plugged in yet.
+  /// A port that is not there (no driver on this Mac, or no card with that id) has
+  /// its mode resolved, fails to open, and waits to try again, as a card not
+  /// plugged in yet would.
   @Test func aPortThatCannotOpenIsLostAndRetried() throws {
-    try #require(!FileManager.default.fileExists(atPath: DriverTests.framework), "Desktop Video is installed here")
+    let why = DriverTests.installed ? "the port is not connected" : "Desktop Video is not installed"
     let log = LogLines()
     let port = cardPort([Self.p5994], log: log)
     defer { port.close() }
-    #expect(port.open(videoMode: "1080p59.94") == .lost("Desktop Video is not installed"))
-    #expect(
-      log.lines == [
-        "DeckLink Duo (1): could not open (Desktop Video is not installed); trying again every 3600 s"
-      ])
+    #expect(port.open(videoMode: "1080p59.94") == .lost(why))
+    #expect(log.lines == ["DeckLink Duo (1): could not open (\(why)); trying again every 3600 s"])
     port.retry()
     port.sync()
-    #expect(port.state == .lost("Desktop Video is not installed"))
+    #expect(port.state == .lost(why))
     #expect(log.lines.count == 1)  // a retry that fails again says nothing more
   }
 

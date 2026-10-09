@@ -4,8 +4,12 @@ import StageUtilityOutputCore
 import Testing
 @testable import DeckLinkKit
 
+/// Some of these run the real dispatch against this Mac, with Desktop Video
+/// installed or not; each such test says which it needs, and is skipped on a Mac
+/// that has the other, rather than failing there.
 @Suite struct DriverTests {
   static let framework = "/Library/Frameworks/DeckLinkAPI.framework"
+  static var installed: Bool { FileManager.default.fileExists(atPath: framework) }
 
   /// Runs the real dispatch against this Mac. Where Desktop Video is not
   /// installed (the build machine has none), the driver must read as not
@@ -22,8 +26,8 @@ import Testing
     }
   }
 
-  @Test func openingAPortWithoutTheDriverSaysWhy() throws {
-    try #require(!FileManager.default.fileExists(atPath: Self.framework), "Desktop Video is installed here")
+  @Test(.enabled(if: !DriverTests.installed, "needs a Mac without Desktop Video"))
+  func openingAPortWithoutTheDriverSaysWhy() throws {
     var port = DeckLinkPortID(persistentID: 1, subDevice: 0).shim
     var callbacks = dl_callbacks()
     var why = [CChar](repeating: 0, count: 256)
@@ -108,13 +112,33 @@ import Testing
     #expect(inventory.seen[0].modes == [p59])
   }
 
-  /// The real reader on this Mac: no driver, so one line saying so.
+  /// With the driver and no card at that id: the open fails and says why, and
+  /// there is a driver to watch for devices.
+  @Test(.enabled(if: DriverTests.installed, "needs Desktop Video"))
+  func openingAPortThatIsNotThereSaysWhy() throws {
+    var port = DeckLinkPortID(persistentID: 0x5eed_0001, subDevice: 9).shim
+    var callbacks = dl_callbacks()
+    var why = [CChar](repeating: 0, count: 256)
+    let output = dl_output_open(&port, 0x4870_3539, &callbacks, &why, why.count)
+    #expect(output == nil)
+    #expect(String(cString: why) == "the port is not connected")
+    #expect(dl_watch_devices(nil, nil) == true)
+  }
+
+  /// The real reader on this Mac, scanned twice: one line, saying the driver is
+  /// missing, or which version it is and how many ports it has.
   @Test func theInventoryOnThisMac() throws {
-    try #require(!FileManager.default.fileExists(atPath: Self.framework), "Desktop Video is installed here")
     let log = LogLines()
     let inventory = DeckLinkInventory(log: log.write)
-    #expect(inventory.scan().ports.isEmpty)
+    let ports = inventory.scan().ports
     _ = inventory.scan()
-    #expect(log.lines == ["Desktop Video is not installed, so there are no DeckLink outputs; install it and restart the helper"])
+    #expect(log.lines.count == 1)
+    if Self.installed {
+      let line = try #require(log.lines.first)
+      #expect(line.hasPrefix("Desktop Video ") && line.contains(": \(ports.count) output port"), "\(line)")
+    } else {
+      #expect(ports.isEmpty)
+      #expect(log.lines == ["Desktop Video is not installed, so there are no DeckLink outputs; install it and restart the helper"])
+    }
   }
 }
