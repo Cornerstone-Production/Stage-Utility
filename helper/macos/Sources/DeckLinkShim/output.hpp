@@ -60,6 +60,14 @@ enum class Completion { completed, late, dropped, flushed };
 
 class Output;
 
+/// A frame the card made itself (IDeckLinkOutput::CreateVideoFrame), retained,
+/// and where its bytes are. Used when the card will not take the helper's own.
+struct CardFrame {
+  IDeckLinkVideoFrame *frame = nullptr;
+  uint8_t *bytes = nullptr;
+  int32_t rowBytes = 0;
+};
+
 /// The thing that plays frames out on its own clock: a DeckLink port, or the
 /// software clock that stands in for one.
 class Card {
@@ -71,7 +79,9 @@ class Card {
     output_ = output;
     return true;
   }
-  virtual bool schedule(PoolFrame *frame, int64_t displayTime, int64_t duration, int64_t timeScale) = 0;
+  virtual bool schedule(IDeckLinkVideoFrame *frame, int64_t displayTime, int64_t duration, int64_t timeScale) = 0;
+  /// A frame of the card's own memory, 8-bit YUV, retained; empty if it cannot.
+  virtual CardFrame createFrame(int32_t width, int32_t height, int32_t rowBytes) = 0;
   /// The card's playback position, in the mode's time scale.
   virtual bool streamTime(int64_t timeScale, int64_t *now) = 0;
   virtual bool start(int64_t at, int64_t timeScale) = 0;
@@ -89,8 +99,11 @@ class Output {
   /// Two frames: one would be due before this callback could hand it over.
   static constexpr int64_t kResyncLead = 2;
 
+  /// With `cardFrames` the card's own frames carry the pictures, each copied in
+  /// from the helper's frame the source wrote; without, the helper's frames go to
+  /// the card as they are.
   Output(Card *card, int32_t width, int32_t height, int64_t frameDuration, int64_t timeScale,
-         const dl_callbacks &callbacks);
+         const dl_callbacks &callbacks, bool cardFrames);
   ~Output();
 
   /// Make the frames, fill and schedule all of them, and start playback.
@@ -109,10 +122,24 @@ class Output {
 
   void counters(dl_counters *out) const;
   Card *card() const { return card_; }
+  bool cardFrames() const { return cardFrames_; }
+  /// The open failed because the card refused the helper's own frames during the
+  /// pre-roll: the case for opening again with card frames.
+  bool helperFramesRefused() const { return helperFramesRefused_; }
 
  private:
-  void fillAndSchedule(PoolFrame *frame);
-  PoolFrame *poolFrame(IDeckLinkVideoFrame *frame) const;
+  /// One frame in flight. `staging` is the helper's memory the source writes into;
+  /// `card` is the card's own frame when there is one, and is what is scheduled.
+  struct Slot {
+    PoolFrame *staging = nullptr;
+    CardFrame card;
+    IDeckLinkVideoFrame *sent() const {
+      return card.frame != nullptr ? card.frame : static_cast<IDeckLinkVideoFrame *>(staging);
+    }
+  };
+
+  void fillAndSchedule(Slot &slot);
+  Slot *slotFor(IDeckLinkVideoFrame *frame);
 
   Card *card_;
   int32_t width_;
@@ -120,15 +147,19 @@ class Output {
   int64_t frameDuration_;
   int64_t timeScale_;
   dl_callbacks callbacks_;
-  std::vector<PoolFrame *> frames_;
+  std::vector<Slot> slots_;
   bool attached_ = false;
+  const bool cardFrames_;
+  bool started_ = false;
+  bool helperFramesRefused_ = false;
 
   /// Held for the whole of a completion, so close() can wait one out.
   std::mutex mutex_;
   /// The frame index the next scheduled frame is shown at; its display time is
   /// this times the frame duration. Playback starts at 0.
   int64_t nextIndex_ = 0;
-  /// The frame most recently scheduled: the picture to send again on a repeat.
+  /// The staging frame most recently scheduled: the picture to send again on a
+  /// repeat.
   PoolFrame *last_ = nullptr;
 
   std::atomic<bool> closing_{false};
@@ -155,5 +186,38 @@ struct dl_output {
   dlshim::Card *card;
   dlshim::Output *output;
 };
+
+namespace dlshim {
+
+/// A mode's frame size and timing.
+struct Geometry {
+  int32_t width = 0;
+  int32_t height = 0;
+  int64_t frameDuration = 0;
+  int64_t timeScale = 0;
+};
+
+/// Open an output on the card `makeCard(why, geometry)` returns (nullptr, with
+/// `why`, if it cannot). If that card refuses the helper's own frames during the
+/// pre-roll, the open is made again, on a fresh card, with card frames.
+template <typename MakeCard>
+dl_output *openOutput(MakeCard makeCard, const dl_callbacks &callbacks, std::string &why) {
+  bool cardFrames = callbacks.card_frames;
+  for (;;) {
+    Geometry g;
+    Card *card = makeCard(why, g);
+    if (card == nullptr) return nullptr;
+    auto *output = new Output(card, g.width, g.height, g.frameDuration, g.timeScale, callbacks, cardFrames);
+    if (output->start(why)) return new dl_output{card, output};
+    const bool again = !cardFrames && output->helperFramesRefused();
+    output->close();
+    delete output;
+    delete card;
+    if (!again) return nullptr;
+    cardFrames = true;
+  }
+}
+
+}  // namespace dlshim
 
 #endif

@@ -88,19 +88,23 @@ HRESULT PoolFrame::GetAncillaryData(IDeckLinkVideoFrameAncillary **ancillary) {
 // MARK: Output
 
 Output::Output(Card *card, int32_t width, int32_t height, int64_t frameDuration, int64_t timeScale,
-               const dl_callbacks &callbacks)
+               const dl_callbacks &callbacks, bool cardFrames)
     : card_(card),
       width_(width),
       height_(height),
       frameDuration_(frameDuration),
       timeScale_(timeScale),
-      callbacks_(callbacks) {
+      callbacks_(callbacks),
+      cardFrames_(cardFrames) {
   if (callbacks_.depth == 0) callbacks_.depth = 3;
   attached_ = card_->attach(this);
 }
 
 Output::~Output() {
-  for (PoolFrame *frame : frames_) frame->Release();
+  for (Slot &slot : slots_) {
+    if (slot.card.frame != nullptr) slot.card.frame->Release();
+    slot.staging->Release();
+  }
 }
 
 bool Output::start(std::string &why) {
@@ -121,19 +125,33 @@ bool Output::start(std::string &why) {
     why = "an output needs at least two frames in flight";
     return false;
   }
-  for (int32_t slot = 0; slot < callbacks_.depth; slot++) {
-    auto *frame = new PoolFrame(width_, height_, slot);
-    if (!frame->valid()) {
-      frame->Release();
+  for (int32_t n = 0; n < callbacks_.depth; n++) {
+    Slot slot;
+    slot.staging = new PoolFrame(width_, height_, n);
+    if (!slot.staging->valid()) {
+      slot.staging->Release();
       why = "could not allocate a frame";
       return false;
     }
-    frames_.push_back(frame);
+    if (cardFrames_) {
+      slot.card = card_->createFrame(width_, height_, slot.staging->rowBytes());
+      if (slot.card.frame == nullptr || slot.card.bytes == nullptr || slot.card.rowBytes < width_ * 2) {
+        if (slot.card.frame != nullptr) slot.card.frame->Release();
+        slot.staging->Release();
+        why = "the card would not make a frame";
+        return false;
+      }
+    }
+    slots_.push_back(slot);
   }
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    for (PoolFrame *frame : frames_) {
-      fillAndSchedule(frame);
+    for (Slot &slot : slots_) {
+      fillAndSchedule(slot);
+      if (helperFramesRefused_) {
+        why = "the card refused the helper's own frames";
+        return false;
+      }
       if (lost_) {
         why = "the card refused the pre-roll";
         return false;
@@ -144,12 +162,13 @@ bool Output::start(std::string &why) {
     why = "the card would not start playback";
     return false;
   }
+  started_ = true;
   return true;
 }
 
-PoolFrame *Output::poolFrame(IDeckLinkVideoFrame *frame) const {
-  for (PoolFrame *mine : frames_) {
-    if (static_cast<IDeckLinkVideoFrame *>(mine) == frame) return mine;
+Output::Slot *Output::slotFor(IDeckLinkVideoFrame *frame) {
+  for (Slot &slot : slots_) {
+    if (slot.sent() == frame) return &slot;
   }
   return nullptr;
 }
@@ -158,7 +177,7 @@ void Output::completed(IDeckLinkVideoFrame *frame, Completion result) {
   if (closing_ || lost_) return;
   std::lock_guard<std::mutex> lock(mutex_);
   if (closing_ || lost_) return;
-  PoolFrame *mine = poolFrame(frame);
+  Slot *mine = slotFor(frame);
   if (mine == nullptr) return;
 
   switch (result) {
@@ -186,10 +205,11 @@ void Output::completed(IDeckLinkVideoFrame *frame, Completion result) {
       resyncs_++;
     }
   }
-  fillAndSchedule(mine);
+  fillAndSchedule(*mine);
 }
 
-void Output::fillAndSchedule(PoolFrame *frame) {
+void Output::fillAndSchedule(Slot &slot) {
+  PoolFrame *frame = slot.staging;
   const int64_t index = nextIndex_;
   const int64_t at = index * frameDuration_;
   const dl_frame_target target{frame->bytes(), frame->length(), frame->rowBytes(), width_, height_, frame->slot()};
@@ -204,7 +224,27 @@ void Output::fillAndSchedule(PoolFrame *frame) {
     repeated_++;
   }
   last_ = frame;
-  if (!card_->schedule(frame, at, frameDuration_, timeScale_)) {
+  if (slot.card.frame != nullptr) {
+    // The card's own frame: one copy of the picture into it, a row at a time when
+    // the card pads its rows.
+    const size_t row = static_cast<size_t>(width_) * 2;
+    if (slot.card.rowBytes == frame->rowBytes()) {
+      std::memcpy(slot.card.bytes, frame->bytes(), row * height_);
+    } else {
+      for (int32_t y = 0; y < height_; y++) {
+        std::memcpy(slot.card.bytes + static_cast<size_t>(y) * slot.card.rowBytes,
+                    frame->bytes() + static_cast<size_t>(y) * frame->rowBytes(), row);
+      }
+    }
+  }
+  if (!card_->schedule(slot.sent(), at, frameDuration_, timeScale_)) {
+    if (!started_ && !cardFrames_) {
+      // Refused before playback began, in the helper's own frames: the driver
+      // may not take application memory. Not a loss; the open is made again with
+      // the card's frames.
+      helperFramesRefused_ = true;
+      return;
+    }
     lose("the card refused a frame");
     return;
   }

@@ -137,7 +137,20 @@ typedef struct {
   /// Frames in flight, all of them scheduled before playback starts (the
   /// pre-roll). 0 means 3; at least 2.
   int32_t depth;
+  /// Use the card's own frames from the start. Without it the helper's frames go
+  /// to the card, and only a card that refuses them during the pre-roll gets its
+  /// own (see dl_output_frames).
+  bool card_frames;
 } dl_callbacks;
+
+/// Which frames carry an output's pictures.
+typedef enum {
+  /// The helper's own page-aligned memory, which the source writes straight into.
+  DL_FRAMES_HELPER = 0,
+  /// Frames the card made (IDeckLinkOutput::CreateVideoFrame). The source still
+  /// writes into the helper's memory; each frame is then copied into the card's.
+  DL_FRAMES_CARD = 1,
+} dl_frames;
 
 typedef struct dl_output dl_output;
 
@@ -149,9 +162,16 @@ dl_output *dl_output_open(const dl_port_id *port, uint32_t display_mode, const d
 
 /// The same scheduler over a software clock, for tests and for running without a
 /// card. With `timer` the clock ticks by itself every frame on its own thread;
-/// without it, only `dl_fake_tick` moves it.
+/// without it, only `dl_fake_tick` moves it. With `refuse_helper_frames` it
+/// refuses any frame it did not make itself, as a driver that will not take
+/// application memory would.
 dl_output *dl_fake_output_open(int32_t width, int32_t height, int64_t frame_duration, int64_t time_scale, bool timer,
-                               const dl_callbacks *callbacks, char *why, size_t why_len);
+                               bool refuse_helper_frames, const dl_callbacks *callbacks, char *why, size_t why_len);
+
+/// Frames the software clocks have made and not yet freed, across the process.
+int32_t dl_fake_card_frames_alive(void);
+
+dl_frames dl_output_frames(const dl_output *output);
 
 /// Stop playback and free the output. No callback runs after this returns.
 void dl_output_close(dl_output *output);
@@ -197,8 +217,9 @@ void dl_fake_report_late(dl_output *output, int32_t frames);
 void dl_fake_unplug(dl_output *output);
 /// What went out, one entry per frame of the clock: the first eight bytes of the
 /// frame on air, read as a little-endian int64 (a test source writes its picture
-/// number there). A slot with no frame of ours repeats the card's last picture, as
-/// a card does. Returns how many entries there are; copies up to `capacity`.
+/// number at the start of every line), or -2 when the frame's last line does not
+/// start the same way. A slot with no frame of ours repeats the card's last
+/// picture, as a card does. Returns how many entries there are; copies up to `capacity`.
 int32_t dl_fake_shown(const dl_output *output, int64_t *pictures, int32_t capacity);
 
 #ifdef __cplusplus

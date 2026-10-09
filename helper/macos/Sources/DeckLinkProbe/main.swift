@@ -11,6 +11,10 @@
 //   swift run DeckLinkProbe null [seconds] [outputs]
 //       The same on the software clock instead of a card, at 1920 x 1080 59.94.
 //
+//   --card-frames, with bars or null, sends in frames the card makes, each picture
+//   copied in, instead of the helper's own: the mode a port falls back to when its
+//   driver refuses the helper's frames.
+//
 // Each picture is drawn when the clock takes the frame before it, on another
 // thread, as a windowless browser's begin frame would be: a picture that is not
 // ready in time shows up as a repeat.
@@ -132,7 +136,8 @@ func printLog(_ level: DeckLinkLog.Level, _ message: String) {
   print("[decklink] \(message)")
 }
 
-let args = Array(CommandLine.arguments.dropFirst())
+let cardFrames = CommandLine.arguments.contains("--card-frames")
+let args = Array(CommandLine.arguments.dropFirst().filter { $0 != "--card-frames" })
 
 switch args.first {
 case "list":
@@ -170,7 +175,8 @@ case "bars" where args.count >= 2:
   let painter = BarsPainter(width: cardMode.width, height: cardMode.height)
   let render = feed(source, painter: painter, label: found.descriptor.name)
   render.sync {}
-  let port = DeckLinkOutputPort(label: found.descriptor.name, hardware: .port(found), source: timed, log: printLog)
+  let port = DeckLinkOutputPort(
+    label: found.descriptor.name, hardware: .port(found), source: timed, cardFrames: cardFrames, log: printLog)
   _ = DeckLinkDriver.watchDevices { port.retry() }
   port.open(videoMode: mode)
   run([(port, timed)], seconds: args.count >= 4 ? Double(args[3]) ?? 10 : 10)
@@ -191,7 +197,7 @@ case "null":
     let port = DeckLinkOutputPort(
       label: label,
       hardware: .softwareClock(width: 1920, height: 1080, frameDuration: 1001, timeScale: 60000, ticksByItself: true),
-      source: timed, log: printLog)
+      source: timed, cardFrames: cardFrames, log: printLog)
     port.open(videoMode: nil)
     ports.append((port, timed))
   }
@@ -201,8 +207,8 @@ default:
   print(
     """
     usage: DeckLinkProbe list
-           DeckLinkProbe bars <output key> [mode] [seconds]
-           DeckLinkProbe null [seconds] [outputs]
+           DeckLinkProbe bars <output key> [mode] [seconds] [--card-frames]
+           DeckLinkProbe null [seconds] [outputs] [--card-frames]
     """)
   exit(2)
 }

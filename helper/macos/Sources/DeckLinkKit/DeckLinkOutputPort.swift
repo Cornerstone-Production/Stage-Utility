@@ -21,14 +21,27 @@ public final class DeckLinkOutputPort: CardSink {
   public enum Hardware {
     case port(DeckLinkPort)
     /// The scheduler on a software clock instead of a card. With
-    /// `ticksByItself` false only the tests move it.
-    case softwareClock(width: Int, height: Int, frameDuration: Int64, timeScale: Int64, ticksByItself: Bool)
+    /// `ticksByItself` false only the tests move it. With `refusesHelperFrames`
+    /// it refuses the helper's own frames, as a driver that will not take
+    /// application memory would.
+    case softwareClock(
+      width: Int, height: Int, frameDuration: Int64, timeScale: Int64, ticksByItself: Bool,
+      refusesHelperFrames: Bool = false)
+  }
+
+  /// Which frames carry the pictures to the card.
+  public enum Frames: String, Equatable {
+    /// The helper's own memory, which Metal writes straight into: no copy.
+    case helper = "the helper's frames"
+    /// Frames the card made: each picture is copied in from the helper's memory.
+    /// Used when the card refuses the helper's own, or when asked for.
+    case card = "the card's frames"
   }
 
   public enum State: Equatable {
     case closed
-    /// Playing out in this mode.
-    case running(mode: String)
+    /// Playing out in this mode, in these frames.
+    case running(mode: String, frames: Frames)
     /// The screen's mode cannot be played on this port. Not retried.
     case refused(String)
     /// Gone or failed; retried until it opens again.
@@ -37,6 +50,9 @@ public final class DeckLinkOutputPort: CardSink {
 
   public let label: String
   private let hardware: Hardware
+  private let forceCardFrames: Bool
+  /// The switch to card frames is said once per port, not on every reopening.
+  private var saidCardFrames = false
   private let source: CardFrameSource
   private let depth: Int
   private let retryInterval: TimeInterval
@@ -61,15 +77,19 @@ public final class DeckLinkOutputPort: CardSink {
 
   /// - Parameters:
   ///   - depth: frames in flight, all scheduled before playback starts.
+  ///   - cardFrames: use the card's own frames from the start, for a card known
+  ///     to refuse the helper's (or to compare the two on the bench).
   ///   - log: where the port's lines go; the unified log unless a test says.
   ///   - clock: seconds, for the health sample's rate.
   public init(
-    label: String, hardware: Hardware, source: CardFrameSource, depth: Int = 3, retryInterval: TimeInterval = 2,
+    label: String, hardware: Hardware, source: CardFrameSource, depth: Int = 3, cardFrames: Bool = false,
+    retryInterval: TimeInterval = 2,
     pollInterval: TimeInterval = 1, log: @escaping (DeckLinkLog.Level, String) -> Void = DeckLinkLog.write,
     clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
   ) {
     self.label = label
     self.hardware = hardware
+    forceCardFrames = cardFrames
     self.source = source
     self.depth = depth
     self.retryInterval = retryInterval
@@ -87,6 +107,12 @@ public final class DeckLinkOutputPort: CardSink {
 
   public var state: State { queue.sync { current } }
 
+  /// Which frames the port is sending in; nil when it is not running.
+  public var frames: Frames? {
+    if case .running(_, let frames) = state { return frames }
+    return nil
+  }
+
   /// Open the port in the screen's `videoMode` (nil for the default, 1080p59.94).
   /// An open port is closed and opened again.
   @discardableResult
@@ -96,9 +122,9 @@ public final class DeckLinkOutputPort: CardSink {
       closeHandle()
       self.videoMode = videoMode
       switch attempt() {
-      case .opened(let mode):
-        current = .running(mode: mode)
-        log(.info, "\(label): opened in \(mode)")
+      case .opened(let mode, let frames):
+        current = .running(mode: mode, frames: frames)
+        log(.info, "\(label): opened in \(mode)\(frames == .card ? " with the card's frames" : "")")
         startPolling()
       case .refused(let why):
         current = .refused(why)
@@ -145,7 +171,7 @@ public final class DeckLinkOutputPort: CardSink {
   // MARK: On the queue
 
   private enum Attempt {
-    case opened(String)
+    case opened(String, Frames)
     case refused(String)
     case failed(String)
   }
@@ -165,33 +191,41 @@ public final class DeckLinkOutputPort: CardSink {
       modeName = VideoModes.name(of: mode) ?? mode.driverName
       box = CallbackBox(source: source, timeScale: mode.timeScale, port: self, queue: queue)
       var id = port.id.shim
-      var callbacks = box.callbacks(depth: depth)
+      var callbacks = box.callbacks(depth: depth, cardFrames: forceCardFrames)
       opened = dl_output_open(&id, mode.code, &callbacks, &why, why.count)
-    case .softwareClock(let width, let height, let duration, let scale, let ticks):
+    case .softwareClock(let width, let height, let duration, let scale, let ticks, let refuses):
       modeName = "\(width)x\(height) at \(VideoModes.rateText(Double(scale) / Double(duration))) on a software clock"
       box = CallbackBox(source: source, timeScale: scale, port: self, queue: queue)
-      var callbacks = box.callbacks(depth: depth)
-      opened = dl_fake_output_open(Int32(width), Int32(height), duration, scale, ticks, &callbacks, &why, why.count)
+      var callbacks = box.callbacks(depth: depth, cardFrames: forceCardFrames)
+      opened = dl_fake_output_open(
+        Int32(width), Int32(height), duration, scale, ticks, refuses, &callbacks, &why, why.count)
     }
     guard let opened else { return .failed(String(cString: why)) }
     handle = opened
     self.box = box
+    let frames: Frames = dl_output_frames(opened) == DL_FRAMES_CARD ? .card : .helper
+    if frames == .card, !forceCardFrames, !saidCardFrames {
+      saidCardFrames = true
+      log(
+        .info,
+        "\(label): the card refused the helper's own frames, so it gets the card's frames, with one copy of each picture")
+    }
     // The pre-roll is filled before any page can have drawn, so its repeats are the
     // baseline, not trouble. An episode that was running goes on across a reopening.
     let counts = countsNow()
     trouble.rebase(repeated: counts.repeated, dropped: counts.dropped)
     lastPolledScheduled = counts.scheduled
     stalledPolls = 0
-    return .opened(modeName)
+    return .opened(modeName, frames)
   }
 
   private func retryNow() {
     guard case .lost = current else { return }
     switch attempt() {
-    case .opened(let mode):
-      current = .running(mode: mode)
+    case .opened(let mode, let frames):
+      current = .running(mode: mode, frames: frames)
       stopTimers()
-      log(.info, "\(label): reopened in \(mode)")
+      log(.info, "\(label): reopened in \(mode)\(frames == .card ? " with the card's frames" : "")")
       startPolling()
     case .refused(let why):
       current = .refused(why)
@@ -317,9 +351,10 @@ final class CallbackBox {
     self.queue = queue
   }
 
-  func callbacks(depth: Int) -> dl_callbacks {
+  func callbacks(depth: Int, cardFrames: Bool) -> dl_callbacks {
     dl_callbacks(
-      fill: fillThunk, lost: lostThunk, ctx: Unmanaged.passUnretained(self).toOpaque(), depth: Int32(depth))
+      fill: fillThunk, lost: lostThunk, ctx: Unmanaged.passUnretained(self).toOpaque(), depth: Int32(depth),
+      card_frames: cardFrames)
   }
 }
 

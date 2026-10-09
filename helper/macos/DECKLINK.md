@@ -72,7 +72,7 @@ The card's clock drives each output, through scheduled playback.
 
 - **Frames in flight.** Three frames, all filled and scheduled before playback
   starts. The frames' memory is the helper's own, page-aligned, so Metal writes the
-  picture straight into it.
+  picture straight into it (see [Helper frames and card frames](#helper-frames-and-card-frames)).
 - **Each frame.** When the card finishes showing frame *k* (`ScheduledFrameCompleted`),
   the source is asked for frame *k* + 3, two slots after the one on air, and that
   frame is scheduled.
@@ -88,6 +88,35 @@ The card's clock drives each output, through scheduled playback.
 
 Health posts report `fps` as frames sent per second (repeats included), with the
 repeated and dropped counts since the last post.
+
+## Helper frames and card frames
+
+A port sends its pictures in one of two kinds of frame, shown in its state
+(`.running(mode:frames:)`, `port.frames`):
+
+| Frames | What happens per frame | Cost |
+|---|---|---|
+| **The helper's** (the default) | Metal writes the picture into the helper's own page-aligned memory, which is handed to the card as an `IDeckLinkVideoFrame`. | No copy. |
+| **The card's** | Metal writes into the same helper memory, then the picture is copied into a frame the card made (`IDeckLinkOutput::CreateVideoFrame`, 8-bit YUV), a line at a time if the card pads its lines. | One `memcpy` of 4 MB per 1080p frame: about 0.1 ms on an M4 Mac mini (0.07-0.10 ms, about 45 GB/s, measured with buffers larger than the caches). Eight outputs at 59.94 is about 5% of one core and 4 GB/s more memory traffic. |
+
+The SDK lets an application hand over its own frames, but whether a given driver
+takes them is unproven until a card is on the bench. So a port that has its own
+frames refused while it is filling the pre-roll opens again by itself in the
+card's frames for the rest of that open (a reopening tries the helper's frames
+first again), and logs the switch once per port:
+
+```
+<port>: the card refused the helper's own frames, so it gets the card's frames, with one copy of each picture
+```
+
+Its open line then reads `opened in 1080p59.94 with the card's frames`. A frame
+refused once playback is running is not a refusal of the kind of frame but a
+failed port, and is handled as one. The card's frames are not written by Metal
+directly, because nothing promises their memory is page-aligned and a whole number
+of pages, which a Metal buffer without a copy needs.
+
+`DeckLinkOutputPort(cardFrames: true)` and `DeckLinkProbe … --card-frames` use the
+card's frames from the start.
 
 ## Bandwidth
 
@@ -120,7 +149,8 @@ log stream --level info --predicate 'subsystem == "com.stageutility.output" && c
 |---|---|
 | `Desktop Video is not installed, so there are no DeckLink outputs; install it and restart the helper` | At the first scan, and again only if that changes. Likewise too old or not loading. |
 | `Desktop Video 14.2: 2 output ports: …` | The driver found, or its ports changed. |
-| `<port>: opened in 1080p59.94` / `reopened in …` | A port started, or came back. |
+| `<port>: opened in 1080p59.94` / `reopened in …` | A port started, or came back. `… with the card's frames` when it sends in those. |
+| `<port>: the card refused the helper's own frames, so it gets the card's frames, …` | Once per port, the first time it falls back. |
 | `<port>: refused 1080p59.94: <reason>` | The mode cannot be played on that port. |
 | `<port>: could not open (<reason>)` / `lost (<reason>)` | A port that will not open or went away; retried. A running port that sends nothing for two seconds is lost with "the card stopped taking frames". |
 | `<port>: repeating frames (n in the last 1 s)` / `stopped repeating frames (n in all)` | Repeats start, and stop after five quiet seconds. Likewise `dropping frames`. |
@@ -131,9 +161,12 @@ Healthy frames are not logged.
 
 ```sh
 swift run DeckLinkProbe list                       # the driver, the ports, their modes
-swift run DeckLinkProbe bars <output key> [mode] [seconds]
-swift run DeckLinkProbe null [seconds] [outputs]   # the software clock, no card
+swift run DeckLinkProbe bars <output key> [mode] [seconds] [--card-frames]
+swift run DeckLinkProbe null [seconds] [outputs] [--card-frames]   # the software clock, no card
 ```
+
+`--card-frames` sends in frames the card makes, as a port does when its driver
+refuses the helper's: the way to check that mode on a card that would take either.
 
 `bars` and `null` play 75% colour bars with a moving white line through the whole
 path (an IOSurface presented, the Metal conversion, the scheduler) and print the
@@ -185,14 +218,21 @@ Proven on a Mac with no DeckLink hardware and no driver:
 - the scheduler, on the software clock: exactly the late frames repeat with the
   previous picture, a stalled host resyncs once with no frames dropped, an unplugged
   port is lost and reopens, health samples and the start/stop log lines;
+- the card-frame fallback, on a software clock that refuses the helper's frames:
+  it opens in its own frames, frames flow whole (its lines are longer than the
+  helper's), the counts are right, the switch is said once, and closing frees
+  every frame it made;
 - the Metal conversion on this Mac's GPU, against exact UYVY bytes for white,
   black, the 75% bars and turned patterns;
 - eight 1080p59.94 outputs on the software clock through the whole path.
 
 Only a card can prove:
 
-- that the driver accepts the helper's own frames (an `IDeckLinkVideoFrame` over
-  helper memory, which the SDK allows) and DMAs from them;
+- whether the driver accepts the helper's own frames (an `IDeckLinkVideoFrame` over
+  helper memory, which the SDK allows) and DMAs from them, or refuses them at the
+  pre-roll so the fallback takes over; a driver that took them and then sent
+  garbage would not be caught, and is what `bars` with and without
+  `--card-frames` side by side is for;
 - port enumeration, persistent ids, sub-devices and the modes a real card reports;
 - the card's completion results and stream time under load, and the resync on real
   timing;

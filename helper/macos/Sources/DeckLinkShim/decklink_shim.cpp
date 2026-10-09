@@ -190,8 +190,26 @@ class DeckLinkCard final : public Card {
     return out_->SetScheduledFrameCompletionCallback(sink_) == S_OK;
   }
 
-  bool schedule(PoolFrame *frame, int64_t displayTime, int64_t duration, int64_t timeScale) override {
+  bool schedule(IDeckLinkVideoFrame *frame, int64_t displayTime, int64_t duration, int64_t timeScale) override {
     return out_->ScheduleVideoFrame(frame, displayTime, duration, timeScale) == S_OK;
+  }
+
+  CardFrame createFrame(int32_t width, int32_t height, int32_t rowBytes) override {
+    CardFrame made;
+    IDeckLinkMutableVideoFrame *frame = nullptr;
+    if (out_->CreateVideoFrame(width, height, rowBytes, bmdFormat8BitYUV, bmdFrameFlagDefault, &frame) != S_OK ||
+        frame == nullptr) {
+      return made;
+    }
+    void *bytes = nullptr;
+    if (frame->GetBytes(&bytes) != S_OK || bytes == nullptr) {
+      frame->Release();
+      return made;
+    }
+    made.frame = frame;
+    made.bytes = static_cast<uint8_t *>(bytes);
+    made.rowBytes = static_cast<int32_t>(frame->GetRowBytes());
+    return made;
   }
 
   bool streamTime(int64_t timeScale, int64_t *now) override {
@@ -427,6 +445,58 @@ extern "C" bool dl_port_list_mode(const dl_port_list *list, int32_t port, int32_
 
 extern "C" void dl_port_list_free(dl_port_list *list) { delete list; }
 
+namespace {
+
+/// Find `port`, check `display_mode` plays in 8-bit YUV, and enable it: a card
+/// ready for the pre-roll, or nullptr with the reason.
+Card *enablePort(const dl_port_id &port, uint32_t displayMode, std::string &why, Geometry &g) {
+  IDeckLink *device = findDevice(port);
+  if (device == nullptr) {
+    why = "the port is not connected";
+    return nullptr;
+  }
+  IDeckLinkOutput *out = nullptr;
+  if (device->QueryInterface(IID_IDeckLinkOutput, reinterpret_cast<void **>(&out)) != S_OK) {
+    device->Release();
+    why = "the port cannot play out";
+    return nullptr;
+  }
+  auto fail = [&](const std::string &reason) -> Card * {
+    out->Release();
+    device->Release();
+    why = reason;
+    return nullptr;
+  };
+
+  IDeckLinkDisplayMode *mode = nullptr;
+  if (out->GetDisplayMode(displayMode, &mode) != S_OK || mode == nullptr) {
+    return fail("the port has no mode " + modeCode(displayMode));
+  }
+  g.width = static_cast<int32_t>(mode->GetWidth());
+  g.height = static_cast<int32_t>(mode->GetHeight());
+  BMDTimeValue duration = 0;
+  BMDTimeScale scale = 0;
+  mode->GetFrameRate(&duration, &scale);
+  g.frameDuration = duration;
+  g.timeScale = scale;
+  mode->Release();
+
+  BMDDisplayMode actual = bmdModeUnknown;
+  bool supported = false;
+  if (out->DoesSupportVideoMode(bmdVideoConnectionUnspecified, displayMode, bmdFormat8BitYUV,
+                                bmdNoVideoOutputConversion, bmdSupportedVideoModeDefault, &actual,
+                                &supported) != S_OK ||
+      !supported) {
+    return fail("the port does not play " + modeCode(displayMode) + " in 8-bit YUV");
+  }
+  const HRESULT enabled = out->EnableVideoOutput(displayMode, bmdVideoOutputFlagDefault);
+  if (enabled == E_ACCESSDENIED) return fail("the port is in use by another application");
+  if (enabled != S_OK) return fail("the port refused " + modeCode(displayMode));
+  return new DeckLinkCard(device, out, port);
+}
+
+}  // namespace
+
 extern "C" dl_output *dl_output_open(const dl_port_id *port, uint32_t display_mode, const dl_callbacks *callbacks,
                                      char *why, size_t why_len) {
   if (port == nullptr || callbacks == nullptr) {
@@ -443,61 +513,21 @@ extern "C" dl_output *dl_output_open(const dl_port_id *port, uint32_t display_mo
   }
   DeviceWatch::shared().ensure();
 
-  IDeckLink *device = findDevice(*port);
-  if (device == nullptr) {
-    copyReason("the port is not connected", why, why_len);
-    return nullptr;
-  }
-  IDeckLinkOutput *out = nullptr;
-  if (device->QueryInterface(IID_IDeckLinkOutput, reinterpret_cast<void **>(&out)) != S_OK) {
-    device->Release();
-    copyReason("the port cannot play out", why, why_len);
-    return nullptr;
-  }
-  auto fail = [&](const std::string &reason) -> dl_output * {
-    out->Release();
-    device->Release();
-    copyReason(reason, why, why_len);
-    return nullptr;
-  };
-
-  IDeckLinkDisplayMode *mode = nullptr;
-  if (out->GetDisplayMode(display_mode, &mode) != S_OK || mode == nullptr) {
-    return fail("the port has no mode " + modeCode(display_mode));
-  }
-  const auto width = static_cast<int32_t>(mode->GetWidth());
-  const auto height = static_cast<int32_t>(mode->GetHeight());
-  BMDTimeValue duration = 0;
-  BMDTimeScale scale = 0;
-  mode->GetFrameRate(&duration, &scale);
-  mode->Release();
-
-  BMDDisplayMode actual = bmdModeUnknown;
-  bool supported = false;
-  if (out->DoesSupportVideoMode(bmdVideoConnectionUnspecified, display_mode, bmdFormat8BitYUV,
-                                bmdNoVideoOutputConversion, bmdSupportedVideoModeDefault, &actual,
-                                &supported) != S_OK ||
-      !supported) {
-    return fail("the port does not play " + modeCode(display_mode) + " in 8-bit YUV");
-  }
-  const HRESULT enabled = out->EnableVideoOutput(display_mode, bmdVideoOutputFlagDefault);
-  if (enabled == E_ACCESSDENIED) return fail("the port is in use by another application");
-  if (enabled != S_OK) return fail("the port refused " + modeCode(display_mode));
-
-  auto *card = new DeckLinkCard(device, out, *port);
-  auto *output = new Output(card, width, height, duration, scale, *callbacks);
   std::string reason;
-  if (!output->start(reason)) {
-    output->close();
-    delete output;
-    delete card;
+  dl_output *handle = openOutput(
+      [&](std::string &whyNot, Geometry &g) { return enablePort(*port, display_mode, whyNot, g); }, *callbacks,
+      reason);
+  if (handle == nullptr) {
     copyReason(reason, why, why_len);
     return nullptr;
   }
-  auto *handle = new dl_output{card, output};
   std::lock_guard<std::mutex> lock(gOpenMutex);
   gOpen.push_back(handle);
   return handle;
+}
+
+extern "C" dl_frames dl_output_frames(const dl_output *output) {
+  return output != nullptr && output->output->cardFrames() ? DL_FRAMES_CARD : DL_FRAMES_HELPER;
 }
 
 extern "C" void dl_output_close(dl_output *output) {

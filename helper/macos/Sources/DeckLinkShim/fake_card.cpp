@@ -8,13 +8,17 @@
 //   completes as dropped;
 // - a slot with no frame of ours shows the card's last picture again;
 // - a frame completes once its slot is over;
-// - completions can be held back, as a host stuck elsewhere would hold them.
+// - completions can be held back, as a host stuck elsewhere would hold them;
+// - it can refuse frames it did not make, as a driver that will not take
+//   application memory would, and make its own.
 
 #include "output.hpp"
 
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
+#include <set>
 #include <thread>
 #include <utility>
 
@@ -22,22 +26,105 @@ namespace dlshim {
 
 namespace {
 
+std::atomic<int32_t> gCardFramesAlive{0};
+
+/// A frame the software clock made, as a card's CreateVideoFrame would. Its
+/// memory is plain malloc, not page-aligned, as nothing promises a card's is.
+class FakeCardFrame final : public IDeckLinkMutableVideoFrame {
+ public:
+  FakeCardFrame(int32_t width, int32_t height, int32_t rowBytes)
+      : width_(width), height_(height), rowBytes_(rowBytes),
+        bytes_(static_cast<uint8_t *>(std::calloc(static_cast<size_t>(rowBytes) * height, 1))) {
+    gCardFramesAlive++;
+  }
+
+  bool valid() const { return bytes_ != nullptr; }
+
+  HRESULT QueryInterface(REFIID, LPVOID *ppv) override {
+    if (ppv != nullptr) *ppv = nullptr;
+    return E_NOINTERFACE;
+  }
+  ULONG AddRef() override { return ++refs_; }
+  ULONG Release() override {
+    ULONG left = --refs_;
+    if (left == 0) delete this;
+    return left;
+  }
+
+  long GetWidth() override { return width_; }
+  long GetHeight() override { return height_; }
+  long GetRowBytes() override { return rowBytes_; }
+  BMDPixelFormat GetPixelFormat() override { return bmdFormat8BitYUV; }
+  BMDFrameFlags GetFlags() override { return bmdFrameFlagDefault; }
+  HRESULT GetBytes(void **buffer) override {
+    *buffer = bytes_;
+    return S_OK;
+  }
+  HRESULT GetTimecode(BMDTimecodeFormat, IDeckLinkTimecode **timecode) override {
+    *timecode = nullptr;
+    return S_FALSE;
+  }
+  HRESULT GetAncillaryData(IDeckLinkVideoFrameAncillary **ancillary) override {
+    *ancillary = nullptr;
+    return S_FALSE;
+  }
+  HRESULT SetFlags(BMDFrameFlags) override { return S_OK; }
+  HRESULT SetTimecode(BMDTimecodeFormat, IDeckLinkTimecode *) override { return E_NOTIMPL; }
+  HRESULT SetTimecodeFromComponents(BMDTimecodeFormat, uint8_t, uint8_t, uint8_t, uint8_t,
+                                    BMDTimecodeFlags) override {
+    return E_NOTIMPL;
+  }
+  HRESULT SetAncillaryData(IDeckLinkVideoFrameAncillary *) override { return E_NOTIMPL; }
+  HRESULT SetTimecodeUserBits(BMDTimecodeFormat, BMDTimecodeUserBits) override { return E_NOTIMPL; }
+
+ private:
+  ~FakeCardFrame() override {
+    std::free(bytes_);
+    gCardFramesAlive--;
+  }
+  std::atomic<ULONG> refs_{1};
+  int32_t width_;
+  int32_t height_;
+  int32_t rowBytes_;
+  uint8_t *bytes_;
+};
+
 class FakeCard final : public Card {
  public:
-  FakeCard(int64_t frameDuration, int64_t timeScale, bool timer)
-      : frameDuration_(frameDuration), timeScale_(timeScale), timer_(timer) {}
+  FakeCard(int64_t frameDuration, int64_t timeScale, bool timer, bool refuseHelperFrames)
+      : frameDuration_(frameDuration), timeScale_(timeScale), timer_(timer), refuseHelperFrames_(refuseHelperFrames) {}
 
   ~FakeCard() override { stop(); }
 
   bool isFake() const override { return true; }
 
-  bool schedule(PoolFrame *frame, int64_t displayTime, int64_t, int64_t) override {
+  bool schedule(IDeckLinkVideoFrame *frame, int64_t displayTime, int64_t, int64_t) override {
     std::lock_guard<std::mutex> lock(mutex_);
     if (unplugged_ || stopped_) return false;
+    if (refuseHelperFrames_ && made_.count(frame) == 0) return false;
     const int64_t index = floorDiv(displayTime, frameDuration_);
     frame->AddRef();
     pending_.push_back(Pending{frame, index, started_ && index <= onAir_});
     return true;
+  }
+
+  CardFrame createFrame(int32_t width, int32_t height, int32_t rowBytes) override {
+    CardFrame made;
+    // Rows padded past the picture, as a card may pad them, so the copy that
+    // honours the card's row length is the one exercised.
+    auto *frame = new FakeCardFrame(width, height, rowBytes + 64);
+    if (!frame->valid()) {
+      frame->Release();
+      return made;
+    }
+    void *bytes = nullptr;
+    frame->GetBytes(&bytes);
+    made.frame = frame;
+    made.bytes = static_cast<uint8_t *>(bytes);
+    made.rowBytes = static_cast<int32_t>(frame->GetRowBytes());
+    std::lock_guard<std::mutex> lock(mutex_);
+    made_.insert(frame);
+    return made;
   }
 
   bool streamTime(int64_t timeScale, int64_t *now) override {
@@ -110,13 +197,14 @@ class FakeCard final : public Card {
 
  private:
   struct Pending {
-    PoolFrame *frame;
+    IDeckLinkVideoFrame *frame;
     int64_t index;
     /// Scheduled after its slot began: never shown.
     bool late;
   };
-  using Done = std::vector<std::pair<PoolFrame *, Completion>>;
+  using Done = std::vector<std::pair<IDeckLinkVideoFrame *, Completion>>;
 
+  static constexpr int64_t kTorn = -2;
   /// Keeps memory bounded on a fake left running for hours.
   static constexpr size_t kShownCap = 1 << 16;
 
@@ -148,11 +236,21 @@ class FakeCard final : public Card {
     deliver(done);
   }
 
-  /// Record what is on air for the slot that just began.
+  /// Record what is on air for the slot that just began: the first eight bytes of
+  /// its first line, or kTorn when its last line, found by the frame's own row
+  /// length, does not start with the same eight.
   void showLocked() {
     for (const auto &p : pending_) {
       if (p.index == onAir_ && !p.late) {
-        std::memcpy(&lastShown_, p.frame->bytes(), sizeof lastShown_);
+        void *bytes = nullptr;
+        p.frame->GetBytes(&bytes);
+        const auto *first = static_cast<const uint8_t *>(bytes);
+        const uint8_t *last = first + static_cast<size_t>(p.frame->GetRowBytes()) * (p.frame->GetHeight() - 1);
+        int64_t a = 0;
+        int64_t b = 0;
+        std::memcpy(&a, first, sizeof a);
+        std::memcpy(&b, last, sizeof b);
+        lastShown_ = a == b ? a : kTorn;
         break;
       }
     }
@@ -184,6 +282,9 @@ class FakeCard final : public Card {
   const int64_t frameDuration_;
   const int64_t timeScale_;
   const bool timer_;
+  const bool refuseHelperFrames_;
+  /// The frames this card made; only compared, never dereferenced.
+  std::set<const IDeckLinkVideoFrame *> made_;
 
   std::mutex mutex_;
   std::condition_variable wake_;
@@ -214,23 +315,24 @@ FakeCard *fakeOf(const dl_output *output) {
 using namespace dlshim;
 
 extern "C" dl_output *dl_fake_output_open(int32_t width, int32_t height, int64_t frame_duration, int64_t time_scale,
-                                          bool timer, const dl_callbacks *callbacks, char *why, size_t why_len) {
+                                          bool timer, bool refuse_helper_frames, const dl_callbacks *callbacks,
+                                          char *why, size_t why_len) {
   if (callbacks == nullptr) {
     copyReason("no callbacks", why, why_len);
     return nullptr;
   }
-  auto *card = new FakeCard(frame_duration, time_scale, timer);
-  auto *output = new Output(card, width, height, frame_duration, time_scale, *callbacks);
   std::string reason;
-  if (!output->start(reason)) {
-    output->close();
-    delete output;
-    delete card;
-    copyReason(reason, why, why_len);
-    return nullptr;
-  }
-  return new dl_output{card, output};
+  dl_output *handle = openOutput(
+      [&](std::string &, Geometry &g) -> Card * {
+        g = Geometry{width, height, frame_duration, time_scale};
+        return new FakeCard(frame_duration, time_scale, timer, refuse_helper_frames);
+      },
+      *callbacks, reason);
+  if (handle == nullptr) copyReason(reason, why, why_len);
+  return handle;
 }
+
+extern "C" int32_t dl_fake_card_frames_alive(void) { return gCardFramesAlive; }
 
 extern "C" void dl_fake_tick(dl_output *output, int32_t frames) {
   if (auto *fake = fakeOf(output)) fake->tick(frames);

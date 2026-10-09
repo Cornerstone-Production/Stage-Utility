@@ -3,9 +3,10 @@ import StageUtilityOutputCore
 import Testing
 @testable import DeckLinkKit
 
-/// A source that writes each frame's index into its first eight bytes, so the
-/// software clock's record of what went out says which picture each slot carried,
-/// and has nothing new for the frames in `missing`.
+/// A source that writes each frame's index at the start of every line, so the
+/// software clock's record of what went out says which picture each slot carried
+/// (and that the whole frame carried it), and has nothing new for the frames in
+/// `missing`.
 final class NumberedSource: CardFrameSource {
   private let lock = NSLock()
   private let missing: Set<Int64>
@@ -18,7 +19,9 @@ final class NumberedSource: CardFrameSource {
   func fill(_ request: CardFrameRequest, into target: CardFrameTarget) -> Bool {
     lock.withLock { _asked.append(request.index) }
     if missing.contains(request.index) { return false }
-    target.bytes.storeBytes(of: request.index.littleEndian, as: Int64.self)
+    for line in 0..<target.height {
+      target.bytes.storeBytes(of: request.index.littleEndian, toByteOffset: line * target.rowBytes, as: Int64.self)
+    }
     return true
   }
 }
@@ -49,7 +52,7 @@ func softwarePort(
     let source = NumberedSource(missing: [5, 9, 10])
     let port = softwarePort(source)
     defer { port.close() }
-    #expect(port.open(videoMode: nil) == .running(mode: "16x4 at 59.94 on a software clock"))
+    #expect(port.open(videoMode: nil) == .running(mode: "16x4 at 59.94 on a software clock", frames: .helper))
 
     port.fakeTick(20)
 
@@ -132,7 +135,7 @@ func softwarePort(
     port.fakeTick(3)
     port.pollForTest()
     port.pollForTest()  // nothing sent since the last poll: one quiet poll
-    #expect(port.state == .running(mode: "16x4 at 59.94 on a software clock"))
+    #expect(port.state == .running(mode: "16x4 at 59.94 on a software clock", frames: .helper))
     port.pollForTest()
     #expect(port.state == .lost("the card stopped taking frames"))
     #expect(log.lines.last == "SDI test: lost (the card stopped taking frames); trying again every 3600 s")
@@ -159,7 +162,7 @@ func softwarePort(
 
     port.retry()
     port.sync()
-    #expect(port.state == .running(mode: "16x4 at 59.94 on a software clock"))
+    #expect(port.state == .running(mode: "16x4 at 59.94 on a software clock", frames: .helper))
     #expect(port.counters.scheduled == 11)  // the count runs on across the reopening
     #expect(
       log.lines == [
