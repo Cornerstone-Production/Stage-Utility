@@ -146,6 +146,20 @@ M4 Mac mini (16 GB), with the screen unlocked and no WebKit SPI:
   The installer turns off every lock and display-sleep setting it can, and the
   helper warns in its window and on the server when the session is locked.
 
+**Timing.** The card's clock drives output, not the renderer:
+- Scheduled playback. In `ScheduledFrameCompleted`, the frame just returned is
+  filled with the picture chosen by schedule (above) and scheduled two frames
+  ahead.
+- If no picture is old enough yet, the previous one repeats rather than letting
+  the card run dry.
+- If the schedule falls behind the card's own stream time, it resyncs forward
+  instead of building delay.
+
+Clocking scheduled playback from the card's completion callback is the approach
+MxU Slides takes. MxU's code is licensed PolyForm Shield, which is
+source-available, not open source, so this project takes the idea and none of
+the code.
+
 **Bandwidth.** Eight 1080p59.94 BGRA streams are about 4 GB/s, more than a
 Thunderbolt PCIe enclosure carries. 8-bit 4:2:2 halves that. Whether a DeckLink
 Quad 2 in an enclosure sustains all eight is unmeasured until real hardware is
