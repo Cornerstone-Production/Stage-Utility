@@ -246,7 +246,7 @@ describe("fetching the helper from the release", () => {
       stall && String(input).endsWith(".zip")
         ? new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)))
         : real(input, init);
-    const dl = make({ zipTimeoutMs: 30 });
+    const dl = make({ zipIdleMs: 30 });
 
     const r = await dl.resolve(ZIP);
     assert.ok(!r.ok);
@@ -269,6 +269,74 @@ describe("fetching the helper from the release", () => {
     assert.equal(reads, 2, "a cache hit is one read");
     assert.ok(!(await dl.resolve(parseHelperPath("/kiosk/StageUtilityOutput-x86_64.zip") as HelperAsset)).ok);
     assert.equal(reads, 3, "a refusal is one read");
+  });
+
+  describe("a transfer that is slow but healthy, and one that is not", () => {
+    /** The zip's reply: `chunks` chunks `gapMs` apart, then the end, or silence for ever when `endless`.
+     *  The stream errors when the request's signal aborts, as a real fetch body does. */
+    const slowZip = (chunks: number, gapMs: number, opts: { endless?: boolean } = {}) => {
+      const real = release.fetch;
+      release.fetch = async (input, init) => {
+        if (!String(input).endsWith(".zip")) return real(input, init);
+        let sent = 0;
+        let timer: NodeJS.Timeout | undefined;
+        const stream = new ReadableStream<Uint8Array>({
+          start(c) {
+            init?.signal?.addEventListener("abort", () => {
+              clearTimeout(timer);
+              c.error(init.signal!.reason);
+            });
+          },
+          pull: (c) =>
+            new Promise<void>((resolve) => {
+              timer = setTimeout(() => {
+                if (sent >= chunks && !opts.endless) c.close();
+                else if (sent >= chunks) return resolve(); // silence: nothing more, never ends
+                else c.enqueue(new Uint8Array(100).fill(sent++ + 1));
+                resolve();
+              }, gapMs);
+              // A fake that is still running when a test fails must not keep the process alive.
+              timer.unref();
+            }),
+        });
+        return new Response(stream, { status: 200 });
+      };
+    };
+    const publishedFor = (chunks: number) => {
+      const bytes = Buffer.concat(Array.from({ length: chunks }, (_, i) => Buffer.alloc(100, i + 1)));
+      release.publish(ZIP.name, bytes);
+      return bytes;
+    };
+
+    it("lets a slow transfer finish when it keeps moving, though it takes far longer than the idle limit", { timeout: 5000 }, async (t) => {
+      captureConsole(t, "log", "warn");
+      const bytes = publishedFor(6);
+      slowZip(6, 60); // ~360 ms in all against a 150 ms idle limit
+      const r = await make({ zipIdleMs: 150, zipTotalMs: 10_000 }).resolve(ZIP);
+      assert.ok(r.ok, JSON.stringify(r));
+      assert.deepEqual(await fs.readFile(r.file), bytes);
+    });
+
+    it("gives up on a transfer that goes quiet part-way, and leaves nothing but the checksum", { timeout: 5000 }, async (t) => {
+      captureConsole(t, "warn");
+      publishedFor(6);
+      slowZip(2, 20, { endless: true });
+      const r = await make({ zipIdleMs: 100, zipTotalMs: 10_000 }).resolve(ZIP);
+      assert.ok(!r.ok);
+      assert.equal(r.status, 502);
+      assert.match(r.message, /did not finish downloading: no data for 0\.1 s/);
+      assert.deepEqual(await listCache(), [SUM.name], "no zip and no partial file");
+    });
+
+    it("stops a transfer that trickles for ever at the ceiling", { timeout: 5000 }, async (t) => {
+      captureConsole(t, "warn");
+      publishedFor(6);
+      slowZip(1_000_000, 20); // never idle for 200 ms, never ends
+      const r = await make({ zipIdleMs: 200, zipTotalMs: 250 }).resolve(ZIP);
+      assert.ok(!r.ok);
+      assert.match(r.message, /did not finish downloading: still going after 0\.25 s/);
+      assert.deepEqual(await listCache(), [SUM.name]);
+    });
   });
 
   it("keeps only the running version's files", async () => {

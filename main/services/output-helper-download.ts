@@ -12,8 +12,9 @@
 //     two 300 MB downloads of the same thing;
 //   - a size cap: a release host (or whatever answers in its place) that sends
 //     more than the helper can possibly weigh is refused, not stored;
-//   - a timeout: a transfer that stalls ends, so the next request tries again
-//     instead of waiting behind it for ever.
+//   - a stall watchdog and a ceiling: a transfer that goes quiet for a minute ends,
+//     so the next request tries again instead of waiting behind it for ever; one
+//     that keeps moving, however slowly, is let finish, up to two hours in all.
 //
 // A file reaches the cache only after its digest matched. It is written to a
 // temporary name and renamed into place, so a request never sees half a file.
@@ -27,7 +28,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { withoutDataDir } from "./app-paths.js";
-import { commitPart, readCapped, streamToPart } from "./capped-download.js";
+import { commitPart, downloadWatchdog, readCapped, streamToPart } from "./capped-download.js";
 import { errorMessage, fetchFailureMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import { atomicWrite } from "./write-queue.js";
@@ -64,7 +65,12 @@ export function parseHelperPath(pathname: string): HelperAsset | null {
 const DEFAULT_MAX_ZIP_BYTES = 1024 * 1024 * 1024;
 /** A checksum file is one line. */
 const MAX_SUM_BYTES = 4 * 1024;
-const DEFAULT_ZIP_TIMEOUT_MS = 30 * 60 * 1000;
+/** No bytes for this long (the connect and the response headers count) and the zip
+ *  transfer is given up on. A slow link that keeps moving never trips it. */
+const DEFAULT_ZIP_IDLE_MS = 60 * 1000;
+/** The outright ceiling, for a host that trickles just fast enough never to go
+ *  idle. About 145 MB per architecture, so this is ~20 kB/s. */
+const DEFAULT_ZIP_TOTAL_MS = 2 * 60 * 60 * 1000;
 const SUM_TIMEOUT_MS = 15 * 1000;
 /** A leftover temporary file older than this belongs to a fetch that died. */
 const STALE_PART_MS = 60 * 60 * 1000;
@@ -82,7 +88,8 @@ export interface DownloadDeps {
   /** Where release assets are fetched from. Tests only; see releaseBase(). */
   releaseBase?: () => string;
   maxZipBytes?: number;
-  zipTimeoutMs?: number;
+  zipIdleMs?: number;
+  zipTotalMs?: number;
   sumTimeoutMs?: number;
 }
 
@@ -127,14 +134,16 @@ export class OutputHelperDownloads {
   private readonly inflight = new Map<string, Promise<Resolution>>();
   private readonly doFetch: typeof fetch;
   private readonly maxZipBytes: number;
-  private readonly zipTimeoutMs: number;
+  private readonly zipIdleMs: number;
+  private readonly zipTotalMs: number;
   private readonly sumTimeoutMs: number;
   private readonly base: () => string;
 
   constructor(private readonly deps: DownloadDeps) {
     this.doFetch = deps.fetch ?? ((input, init) => fetch(input, init));
     this.maxZipBytes = deps.maxZipBytes ?? DEFAULT_MAX_ZIP_BYTES;
-    this.zipTimeoutMs = deps.zipTimeoutMs ?? DEFAULT_ZIP_TIMEOUT_MS;
+    this.zipIdleMs = deps.zipIdleMs ?? DEFAULT_ZIP_IDLE_MS;
+    this.zipTotalMs = deps.zipTotalMs ?? DEFAULT_ZIP_TOTAL_MS;
     this.sumTimeoutMs = deps.sumTimeoutMs ?? SUM_TIMEOUT_MS;
     this.base = deps.releaseBase ?? releaseBase;
   }
@@ -196,11 +205,11 @@ export class OutputHelperDownloads {
     return `${this.base()}/v${version}/${name}`;
   }
 
-  private async get(name: string, version: string, timeoutMs: number): Promise<Response> {
+  private async get(name: string, version: string, signal: AbortSignal): Promise<Response> {
     const url = this.url(name, version);
     let res: Response;
     try {
-      res = await this.doFetch(url, { signal: AbortSignal.timeout(timeoutMs), headers: { "user-agent": "stage-utility-output-helper" } });
+      res = await this.doFetch(url, { signal, headers: { "user-agent": "stage-utility-output-helper" } });
     } catch (err) {
       throw new Refusal(
         404,
@@ -219,7 +228,7 @@ export class OutputHelperDownloads {
 
   private async fetchChecksum(asset: HelperAsset, file: string, version: string): Promise<Resolution> {
     const zipName = asset.name.replace(/\.sha256$/, "");
-    const res = await this.get(asset.name, version, this.sumTimeoutMs);
+    const res = await this.get(asset.name, version, AbortSignal.timeout(this.sumTimeoutMs));
     const body = await readCapped(res, MAX_SUM_BYTES);
     if (!body) throw new Refusal(502, `${asset.name} is larger than ${MAX_SUM_BYTES} bytes; refusing it`);
     const text = body.toString("utf8");
@@ -245,7 +254,32 @@ export class OutputHelperDownloads {
     const expected = parseChecksum(await fs.readFile(sumFile, "utf8"));
     if (!expected) throw new Refusal(502, `the cached ${sumName} is not a SHA-256 digest`);
 
-    const res = await this.get(asset.name, version, this.zipTimeoutMs);
+    // Idle watchdog plus a ceiling, over the connect, the headers and the body.
+    const watchdog = downloadWatchdog({ idleMs: this.zipIdleMs, totalMs: this.zipTotalMs });
+    let size: number;
+    try {
+      size = await this.downloadZip(asset, file, version, expected, sumFile, watchdog);
+    } finally {
+      watchdog.stop();
+    }
+    console.log(`[output-helper] fetched ${scrub(asset.name)} from the release and verified its SHA-256 (${scrub(size)} bytes)`);
+    const removed = await this.dropOtherVersions(version);
+    for (const failed of removed) console.warn(`[output-helper] could not remove an older cached release: ${scrub(failed)}`);
+    return { ok: true, file, size, source: "release" };
+  }
+
+  /** The zip's transfer to its file, hashed on the way, and renamed into place
+   *  only when the digest matched. Returns the bytes written. */
+  private async downloadZip(
+    asset: HelperAsset,
+    file: string,
+    version: string,
+    expected: string,
+    sumFile: string,
+    watchdog: { signal: AbortSignal; touch: () => void },
+  ): Promise<number> {
+    const res = await this.get(asset.name, version, watchdog.signal);
+    watchdog.touch(); // the headers are data too
     const declared = Number(res.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > this.maxZipBytes) {
       await res.body?.cancel().catch(() => undefined);
@@ -265,7 +299,10 @@ export class OutputHelperDownloads {
         maxBytes: this.maxZipBytes,
         exclusive: true,
         mode: 0o644,
-        onChunk: (chunk) => void hash.update(chunk),
+        onChunk: (chunk) => {
+          hash.update(chunk);
+          watchdog.touch();
+        },
       });
       if (!written.ok) throw new Refusal(502, `${asset.name} went past the ${this.maxZipBytes} byte limit; refusing it`);
       size = written.bytes;
@@ -283,10 +320,7 @@ export class OutputHelperDownloads {
       // A timeout or a dropped connection mid-body: the download did not finish.
       throw new Refusal(502, `${asset.name} did not finish downloading: ${fetchFailureMessage(err, "the release host")}`);
     }
-    console.log(`[output-helper] fetched ${scrub(asset.name)} from the release and verified its SHA-256 (${scrub(size)} bytes)`);
-    const removed = await this.dropOtherVersions(version);
-    for (const failed of removed) console.warn(`[output-helper] could not remove an older cached release: ${scrub(failed)}`);
-    return { ok: true, file, size, source: "release" };
+    return size;
   }
 
   /** The cache holds the running version only; an older release's zip is

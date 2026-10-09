@@ -112,8 +112,9 @@ answered.
 
 The cache is `cache/output-helper/<version>/` in the data directory. It holds the
 running version only, is not part of a config backup, and costs one download to
-rebuild. One fetch runs at a time per file, a transfer that stalls is given up on
-after 30 minutes, and a file over 1 GB is refused. A download that does not match
+rebuild. One fetch runs at a time per file, a transfer that goes a minute without data is
+given up on (one that keeps moving, however slowly, is not, up to two hours in all),
+and a file over 1 GB is refused. A download that does not match
 its checksum is never stored and answers `502`.
 
 **With no internet on the server** and nothing cached, the route answers `404`
