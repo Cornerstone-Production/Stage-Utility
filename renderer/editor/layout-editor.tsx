@@ -75,6 +75,7 @@ import {
 } from "../settings/sections/layout-geometry.js";
 import { useConfiguredIntegrations } from "../main/use-integration-states";
 import {
+  LAYOUT_OBJECTS,
   PALETTE_GROUPS,
   SUPERSEDED_ON_WALL,
   defaultConfig,
@@ -93,7 +94,7 @@ import { useCoarsePointer } from "../lib/use-media-query";
 import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
 import { Palette } from "./palette";
-import { rectForDrop, localiseToParent, defaultDropSize } from "./drag-to-place";
+import { rectForDrop, localiseToParent, defaultSizeFor, nestedGeometry } from "./drag-to-place";
 import { rectFrom } from "./draw-to-create";
 import { ShapePreview, PREVIEW_SHAPES, type PreviewShape } from "./preview-shape";
 import { AlignmentGuides } from "./alignment-guides";
@@ -125,16 +126,22 @@ const MAX_DEPTH = 2;
 // The canvas occupies the whole coordinate space; top-level objects are fractions of it.
 const CANVAS_FRAC: FracRect = { x: 0, y: 0, w: 1, h: 1 };
 
-function makeObject(
+export function makeObject(
   type: LayoutObjectType,
   z: number,
   geom?: Partial<Pick<LayoutObject, "x" | "y" | "w" | "h">>,
   /** True only on Home, whose grid frames every tile. See defaultStyleFor. */
   hostDrawsFrame = false,
 ): LayoutObject {
-  // Containers default to a card-sized box; everything else keeps the old default.
+  // A widget with its own `defaultSize` arrives centred at it; a container a
+  // card-sized box; everything else the old default, to the digit.
   // (Top-level adds are snapped to the square grid by the caller via snapRectToGrid.)
-  const base = type === "container" ? { x: 0.3, y: 0.32, w: 0.4, h: 0.32 } : { x: 0.35, y: 0.42, w: 0.3, h: 0.16 };
+  const own = LAYOUT_OBJECTS[type].defaultSize;
+  const base = own
+    ? { x: (1 - own.w) / 2, y: (1 - own.h) / 2, ...own }
+    : type === "container"
+      ? { x: 0.3, y: 0.32, w: 0.4, h: 0.32 }
+      : { x: 0.35, y: 0.42, w: 0.3, h: 0.16 };
   return {
     id: uid(),
     ...base,
@@ -1693,7 +1700,7 @@ export function LayoutEditor({
    */
   function dropObject(type: LayoutObjectType, point: { x: number; y: number }) {
     const isContainer = type === "container";
-    const abs = rectForDrop(point, defaultDropSize(isContainer));
+    const abs = rectForDrop(point, defaultSizeFor(type));
 
     // Which container, if any, is under the drop point. Same rule the drag path
     // uses, so dropping and dragging agree about where things land.
@@ -1746,8 +1753,10 @@ export function LayoutEditor({
       intoId != null && targetDepth <= MAX_DEPTH && !(type === "container" && targetDepth >= MAX_DEPTH);
     if (canNest && intoId) {
       const siblingMaxZ = (selected?.children ?? []).reduce((m, o) => Math.max(m, o.z), 0);
-      // Default a new child to a centered box inside the container's local space.
-      const geom = type === "container" ? { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } : { x: 0.1, y: 0.3, w: 0.8, h: 0.4 };
+      // Default a new child inside the container's local space (see nestedGeometry).
+      let parentAbs: FracRect = CANVAS_FRAC;
+      forEachWithRect(objects, (n) => { if (n.o.id === intoId) parentAbs = n.abs; });
+      const geom = nestedGeometry(type, parentAbs);
       const child = makeObject(type, siblingMaxZ + 1, geom, view.id === HOME_VIEW_ID);
       setObjects((prev) => insertChild(prev, intoId, child));
       setSelectedIds(new Set([child.id]));
@@ -2383,7 +2392,7 @@ export function LayoutEditor({
               // must preview what that surface will draw.
               // The editor's own canvas is never the real screen a switched-off
               // display would refuse HLS on, so a Video widget here always may.
-              ctx={{ ...data, ...statusCtx(data), state: data.state, propresenter: data.propresenterStatus.value, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, allowHls: true }}
+              ctx={{ ...data, ...statusCtx(data), state: data.state, propresenter: data.propresenterStatus.value, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, allowHls: true, screen: null }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}

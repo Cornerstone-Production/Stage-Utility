@@ -317,6 +317,29 @@ describe("GET and PUT /api/messaging", () => {
   }
 });
 
+describe("serverNow", () => {
+  /** Within a few hundred ms of the host clock this test runs on, which is the server's here. */
+  const near = (t: unknown) => typeof t === "number" && Math.abs(t - Date.now()) < 500;
+
+  it("is stamped on GET /api/messages, fresh each time", async () => {
+    const first = (await callRoute(messagesRoutes, "/api/messages")).json as MessagesState;
+    assert.ok(near(first.serverNow), `serverNow was ${first.serverNow}`);
+    await new Promise((r) => setTimeout(r, 30));
+    const second = (await callRoute(messagesRoutes, "/api/messages")).json as MessagesState;
+    assert.ok(second.serverNow > first.serverNow, "the stamp did not move between two reads");
+  });
+
+  it("is stamped on the hello-burst frame", async () => {
+    const { writeHelloBurst } = await import("../remote-server.js");
+    const sink = { collected: [] as { channel: string; serialized: string }[] };
+    writeHelloBurst(sink);
+    const frame = sink.collected.find((f) => f.channel === "messages:state");
+    assert.ok(frame);
+    const at = (JSON.parse(frame.serialized) as MessagesState).serverNow;
+    assert.ok(near(at), `the burst's serverNow was ${at}`);
+  });
+});
+
 describe("the hello burst", () => {
   it("hydrates messages:state with the day's thread, so a screen that connects mid-alert shows it", async () => {
     const { writeHelloBurst } = await import("../remote-server.js");

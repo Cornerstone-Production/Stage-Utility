@@ -444,7 +444,10 @@ export type IpcChannel =
   | "layoutTemplates:list"
   | "layoutTemplates:save"
   | "layoutTemplates:update"
+  | "messages:clearAlert"
   | "messages:get"
+  | "messages:reply"
+  | "messages:send"
   | "messaging:get"
   | "messaging:set"
   | "notes:set"
@@ -1567,7 +1570,19 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/notes", p);
 
     case "messages:get":
-      return apiFetch<T>("/api/messages");
+      // no-store, as the poll transport does: this read is also a clock sample (see
+      // useMessagesStatus), so it must come from the server now and not a cache.
+      return apiFetch<T>("/api/messages", { cache: "no-store" });
+    case "messages:send":
+      return post<T>("/api/messages", { to: p.to, text: p.text, alert: p.alert, from: p.from });
+    case "messages:clearAlert":
+      return post<T>(`/api/messages/${encodeURIComponent(String(p.id))}/clear-alert`, { from: p.from });
+    case "messages:reply":
+      return post<T>(`/api/messages/${encodeURIComponent(String(p.id))}/replies`, {
+        text: p.text,
+        objectId: p.objectId,
+        outputId: p.outputId,
+      });
     case "messaging:get":
       return apiFetch<T>("/api/messaging");
     case "messaging:set":

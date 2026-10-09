@@ -467,6 +467,8 @@ nothing.
 | **Cue button** | Fires a cue and shows its device's state: on, off, settling after a press, stale when Companion has lost the device, dimmed when the cue refuses | This app, via Companion |
 | **Notes** | A note typed on a console and shown wherever the widget is | This app |
 | **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
+| **Message composer** | Where a producer sends [stage messages](../features/stage-messages.md): who it goes to, quick messages, the text, an alert switch, and the day's thread with its replies | This app |
+| **Messages** | The newest three [stage messages](../features/stage-messages.md) sent to this screen's groups, each with its sender, its age and the latest reply under it | This app |
 
 A **Notes** widget keeps its own text: everyone looking at that widget sees the
 same words, but a second Notes widget, or a copy made by duplicating the view,
@@ -520,6 +522,35 @@ Two colour schemes, by what the switch means:
 The live scheme is carried by the OBS recording, OBS stream and REAPER recording
 built-ins. Everything else draws the ordinary way, and both draw an unreadable
 state as the amber dashed ring.
+
+**Message composer** has no options. It draws, top to bottom: a header with the
+name **Messages** and who a message from it is signed as, **To** (Everyone and
+each group; Everyone stands alone, several groups can be picked, and the choice is
+kept after a send), **Quick messages** (pressing one fills the box, it does not
+send), the text box, **Alert: takes over the screen** beside **Send** (red, and
+**Send alert**, while the alert switch is on), a line saying how many screens the
+message reaches, and **Today**: the thread, newest first, each reply under its
+message, with **Clear alert** on any alert still running. A message signs with the
+screen's name on a screen, the console's name on a console in the app, and **Home**
+on Home. A send that fails keeps the text and the choices and says why. Like every
+control it does nothing on a wall display.
+
+**Messages** shows the [stage messages](../features/stage-messages.md) that went
+to Everyone or to a group it follows: up to three, newest first and largest, with
+the sender and how long ago (against the server's clock) above each and the latest
+reply in green below. Which groups it follows is its **Groups** setting. **Follow
+screen**, the default, takes the groups of the screen drawing it, so one
+layout shown in two rooms follows each. **Own groups** is its own list and
+overrides the screen's; it is also the only way for a widget on a console in the
+app to have any, since a console is not a screen. In the layout editor a widget with no groups of its own says **Follows the screen it
+is on**; on a console in the app, which is no screen, it says **Choose groups for
+this widget**; on a Screens-card preview it draws only its heading.
+Before the server has answered it draws only its heading, never "No messages".
+
+On a panel or a console in the app, **Messages** also draws the quick replies as
+buttons under the newest message it shows, and the server checks the press against
+the widget's groups ([Replies](../features/stage-messages.md#replies-and-who-may-answer)).
+A wall display draws no buttons.
 
 ## Layout
 

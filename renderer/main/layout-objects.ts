@@ -66,6 +66,13 @@ export interface LayoutObjectSpec {
   integration?: { id: string; label: string };
   /** No per-object options; the inspector shows a "styling only" hint. */
   stylingOnly?: boolean;
+  /**
+   * How big this widget is when it is first placed, as fractions of the canvas, for
+   * a widget whose content does not fit the editor's one default (0.3 x 0.16, or
+   * 0.4 x 0.32 for a container). Absent for every other type, which keeps that
+   * default: an operator's muscle memory for where a clock lands is not disturbed.
+   */
+  defaultSize?: { w: number; h: number };
   /** Reads from one ProPresenter machine — offers the instance picker when
    *  more than one is configured. */
   propInstance?: boolean;
@@ -794,6 +801,37 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     group: "Control",
     config: () => ({ type: "cue-button", cue: "", label: "", showDevice: true }),
     style: () => PILL({ fontSize: 0.12 }),
+  },
+
+  // The newest three stage messages for the screen's groups. Sized so a message
+  // reads from across a room: 0.046 of the canvas height is 2.6% of a 16:9
+  // canvas's width, which is what the approved mockup draws it at. Top-left
+  // aligned: it is a feed, not a readout.
+  messages: {
+    label: "Messages",
+    blurb: "Stage messages for this screen's groups, with replies",
+    group: "Control",
+    config: () => ({ type: "messages" }),
+    style: () => CARD({ fontSize: 0.046, fontWeight: 400, textAlign: "left", vAlign: "top" }),
+    // Three messages and the reply buttons at that type size: the mockup's Green
+    // room card is 0.305 wide and runs most of the height.
+    defaultSize: { w: 0.3, h: 0.8 },
+    homeSize: "m",
+  },
+
+  // The producer's panel. Sized in em off the font size: 0.022 of the canvas
+  // height is 14.5px at the 660px-tall panel the approved mockup was drawn at.
+  "message-composer": {
+    label: "Message composer",
+    blurb: "Send stage messages and alerts, and read the replies",
+    group: "Control",
+    config: () => ({ type: "message-composer" }),
+    style: () => CARD({ fontSize: 0.022, fontWeight: 400, textAlign: "left", vAlign: "top" }),
+    stylingOnly: true,
+    // The mockup's producer panel: 400px of 14.5px type is about 27 em across, and
+    // at 0.022 of the height that is a third of the canvas; tall, for the thread.
+    defaultSize: { w: 0.34, h: 0.9 },
+    homeSize: "l",
   },
 
   // Status

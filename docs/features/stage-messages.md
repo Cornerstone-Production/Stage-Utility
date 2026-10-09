@@ -98,7 +98,8 @@ service keeps them.
 
 ### How screens receive them
 
-One channel, `messages:state`, carries `{ rev, groups, messages, alerts }`. It is
+One channel, `messages:state`, carries `{ rev, serverNow, groups, quickMessages,
+quickReplies, messages, alerts }`. It is
 sent once when a client connects and again on every change. See
 [Network traffic](../ops/network-traffic.md#stage-messages).
 
@@ -130,6 +131,125 @@ back. Then start-up leaves the screens alone and says so on the log
 only when a screen actually holds a group. Fix or restore the file and restart, or
 save the groups in Settings → Messages, which is the operator's own decision and
 always runs it.
+
+## On screens
+
+### Alerts on screens
+
+Every kiosk screen (a display, or a panel running a console) draws a running alert
+over whatever it is showing, whatever the layout or the kind of view, with no
+widget needed. A console open in the operator app is not a kiosk screen and draws
+no banner; its Messages and Message composer widgets show the messages and the
+alert in the thread.
+
+The banner is the word **Alert** and the message large and white on a deep red
+banner across the bottom (3% in from each side, 4% up), with a bar along its foot
+that runs down to nothing as the 30 seconds do. It rises into place when it
+arrives.
+
+- Which alert: the newest running one sent to Everyone or to a group the screen is
+  in. When it ends, the next one sent to this screen, if any, shows. A screen in no
+  group still gets Everyone's.
+- How long: counted against the **server's** clock from the server-stamped
+  `alertUntil`, so a wall whose own clock is wrong still ends it on time. Every
+  messages frame and read carries `serverNow`, and a screen sets its clock from them
+  (the first read measures its own round trip, so one is enough), so this holds on a
+  slots view or an unrouted screen as on a layout. The
+  banner goes at that moment without waiting for the server's frame that says the
+  alert ran out. A screen with no alert keeps no timer.
+- Never over **blackout**: a blacked-out screen stays black, because blackout is a
+  deliberate choice for that screen. Never on a **preview**, such as a Screens card,
+  which is a picture of a screen and not one.
+- A **screen-embed tile** (a picture of another screen on a producer wall) does not
+  draw that screen's alert banner; a Messages widget inside it follows the screen it
+  shows, not the one it sits on, and never draws reply buttons: a tile is a monitor
+  of that screen, and only the screen itself answers. A composer in a tile signs as
+  the view that holds it, not as the screen it monitors.
+- A screen subscribes to `messages:state` for this whatever view it shows, once it has
+  loaded (a screen still loading, showing an error, or blacked out draws no banner). If the banner
+  itself fails to draw, it is hidden and `[messages] the alert banner failed to
+  draw` is on `/log`; the screen underneath stays up, and the next update from the server gets a fresh
+  try. A frame that is not the shape it should be is handled the same way.
+
+### The Message composer widget
+
+The **Message composer** [widget](../reference/widgets.md#control) is where a
+message is sent from. It goes on Home, a console or a panel like any other widget,
+so a producer's phone, the booth's panel and Home can each be a composer. It draws
+**To** chips, the quick messages, a text box, the **Alert** switch and **Send**, a
+line saying how many screens the message reaches, and **Today**, the day's thread
+with every reply under its message.
+
+- **To**: Everyone, and each group. Everyone stands alone; several groups can be
+  picked; the choice stays after a send.
+- **Alert** turns **Send** into a red **Send alert**; the message then takes the
+  screens in those groups over for 30 seconds ([Alerts](#alerts)). **Clear alert**
+  on a message in the thread ends one early.
+- The message is signed with the **screen's name** on a screen, the **console's
+  name** on a console in the app, and **Home** on Home.
+- A send that fails keeps what was typed, the groups and the alert switch, and says
+  why; the failure is also on `/log` as `[messages]`.
+
+### The Messages widget
+
+The **Messages** [widget](../reference/widgets.md#control) draws the newest three
+messages sent to Everyone or to a group it follows: the newest large, the older two
+smaller and muted, each with its sender and how long ago above it and the latest
+reply in green below. Ages are counted against the server's clock.
+
+Which groups it follows is its **Groups** setting in the layout editor's inspector:
+
+- **Follow screen** (the default) takes the groups of the screen that draws it,
+  set on the Screens page. One layout shown on screens in different rooms follows
+  each of them.
+- **Own groups** is the widget's own list, and overrides the screen's. It is also
+  the only way for a widget on a console in the operator app to follow any, because
+  a console is not a screen. With none chosen it says **Choose groups for this
+  widget** on the console, and **Follows the screen it is on** in the layout editor.
+
+A Screens-card preview is a picture of a screen, not a screen, so a Messages widget
+that follows its screen follows no group in one and draws only its heading; one with
+groups of its own shows them.
+
+### Replies, and who may answer
+
+Where controls are live, the widget also lets a console answer. Under the newest
+message it shows is the line **Answering: <text>** and the quick replies as
+buttons; with nothing to answer it says **Nothing to answer. This console can reply
+only to messages sent to Stage, Booth or Everyone.** (naming the groups it
+follows, then Everyone). Controls are live on a screen in **panel** mode and on a console in the
+operator app, never on a wall display, which draws no buttons.
+
+A reply is sent with `POST /api/messages/:id/replies`, and the server checks it
+against the stored layouts and screens:
+
+- the widget the reply is pressed on is found by its id in every view's layout, and
+  must be a Messages widget;
+- a reply that names a screen must name one in **panel** mode that actually draws
+  that widget, in the view it is routed to or one that view embeds. A display never
+  replies, and a screen that does not draw the widget cannot answer for it;
+- a reply that names no screen (a console in the app) must come from a widget with
+  groups of its own, because a widget that follows its screen has no screen to
+  follow;
+- the widget's groups are its own list when it has one, else the screen's, and the
+  message must have gone to Everyone or to one of them, otherwise the answer is
+  `403` and nothing is recorded.
+
+A tile of a screen on a producer wall shows that screen's messages but never
+answers for it: only the screen itself replies. A Message composer in such a tile
+signs as the view that holds it, not as the screen it monitors.
+
+This keeps honest clients honest. It is not authentication: the app has no logins,
+so anyone who knows a real panel and a Messages widget that panel draws can still
+send a reply that is signed as that panel.
+
+The reply is signed with the screen's name, or the name of the view holding the
+widget when it is not on a screen, and appears under the message in the composer's
+thread and in green under it on every Messages widget showing it. A message cleared
+at midnight cannot be answered, and a message keeps at most 20 replies: the 21st is
+refused with `409` and the reason, so nothing a console sent silently disappears. Each reply, and each refusal with its reason, is
+logged as `[messages]`; a console that could not send one says so and logs it from
+the browser.
 
 ## From automation and Companion
 

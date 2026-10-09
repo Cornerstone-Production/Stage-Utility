@@ -453,6 +453,15 @@
   @media (prefers-reduced-motion: reduce) {
     .video-probe-checking-dot { animation: none !important; }
   }
+  /* The stage-message alert banner arriving: it rises into place over 260ms. The
+     global reduced-motion rule below collapses it to one frame. */
+  @keyframes stage-alert-rise {
+    from { transform: translateY(20%); opacity: 0; }
+    to   { transform: none; opacity: 1; }
+  }
+  .stage-alert-rise {
+    animation: stage-alert-rise 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
   /* One place that honours the operating system's reduced-motion setting, rather
      than per-component motion-reduce: variants that each have to be remembered.
      Not `animation: none` globally - a spinner that stops spinning reads as a

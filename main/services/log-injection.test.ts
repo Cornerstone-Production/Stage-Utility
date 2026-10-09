@@ -170,6 +170,9 @@ const REQUEST_FACING = [
   // typed into a POST /api/video/feeds body.
   "routes/video-routes.ts",
   "routes/view-routes.ts",
+  // Its one warning names the screen whose embedded views run past the cap; the id is
+  // scrubbed, and a reply request is what asks the question.
+  "screen-reach.ts",
   // Both recorders name a Planning Center PLAN ITEM TITLE on their re-run and
   // carry-over lines. A title is typed into Planning Center and arrives here in
   // an HTTP response body — outside data by every measure this file uses, and
@@ -441,6 +444,9 @@ function requestFacingFiles(): string[] {
     // title-fallback warning names a Planning Center plan item TITLE, read back
     // out of the raw archive, and POST /api/history/rebuild is what runs it.
     path.join(HERE, "archive/rebuild.ts"),
+    // Its one warning names the screen whose embedded views run past the cap; the id is
+    // scrubbed, and a reply request is what asks the question.
+    path.join(HERE, "screen-reach.ts"),
     // Both recorders log a Planning Center plan item TITLE — on the re-run line
     // and, for the timeline, on the carried-over-item line. A title is typed
     // into Planning Center and reaches this process in an HTTP response body.

@@ -61,6 +61,14 @@ one-off address handed to someone outside Production, so opening it can't lead
 to Settings or another display. Soft by design, like the toggle it matches —
 editing the URL undoes it — a guardrail, not access control.
 
+## Stage message alerts
+
+A [stage message](features/stage-messages.md) sent as an alert draws over whatever
+a display is showing, on every display address, as a red banner along the bottom
+with a bar that runs down over its 30 seconds. It reaches a display that is in a
+group the message went to, or any display when it went to Everyone. A blacked-out
+display stays black, and a display's preview on the Screens page never shows one.
+
 ## Text size on a ServiceCue view
 
 Append `?text=<percent>` to the address of a display showing a ServiceCue view —

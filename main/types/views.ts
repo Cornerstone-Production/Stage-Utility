@@ -499,6 +499,18 @@ export type LayoutObjectConfig =
   // "config" store, so it rides along in every backup). `placeholder` is the
   // prompt shown while empty; the content itself is never in the layout.
   | { type: "notes"; placeholder?: string }
+  // The newest stage messages sent to this screen's groups, with the latest reply
+  // under each, and — where controls are live — the quick replies as buttons.
+  // `groups` null/absent follows the screen the layout is drawn on; a list
+  // (even an empty one) is this widget's own and overrides it, which is also how
+  // a widget on an in-app console, which is no screen, gets any. Message group
+  // ids, from /api/messaging; one that has since been deleted matches nothing.
+  | { type: "messages"; groups?: string[] | null }
+  // Where a producer sends stage messages from: who it goes to, quick messages,
+  // the text, an alert switch, and the day's thread with its replies and Clear
+  // alert. No options — the groups, the quick messages and the sender all come
+  // from elsewhere (Settings, and the screen or console it is placed on).
+  | { type: "message-composer" }
   // No `resetDaily`: it was declared here and read by nothing, for its whole
   // life. The rows come from the plan's notes now, and their ticks are stored
   // per plan — so the reset happens because a new plan is a new set of keys,

@@ -5,9 +5,23 @@
 //   GET  /api/messages                   the messages:state snapshot
 //   POST /api/messages                   send: { to, text, alert?, from? }
 //   POST /api/messages/:id/clear-alert   end a running alert early
+//   POST /api/messages/:id/replies       answer: { text, objectId, outputId? }; 201
+//                                        with the reply
 //   GET  /api/messaging                  groups, quick messages, quick replies
 //   PUT  /api/messaging                  replace them; carries the `version` it was
 //                                        built from
+//
+// A reply is checked against the stored layouts and outputs, and answered:
+//   403  the named screen is not a panel, or does not draw that widget (its routed
+//        view or one it embeds); or no screen was named and the widget follows a
+//        screen's groups; or the widget's groups miss every group the message went
+//        to (Everyone always reaches it);
+//   404  no such message (or one cleared at midnight), or no Messages widget with
+//        that id;
+//   409  the message already holds its 20 replies;
+//   400  a body that breaks a rule.
+// That keeps honest clients honest; it is not authentication (the app has no
+// logins).
 //
 // A rule a body breaks is a 400 that says which (MessageRefused). A PUT built from
 // a config another window has since replaced is a 409 and changes nothing
@@ -90,6 +104,28 @@ export async function messagesRoutes(c: RouteCtx): Promise<void> {
       } else {
         json(res, messagesService.state());
       }
+    } catch (err) {
+      answerFailure(res, err);
+    }
+    return;
+  }
+
+  const replyMatch = pathname.match(/^\/api\/messages\/([^/]+)\/replies$/);
+  if (method === "POST" && replyMatch) {
+    const id = replyMatch[1];
+    if (!MESSAGE_ID.test(id)) {
+      error(res, "that is not a message id");
+      return;
+    }
+    const body = objectBody(await readBodyOrEmpty(req));
+    if (!body) {
+      error(res, "body must be { text, objectId, outputId? }");
+      return;
+    }
+    try {
+      const result = await messagesService.reply(id, { text: body.text, objectId: body.objectId, outputId: body.outputId });
+      if (result.ok) json(res, result.reply, 201);
+      else error(res, result.reason, result.status);
     } catch (err) {
       answerFailure(res, err);
     }

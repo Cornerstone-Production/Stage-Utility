@@ -17,8 +17,14 @@ const teardown = installDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 let answer: () => Promise<unknown> = async () => ({});
-(globalThis as unknown as { fetch: unknown }).fetch = async (input: RequestInfo | URL) => {
+/** What the page sent to /log. */
+const toLog: unknown[] = [];
+(globalThis as unknown as { fetch: unknown }).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+  if (url === "/api/log/client") {
+    toLog.push(JSON.parse(String(init?.body)));
+    return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
+  }
   if (!url.startsWith("/api/messages")) throw new Error(`unexpected fetch in use-message-groups.test.tsx: ${url}`);
   const body = await answer();
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
@@ -92,6 +98,7 @@ describe("useMessageGroups", () => {
     };
     const warn = console.warn;
     console.warn = () => {};
+    toLog.length = 0;
     try {
       const seen = mount();
       await settle();
@@ -99,5 +106,8 @@ describe("useMessageGroups", () => {
     } finally {
       console.warn = warn;
     }
+    // And said on /log: a screen that cannot read the messages is otherwise a
+    // screen that silently never shows an alert.
+    assert.deepEqual(toLog, [{ tag: "messages", message: "could not read the stage messages: network down" }]);
   });
 });

@@ -9,7 +9,11 @@
 //   - one timer for the alert that is running, so the state goes back to "no
 //     alert" at the moment the alert runs out on screens that keep no timer of
 //     their own;
-//   - the nightly clear, and the 200-message cap.
+//   - the nightly clear, and the 200-message cap;
+//   - replies: who may answer from which widget (the stored layouts and outputs
+//     decide, see reply()), and the 20-reply cap on one message;
+//   - the server's clock, stamped as `serverNow` on every snapshot, which screens
+//     correct their own clock from.
 //
 // THE CLOCK. "What day is it" is asked of app-timezone.ts and never of the host:
 // a UTC box rolls its date at 19:00 in Chicago, and clearing the thread in the
@@ -32,10 +36,17 @@ import {
   FROM_MAX,
   GROUP_ID,
   GROUPS_MAX,
+  isAlertRunning,
   MESSAGE_MAX,
   MESSAGES_CAP,
   MESSAGES_CHANNEL,
+  MESSAGE_REPLIES_MAX,
+  QUICK_REPLY_MAX,
+  WIRE_ID,
+  messageReaches,
+  widgetGroups,
   type MessageGroup,
+  type MessageReply,
   type MessagesState,
   type MessagingConfig,
   type StageMessage,
@@ -49,6 +60,9 @@ import { plural } from "./plural.js";
 import { scrub, scrubError } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 import { Ticker } from "./ticker.js";
+import { viewsDrawnBy } from "./screen-reach.js";
+import { outputMode } from "../types/views.js";
+import { walkLayoutObjects } from "./view-refs.js";
 import { WriteQueue } from "./write-queue.js";
 
 /** How often the date is compared against the day the thread was last cleared. */
@@ -74,11 +88,58 @@ export interface StartFailure {
   error: Error;
 }
 
+export interface ReplyInput {
+  text: unknown;
+  /** The Messages widget the answer is pressed on. */
+  objectId: unknown;
+  /** The screen that widget is drawn on, when it is drawn on one. */
+  outputId?: unknown;
+}
+
+/**
+ * What a reply came to. A refusal the caller can act on is returned, with the
+ * status a route answers it, rather than thrown: it is not a failure of ours. (A
+ * body that breaks a rule still throws MessageRefused, as a send does, and a
+ * write that failed still throws.)
+ */
+export type ReplyResult =
+  | { ok: true; reply: MessageReply }
+  | { ok: false; status: 403 | 404 | 409; reason: string };
+
 export interface SendInput {
   to: unknown;
   text: unknown;
   alert?: unknown;
   from?: unknown;
+}
+
+/** An id that rides in a body but is not one the service issued: only its shape is checked here. */
+function wireId(value: unknown, must: string): string {
+  if (typeof value !== "string" || !WIRE_ID.test(value)) throw new MessageRefused(must);
+  return value;
+}
+
+/**
+ * The rules for a reply's body, pure like checkSend: 1 to 60 characters of text,
+ * the id of the widget it is pressed on, and the screen that widget is on when
+ * there is one. Shapes only; who may answer is decided against the stored layouts.
+ */
+export function checkReply(input: ReplyInput): { text: string; objectId: string; outputId: string | null } {
+  const text = checkedText(input.text, "a reply", QUICK_REPLY_MAX);
+  const objectId = wireId(input.objectId, "objectId must be the id of the Messages widget the reply is pressed on");
+  const outputId =
+    input.outputId === undefined || input.outputId === null ? null : wireId(input.outputId, "outputId must be the id of a screen");
+  return { text, objectId, outputId };
+}
+
+/** Run a body's check; when it refuses, say so on the log under `what` and hand the refusal on. */
+function checkedOrLogged<T>(what: string, check: () => T): T {
+  try {
+    return check();
+  } catch (err) {
+    if (err instanceof MessageRefused) console.warn(`[messages] ${scrub(what)}: ${scrub(err.message)}`);
+    throw err;
+  }
 }
 
 /** Who a send or a clear says it is from: `DEFAULT_FROM` when it does not say. */
@@ -127,16 +188,34 @@ export function checkSend(
   return { to, text, alert: input.alert === true, from: checkedFrom(input.from) };
 }
 
+/** A Messages widget as the layouts hold it: the view it is in and its own groups. */
+interface FoundWidget {
+  viewId: string;
+  viewName: string;
+  groups: readonly string[] | null | undefined;
+}
+
+/**
+ * The Messages widget with this id, across every view's layout, containers
+ * included. Ids are a layout object's, unique across layouts; the first found
+ * wins. An id that names some other type of widget is no Messages widget.
+ */
+function findMessagesWidget(views: readonly View[], objectId: string): FoundWidget | null {
+  for (const view of views) {
+    let found: FoundWidget | null = null;
+    walkLayoutObjects(view.layout?.objects ?? [], (o) => {
+      if (!found && o.id === objectId && o.config.type === "messages") found = { viewId: view.id, viewName: view.name, groups: o.config.groups };
+    });
+    if (found) return found;
+  }
+  return null;
+}
+
 /** Group ids as the names an operator reads, comma separated: "Everyone" for
  *  Everyone, and the id itself for a group the config no longer has. */
 export function groupNames(ids: readonly string[], groups: readonly MessageGroup[]): string {
   const names = new Map(groups.map((g) => [g.id, g.name]));
   return ids.map((id) => (id === EVERYONE ? "Everyone" : names.get(id) ?? id)).join(", ");
-}
-
-/** Is this message's alert still holding the screens at `now`? */
-function alertRunning(m: StageMessage, now: number): boolean {
-  return m.alert && m.clearedAt === null && m.alertUntil !== null && m.alertUntil > now;
 }
 
 export class MessagesService {
@@ -167,12 +246,14 @@ export class MessagesService {
 
   /** The snapshot `messages:state` carries and GET /api/messages answers. */
   state(): MessagesState {
-    return { rev: this.rev, groups: messagingStore.get().groups, messages: this.messages, alerts: this.runningAlerts(Date.now()) };
+    const { groups, quickMessages, quickReplies } = messagingStore.get();
+    const now = Date.now();
+    return { rev: this.rev, serverNow: now, groups, quickMessages, quickReplies, messages: this.messages, alerts: this.runningAlerts(now) };
   }
 
   /** The messages whose alert is still holding the screens at `now`, newest first. */
   private runningAlerts(now: number): StageMessage[] {
-    return this.messages.filter((m) => alertRunning(m, now)).reverse();
+    return this.messages.filter((m) => isAlertRunning(m, now)).reverse();
   }
 
   /** The messaging config, loaded: the groups, quick messages and quick replies. */
@@ -248,13 +329,7 @@ export class MessagesService {
   /** Send a message. Refuses with MessageRefused, naming the reason. */
   async send(input: SendInput): Promise<StageMessage> {
     await this.ensureLoaded();
-    let checked: ReturnType<typeof checkSend>;
-    try {
-      checked = checkSend(input, messagingStore.get().groups);
-    } catch (err) {
-      if (err instanceof MessageRefused) console.warn(`[messages] refused: ${scrub(err.message)}`);
-      throw err;
-    }
+    const checked = checkedOrLogged("refused", () => checkSend(input, messagingStore.get().groups));
     return this.writes.enqueue(async () => {
       await this.rollDayLocked();
       const at = Date.now();
@@ -298,7 +373,7 @@ export class MessagesService {
       const found = this.messages.find((m) => m.id === id);
       if (!found) return "not-found";
       const now = Date.now();
-      if (!alertRunning(found, now)) return "not-running";
+      if (!isAlertRunning(found, now)) return "not-running";
       const next = this.messages.map((m) => (m.id === id ? { ...m, clearedAt: now } : m));
       await this.persist(this.lastClearedDate, next);
       console.log(`[messages] alert ${scrub(found.id)} cleared by ${scrub(by)}`);
@@ -308,10 +383,92 @@ export class MessagesService {
   }
 
   /**
+   * Answer a message from a Messages widget.
+   *
+   * WHO MAY ANSWER is checked here against the stored layouts and outputs. The
+   * app has no logins, so this keeps honest clients honest and is not
+   * authentication: anyone who knows a real panel and a widget it draws can still
+   * sign as it.
+   *   - the widget is found by `objectId` across every view's layout and must be
+   *     a Messages widget: 404 otherwise;
+   *   - with an `outputId`, that output must be in panel mode (a wall is
+   *     read-only and draws no buttons) and must DRAW the widget, in its routed
+   *     view or one it embeds: 403 otherwise;
+   *   - with no `outputId` (a console in the app, which is no screen) the widget
+   *     must have groups of its own: 403 for one that follows a screen;
+   *   - its groups are its own list when it has one, else the output's;
+   *   - 403 unless the message went to Everyone or to one of those groups. The
+   *     message's own `to` decides.
+   * `from` is the output's name, else the name of the view holding the widget.
+   *
+   * A message that is not there is 404 too: an id nobody issued, or one cleared
+   * at midnight (the day is rolled first, so a reply cannot land on a thread the
+   * nightly check had not yet swept).
+   */
+  async reply(messageId: string, input: ReplyInput): Promise<ReplyResult> {
+    await this.ensureLoaded();
+    const refuse = (status: 403 | 404 | 409, reason: string): ReplyResult => {
+      console.warn(`[messages] reply to ${scrub(messageId)} refused: ${scrub(reason)}`);
+      return { ok: false, status, reason };
+    };
+    const { text, objectId, outputId } = checkedOrLogged("reply refused", () => checkReply(input));
+
+    return this.writes.enqueue(async (): Promise<ReplyResult> => {
+      await this.rollDayLocked();
+      const message = this.messages.find((m) => m.id === messageId);
+      if (!message) return refuse(404, "no message has that id (it may have been cleared at midnight)");
+
+      const state = stageController.getState();
+      const widget = findMessagesWidget(state.views ?? [], objectId);
+      if (!widget) return refuse(404, "no Messages widget has that id");
+
+      // The screen it says it is on, if it says. The app has no logins, so this is
+      // not authentication: it keeps an honest client honest, because a forged
+      // request has to name a real panel that really draws this widget.
+      let output: Output | undefined;
+      if (outputId !== null) {
+        output = (state.outputs ?? []).find((o) => o.id === outputId);
+        if (!output) return refuse(403, "that screen does not draw that widget");
+        if (outputMode(output) !== "panel") return refuse(403, `${output.name} is a display, and a display cannot reply`);
+        if (!viewsDrawnBy(output, state.views ?? [], state.outputs ?? []).has(widget.viewId)) {
+          return refuse(403, "that screen does not draw that widget");
+        }
+      } else if (!widget.groups) {
+        // A widget that follows its screen's groups has no screen to follow here.
+        return refuse(403, "that widget follows a screen's groups, and no screen was named");
+      }
+      const groups = widgetGroups(widget.groups, output ? (output.groups ?? []) : null) ?? [];
+      if (!messageReaches(message.to, groups)) {
+        return refuse(403, "that widget does not follow a group this message was sent to");
+      }
+
+      // Last, after who may answer: someone who may not should hear that, not that
+      // the thread is full. Refused, not trimmed, so no reply a console sent
+      // silently vanishes.
+      if (message.replies.length >= MESSAGE_REPLIES_MAX) {
+        return refuse(409, `that message already has ${MESSAGE_REPLIES_MAX} replies, the most one keeps`);
+      }
+
+      const reply: MessageReply = {
+        id: randomBytes(8).toString("hex"),
+        at: Date.now(),
+        from: (output?.name ?? widget.viewName).slice(0, FROM_MAX),
+        text,
+      };
+      const next = this.messages.map((m) => (m.id === messageId ? { ...m, replies: [...m.replies, reply] } : m));
+      await this.persist(this.lastClearedDate, next);
+      console.log(`[messages] reply to ${scrub(messageId)} from ${scrub(reply.from)}: "${scrub(reply.text, LOG_TEXT_MAX)}"`);
+      this.publish();
+      return { ok: true, reply };
+    });
+  }
+
+  /**
    * Replace the messaging config (groups, quick messages, quick replies).
    *
    * A group whose id is gone comes off every screen that held it, in one write,
-   * and the state is re-sent because it carries `groups`. Messages already sent
+   * and the state is re-sent when the groups or either quick list changed,
+   * because it carries all three. Messages already sent
    * to the group are left alone. Refuses with MessageRefused like the store,
    * and with MessagingConflict when the body is built from an older config.
    *
@@ -321,7 +478,7 @@ export class MessagesService {
    */
   async updateConfig(input: unknown): Promise<MessagingConfig> {
     await messagingStore.init();
-    const { config, removed, groupsChanged } = await messagingStore.replace(input);
+    const { config, removed, stateChanged } = await messagingStore.replace(input);
     try {
       // Every time, whether or not this save removed anything: what is taken off
       // the screens is whatever the screens hold that the config does not, so a
@@ -333,7 +490,7 @@ export class MessagesService {
     } finally {
       // Re-sent even when that failed: the config is saved either way, and the
       // screens must not keep drawing a group that is gone.
-      if (groupsChanged) this.publish();
+      if (stateChanged) this.publish();
     }
     return config;
   }

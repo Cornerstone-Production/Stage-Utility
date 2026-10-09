@@ -606,6 +606,20 @@ describe("persistence", () => {
     assert.equal(logged("[messages] messages.json: left out 3").length, 1);
   });
 
+  test("the state is stamped with the server's clock when it is built, and again each time", async () => {
+    // Screens correct their own clock from this, so a stamp that is zero, stale or
+    // fixed would leave every screen counting alerts against its own.
+    const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
+    assert.equal(svc.state().serverNow, Date.now());
+    mock.timers.tick(7_000);
+    assert.equal(svc.state().serverNow, Date.now(), "the stamp did not move with the clock");
+    const m = await svc.send({ to: [EVERYONE], text: "x" });
+    assert.ok(m.at <= svc.state().serverNow);
+    frames.length = 0;
+    await svc.send({ to: [EVERYONE], text: "y", alert: true });
+    assert.equal(frames.at(-1)!.serverNow, Date.now(), "a broadcast frame carries the stamp too");
+  });
+
   test("the groups ride in the state, from the messaging config", async () => {
     const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
     assert.deepEqual(svc.state().groups.map((g) => g.id), [green, stage, booth]);
@@ -695,7 +709,7 @@ describe("updateConfig", () => {
     assert.equal(logged("[messages] group").at(-1), '[messages] group "Stage" deleted; removed from 0 screen(s)');
   });
 
-  test("editing only the quick lists, or renaming a group, removes nothing from any screen", async () => {
+  test("editing only the quick lists, or renaming a group, removes nothing from any screen and says so to the ones that draw them", async () => {
     const svc = await boot({ lastClearedDate: "2026-10-07", messages: [] });
     frames.length = 0;
     await svc.updateConfig({
@@ -714,7 +728,17 @@ describe("updateConfig", () => {
       quickMessages: ["Go", "Stop"],
       quickReplies: ["Ok"],
     });
-    assert.equal(frames.length, 0, "a change the state does not carry was broadcast");
+    assert.equal(frames.length, 1, "a changed quick list must reach the composers and consoles that offer it");
+    assert.deepEqual([frames[0].quickMessages, frames[0].quickReplies], [["Go", "Stop"], ["Ok"]]);
+    assert.deepEqual([svc.state().quickMessages, svc.state().quickReplies], [["Go", "Stop"], ["Ok"]]);
+    frames.length = 0;
+    await svc.updateConfig({
+      version: messagingStore.get().version,
+      groups: [{ id: green, name: "Greenroom" }, { id: stage, name: "Stage" }, { id: booth, name: "Booth" }],
+      quickMessages: ["Go", "Stop"],
+      quickReplies: ["Ok"],
+    });
+    assert.equal(frames.length, 0, "a save that changed nothing the state carries was broadcast");
   });
 
   test("two overlapping saves, the second putting the groups back, each re-send the state", async () => {

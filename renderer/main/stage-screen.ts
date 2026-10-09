@@ -92,6 +92,41 @@ export interface ScreenInput {
   previewOutputId: string | null;
 }
 
+/** The screen a kiosk page IS: its id and the message groups it is in. */
+export interface OwnScreen {
+  outputId: string;
+  groups: readonly string[];
+  /**
+   * True only for a tile of a screen on a producer wall: a monitor of that screen,
+   * not the screen. A Messages widget in one shows the screen's messages but never
+   * answers for it; only the screen itself does.
+   */
+  monitor?: true;
+}
+
+/**
+ * Which screen this page is, for what is addressed to a screen's groups.
+ *
+ * Null on a preview, and that is load-bearing: a Screens-card iframe is a
+ * picture of another screen (`standingIn`, above), not that screen, so it must
+ * not answer for its groups — an alert drawn into a thumbnail, or a Messages
+ * widget offering replies for a group the thumbnail is not in, would be the
+ * Screens page acting as a screen. It reads `resolved`'s side of the decision
+ * for the same reason blackout does.
+ *
+ * A real page whose id matches no output is still a screen — it is simply in no
+ * group, and Everyone still reaches it.
+ */
+export function ownScreen(
+  input: Pick<ScreenInput, "state" | "displayId" | "previewViewId">,
+): OwnScreen | null {
+  if (input.previewViewId) return null;
+  return {
+    outputId: input.displayId,
+    groups: input.state?.resolvedByOutput?.[input.displayId]?.groups ?? [],
+  };
+}
+
 export function resolveScreen(input: ScreenInput): StageScreen {
   const { state, isLoading, error, displayId, previewViewId, previewOutputId } = input;
 

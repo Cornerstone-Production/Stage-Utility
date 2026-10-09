@@ -23,6 +23,11 @@ import { useResiStatus, useYouTubeStatus } from "./use-stream-state";
 import { obsRecordTimecode } from "@main/services/obs-record-clock";
 import { streamers, streamIndicator, STREAMER_FOR, type StreamerName } from "../app/recording-status";
 import { usePvpState } from "./use-pvp-state";
+import { useMessagesStatus } from "./use-messages-state";
+import { MessagesObject } from "./messages-object";
+import type { OwnScreen } from "./stage-screen";
+import { MessageComposerObject, senderName } from "./message-composer-object";
+import type { MessagesState } from "@main/types/messages";
 import { useReaperStatus } from "./use-reaper-state";
 import { useScoresStatus } from "./use-scores-state";
 import { ScoresObject } from "./scores-object";
@@ -94,6 +99,11 @@ export interface LayoutRenderCtx {
   pvp: PvpStatusDTO | null;
   scores: ScoresStatusDTO | null;
   scoresKnown: boolean;
+  /** The day's stage messages, the groups and the quick lists — for the Messages
+   *  and Message composer widgets. Whether it has answered is `messagesKnown`:
+   *  "No messages" is a claim only once it has. */
+  messages: MessagesState | null;
+  messagesKnown: boolean;
   resi: StreamStatusDTO | null;
   resiKnown: boolean;
   youtube: YouTubeStatusDTO | null;
@@ -141,6 +151,18 @@ export interface LayoutRenderCtx {
    *  a Screens-card preview and the layout editor's own canvas are never the
    *  real screen a B-frame feed would be refused on, so each sets this true. */
   allowHls: boolean;
+  /**
+   * The screen (output) this layout is being drawn ON: its id, and the message
+   * groups it is in. Null where the surface is not a screen — an in-app
+   * console, Home, the layout editor, and a Screens-card preview, which is a
+   * picture of another screen and not that screen.
+   *
+   * Required, like `allowHls` and for the same reason: a surface that forgot
+   * them would read as "not a screen" and a Messages widget on a real wall
+   * would silently follow no group. Embedded views inherit their parent's; a
+   * screen-embed tile carries the screen it shows (see ScreenEmbedObject).
+   */
+  screen: OwnScreen | null;
   /** Canvas height in design px — basis for fraction→px font/spacing sizing. */
   H: number;
   /** True only on a real display route. Interactive objects (live controls)
@@ -1619,6 +1641,39 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     }
     case "scores":
       return <ScoresObject config={c} scores={ctx.scores} known={ctx.scoresKnown} />;
+    case "message-composer":
+      return (
+        <MessageComposerObject
+          state={ctx.messages}
+          known={ctx.messagesKnown}
+          outputs={ctx.state.outputs ?? []}
+          from={senderName({
+            home: ctx.home,
+            outputId: ctx.screen?.outputId ?? null,
+            monitor: ctx.screen?.monitor === true,
+            embedChain: ctx.embedChain,
+            outputs: ctx.state.outputs ?? [],
+            views: ctx.state.views ?? [],
+          })}
+          interactive={ctx.interactive}
+          now={ctx.now}
+          ts={ts}
+        />
+      );
+    case "messages":
+      return (
+        <MessagesObject
+          objectId={o.id}
+          config={c}
+          state={ctx.messages}
+          known={ctx.messagesKnown}
+          screen={ctx.screen}
+          interactive={ctx.interactive}
+          editing={ctx.editing === true}
+          now={ctx.now}
+          ts={ts}
+        />
+      );
 
     default: {
       // Exhaustiveness guard: every LayoutObjectType must have a case above. Add
@@ -2812,7 +2867,19 @@ function ScreenEmbedObject({
     return (
       <EmbeddedView
         view={view}
-        ctx={{ ...ctx, H: childH, insideEmbedTile: where === "tile" }}
+        // A tile of a screen carries that screen's own id and message groups, so a
+        // Messages widget in it follows the screen it shows and not the one the
+        // tile sits on. It is a MONITOR of that screen: controls in a tile stay live
+        // (that is what a producer wall is for), but a Messages widget there draws
+        // no reply buttons, because a reply would be signed as the screen it shows.
+        // Only the screen itself answers. Its alert banner is its own and is not
+        // drawn here.
+        ctx={{
+          ...ctx,
+          H: childH,
+          insideEmbedTile: where === "tile",
+          screen: { outputId: output.id, groups: output.groups ?? [], monitor: true },
+        }}
         displayId={output.id}
       />
     );
@@ -3190,6 +3257,9 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // Gated like every other integration hook: a clock-only wall screen must not
   // hold a poll open against ESPN.
   const scoresStatus = useScoresStatus(want(["scores", "home-scores"]));
+  // The stage messages: only a layout that holds a widget that draws them opens
+  // the channel. (The alert overlay is not a widget and has its own read.)
+  const messagesStatus = useMessagesStatus(want(["messages", "message-composer"]));
   // Both gated on the streaming objects (`streamWanted`, declared above the
   // recorder gates): a clock-only wall screen must not hold a poll open against
   // two cloud APIs, one of which has a daily quota.
@@ -3249,7 +3319,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // as wrong as the last time anyone set it.
   const now = useServerClock(pcoLive?.serverNow);
 
-  return { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
+  return { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
 }
 
 type LayoutData = ReturnType<typeof useLayoutData>;
@@ -3265,7 +3335,7 @@ type LayoutData = ReturnType<typeof useLayoutData>;
  * gate-render-parity.test.ts reads it to map each ctx field to its gate.
  */
 export function statusCtx(
-  d: Pick<LayoutData, "obsStatus" | "reaperStatus" | "resiStatus" | "youtubeStatus" | "scoresStatus" | "baptismStatus" | "cuesStatus" | "planItemsStatus" | "integrationsSnap" | "onlinePresence">,
+  d: Pick<LayoutData, "obsStatus" | "reaperStatus" | "resiStatus" | "youtubeStatus" | "scoresStatus" | "messagesStatus" | "baptismStatus" | "cuesStatus" | "planItemsStatus" | "integrationsSnap" | "onlinePresence">,
 ) {
   return {
     obs: d.obsStatus.value,
@@ -3278,6 +3348,8 @@ export function statusCtx(
     youtubeKnown: d.youtubeStatus.known,
     scores: d.scoresStatus.value,
     scoresKnown: d.scoresStatus.known,
+    messages: d.messagesStatus.value,
+    messagesKnown: d.messagesStatus.known,
     baptism: d.baptismStatus.value,
     baptismKnown: d.baptismStatus.known,
     cues: d.cuesStatus.value,
@@ -3302,6 +3374,7 @@ export function LayoutRenderer({
   ndiSource,
   interactive = false,
   allowHls,
+  screen,
   surface,
   viewId,
 }: {
@@ -3313,6 +3386,10 @@ export function LayoutRenderer({
    *  otherwise play HLS on a screen set to refuse it. Every caller that is not
    *  a real display passes true. */
   allowHls: boolean;
+  /** The screen this layout is drawn on, and the groups it is in — see
+   *  LayoutRenderCtx. Null/null for anything that is not a real screen; every
+   *  caller says which, as it does for `allowHls`. */
+  screen: OwnScreen | null;
   /** The View's surface, so a console can respond to the window while a display
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
@@ -3330,7 +3407,7 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
+  const { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -3412,7 +3489,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, messages: messagesStatus.value, messagesKnown: messagesStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, screen, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

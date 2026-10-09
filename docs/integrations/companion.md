@@ -906,8 +906,9 @@ keeps working.
 **Stage messages** — the day's [stage messages](../features/stage-messages.md),
 sent and read from a button. The module follows the `messages:state` channel, so
 a renamed group, a new message or a running alert reaches a button without
-reconnecting. The quick messages are read when the connection starts, so an
-edited quick list reaches Companion on the next reconnect.
+reconnecting. So does an edited quick list: the quick messages are read when the
+connection starts and again from every messages update the app sends after a
+change to them.
 
 | Actions | |
 |---|---|
