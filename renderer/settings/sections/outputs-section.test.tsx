@@ -1,4 +1,5 @@
-// outputs-section.test.tsx — the Screens card's struggling-feed warning box.
+// outputs-section.test.tsx — the Screens card's struggling-feed and lagging-feed
+// warning boxes.
 //
 // Driven through the real OutputRow — the same component screens-route.tsx
 // says the card IS ("This card is OutputsSection's OutputRow, extended") —
@@ -93,7 +94,7 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
 
 const NOOP_ASYNC = async () => {};
 
-function renderRow(struggles: Parameters<typeof OutputRow>[0]["struggles"]) {
+function renderRow(struggles: Parameters<typeof OutputRow>[0]["struggles"], lags: Parameters<typeof OutputRow>[0]["lags"] = []) {
   return render(
     React.createElement(
       TooltipProvider,
@@ -104,6 +105,7 @@ function renderRow(struggles: Parameters<typeof OutputRow>[0]["struggles"]) {
         baseUrl: "http://192.168.1.50:8788",
         online: true,
         struggles,
+        lags,
         canRemove: true,
         iconKey: OUTPUT.id,
         onRename: () => {},
@@ -215,6 +217,26 @@ test("two struggling feeds on one screen render two separate boxes, each naming 
   assert.ok(screen.getByText(/Struggling with Stage PTZ\./));
 });
 
+// ── The lagging box ───────────────────────────────────────────────────────
+
+test("a lagging feed renders its own box: how much the screen holds, and where to look", () => {
+  renderRow([], [{ feedId: "program", feedName: "Program (IMAG)", holdingMs: 2449 }]);
+  const lead = screen.getByText("Holding 2.4 s of Program (IMAG) in its own buffer.");
+  assert.equal(
+    lead.parentElement!.textContent,
+    "Holding 2.4 s of Program (IMAG) in its own buffer. The delay is held on this screen: check its network or decoding.",
+  );
+});
+
+test("a screen both struggling and lagging on one feed shows both boxes", () => {
+  renderRow(
+    [{ feedId: "program", feedName: "Program (IMAG)", droppedInWindow: 100, decodedInWindow: 1000, stallsInWindow: 0, width: 1280, height: 720 }],
+    [{ feedId: "program", feedName: "Program (IMAG)", holdingMs: 1500 }],
+  );
+  assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./));
+  assert.ok(screen.getByText("Holding 1.5 s of Program (IMAG) in its own buffer."));
+});
+
 // ── The full wiring: OutputsSection itself, hydrated from a real video:state ──
 //
 // Everything above renders OutputRow directly with a hand-built `struggles`
@@ -235,8 +257,8 @@ function stageStateWith(outputs: Output[]) {
 test("OutputsSection shows the struggling feed's box, correctly naming it from video:state.feeds — and nothing for a feed reporting clean", async () => {
   stubVideoState(
     videoState([
-      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: { droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080 } },
-      { outputId: OUTPUT.id, feedId: "ptz", via: "webrtc", struggling: false, droppedInWindow: 5, decodedInWindow: 4000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: null },
+      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: { droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080 }, laggingEpisode: null },
+      { outputId: OUTPUT.id, feedId: "ptz", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 5, decodedInWindow: 4000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: null, laggingEpisode: null },
     ]),
   );
   render(
@@ -259,7 +281,7 @@ test("OutputsSection builds the box from the pair's episode, not its live window
   // episode. Every number in the box must be the episode's.
   stubVideoState(
     videoState([
-      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 240, decodedInWindow: 10000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: { droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 4, width: 1920, height: 1080 } },
+      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 240, decodedInWindow: 10000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: { droppedInWindow: 240, decodedInWindow: 1000, stallsInWindow: 4, width: 1920, height: 1080 }, laggingEpisode: null },
     ]),
   );
   render(
@@ -280,8 +302,8 @@ test("OutputsSection routes each screen's own struggles to its own card — a se
   const OTHER: Output = { id: "display-2", name: "Right Mic Display", viewId: null };
   stubVideoState(
     videoState([
-      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: { droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080 } },
-      { outputId: OTHER.id, feedId: "program", via: "webrtc", struggling: false, droppedInWindow: 0, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null },
+      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: true, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: { droppedInWindow: 300, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080 }, laggingEpisode: null },
+      { outputId: OTHER.id, feedId: "program", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: null, droppedInWindow: 0, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
     ]),
   );
   render(
@@ -311,4 +333,25 @@ test("OutputsSection shows no struggle box for any screen before video:state has
   );
   await waitFor(() => assert.ok(screen.getByText("Nothing assigned"))); // the unrouted-screen placeholder — proof the card mounted
   assert.equal(screen.queryByText(/Struggling with/) === null, true);
+});
+
+test("OutputsSection builds the lagging box from the pair's EPISODE — the worse figure, named by feed — and gives a screen not lagging none", async () => {
+  const OTHER: Output = { id: "display-2", name: "Right Mic Display", viewId: null };
+  // The live window figures differ from the episode on purpose: the box must
+  // state the episode's 3200 ms, not the window's 90 ms.
+  stubVideoState(
+    videoState([
+      { outputId: OUTPUT.id, feedId: "program", via: "webrtc", struggling: false, lagging: true, jitterBufferMsInWindow: 90, droppedInWindow: 0, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: { jitterBufferMs: 3200 } },
+      { outputId: OUTPUT.id, feedId: "ptz", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: 20, droppedInWindow: 0, decodedInWindow: 4000, stallsInWindow: 0, width: 1280, height: 720, reportedAt: Date.now(), episode: null, laggingEpisode: null },
+      { outputId: OTHER.id, feedId: "program", via: "webrtc", struggling: false, lagging: false, jitterBufferMsInWindow: 20, droppedInWindow: 0, decodedInWindow: 4000, stallsInWindow: 0, width: 1920, height: 1080, reportedAt: Date.now(), episode: null, laggingEpisode: null },
+    ]),
+  );
+  render(
+    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT, OTHER]), handlers: NOOP_HANDLERS, onOpenMessagingSettings: () => {} })),
+  );
+
+  await waitFor(() => assert.ok(screen.getByText("Holding 3.2 s of Program (IMAG) in its own buffer.")));
+  assert.equal(screen.queryByText(/of Stage PTZ in its own buffer/) === null, true, "a feed reporting clean on the same screen gets no box");
+  const rightCard = screen.getByDisplayValue("Right Mic Display").closest('[class*="rounded-xl"]') as HTMLElement;
+  assert.equal(within(rightCard).queryByText(/in its own buffer/), null, "the second screen is not lagging and carries no box");
 });

@@ -1,6 +1,9 @@
 // main/services/video/playback-health.ts — a rolling one-minute window of
 // each (output, feed) pair's playback deltas, and whether that pair is
-// struggling.
+// struggling or lagging. Struggling is about dropped frames and stalls;
+// lagging is about delay the screen's own browser is holding (the WebRTC
+// receive-delay figure a report may carry) — separate flags, so a pair can
+// be either, both or neither.
 //
 // video-service.ts is the one caller: recordPlaybackReports() there parses a
 // presence heartbeat's `video` field with parseVideoReports() below, drops
@@ -27,10 +30,14 @@ export const DROPPED_FRACTION = 0.05;
 export const STALLS_IN_WINDOW = 3;
 /** How long `struggling` stays true after the last sample that kept the
  *  window's own fraction/stall check bad — see the sticky-flag comment on
- *  `Pair.lastBadAt` for why this is a separate constant from WINDOW_MS
+ *  `Sticky.lastBadAt` for why this is a separate constant from WINDOW_MS
  *  rather than the same read twice. Currently equal in value; the two mean
  *  different things and are named separately on purpose. */
 export const CLEAR_AFTER_MS = 60_000;
+/** A window whose worst `jitterBufferMs` is strictly ABOVE this is lagging:
+ *  over a second of delay held inside the screen's own browser. Held for CLEAR_AFTER_MS after the last report over it, the same
+ *  hold struggling has. */
+export const LAGGING_MS = 1_000;
 
 /** A heartbeat's own cap — see parseVideoReports(). A screen reports one
  *  entry per currently-playing widget instance, so this is generous for any
@@ -44,6 +51,11 @@ export const MAX_REPORTS = 32;
 export const MAX_COUNT_PER_REPORT = 100_000;
 /** The largest width or height one report may carry. */
 export const MAX_DIMENSION = 16_384;
+/** The most `jitterBufferMs` one report may carry: ten minutes, a bound on
+ *  what the server will hold, far past anything real. The page sends null for
+ *  a reading past it (see reportedMs in playback-stats.ts), so one over it is
+ *  not from this build's page and is refused whole like any other bad field. */
+export const MAX_LAG_MS = 600_000;
 
 /** Samples held per pair, capped — see the merge branch in record(). A LAN
  *  client posting a valid outputId and feed id in a tight loop would
@@ -60,6 +72,157 @@ interface Sample {
   decoded: number;
   dropped: number;
   stalls: number;
+  jitterBufferMs: number | null;
+}
+
+/** A lagging pair's peak: the worst `jitterBufferMs` since it started lagging. */
+export interface LagPeak {
+  jitterBufferMs: number;
+}
+
+/** The larger of two figures, null only when both are. */
+function maxOrNull(a: number | null, b: number | null): number | null {
+  return a === null ? b : b === null ? a : Math.max(a, b);
+}
+
+/** The one sentence the Screens card, the `[video]` lagging line and the docs
+ *  all say about a lagging pair. It claims only what the figure shows: this
+ *  screen's own browser is holding the delay. It does not say the relay or the
+ *  encoder are fine — a jitter buffer over a second can come from bursty
+ *  delivery on the path to the screen — so the advice stops at this screen. */
+export const LAGGING_ADVICE = "The delay is held on this screen: check its network or decoding.";
+
+/** A figure in the tenths of a second the card and the log line state it in,
+ *  so a peak creeping up inside one displayed tenth is not a moved peak. */
+function tenths(ms: number): number {
+  return Math.round(ms / 100);
+}
+
+/** The lagging peak after one more window. Returns `held` itself unless the
+ *  figure rose by a whole displayed tenth of a second — a creeping 1001, 1002,
+ *  1003 ms would otherwise be a new episode object, and so a published
+ *  `video:state` frame, on every heartbeat for a number that reads "1.0 s"
+ *  throughout. */
+function raisePeak(held: LagPeak, fresh: LagPeak): LagPeak {
+  return tenths(fresh.jitterBufferMs) > tenths(held.jitterBufferMs) ? { jitterBufferMs: Math.max(held.jitterBufferMs, fresh.jitterBufferMs) } : held;
+}
+
+/** The worst `jitterBufferMs` across `samples`, null when none carried one. */
+function worstJitter(samples: readonly Sample[]): number | null {
+  let worst: number | null = null;
+  for (const s of samples) worst = maxOrNull(worst, s.jitterBufferMs);
+  return worst;
+}
+
+/**
+ * One sticky flag with its episode — what `struggling` and `lagging` both are.
+ * The two differ only in what makes a report bad and in how their peak moves;
+ * the hold, the clear by time and the episode identity are this one piece of
+ * code, so they cannot drift apart.
+ */
+interface Sticky<E> {
+  /**
+   * The last time a report was itself bad AND its check held — null if never.
+   * The flag is read off THIS, not off a fresh check of the window: a clean
+   * report arriving while a bad one is still inside the window adds its own
+   * (large) counts to the sums, which would otherwise DILUTE the check back
+   * under threshold long before the bad report itself ages out, clearing the
+   * flag on a technicality rather than on 60 clean seconds. Recording
+   * `lastBadAt` and comparing it to `now` directly is what makes "a clean
+   * report 30 s later keeps it on; clean reports until 60 s after the last
+   * bad one clear it" true however much clean traffic arrives in between.
+   */
+  lastBadAt: number | null;
+  /**
+   * `isHeldAt(lastBadAt, at)` as advanceSticky() last computed it, or false
+   * once sweepSticky() has seen it run out by time — read back as the next
+   * call's "was it on", never re-derived fresh against the new `now`. The
+   * flag clears purely from elapsed wall-clock time, with no call landing at
+   * the exact moment it happens; the first call to notice is whichever one
+   * happens next, however much later that is. A FRESH recompute of the old
+   * state (the OLD `lastBadAt` against the NEW `now`) would already read
+   * past the clear boundary on both sides of the comparison, matching each
+   * other and reporting no flip, so neither `changed` nor the clear log line
+   * would ever fire. A stored fact is immune to how much time has passed.
+   */
+  on: boolean;
+  /**
+   * The peak since the flag last turned on, null whenever it is off. Reset to
+   * a fresh reading (never merged with the old one) the moment the flag turns
+   * on from off — a NEW episode's peak must never start from a cleared
+   * episode's numbers. Replaced, never mutated, so a new object is exactly
+   * "the peak moved". Each flag supplies its own rule for when it moves.
+   */
+  episode: E | null;
+  /**
+   * This episode's identity — minted only the moment the flag turns on from
+   * off, null whenever `episode` is. UNLIKE `episode`'s own object identity,
+   * it does NOT change when the peak merely moves inside an ongoing episode:
+   * video-service.ts's log uses this, not `episode`'s reference, to tell a
+   * genuinely new episode from a worsening one, including a flag that reads
+   * on both before and after one record() call because sweep() cleared it
+   * and the same call's report re-armed it, with nothing outside ever seeing
+   * the flip.
+   */
+  episodeId: number | null;
+}
+
+function newSticky<E>(): Sticky<E> {
+  return { lastBadAt: null, on: false, episode: null, episodeId: null };
+}
+
+/** Clears a flag whose hold has run out by time alone, so the next bad report
+ *  seeds a NEW episode. Returns whether it cleared. */
+function sweepSticky(s: Sticky<unknown>, now: number): boolean {
+  if (!s.on || isHeldAt(s.lastBadAt, now)) return false;
+  s.on = false;
+  s.episode = null;
+  s.episodeId = null;
+  return true;
+}
+
+/**
+ * Folds one report into a flag. `bad` is the caller's own verdict on THIS
+ * report (and, for struggling, on the window it leaves) — it re-arms the hold
+ * only when true, never off the window alone (see Sticky.lastBadAt). `fresh`
+ * is the episode this call's window would seed; `peak` decides, once the flag
+ * was already on, whether the held episode or `fresh` stands, and must return
+ * the held object itself when nothing got worse.
+ *
+ * @returns the new state, and whether the flag flipped or the held peak moved
+ *   — the part of `changed` this flag contributes.
+ */
+function advanceSticky<E>(
+  prev: Sticky<E>,
+  bad: boolean,
+  now: number,
+  fresh: E,
+  peak: (held: E, fresh: E) => E,
+  mintId: () => number,
+): { next: Sticky<E>; changed: boolean } {
+  const lastBadAt = bad ? now : prev.lastBadAt;
+  const on = isHeldAt(lastBadAt, now);
+  let episode = prev.episode;
+  let episodeId = prev.episodeId;
+  if (!on) {
+    episode = null;
+    episodeId = null;
+  } else if (!prev.on || episode === null) {
+    episode = fresh;
+    episodeId = mintId();
+  } else {
+    episode = peak(episode, fresh);
+  }
+  return { next: { lastBadAt, on, episode, episodeId }, changed: prev.on !== on || (on && episode !== prev.episode) };
+}
+
+/** The peak a struggling pair holds: one window's totals and the frame size. */
+interface StruggleEpisode {
+  dropped: number;
+  decoded: number;
+  stalls: number;
+  width: number;
+  height: number;
 }
 
 interface Pair {
@@ -70,65 +233,10 @@ interface Pair {
   reportedAt: number;
   /** Pruned to WINDOW_MS on every touch (record()/snapshot()). */
   samples: Sample[];
-  /**
-   * The last time the WINDOWED fraction/stall check (isBadWindow(), below)
-   * evaluated true for this pair — null if it never has. `struggling` is
-   * read off THIS, not off a fresh isBadWindow() call: a clean report
-   * arriving while a bad one is still inside the window adds its own
-   * (large) decoded count to the sum, which would otherwise DILUTE the
-   * fraction back under threshold long before the bad sample itself ages
-   * out — clearing the flag on a technicality rather than on 60 clean
-   * seconds. Recording `lastBadAt` and comparing it to `now` directly is
-   * what makes "a clean report 30 s later keeps it struggling; clean
-   * reports until 60 s after the last bad sample clear it" true regardless
-   * of how much clean traffic arrives in between.
-   */
-  lastBadAt: number | null;
-  /**
-   * `isStrugglingAt(lastBadAt, at)` as record() last computed it, or false
-   * once sweep() has seen it run out by time — read back as THIS call's
-   * `wasStruggling`, never re-derived fresh against the new `now`. The sticky flag clears purely from elapsed wall-clock time, with
-   * no call landing at the exact moment it happens; the first call to
-   * notice is whichever one happens next, however much later that is. If
-   * that call compared a FRESH recompute of the old state (using the OLD
-   * `lastBadAt` but the NEW `now`) against a fresh recompute of the new
-   * state, both would already read past the clear boundary by the time
-   * either runs — matching each other and reporting no flip at all, so
-   * neither `changed` nor the "smoothly again" log line would ever fire.
-   * Comparing against what THIS field held after the PREVIOUS call — a
-   * plain stored fact, immune to how much time has passed since — is what
-   * makes the transition visible to whichever call finally notices it.
-   */
-  struggling: boolean;
-  /**
-   * The worst window since `struggling` last turned true — null whenever it
-   * is false. "Worst" is judged by severity() below, comparing THIS call's
-   * fresh `totals` against the stored peak; a later window that is not
-   * worse leaves the peak exactly as it was, which is what lets it survive
-   * a live window diluting back toward clean while the sticky flag still
-   * holds. Reset to a fresh reading (never merged with the old one) the
-   * moment `struggling` turns true from false — a NEW episode's peak must
-   * never start from a previous, already-cleared episode's numbers.
-   * width/height are captured alongside dropped/decoded/stalls because the
-   * card's own resolution sentence has to describe the frame size AT THE
-   * PEAK, which can differ from the pair's current width/height if the
-   * encoder changed output mid-episode.
-   */
-  episode: { dropped: number; decoded: number; stalls: number; width: number; height: number } | null;
-  /**
-   * This episode's identity — bumped only the moment `struggling` turns true
-   * from false, null whenever `episode` is. UNLIKE `episode`'s own object
-   * identity, this does NOT change when the peak merely moves within an
-   * ONGOING struggle (severity() rising keeps the same id): `episode` mints a
-   * fresh object on BOTH a genuinely new struggle and a worsening peak inside
-   * one that never cleared, so video-service.ts's logPlaybackFlips uses this,
-   * not `episode`'s reference, to tell the two apart — a struggling flag that
-   * reads true both before and after one record() call (sweep() clearing it
-   * in its own pass, then the same call's report re-arming it, both inside
-   * the same call — see record()'s own comment) needs a fresh id here even
-   * though nothing outside this call ever saw the flag flip.
-   */
-  episodeId: number | null;
+  /** Whether this pair is struggling, and its peak window — see Sticky. */
+  struggle: Sticky<StruggleEpisode>;
+  /** Whether this pair is lagging, and its worst figure — see Sticky. */
+  lag: Sticky<LagPeak>;
 }
 
 export interface Totals {
@@ -140,7 +248,7 @@ export interface Totals {
 /**
  * A single comparable measure of how bad ONE window's totals are, used only
  * to decide whether a later window inside the same episode becomes the new
- * peak (see Pair.episode's own comment) — never to decide struggling itself,
+ * peak (see Sticky.episode's own comment) — never to decide struggling itself,
  * which stays classifyWindow()'s own `>`/`>=` rules.
  *
  * Both axes are normalized against their OWN threshold (1.0 is exactly the
@@ -189,16 +297,17 @@ export function classifyWindow(totals: Totals): { droppedBad: boolean; stallsBad
 }
 
 /** Whether this window's own totals are bad enough to (re)arm the sticky
- *  flag — never read directly as `struggling` itself; see `Pair.lastBadAt`. */
+ *  flag — never read directly as `struggling` itself; see `Sticky.lastBadAt`. */
 function isBadWindow(totals: Totals): boolean {
   const { droppedBad, stallsBad } = classifyWindow(totals);
   return droppedBad || stallsBad;
 }
 
-/** Whether the sticky flag reads true AT `at`, given the pair's own
- *  `lastBadAt` — the one place both record() and snapshot() do this check,
- *  so the two can never drift on what "struggling" means. */
-function isStrugglingAt(lastBadAt: number | null, at: number): boolean {
+/** Whether a sticky flag reads true AT `at`, given the last time its own
+ *  check was bad — the one place record(), sweep() and snapshot() do this for
+ *  BOTH flags (struggling off `lastBadAt`, lagging off `lastLaggingAt`), so
+ *  they can never drift on what "held for CLEAR_AFTER_MS" means. */
+function isHeldAt(lastBadAt: number | null, at: number): boolean {
   return lastBadAt !== null && at - lastBadAt < CLEAR_AFTER_MS;
 }
 
@@ -220,7 +329,7 @@ export class PlaybackHealth {
    *  is exactly the request-keyed-property-injection shape this repo fixes
    *  with Maps. */
   private readonly pairs = new Map<string, Map<string, Pair>>();
-  /** The next `Pair.episodeId` to mint — see its own field comment. A plain
+  /** The next Sticky.episodeId to mint — see its own field comment. A plain
    *  incrementing counter, never a timestamp: two episodes starting from
    *  record() calls at the exact same `now` (the sweep-then-reflag scenario
    *  this exists for is precisely that) must still mint DIFFERENT ids. */
@@ -243,10 +352,10 @@ export class PlaybackHealth {
    * caught the next time anything reads `snapshot()` — its own defensive age
    * check does not depend on this sweep having run.
    *
-   * Clearing `struggling` and `episode` here, not only in record() for the
+   * Clearing each flag and its episode here, not only in record() for the
    * pair reporting, is what makes the next bad report on a time-cleared pair
-   * a NEW episode: record() reads `wasStruggling` off the stored flag, and a
-   * stale `true` kept the cleared episode's numbers as the new one's peak.
+   * a NEW episode: advanceSticky() reads "was it on" off the stored flag, and
+   * a stale `true` kept the cleared episode's numbers as the new one's peak.
    *
    * @returns whether `snapshot()` now reads differently — a pair left, or a
    *   flag cleared — folded into record()'s own `changed` result.
@@ -258,12 +367,11 @@ export class PlaybackHealth {
         if (now - pair.reportedAt >= WINDOW_MS) {
           byFeed.delete(feedId);
           changed = true;
-        } else if (pair.struggling && !isStrugglingAt(pair.lastBadAt, now)) {
-          pair.struggling = false;
-          pair.episode = null;
-          pair.episodeId = null;
-          changed = true;
+          continue;
         }
+        // Both, never short-circuited: a pair can clear both in one pass.
+        if (sweepSticky(pair.struggle, now)) changed = true;
+        if (sweepSticky(pair.lag, now)) changed = true;
       }
       if (byFeed.size === 0) this.pairs.delete(outputId);
     }
@@ -299,7 +407,9 @@ export class PlaybackHealth {
     // decides which report's via/width/height wins for a shared feed; there
     // is no single "right" answer when two widgets genuinely differ; both
     // report the same decoder's own frame size in every real case.
-    const merged = new Map<string, { via: "webrtc" | "hls"; width: number; height: number; decoded: number; dropped: number; stalls: number }>();
+    // The receive-delay figure folds as a MAX, not a sum: it is not a count,
+    // and the worse of two widgets' views of one feed is the one to act on.
+    const merged = new Map<string, { via: "webrtc" | "hls"; width: number; height: number; decoded: number; dropped: number; stalls: number; jitterBufferMs: number | null }>();
     for (const r of reports) {
       const acc = merged.get(r.feedId);
       if (acc) {
@@ -309,15 +419,22 @@ export class PlaybackHealth {
         acc.via = r.via;
         acc.width = r.width;
         acc.height = r.height;
+        acc.jitterBufferMs = maxOrNull(acc.jitterBufferMs, r.jitterBufferMs ?? null);
       } else {
-        merged.set(r.feedId, { via: r.via, width: r.width, height: r.height, decoded: r.decoded, dropped: r.dropped, stalls: r.stalls });
+        merged.set(r.feedId, {
+          via: r.via,
+          width: r.width,
+          height: r.height,
+          decoded: r.decoded,
+          dropped: r.dropped,
+          stalls: r.stalls,
+          jitterBufferMs: r.jitterBufferMs ?? null,
+        });
       }
     }
 
     for (const [feedId, r] of merged) {
       const existing = byFeed.get(feedId);
-      const wasStruggling = existing?.struggling ?? false;
-
       const samples = this.pruneSamples(existing?.samples ?? [], now);
       // At the cap, merge into the newest held sample rather than growing
       // further — see MAX_SAMPLES_PER_PAIR's own comment. Summing the counts
@@ -330,9 +447,10 @@ export class PlaybackHealth {
           decoded: newest.decoded + r.decoded,
           dropped: newest.dropped + r.dropped,
           stalls: newest.stalls + r.stalls,
+          jitterBufferMs: maxOrNull(newest.jitterBufferMs, r.jitterBufferMs),
         };
       } else {
-        samples.push({ at: now, decoded: r.decoded, dropped: r.dropped, stalls: r.stalls });
+        samples.push({ at: now, decoded: r.decoded, dropped: r.dropped, stalls: r.stalls, jitterBufferMs: r.jitterBufferMs });
       }
       const totals = sumSamples(samples);
       // Re-arm only when THIS sample itself is bad — not merely when the
@@ -345,41 +463,37 @@ export class PlaybackHealth {
       // actual last bad sample, exactly the "clears 80 s after the last
       // dropping sample" bug this guards.
       const sampleIsBad = r.dropped > 0 || r.stalls > 0;
-      const lastBadAt = sampleIsBad && isBadWindow(totals) ? now : (existing?.lastBadAt ?? null);
-      const isStruggling = isStrugglingAt(lastBadAt, now);
+      const struggle = advanceSticky(
+        existing?.struggle ?? newSticky<StruggleEpisode>(),
+        sampleIsBad && isBadWindow(totals),
+        now,
+        { dropped: totals.dropped, decoded: totals.decoded, stalls: totals.stalls, width: r.width, height: r.height },
+        // Only a window STRICTLY worse than the held peak replaces it — see
+        // severity()'s own comment.
+        (held, fresh) => (severity(fresh) > severity(held) ? fresh : held),
+        () => this.nextEpisodeId++,
+      );
 
-      // A fresh episode (never merged with a previous, already-cleared one)
-      // the moment the flag turns true from false; otherwise the peak only
-      // moves when THIS call's window is strictly worse than what is
-      // already held — see severity()'s own comment. Not struggling clears
-      // it outright, the same fact isStrugglingAt() itself is judged on.
-      let episode = existing?.episode ?? null;
-      let episodeId = existing?.episodeId ?? null;
-      if (!isStruggling) {
-        episode = null;
-        episodeId = null;
-      } else if (!wasStruggling || episode === null || severity(totals) > severity(episode)) {
-        episode = { dropped: totals.dropped, decoded: totals.decoded, stalls: totals.stalls, width: r.width, height: r.height };
-        // A new id ONLY on the genuine transition into struggling — not on a
-        // peak merely worsening inside a struggle that never cleared, which
-        // also lands in this branch (severity(totals) > severity(episode))
-        // and must keep the SAME id. See Pair.episodeId's own comment for
-        // why the two need to read differently to video-service.ts.
-        if (!wasStruggling || episodeId === null) episodeId = this.nextEpisodeId++;
-      }
+      // Lagging: re-armed only by THIS report's own figure (the window's
+      // worst is over the line exactly when some report in it was, so
+      // reading the window instead would re-arm on every clean heartbeat for
+      // as long as one old bad report stayed inside it).
+      const lag = advanceSticky(
+        existing?.lag ?? newSticky<LagPeak>(),
+        (r.jitterBufferMs ?? 0) > LAGGING_MS,
+        now,
+        { jitterBufferMs: worstJitter(samples) ?? 0 },
+        raisePeak,
+        () => this.nextEpisodeId++,
+      );
 
-      byFeed.set(feedId, { via: r.via, width: r.width, height: r.height, reportedAt: now, samples, lastBadAt, struggling: isStruggling, episode, episodeId });
+      byFeed.set(feedId, { via: r.via, width: r.width, height: r.height, reportedAt: now, samples, struggle: struggle.next, lag: lag.next });
 
-      if (!existing) {
-        changed = true; // a pair appeared
-      } else if (wasStruggling !== isStruggling) {
-        changed = true; // the sticky flag flipped
-      } else if (isStruggling && episode !== existing.episode) {
-        // The episode is replaced, never mutated, so a new object is exactly
-        // "the peak moved". The live window moving alone is not a change: the
-        // card and the log read the episode.
-        changed = true;
-      }
+      // A pair appearing, a flag flipping or a held peak moving is a change.
+      // The episode is replaced, never mutated, so a new object is exactly
+      // "the peak moved"; the live window moving alone is not: the card and
+      // the log read the episode.
+      if (!existing || struggle.changed || lag.changed) changed = true;
     }
     return changed;
   }
@@ -407,14 +521,22 @@ export class PlaybackHealth {
     return this.pairs.get(outputId)?.get(feedId)?.samples.length ?? 0;
   }
 
+  /** A pair's current lagging-episode identity, or null when not lagging —
+   *  video-service.ts's logLaggingFlips reads this the way logPlaybackFlips
+   *  reads episodeIdFor(), for the same reason: a clear and re-flag inside one
+   *  record() call never shows as a flip in a before/after of `lagging`. */
+  laggingEpisodeIdFor(outputId: string, feedId: string): number | null {
+    return this.pairs.get(outputId)?.get(feedId)?.lag.episodeId ?? null;
+  }
+
   /** A pair's current episode identity, or null when not struggling —
    *  video-service.ts's logPlaybackFlips reads this, never `snapshot()`'s own
    *  `episode` (a fresh object every call, so never comparable by reference
    *  across calls, and equal-by-value even for two genuinely different
-   *  episodes that happen to share the same numbers). See Pair.episodeId's
+   *  episodes that happen to share the same numbers). See Sticky.episodeId's
    *  own comment. */
   episodeIdFor(outputId: string, feedId: string): number | null {
-    return this.pairs.get(outputId)?.get(feedId)?.episodeId ?? null;
+    return this.pairs.get(outputId)?.get(feedId)?.struggle.episodeId ?? null;
   }
 
   /** Every currently-live pair's health, in no particular order —
@@ -429,11 +551,14 @@ export class PlaybackHealth {
       for (const [feedId, pair] of byFeed) {
         if (now - pair.reportedAt >= WINDOW_MS) continue;
         const totals = sumSamples(this.pruneSamples(pair.samples, now));
-        // Recomputed fresh, the same way `struggling` itself always is —
-        // never a bare read of `pair.episode`, which would still show a
-        // stale peak for however long it takes the NEXT record() call to
-        // notice the sticky flag has actually cleared by elapsed time alone.
-        const struggling = isStrugglingAt(pair.lastBadAt, now);
+        // Recomputed fresh, the same way each flag itself always is — never a
+        // bare read of the stored episode, which would still show a stale
+        // peak for however long it takes the NEXT record() call to notice
+        // the sticky flag has actually cleared by elapsed time alone.
+        const struggling = isHeldAt(pair.struggle.lastBadAt, now);
+        const lagging = isHeldAt(pair.lag.lastBadAt, now);
+        const struggleEpisode = struggling ? pair.struggle.episode : null;
+        const worstJitterMs = worstJitter(this.pruneSamples(pair.samples, now));
         out.push({
           outputId,
           feedId,
@@ -442,18 +567,21 @@ export class PlaybackHealth {
           droppedInWindow: totals.dropped,
           decodedInWindow: totals.decoded,
           stallsInWindow: totals.stalls,
+          lagging,
+          jitterBufferMsInWindow: worstJitterMs,
           width: pair.width,
           height: pair.height,
           reportedAt: pair.reportedAt,
-          episode: struggling && pair.episode
+          episode: struggleEpisode
             ? {
-                droppedInWindow: pair.episode.dropped,
-                decodedInWindow: pair.episode.decoded,
-                stallsInWindow: pair.episode.stalls,
-                width: pair.episode.width,
-                height: pair.episode.height,
+                droppedInWindow: struggleEpisode.dropped,
+                decodedInWindow: struggleEpisode.decoded,
+                stallsInWindow: struggleEpisode.stalls,
+                width: struggleEpisode.width,
+                height: struggleEpisode.height,
               }
             : null,
+          laggingEpisode: lagging && pair.lag.episode ? { ...pair.lag.episode } : null,
         });
       }
     }
@@ -463,8 +591,8 @@ export class PlaybackHealth {
   /**
    * The earliest future moment ANY held pair's own state would change with
    * NO further heartbeat: either it ages out of `snapshot()` entirely
-   * (`reportedAt + WINDOW_MS`), or a currently-struggling pair's sticky flag
-   * clears (`lastBadAt + CLEAR_AFTER_MS`) — whichever comes first, over every
+   * (`reportedAt + WINDOW_MS`), or a currently-struggling or lagging pair's
+   * sticky flag clears (`lastBadAt + CLEAR_AFTER_MS`) — whichever comes first, over every
    * pair. `null` with nothing held. video-service.ts arms its one expiry
    * timer to this and re-arms after every record() and after the timer
    * itself fires — see its own comment for why this is a single timer over
@@ -479,12 +607,13 @@ export class PlaybackHealth {
         // ageOutAt is a pair still waiting to be swept, so firing at once is
         // right, and the sweep removes it, so it cannot fire again.
         if (earliest === null || ageOutAt < earliest) earliest = ageOutAt;
-        if (pair.lastBadAt !== null) {
-          const clearAt = pair.lastBadAt + CLEAR_AFTER_MS;
-          // Only while still in the future: a pair that is not currently
-          // struggling already has clearAt in the past, and scheduling a
-          // timer for a moment that has already happened would fire at once,
-          // forever, for a fact nothing needs telling again.
+        for (const flag of [pair.struggle, pair.lag]) {
+          if (flag.lastBadAt === null) continue;
+          const clearAt = flag.lastBadAt + CLEAR_AFTER_MS;
+          // Only while still in the future: a flag that is not currently on
+          // already has clearAt in the past, and scheduling a timer for a
+          // moment that has already happened would fire at once, forever,
+          // for a fact nothing needs telling again.
           if (clearAt > now && (earliest === null || clearAt < earliest)) earliest = clearAt;
         }
       }
@@ -514,14 +643,22 @@ function isCountUpTo(max: number): (n: unknown) => n is number {
 }
 const isReportCount = isCountUpTo(MAX_COUNT_PER_REPORT);
 const isDimension = isCountUpTo(MAX_DIMENSION);
+/** A receive-delay figure: absent or null (a page older than the figure, HLS,
+ *  or a browser that cannot measure it) reads as null; anything else must be
+ *  a finite number from 0 to MAX_LAG_MS, or the whole array is refused. */
+function lagFigure(n: unknown): number | null | undefined {
+  if (n === undefined || n === null) return null;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= MAX_LAG_MS ? n : undefined;
+}
 
 /**
  * `body.video`'s refusal rules: a non-array, more than MAX_REPORTS entries,
  * or any single entry with a non-string/empty `feedId`, a `via` other than
  * "webrtc"/"hls", a decoded/dropped/stalls that is not a whole number from 0
  * to MAX_COUNT_PER_REPORT, or a width/height that is not a whole number from
- * 0 to MAX_DIMENSION refuses the WHOLE array — `null`, never a
- * partial one. A malformed screen must not be able to poison one pair's
+ * 0 to MAX_DIMENSION, or a `jitterBufferMs` that is neither absent/null nor a
+ * finite number from 0 to MAX_LAG_MS, refuses the WHOLE array — `null`, never
+ * a partial one. A malformed screen must not be able to poison one pair's
  * numbers while its others look normal, and the caller reads `null` the
  * same way it reads "no `video` field at all": nothing to record this
  * heartbeat. The heartbeat's PRESENCE half (displayHeartbeat) is untouched
@@ -537,6 +674,8 @@ export function parseVideoReports(body: unknown): VideoPlaybackReport[] | null {
     if (r.via !== "webrtc" && r.via !== "hls") return null;
     if (![r.decoded, r.dropped, r.stalls].every(isReportCount)) return null;
     if (![r.width, r.height].every(isDimension)) return null;
+    const jitterBufferMs = lagFigure(r.jitterBufferMs);
+    if (jitterBufferMs === undefined) return null;
     out.push({
       feedId: r.feedId,
       via: r.via,
@@ -545,6 +684,7 @@ export function parseVideoReports(body: unknown): VideoPlaybackReport[] | null {
       stalls: r.stalls as number,
       width: r.width as number,
       height: r.height as number,
+      jitterBufferMs,
     });
   }
   return out;

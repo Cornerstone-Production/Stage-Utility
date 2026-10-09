@@ -29,7 +29,7 @@ import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
 import { viewSurface, outputMode, KIND_DRAWS_TOP_BAR } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
-import { classifyWindow } from "@main/services/video/playback-health";
+import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
 import { invoke, onNotification } from "../../lib/api";
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -109,6 +109,31 @@ function ScreenStruggleBox({ struggle }: { struggle: ScreenStruggle }) {
   );
 }
 
+/** A pair's lagging episode reduced to what its card box says: the worst
+ *  jitter buffer figure, in ms. From the EPISODE, never the live
+ *  window, for the same reason ScreenStruggle is (see it). */
+interface ScreenLag {
+  feedId: string;
+  feedName: string;
+  holdingMs: number;
+}
+
+/**
+ * The warn box for a feed this screen is holding delay for in its own browser.
+ * The lead names how much; the sentence after says where to look, and claims
+ * no more than the figures show (see LAGGING_ADVICE).
+ */
+function ScreenLagBox({ lag }: { lag: ScreenLag }) {
+  return (
+    <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+      <span className="font-semibold">
+        Holding {(lag.holdingMs / 1000).toFixed(1)} s of {lag.feedName} in its own buffer.
+      </span>{" "}
+      {LAGGING_ADVICE}
+    </p>
+  );
+}
+
 export interface OutputRowProps {
   output: Output;
   views: View[];
@@ -121,6 +146,9 @@ export interface OutputRowProps {
    *  Empty, never undefined, so the card never needs an extra branch for
    *  "no video state yet". */
   struggles: ScreenStruggle[];
+  /** This screen's own currently-lagging feeds, the same way, from the
+   *  pair's lagging episode. */
+  lags: ScreenLag[];
   canRemove: boolean;
   onRename: (name: string) => void;
   /** This display's icon tint, or undefined for the theme default. */
@@ -284,7 +312,7 @@ function GroupsSubmenu({
   );
 }
 
-export function OutputRow({ output, views, baseUrl, online, struggles, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetAllowHls, messageGroups, onSetGroups, onOpenMessagingSettings, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+export function OutputRow({ output, views, baseUrl, online, struggles, lags, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetAllowHls, messageGroups, onSetGroups, onOpenMessagingSettings, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   // Both bar items below are about a strip that only some kinds draw. Offering
@@ -640,6 +668,12 @@ export function OutputRow({ output, views, baseUrl, online, struggles, canRemove
       {struggles.map((s) => (
         <ScreenStruggleBox key={s.feedId} struggle={s} />
       ))}
+      {/* A feed this screen is holding delay for in its own browser — see
+          ScreenLagBox. Separate from the struggle box: a screen can be either
+          or both, and each says something different to do. */}
+      {lags.map((l) => (
+        <ScreenLagBox key={l.feedId} lag={l} />
+      ))}
 
       {/* What it shows, and the way into its layout. The two controls an
           operator actually reaches for. */}
@@ -919,20 +953,28 @@ export function OutputsSection({
   // renamed or deleted in Settings reaches an open Screens page.
   const messageGroups = useMessageGroups();
   const strugglesByOutput = new Map<string, ScreenStruggle[]>();
+  const lagsByOutput = new Map<string, ScreenLag[]>();
   for (const health of video?.screens ?? []) {
-    if (!health.struggling || !health.episode) continue;
-    const feed = video?.feeds.find((f) => f.id === health.feedId);
-    const list = strugglesByOutput.get(health.outputId) ?? [];
-    list.push({
-      feedId: health.feedId,
-      feedName: feed?.name ?? health.feedId,
-      droppedInWindow: health.episode.droppedInWindow,
-      decodedInWindow: health.episode.decodedInWindow,
-      stallsInWindow: health.episode.stallsInWindow,
-      width: health.episode.width,
-      height: health.episode.height,
-    });
-    strugglesByOutput.set(health.outputId, list);
+    const feedName = video?.feeds.find((f) => f.id === health.feedId)?.name ?? health.feedId;
+    if (health.struggling && health.episode) {
+      const list = strugglesByOutput.get(health.outputId) ?? [];
+      list.push({
+        feedId: health.feedId,
+        feedName,
+        droppedInWindow: health.episode.droppedInWindow,
+        decodedInWindow: health.episode.decodedInWindow,
+        stallsInWindow: health.episode.stallsInWindow,
+        width: health.episode.width,
+        height: health.episode.height,
+      });
+      strugglesByOutput.set(health.outputId, list);
+    }
+    // Lagging reads its own episode the same way, for the same reason.
+    if (health.lagging && health.laggingEpisode) {
+      const list = lagsByOutput.get(health.outputId) ?? [];
+      list.push({ feedId: health.feedId, feedName, holdingMs: health.laggingEpisode.jitterBufferMs });
+      lagsByOutput.set(health.outputId, list);
+    }
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -973,6 +1015,7 @@ export function OutputsSection({
                 baseUrl={baseUrl}
                 online={connected.has(output.id)}
                 struggles={strugglesByOutput.get(output.id) ?? []}
+                lags={lagsByOutput.get(output.id) ?? []}
                 canRemove={outputs.length > 1}
                 iconColor={icon.value}
                 iconKey={icon.key}

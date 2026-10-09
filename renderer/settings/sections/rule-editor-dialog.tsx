@@ -21,6 +21,7 @@
 import { errorMessage } from "@main/services/errors";
 import { CALL_TRIGGER_ID, encodeAliases, parseAliases } from "@main/services/cue-aliases";
 import {
+  choiceList,
   fieldsNeedAttention,
   numberParamDefault,
   ruleIssues,
@@ -75,6 +76,7 @@ import {
   DialogTitle,
   InfoHint,
   Input,
+  MultiSelect,
   NOT_OFFERED,
   NumberInput,
   Select,
@@ -100,7 +102,7 @@ import { ActionPicker } from "../../editor/action-picker";
  * dropped on the way out.
  *
  * `params` is the SERVER's own {@link ParamDef}, not a copy of it. A local copy
- * here widened one field — `optionsFrom`, a closed union of eight literals on
+ * here widened one field — `optionsFrom`, a closed union of nine literals on
  * the server — to bare `string`, and that widening is the whole reason a
  * condition could declare `optionsFrom: "service-types"` with nothing in the
  * renderer answering it: the select offered "Pick one…" and nothing else, and
@@ -312,6 +314,17 @@ function KeyValueField({
   );
 }
 
+/**
+ * A multi-enum's next selection once its exclusive choice (Everyone) is honoured.
+ * Ticking the exclusive value while others are held leaves only it; ticking
+ * another while it is held drops it. The validator still refuses a stored
+ * combination: this keeps the picker from making one.
+ */
+function withExclusiveChoice(next: string[], held: string[], exclusive: string | undefined): string[] {
+  if (!exclusive || !next.includes(exclusive) || next.length < 2) return next;
+  return held.includes(exclusive) ? next.filter((v) => v !== exclusive) : [exclusive];
+}
+
 /** Renders one param from its spec — the reason a new provider needs no UI work.
  *  Exported so the layout editor's action-button inspector renders the SAME
  *  fields the rule editor does for the same action, rather than a second copy
@@ -341,7 +354,7 @@ export function ParamField({
   //
   // The `??` is still here, and not for that: the registry comes off the WIRE,
   // and a kiosk tab left open across an update is an old bundle talking to a new
-  // server. A ninth source that server knows about is `undefined` here, and
+  // server. A tenth source that server knows about is `undefined` here, and
   // reading `.options` off it would throw inside the render and take the whole
   // Automation section down — a blank page where the operator's rules were,
   // rather than one dropdown that is short.
@@ -391,8 +404,44 @@ export function ParamField({
       </Row>
     );
   }
-  if (spec.type === "enum" || spec.type === "multi-enum") {
-    const current = String(value ?? "");
+  if (spec.type === "multi-enum") {
+    // Stored as one comma-separated string, the shape every multi-enum reader
+    // (a day-of-week condition, a plan-time trigger, a send's groups) splits. A
+    // Select held ONE value here, so a rule could name one day, never two.
+    const selected = choiceList(value);
+    // Saved choices the list no longer has — a group deleted since the rule was
+    // written. Kept in the value and said so, as the enum branch does.
+    const stale = spec.optionsFrom && options.length > 0 && selected.some((v) => !options.some((o) => o.value === v));
+    return (
+      <Row label={spec.label} hint={spec.help}>
+        <>
+          <MultiSelect
+            label={spec.label}
+            options={options}
+            selected={selected}
+            // Options' order, unknown values last: the stored string does not
+            // depend on the order the boxes were ticked in.
+            onChange={(next) => {
+              const kept = withExclusiveChoice(next, selected, spec.exclusiveChoice?.value);
+              onChange(
+                [...options.filter((o) => kept.includes(o.value)).map((o) => o.value), ...kept.filter((v) => !options.some((o) => o.value === v))].join(","),
+              );
+            }}
+            // "All" would tick the exclusive choice beside everything else, or
+            // mean "every group", which is not what Everyone is.
+            allowAll={!spec.exclusiveChoice}
+            placeholder={spec.optional ? "Any" : "Pick…"}
+            className={invalidClass("w-full", invalid)}
+          />
+          {fieldIssue ?? (stale ? <span className="block pt-0.5 text-caption2 text-amber-11">A saved choice is no longer offered: kept as it is.</span> : notice)}
+        </>
+      </Row>
+    );
+  }
+  if (spec.type === "enum") {
+    // A blank with a `default` shows the default: it is what the action reads it
+    // as, so the field is not displaying a choice the rule does not have.
+    const current = String(value ?? "") || spec.default || "";
     return (
       <Row label={spec.label} hint={spec.help}>
         {/* A RUNTIME source can be empty or incomplete: a ProPresenter that is off
@@ -404,7 +453,7 @@ export function ParamField({
           <Select value={current} onValueChange={onChange}>
             <SelectTrigger className={invalidClass("w-full", invalid)}><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="">{spec.optional ? "(any)" : "Pick one…"}</SelectItem>
+              {!spec.default && <SelectItem value="">{spec.optional ? "(any)" : "Pick one…"}</SelectItem>}
               {options.map((o) => (
                 <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
               ))}

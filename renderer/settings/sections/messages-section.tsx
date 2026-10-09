@@ -299,7 +299,15 @@ function ScreenCount({ screens }: { screens: number | null }) {
  * them: they only supply the "N screens" beside a group, and a count that is not
  * known yet is left blank rather than drawn as 0.
  */
-export function MessagesSection({ outputs }: { outputs?: readonly Output[] }) {
+export function MessagesSection({
+  outputs,
+  onConfigSaved,
+}: {
+  outputs?: readonly Output[];
+  /** Called when a save has changed the stored config, so anything else holding a
+   *  copy (the rule editor's list of groups) can refetch it. */
+  onConfigSaved?: () => void;
+}) {
   const [config, setConfig] = useState<MessagingConfig | null>(null);
   const { failed, fail, clear } = useFailedReads<"config">("messages");
 
@@ -357,6 +365,7 @@ export function MessagesSection({ outputs }: { outputs?: readonly Output[] }) {
         });
         adopt(stored);
         clear("config");
+        onConfigSaved?.();
         return true;
       } catch (err) {
         const { status, code } = err as ApiError;
@@ -377,6 +386,7 @@ export function MessagesSection({ outputs }: { outputs?: readonly Output[] }) {
           logToServer("messages", `the save landed but did not finish: ${errorMessage(err)}`);
           toast.error(errorMessage(err));
           await read();
+          onConfigSaved?.();
           return true;
         }
         logToServer("messages", `could not save the groups and quick messages: ${errorMessage(err)}`);

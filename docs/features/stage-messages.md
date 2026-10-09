@@ -250,3 +250,15 @@ at midnight cannot be answered, and a message keeps at most 20 replies: the 21st
 refused with `409` and the reason, so nothing a console sent silently disappears. Each reply, and each refusal with its reason, is
 logged as `[messages]`; a console that could not send one says so and logs it from
 the browser.
+
+## From automation and Companion
+
+A rule, or an **Action button** on any console, can send a message and clear the
+running alerts: the automation actions **Send a stage message** and **Clear stage
+message alerts**, sent from `Automation`. See
+[Automation](../automation.md#actions).
+
+The [Companion](../integrations/companion.md#what-the-module-exposes) module sends
+messages from a button, shows an alert on one, and puts the newest message and
+reply into variables. It sends from `Companion`, through the same
+`POST /api/messages` a console uses.

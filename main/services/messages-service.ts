@@ -211,6 +211,13 @@ function findMessagesWidget(views: readonly View[], objectId: string): FoundWidg
   return null;
 }
 
+/** Group ids as the names an operator reads, comma separated: "Everyone" for
+ *  Everyone, and the id itself for a group the config no longer has. */
+export function groupNames(ids: readonly string[], groups: readonly MessageGroup[]): string {
+  const names = new Map(groups.map((g) => [g.id, g.name]));
+  return ids.map((id) => (id === EVERYONE ? "Everyone" : names.get(id) ?? id)).join(", ");
+}
+
 export class MessagesService {
   private messages: StageMessage[] = [];
   private lastClearedDate: string | null = null;
@@ -343,8 +350,7 @@ export class MessagesService {
       await this.persist(this.lastClearedDate, next);
       if (over > 0) this.noteCap(at);
 
-      const groups = new Map(messagingStore.get().groups.map((g) => [g.id, g.name]));
-      const names = message.to.map((id) => (id === EVERYONE ? "Everyone" : groups.get(id) ?? id)).join(", ");
+      const names = groupNames(message.to, messagingStore.get().groups);
       console.log(
         `[messages] sent to ${scrub(names)}${scrub(message.alert ? " (alert)" : "")} by ${scrub(message.from)}: "${scrub(message.text, LOG_TEXT_MAX)}"`,
       );
