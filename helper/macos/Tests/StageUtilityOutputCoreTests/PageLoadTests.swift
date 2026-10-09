@@ -26,13 +26,15 @@ import Testing
     var t = PageLoadTracker()
     _ = t.navigationFailed(NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut))
     _ = t.navigationFailed(NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut))
+    // Every retry is a new load (SurfaceLoader.reload).
+    t.loadStarted()
     #expect(t.finished() == .loaded(afterFailures: 2))
     #expect(t.failures == 0)
   }
 
-  /// WebKit finishes a navigation that got a 5xx: the error page is a page. That
+  /// A browser finishes a navigation that got a 5xx: the error page is a page. That
   /// must stay a failure, or the retry backoff resets and the window reads "up".
-  @Test func aFiveHundredIsAFailureEvenThoughWebKitFinishesIt() {
+  @Test func aFiveHundredIsAFailureEvenThoughTheBrowserFinishesIt() {
     var t = PageLoadTracker()
     let f = failure(t.responded(status: 503))
     #expect(f?.failures == 1)
@@ -64,11 +66,26 @@ import Testing
     #expect(t.failures == 0)
   }
 
-  @Test func aDeadWebContentProcessIsAFailure() {
+  @Test func aDeadRendererIsAFailure() {
     var t = PageLoadTracker()
     let f = failure(t.processTerminated())
     #expect(f?.failures == 1)
-    #expect(f?.reason == "web content process ended")
+    #expect(f?.reason == "the page's renderer process ended")
+  }
+
+  /// Chromium reports a navigation that fails after it committed, then finishes it.
+  /// The finish must not read as the page being up: that would reset the backoff on
+  /// every retry, so discovery would never run again for a server that moved.
+  @Test func aFailureAfterCommitIsNotUndoneByTheFinishThatFollowsIt() {
+    var t = PageLoadTracker()
+    for n in 1...3 {
+      t.loadStarted()
+      #expect(failure(t.navigationFailed(NSError(domain: "net", code: -101)))?.failures == n)
+      #expect(t.finished() == .none)
+    }
+    #expect(t.failures == 3)
+    t.loadStarted()
+    #expect(t.finished() == .loaded(afterFailures: 3))
   }
 
   @Test func askingForANewAddressStartsTheRunOver() {

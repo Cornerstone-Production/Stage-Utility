@@ -4,15 +4,20 @@ import Foundation
 /// row, which of them to retry and when, and when a load that follows a failure is
 /// the page being back.
 ///
-/// The web view reports events; this decides. A 5xx is a failed load even though
-/// WebKit finishes it (the error page is a page), so a navigation that got a 5xx
-/// answer must not then count as loaded when WebKit says it finished.
+/// The browser reports events; this decides. A 5xx is a failed load even though the
+/// browser finishes it (the error page is a page), so a navigation that got a 5xx
+/// answer must not then count as loaded when the browser says it finished. Nor may
+/// one that failed after it committed: Chromium reports that failure and then
+/// finishes the same navigation.
 public struct PageLoadTracker: Equatable {
   /// Consecutive failures since the last good load (0 when the page is up).
   public private(set) var failures = 0
   /// The navigation in flight got a 5xx answer. Its page is an error page: it is
   /// neither a load that succeeded nor a screen to classify.
   public private(set) var responseFailed = false
+  /// The navigation in flight failed and was counted. Its finishing, if the browser
+  /// reports one, is the end of that failure, not a load.
+  public private(set) var failedInFlight = false
 
   public struct Failure: Equatable {
     public var failures: Int
@@ -35,10 +40,14 @@ public struct PageLoadTracker: Equatable {
   public mutating func reset() {
     failures = 0
     responseFailed = false
+    failedInFlight = false
   }
 
   /// A load (or a reload) begins.
-  public mutating func loadStarted() { responseFailed = false }
+  public mutating func loadStarted() {
+    responseFailed = false
+    failedInFlight = false
+  }
 
   /// The main frame's response arrived with this HTTP status.
   public mutating func responded(status: Int) -> Outcome {
@@ -47,11 +56,12 @@ public struct PageLoadTracker: Equatable {
     return fail("server answered \(status)")
   }
 
-  /// WebKit finished the navigation.
+  /// The browser finished the navigation.
   public mutating func finished() -> Outcome {
-    if responseFailed {
-      // Already counted when the 5xx arrived.
+    if responseFailed || failedInFlight {
+      // Already counted when the 5xx or the failure arrived.
       responseFailed = false
+      failedInFlight = false
       return .none
     }
     let ended = failures
@@ -68,10 +78,11 @@ public struct PageLoadTracker: Equatable {
       responseFailed = false
       return .none
     }
+    failedInFlight = true
     return fail(error.localizedDescription)
   }
 
-  public mutating func processTerminated() -> Outcome { fail("web content process ended") }
+  public mutating func processTerminated() -> Outcome { fail("the page's renderer process ended") }
 
   private mutating func fail(_ reason: String) -> Outcome {
     failures += 1
