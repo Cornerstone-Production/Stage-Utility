@@ -231,6 +231,9 @@ final class AppModel: ObservableObject {
   /// Make the runtimes match the displays macOS lists now, every DeckLink port
   /// found since launch, and the virtual card outputs `--virtual-sdi` asks for.
   private func reconcile() {
+    // Quitting: nothing new is made in the moments before the app goes, whatever
+    // asks (a display change, a device arriving, a scan finishing).
+    guard !stopping else { return }
     let outputs = DisplayEnumerator.current().map(PresentOutput.init(display:))
       + deckLink.seen.map { PresentOutput(descriptor: $0.descriptor, card: .port($0)) }
       + VirtualCards.outputs(count: options.virtualSDI).map { PresentOutput(descriptor: $0, card: .virtual) }
@@ -300,7 +303,7 @@ final class AppModel: ObservableObject {
   }
 
   private func activate(_ key: String) {
-    guard let rt = runtimes[key], rt.sink == nil else { return }
+    guard !stopping, let rt = runtimes[key], rt.sink == nil else { return }
     let d = rt.descriptor
     let sink: OutputSink
     if let screen = rt.output.screen {
@@ -340,13 +343,14 @@ final class AppModel: ObservableObject {
     }
 
     // With a `server` file the page loads from it at once and the probes go to that
-    // server alone, so the output still shows up under "Not set up yet".
+    // server alone, so the output still shows up under "Not set up yet". The latency
+    // test page needs no server: it is up from the start.
     var mode = OutputDiscovery.Mode.broadcast
     if let server = identity.server {
       rt.serverURL = server
-      navigate(rt)
       if let host = EnrollURL.host(of: server) { mode = .unicast(host: host) }
     }
+    if rt.serverURL != nil || options.testPattern != nil { navigate(rt) }
     let discovery = OutputDiscovery(
       label: d.port, port: options.discoveryPort, mode: mode,
       boundTo: { [weak self] in self?.store.record(for: key)?.boundTo },
