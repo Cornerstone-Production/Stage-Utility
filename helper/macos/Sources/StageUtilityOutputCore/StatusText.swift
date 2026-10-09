@@ -15,14 +15,14 @@ public enum StatusText {
     /// The output is showing a bound screen, whose name has not been read yet.
     public var showingBound: Bool
     public var fps: Double?
-    /// The server told this output's health posts to stop: it has no screen set up
-    /// for it (a release in Screens), or refused its token.
-    public var healthPause: HealthGate.Pause?
+    /// The server does not recognise this output (a release in Screens, or a token
+    /// it does not hold), so its health posts are paused.
+    public var healthPaused: Bool
 
     public init(
       enabled: Bool, isMain: Bool, serverKnown: Bool, unreachable: Bool = false,
       boundScreenName: String? = nil, showingBound: Bool = false, fps: Double? = nil,
-      healthPause: HealthGate.Pause? = nil
+      healthPaused: Bool = false
     ) {
       self.enabled = enabled
       self.isMain = isMain
@@ -31,7 +31,7 @@ public enum StatusText {
       self.boundScreenName = boundScreenName
       self.showingBound = showingBound
       self.fps = fps
-      self.healthPause = healthPause
+      self.healthPaused = healthPaused
     }
   }
 
@@ -43,8 +43,8 @@ public enum StatusText {
     if i.unreachable { return "Cannot reach the server. Retrying" }
     if i.boundScreenName != nil || i.showingBound {
       var parts = [i.boundScreenName ?? "Showing a screen"]
-      if let pause = i.healthPause {
-        parts.append(pause == .unknownDevice ? "not set up on the server, health paused" : "token refused, health paused")
+      if i.healthPaused {
+        parts.append("not recognised by the server, health paused")
       } else if let fps = i.fps, fps > 0 {
         parts.append(String(format: "%.2f fps", fps))
       }

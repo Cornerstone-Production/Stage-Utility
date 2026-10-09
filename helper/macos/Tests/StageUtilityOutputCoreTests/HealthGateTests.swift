@@ -3,13 +3,14 @@ import Testing
 @testable import StageUtilityOutputCore
 
 @Suite struct HealthOutcomeTests {
-  /// What the server's health route means: 404 no device with that id, 401 a wrong
-  /// or missing secret, 400 a body that is not a report.
+  /// 401 and 404 are one answer to a device the server does not recognise: the
+  /// server says 401 for an unknown id and for a wrong token alike, so ids cannot
+  /// be enumerated, and an older one said 404.
   @Test func mapsTheRoutesStatuses() {
     #expect(HealthOutcome.from(status: 200) == .accepted)
     #expect(HealthOutcome.from(status: 204) == .accepted)
-    #expect(HealthOutcome.from(status: 404) == .unknownDevice)
-    #expect(HealthOutcome.from(status: 401) == .unauthorised)
+    #expect(HealthOutcome.from(status: 404) == .notRecognised(status: 404))
+    #expect(HealthOutcome.from(status: 401) == .notRecognised(status: 401))
     #expect(HealthOutcome.from(status: 400) == .rejected(400))
     #expect(HealthOutcome.from(status: 500) == .rejected(500))
     #expect(HealthOutcome.from(status: 302) == .rejected(302))
@@ -27,8 +28,8 @@ import Testing
   /// A released output answers 404. It must stop asking, and ask again later.
   @Test func aFourOhFourPausesAndThenWaitsOut() {
     var g = HealthGate()
-    #expect(g.record(.unknownDevice, at: t0) == .paused(.unknownDevice, retryIn: 30))
-    #expect(g.pause == .unknownDevice)
+    #expect(g.record(.notRecognised(status: 404), at: t0) == .paused(status: 404, retryIn: 30))
+    #expect(g.isPaused)
     #expect(!g.isDue(at: at(10)))
     #expect(!g.isDue(at: at(29.9)))
     #expect(g.isDue(at: at(30)))
@@ -39,7 +40,7 @@ import Testing
     var waits: [TimeInterval] = []
     var now = t0
     for _ in 0..<6 {
-      _ = g.record(.unknownDevice, at: now)
+      _ = g.record(.notRecognised(status: 404), at: now)
       // The pause ends exactly this long after the post.
       var step: TimeInterval = 0
       while !g.isDue(at: now.addingTimeInterval(step)) { step += 1 }
@@ -51,35 +52,39 @@ import Testing
 
   @Test func onlyTheFirstPauseOfARunIsWorthALine() {
     var g = HealthGate()
-    _ = g.record(.unknownDevice, at: t0)
-    #expect(g.record(.unknownDevice, at: at(30)) == .none)
-    #expect(g.record(.unknownDevice, at: at(100)) == .none)
+    _ = g.record(.notRecognised(status: 404), at: t0)
+    #expect(g.record(.notRecognised(status: 404), at: at(30)) == .none)
+    #expect(g.record(.notRecognised(status: 404), at: at(100)) == .none)
   }
 
   @Test func theSetUpScreenComingBackResumesAtOnce() {
     var g = HealthGate()
-    _ = g.record(.unknownDevice, at: t0)
+    _ = g.record(.notRecognised(status: 404), at: t0)
     #expect(!g.isDue(at: at(5)))
     g.boundAgain()
     #expect(g.isDue(at: at(5)))
-    #expect(g.pause == nil)
+    #expect(!g.isPaused)
     // And the wait starts from the beginning again.
-    #expect(g.record(.unknownDevice, at: at(5)) == .paused(.unknownDevice, retryIn: 30))
+    #expect(g.record(.notRecognised(status: 404), at: at(5)) == .paused(status: 404, retryIn: 30))
   }
 
   @Test func anAcceptedPostEndsThePauseAndSaysSo() {
     var g = HealthGate()
-    _ = g.record(.unknownDevice, at: t0)
+    _ = g.record(.notRecognised(status: 404), at: t0)
     #expect(g.record(.accepted, at: at(30)) == .recovered)
-    #expect(g.pause == nil)
+    #expect(!g.isPaused)
     #expect(g.isDue(at: at(30)))
     #expect(g.record(.accepted, at: at(40)) == .none)
   }
 
-  @Test func aRefusedTokenPausesToo() {
+  /// The server answers 401 for an unknown id AND a wrong token: both pause.
+  @Test func aFourOhOneIsTheSameAsAFourOhFour() {
     var g = HealthGate()
-    #expect(g.record(.unauthorised, at: t0) == .paused(.unauthorised, retryIn: 30))
+    #expect(g.record(.notRecognised(status: 401), at: t0) == .paused(status: 401, retryIn: 30))
     #expect(!g.isDue(at: at(10)))
+    #expect(g.isPaused)
+    // A 401 after a 404 is the same run, so not another line.
+    #expect(g.record(.notRecognised(status: 404), at: at(30)) == .none)
   }
 
   @Test func aRejectedBodyKeepsPostingAndSaysItOnce() {
@@ -117,22 +122,22 @@ import Testing
   /// The reported bug: one output's 404 turned posting off for every output.
   @Test func oneOutputsFourOhFourDoesNotPauseAnother() {
     var board = HealthBoard()
-    _ = board.record(.unknownDevice, for: "released", at: now)
+    _ = board.record(.notRecognised(status: 404), for: "released", at: now)
     #expect(!board.isDue("released", at: now.addingTimeInterval(5)))
     #expect(board.isDue("other", at: now.addingTimeInterval(5)))
-    #expect(board.pause(for: "released") == .unknownDevice)
-    #expect(board.pause(for: "other") == nil)
+    #expect(board.isPaused("released"))
+    #expect(!board.isPaused("other"))
     // The other keeps posting, and keeps being accepted.
     #expect(board.record(.accepted, for: "other", at: now) == .none)
-    #expect(board.pause(for: "released") == .unknownDevice)
+    #expect(board.isPaused("released"))
   }
 
   @Test func anOutputThatWasTurnedOffStartsClean() {
     var board = HealthBoard()
-    _ = board.record(.unknownDevice, for: "k", at: now)
+    _ = board.record(.notRecognised(status: 404), for: "k", at: now)
     board.forget("k")
     #expect(board.isDue("k", at: now))
-    #expect(board.pause(for: "k") == nil)
+    #expect(!board.isPaused("k"))
   }
 }
 
@@ -142,19 +147,19 @@ import Testing
   @Test func aPausedOutputSaysWhyOnItsOwnLine() {
     #expect(StatusText.outputLine(I(
       enabled: true, isMain: false, serverKnown: true, boundScreenName: "Left", showingBound: true, fps: 59.94,
-      healthPause: .unknownDevice)) == "Left · not set up on the server, health paused")
+      healthPaused: true)) == "Left · not recognised by the server, health paused")
     #expect(StatusText.outputLine(I(
-      enabled: true, isMain: false, serverKnown: true, showingBound: true, healthPause: .unauthorised))
-      == "Showing a screen · token refused, health paused")
+      enabled: true, isMain: false, serverKnown: true, showingBound: true, healthPaused: true))
+      == "Showing a screen · not recognised by the server, health paused")
   }
 
   /// A page that is not up is the bigger news, and an output on the holding screen
   /// has nothing to report health about.
   @Test func theOtherStatesWinOverAPause() {
     #expect(StatusText.outputLine(I(
-      enabled: true, isMain: false, serverKnown: true, unreachable: true, showingBound: true, healthPause: .unknownDevice))
+      enabled: true, isMain: false, serverKnown: true, unreachable: true, showingBound: true, healthPaused: true))
       == "Cannot reach the server. Retrying")
-    #expect(StatusText.outputLine(I(enabled: true, isMain: false, serverKnown: true, healthPause: .unknownDevice))
+    #expect(StatusText.outputLine(I(enabled: true, isMain: false, serverKnown: true, healthPaused: true))
       == "Waiting to be set up on the server")
   }
 }

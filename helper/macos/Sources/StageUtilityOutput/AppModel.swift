@@ -326,12 +326,8 @@ final class AppModel: ObservableObject {
       break
     case .recovered:
       Log.notice(.health, "\(port): health posts are accepted again")
-    case .paused(let pause, let retryIn):
-      let why =
-        pause == .unknownDevice
-        ? "the server has no screen set up for this output (HTTP 404), as after a release in Screens"
-        : "the server refused this output's token (HTTP 401)"
-      Log.notice(.health, "\(port): \(why); health posts for this output are paused, retried in \(Int(retryIn)) s or when it is set up again")
+    case .paused(let status, let retryIn):
+      Log.notice(.health, "\(port): the server does not recognise this output (HTTP \(status): released in Screens, not set up, or a token it does not hold); health posts for this output are paused, retried in \(Int(retryIn)) s or when it is set up again")
     case .failing(let why):
       Log.error(.health, "\(port): \(why)")
     case .rediscover(let misses):
@@ -385,7 +381,7 @@ final class AppModel: ObservableObject {
         .init(
           enabled: record.enabled, isMain: d.isMain, serverKnown: rt.serverURL != nil,
           unreachable: rt.unreachable, boundScreenName: rt.boundScreenName, showingBound: rt.showingBound,
-          fps: rt.fps, healthPause: healthBoard.pause(for: key)))
+          fps: rt.fps, healthPaused: healthBoard.isPaused(key)))
       return OutputRow(id: key, title: d.isMain ? "\(d.name) (main)" : d.name, enabled: record.enabled, status: status)
     }
     let active = order.compactMap { runtimes[$0] }.filter { $0.sink != nil }
