@@ -392,13 +392,8 @@ try_source() {
     return 1
   fi
   expected="$(awk 'NR == 1 { print tolower($1) }' "$WORK/$ZIP_NAME.sha256")"
-  case "$expected" in
-    *[!0-9a-f]* | '')
-      WHY="$label: the checksum is not a SHA-256 digest"
-      return 1
-      ;;
-  esac
-  if [ "${#expected}" -ne 64 ]; then
+  # One shape check: exactly 64 lowercase hex digits, and nothing else on the line.
+  if ! printf '%s\n' "$expected" | grep -Eq '^[0-9a-f]{64}$'; then
     WHY="$label: the checksum is not a SHA-256 digest"
     return 1
   fi

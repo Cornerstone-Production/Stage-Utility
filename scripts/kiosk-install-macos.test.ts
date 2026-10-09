@@ -401,6 +401,26 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
     assert.deepEqual(fs.existsSync(path.join(scratch, "Applications")) ? leftovers() : [], []);
   });
 
+  it("refuses a checksum file that is not exactly one SHA-256 digest, before it asks for the zip", async () => {
+    const good = sha(zipA.bytes);
+    for (const [label, body] of [
+      ["empty", ""],
+      ["63 digits", `${good.slice(1)}  x.zip\n`],
+      ["65 digits", `${good}0  x.zip\n`],
+      ["a non-hex digit", `${good.slice(0, 63)}g  x.zip\n`],
+      ["an HTML error page", "<html>502 Bad Gateway</html>"],
+    ] as const) {
+      stageServer.hits.length = 0;
+      publish(stageServer, "/kiosk", zipA);
+      stageServer.routes.set("/kiosk/StageUtilityOutput-arm64.zip.sha256", { body });
+      const r = await install(FLOW);
+      assert.equal(r.status, 1, label);
+      assert.match(r.err, /the checksum is not a SHA-256 digest/, label);
+      assert.ok(!stageServer.hits.includes("/kiosk/StageUtilityOutput-arm64.zip"), `${label}: the zip must not be downloaded`);
+      assert.ok(!fs.existsSync(app()), label);
+    }
+  });
+
   it("falls back to the GitHub release for the server's version, and verifies that too", async () => {
     stageServer.routes.set("/kiosk/StageUtilityOutput-arm64.zip.sha256", {
       status: 404,
@@ -473,6 +493,39 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
     assert.match(r.err, /does not contain StageUtilityOutput\.app/);
     assert.equal(marker(), "build-a");
     assert.deepEqual(leftovers(), []);
+  });
+
+  it("refuses an app whose executable is not executable", async () => {
+    const dir = path.join(scratch, "noexec");
+    const contents = path.join(dir, "StageUtilityOutput.app", "Contents");
+    fs.mkdirSync(path.join(contents, "MacOS"), { recursive: true });
+    fs.writeFileSync(path.join(contents, "Info.plist"), "<plist><dict>\n<key>CFBundleIdentifier</key>\n<string>com.stageutility.output</string>\n</dict></plist>");
+    fs.writeFileSync(path.join(contents, "MacOS", "StageUtilityOutput"), "#!/bin/sh\n", { mode: 0o644 });
+    const z = path.join(scratch, "noexec.zip");
+    assert.equal(spawnSync("zip", ["-qr", z, "StageUtilityOutput.app"], { cwd: dir }).status, 0);
+    publish(stageServer, "/kiosk", { bytes: fs.readFileSync(z) });
+    const r = await install(FLOW);
+    assert.equal(r.status, 1, r.out + r.err);
+    assert.match(r.err, /holds no runnable StageUtilityOutput/);
+    assert.ok(!fs.existsSync(app()), "a helper that cannot run must not replace anything");
+  });
+
+  it("downloads from the address the server stamped into the script, when nothing else names one", async () => {
+    // The server replaces the FETCHED_FROM="" line with its own address. A stamped
+    // copy is made the same way here and the real fetch is run from it.
+    publish(stageServer, "/kiosk", zipA);
+    const stamped = path.join(scratch, "install-macos.stamped.sh");
+    const src = fs.readFileSync(SCRIPT, "utf8");
+    assert.ok(src.split("\n").includes('FETCHED_FROM=""'));
+    fs.writeFileSync(stamped, src.replace('\nFETCHED_FROM=""\n', `\nFETCHED_FROM="${stageServer.base}"\n`));
+    const r = await sh(`. "${stamped}"; trap on_exit EXIT; WORK="$(mktemp -d)"; ${FLOW}; FINISHED=1`, { ...baseEnv(), STAGE_SERVER: "" });
+    assert.equal(r.status, 0, r.out + r.err);
+    assert.match(r.out, new RegExp(`from this server \\(${stageServer.base.replace(/\./g, "\\.")}\\)`));
+    assert.equal(marker(), "build-a");
+    // and an unstamped copy, with no server file either, has nowhere to go
+    const bare = await sh(`. "${SCRIPT}"; trap on_exit EXIT; WORK="$(mktemp -d)"; ${FLOW}`, { ...baseEnv(), STAGE_SERVER: "" });
+    assert.equal(bare.status, 1);
+    assert.match(bare.err, /no server address to download from/);
   });
 
   it("refuses an app with another bundle id", async () => {
