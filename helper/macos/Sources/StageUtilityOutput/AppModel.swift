@@ -477,18 +477,10 @@ final class AppModel: ObservableObject {
           fps: rt.fps, healthPaused: healthBoard.isPaused(key)))
       return OutputRow(id: key, title: d.isMain ? "\(d.name) (main)" : d.name, enabled: record.enabled, status: status)
     }
-    let active = order.compactMap { runtimes[$0] }.filter { $0.sink != nil }
-    if let bad = active.first(where: { $0.unreachable }), let url = bad.serverURL {
-      connection = .unreachable(address: EnrollURL.displayAddress(url))
-    } else if let good = active.first(where: { $0.serverURL != nil && ($0.loaded || $0.serverName != nil) }), let url = good.serverURL {
-      connection = .connected(name: good.serverName ?? "Stage Utility", address: EnrollURL.displayAddress(url))
-    } else if let any = active.first(where: { $0.serverURL != nil }), let url = any.serverURL {
-      connection = .configured(address: EnrollURL.displayAddress(url))
-    } else if active.isEmpty {
-      connection = .noOutputs
-    } else {
-      connection = .searching
-    }
+    connection = StatusText.connection(
+      order.compactMap { runtimes[$0] }.map {
+        .init(active: $0.sink != nil, serverURL: $0.serverURL, serverName: $0.serverName, loaded: $0.loaded, unreachable: $0.unreachable)
+      })
   }
 
   // MARK: Open at login

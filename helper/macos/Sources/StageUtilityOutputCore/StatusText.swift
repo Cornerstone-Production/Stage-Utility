@@ -63,6 +63,46 @@ public enum StatusText {
     case unreachable(address: String)
   }
 
+  /// What the connection line reads from one output.
+  public struct OutputFacts: Equatable {
+    /// Turned on, so it has a window and is looking.
+    public var active: Bool
+    public var serverURL: String?
+    /// The name a probe answer gave, once one has.
+    public var serverName: String?
+    /// The page has loaded at least once.
+    public var loaded: Bool
+    /// The page is failing to load.
+    public var unreachable: Bool
+
+    public init(active: Bool, serverURL: String? = nil, serverName: String? = nil, loaded: Bool = false, unreachable: Bool = false) {
+      self.active = active
+      self.serverURL = serverURL
+      self.serverName = serverName
+      self.loaded = loaded
+      self.unreachable = unreachable
+    }
+  }
+
+  /// The one line at the top of the window, from every output's facts.
+  ///
+  /// The worst news first: any turned-on output that cannot load its page says so,
+  /// whatever the others are doing. Then a server that has been heard from or loaded
+  /// from, then one only named, then nobody looking, then still searching.
+  public static func connection(_ outputs: [OutputFacts]) -> Connection {
+    let active = outputs.filter(\.active)
+    if let bad = active.first(where: { $0.unreachable }), let url = bad.serverURL {
+      return .unreachable(address: EnrollURL.displayAddress(url))
+    }
+    if let good = active.first(where: { $0.serverURL != nil && ($0.loaded || $0.serverName != nil) }), let url = good.serverURL {
+      return .connected(name: good.serverName ?? "Stage Utility", address: EnrollURL.displayAddress(url))
+    }
+    if let any = active.first(where: { $0.serverURL != nil }), let url = any.serverURL {
+      return .configured(address: EnrollURL.displayAddress(url))
+    }
+    return active.isEmpty ? .noOutputs : .searching
+  }
+
   /// "Connected to Stage Utility at 192.0.2.10:8788" splits into these pieces so the
   /// window can set the name in bold and the address in monospace.
   public static func connectionLine(_ c: Connection) -> (prefix: String, name: String?, middle: String?, address: String?) {
