@@ -94,9 +94,13 @@ export interface DownloadDeps {
 export function releaseBase(): string {
   const base = process.env.STAGE_UTILITY_TEST_RELEASE_BASE?.trim();
   if (!base) return DEFAULT_RELEASE_BASE;
-  console.warn("[output-helper] fetching releases from STAGE_UTILITY_TEST_RELEASE_BASE, a test hook");
+  if (!testHookAnnounced) {
+    testHookAnnounced = true;
+    console.warn("[output-helper] fetching releases from STAGE_UTILITY_TEST_RELEASE_BASE, a test hook");
+  }
   return base.replace(/\/+$/, "");
 }
+let testHookAnnounced = false;
 
 /** The digest on a checksum file's first line: `shasum -a 256` prints
  *  "<hex>  <file>", and a bare hex digest is accepted too. */
@@ -226,9 +230,9 @@ export class OutputHelperDownloads {
     // The checksum first, and through the same one-flight path, so a Mac that
     // asks for it while the zip is downloading does not start a second fetch.
     const sum = await this.ensure({ arch: asset.arch, kind: "sha256", name: sumName });
-    if (!sum.ok) {
-      throw new Refusal(sum.status, `${asset.name} will not be fetched without its published checksum: ${sum.message}`);
-    }
+    // Its own reason, unprefixed: the zip is not fetched without it, and the
+    // checksum's message already says what was missing and why.
+    if (!sum.ok) throw new Refusal(sum.status, sum.message);
     const expected = parseChecksum(await fs.readFile(sumFile, "utf8"));
     if (!expected) throw new Refusal(502, `the cached ${sumName} is not a SHA-256 digest`);
 
