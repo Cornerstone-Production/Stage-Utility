@@ -25,12 +25,7 @@ const SWEEP_MS = 15_000;
  *  walk to a screen and back, short enough that leaving it on is not a habit. */
 export const SCAN_WINDOW_MS = 60_000;
 
-/** An unknown device is recorded at most this often, so a misconfigured or
- *  malicious box cannot fill the list faster than a person can read it. */
-const RECORD_EVERY_MS = 60_000;
-
 const seen = new Map<string, SeenDevice>();
-const lastRecorded = new Map<string, number>();
 
 /**
  * Device secrets, kept OUT of the device record on purpose.
@@ -87,16 +82,18 @@ export function stopScan(holder = "manual"): void {
 
 }
 
-/** Record a device we just heard from. Returns false when rate-limited. */
+/**
+ * Record a device we just heard from that is not bound here. A bound one is never
+ * recorded (see the responder), so it does not list, announce or log "output seen"
+ * for as long as it runs; an unbound one is listed the moment it is heard, and a
+ * released output is back on the list at its next probe.
+ */
 export function recordSeen(
   d: Omit<SeenDevice, "firstSeen" | "lastSeen">,
   now = Date.now(),
-): boolean {
+): void {
   const existing = seen.get(d.id);
   if (!existing) {
-    const last = lastRecorded.get(d.id) ?? 0;
-    if (now - last < RECORD_EVERY_MS && last !== 0) return false;
-    lastRecorded.set(d.id, now);
     seen.set(d.id, { ...d, firstSeen: now, lastSeen: now });
     // One line per output appearing, not per probe: this branch runs once per
     // sighting and a helper with six outputs is six lines, which is the
@@ -108,7 +105,7 @@ export function recordSeen(
     }
     ensureSweep();
     announce(now);
-    return true;
+    return;
   }
   // Known device: refresh cheaply. Only announce when something a person would
   // notice changed — a probe every two seconds must not become an SSE every two
@@ -127,7 +124,6 @@ export function recordSeen(
     !sameScreen(existing.screen, screen);
   seen.set(d.id, { ...existing, ...d, screen, lastSeen: now });
   if (changed) announce(now);
-  return true;
 }
 
 /**
@@ -287,7 +283,6 @@ export function resetKioskPresence(): void {
   secrets.clear();
   health.clear();
   seen.clear();
-  lastRecorded.clear();
   scans.clear();
   lastSig = "";
   if (sweepTimer) clearInterval(sweepTimer);

@@ -73,20 +73,6 @@ describe("devices heard", () => {
     assert.deepEqual(seenDevices(t0 + 100_000).map((d) => d.id), ["d1"]);
   });
 
-  test("an unknown device cannot flood the list", () => {
-    // A misconfigured box probing every 2s must not add an entry every 2s.
-    const t0 = 1_000_000;
-    for (let i = 0; i < 10; i++) recordSeen(dev(`flood-${i}`), t0);
-    // Each distinct id is allowed once; the rate limit is per id, so a single
-    // rogue id retrying is what gets throttled.
-    const first = recordSeen(dev("rogue"), t0);
-    const again = recordSeen(dev("rogue"), t0 + 1_000);
-    assert.equal(first, true);
-    forgetSeen("rogue");
-    assert.equal(recordSeen(dev("rogue"), t0 + 2_000), false, "a re-added id was not rate limited");
-    void again;
-  });
-
   test("claiming forgets it at once", () => {
     // Otherwise a device you just bound sits in the unclaimed list for another
     // 90 seconds, which reads as the claim not having worked.
@@ -94,6 +80,16 @@ describe("devices heard", () => {
     recordSeen(dev("d1"), t0);
     forgetSeen("d1");
     assert.deepEqual(seenDevices(t0).map((d) => d.id), []);
+  });
+
+  test("a device claimed and released inside a minute is listed again at once", () => {
+    // Heard, claimed (forgotten), released: the output is a candidate again the
+    // moment it is next heard, with no wait for a record limit to lapse.
+    const t0 = 1_000_000;
+    recordSeen(dev("d1"), t0);
+    forgetSeen("d1");
+    recordSeen(dev("d1"), t0 + 10_000);
+    assert.deepEqual(seenDevices(t0 + 10_000).map((d) => d.id), ["d1"]);
   });
 
   test("freshest first", () => {

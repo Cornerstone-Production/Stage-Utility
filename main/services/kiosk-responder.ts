@@ -65,7 +65,11 @@ export function startKioskResponder(opts: ResponderOptions): void {
     const bound = !!findById(devices, probe.id);
     const decision = decideProbe(probe, opts.serverId, { scanning: scanning(), bound });
 
-    if (decision.list !== "none") {
+    // A device bound HERE is not a candidate: recording it would list it, announce
+    // it and log "output seen" on every minute it runs, only to forget it again
+    // below. Only a device somebody could claim, or one that cannot reach its
+    // server, is shown.
+    if (decision.list === "unclaimed" || decision.list === "elsewhere") {
       recordSeen({
         id: probe.id,
         macs: probe.macs,
