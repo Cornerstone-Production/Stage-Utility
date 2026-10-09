@@ -1,71 +1,577 @@
-#!/usr/bin/env bash
-# Turn this Mac into a Stage Utility display.
+#!/bin/sh
+# Turn this Mac into Stage Utility screens.
 #
 #   curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
 #
+# By default this installs the Stage Utility Output helper (macOS 14 or later): a
+# menu bar app that makes each of the Mac's displays, and each DeckLink port, a
+# screen device of its own. It downloads the app from this server, falls back to
+# the GitHub release for the server's version, checks a published SHA-256, puts it
+# in /Applications and starts it at login.
+#
+#   --browser    the earlier Chrome kiosk instead: one full-screen browser. For a
+#                Mac the helper cannot run on.
+#                curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh -s -- --browser
+#   --dry-run    print every step and change nothing. Needs no sudo.
+#   --help       this text
+#
+#   STAGE_SERVER=http://<server>   where to download from and, for the Chrome
+#                                  kiosk, a server to use instead of discovery.
+#                                  Written to the `server` file, which skips
+#                                  discovery: set it only where broadcast does not
+#                                  cross.
+#   STAGE_KIOSK_PORT=8789          the discovery port of the Chrome kiosk
+#
+# Running it again upgrades in place. It never mints a second device id.
+#
 # Best-effort, and honestly so: a Mac is a general-purpose machine that sleeps,
 # locks and reboots for updates on its own schedule. For a permanent wall screen
-# a purpose-built Pi is the right tool. This is for a laptop on a cart, or a Mac
-# already sitting at FOH.
+# a purpose-built Pi is the right tool. This is for a Mac mini in the booth, a
+# laptop on a cart, or a Mac already sitting at FOH.
 #
-# What it needs from you, once, in System Settings:
-#   • Users & Groups → automatic login for this account
-#   • Lock Screen → never for display sleep and screen saver (this sets what it
-#     can via pmset, but the screen saver is per-user and not scriptable)
+# What it cannot do for you, once, at the Mac: see the notes it prints at the end.
+#
+# POSIX sh on purpose: it is piped to `sh`, which on macOS is bash in POSIX mode.
+# The STAGE_INSTALL_* variables below exist for the tests and nothing else.
 
 set -eu
 
-STATE_DIR="/Library/Application Support/StageUtility"
-BIN=/usr/local/bin/stage-utility-kiosk
-AGENT_DIR="/Library/LaunchAgents"
-AGENT="$AGENT_DIR/com.stageutility.kiosk.plist"
+# Stamped by the server that serves this file with the address it was fetched
+# from, so the app can be downloaded from the same place. Empty when the file was
+# saved and run by hand.
+FETCHED_FROM=""
+
+# Prefix for every path below. Empty on a real install; a test points it at a
+# scratch directory so the real functions run without touching the Mac.
+ROOT="${STAGE_INSTALL_TEST_ROOT:-}"
+
+STATE_DIR="$ROOT/Library/Application Support/StageUtility"
+APPS_DIR="$ROOT/Applications"
+BIN="$ROOT/usr/local/bin/stage-utility-kiosk"
+AGENT_DIR="$ROOT/Library/LaunchAgents"
+KIOSK_LABEL=com.stageutility.kiosk
+AGENT="$AGENT_DIR/$KIOSK_LABEL.plist"
 PORT="${STAGE_KIOSK_PORT:-8789}"
 SERVER="${STAGE_SERVER:-}"
 
-if [ "$(id -u)" -ne 0 ]; then
-  echo "Run with sudo — the device id lives outside your home directory so a" >&2
-  echo "profile reset cannot cost you a claim." >&2
+APP_NAME=StageUtilityOutput.app
+APP_EXEC=StageUtilityOutput
+HELPER_LABEL=com.stageutility.output
+GITHUB_BASE="${STAGE_INSTALL_GITHUB_BASE:-https://github.com/Cornerstone-Production/Stage-Utility/releases/download}"
+
+MODE=helper
+DRY=0
+ARCH=""
+ZIP_NAME=""
+WHY=""
+HTTP_CODE=""
+CONSOLE_USER=""
+CONSOLE_UID=""
+WORK=""
+STAGING=""
+OLD_APP=""
+AGENT_STOPPED=0
+FINISHED=0
+
+say() { printf '%s\n' "$*"; }
+warn() { printf 'install-macos.sh: %s\n' "$*" >&2; }
+die() {
+  warn "$*"
   exit 1
-fi
+}
+# What a dry run would have done.
+would() { printf '    [dry-run] %s\n' "$*"; }
 
-echo "==> Installing the Stage Utility kiosk agent"
+usage() {
+  cat <<'USAGE'
+Usage: install-macos.sh [--browser] [--dry-run]
 
-mkdir -p "$STATE_DIR"
-# Generated ONCE: re-running must never mint a new id, or this screen's binding
-# is orphaned and needs re-claiming.
-[ -f "$STATE_DIR/device-id" ] || uuidgen | tr 'A-Z' 'a-z' > "$STATE_DIR/device-id"
-# The device's own secret — pinned by the server the first time it is claimed.
-[ -f "$STATE_DIR/token" ] || head -c 24 /dev/urandom | xxd -p | tr -d '\n' > "$STATE_DIR/token"
-[ -n "$SERVER" ] && printf '%s' "$SERVER" > "$STATE_DIR/server" || true
-chmod 644 "$STATE_DIR/device-id"
-# The token is readable ONLY by the account that runs the kiosk.
-#
-# Owned by that account, not by root. The installer runs under sudo but the
-# LaunchAgent below runs as the LOGGED-IN GUI user, so a 0600 root-owned token
-# meant the launcher's `cat` returned empty, /enroll was called with no token,
-# and authorise() is `if (!device || !secret) return null` -- unconditionally
-# null, including after the operator claims the screen. Same shape as the Linux
-# installer had.
-#
-# The whole directory, because the launcher also records the server binding here.
-CONSOLE_USER="$(stat -f %Su /dev/console 2>/dev/null || true)"
-if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
-  chown -R "$CONSOLE_USER" "$STATE_DIR"
-  chmod 600 "$STATE_DIR/token"
-  echo "    kiosk user: $CONSOLE_USER"
-else
-  # No GUI session yet -- an install over SSH before anyone has logged in. Leave
-  # it group-readable rather than unreadable, and SAY SO: a silent 0600 here is
-  # exactly the failure this block exists to prevent, and it presents as a screen
-  # that enrols for ever.
-  chmod 640 "$STATE_DIR/token"
-  echo "    no console user yet — token left group-readable; re-run this installer"
-  echo "    after logging in if the screen never leaves the holding page."
-fi
-echo "    device id: $(cat "$STATE_DIR/device-id")"
+  (default)   install the Stage Utility Output helper (macOS 14 or later)
+  --browser   install the Chrome kiosk instead
+  --dry-run   print every step and change nothing; needs no sudo
+  --help      this text
 
-# ── The launcher ────────────────────────────────────────────────────────────
-cat > "$BIN" <<LAUNCHER
+Run as root: curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
+Options go after -s --:  ... | sudo sh -s -- --dry-run
+STAGE_SERVER=http://<server> names the server to download from.
+USAGE
+}
+
+# ── Cleanup, and never a half-installed app ────────────────────────────────
+# Runs on every exit. A failure after the old app was moved aside puts it back;
+# a failure after the helper's agent was stopped starts it again, so the Mac is
+# never left with neither the old app nor the new one.
+on_exit() {
+  if [ "$FINISHED" -ne 1 ]; then
+    if [ -n "$OLD_APP" ] && [ -d "$OLD_APP" ] && [ ! -d "$APPS_DIR/$APP_NAME" ]; then
+      mv "$OLD_APP" "$APPS_DIR/$APP_NAME" && say "    restored the previous $APP_NAME"
+    fi
+    if [ "$AGENT_STOPPED" -eq 1 ]; then
+      start_helper_agent || warn "could not restart the helper after a failed install; it starts at the next login"
+    fi
+  elif [ -n "$OLD_APP" ]; then
+    rm -rf "$OLD_APP"
+  fi
+  if [ -n "$STAGING" ]; then rm -rf "$STAGING"; fi
+  if [ -n "$WORK" ]; then rm -rf "$WORK"; fi
+}
+
+# ── What this Mac is ───────────────────────────────────────────────────────
+detect_arch() {
+  machine="${STAGE_INSTALL_TEST_UNAME_M:-$(uname -m)}"
+  case "$machine" in
+    arm64) ARCH=arm64 ;;
+    x86_64) ARCH=x86_64 ;;
+    *) die "this Mac reports the architecture \"$machine\"; the output helper is built for arm64 and x86_64. Use --browser for the Chrome kiosk." ;;
+  esac
+}
+
+check_macos() {
+  system="${STAGE_INSTALL_TEST_UNAME_S:-$(uname -s)}"
+  [ "$system" = Darwin ] || die "this installer is for macOS; this is $system."
+  version="${STAGE_INSTALL_TEST_OS_VERSION:-$(sw_vers -productVersion)}"
+  major="${version%%.*}"
+  case "$major" in
+    '' | *[!0-9]*) die "could not read the macOS version (\"$version\")." ;;
+  esac
+  if [ "$MODE" = helper ] && [ "$major" -lt 14 ]; then
+    die "the output helper needs macOS 14 or later; this is macOS $version. Use --browser for the Chrome kiosk."
+  fi
+}
+
+# The account at the keyboard. The installer runs as root, but the helper is a
+# per-user app and its LaunchAgent and settings belong to whoever is logged in.
+find_console_user() {
+  CONSOLE_USER="$(stat -f %Su /dev/console 2>/dev/null || true)"
+  if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != root ]; then
+    CONSOLE_UID="$(id -u "$CONSOLE_USER")"
+  else
+    CONSOLE_USER=""
+    CONSOLE_UID=""
+  fi
+}
+
+# ── The device's identity, kept across installs ────────────────────────────
+# Shared by both modes. The id is generated ONCE: re-running must never mint a
+# new one, or this Mac's bindings are orphaned and need claiming again.
+write_state() {
+  if [ "$DRY" -eq 1 ]; then
+    if [ -f "$STATE_DIR/device-id" ]; then
+      would "keep the device id $(cat "$STATE_DIR/device-id") and the token in $STATE_DIR"
+    else
+      would "create a device id and a token in $STATE_DIR"
+    fi
+    if [ -n "$SERVER" ]; then would "write $SERVER to $STATE_DIR/server"; fi
+    would "give the token to the console user, mode 600"
+    return 0
+  fi
+  mkdir -p "$STATE_DIR"
+  [ -f "$STATE_DIR/device-id" ] || uuidgen | tr '[:upper:]' '[:lower:]' >"$STATE_DIR/device-id"
+  # The device's own secret: pinned by the server the first time it is claimed.
+  [ -f "$STATE_DIR/token" ] || head -c 24 /dev/urandom | xxd -p | tr -d '\n' >"$STATE_DIR/token"
+  [ -n "$SERVER" ] && printf '%s' "$SERVER" >"$STATE_DIR/server" || true
+  chmod 644 "$STATE_DIR/device-id"
+  # The token is readable ONLY by the account that runs the app.
+  #
+  # Owned by that account, not by root. The installer runs under sudo but the
+  # LaunchAgent runs as the LOGGED-IN GUI user, so a 0600 root-owned token read
+  # as empty, the device enrolled with no token, and the server's authorise() is
+  # `if (!device || !secret) return null` -- unconditionally null, including
+  # after the operator claims the screen.
+  #
+  # The whole directory, because the Chrome kiosk also records the server binding
+  # here.
+  if [ -n "$CONSOLE_USER" ]; then
+    chown -R "$CONSOLE_USER" "$STATE_DIR"
+    chmod 600 "$STATE_DIR/token"
+    say "    kiosk user: $CONSOLE_USER"
+  else
+    # No GUI session yet -- an install over SSH before anyone has logged in. Leave
+    # it group-readable rather than unreadable, and SAY SO: a silent 0600 here is
+    # exactly the failure this block exists to prevent, and it presents as a screen
+    # that enrols for ever.
+    chmod 640 "$STATE_DIR/token"
+    say "    no console user yet — token left group-readable; re-run this installer"
+    say "    after logging in if the screen never leaves the holding page."
+  fi
+  say "    device id: $(cat "$STATE_DIR/device-id")"
+}
+
+# ── Getting the app ────────────────────────────────────────────────────────
+# Where the server is, for the download: the operator's STAGE_SERVER, else the
+# address this script was served from, else the server file of an earlier
+# install. Empty when none of them is known.
+server_origin() {
+  if [ -n "$SERVER" ]; then
+    printf '%s' "$SERVER"
+  elif [ -n "$FETCHED_FROM" ]; then
+    printf '%s' "$FETCHED_FROM"
+  elif [ -r "$STATE_DIR/server" ]; then
+    tr -d '\r\n' <"$STATE_DIR/server"
+  fi
+}
+
+no_server_address() {
+  die "no server address to download from. Run the command from the server's Settings page, or: sudo STAGE_SERVER=http://<server> sh install-macos.sh"
+}
+
+sha256_of() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    sha256sum "$1" | awk '{print $1}'
+  fi
+}
+
+# GET one URL into a file. Sets HTTP_CODE, and WHY when it was not a 200. The
+# server explains its refusals in a JSON body ("not in the cache and could not be
+# fetched: ..."), and `curl -f` would throw that away, so the body is read.
+fetch_to() {
+  url="$1"
+  dest="$2"
+  max="$3"
+  progress="$4"
+  HTTP_CODE=""
+  rc=0
+  if [ "$progress" -eq 1 ]; then
+    HTTP_CODE="$(curl -# -L --connect-timeout 10 --max-time "$max" -o "$dest" -w '%{http_code}' "$url")" || rc=$?
+  else
+    HTTP_CODE="$(curl -sS -L --connect-timeout 10 --max-time "$max" -o "$dest" -w '%{http_code}' "$url")" || rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    WHY="could not reach it (curl exit $rc)"
+    return 1
+  fi
+  if [ "$HTTP_CODE" != 200 ]; then
+    reason="$(head -c 400 "$dest" 2>/dev/null | tr '\r\n' '  ' | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')"
+    WHY="answered $HTTP_CODE${reason:+: $reason}"
+    rm -f "$dest"
+    return 1
+  fi
+}
+
+# One download source: the checksum, then the zip, then the comparison. Returns
+# non-zero with the reason in WHY, and leaves no zip it would trust behind.
+try_source() {
+  label="$1"
+  zip_url="$2"
+  sum_url="$3"
+  WHY=""
+  rm -f "$WORK/$ZIP_NAME" "$WORK/$ZIP_NAME.sha256"
+  if ! fetch_to "$sum_url" "$WORK/$ZIP_NAME.sha256" 60 0; then
+    WHY="$label: the checksum $WHY"
+    return 1
+  fi
+  expected="$(awk 'NR == 1 { print tolower($1) }' "$WORK/$ZIP_NAME.sha256")"
+  case "$expected" in
+    *[!0-9a-f]* | '')
+      WHY="$label: the checksum is not a SHA-256 digest"
+      return 1
+      ;;
+  esac
+  if [ "${#expected}" -ne 64 ]; then
+    WHY="$label: the checksum is not a SHA-256 digest"
+    return 1
+  fi
+  say "    downloading $ZIP_NAME from $label"
+  say "    (a server that has not fetched it yet downloads it from GitHub first; that can take a few minutes)"
+  if ! fetch_to "$zip_url" "$WORK/$ZIP_NAME" 1800 1; then
+    WHY="$label: the download $WHY"
+    return 1
+  fi
+  actual="$(sha256_of "$WORK/$ZIP_NAME")"
+  if [ "$actual" != "$expected" ]; then
+    rm -f "$WORK/$ZIP_NAME"
+    WHY="$label: the download did not match its published SHA-256 (expected $expected, got $actual)"
+    return 1
+  fi
+  say "    verified SHA-256 $expected"
+}
+
+# The server's own release version, for the GitHub fallback. /api/update/status
+# carries it ("1.26.0"); /api/version is a build id, not a release.
+release_version() {
+  curl -fsS --connect-timeout 10 --max-time 15 "$1/api/update/status" 2>/dev/null |
+    grep -o '"version":"[^"]*"' | head -n 1 | cut -d'"' -f4
+}
+
+# A verified zip at $WORK/$ZIP_NAME, from the server or else the release.
+fetch_helper() {
+  origin="$(server_origin)"
+  [ -n "$origin" ] || no_server_address
+  origin="${origin%/}"
+  ZIP_NAME="StageUtilityOutput-$ARCH.zip"
+  if try_source "this server ($origin)" "$origin/kiosk/$ZIP_NAME" "$origin/kiosk/$ZIP_NAME.sha256"; then
+    return 0
+  fi
+  say "    $WHY"
+  first="$WHY"
+  version="$(release_version "$origin" || true)"
+  if [ -z "$version" ]; then
+    die "could not get the helper. $first. This server's version could not be read from $origin/api/update/status either, so the GitHub release was not tried."
+  fi
+  if try_source "the GitHub release v$version" "$GITHUB_BASE/v$version/$ZIP_NAME" "$GITHUB_BASE/v$version/$ZIP_NAME.sha256"; then
+    return 0
+  fi
+  die "could not get the helper. $first. $WHY."
+}
+
+unpack_zip() {
+  if command -v ditto >/dev/null 2>&1; then
+    ditto -x -k "$1" "$2"
+  else
+    unzip -q "$1" -d "$2"
+  fi
+}
+
+# Unpacked beside its destination, so the swap below is a rename on one volume,
+# and checked before anything is touched.
+stage_app() {
+  mkdir -p "$APPS_DIR"
+  STAGING="$APPS_DIR/.$APP_NAME.new.$$"
+  rm -rf "$STAGING"
+  mkdir -p "$STAGING"
+  unpack_zip "$WORK/$ZIP_NAME" "$STAGING" || die "could not unpack $ZIP_NAME."
+  [ -d "$STAGING/$APP_NAME" ] || die "$ZIP_NAME does not contain $APP_NAME."
+  [ -x "$STAGING/$APP_NAME/Contents/MacOS/$APP_EXEC" ] || die "$ZIP_NAME holds no runnable $APP_EXEC."
+  if ! grep -A1 '<key>CFBundleIdentifier</key>' "$STAGING/$APP_NAME/Contents/Info.plist" 2>/dev/null | grep -q "<string>$HELPER_LABEL</string>"; then
+    die "the app in $ZIP_NAME is not $HELPER_LABEL."
+  fi
+}
+
+# The old copy is moved aside, the new one renamed in, and the old one deleted
+# only after that worked. A failure between the two puts the old one back.
+swap_app() {
+  OLD_APP="$APPS_DIR/.$APP_NAME.old.$$"
+  rm -rf "$OLD_APP"
+  if [ -d "$APPS_DIR/$APP_NAME" ]; then
+    mv "$APPS_DIR/$APP_NAME" "$OLD_APP" || die "could not move the existing $APP_NAME aside; nothing was changed."
+  else
+    OLD_APP=""
+  fi
+  # On failure the exit trap puts the old copy back; see on_exit.
+  mv "$STAGING/$APP_NAME" "$APPS_DIR/$APP_NAME" ||
+    die "could not put the new $APP_NAME in $APPS_DIR; the previous one is kept."
+}
+
+# ── The agent that starts the helper at login ──────────────────────────────
+user_home() {
+  dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | sed 's/^NFSHomeDirectory: //'
+}
+
+# Never relaunch after a clean Quit from the app's window, always after a crash.
+write_helper_plist() {
+  cat >"$1" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$HELPER_LABEL</string>
+  <key>ProgramArguments</key><array><string>/Applications/$APP_NAME/Contents/MacOS/$APP_EXEC</string></array>
+  <key>AssociatedBundleIdentifiers</key><array><string>$HELPER_LABEL</string></array>
+  <key>RunAtLoad</key><true/>
+  <!-- Restarted if it crashes (a driver can take the process down), left alone
+       when somebody quits it on purpose. -->
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>ProcessType</key><string>Interactive</string>
+</dict>
+</plist>
+PLIST
+  chmod 644 "$1"
+}
+
+stop_helper_agent() {
+  [ -n "$CONSOLE_UID" ] || return 0
+  if launchctl print "gui/$CONSOLE_UID/$HELPER_LABEL" >/dev/null 2>&1; then
+    if launchctl bootout "gui/$CONSOLE_UID/$HELPER_LABEL"; then
+      AGENT_STOPPED=1
+      say "    stopped the running helper"
+    else
+      warn "could not stop the running helper through launchd"
+    fi
+  fi
+  # A copy somebody opened by hand is not launchd's, and would hold the new
+  # helper's place (a second launch hands over to the first). pgrep exits 1 when
+  # there is none, which is the usual case.
+  if pgrep -x -u "$CONSOLE_UID" "$APP_EXEC" >/dev/null 2>&1; then
+    pkill -x -u "$CONSOLE_UID" "$APP_EXEC" || warn "could not stop a running copy of the helper"
+    say "    stopped a copy that was running outside launchd"
+  fi
+}
+
+start_helper_agent() {
+  [ -n "$CONSOLE_UID" ] || return 0
+  plist="$(user_home)/Library/LaunchAgents/$HELPER_LABEL.plist"
+  [ -f "$plist" ] || return 0
+  launchctl bootstrap "gui/$CONSOLE_UID" "$plist"
+}
+
+install_helper_agent() {
+  if [ -z "$CONSOLE_USER" ]; then
+    say "    nobody is logged in at the console, so no login agent was written;"
+    say "    re-run this installer after logging in as the account that will run the Mac."
+    return 0
+  fi
+  home="$(user_home)"
+  [ -d "$home" ] || die "could not find the home folder of $CONSOLE_USER."
+  agents="$home/Library/LaunchAgents"
+  if [ ! -d "$agents" ]; then
+    mkdir -p "$agents"
+    chown "$CONSOLE_USER" "$agents"
+  fi
+  plist="$agents/$HELPER_LABEL.plist"
+  write_helper_plist "$plist"
+  chown "$CONSOLE_USER" "$plist"
+  if command -v plutil >/dev/null 2>&1; then
+    plutil -lint "$plist" >/dev/null || die "the LaunchAgent written to $plist is not a valid property list."
+  fi
+  # Started now: the account is at the console, so it has a session. Through
+  # launchd rather than directly, so a crash is restarted and a logout stops it.
+  if launchctl bootstrap "gui/$CONSOLE_UID" "$plist"; then
+    AGENT_STOPPED=0
+    say "    started for $CONSOLE_USER; it also starts at every login"
+  else
+    warn "could not start the helper now; it starts at the next login of $CONSOLE_USER"
+  fi
+}
+
+# ── Moving off the Chrome kiosk ────────────────────────────────────────────
+# The old agent and the helper must not both run on one Mac. The device id and
+# token in the state directory are left exactly as they are: the Mac keeps its
+# identity.
+migrate_kiosk() {
+  if [ ! -f "$AGENT" ] && [ ! -f "$BIN" ]; then return 0; fi
+  say "==> Replacing the Chrome kiosk agent from an earlier install"
+  if [ "$DRY" -eq 1 ]; then
+    would "stop $KIOSK_LABEL for the console user, then remove $AGENT and $BIN"
+    would "keep the device id, the token and the Chrome profile in $STATE_DIR"
+    return 0
+  fi
+  if [ -n "$CONSOLE_UID" ] && launchctl print "gui/$CONSOLE_UID/$KIOSK_LABEL" >/dev/null 2>&1; then
+    if launchctl bootout "gui/$CONSOLE_UID/$KIOSK_LABEL"; then
+      say "    stopped the running kiosk"
+    else
+      warn "could not stop the running Chrome kiosk; it stops at the next login"
+    fi
+  fi
+  rm -f "$AGENT" "$BIN"
+  say "    removed $AGENT and $BIN"
+  say "    this Mac keeps its device id. If the screen it used to show is listed under"
+  say "    \"Not set up yet\" instead of coming back by itself, choose \"Use for an existing screen\"."
+  say "    The Chrome profile in $STATE_DIR is left in place."
+}
+
+# ── What an output Mac needs ───────────────────────────────────────────────
+as_user() {
+  launchctl asuser "$CONSOLE_UID" sudo -u "$CONSOLE_USER" "$@"
+}
+
+set_power() {
+  say "==> Keeping the displays awake"
+  if [ "$DRY" -eq 1 ]; then
+    would "pmset -a displaysleep 0 sleep 0"
+    would "screen saver idle time 0, and no password after it, for the console user"
+    return 0
+  fi
+  # Display sleep is the difference between a display and a black rectangle.
+  if pmset -a displaysleep 0 sleep 0; then
+    say "    display sleep and system sleep: never"
+  else
+    warn "pmset could not turn off display and system sleep; set both to Never in System Settings > Lock Screen"
+  fi
+  if [ -z "$CONSOLE_USER" ]; then
+    warn "nobody is logged in, so the screen saver was not changed; it is a per-user setting"
+    return 0
+  fi
+  # Per user, and per host for the idle time: run in the user's own session or the
+  # write lands in a preferences daemon nobody reads.
+  if as_user defaults -currentHost write com.apple.screensaver idleTime -int 0; then
+    say "    screen saver: never ($CONSOLE_USER)"
+  else
+    warn "could not set the screen saver to never for $CONSOLE_USER; set it in System Settings > Lock Screen"
+  fi
+  # Newer macOS keeps this under a managed setting and may ignore the write; the
+  # closing notes say to check it either way.
+  as_user defaults write com.apple.screensaver askForPassword -int 0 ||
+    warn "could not turn off the password after the screen saver for $CONSOLE_USER"
+}
+
+notes() {
+  say
+  say "    Still to do at the Mac, once. macOS does not let a script do these:"
+  say "      - System Settings > Users & Groups: set automatic login to this account."
+  say "        The helper's browser needs a logged-in session."
+  say "      - Answer the Local Network prompt when the helper first opens:"
+  say "        \"Allow Stage Utility Output to find devices on local networks?\" -> Allow."
+  say "        Without it the helper cannot find the server. It says so in its own window."
+  say "      - System Settings > Lock Screen: \"Require password after screen saver"
+  say "        begins or display is turned off\" -> Never, and check that the screen saver"
+  say "        and display-off times read Never. This installer sets them where macOS"
+  say "        accepts it; a managed Mac may ignore it."
+  say "    Then open Screens in Stage Utility: this Mac's displays are listed under"
+  say "    \"Not set up yet\". The Mac's main display (the one with the menu bar) is off"
+  say "    until you switch it on in the helper's window."
+}
+
+# ── The two installs ───────────────────────────────────────────────────────
+install_helper() {
+  say "==> Installing the Stage Utility Output helper"
+  detect_arch
+  say "    this Mac: $ARCH"
+  if [ "$DRY" -eq 0 ]; then find_console_user; fi
+  write_state
+
+  if [ "$DRY" -eq 1 ]; then
+    origin="$(server_origin)"
+    [ -n "$origin" ] || no_server_address
+    would "download $origin/kiosk/StageUtilityOutput-$ARCH.zip and its .sha256"
+    would "failing that, ask $origin/api/update/status for its version and download the GitHub release's StageUtilityOutput-$ARCH.zip"
+    would "refuse a zip whose SHA-256 differs from the published one"
+    would "unpack beside $APPS_DIR/$APP_NAME, check it is $HELPER_LABEL, then swap it in, keeping the old copy until that worked"
+    would "write ~/Library/LaunchAgents/$HELPER_LABEL.plist for the console user and start it"
+    migrate_kiosk
+    set_power
+    notes
+    say
+    say "==> Dry run: nothing was changed."
+    return 0
+  fi
+
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/stage-utility-output.XXXXXX")"
+  fetch_helper
+  stage_app
+  stop_helper_agent
+  swap_app
+  say "    installed $APPS_DIR/$APP_NAME"
+  install_helper_agent
+  # Only now: a failure before this point leaves an earlier kiosk running.
+  migrate_kiosk
+  set_power
+  FINISHED=1
+  say
+  say "==> Done. This Mac is device $(cat "$STATE_DIR/device-id")"
+  notes
+}
+
+# Today's Chrome kiosk.
+install_browser() {
+  echo "==> Installing the Stage Utility kiosk agent"
+
+  if [ "$DRY" -eq 1 ]; then
+    write_state
+    would "write the launcher $BIN"
+    would "write the LaunchAgent $AGENT"
+    would "pmset -a displaysleep 0 sleep 0"
+    return 0
+  fi
+
+  find_console_user
+  write_state
+
+  # ── The launcher ────────────────────────────────────────────────────────
+  mkdir -p "$(dirname "$BIN")"
+  cat >"$BIN" <<LAUNCHER
 #!/usr/bin/env bash
 set -u
 STATE_DIR="$STATE_DIR"
@@ -82,9 +588,9 @@ macs() {
 # nc, not socat: it ships with macOS, so this adds no dependency. -w2 gives the
 # server two seconds to answer before we try again.
 #
-# NOT `nc -b`. On macOS -b is the INTERFACE flag, not a broadcast switch, so
-# `nc -u -w2 -b 255.255.255.255` dies with "nc: bad interface name" and never
-# sends anything. `| head -c 2048` then swallowed the failure, discover() always
+# NOT \`nc -b\`. On macOS -b is the INTERFACE flag, not a broadcast switch, so
+# \`nc -u -w2 -b 255.255.255.255\` dies with "nc: bad interface name" and never
+# sends anything. \`| head -c 2048\` then swallowed the failure, discover() always
 # returned empty, and the loop below spun for ever -- a Mac kiosk without
 # STAGE_SERVER preset never displayed anything at all.
 #
@@ -141,18 +647,18 @@ else
   exec open -a Safari "\$TARGET"
 fi
 LAUNCHER
-chmod +x "$BIN"
+  chmod +x "$BIN"
 
-# ── Survive a reboot, and a browser that dies ──────────────────────────────
-# A LaunchAgent, not a Daemon: this needs a logged-in GUI session to put a window
-# on a screen, which is also why automatic login is a prerequisite.
-mkdir -p "$AGENT_DIR"
-cat > "$AGENT" <<PLIST
+  # ── Survive a reboot, and a browser that dies ────────────────────────────
+  # A LaunchAgent, not a Daemon: this needs a logged-in GUI session to put a window
+  # on a screen, which is also why automatic login is a prerequisite.
+  mkdir -p "$AGENT_DIR"
+  cat >"$AGENT" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.stageutility.kiosk</string>
+  <key>Label</key><string>$KIOSK_LABEL</string>
   <key>ProgramArguments</key><array><string>$BIN</string></array>
   <key>RunAtLoad</key><true/>
   <!-- The browser exiting is the cue to re-discover, which is how a screen
@@ -161,16 +667,58 @@ cat > "$AGENT" <<PLIST
 </dict>
 </plist>
 PLIST
-chmod 644 "$AGENT"
+  chmod 644 "$AGENT"
 
-# Display sleep is the difference between a display and a black rectangle. The
-# screen saver is per-user and not scriptable — see the note at the top.
-pmset -a displaysleep 0 sleep 0 2>/dev/null || true
+  # Display sleep is the difference between a display and a black rectangle. The
+  # screen saver is per-user and not scriptable -- see the note at the top.
+  pmset -a displaysleep 0 sleep 0 2>/dev/null || true
 
-echo
-echo "==> Done. This screen is device $(cat "$STATE_DIR/device-id")"
-echo "    It starts at the next login. Open Screens in Stage Utility and set"
-echo "    it up under \"Not set up yet\"."
-echo
-echo "    Still to do by hand, once: enable automatic login, and set the screen"
-echo "    saver to Never. Neither can be set from a script."
+  if [ -d "$APPS_DIR/$APP_NAME" ]; then
+    echo
+    echo "    Note: the Stage Utility Output helper is still installed on this Mac, and"
+    echo "    both would show on its display. To remove the helper:"
+    echo "      launchctl bootout gui/<uid>/$HELPER_LABEL; rm -rf \"/Applications/$APP_NAME\""
+  fi
+
+  echo
+  echo "==> Done. This screen is device $(cat "$STATE_DIR/device-id")"
+  echo "    It starts at the next login. Open Screens in Stage Utility and set"
+  echo "    it up under \"Not set up yet\"."
+  echo
+  echo "    Still to do by hand, once: enable automatic login, and set the screen"
+  echo "    saver to Never. Neither can be set from a script."
+}
+
+main() {
+  for arg in "$@"; do
+    case "$arg" in
+      --browser) MODE=browser ;;
+      --dry-run) DRY=1 ;;
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      *)
+        warn "unknown option \"$arg\" (try --help)"
+        exit 2
+        ;;
+    esac
+  done
+
+  trap on_exit EXIT
+  check_macos
+  if [ "$DRY" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
+    die "run with sudo — the device id lives outside your home directory so a profile reset cannot cost you a claim."
+  fi
+
+  if [ "$MODE" = browser ]; then
+    install_browser
+  else
+    install_helper
+  fi
+}
+
+# The tests source this file to drive the functions above.
+if [ -z "${STAGE_INSTALL_SOURCED:-}" ]; then
+  main "$@"
+fi

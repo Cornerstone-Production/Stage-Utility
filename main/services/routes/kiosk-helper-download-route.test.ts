@@ -139,3 +139,31 @@ describe("GET /kiosk/StageUtilityOutput-<arch>.zip", () => {
     assert.deepEqual(githubHits, []);
   });
 });
+
+describe("GET /kiosk/install-macos.sh", () => {
+  const get = (host: string) =>
+    new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const u = new URL(appBase);
+      http
+        .get({ host: u.hostname, port: u.port, path: "/kiosk/install-macos.sh", headers: { host } }, (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (c: string) => (body += c));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+        })
+        .on("error", reject);
+    });
+
+  it("tells the installer the address it was fetched from", async () => {
+    const r = await get("192.0.2.10:8788");
+    assert.equal(r.status, 200);
+    assert.ok(r.body.split("\n").includes('FETCHED_FROM="http://192.0.2.10:8788"'));
+  });
+
+  it("does not stamp a Host header that is not an address", async () => {
+    const r = await get('x"; id; "');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.split("\n").includes('FETCHED_FROM=""'));
+    assert.ok(!r.body.includes("id; "));
+  });
+});

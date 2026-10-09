@@ -22,6 +22,7 @@ import { getUserDataPath } from "../app-paths.js";
 import { OutputHelperDownloads, parseHelperPath } from "../output-helper-download.js";
 import { pkgVersion } from "../updater.js";
 import { scrub } from "../scrub.js";
+import { originFromHost, stampOrigin } from "../kiosk-installer-origin.js";
 
 /** Exactly what may be served from scripts/kiosk. An allowlist rather than a
  *  path join, because this reads a file from disk on request. */
@@ -104,18 +105,33 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       error(res, "unknown installer", 404);
       return;
     }
+    let body: string;
     try {
       // APP_ROOT, not a path relative to this module. `import.meta.url` is
       // main/services/routes/ in a checkout but the bundled server.mjs at the
       // install root, where "../../../scripts" resolves to file:///scripts and
       // 404s. app-root.ts exists for exactly this and is used in five other
       // places; this was the copy that drifted.
-      const body = await readFile(path.join(APP_ROOT, "scripts", "kiosk", name), "utf8");
-      res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-      res.end(body);
+      body = await readFile(path.join(APP_ROOT, "scripts", "kiosk", name), "utf8");
     } catch {
       error(res, "installer not found in this build", 404);
+      return;
     }
+    // The Mac installer downloads the output helper from the server it came
+    // from, and is told which that is here. The others carry no address. A
+    // missing marker throws, and is the server's fault, not a missing file.
+    if (name === "install-macos.sh") {
+      const secure = "encrypted" in req.socket && req.socket.encrypted === true;
+      try {
+        body = stampOrigin(body, originFromHost(req.headers.host, secure));
+      } catch (err) {
+        console.error(`[output-helper] could not prepare ${scrub(name)}: ${scrub(err)}`);
+        error(res, "installer could not be prepared", 500);
+        return;
+      }
+    }
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+    res.end(body);
     return;
   }
 
