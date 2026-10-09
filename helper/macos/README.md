@@ -238,7 +238,7 @@ whichever server is scanning. Until then it will not follow another server.
 ## Health
 
 Every 10 s, an output that is showing a set-up screen posts
-`{ at, dropped, fps, repeated }` to `/api/devices/<id>/health` with its token in the
+`{ at, dropped, fps, latencyMs, repeated }` to `/api/devices/<id>/health` with its token in the
 `x-device-token` header. A display's fps is its display link's tick rate; `repeated`
 and `dropped` are 0. A card output's come from the shim's scheduler (`CardCounters`),
 the same for a DeckLink port and a virtual one: fps is frames sent per second, repeats
@@ -247,6 +247,11 @@ the page's was late; and `dropped` the slots missed since the output was made, a
 (so a lower number than last time means the output was made again). A slot is missed
 when the card reports its frame late or dropped, or when the schedule fell behind the
 card and moved forward past it (a resync), so nothing of ours went out in it.
+`latencyMs` is a card output's render to air over the window, the median from a
+picture's content being drawn to its slot going out of the card (see
+[DECKLINK.md](DECKLINK.md#latency)); the server shows it in Screen settings > Device.
+It is left out for a display, for a window with no new picture, and for a figure
+outside the 0 to 10,000 ms the server takes.
 
 A **401 or 404** means the server does not recognise this output with this token (it
 was released in Screens, or never set up; the server answers 401 for both so ids cannot

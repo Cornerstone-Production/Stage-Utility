@@ -35,6 +35,38 @@ import Testing
   @Test func bodyIsExactBytes() {
     let body = HealthPost.body(HealthSample(fps: 59.9401, repeated: 1.6694, dropped: 1), at: at)
     #expect(String(decoding: body, as: UTF8.self) == #"{"at":1760000000123,"dropped":1,"fps":59.94,"repeated":1.67}"#)
+    let card = HealthPost.body(HealthSample(fps: 59.94, repeated: 0, dropped: 0, latencyMs: 20.0441), at: at)
+    #expect(
+      String(decoding: card, as: UTF8.self)
+        == #"{"at":1760000000123,"dropped":0,"fps":59.94,"latencyMs":20.04,"repeated":0}"#)
+  }
+
+  func keys(_ body: Data) throws -> [String] {
+    try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any]).keys.sorted()
+  }
+
+  /// The body's keys, exactly, as the server's `parseHealthReport` reads them:
+  /// `latencyMs` beside the four when a card output measured it, and left out, not
+  /// null, when nothing did or it is outside what the server takes (a body it
+  /// refused would lose the whole report).
+  @Test func theBodyCarriesTheLatencyOnlyWhenThereIsOne() throws {
+    #expect(
+      try keys(HealthPost.body(HealthSample(fps: 60, latencyMs: 20), at: at)) == [
+        "at",
+        "dropped",
+        "fps",
+        "latencyMs",
+        "repeated",
+      ])
+    for latency in [nil, -1, 10_001, .infinity, .nan] as [Double?] {
+      #expect(
+        try keys(HealthPost.body(HealthSample(fps: 60, latencyMs: latency), at: at)) == [
+          "at",
+          "dropped",
+          "fps",
+          "repeated",
+        ], "\(String(describing: latency))")
+    }
   }
 
   @Test func requestGoesToTheDevicesHealthRoute() throws {

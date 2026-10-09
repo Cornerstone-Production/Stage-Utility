@@ -4,23 +4,33 @@ import Foundation
 public enum HealthPost {
   public static let interval: TimeInterval = 10
 
-  /// `{ at, dropped, fps, repeated }`, `at` in epoch milliseconds like every other
-  /// timestamp the server stores. fps and the repeated percent are rounded to 2
-  /// places.
+  /// `{ at, dropped, fps, latencyMs, repeated }`, `at` in epoch milliseconds like
+  /// every other timestamp the server stores. fps, the repeated percent and the
+  /// latency are rounded to 2 places. `latencyMs` (a card output's render to air) is
+  /// left out when nothing measured it, and when it is outside what the server takes
+  /// (0 to 10,000 ms, `parseHealthReport` in output-health.ts), which would cost the
+  /// whole post a 400.
   public static func body(_ sample: HealthSample, at: Date) -> Data {
     struct Wire: Encodable {
       var fps: Double
       var repeated: Double
       var dropped: Int
       var at: Int64
+      // Optional, so the synthesized encoder leaves it out when nil.
+      var latencyMs: Double?
     }
+    func twoPlaces(_ v: Double) -> Double { (v * 100).rounded() / 100 }
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     let wire = Wire(
-      fps: (sample.fps * 100).rounded() / 100, repeated: (sample.repeated * 100).rounded() / 100, dropped: sample.dropped,
-      at: Int64((at.timeIntervalSince1970 * 1000).rounded()))
+      fps: twoPlaces(sample.fps), repeated: twoPlaces(sample.repeated), dropped: sample.dropped,
+      at: Int64((at.timeIntervalSince1970 * 1000).rounded()),
+      latencyMs: sample.latencyMs.flatMap { $0.isFinite && (0...maxLatencyMs).contains($0) ? twoPlaces($0) : nil })
     return try! encoder.encode(wire)
   }
+
+  /// The most the server's health route takes for `latencyMs`.
+  public static let maxLatencyMs = 10_000.0
 
   public static func request(server: String, deviceId: String, token: String, body: Data) -> URLRequest? {
     guard let base = EnrollURL.normalise(server: server),

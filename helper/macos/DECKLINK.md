@@ -118,8 +118,9 @@ takes others (`CardLeads`), and the helper's `--head-start` and `--fill-lead`
 flags set them for every card output, for measuring.
 
 Health posts report `fps` as frames sent per second (repeats included), `repeated` as
-the percent of those that were repeats, and `dropped` as every slot missed since the
-port was made: reported dropped by the card, or skipped.
+the percent of those that were repeats, `dropped` as every slot missed since the
+port was made (reported dropped by the card, or skipped), and `latencyMs` as the
+window's render to air ([Latency](#latency)).
 
 ## Latency
 
@@ -128,9 +129,9 @@ carrying it beginning to go out of the card: how far the card's output runs behi
 the page. Each slot's times are kept in the shim (`dl_frame_timing`, `FrameTiming`):
 when the picture's content was drawn, handed over, converted, filled, copied into
 the frame, taken by the card, on air, and finished with. The health sample carries
-the window's median (`latencyMs`), the window shows it ("20 ms behind the page"), and
-the log says it when it changes. The server's health route keeps only `fps`,
-`repeated`, `dropped` and `at`, so `latencyMs` stays in the helper for now.
+the window's median (`latencyMs`), which goes to the server in the health post and
+shows in its Screen settings > Device; the helper's window shows it too ("20 ms
+behind the page"), and the log says it when it changes.
 
 With the standard leads it is **20 ms at 1080p59.94**, down from 64.7 ms.
 
