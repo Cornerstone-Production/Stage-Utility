@@ -648,6 +648,31 @@ describe("setOutputRole — a step that fails is taken back", () => {
     assert.equal((await outputsOnDisk()).find((o) => o.id === "display-4")?.mode, "panel");
   });
 
+  it("puts the view's kind back when the screen's role then fails", async () => {
+    // A wall display on a view only this screen shows: the view leads, the
+    // screen follows. If the screen's write fails, the view must be a console
+    // again, or the screen is a control surface on a wall view it never chose.
+    await stageController.setOutputView("display-4", "ctl-b");
+    const before = snapshot(["display-4"], ["ctl-b"]);
+    const restore = failNext("setOutputMode", "disk full");
+    try {
+      await assert.rejects(
+        () => stageController.setOutputRole("display-4", "display"),
+        (err: unknown) => {
+          assert.ok(err instanceof ScreenWriteError, String(err));
+          assert.equal(err.failed, "set the screen's role");
+          assert.deepEqual(err.rolledBack, ["change the view's kind"]);
+          return true;
+        },
+      );
+    } finally {
+      restore();
+    }
+    assert.equal(viewSurface(view("ctl-b")), "console", "the view was left a wall view");
+    assert.equal(snapshot(["display-4"], ["ctl-b"]), before);
+    assert.equal((await viewsOnDisk()).find((v) => v.id === "ctl-b")?.surface, "console", "views.json still has it as a wall view");
+  });
+
   it("restores the screen when the second of two writes fails", async () => {
     // Panel on a view only this screen shows: the screen goes first, the view's
     // kind second. If the kind fails, the screen must go back to a display.
