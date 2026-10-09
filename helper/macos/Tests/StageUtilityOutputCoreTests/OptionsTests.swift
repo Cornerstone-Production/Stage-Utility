@@ -15,8 +15,12 @@ import Testing
   }
 
   @Test func readsEveryFlag() {
-    let (o, problems) = parse(["--show-window", "--list-outputs", "--log-stderr", "--dump-frames", "/tmp/frames", "--discovery-port", "9000"])
+    let (o, problems) = parse([
+      "--show-window", "--list-outputs", "--log-stderr", "--dump-frames", "/tmp/frames", "--discovery-port", "9000",
+      "--virtual-sdi", "4",
+    ])
     #expect(o.showWindow && o.listOutputs && o.logToStderr)
+    #expect(o.virtualSDI == 4)
     #expect(o.dumpFramesDir?.path == "/tmp/frames")
     #expect(o.discoveryPort == 9000)
     #expect(problems.isEmpty)
@@ -37,6 +41,16 @@ import Testing
     let (b, pb) = parse([], env: ["STAGE_KIOSK_PORT": "x"])
     #expect(b.discoveryPort == 8789)
     #expect(pb == ["STAGE_KIOSK_PORT is not a port: x"])
+  }
+
+  @Test func virtualOutputsAreOffUnlessAskedForAndBounded() {
+    #expect(parse([]).0.virtualSDI == 0)
+    #expect(parse(["--virtual-sdi", "16"]).0.virtualSDI == 16)
+    for bad in ["0", "17", "-1", "four"] {
+      let (o, problems) = parse(["--virtual-sdi", bad])
+      #expect(o.virtualSDI == 0)
+      #expect(problems == ["--virtual-sdi takes 1 to 16: \(bad)"])
+    }
   }
 
   @Test func aFlagWithoutItsValueIsAProblem() {

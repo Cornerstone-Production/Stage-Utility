@@ -1,7 +1,7 @@
 import Foundation
 
-/// What an output is. "decklink" is step 3; it is here so the wire format does not
-/// change when it lands.
+/// What an output is. A "decklink" output is a card port: today only a virtual one
+/// (`VirtualCards`); real ports arrive with the DeckLink layer.
 public enum OutputKind: String, Codable, Equatable {
   case display
   case decklink
@@ -43,6 +43,24 @@ public enum OutputNaming {
     let port = (connector?.isEmpty == false) ? connector! : "Display \(index)"
     let name = localizedName.isEmpty ? port : "\(port) · \(localizedName)"
     return (port, name)
+  }
+}
+
+/// Card outputs with no card behind them, for `--virtual-sdi`: they run the whole
+/// card path (a windowless page on a 59.94 Hz clock, health, frame dumps) on a Mac
+/// with no DeckLink. They exist only while the flag is given.
+public enum VirtualCards {
+  public static let maxCount = 16
+  public static let mode = "1080p59.94"
+
+  /// "SDI 1 (virtual)" ... "SDI n (virtual)". The keys are stable, so a virtual
+  /// output keeps its device id, and its binding, from one run to the next.
+  public static func outputs(count: Int) -> [OutputDescriptor] {
+    guard count > 0 else { return [] }
+    return (1...min(count, maxCount)).map { n in
+      let label = "SDI \(n) (virtual)"
+      return OutputDescriptor(kind: .decklink, key: "virtual-sdi-\(n)", name: label, port: label, modes: [mode])
+    }
   }
 }
 

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Command-line flags. Parsed by hand: there are five and none is worth a
+/// Command-line flags. Parsed by hand: there are six and none is worth a
 /// dependency.
 public struct Options: Equatable {
   /// `--dump-frames <dir>`: write a PNG of every output every 5 s.
@@ -15,6 +15,9 @@ public struct Options: Equatable {
   public var discoveryPort: UInt16 = 8789
   /// `--log-stderr`: mirror the log to stderr.
   public var logToStderr = false
+  /// `--virtual-sdi <n>`, for development: add n card outputs with no card behind
+  /// them (`VirtualCards`), so the card path runs end to end on any Mac. 0 without it.
+  public var virtualSDI = 0
 
   public init() {}
 
@@ -39,6 +42,14 @@ public struct Options: Equatable {
       case "--discovery-port":
         if let v = value("--discovery-port") {
           if let n = UInt16(v), n > 0 { o.discoveryPort = n } else { problems.append("--discovery-port is not a port: \(v)") }
+        }
+      case "--virtual-sdi":
+        if let v = value("--virtual-sdi") {
+          if let n = Int(v), (1...VirtualCards.maxCount).contains(n) {
+            o.virtualSDI = n
+          } else {
+            problems.append("--virtual-sdi takes 1 to \(VirtualCards.maxCount): \(v)")
+          }
         }
       case "--show-window": o.showWindow = true
       case "--list-outputs": o.listOutputs = true
