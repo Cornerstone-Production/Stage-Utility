@@ -61,4 +61,38 @@ import Testing
           kind: .decklink, key: "decklink-7-1", name: "DeckLink Duo (2)", port: "DeckLink Duo (2)",
           modes: ["1080p59.94"]))
   }
+
+  /// The driver's state is logged when it changes, not on every scan: the helper
+  /// scans at launch and on every device change.
+  @Test func theInventoryLogsOnlyWhatChanged() {
+    let log = LogLines()
+    let duo = DeckLinkPort(
+      id: DeckLinkPortID(persistentID: 7, subDevice: 0), displayName: "DeckLink Duo (1)", modelName: "", modes: [])
+    let reading = Locked<(DeckLinkDriver.Status, [DeckLinkPort])>((.notInstalled, []))
+    let inventory = DeckLinkInventory(read: { reading.value }, log: log.write)
+
+    _ = inventory.scan()
+    _ = inventory.scan()
+    reading.value = (.installed(version: "14.2"), [duo])
+    #expect(inventory.scan().ports == [duo])
+    _ = inventory.scan()
+    reading.value = (.installed(version: "14.2"), [])
+    _ = inventory.scan()
+    #expect(
+      log.lines == [
+        "Desktop Video is not installed, so there are no DeckLink outputs",
+        "Desktop Video 14.2: 1 output port: DeckLink Duo (1) (decklink-7-0)",
+        "Desktop Video 14.2: 0 output ports",
+      ])
+  }
+
+  /// The real reader on this Mac: no driver, so one line saying so.
+  @Test func theInventoryOnThisMac() throws {
+    try #require(!FileManager.default.fileExists(atPath: Self.framework), "Desktop Video is installed here")
+    let log = LogLines()
+    let inventory = DeckLinkInventory(log: log.write)
+    #expect(inventory.scan().ports.isEmpty)
+    _ = inventory.scan()
+    #expect(log.lines == ["Desktop Video is not installed, so there are no DeckLink outputs"])
+  }
 }

@@ -66,6 +66,15 @@ public enum DeckLinkDriver {
     return ports
   }
 
+  /// Call `changed` whenever a DeckLink device arrives or goes, on the driver's
+  /// thread. An open port on a device that goes has already been told. False
+  /// without a driver.
+  @discardableResult
+  public static func watchDevices(_ changed: @escaping () -> Void) -> Bool {
+    DeviceListener.shared.handler = changed
+    return dl_watch_devices({ _ in DeviceListener.shared.fire() }, nil)
+  }
+
   /// "12.4.1" from 0x0c040100.
   static func versionText(_ v: Int64) -> String {
     guard v > 0 else { return "unknown" }
@@ -163,4 +172,55 @@ func cString<T>(_ tuple: inout T, fallback: String) -> String {
     return String(decoding: bytes[..<end], as: UTF8.self)
   }
   return s.isEmpty ? fallback : s
+}
+
+/// The one device-change handler the shim's C callback reaches.
+private final class DeviceListener {
+  static let shared = DeviceListener()
+  private let lock = NSLock()
+  private var _handler: (() -> Void)?
+
+  var handler: (() -> Void)? {
+    get { lock.withLock { _handler } }
+    set { lock.withLock { _handler = newValue } }
+  }
+
+  func fire() { handler?() }
+}
+
+/// The driver and its ports, scanned when asked, logged only when they change: the
+/// driver missing (once, not on every scan), a driver found, the ports it offers.
+public final class DeckLinkInventory {
+  public typealias Reader = () -> (DeckLinkDriver.Status, [DeckLinkPort])
+
+  private let read: Reader
+  private let log: (DeckLinkLog.Level, String) -> Void
+  private let lock = NSLock()
+  private var last: (status: DeckLinkDriver.Status, keys: [String])?
+
+  public init(
+    read: @escaping Reader = { (DeckLinkDriver.status(), DeckLinkDriver.ports()) },
+    log: @escaping (DeckLinkLog.Level, String) -> Void = DeckLinkLog.write
+  ) {
+    self.read = read
+    self.log = log
+  }
+
+  /// The ports now. Call at launch and when a device arrives or goes.
+  public func scan() -> (status: DeckLinkDriver.Status, ports: [DeckLinkPort]) {
+    let (status, ports) = read()
+    let keys = ports.map(\.id.outputKey)
+    lock.withLock {
+      defer { last = (status, keys) }
+      if let last, last.status == status, last.keys == keys { return }
+      if let problem = status.problem {
+        log(.error, problem)
+      } else if case .installed(let version) = status {
+        let names = ports.map { "\($0.descriptor.name) (\($0.id.outputKey))" }
+        log(.info, "Desktop Video \(version): \(ports.count) output port\(ports.count == 1 ? "" : "s")"
+          + (names.isEmpty ? "" : ": " + names.joined(separator: ", ")))
+      }
+    }
+    return (status, ports)
+  }
 }

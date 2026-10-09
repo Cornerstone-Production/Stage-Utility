@@ -42,6 +42,12 @@ let package = Package(
       dependencies: ["DeckLinkShim", "StageUtilityOutputCore"],
       linkerSettings: [.linkedFramework("Metal"), .linkedFramework("IOSurface")]
     ),
+    // A bench tool: list the ports, or play bars out of one (or a software clock)
+    // through the whole path. `swift run DeckLinkProbe`.
+    .executableTarget(
+      name: "DeckLinkProbe",
+      dependencies: ["DeckLinkKit", "StageUtilityOutputCore"]
+    ),
     .testTarget(
       name: "DeckLinkKitTests",
       dependencies: ["DeckLinkKit", "DeckLinkShim", "StageUtilityOutputCore"]
