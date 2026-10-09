@@ -16,7 +16,6 @@ final class CEFWindowlessSurface: WebSurface {
   /// Made in init and freed in `stop`, after the frame clock has stopped calling
   /// `beginFrame` (see CardOutput).
   private var browser: OpaquePointer?
-  private var pendingSnapshots: [@MainActor (CGImage?, String?) -> Void] = []
 
   /// Every frame the page draws, on the main thread.
   var onPicture: ((IOSurfaceRef) -> Void)?
@@ -71,45 +70,13 @@ final class CEFWindowlessSurface: WebSurface {
     loader.stop()
     if let browser { api.pointee.close!(browser) }
     browser = nil
-    for done in pendingSnapshots { done(nil, "the output stopped") }
-    pendingSnapshots = []
   }
 
-  /// The next frame the page draws, copied out of its IOSurface.
+  /// Not the way to see a card output: its dump is the frame the card is sent,
+  /// after the conversion and the turn (`CardOutput.writeSnapshot`).
   func snapshot(completion: @escaping @MainActor (CGImage?, String?) -> Void) {
-    guard browser != nil else {
-      completion(nil, "no browser")
-      return
-    }
-    pendingSnapshots.append(completion)
+    completion(nil, "a card output's picture is its frame: see CardOutput.writeSnapshot")
   }
 
-  private func painted(_ surface: IOSurfaceRef) {
-    if !pendingSnapshots.isEmpty {
-      let waiting = pendingSnapshots
-      pendingSnapshots = []
-      let image = IOSurfaceImage.copy(surface)
-      for done in waiting { done(image, image == nil ? "could not read the frame's IOSurface" : nil) }
-    }
-    onPicture?(surface)
-  }
-}
-
-enum IOSurfaceImage {
-  /// A CGImage of a BGRA IOSurface, copied while it is locked: the surface goes back
-  /// to Chromium's pool when the paint callback returns.
-  static func copy(_ surface: IOSurfaceRef) -> CGImage? {
-    guard IOSurfaceLock(surface, .readOnly, nil) == kIOReturnSuccess else { return nil }
-    defer { IOSurfaceUnlock(surface, .readOnly, nil) }
-    let width = IOSurfaceGetWidth(surface)
-    let height = IOSurfaceGetHeight(surface)
-    let rowBytes = IOSurfaceGetBytesPerRow(surface)
-    let data = Data(bytes: IOSurfaceGetBaseAddress(surface), count: rowBytes * height)
-    guard let provider = CGDataProvider(data: data as CFData) else { return nil }
-    return CGImage(
-      width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: rowBytes,
-      space: CGColorSpaceCreateDeviceRGB(),
-      bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue),
-      provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
-  }
+  private func painted(_ surface: IOSurfaceRef) { onPicture?(surface) }
 }

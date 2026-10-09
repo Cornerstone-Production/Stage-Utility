@@ -74,11 +74,12 @@ final class DisplaySink: OutputSink {
   }
 }
 
-/// A snapshot comes from the page, drawn upright at the size the page laid out at.
-/// The output shows it turned; the dump should show what the output shows.
+/// A display output's snapshot comes from the page, drawn upright at the size the
+/// page laid out at. The window shows it turned; the dump should show what the
+/// window shows. (A card output's dump is its frame, already turned: `CardDump`.)
 enum SnapshotTurn {
   /// The picture is taken on the main thread; turning, encoding and writing it are
-  /// not. Card outputs get their frames on the main thread, and a 1080p PNG encode
+  /// not. Card outputs get their pictures on the main thread, and a 1080p PNG encode
   /// there held them up long enough to repeat a frame. `completion` runs on the main
   /// thread.
   @MainActor

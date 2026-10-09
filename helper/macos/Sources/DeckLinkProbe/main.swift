@@ -122,7 +122,7 @@ func run(_ ports: [(DeckLinkOutputPort, TimedSource)], seconds: Double) {
     Thread.sleep(forTimeInterval: 1)
     for (port, _) in ports {
       let c = port.counters
-      print("\(port.label): \(port.state)  scheduled \(c.scheduled)  rendered \(c.rendered)  repeated \(c.repeated)  dropped \(c.dropped)  resyncs \(c.resyncs)")
+      print("\(port.label): \(port.state)  scheduled \(c.scheduled)  rendered \(c.rendered)  repeated \(c.repeated)  dropped \(c.dropped)  resyncs \(c.resyncs)  skipped \(c.skipped)")
     }
   }
   for (port, timed) in ports {

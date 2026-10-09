@@ -1,4 +1,5 @@
 import AppKit
+import DeckLinkKit
 import StageUtilityOutputCore
 
 /// A display the Mac has right now, with the screen to put a window on.
@@ -11,11 +12,15 @@ struct ConnectedDisplay {
 /// on, or a card port, which has none.
 struct PresentOutput {
   var descriptor: OutputDescriptor
+  /// A display output's screen.
   var screen: NSScreen?
+  /// A card output's port: a DeckLink port, or `.virtual`.
+  var card: DeckLinkOutputPort.Hardware?
 
-  init(descriptor: OutputDescriptor, screen: NSScreen?) {
+  init(descriptor: OutputDescriptor, screen: NSScreen? = nil, card: DeckLinkOutputPort.Hardware? = nil) {
     self.descriptor = descriptor
     self.screen = screen
+    self.card = card
   }
 
   init(display: ConnectedDisplay) { self.init(descriptor: display.descriptor, screen: display.screen) }

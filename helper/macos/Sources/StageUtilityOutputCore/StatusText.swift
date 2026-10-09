@@ -18,11 +18,14 @@ public enum StatusText {
     /// The server does not recognise this output (a release in Screens, or a token
     /// it does not hold), so its health posts are paused.
     public var healthPaused: Bool
+    /// What keeps a card output from sending: a mode its port refused, a port that
+    /// is gone. It sends nothing, so it says so whatever the server is doing.
+    public var portProblem: String?
 
     public init(
       enabled: Bool, isMain: Bool, serverKnown: Bool, unreachable: Bool = false,
       boundScreenName: String? = nil, showingBound: Bool = false, fps: Double? = nil,
-      healthPaused: Bool = false
+      healthPaused: Bool = false, portProblem: String? = nil
     ) {
       self.enabled = enabled
       self.isMain = isMain
@@ -32,12 +35,16 @@ public enum StatusText {
       self.showingBound = showingBound
       self.fps = fps
       self.healthPaused = healthPaused
+      self.portProblem = portProblem
     }
   }
 
   public static func outputLine(_ i: Input) -> String {
     if !i.enabled {
       return i.isMain ? "The Mac's desktop. Off, so the menu bar stays here." : "Turned off here"
+    }
+    if let problem = i.portProblem {
+      return i.boundScreenName.map { "\($0) · \(problem)" } ?? problem
     }
     if !i.serverKnown { return "Looking for Stage Utility" }
     if i.unreachable { return "Cannot reach the server. Retrying" }

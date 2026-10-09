@@ -124,6 +124,39 @@ public enum VideoModes {
     return text.hasSuffix("0") ? String(text.dropLast()) : text
   }
 
+  /// Every mode in `all`, as a card that played them all in 8-bit YUV would report
+  /// it: what a virtual port (`--virtual-sdi`) offers. The timings are DeckLink's
+  /// (DECKLINK.md, Formats); `code` is 0, as no driver is asked.
+  public static let standard: [CardMode] = all.compactMap(standardMode(named:))
+
+  /// The mode a server name describes, or nil for a name that is not one.
+  public static func standardMode(named name: String) -> CardMode? {
+    let size: (Int, Int)
+    let rest: Substring
+    if name.hasPrefix("1080") {
+      size = (1920, 1080)
+      rest = name.dropFirst(4)
+    } else if name.hasPrefix("720") {
+      size = (1280, 720)
+      rest = name.dropFirst(3)
+    } else {
+      return nil
+    }
+    guard let scan = rest.first, scan == "p" || scan == "i" else { return nil }
+    // Frames per second as duration / scale. An interlaced name is its field rate:
+    // its frames come at half of it.
+    let rates: [String: (Int64, Int64)] = [
+      "23.98": (1001, 24000), "24": (1000, 24000), "25": (1000, 25000), "29.97": (1001, 30000),
+      "30": (1000, 30000), "50": (1000, 50000), "59.94": (1001, 60000), "60": (1000, 60000),
+    ]
+    guard let (duration, rateScale) = rates[String(rest.dropFirst())] else { return nil }
+    let scale = scan == "i" ? rateScale / 2 : rateScale
+    let mode = CardMode(
+      code: 0, driverName: name, width: size.0, height: size.1, frameDuration: duration, timeScale: scale,
+      field: scan == "i" ? .upperFirst : .progressive, supportsYUV8: true)
+    return VideoModes.name(of: mode) == name ? mode : nil
+  }
+
   /// The modes a port can be set to, for the probe's `modes`: the server's names it
   /// plays in 8-bit YUV, in the server's order.
   public static func offered(by modes: [CardMode]) -> [String] {

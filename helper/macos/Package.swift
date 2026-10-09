@@ -17,7 +17,7 @@ let package = Package(
     .target(name: "StageUtilityCEFHostAPI"),
     .executableTarget(
       name: "StageUtilityOutput",
-      dependencies: ["StageUtilityOutputCore", "StageUtilityCEFHostAPI"]
+      dependencies: ["StageUtilityOutputCore", "StageUtilityCEFHostAPI", "DeckLinkKit"]
     ),
     .testTarget(
       name: "StageUtilityOutputCoreTests",

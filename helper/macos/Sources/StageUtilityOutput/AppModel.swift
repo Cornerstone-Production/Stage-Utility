@@ -1,4 +1,5 @@
 import AppKit
+import DeckLinkKit
 import ServiceManagement
 import StageUtilityOutputCore
 import SwiftUI
@@ -49,6 +50,9 @@ final class AppModel: ObservableObject {
     /// The bound screen's rotation, as the server last said. Kept when the page goes
     /// back to the holding screen: it describes how the monitor is mounted.
     var rotation: Rotation = .none
+    /// A card output's format, as the bound screen last said; nil is the default.
+    /// Kept on the holding screen, like the rotation.
+    var videoMode: String?
     /// Why the screens could not be read, while they cannot: logged once, not per try.
     var screenReadProblem: String?
     var fps: Double?
@@ -152,7 +156,7 @@ final class AppModel: ObservableObject {
   /// outputs `--virtual-sdi` asks for.
   private func reconcile() {
     let outputs = DisplayEnumerator.current().map(PresentOutput.init(display:))
-      + VirtualCards.outputs(count: options.virtualSDI).map { PresentOutput(descriptor: $0, screen: nil) }
+      + VirtualCards.outputs(count: options.virtualSDI).map { PresentOutput(descriptor: $0, card: .virtual) }
     let present = Set(outputs.map { $0.descriptor.key })
     for key in order where !present.contains(key) {
       Log.notice(.output, "\(runtimes[key]?.descriptor.port ?? key) is gone; its window is closed")
@@ -224,8 +228,11 @@ final class AppModel: ObservableObject {
     let sink: OutputSink
     if let screen = rt.output.screen {
       sink = DisplaySink(descriptor: d, screen: screen)
+    } else if let card = rt.output.card {
+      sink = CardOutput(descriptor: d, hardware: card)
     } else {
-      sink = CardOutput(descriptor: d, card: NullCardSink())
+      Log.error(.output, "\(d.port): neither a display nor a card port; not started")
+      return
     }
     rt.sink = sink
     if !sink.surfaceProblems.isEmpty {
@@ -279,6 +286,7 @@ final class AppModel: ObservableObject {
     rt.unreachable = false
     rt.page = .other
     rt.rotation = .none
+    rt.videoMode = nil
     rt.screenReadProblem = nil
     rt.boundScreenName = nil
     rt.fps = nil
@@ -406,7 +414,11 @@ final class AppModel: ObservableObject {
       rt.screenReadProblem = nil
     }
     rt.boundScreenName = screen.name
-    // `videoMode` is deliberately not read: it is a DeckLink port's setting, read when the DeckLink layer lands.
+    if let card = sink as? CardOutput, (screen.videoMode ?? VideoModes.defaultMode) != (rt.videoMode ?? VideoModes.defaultMode) {
+      Log.notice(.output, "\(port): format \(rt.videoMode ?? VideoModes.defaultMode) -> \(screen.videoMode ?? VideoModes.defaultMode), from \(screen.name)")
+      rt.videoMode = screen.videoMode
+      card.setVideoMode(screen.videoMode)
+    }
     if screen.rotation != rt.rotation {
       Log.notice(.output, "\(port): rotation \(rt.rotation.rawValue) -> \(screen.rotation.rawValue) degrees, from \(screen.name)")
       rt.rotation = screen.rotation
@@ -512,7 +524,7 @@ final class AppModel: ObservableObject {
         .init(
           enabled: record.enabled, isMain: d.isMain, serverKnown: rt.serverURL != nil,
           unreachable: rt.unreachable, boundScreenName: rt.boundScreenName, showingBound: rt.showingBound,
-          fps: rt.fps, healthPaused: healthBoard.isPaused(key)))
+          fps: rt.fps, healthPaused: healthBoard.isPaused(key), portProblem: (rt.sink as? CardOutput)?.problem))
       return OutputRow(id: key, title: d.isMain ? "\(d.name) (main)" : d.name, enabled: record.enabled, status: status)
     }
     connection = StatusText.connection(

@@ -27,6 +27,11 @@ public final class DeckLinkOutputPort: CardSink {
     case softwareClock(
       width: Int, height: Int, frameDuration: Int64, timeScale: Int64, ticksByItself: Bool,
       refusesHelperFrames: Bool = false)
+    /// A port with no card that offers every mode the server lists
+    /// (`VideoModes.standard`): the software clock, ticking by itself, at the
+    /// geometry and rate of whichever mode it is opened in. A `--virtual-sdi`
+    /// output.
+    case virtual
   }
 
   /// Which frames carry the pictures to the card.
@@ -67,13 +72,16 @@ public final class DeckLinkOutputPort: CardSink {
   private var closedCounts = CardCounters()
   private var current: State = .closed
   private var videoMode: String?
-  private var trouble = CardTrouble()
+  private var watch = CardWatch()
+  private var stalled: (() -> Void)?
   /// Polls in a row in which a running port sent nothing.
   private var stalledPolls = 0
-  private var lastPolledScheduled: UInt64 = 0
+  /// The counts at the last poll, or at the open that came after it.
+  private var lastPolled = CardCounters()
   private var pollTimer: DispatchSourceTimer?
   private var retryTimer: DispatchSourceTimer?
   private var lastSample: (at: TimeInterval, counters: CardCounters)
+  private var openSize: (width: Int, height: Int)?
 
   /// - Parameters:
   ///   - depth: frames in flight, all scheduled before playback starts.
@@ -106,6 +114,10 @@ public final class DeckLinkOutputPort: CardSink {
   }
 
   public var state: State { queue.sync { current } }
+
+  /// The frame size of the mode it last opened in; nil before it has opened.
+  /// A browser feeding it lays out at this size (turned, for a quarter turn).
+  public var frameSize: (width: Int, height: Int)? { queue.sync { openSize } }
 
   /// Which frames the port is sending in; nil when it is not running.
   public var frames: Frames? {
@@ -153,16 +165,22 @@ public final class DeckLinkOutputPort: CardSink {
 
   public var counters: CardCounters { queue.sync { countsNow() } }
 
+  /// Called on the port's own queue when the source has had no new picture for
+  /// `CardWatch.stallSeconds`, once per stall: for a browser, the cue to reload
+  /// its page. Hop to the owner's thread to act on it.
+  public var onSourceStalled: (() -> Void)? {
+    get { queue.sync { stalled } }
+    set { queue.sync { stalled = newValue } }
+  }
+
   public func takeHealthSample() -> HealthSample {
     queue.sync {
       let now = clock()
       let counts = countsNow()
-      let elapsed = now - lastSample.at
-      let sent = counts.scheduled - lastSample.counters.scheduled
-      let sample = HealthSample(
-        fps: elapsed > 0 ? Double(sent) / elapsed : 0,
-        repeated: Double(counts.repeated - lastSample.counters.repeated),
-        dropped: Int(counts.dropped - lastSample.counters.dropped))
+      let sample = HealthSample.card(
+        sent: counts.scheduled - lastSample.counters.scheduled,
+        repeated: counts.repeated - lastSample.counters.repeated, droppedSinceOpened: counts.missed,
+        seconds: now - lastSample.at)
       lastSample = (now, counts)
       return sample
     }
@@ -193,12 +211,27 @@ public final class DeckLinkOutputPort: CardSink {
       var id = port.id.shim
       var callbacks = box.callbacks(depth: depth, cardFrames: forceCardFrames)
       opened = dl_output_open(&id, mode.code, &callbacks, &why, why.count)
+      if opened != nil { openSize = (mode.width, mode.height) }
+    case .virtual:
+      let mode: CardMode
+      switch VideoModes.resolve(videoMode, among: VideoModes.standard) {
+      case .failure(let refusal): return .refused(refusal.reason)
+      case .success(let m): mode = m
+      }
+      modeName = "\(mode.driverName) on a software clock"
+      box = CallbackBox(source: source, timeScale: mode.timeScale, port: self, queue: queue)
+      var callbacks = box.callbacks(depth: depth, cardFrames: forceCardFrames)
+      opened = dl_fake_output_open(
+        Int32(mode.width), Int32(mode.height), mode.frameDuration, mode.timeScale, true, false, &callbacks, &why,
+        why.count)
+      if opened != nil { openSize = (mode.width, mode.height) }
     case .softwareClock(let width, let height, let duration, let scale, let ticks, let refuses):
       modeName = "\(width)x\(height) at \(VideoModes.rateText(Double(scale) / Double(duration))) on a software clock"
       box = CallbackBox(source: source, timeScale: scale, port: self, queue: queue)
       var callbacks = box.callbacks(depth: depth, cardFrames: forceCardFrames)
       opened = dl_fake_output_open(
         Int32(width), Int32(height), duration, scale, ticks, refuses, &callbacks, &why, why.count)
+      if opened != nil { openSize = (width, height) }
     }
     guard let opened else { return .failed(String(cString: why)) }
     handle = opened
@@ -210,11 +243,9 @@ public final class DeckLinkOutputPort: CardSink {
         .info,
         "\(label): the card refused the helper's own frames, so it gets the card's frames, with one copy of each picture")
     }
-    // The pre-roll is filled before any page can have drawn, so its repeats are the
-    // baseline, not trouble. An episode that was running goes on across a reopening.
-    let counts = countsNow()
-    trouble.rebase(repeated: counts.repeated, dropped: counts.dropped)
-    lastPolledScheduled = counts.scheduled
+    // The pre-roll is filled before the clock runs, so its repeats are the
+    // baseline, not falling behind. Being behind goes on across a reopening.
+    lastPolled = countsNow()
     stalledPolls = 0
     return .opened(modeName, frames)
   }
@@ -253,7 +284,8 @@ public final class DeckLinkOutputPort: CardSink {
     var c = dl_counters()
     dl_output_counters(handle, &c)
     return closedCounts
-      + CardCounters(scheduled: c.scheduled, repeated: c.repeated, dropped: c.dropped, resyncs: c.resyncs)
+      + CardCounters(
+        scheduled: c.scheduled, repeated: c.repeated, dropped: c.dropped, resyncs: c.resyncs, skipped: c.skipped)
   }
 
   private func closeHandle() {
@@ -290,24 +322,31 @@ public final class DeckLinkOutputPort: CardSink {
   /// Polls with nothing sent before a running port counts as lost.
   static let stallPolls = 2
 
-  /// Log repeats and drops when they start and when they stop, and treat a port
-  /// that has stopped taking frames as lost: a card that goes silent without
+  /// Once a second: log falling behind and catching up (`CardWatch`, the server's
+  /// own 5% and any-drop line), report a source that has stopped drawing, and treat
+  /// a port that has stopped taking frames as lost: a card that goes silent without
   /// reporting anything would otherwise sit frozen with no line in the log.
   private func pollNow() {
     guard handle != nil else { return }
     let counts = countsNow()
-    stalledPolls = counts.scheduled == lastPolledScheduled ? stalledPolls + 1 : 0
-    lastPolledScheduled = counts.scheduled
+    let sent = counts.scheduled - lastPolled.scheduled
+    let repeated = counts.repeated - lastPolled.repeated
+    let missed = counts.missed - lastPolled.missed
+    lastPolled = counts
+    stalledPolls = sent == 0 ? stalledPolls + 1 : 0
     if stalledPolls >= Self.stallPolls {
       handleLost("the card stopped taking frames", from: nil)
       return
     }
-    for event in trouble.observe(repeated: counts.repeated, dropped: counts.dropped) {
+    for event in watch.second(sent: Int(sent), repeated: Int(repeated), dropped: Int(missed)) {
       switch event {
-      case .started(let kind, let count):
-        log(.error, "\(label): \(kind.rawValue) (\(count) in the last \(Int(pollInterval)) s)")
-      case .stopped(let kind, let total):
-        log(.info, "\(label): stopped \(kind.rawValue) (\(total) in all)")
+      case .fellBehind(let r, let d):
+        log(.error, "\(label): falling behind: \(r) repeated and \(d) dropped in the last second")
+      case .caughtUp(let seconds):
+        log(.info, "\(label): keeping up again after \(seconds) s")
+      case .stalled:
+        // The owner says what it does about it.
+        stalled?()
       }
     }
   }

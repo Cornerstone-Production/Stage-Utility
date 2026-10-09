@@ -163,3 +163,21 @@ import Testing
       == "Waiting to be set up on the server")
   }
 }
+
+@Suite struct PortProblemStatusTests {
+  typealias I = StatusText.Input
+
+  /// A card output whose port refused the screen's format sends nothing: that is
+  /// its line, beside the screen it is set up as, and it wins over the frame rate.
+  @Test func aRefusedModeIsTheLine() {
+    let why = "Cannot play 1080p25: the port has no 1080p25 (it offers 1080p59.94)"
+    #expect(StatusText.outputLine(I(
+      enabled: true, isMain: false, serverKnown: true, boundScreenName: "Wing", showingBound: true, fps: 59.94,
+      portProblem: why)) == "Wing · \(why)")
+    #expect(StatusText.outputLine(I(enabled: true, isMain: false, serverKnown: false, portProblem: why)) == why)
+  }
+
+  @Test func anOutputTurnedOffSaysOnlyThat() {
+    #expect(StatusText.outputLine(I(enabled: false, isMain: false, serverKnown: true, portProblem: "x")) == "Turned off here")
+  }
+}

@@ -180,4 +180,17 @@ final class FrameMemory {
     #expect(taken == [0, 0, 0, 0])
     #expect(source.failure == nil)
   }
+
+  /// Two pictures before the card takes a frame: the newer goes out, once, and the
+  /// older is never sent. Every frame went out, so neither is a repeat or a drop.
+  @Test func twoPicturesBeforeAFrameSendTheNewerOnce() throws {
+    let source = SurfaceFrameSource(converter: converter)
+    let frame = FrameMemory(width: 2, height: 1)
+    let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
+    try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
+    try source.present(bgraSurface(width: 2, height: 1, [.grey(0), .grey(0)]))
+    #expect(source.fill(request, into: frame.target) == true)
+    #expect(frame.pairs == [[128, 16, 128, 16]])
+    #expect(source.fill(request, into: frame.target) == false)
+  }
 }

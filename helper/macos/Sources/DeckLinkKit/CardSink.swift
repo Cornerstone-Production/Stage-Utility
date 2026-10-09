@@ -50,7 +50,8 @@ public protocol CardFrameSource: AnyObject {
   func fill(_ request: CardFrameRequest, into target: CardFrameTarget) -> Bool
 }
 
-/// An output's frame counts since it was made, across reopenings.
+/// An output's frame counts since it was made, across reopenings: the one count
+/// of what a card output sent, real port or software clock.
 public struct CardCounters: Equatable {
   /// Frames handed to the card.
   public var scheduled: UInt64 = 0
@@ -60,21 +61,30 @@ public struct CardCounters: Equatable {
   public var dropped: UInt64 = 0
   /// Times the schedule fell behind the card and was moved forward.
   public var resyncs: UInt64 = 0
+  /// Slots those moves passed over, which went out with no frame of ours: the card
+  /// held its last picture.
+  public var skipped: UInt64 = 0
 
   /// New pictures sent: every frame scheduled that was not a repeat.
   public var rendered: UInt64 { scheduled - repeated }
 
-  public init(scheduled: UInt64 = 0, repeated: UInt64 = 0, dropped: UInt64 = 0, resyncs: UInt64 = 0) {
+  /// What the server's health route calls dropped: every slot that did not go out
+  /// as scheduled, whether the card said so (`dropped`) or the schedule passed it
+  /// over (`skipped`).
+  public var missed: UInt64 { dropped + skipped }
+
+  public init(scheduled: UInt64 = 0, repeated: UInt64 = 0, dropped: UInt64 = 0, resyncs: UInt64 = 0, skipped: UInt64 = 0) {
     self.scheduled = scheduled
     self.repeated = repeated
     self.dropped = dropped
     self.resyncs = resyncs
+    self.skipped = skipped
   }
 
   static func + (a: CardCounters, b: CardCounters) -> CardCounters {
     CardCounters(
       scheduled: a.scheduled + b.scheduled, repeated: a.repeated + b.repeated, dropped: a.dropped + b.dropped,
-      resyncs: a.resyncs + b.resyncs)
+      resyncs: a.resyncs + b.resyncs, skipped: a.skipped + b.skipped)
   }
 }
 
@@ -83,8 +93,9 @@ public struct CardCounters: Equatable {
 /// one.
 public protocol CardSink: AnyObject {
   var counters: CardCounters { get }
-  /// The counts since the last call, as the health post reports them: `fps` is
-  /// frames sent per second, repeats included.
+  /// The window since the last call, in the server's units: `fps` is frames sent
+  /// per second, repeats included; `repeated` a percent of them; `dropped` the
+  /// total since the output was made (`CardCounters.missed`).
   func takeHealthSample() -> HealthSample
   func close()
 }

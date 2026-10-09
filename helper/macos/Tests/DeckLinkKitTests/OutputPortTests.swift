@@ -11,14 +11,20 @@ final class NumberedSource: CardFrameSource {
   private let lock = NSLock()
   private let missing: Set<Int64>
   private var _asked: [Int64] = []
+  private var _missingNow = false
 
   init(missing: Set<Int64> = []) { self.missing = missing }
 
   var asked: [Int64] { lock.withLock { _asked } }
+  /// While set, every frame has nothing new: a page that has stopped drawing.
+  var missingNow: Bool {
+    get { lock.withLock { _missingNow } }
+    set { lock.withLock { _missingNow = newValue } }
+  }
 
   func fill(_ request: CardFrameRequest, into target: CardFrameTarget) -> Bool {
     lock.withLock { _asked.append(request.index) }
-    if missing.contains(request.index) { return false }
+    if missingNow || missing.contains(request.index) { return false }
     for line in 0..<target.height {
       target.bytes.storeBytes(of: request.index.littleEndian, toByteOffset: line * target.rowBytes, as: Int64.self)
     }
@@ -68,7 +74,9 @@ func softwarePort(
 
   /// The host is held up for ten frames while the card's clock runs on. The
   /// schedule is moved to just ahead of the card once, and from then on each slot
-  /// carries its own frame again: no frames dropped, no delay left behind.
+  /// carries its own frame again: none dropped by the card, no delay left behind.
+  /// The nine slots the move passed over are counted as skipped, and the health
+  /// post reports them as dropped: they went out with no frame of ours.
   ///
   /// Without the move the frames after the stall are scheduled in the past. The
   /// software clock drops those (eleven here, and the picture holds for two more
@@ -89,6 +97,8 @@ func softwarePort(
     let counts = port.counters
     #expect(counts.resyncs == 1)
     #expect(counts.dropped == 0)
+    #expect(counts.skipped == 9)
+    #expect(port.takeHealthSample().dropped == 9)
     let shown = port.fakeShown()
     #expect(shown.count == 51)
     // On time up to the stall; the card holds frame 12 through the slots nobody
@@ -111,6 +121,7 @@ func softwarePort(
     port.fakeTick(10)
     #expect(port.counters.resyncs == 1)
     #expect(port.counters.dropped == 0)
+    #expect(port.counters.skipped == 2)  // the slot on air and the one after it
   }
 
   /// Frames the card reports displayed late are counted as dropped.
@@ -214,38 +225,124 @@ func softwarePort(
     #expect(log.lines.count == 1)  // a retry that fails again says nothing more
   }
 
-  @Test func theHealthSampleIsTheCountsSinceTheLastOne() {
+  /// In the server's units (output-health.ts): fps is frames sent per second,
+  /// repeated is a PERCENT of the window's frames, dropped a TOTAL since the
+  /// output was made, which the next window does not start over.
+  @Test func theHealthSampleIsInTheServersUnits() {
     let now = Locked(0.0)
-    let port = softwarePort(NumberedSource(missing: [4, 5]), clock: { now.value })
+    let port = softwarePort(NumberedSource(missing: [4, 5, 6]), clock: { now.value })
     defer { port.close() }
     port.open(videoMode: nil)
+    port.fakeReportLate(2)
     port.fakeTick(57)
     now.value = 1.0
-    // 60 sent in a second: three of pre-roll and 57 rescheduled.
-    #expect(port.takeHealthSample() == HealthSample(fps: 60, repeated: 2, dropped: 0))
+    // 60 sent in a second: three of pre-roll and 57 rescheduled. 3 of 60 is 5%.
+    #expect(port.takeHealthSample() == HealthSample(fps: 60, repeated: 5, dropped: 2))
     port.fakeTick(30)
     now.value = 1.5
-    #expect(port.takeHealthSample() == HealthSample(fps: 60, repeated: 0, dropped: 0))
+    #expect(port.takeHealthSample() == HealthSample(fps: 60, repeated: 0, dropped: 2))
   }
 
-  @Test func repeatsAreLoggedWhenTheyStartAndWhenTheyStop() {
-    let log = LogLines()
-    let port = softwarePort(NumberedSource(missing: [10, 11, 12]), log: log)
+  @Test func aNewPortStartsTheDropTotalAtNothing() {
+    let port = softwarePort(NumberedSource())
     defer { port.close() }
     port.open(videoMode: nil)
-    for _ in 0..<8 {
-      port.fakeTick(5)
+    #expect(port.takeHealthSample().dropped == 0)
+  }
+
+  /// The server's line, per second: 3 repeats (5% of 59.94) or any drop is
+  /// falling behind; five clean seconds in a row is keeping up again. Two repeats
+  /// is jitter and says nothing.
+  @Test func fallingBehindIsLoggedWhenItStartsAndWhenItEnds() {
+    let log = LogLines()
+    let port = softwarePort(NumberedSource(missing: [20, 21, 40, 41, 42]), log: log)
+    defer { port.close() }
+    port.open(videoMode: nil)
+    for _ in 0..<12 {
+      port.fakeTick(10)
       port.pollForTest()
     }
     #expect(
       log.lines == [
         "SDI test: opened in 16x4 at 59.94 on a software clock",
-        "SDI test: repeating frames (3 in the last 3600 s)",
-        "SDI test: stopped repeating frames (3 in all)",
+        "SDI test: falling behind: 3 repeated and 0 dropped in the last second",
+        "SDI test: keeping up again after 6 s",
       ])
   }
 
-  /// The software clock ticking by itself, as the null sink does: frames go out
+  /// A drop alone is falling behind.
+  @Test func aDropAloneIsFallingBehind() {
+    let log = LogLines()
+    let port = softwarePort(NumberedSource(), log: log)
+    defer { port.close() }
+    port.open(videoMode: nil)
+    port.fakeTick(10)
+    port.pollForTest()
+    port.fakeReportLate(1)
+    port.fakeTick(10)
+    port.pollForTest()
+    #expect(log.lines.last == "SDI test: falling behind: 0 repeated and 1 dropped in the last second")
+  }
+
+  /// The pre-roll of a reopening repeats by necessity: it is the baseline, not
+  /// falling behind.
+  @Test func aReopeningsPreRollIsNotFallingBehind() {
+    let log = LogLines()
+    let source = NumberedSource()
+    let port = softwarePort(source, log: log)
+    defer { port.close() }
+    port.open(videoMode: nil)
+    port.fakeTick(10)
+    port.pollForTest()
+    source.missingNow = true
+    port.open(videoMode: nil)
+    source.missingNow = false
+    port.fakeTick(10)
+    port.pollForTest()
+    #expect(!log.lines.contains { $0.contains("falling behind") })
+  }
+
+  /// A source with no new picture for five polls in a row is reported once, so its
+  /// owner reloads the page once, not every second after.
+  @Test func aSourceThatStopsDrawingIsReportedOnce() {
+    let source = NumberedSource()
+    let port = softwarePort(source)
+    defer { port.close() }
+    let stalls = Locked(0)
+    port.onSourceStalled = { stalls.value += 1 }
+    port.open(videoMode: nil)
+    port.fakeTick(10)
+    port.pollForTest()
+    source.missingNow = true
+    for _ in 0..<(CardWatch.stallSeconds * 3) {
+      port.fakeTick(10)
+      port.pollForTest()
+    }
+    #expect(stalls.value == 1)
+  }
+
+  /// A virtual port opens in whichever of the server's modes it is asked for, at
+  /// that mode's size, and refuses a name the server does not list.
+  @Test func aVirtualPortTakesAnyListedMode() {
+    let log = LogLines()
+    let port = DeckLinkOutputPort(
+      label: "SDI 2 (virtual)", hardware: .virtual, source: NumberedSource(), retryInterval: 3600, pollInterval: 3600,
+      log: log.write)
+    defer { port.close() }
+    #expect(port.open(videoMode: nil) == .running(mode: "1080p59.94 on a software clock", frames: .helper))
+    #expect(port.frameSize.map { [$0.width, $0.height] } == [1920, 1080])
+    #expect(port.open(videoMode: "720p59.94") == .running(mode: "720p59.94 on a software clock", frames: .helper))
+    #expect(port.frameSize.map { [$0.width, $0.height] } == [1280, 720])
+    #expect(port.open(videoMode: "4Kp60") == .refused("4Kp60 is not a mode the helper knows"))
+    #expect(
+      log.lines == [
+        "SDI 2 (virtual): opened in 1080p59.94 on a software clock",
+        "SDI 2 (virtual): opened in 720p59.94 on a software clock",
+        "SDI 2 (virtual): refused 4Kp60: 4Kp60 is not a mode the helper knows",
+      ])
+  }
+
+  /// The software clock ticking by itself, as a virtual output's does: frames go out
   /// with nobody moving the clock.
   @Test func theSoftwareClockRunsByItself() async throws {
     let port = DeckLinkOutputPort(

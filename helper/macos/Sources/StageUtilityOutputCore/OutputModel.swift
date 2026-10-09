@@ -1,7 +1,7 @@
 import Foundation
 
-/// What an output is. A "decklink" output is a card port: today only a virtual one
-/// (`VirtualCards`); real ports arrive with the DeckLink layer.
+/// What an output is. A "decklink" output is a card port: a DeckLink or UltraStudio
+/// port (`DeckLinkPort` in DeckLinkKit), or a virtual one (`VirtualCards`).
 public enum OutputKind: String, Codable, Equatable {
   case display
   case decklink
@@ -10,8 +10,8 @@ public enum OutputKind: String, Codable, Equatable {
 /// One thing the helper can send a screen to, as the server is told about it.
 public struct OutputDescriptor: Equatable {
   public var kind: OutputKind
-  /// Stable across reboots and re-plugging: a display's UUID, later a DeckLink
-  /// port's persistent id plus its sub-device index.
+  /// Stable across reboots and re-plugging: a display's UUID, or a DeckLink port's
+  /// persistent id plus its sub-device index.
   public var key: String
   /// What the operator reads: "HDMI · LG 27UL", "Display 2 · LG 27UL".
   public var name: String
@@ -47,11 +47,12 @@ public enum OutputNaming {
 }
 
 /// Card outputs with no card behind them, for `--virtual-sdi`: they run the whole
-/// card path (a windowless page on a 59.94 Hz clock, health, frame dumps) on a Mac
-/// with no DeckLink. They exist only while the flag is given.
+/// card path (a windowless page, the Metal conversion, the shim's scheduler on a
+/// software clock, health, frame dumps) on a Mac with no DeckLink. They offer every
+/// mode the server lists (`VideoModes.standard`). They exist only while the flag is
+/// given.
 public enum VirtualCards {
   public static let maxCount = 16
-  public static let mode = "1080p59.94"
 
   /// "SDI 1 (virtual)" ... "SDI n (virtual)". The keys are stable, so a virtual
   /// output keeps its device id, and its binding, from one run to the next.
@@ -59,7 +60,9 @@ public enum VirtualCards {
     guard count > 0 else { return [] }
     return (1...min(count, maxCount)).map { n in
       let label = "SDI \(n) (virtual)"
-      return OutputDescriptor(kind: .decklink, key: "virtual-sdi-\(n)", name: label, port: label, modes: [mode])
+      return OutputDescriptor(
+        kind: .decklink, key: "virtual-sdi-\(n)", name: label, port: label,
+        modes: VideoModes.offered(by: VideoModes.standard))
     }
   }
 }

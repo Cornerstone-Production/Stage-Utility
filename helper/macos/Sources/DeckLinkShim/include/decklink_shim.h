@@ -187,6 +187,9 @@ typedef struct {
   uint64_t dropped;
   /// Times the schedule had fallen behind the card and was moved forward.
   uint64_t resyncs;
+  /// Slots a resync passed over: no frame of ours was scheduled for them, so the
+  /// card held its last picture. Not counted in `scheduled`.
+  uint64_t skipped;
   bool lost;
 } dl_counters;
 

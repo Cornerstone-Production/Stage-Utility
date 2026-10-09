@@ -109,4 +109,16 @@ private let otherModes: [CardMode] = [
     let port = [sdkHDModes[12], sdkHDModes[6], sdkHDModes[0]] + otherModes
     #expect(VideoModes.offered(by: port) == ["1080p23.98", "1080p59.94", "720p59.94"])
   }
+
+  /// A virtual port offers every mode the server lists, each with the timing a
+  /// card reports for it: the SDK's own list, matched by name.
+  @Test func theStandardModesAreTheServersWithTheSDKsTimings() {
+    #expect(VideoModes.standard.compactMap(VideoModes.name(of:)) == VideoModes.all)
+    for m in VideoModes.standard {
+      let sdk = sdkHDModes.first { VideoModes.name(of: $0) == VideoModes.name(of: m) }
+      #expect(sdk.map { [$0.width, $0.height, Int($0.frameDuration), Int($0.timeScale)] } == [m.width, m.height, Int(m.frameDuration), Int(m.timeScale)])
+    }
+    #expect(VideoModes.standardMode(named: "1080p59") == nil)
+    #expect(VideoModes.standardMode(named: "4Kp60") == nil)
+  }
 }

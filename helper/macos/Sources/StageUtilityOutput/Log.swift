@@ -1,3 +1,4 @@
+import DeckLinkKit
 import Foundation
 import os
 
@@ -7,11 +8,12 @@ import os
 ///
 /// Decisions and failures only: an output coming or going, an answer from a
 /// server, a reload, a renderer or GPU process gone, a card output falling
-/// behind or catching up, a refused health post. A healthy
-/// frame is not logged.
+/// behind or catching up, a refused health post, and the DeckLink layer's own
+/// lines (`decklink`: the driver, ports opened, refused, lost). A healthy frame is
+/// not logged.
 enum Log {
   enum Category: String, CaseIterable {
-    case app, discovery, output, health, cef, state
+    case app, discovery, output, health, cef, state, decklink
   }
 
   /// `--log-stderr`: also print each line, for a terminal run.
@@ -36,5 +38,16 @@ enum Log {
   private static func mirror(_ level: String, _ category: Category, _ message: String) {
     guard mirrorToStderr else { return }
     FileHandle.standardError.write(Data("[\(category.rawValue)] \(level): \(message)\n".utf8))
+  }
+}
+
+extension Log {
+  /// Where a `DeckLinkOutputPort` and the `DeckLinkInventory` write: the same
+  /// subsystem and category as `DeckLinkLog`, and mirrored to stderr like the rest.
+  static func decklink(_ level: DeckLinkLog.Level, _ message: String) {
+    switch level {
+    case .info: notice(.decklink, message)
+    case .error: error(.decklink, message)
+    }
   }
 }

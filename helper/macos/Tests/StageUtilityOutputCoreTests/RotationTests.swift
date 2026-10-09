@@ -61,9 +61,13 @@ import Testing
     ])
   }
 
-  @Test func aVideoModeIsNotReadHere() throws {
-    let list = try ScreenList.parse(status: 200, body: body(#"[{"id":"o1","name":"A","videoMode":"1080p50"}]"#)).get()
-    #expect(list == [ScreenRecord(id: "o1", name: "A")])
+  /// A card output reopens its port in the screen's format; one with none, or one
+  /// that is not a string, gets the default.
+  @Test func readsTheVideoMode() throws {
+    let list = try ScreenList.parse(
+      status: 200, body: body(#"[{"id":"o1","name":"A","videoMode":"720p59.94"},{"id":"o2","name":"B"},{"id":"o3","name":"C","videoMode":50}]"#)
+    ).get()
+    #expect(list.map(\.videoMode) == ["720p59.94", nil, nil])
   }
 
   @Test func saysWhyItIsNotAListing() {

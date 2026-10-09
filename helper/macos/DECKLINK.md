@@ -5,9 +5,9 @@ as outputs, each its own device on the server like a display. A port is not a
 display: macOS never sees it, and the helper writes frames to the card through the
 Desktop Video SDK, so DeckLink outputs are not limited by the Mac's display count.
 
-It is a library (`DeckLinkKit`) and a bench tool (`DeckLinkProbe`). The helper app
-does not use it yet: a port's pictures come from a windowless browser, which the
-Chromium (CEF) surface provides. [How it plugs in](#how-it-plugs-in) says how.
+It is a library (`DeckLinkKit`) and a bench tool (`DeckLinkProbe`). Every card output
+in the helper, a real port or a `--virtual-sdi` one, runs through it, its pictures
+coming from a windowless Chromium browser; [How it plugs in](#how-it-plugs-in) says how.
 
 ## Requirements
 
@@ -86,8 +86,9 @@ The card's clock drives each output, through scheduled playback.
   (**resync**) instead of scheduling frames in the past, which would be shown late
   for good or dropped until it caught up.
 
-Health posts report `fps` as frames sent per second (repeats included), with the
-repeated and dropped counts since the last post.
+Health posts report `fps` as frames sent per second (repeats included), `repeated` as
+the percent of those that were repeats, and `dropped` as every slot missed since the
+port was made: reported dropped by the card, or passed over by a resync (`skipped`).
 
 ## Helper frames and card frames
 
@@ -153,7 +154,7 @@ log stream --level info --predicate 'subsystem == "com.stageutility.output" && c
 | `<port>: the card refused the helper's own frames, so it gets the card's frames, …` | Once per port, the first time it falls back. |
 | `<port>: refused 1080p59.94: <reason>` | The mode cannot be played on that port. |
 | `<port>: could not open (<reason>)` / `lost (<reason>)` | A port that will not open or went away; retried. A running port that sends nothing for two seconds is lost with "the card stopped taking frames". |
-| `<port>: repeating frames (n in the last 1 s)` / `stopped repeating frames (n in all)` | Repeats start, and stop after five quiet seconds. Likewise `dropping frames`. |
+| `<port>: falling behind: r repeated and d dropped in the last second` / `keeping up again after n s` | A second with 3 or more repeats (5% at 59.94, the server's line) or any slot missed, and five good seconds in a row after it (`CardWatch`). |
 
 Healthy frames are not logged.
 
@@ -197,11 +198,8 @@ For a windowless CEF browser per port:
    turned size (1080 x 1920 for a quarter turn), as a display output's does.
 5. Post `port.takeHealthSample()` every ten seconds.
 
-The CEF branch's `NullCardSink` is the same shape: a sink that pulls frame *n*
-from a provider on a 59.94 Hz clock and counts rendered, repeated and dropped.
-`DeckLinkOutputPort` on a software clock is that sink with the card's scheduling
-behind it; the two merge by having the null sink be the software clock, or by
-making `NullCardSink` conform to `CardSink`, with its provider a `CardFrameSource`.
+A `--virtual-sdi` output is the same with `.virtual` for the port: the software
+clock, at the size and rate of the mode it is opened in.
 
 The scheduling follows the general approach MxU Slides describes (scheduled playback
 clocked by the completion callback, the latest picture copied into the returned
@@ -247,5 +245,5 @@ Only a card can prove:
 | `Vendor/DeckLink/` | The SDK headers and dispatch, unchanged, with Blackmagic's notice. |
 | `Sources/DeckLinkShim/` | The C API (`include/decklink_shim.h`), the scheduler shared by card and software clock (`output.cpp`), the software clock (`fake_card.cpp`), the driver side (`decklink_shim.cpp`). |
 | `Sources/DeckLinkKit/` | Swift: the driver and ports, the output port, the Metal conversion, the surface source. |
-| `Sources/StageUtilityOutputCore/CardModes.swift`, `CardTrouble.swift` | Mode naming and refusal, and when repeats or drops start and stop. |
+| `Sources/StageUtilityOutputCore/CardModes.swift`, `CardHealth.swift` | Mode naming and refusal; health in the server's units, and when an output is falling behind. |
 | `Sources/DeckLinkProbe/` | The bench tool. |

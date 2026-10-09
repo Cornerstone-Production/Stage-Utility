@@ -168,6 +168,7 @@ class Output {
   std::atomic<uint64_t> repeated_{0};
   std::atomic<uint64_t> dropped_{0};
   std::atomic<uint64_t> resyncs_{0};
+  std::atomic<uint64_t> skipped_{0};
 };
 
 /// Floor division for stream times, which are never negative in practice but

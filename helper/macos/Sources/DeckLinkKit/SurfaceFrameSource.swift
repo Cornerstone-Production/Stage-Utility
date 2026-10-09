@@ -23,6 +23,7 @@ public final class SurfaceFrameSource: CardFrameSource {
   private var fresh = false
   private var _rotation: Rotation = .none
   private var _failure: String?
+  private var capture: ((CardFrameCopy?) -> Void)?
 
   /// Called on the card's thread each time it takes a frame, with that frame's
   /// request. An engine that renders on command sends its next begin frame from
@@ -42,6 +43,19 @@ public final class SurfaceFrameSource: CardFrameSource {
   /// Why the last frame could not be converted, nil once one has been. The card
   /// repeats the previous picture meanwhile, so it shows in the repeat count.
   public var failure: String? { lock.withLock { _failure } }
+
+  /// The next new frame exactly as the card is sent it (converted, turned, scaled),
+  /// handed to `done` on the card's thread: what `--dump-frames` writes. A capture
+  /// still waiting when another is asked for gets nil, so a page that has stopped
+  /// drawing does not pile them up.
+  public func captureNextFrame(_ done: @escaping (CardFrameCopy?) -> Void) {
+    let replaced: ((CardFrameCopy?) -> Void)? = lock.withLock {
+      let old = capture
+      capture = done
+      return old
+    }
+    replaced?(nil)
+  }
 
   /// A new picture: a 32-bit BGRA IOSurface, upright, at the size the page laid out
   /// at. Copied before this returns. Call it from one thread.
@@ -81,7 +95,12 @@ public final class SurfaceFrameSource: CardFrameSource {
     defer { lock.withLock { reading = nil } }
     do {
       try converter.convert(taken.texture, rotation: taken.rotation, into: target)
-      lock.withLock { _failure = nil }
+      let done: ((CardFrameCopy?) -> Void)? = lock.withLock {
+        _failure = nil
+        defer { capture = nil }
+        return capture
+      }
+      done?(CardFrameCopy(target))
       return true
     } catch {
       // Nothing was written that can be trusted: the card repeats the previous
@@ -100,5 +119,20 @@ public final class SurfaceFrameSource: CardFrameSource {
       throw UYVYConverter.Failure.gpu("could not make a texture for the picture")
     }
     return copy
+  }
+}
+
+/// A frame as the card was sent it: 8-bit UYVY, `rowBytes` per line.
+public struct CardFrameCopy: Sendable {
+  public var bytes: [UInt8]
+  public var width: Int
+  public var height: Int
+  public var rowBytes: Int
+
+  init(_ target: CardFrameTarget) {
+    bytes = Array(UnsafeRawBufferPointer(start: target.bytes, count: target.rowBytes * target.height))
+    width = target.width
+    height = target.height
+    rowBytes = target.rowBytes
   }
 }

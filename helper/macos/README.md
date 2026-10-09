@@ -92,7 +92,7 @@ main display, and again when a change in the displays newly covers it.
 | Flag | What it does |
 |---|---|
 | `--show-window` | Open the window at launch. Without it the window opens only on a first run (no `outputs.json` yet) or from the menu bar icon. |
-| `--dump-frames <dir>` | Every 5 s, write a PNG of what each output is showing (`<output key>-NNNN.png`), turned as it goes out, and of the helper's own window (`window-NNNN.png`). It is how to check rendering on a Mac nobody is looking at, with the screen locked: a display output's picture comes from Chromium's DevTools (`Page.captureScreenshot`), a card output's is the frame itself, copied from Chromium's IOSurface; neither needs Screen Recording permission. Only the pictures are taken on the main thread, where card outputs get their frames, and the encoding and writing are not; even so, with four card outputs it costs each about one repeated frame in 150 (0.3 to 0.7%), so leave it off when measuring. |
+| `--dump-frames <dir>` | Every 5 s, write a PNG of what each output is showing (`<output key>-NNNN.png`) and of the helper's own window (`window-NNNN.png`). It is how to check rendering on a Mac nobody is looking at, with the screen locked; nothing needs Screen Recording permission. A display output's picture comes from Chromium's DevTools (`Page.captureScreenshot`), turned as the window turns it. A card output's is the next new frame exactly as the card is sent it, 8-bit UYVY decoded back to RGB, so it shows the Metal conversion, the turn and the scaling. The copy is taken on the port's thread; decoding, encoding and writing are off the main thread. A card output whose page draws nothing new has no dump that round. Leave it off when measuring. |
 | `--list-outputs` | Print the stored state and exit: each display's output key, device id, and whether it is on (stored) or what it would default to. It only reads; a Mac with no device id yet is told so, not given one. |
 | `--discovery-port <n>` | The UDP port to probe. Default 8789, or `STAGE_KIOSK_PORT`. |
 | `--log-stderr` | Also print the log to the terminal. |
@@ -218,10 +218,13 @@ whichever server is scanning. Until then it will not follow another server.
 Every 10 s, an output that is showing a set-up screen posts
 `{ at, dropped, fps, repeated }` to `/api/devices/<id>/health` with its token in the
 `x-device-token` header. A display's fps is its display link's tick rate; `repeated`
-and `dropped` are 0. A card output's are its frame clock's: fps is frames sent per
-second, `repeated` the percent of them that repeated the one before because the page's
-picture was late, and `dropped` the frames the clock skipped since the output opened
-(a total, so a lower number than last time means the output was reopened).
+and `dropped` are 0. A card output's come from the shim's scheduler (`CardCounters`),
+the same for a DeckLink port and a virtual one: fps is frames sent per second, repeats
+included; `repeated` the percent of them that carried the previous picture again because
+the page's was late; and `dropped` the slots missed since the output was made, a total
+(so a lower number than last time means the output was made again). A slot is missed
+when the card reports its frame late or dropped, or when the schedule fell behind the
+card and moved forward past it (a resync), so nothing of ours went out in it.
 
 A **401 or 404** means the server does not recognise this output with this token (it
 was released in Screens, or never set up; the server answers 401 for both so ids cannot
@@ -242,10 +245,15 @@ view that holds it), so the screen is laid out for its real shape and not squeez
 does the hit-testing in the turned view's coordinates, so a click or a touch lands where it
 looks: driven with a 90° turn on a 1920 x 1080 display, clicks at window points (100, 200)
 and (1800, 900) reached the page at (200, 1820) and (900, 120). A card output lays its
-page out at the turned size too; turning its frames back is the DeckLink layer's, so
-for now only its dump is turned. `--dump-frames` PNGs are turned to match what the
-output shows. The page shows upright for a moment at launch, before the first read.
-`videoMode` is a DeckLink port's setting and is not read yet.
+page out at the turned size too (1080 x 1920 for a quarter turn of a 1080p port), and
+the Metal conversion turns each frame back as it writes it for the card
+(`SurfaceFrameSource.rotation`), so the card is always sent a landscape frame. The page
+shows upright for a moment at launch, before the first read.
+
+A card output also reads the screen's `videoMode` there (absent is 1080p59.94). A
+change reopens its port in that mode, and the page lays out at the mode's size; a mode
+the port does not have is refused, said in the log and on the output's line in the
+window, and the port stays off until the mode changes.
 
 ## Chromium
 
@@ -284,22 +292,36 @@ hidden (a locked screen, an asleep display) through three public Chromium switch
 asking for the login keychain. Popups (`window.open`), JavaScript dialogs and the context
 menu are refused: an output has nobody to answer them.
 
-**Card outputs** are windowless browsers, 1920 x 1080, with shared textures and external
-begin frames: they draw a frame only when asked, and hand it over as an IOSurface that is
-valid only inside the callback. A scheduler (`FrameScheduler`) asks for one frame per slot
-of the card's clock and sends the newest picture at each slot, or the last one again if
-none came in time. Each request first invalidates the page, so a page that has not
-changed still draws, and a repeat always means late, never idle. `FrameLedger` (core,
-tested) counts each slot as new, repeated or dropped. A page that draws nothing for 300
-frames (5 s) is reloaded.
+**Card outputs** are windowless browsers at their port's frame size, with shared
+textures and external begin frames: they draw a frame only when asked, and hand it over
+as an IOSurface that is valid only inside the callback. Each one feeds a
+`DeckLinkOutputPort` (see [DECKLINK.md](DECKLINK.md)), whose scheduler, in the C++ shim,
+runs on the card's clock:
+
+1. When the card finishes with a frame, the scheduler asks the output's
+   `SurfaceFrameSource` for the frame three ahead. The source converts the newest
+   picture to UYVY on the GPU, turned for the screen's rotation, straight into that
+   frame's memory; if no new picture came, the frame carries the previous one again
+   and counts as repeated.
+2. Taking the frame sends the browser its next begin frame (`source.onFrameTaken` calls
+   the host's `begin_frame`, which CEF runs on its UI thread). Each request first
+   invalidates the page, so a page that has not changed still draws, and a repeat
+   always means late, never idle.
+3. The picture arrives in `OnAcceleratedPaint`, on the main thread, and
+   `source.present` copies it on the GPU before the callback returns.
+
+The scheduler is the one count of what went out (`CardCounters`: scheduled, repeated,
+dropped, resyncs, skipped). Health is taken from it, and once a second it decides
+whether the output is falling behind (`CardWatch` and `LagWatch`, core, tested). A page
+that has drawn no new picture for 5 s is reloaded.
 
 **`--virtual-sdi <n>`** adds n card outputs named "SDI n (virtual)", keyed
 `virtual-sdi-n` (so each keeps its device id and binding between runs), kind `decklink`,
-mode `1080p59.94`. Each runs the whole card path, a windowless page and the scheduler,
-through a `NullCardSink`: a 59.94 Hz software clock (1001/60000 s) that takes each
-frame and sends it nowhere. They are listed, claimed, rotated and report health like a
-real port. Without the flag they do not exist. The DeckLink layer replaces the null sink
-with a port's scheduled playback, clocked by the card.
+offering every mode the server lists. Each is a `DeckLinkOutputPort` with no card
+(`.virtual`): the same scheduler on a software clock that ticks by itself at the rate
+and size of the mode it is opened in, and sends the frames nowhere. They are listed,
+claimed, rotated, set to a format and report health like a real port. Without the flag
+they do not exist.
 
 **Measured** on an M4 Mac mini with the screen locked, a display output and four
 virtual card outputs, all claimed and showing a static screen, over 2 minutes: health
@@ -348,9 +370,11 @@ retried, health posts refused or paused, a rotation applied, a foreign server's 
 ignored, a state file that could not be read or saved. Chromium's own (category `cef`):
 whether it started, with its version and whether the sandbox is on, or why not; a page's
 renderer process ending, and the reload; the GPU process ending (Chromium starts
-another). A card output logs when it falls behind (a second with 3 or more repeated
-frames, 5%, the server's own line, or any dropped) and when it has kept up again for 5 s,
-on the change only, and a page that drew nothing for 5 s being reloaded. Trouble that
+another). The DeckLink layer's (category `decklink`): a port opened in a mode, refused
+one, lost or reopened, and a card output falling behind (a second with 3 or more
+repeated frames, 5%, the server's own line, or any dropped) and keeping up again after
+5 good seconds, on the change only. A page that drew nothing new for 5 s being reloaded
+is under `output`. Trouble that
 continues (a probe socket that will not open, every probe failing to send) is logged
 when it starts and when it ends, not on every try. Healthy frames are not logged.
 Tokens never are.
@@ -363,8 +387,8 @@ launch), are also said in the helper's window. Chromium writes its own warnings 
 
 | Path | What |
 |---|---|
-| `Sources/StageUtilityOutputCore/` | Everything decidable without a window: the probe, reply, ids, URLs, state files, timing, frame accounting, wording. Foundation only. |
-| `Sources/StageUtilityOutput/` | The app: displays, windows, sockets, the menu bar, the window, the Chromium surfaces and the card scheduler. |
+| `Sources/StageUtilityOutputCore/` | Everything decidable without a window: the probe, reply, ids, URLs, state files, timing, health units and when a card output is falling behind, video modes, wording. Foundation only. |
+| `Sources/StageUtilityOutput/` | The app: displays, windows, sockets, the menu bar, the window, the Chromium surfaces, and card outputs wired to their ports. |
 | `Sources/StageUtilityCEFHostAPI/` | The browser host's C API, and the few lines that open the host at run time. |
 | `CEFHost/` | The browser host, over CEF, built with CMake. |
 | `Tests/StageUtilityOutputCoreTests/` | swift-testing tests of the core. Nothing that needs Chromium running is unit-tested; that is driven end to end. |
@@ -378,5 +402,4 @@ is the part every engine shares (the retry, the backoff, what a 5xx means). A di
 output (`DisplaySink`) is a `CEFWindowedSurface` in a borderless window over a whole
 display (`WindowDestination`, which takes a placement and turns the view for a rotation
 without knowing what draws in it). A card output (`CardOutput`) is a
-`CEFWindowlessSurface` and a `FrameScheduler` driving a `CardSink`: today the
-`NullCardSink`, next a DeckLink port.
+`CEFWindowlessSurface` feeding a `SurfaceFrameSource` and a `DeckLinkOutputPort`.

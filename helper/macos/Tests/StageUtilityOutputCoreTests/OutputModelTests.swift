@@ -41,7 +41,7 @@ import Testing
     let outputs = VirtualCards.outputs(count: 4)
     #expect(outputs.map(\.key) == ["virtual-sdi-1", "virtual-sdi-2", "virtual-sdi-3", "virtual-sdi-4"])
     #expect(outputs.map(\.name) == ["SDI 1 (virtual)", "SDI 2 (virtual)", "SDI 3 (virtual)", "SDI 4 (virtual)"])
-    #expect(outputs.allSatisfy { $0.kind == .decklink && $0.modes == ["1080p59.94"] && !$0.isMain })
+    #expect(outputs.allSatisfy { $0.kind == .decklink && $0.modes == VideoModes.all && !$0.isMain })
     #expect(VirtualCards.outputs(count: 4) == outputs)
     #expect(Array(VirtualCards.outputs(count: 6).prefix(4)) == outputs)
   }

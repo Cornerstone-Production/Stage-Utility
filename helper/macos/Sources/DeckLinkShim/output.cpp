@@ -201,7 +201,11 @@ void Output::completed(IDeckLinkVideoFrame *frame, Completion result) {
   if (card_->streamTime(timeScale_, &now)) {
     const int64_t onAir = floorDiv(now, frameDuration_);
     if (nextIndex_ <= onAir) {
-      nextIndex_ = onAir + kResyncLead;
+      // Every slot from the next unscheduled one up to the new start goes out with
+      // nothing of ours in it: the card holds its last picture there.
+      const int64_t resumeAt = onAir + kResyncLead;
+      skipped_ += static_cast<uint64_t>(resumeAt - nextIndex_);
+      nextIndex_ = resumeAt;
       resyncs_++;
     }
   }
@@ -270,6 +274,7 @@ void Output::counters(dl_counters *out) const {
   out->repeated = repeated_;
   out->dropped = dropped_;
   out->resyncs = resyncs_;
+  out->skipped = skipped_;
   out->lost = lost_;
 }
 
