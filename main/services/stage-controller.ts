@@ -235,7 +235,7 @@ export interface ScreenStep {
 }
 
 /**
- * A multi-step screen write (createScreen, setOutputRole) that failed part-way.
+ * A multi-step screen write (createScreen, setOutputRole, setViewRole) that failed part-way.
  * Says which step failed and what was put back, and what could NOT be, so the
  * caller never has to guess whether a half-made screen is still there.
  */
@@ -3963,6 +3963,90 @@ export class StageController {
       );
     }
     return { state: this.state, copiedViewId: copy?.id ?? null };
+  }
+
+  /**
+   * Change what a view is for AND every screen showing it, as one call.
+   *
+   * The view card's deliberate "all of them" path. (One screen's role is
+   * setOutputRole, which never changes another screen; setViewSurface alone
+   * refuses a view that screens are showing.) The same two guards decide the
+   * order, whichever side is being made MORE permissive going first:
+   *
+   *   console   each screen to a control surface, then the view
+   *   display   the view, then each screen to a wall display
+   *
+   * Every screen is a step with its own undo, so one that fails part-way puts
+   * back the ones that landed, newest first, and the failure says what was and
+   * was not put back. A screen pointed at the view after this started is caught
+   * by the guard inside the write that would strand it, not by a check made here
+   * and gone stale: the write is refused and everything before it is undone.
+   *
+   * A view already as asked, with every screen already matching, is not an error
+   * and writes nothing. Only a custom view may become a console.
+   */
+  async setViewRole(id: string, surface: ViewSurface): Promise<StageState> {
+    if (surface !== "display" && surface !== "console") throw new Error('views:setRole — surface must be "display" or "console"');
+    if (id === HOME_VIEW_ID) throw new Error(`"Home" is the operator's front page, not a screen. Choose another view.`);
+    const view = this.state.views.find((v) => v.id === id);
+    if (!view) throw new Error(`view ${id} not found`);
+    const mode: OutputMode = surface === "console" ? "panel" : "display";
+    if (!viewCanTakeRole(view, mode)) throw new Error(noControlSurfaceReason(view));
+
+    // The screens that will change. Decided here, before the first write; the
+    // guards inside each write are what hold if this turns out to be stale.
+    const changing = this.state.outputs.filter((o) => o.viewId === id && outputMode(o) !== mode);
+    const viewChanges = viewSurface(view) !== surface;
+    if (!viewChanges && changing.length === 0) return this.state;
+
+    const wasSurface = viewSurface(view);
+    const viewStep: ScreenStep = {
+      label: `make the view a ${surface === "console" ? "control surface" : "wall-screen view"}`,
+      run: () => this.setViewSurface(id, surface),
+      // Safe when the run did nothing: only writes when the view is not as it was.
+      undo: async () => {
+        const now = this.state.views.find((v) => v.id === id);
+        if (!now || viewSurface(now) === wasSurface) return false;
+        await this.setViewSurface(id, wasSurface);
+      },
+    };
+    const screenSteps: ScreenStep[] = changing.map((o) => {
+      const was = o.mode;
+      return {
+        label: `make "${o.name || o.id}" ${mode === "panel" ? "a control surface" : "a wall display"}`,
+        run: () => this.setOutputMode(o.id, mode),
+        // Puts the exact value back, so not setOutputMode (an absent mode stays
+        // absent). The one pairing a restore must never make is a wall display
+        // showing a console, so it is refused here as setOutputMode refuses it,
+        // and reported as not put back.
+        undo: async () => {
+          const now = this.state.outputs.find((x) => x.id === o.id);
+          if (!now || now.mode === was) return false;
+          await this.commitOutputPatch(
+            o.id,
+            { mode: was },
+            `[stage-controller] setViewRole output=${scrub(o.id)} restored mode=${scrub(was ?? "(display)")}`,
+            (cur) => {
+              const shown = cur.viewId ? this.state.views.find((v) => v.id === cur.viewId) : undefined;
+              if (shown && viewSurface(shown) === "console" && was !== "panel") {
+                throw new Error(`"${shown.name}" is still a control surface, and a wall display cannot show it`);
+              }
+            },
+          );
+        },
+      };
+    });
+
+    const steps: ScreenStep[] = [];
+    if (surface === "console") steps.push(...screenSteps, ...(viewChanges ? [viewStep] : []));
+    else steps.push(...(viewChanges ? [viewStep] : []), ...screenSteps);
+
+    await this.runScreenSteps("setViewRole", steps);
+    console.log(
+      `[stage-controller] setViewRole view=${scrub(id)} → ${scrub(surface)}, screens: ` +
+        `${scrub(changing.map((o) => `"${o.name || o.id}"`).join(", ") || "(none changed)")}`,
+    );
+    return this.state;
   }
 
   /**
