@@ -257,6 +257,20 @@ describe("fetching the helper from the release", () => {
     assert.ok(again.ok, JSON.stringify(again));
   });
 
+  it("reads the running version once per request, however many steps the request takes", async (t) => {
+    captureConsole(t, "log", "warn");
+    release.publish(ZIP.name, crypto.randomBytes(1000));
+    let reads = 0;
+    const dl = make({ version: () => (reads++, VERSION) });
+    // A cold request: the checksum, the zip, the pruning after it.
+    assert.ok((await dl.resolve(ZIP)).ok);
+    assert.equal(reads, 1, "cold: package.json is read once, not once per use");
+    assert.ok((await dl.resolve(ZIP)).ok);
+    assert.equal(reads, 2, "a cache hit is one read");
+    assert.ok(!(await dl.resolve(parseHelperPath("/kiosk/StageUtilityOutput-x86_64.zip") as HelperAsset)).ok);
+    assert.equal(reads, 3, "a refusal is one read");
+  });
+
   it("keeps only the running version's files", async () => {
     const old = path.join(dataDir, "cache", "output-helper", "1.0.0");
     await fs.mkdir(old, { recursive: true });

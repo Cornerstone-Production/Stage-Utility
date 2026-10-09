@@ -139,9 +139,11 @@ export class OutputHelperDownloads {
     this.base = deps.releaseBase ?? releaseBase;
   }
 
-  /** The file to send for this request, fetching it first when there is none. */
+  /** The file to send for this request, fetching it first when there is none.
+   *  The running version is read ONCE here (it is a synchronous read of
+   *  package.json) and carried through everything this request does. */
   async resolve(asset: HelperAsset): Promise<Resolution> {
-    const r = await this.ensure(asset);
+    const r = await this.ensure(asset, this.deps.version());
     if (r.ok && r.source === "cache") {
       console.log(`[output-helper] serving ${scrub(asset.name)} from the cache (${scrub(r.size)} bytes)`);
     }
@@ -152,24 +154,27 @@ export class OutputHelperDownloads {
     return path.join(this.deps.dataDir(), "cache", "output-helper");
   }
 
-  private versionDir(): string {
-    return path.join(this.root(), this.deps.version());
+  private versionDir(version: string): string {
+    return path.join(this.root(), version);
   }
 
-  private ensure(asset: HelperAsset): Promise<Resolution> {
-    const running = this.inflight.get(asset.name);
+  /** One flight per version and file: a request that arrives mid-update for the
+   *  new version must not join a flight that is fetching the old one. */
+  private ensure(asset: HelperAsset, version: string): Promise<Resolution> {
+    const key = `${version}/${asset.name}`;
+    const running = this.inflight.get(key);
     if (running) return running;
-    const flight = this.cachedOrFetch(asset).finally(() => this.inflight.delete(asset.name));
-    this.inflight.set(asset.name, flight);
+    const flight = this.cachedOrFetch(asset, version).finally(() => this.inflight.delete(key));
+    this.inflight.set(key, flight);
     return flight;
   }
 
-  private async cachedOrFetch(asset: HelperAsset): Promise<Resolution> {
-    const file = path.join(this.versionDir(), asset.name);
+  private async cachedOrFetch(asset: HelperAsset, version: string): Promise<Resolution> {
+    const file = path.join(this.versionDir(version), asset.name);
     try {
       const have = await statFile(file);
       if (have !== null) return { ok: true, file, size: have, source: "cache" };
-      return asset.kind === "sha256" ? await this.fetchChecksum(asset, file) : await this.fetchZip(asset, file);
+      return asset.kind === "sha256" ? await this.fetchChecksum(asset, file, version) : await this.fetchZip(asset, file, version);
     } catch (err) {
       const refusal =
         err instanceof Refusal
@@ -187,23 +192,23 @@ export class OutputHelperDownloads {
     return withoutDataDir(message, this.deps.dataDir());
   }
 
-  private url(name: string): string {
-    return `${this.base()}/v${this.deps.version()}/${name}`;
+  private url(name: string, version: string): string {
+    return `${this.base()}/v${version}/${name}`;
   }
 
-  private async get(name: string, timeoutMs: number): Promise<Response> {
-    const url = this.url(name);
+  private async get(name: string, version: string, timeoutMs: number): Promise<Response> {
+    const url = this.url(name, version);
     let res: Response;
     try {
       res = await this.doFetch(url, { signal: AbortSignal.timeout(timeoutMs), headers: { "user-agent": "stage-utility-output-helper" } });
     } catch (err) {
       throw new Refusal(
         404,
-        `v${this.deps.version()} of ${name} is not in the cache and could not be fetched: ${fetchFailureMessage(err, "the release host")}`,
+        `v${version} of ${name} is not in the cache and could not be fetched: ${fetchFailureMessage(err, "the release host")}`,
       );
     }
     if (res.status === 404) {
-      throw new Refusal(404, `the release for v${this.deps.version()} has no ${name}`);
+      throw new Refusal(404, `the release for v${version} has no ${name}`);
     }
     if (res.status !== 200) {
       await res.body?.cancel().catch(() => undefined);
@@ -212,9 +217,9 @@ export class OutputHelperDownloads {
     return res;
   }
 
-  private async fetchChecksum(asset: HelperAsset, file: string): Promise<Resolution> {
+  private async fetchChecksum(asset: HelperAsset, file: string, version: string): Promise<Resolution> {
     const zipName = asset.name.replace(/\.sha256$/, "");
-    const res = await this.get(asset.name, this.sumTimeoutMs);
+    const res = await this.get(asset.name, version, this.sumTimeoutMs);
     const body = await readCapped(res, MAX_SUM_BYTES);
     if (!body) throw new Refusal(502, `${asset.name} is larger than ${MAX_SUM_BYTES} bytes; refusing it`);
     const text = body.toString("utf8");
@@ -228,26 +233,26 @@ export class OutputHelperDownloads {
     return { ok: true, file, size: Buffer.byteLength(line), source: "release" };
   }
 
-  private async fetchZip(asset: HelperAsset, file: string): Promise<Resolution> {
+  private async fetchZip(asset: HelperAsset, file: string, version: string): Promise<Resolution> {
     const sumName = `${asset.name}.sha256`;
-    const sumFile = path.join(this.versionDir(), sumName);
+    const sumFile = path.join(this.versionDir(version), sumName);
     // The checksum first, and through the same one-flight path, so a Mac that
     // asks for it while the zip is downloading does not start a second fetch.
-    const sum = await this.ensure({ arch: asset.arch, kind: "sha256", name: sumName });
+    const sum = await this.ensure({ arch: asset.arch, kind: "sha256", name: sumName }, version);
     // Its own reason, unprefixed: the zip is not fetched without it, and the
     // checksum's message already says what was missing and why.
     if (!sum.ok) throw new Refusal(sum.status, sum.message);
     const expected = parseChecksum(await fs.readFile(sumFile, "utf8"));
     if (!expected) throw new Refusal(502, `the cached ${sumName} is not a SHA-256 digest`);
 
-    const res = await this.get(asset.name, this.zipTimeoutMs);
+    const res = await this.get(asset.name, version, this.zipTimeoutMs);
     const declared = Number(res.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > this.maxZipBytes) {
       await res.body?.cancel().catch(() => undefined);
       throw new Refusal(502, `${asset.name} is ${declared} bytes, over the ${this.maxZipBytes} byte limit; refusing it`);
     }
 
-    const dir = this.versionDir();
+    const dir = this.versionDir(version);
     await fs.mkdir(dir, { recursive: true });
     const stale = await sweepParts(dir);
     for (const failed of stale) console.warn(`[output-helper] could not remove a leftover partial download: ${scrub(failed)}`);
@@ -279,14 +284,14 @@ export class OutputHelperDownloads {
       throw new Refusal(502, `${asset.name} did not finish downloading: ${fetchFailureMessage(err, "the release host")}`);
     }
     console.log(`[output-helper] fetched ${scrub(asset.name)} from the release and verified its SHA-256 (${scrub(size)} bytes)`);
-    const removed = await this.dropOtherVersions();
+    const removed = await this.dropOtherVersions(version);
     for (const failed of removed) console.warn(`[output-helper] could not remove an older cached release: ${scrub(failed)}`);
     return { ok: true, file, size, source: "release" };
   }
 
   /** The cache holds the running version only; an older release's zip is
    *  hundreds of MB nobody will ask for again. Returns what it could not remove. */
-  private async dropOtherVersions(): Promise<string[]> {
+  private async dropOtherVersions(version: string): Promise<string[]> {
     const failed: string[] = [];
     let entries: string[];
     try {
@@ -295,7 +300,7 @@ export class OutputHelperDownloads {
       return [errorMessage(err)];
     }
     for (const entry of entries) {
-      if (entry === this.deps.version()) continue;
+      if (entry === version) continue;
       try {
         await fs.rm(path.join(this.root(), entry), { recursive: true, force: true });
       } catch (err) {
