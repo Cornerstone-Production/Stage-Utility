@@ -551,11 +551,13 @@ function Stat({ value, label }: { value: string; label: string }) {
  *
  * Format is DeckLink only: a display runs at whatever the Mac drives it at.
  */
-function OutputDeviceSection({ output, device, online, health, actions }: {
+function OutputDeviceSection({ output, device, online, health, reported, actions }: {
   output: Output;
   device: { id: string; hostname?: string; ip?: string; label?: string; output: DeviceOutput };
   online: boolean;
   health: OutputHealth | undefined;
+  /** Whether it has reported at any time since the page loaded. */
+  reported: boolean;
   actions: ScreenPanelActions;
 }) {
   const [busy, setBusy] = useState(false);
@@ -641,7 +643,15 @@ function OutputDeviceSection({ output, device, online, health, actions }: {
           This output is dropping frames or running late.
         </p>
       )}
-      {!health && <p className="mt-2 text-caption1 text-fg-subtle">No report from the helper yet.</p>}
+      {!health && (
+        <p className="mt-2 text-caption1 text-fg-subtle">
+          {!online
+            ? "Offline, so nothing is being reported."
+            : reported
+              ? "The helper stopped reporting."
+              : "No report from the helper yet."}
+        </p>
+      )}
 
       <div className="mt-1.5 flex items-start justify-between gap-3 py-1.5">
         <p className="min-w-0 text-caption1 text-fg-subtle">
@@ -649,8 +659,9 @@ function OutputDeviceSection({ output, device, online, health, actions }: {
         </p>
         <Button
           type="button"
-          variant="filled"
+          variant="transparent"
           size="small"
+          className="border border-line-strong font-medium text-fg"
           disabled={busy}
           onClick={async () => {
             setBusy(true);
@@ -670,7 +681,7 @@ function OutputDeviceSection({ output, device, online, health, actions }: {
 
 function DeviceSection({ output, online, actions }: { output: Output; online: boolean; actions: ScreenPanelActions }) {
   const outputId = output.id;
-  const { bound, health } = useDevices();
+  const { bound, health, reported } = useDevices();
   const device = bound.find((d) => d.outputId === outputId);
   if (!device) {
     return <p className="text-caption1 text-fg-subtle">No device is set up for this screen.</p>;
@@ -682,6 +693,7 @@ function DeviceSection({ output, online, actions }: { output: Output; online: bo
         device={{ ...device, output: device.output }}
         online={online}
         health={health.find((h) => h.deviceId === device.id)}
+        reported={reported.includes(device.id)}
         actions={actions}
       />
     );

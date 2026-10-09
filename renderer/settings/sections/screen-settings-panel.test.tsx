@@ -56,6 +56,7 @@ const fetchCalls: { url: string; method: string; body: string }[] = [];
 const { render, screen, cleanup, fireEvent, act, within } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { ScreenSettingsPanel, viewsFittingRole } = await import("./screen-settings-panel.js");
+const { __resetDevicesForTests, refreshDevices } = await import("../../app/screens/use-devices.js");
 const { roleChangeConflict } = await import("@main/types/views");
 type PanelProps = import("./screen-settings-panel.js").ScreenSettingsPanelProps;
 type Actions = import("./screen-settings-panel.js").ScreenPanelActions;
@@ -66,6 +67,7 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
 beforeEach(() => {
   cleanup();
+  __resetDevicesForTests();
   devicesPayload = { scanning: false, seen: [], matches: {}, bound: [], health: [], error: null };
   fetchCalls.length = 0;
 });
@@ -660,6 +662,31 @@ describe("the device of a Mac output helper", () => {
   test("a health report for another device is not shown here", async () => {
     await open(SDI, { health: [{ ...HEALTH, deviceId: "mac1.out-2", fps: 12 }] });
     assert.ok(screen.getByText("No report from the helper yet."));
+  });
+
+  // Three different reasons for the same dashes, each said differently: nothing
+  // yet, a helper that was reporting and went quiet, and a screen that is offline.
+  test("a helper that was reporting and went quiet says so, not that it has yet to report", async () => {
+    await open(SDI, { health: [HEALTH] });
+    // The server drops a reading 60 s after the last one.
+    devicesPayload = { ...devicesPayload, health: [] };
+    await act(async () => { await refreshDevices(); await settle(); });
+    assert.ok(screen.getByText("The helper stopped reporting."));
+    assert.equal(screen.queryByText("No report from the helper yet.") !== null, false, "it still says it has yet to report");
+  });
+
+  test("an offline screen with no report says it is offline, not that the helper is silent", async () => {
+    await open(SDI, { online: false });
+    assert.ok(screen.getByText("Offline, so nothing is being reported."));
+    assert.equal(screen.queryByText("No report from the helper yet.") !== null, false, "it says the helper is silent");
+    assert.equal(screen.queryByText("The helper stopped reporting.") !== null, false, "it says the helper stopped");
+  });
+
+  test("an offline screen that has reported says it is offline too", async () => {
+    await open(SDI, { health: [HEALTH], online: false });
+    devicesPayload = { ...devicesPayload, health: [] };
+    await act(async () => { await refreshDevices(); await settle(); });
+    assert.ok(screen.getByText("Offline, so nothing is being reported."));
   });
 
   test("says when the output is struggling", async () => {
