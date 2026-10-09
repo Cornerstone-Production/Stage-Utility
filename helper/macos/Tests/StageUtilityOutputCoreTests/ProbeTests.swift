@@ -154,7 +154,7 @@ import Testing
     #expect(DiscoveryReply.parse(data(#"{"stageUtility":"server","v":1,"serverId":"s"}"#)) == nil)
   }
 
-  /// The url goes into a web view, so only http(s) with a host will do.
+  /// The url goes into a browser, so only http(s) with a host will do.
   @Test func refusesAUrlThatIsNotHttp() {
     for url in ["file:///etc/passwd", "javascript:alert(1)", "ftp://h/", "http://", "/relative"] {
       let body = #"{"stageUtility":"server","v":1,"serverId":"s","url":"\#(url)"}"#

@@ -17,7 +17,7 @@ public struct DiscoveryReply: Equatable {
   /// anything on the LAN can send to the port a probe came from.
   ///
   /// The url must be http or https with a host and no path, because it is loaded in
-  /// a web view (see `EnrollURL.Refusal.notAtTheRoot`). One longer than the server's 512 is refused rather than cut, since a
+  /// a browser (see `EnrollURL.Refusal.notAtTheRoot`). One longer than the server's 512 is refused rather than cut, since a
   /// cut address is a different address.
   public static func parse(_ data: Data) -> DiscoveryReply? {
     if data.count > Probe.maxDatagram { return nil }

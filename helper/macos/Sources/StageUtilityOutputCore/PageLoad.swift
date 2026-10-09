@@ -1,6 +1,6 @@
 import Foundation
 
-/// What a web view's navigation events add up to: how many loads have failed in a
+/// What a browser's navigation events add up to: how many loads have failed in a
 /// row, which of them to retry and when, and when a load that follows a failure is
 /// the page being back.
 ///

@@ -11,7 +11,7 @@ import os
 /// frame is not logged.
 enum Log {
   enum Category: String, CaseIterable {
-    case app, discovery, output, health, webkit, cef, state
+    case app, discovery, output, health, cef, state
   }
 
   /// `--log-stderr`: also print each line, for a terminal run.

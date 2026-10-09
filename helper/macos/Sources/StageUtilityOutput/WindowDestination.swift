@@ -4,9 +4,9 @@ import StageUtilityOutputCore
 
 /// Where a window goes: a rectangle, in screen coordinates, on one display.
 ///
-/// A display output takes the whole display. A DeckLink output will take a tile of
-/// a canvas display, one of several windows on it, so nothing here may assume that
-/// a window is a whole screen.
+/// A display output takes the whole display. A placement is a rectangle rather than
+/// a screen so that a window could later take part of one; nothing here assumes a
+/// window is a whole screen.
 struct WindowPlacement: Equatable {
   var screen: NSScreen
   var frame: NSRect
@@ -102,7 +102,7 @@ final class WindowDestination: NSObject, OutputDestination {
     turned = nil
   }
 
-  /// The display moved or changed size, or the tile did: follow it.
+  /// The display moved or changed size: follow it.
   func move(to new: WindowPlacement) {
     let screenChanged = new.screen != placement.screen
     placement = new
