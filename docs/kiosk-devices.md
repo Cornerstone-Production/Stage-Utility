@@ -119,13 +119,16 @@ release made before the helper existed has no zip, and answers `404` the same wa
 
 **Coming from the Chrome kiosk.** If the earlier agent is there
 (`com.stageutility.kiosk`), the installer writes
-`/Library/Application Support/StageUtility/migrated-from-kiosk`, stops the agent,
-removes its LaunchAgent and launcher, and says so, once the helper is in. The file is
-written only then, never on a fresh install. The Mac keeps its device id, token and
-Chrome profile. The helper reads the file and gives the Mac's main display the kiosk's
-own id and token, and turns it on, so the screen the Chrome kiosk showed comes back by
-itself on that display. The Mac's other displays are new outputs under *Not set up
-yet*. Deleting the file stops the helper doing this.
+`/Library/Application Support/StageUtility/migrated-from-kiosk` before it stops, swaps
+in or starts the helper, because the helper reads the file once, when it launches. Once
+the helper's agent is in, it stops the kiosk's agent and removes its LaunchAgent and
+launcher. The file is written only for a Mac that has the kiosk's agent, never on a
+fresh install, and a failure anywhere in the install takes it back and leaves the kiosk
+as it was. The Mac keeps its device id, token and Chrome profile. The helper reads the
+file and gives the Mac's main display the kiosk's own id and token, and turns it on, so
+the screen the Chrome kiosk showed comes back by itself on that display. The Mac's other
+displays are new outputs under *Not set up yet*. Deleting the file stops the helper doing
+this. With nobody logged in the kiosk is replaced at the next login.
 
 **What a person still has to do, once, at the Mac.** macOS does not let a script:
 

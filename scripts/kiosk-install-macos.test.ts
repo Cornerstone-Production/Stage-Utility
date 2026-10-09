@@ -548,6 +548,98 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
       });
     });
 
+    describe("moving off the Chrome kiosk", () => {
+      const strip = (l: string[]) => l.map((c) => c.replace(/ \| marker=.*/, ""));
+
+      it("writes the marker before the helper is stopped, installed or started, and removes the kiosk's agent only after", async () => {
+        seedKiosk();
+        publish(stageServer, "/kiosk", zipA);
+        const uid = (await sh("id -u")).out.trim();
+        // print answering 0: the helper and the kiosk both look loaded, so both are bootout'd.
+        const r = await whole(ME, { SHIM_PRINT_RC: "0" });
+        assert.equal(r.status, 0, r.out + r.err);
+
+        const changes = shims.log().filter((l) => /^(launchctl (bootout|bootstrap)|chown root:wheel)/.test(l));
+        assert.ok(changes.length >= 4, changes.join("\n"));
+        // Every launchd change to the helper happened with the marker already on disk.
+        for (const line of changes) assert.match(line, /\| marker=yes$/, `the marker must exist before: ${line}`);
+        const names = strip(changes);
+        const helperStop = names.indexOf(`launchctl bootout gui/${uid}/com.stageutility.output`);
+        const helperStart = names.indexOf(`launchctl bootstrap gui/${uid} ${helperPlist()}`);
+        const kioskStop = names.indexOf(`launchctl bootout gui/${uid}/com.stageutility.kiosk`);
+        assert.ok(helperStop >= 0 && helperStart > helperStop, names.join("\n"));
+        assert.ok(kioskStop > helperStart, "the kiosk is stopped only after the helper is in: " + names.join("\n"));
+        assert.ok(fs.existsSync(marker()));
+        assert.ok(!fs.existsSync(kioskPlist()));
+      });
+
+      it("does not touch anything when the marker cannot be written", async () => {
+        publish(stageServer, "/kiosk", zipA);
+        assert.equal((await whole(ME)).status, 0);
+        const plistBefore = fs.readFileSync(helperPlist(), "utf8");
+        const sinceFirst = shims.log().length;
+
+        seedKiosk();
+        fs.mkdirSync(marker(), { recursive: true }); // a directory where the file goes: the write fails
+        publish(stageServer, "/kiosk", zipB);
+        const r = await whole(ME, { SHIM_PRINT_RC: "0" });
+        assert.equal(r.status, 1, r.out + r.err);
+        assert.match(r.err, /could not write .*migrated-from-kiosk; nothing was changed/);
+
+        assert.equal(marker2(), "build-a", "the installed app is untouched");
+        assert.deepEqual(leftovers(), []);
+        assert.equal(fs.readFileSync(helperPlist(), "utf8"), plistBefore);
+        assert.ok(fs.existsSync(kioskPlist()), "the Chrome kiosk is still there");
+        const changes = strip(shims.log().slice(sinceFirst)).filter((c) => /^(launchctl (bootout|bootstrap)|chown root)/.test(c));
+        assert.deepEqual(changes, [], "no agent was stopped, started or rewritten");
+      });
+
+      it("takes the marker back, and keeps the kiosk, when the install fails after writing it", async () => {
+        seedKiosk();
+        publish(stageServer, "/kiosk", zipA);
+        const r = await whole(ME, {}, "write_helper_plist() { return 1; }");
+        assert.equal(r.status, 1, r.out + r.err);
+        assert.ok(!fs.existsSync(marker()), "a marker for a migration that did not happen would be a lie");
+        assert.ok(fs.existsSync(kioskPlist()));
+        assert.ok(fs.existsSync(path.join(scratch, "usr", "local", "bin", "stage-utility-kiosk")));
+        assert.ok(!fs.existsSync(app()));
+      });
+
+      it("keeps an earlier marker as it was", async () => {
+        seedKiosk();
+        fs.mkdirSync(stateDir(), { recursive: true });
+        fs.writeFileSync(marker(), "earlier\n");
+        publish(stageServer, "/kiosk", zipA);
+        const r = await whole(ME);
+        assert.equal(r.status, 0, r.out + r.err);
+        assert.equal(fs.readFileSync(marker(), "utf8"), "earlier\n");
+      });
+
+      it("puts the kiosk's files back, and starts it again, if removing them fails", { skip: process.getuid?.() === 0 && "root ignores a read-only directory" }, async () => {
+        publish(stageServer, "/kiosk", zipA);
+        assert.equal((await whole(ME)).status, 0);
+        seedKiosk();
+        publish(stageServer, "/kiosk", zipB);
+        const uid = (await sh("id -u")).out.trim();
+        // The agents directory is read-only, so the kiosk's agent file cannot be removed.
+        // The helper's plist already exists and can still be rewritten in place.
+        const since = shims.log().length;
+        fs.chmodSync(agents(), 0o555);
+        try {
+          const r = await whole(ME, { SHIM_PRINT_RC: "0" });
+          assert.equal(r.status, 1, r.out + r.err);
+          assert.match(r.err, /could not remove/);
+          assert.equal(marker2(), "build-a", "the helper is rolled back too");
+        } finally {
+          fs.chmodSync(agents(), 0o755);
+        }
+        assert.ok(fs.existsSync(kioskPlist()));
+        assert.ok(fs.existsSync(path.join(scratch, "usr", "local", "bin", "stage-utility-kiosk")));
+        const calls = strip(shims.log().slice(since));
+        assert.ok(calls.lastIndexOf(`launchctl bootstrap gui/${uid} ${kioskPlist()}`) > calls.indexOf(`launchctl bootout gui/${uid}/com.stageutility.kiosk`), calls.join("\n"));
+      });
+    });
+
     it("with nobody logged in, still replaces the Chrome kiosk, and says it happens at the next login", async () => {
       seedKiosk();
       publish(stageServer, "/kiosk", zipA);
@@ -594,7 +686,7 @@ describe("the migration marker", () => {
   const state = () => path.join(scratch, "Library", "Application Support", "StageUtility");
   const marker = () => path.join(state(), "migrated-from-kiosk");
   const migrate = () =>
-    sh(`. "${SCRIPT}"; DRY=0; CONSOLE_UID=""; migrate_kiosk`, { STAGE_INSTALL_SOURCED: "1", STAGE_INSTALL_TEST_ROOT: scratch });
+    sh(`. "${SCRIPT}"; DRY=0; CONSOLE_UID=""; WORK="$(mktemp -d)"; write_kiosk_marker; retire_kiosk; rm -rf "$WORK"`, { STAGE_INSTALL_SOURCED: "1", STAGE_INSTALL_TEST_ROOT: scratch });
 
   it("is written, 0644, when the Chrome kiosk agent is removed, and the identity files stay", async () => {
     const agents = path.join(scratch, "Library", "LaunchAgents");
@@ -623,6 +715,15 @@ describe("the migration marker", () => {
     assert.equal(r.status, 0, r.err);
     assert.ok(!fs.existsSync(marker()), "a Mac that was never a kiosk must not be told it was");
     assert.ok(!fs.existsSync(state()), "and nothing else is made either");
+  });
+
+  it("leaves an existing marker alone when run again, even with the kiosk's agent back", async () => {
+    fs.mkdirSync(path.join(scratch, "usr", "local", "bin"), { recursive: true });
+    fs.writeFileSync(path.join(scratch, "usr", "local", "bin", "stage-utility-kiosk"), "#!/bin/sh\n");
+    fs.mkdirSync(state(), { recursive: true });
+    fs.writeFileSync(marker(), "earlier\n");
+    assert.equal((await migrate()).status, 0);
+    assert.equal(fs.readFileSync(marker(), "utf8"), "earlier\n");
   });
 
   it("leaves an existing marker alone when run again", async () => {

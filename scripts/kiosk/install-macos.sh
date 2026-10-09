@@ -80,6 +80,9 @@ AGENT_STOPPED=0
 AGENT_STARTED=0
 PLIST_WRITTEN=0
 PLIST_BACKUP=""
+MARKER_CREATED=0
+KIOSK_BACKED_UP=0
+KIOSK_STOPPED=0
 FINISHED=0
 MIGRATED=0
 # Tells the helper this Mac was a Chrome kiosk, so its main display takes over the
@@ -142,8 +145,19 @@ roll_back() {
       say "    removed $HELPER_PLIST"
     fi
   fi
+  if [ "$MARKER_CREATED" -eq 1 ]; then
+    rm -f "$MARKER"
+    say "    removed $MARKER"
+  fi
   if [ "$AGENT_STOPPED" -eq 1 ]; then
     start_helper_agent || warn "could not restart the helper after a failed install; it starts at the next login"
+  fi
+  if [ "$KIOSK_BACKED_UP" -eq 1 ]; then
+    if [ -f "$WORK/kiosk/launcher" ] && [ ! -e "$BIN" ]; then cp -p "$WORK/kiosk/launcher" "$BIN"; fi
+    if [ -f "$WORK/kiosk/agent.plist" ] && [ ! -e "$AGENT" ]; then cp -p "$WORK/kiosk/agent.plist" "$AGENT"; fi
+  fi
+  if [ "$KIOSK_STOPPED" -eq 1 ] && [ -f "$AGENT" ] && [ -n "$CONSOLE_UID" ]; then
+    launchctl bootstrap "gui/$CONSOLE_UID" "$AGENT" || warn "could not restart the Chrome kiosk; it starts at the next login"
   fi
 }
 
@@ -496,30 +510,63 @@ install_helper_agent() {
 # The old agent and the helper must not both run on one Mac. The device id and
 # token in the state directory are left exactly as they are: the Mac keeps its
 # identity.
-migrate_kiosk() {
-  if [ ! -f "$AGENT" ] && [ ! -f "$BIN" ]; then return 0; fi
+#
+# Two steps, on either side of the helper's install, and the ORDER is the point.
+# The helper reads the marker ONCE, when it launches, and gives the main display
+# the kiosk's identity only when it first creates that output's record. Its agent
+# loads (RunAtLoad) the moment it is bootstrapped, so a marker written after that
+# can be missed by a fast launch, and the main display then has a fresh identity
+# for good. So the marker is written before the helper is stopped, swapped in or
+# started, and only the kiosk's own agent is removed after.
+kiosk_present() {
+  [ -e "$AGENT" ] || [ -e "$BIN" ]
+}
+
+plan_kiosk_migration() {
+  kiosk_present || return 0
   say "==> Replacing the Chrome kiosk agent from an earlier install"
   MIGRATED=1
-  if [ "$DRY" -eq 1 ]; then
-    would "write $MARKER, which tells the helper to give this Mac's main display the kiosk's screen"
-    would "stop $KIOSK_LABEL for the console user, then remove $AGENT and $BIN"
-    would "keep the device id, the token and the Chrome profile in $STATE_DIR"
+  would "write $MARKER, which tells the helper to give this Mac's main display the kiosk's screen, before the helper is started"
+  would "once the helper is in: stop $KIOSK_LABEL for the console user, then remove $AGENT and $BIN"
+  would "keep the device id, the token and the Chrome profile in $STATE_DIR"
+}
+
+# Step one. A failure to write it stops the install before anything has changed,
+# so the kiosk keeps running rather than the Mac losing its screen with no word of
+# why. Root-owned and world-readable: the helper only reads it. Written only for a
+# Mac that has the kiosk's agent, so a fresh install never has one.
+write_kiosk_marker() {
+  kiosk_present || return 0
+  say "==> Marking this Mac as coming from the Chrome kiosk"
+  MIGRATED=1
+  mkdir -p "$STATE_DIR" || die "could not create $STATE_DIR; nothing was changed."
+  if [ -f "$MARKER" ]; then
+    say "    $MARKER is already there"
     return 0
   fi
-  # First, so a failure to write it leaves the kiosk running, not a Mac that has
-  # lost its screen and carries no word of why. Root-owned and world-readable: the
-  # helper only reads it. Written only here, so a fresh install never has one.
-  mkdir -p "$STATE_DIR"
-  date -u +%Y-%m-%dT%H:%M:%SZ >"$MARKER" || die "could not write $MARKER; the Chrome kiosk was left as it was."
-  chmod 644 "$MARKER"
+  date -u +%Y-%m-%dT%H:%M:%SZ >"$MARKER" || die "could not write $MARKER; nothing was changed, and the Chrome kiosk is as it was."
+  MARKER_CREATED=1
+  chmod 644 "$MARKER" || die "could not set the mode of $MARKER; nothing was changed."
+}
+
+# Step two, after the helper's agent is in. Only the kiosk's agent goes here.
+retire_kiosk() {
+  kiosk_present || return 0
+  say "==> Replacing the Chrome kiosk agent from an earlier install"
+  # Kept until the end, so a failure from here on can put the kiosk back too.
+  mkdir -p "$WORK/kiosk" || die "could not make room to keep the kiosk's files."
+  if [ -e "$BIN" ]; then cp -p "$BIN" "$WORK/kiosk/launcher" || die "could not keep a copy of $BIN."; fi
+  if [ -e "$AGENT" ]; then cp -p "$AGENT" "$WORK/kiosk/agent.plist" || die "could not keep a copy of $AGENT."; fi
+  KIOSK_BACKED_UP=1
   if [ -n "$CONSOLE_UID" ] && launchctl print "gui/$CONSOLE_UID/$KIOSK_LABEL" >/dev/null 2>&1; then
     if launchctl bootout "gui/$CONSOLE_UID/$KIOSK_LABEL"; then
+      KIOSK_STOPPED=1
       say "    stopped the running kiosk"
     else
       warn "could not stop the running Chrome kiosk; it stops at the next login"
     fi
   fi
-  rm -f "$AGENT" "$BIN"
+  rm -f "$AGENT" "$BIN" || die "could not remove $AGENT and $BIN."
   say "    removed $AGENT and $BIN"
   say "    this Mac keeps its device id and its screen: the helper brings it back by itself"
   say "    on the main display. The Chrome profile in $STATE_DIR is left in place."
@@ -614,7 +661,7 @@ install_helper() {
     else
       would "nobody is logged in, so the helper starts at the next login"
     fi
-    migrate_kiosk
+    plan_kiosk_migration
     set_power
     notes
     say
@@ -625,14 +672,18 @@ install_helper() {
   WORK="$(mktemp -d "${TMPDIR:-/tmp}/stage-utility-output.XXXXXX")"
   fetch_helper
   stage_app
+  # Everything above has changed nothing on this Mac. The marker is the first
+  # change, and it comes before the helper can possibly launch; see the note on
+  # the Chrome kiosk below.
+  write_kiosk_marker
   stop_helper_agent
   swap_app
   say "    installed $APPS_DIR/$APP_NAME"
   install_helper_agent
-  # Only now: a failure before this point leaves an earlier kiosk running.
-  migrate_kiosk
-  set_power
+  retire_kiosk
+  # Done: nothing after this is undone by a failure. set_power only warns.
   FINISHED=1
+  set_power
   say
   say "==> Done. This Mac is device $(cat "$STATE_DIR/device-id")"
   notes
