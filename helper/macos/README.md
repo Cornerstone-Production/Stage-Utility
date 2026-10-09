@@ -1,8 +1,8 @@
 # Mac output helper
 
 A menu bar app that turns a Mac into several Stage Utility screens at once. Each
-of the Mac's displays is its own device, set up on the server like any other, and so
-will be each port of a Blackmagic DeckLink card. It is a beta feature.
+of the Mac's displays, and each output port of a Blackmagic DeckLink or UltraStudio
+card, is its own device, set up on the server like any other. It is a beta feature.
 
 The helper is a client. The server can be on another machine or on the same Mac.
 It renders each screen's own URL in Chromium, embedded through the Chromium Embedded
@@ -18,7 +18,7 @@ browser host; nothing is installed system-wide.
 
 ```sh
 cd helper/macos
-./test.sh                        # the core library's tests; needs no CEF
+./test.sh                        # core and DeckLink tests; needs no CEF and no card
 ./build-app.sh --arch arm64      # dist/arm64/StageUtilityOutput.app, signed ad hoc
 ./build-app.sh --arch x86_64     # dist/x86_64/StageUtilityOutput.app
 ```
@@ -93,7 +93,7 @@ main display, and again when a change in the displays newly covers it.
 |---|---|
 | `--show-window` | Open the window at launch. Without it the window opens only on a first run (no `outputs.json` yet) or from the menu bar icon. |
 | `--dump-frames <dir>` | Every 5 s, write a PNG of what each output is showing (`<output key>-NNNN.png`) and of the helper's own window (`window-NNNN.png`). It is how to check rendering on a Mac nobody is looking at, with the screen locked; nothing needs Screen Recording permission. A display output's picture comes from Chromium's DevTools (`Page.captureScreenshot`), turned as the window turns it. A card output's is the next new frame exactly as the card is sent it, 8-bit UYVY decoded back to RGB, so it shows the Metal conversion, the turn and the scaling. The copy is taken on the port's thread; decoding, encoding and writing are off the main thread. A card output whose page draws nothing new has no dump that round. Leave it off when measuring. |
-| `--list-outputs` | Print the stored state and exit: each display's output key, device id, and whether it is on (stored) or what it would default to. It only reads; a Mac with no device id yet is told so, not given one. |
+| `--list-outputs` | Print the stored state and exit: each display's and DeckLink port's output key, device id, and whether it is on (stored) or what it would default to. It only reads; a Mac with no device id yet is told so, not given one. |
 | `--discovery-port <n>` | The UDP port to probe. Default 8789, or `STAGE_KIOSK_PORT`. |
 | `--log-stderr` | Also print the log to the terminal. |
 | `--virtual-sdi <n>` | For development: add n card outputs, 1 to 16, with no card behind them (below). Without it, none are shown. |
@@ -141,15 +141,22 @@ lower-cased. It survives reboots and re-plugging. The name is `<connector> · <s
 name>`, where the connector is "Built-in" for the Mac's own panel and "Display N"
 for everything else, because macOS does not say which port a display is on.
 
-A card output's key will be the card's persistent id and the port's index. A virtual
-one (`--virtual-sdi`) is `virtual-sdi-<n>`.
+A DeckLink port's key is `decklink-<persistent id, hex>-<sub-device>`: the card's own
+identity plus the connector, so a card unplugged and plugged back keeps its binding,
+and moving a cable moves which screen goes out where. A card with no persistent id is
+`decklink-t<topological id>-<sub-device>`, which holds while it stays in the same slot.
+Its name is the driver's ("DeckLink Quad 2 (3)"), and it announces the modes the port
+plays in 8-bit YUV that the server lists. A virtual one (`--virtual-sdi`) is
+`virtual-sdi-<n>`.
 
 The display with the menu bar is **off** until it is switched on, so the Mac keeps
 its desktop. Every other display starts on. The default is decided once, when the
 display is first seen, and stored.
 
 A display that is unplugged closes its window; when it returns it reopens with the
-same binding. The outputs follow a change in the displays only after it has held for
+same binding. A DeckLink port found once stays an output until the helper quits: a card
+unplugged is logged, its line in the window says the port is unavailable, and it
+reopens when the card is back. The outputs follow a change in the displays only after it has held for
 one second, so a display that vanishes for a moment on wake does not tear down every
 page.
 

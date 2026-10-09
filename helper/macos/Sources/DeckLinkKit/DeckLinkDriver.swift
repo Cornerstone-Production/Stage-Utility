@@ -197,6 +197,7 @@ public final class DeckLinkInventory {
   private let log: (DeckLinkLog.Level, String) -> Void
   private let lock = NSLock()
   private var last: (status: DeckLinkDriver.Status, keys: [String])?
+  private var _seen: [DeckLinkPort] = []
 
   public init(
     read: @escaping Reader = { (DeckLinkDriver.status(), DeckLinkDriver.ports()) },
@@ -206,11 +207,20 @@ public final class DeckLinkInventory {
     self.log = log
   }
 
+  /// Every port any scan has found, in the order first found, each as its latest
+  /// scan described it: the outputs to announce. A port that leaves a scan stays,
+  /// because an unplugged card is still a screen's output; its port says it is lost
+  /// and reopens when the card is back.
+  public var seen: [DeckLinkPort] { lock.withLock { _seen } }
+
   /// The ports now. Call at launch and when a device arrives or goes.
   public func scan() -> (status: DeckLinkDriver.Status, ports: [DeckLinkPort]) {
     let (status, ports) = read()
     let keys = ports.map(\.id.outputKey)
     lock.withLock {
+      for port in ports {
+        if let at = _seen.firstIndex(where: { $0.id == port.id }) { _seen[at] = port } else { _seen.append(port) }
+      }
       defer { last = (status, keys) }
       if let last, last.status == status, last.keys == keys { return }
       if let problem = status.problem {

@@ -86,6 +86,28 @@ import Testing
       ])
   }
 
+  /// The outputs to announce are every port found since launch: one unplugged
+  /// stays (its port retries), one plugged in is added after the others, and a
+  /// port found again carries its latest modes.
+  @Test func theSeenPortsAreKeptAcrossAnUnplug() {
+    func port(_ id: Int64, _ modes: [CardMode] = []) -> DeckLinkPort {
+      DeckLinkPort(id: DeckLinkPortID(persistentID: id, subDevice: 0), displayName: "P\(id)", modelName: "", modes: modes)
+    }
+    let p59 = CardMode(
+      code: 1, driverName: "", width: 1920, height: 1080, frameDuration: 1001, timeScale: 60000, field: .progressive,
+      supportsYUV8: true)
+    let reading = Locked<(DeckLinkDriver.Status, [DeckLinkPort])>((.installed(version: "14.2"), [port(1), port(2)]))
+    let inventory = DeckLinkInventory(read: { reading.value }, log: LogLines().write)
+    _ = inventory.scan()
+    reading.value = (.installed(version: "14.2"), [port(2)])
+    _ = inventory.scan()
+    #expect(inventory.seen.map(\.displayName) == ["P1", "P2"])
+    reading.value = (.installed(version: "14.2"), [port(3), port(1, [p59])])
+    _ = inventory.scan()
+    #expect(inventory.seen.map(\.displayName) == ["P1", "P2", "P3"])
+    #expect(inventory.seen[0].modes == [p59])
+  }
+
   /// The real reader on this Mac: no driver, so one line saying so.
   @Test func theInventoryOnThisMac() throws {
     try #require(!FileManager.default.fileExists(atPath: Self.framework), "Desktop Video is installed here")

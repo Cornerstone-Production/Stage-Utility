@@ -68,6 +68,9 @@ final class AppModel: ObservableObject {
   /// What each output's health posts have been told, by output key.
   private var healthBoard = HealthBoard()
   private var healthTimer: Timer?
+  /// The DeckLink driver and its ports: scanned at start and on every device
+  /// change, logged when they change.
+  private let deckLink = DeckLinkInventory(log: Log.decklink)
   private var dumpTimer: Timer?
   private var dumpSequence = 0
 
@@ -110,6 +113,12 @@ final class AppModel: ObservableObject {
   // MARK: Start
 
   func start() {
+    scanDeckLink()
+    // On the driver's thread, for a device arriving or going. Without a driver
+    // there is nothing to watch, and installing one takes a restart.
+    DeckLinkDriver.watchDevices { [weak self] in
+      DispatchQueue.main.async { MainActor.assumeIsolated { self?.deckLinkDevicesChanged() } }
+    }
     reconcile()
     NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
@@ -152,10 +161,26 @@ final class AppModel: ObservableObject {
     DispatchQueue.main.asyncAfter(deadline: .now() + AppModel.displayChangeSettle, execute: work)
   }
 
-  /// Make the runtimes match the displays macOS lists now, and the virtual card
-  /// outputs `--virtual-sdi` asks for.
+  /// Read the DeckLink driver and its ports. Without a working driver the window
+  /// says why, once, and there are simply no DeckLink outputs.
+  private func scanDeckLink() {
+    let status = deckLink.scan().status
+    if let problem = status.problem { setNote("decklink", "\(problem).") } else { clearNote("decklink") }
+  }
+
+  /// A DeckLink device arrived or went: announce any new port, and have every lost
+  /// port try again now rather than at its next retry.
+  private func deckLinkDevicesChanged() {
+    scanDeckLink()
+    reconcile()
+    for key in order { (runtimes[key]?.sink as? CardOutput)?.retry() }
+  }
+
+  /// Make the runtimes match the displays macOS lists now, every DeckLink port
+  /// found since launch, and the virtual card outputs `--virtual-sdi` asks for.
   private func reconcile() {
     let outputs = DisplayEnumerator.current().map(PresentOutput.init(display:))
+      + deckLink.seen.map { PresentOutput(descriptor: $0.descriptor, card: .port($0)) }
       + VirtualCards.outputs(count: options.virtualSDI).map { PresentOutput(descriptor: $0, card: .virtual) }
     let present = Set(outputs.map { $0.descriptor.key })
     for key in order where !present.contains(key) {
