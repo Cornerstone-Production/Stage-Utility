@@ -344,9 +344,12 @@ that calls `CefDoMessageLoopWork` from a timer, exists for apps that cannot hand
 their loop, and CEF documents it as slower; this app can. The app object is
 `StageUtilityCEFApplication`, an `NSApplication` subclass in the host that conforms to
 `CefAppProtocol`, as CEF requires; it is the bundle's `NSPrincipalClass`, and the app
-makes it before anything else touches `NSApplication`. Quitting closes every page and
-stops every clock, then ends the loop and shuts CEF down, so Chromium's processes go with
-the app.
+makes it before anything else touches `NSApplication`. It takes every orderly quit in
+its `terminate:`, as Chromium's own apps do: the Quit button, a quit Apple event, and
+logout, restart and shutdown. It closes every card port and page and stops every clock,
+then ends the loop and shuts CEF down, so Chromium's processes go with the app and the
+ports are free for the next. A quit is never refused, so the helper never holds up a
+restart of an unattended Mac.
 
 **The sandbox is on.** Chromium's renderer, GPU and utility processes run in its macOS
 sandbox (seatbelt; each is started with `--seatbelt-client`). It needs no entitlement and

@@ -5,6 +5,7 @@
 
 #import <Cocoa/Cocoa.h>
 #include <IOSurface/IOSurface.h>
+#include <objc/message.h>
 #include <mach-o/dyld.h>
 
 #include <atomic>
@@ -50,6 +51,25 @@
 - (void)sendEvent:(NSEvent*)event {
   CefScopedSendingEvent sendingEventScoper;
   [super sendEvent:event];
+}
+
+// Every orderly quit reaches an app through -terminate:: the Quit item, a quit Apple
+// event, and logout, restart and shutdown. AppKit's own ends the process with exit()
+// from inside the run loop, which Chromium cannot shut down from; and a delegate
+// that answers NSTerminateCancel to put that off has macOS report that the app
+// cancelled the logout or restart. So, as Chromium's own apps do (cefclient's
+// ClientApplication), -terminate: asks the delegate to close everything
+// (-tryToTerminateApplication:, which returns YES when it has started) and returns.
+// The delegate ends CEF's loop once every browser has closed, and the process exits
+// from main. A delegate that does not take it (Chromium not running) gets AppKit's.
+- (void)terminate:(id)sender {
+  id delegate = [self delegate];
+  SEL ask = NSSelectorFromString(@"tryToTerminateApplication:");
+  if ([delegate respondsToSelector:ask]) {
+    BOOL (*send)(id, SEL, id) = (BOOL (*)(id, SEL, id))objc_msgSend;
+    if (send(delegate, ask, self)) return;
+  }
+  [super terminate:sender];
 }
 @end
 

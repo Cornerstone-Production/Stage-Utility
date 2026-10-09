@@ -55,18 +55,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   private var quitting = false
 
-  /// Every page is closed and every clock stopped before Chromium shuts down, so
-  /// its processes go with the app. CEF then ends the loop, and main() exits.
-  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    guard CEFEngine.api != nil else { return .terminateNow }
-    if !quitting {
+  /// Every orderly quit, logout, restart and shutdown included, while Chromium runs:
+  /// the browser host's application class calls this from its `terminate:` (see
+  /// cef_host_mac.mm) instead of AppKit's, which would exit from inside the run loop.
+  /// Every port is closed and every page with it before Chromium shuts down, so its
+  /// processes go with the app; CEF then ends the loop, and main() exits. True when
+  /// it is closing them, false to have AppKit terminate as usual (`QuitDecision`).
+  @objc func tryToTerminateApplication(_ app: NSApplication) -> Bool {
+    switch QuitDecision.onTerminate(engineRunning: CEFEngine.api != nil, alreadyQuitting: quitting) {
+    case .letAppKitTerminate:
+      return false
+    case .alreadyClosing:
+      return true
+    case .closeOutputsThenEndLoop:
       quitting = true
-      Log.notice(.app, "quitting: closing every output's page")
+      Log.notice(.app, "quitting: closing every output's port and page")
       model?.stopAll()
       CEFEngine.quit()
+      return true
     }
-    return .terminateCancel
   }
+
+  /// Reached only when Chromium is not running. Never a cancel: macOS reads a cancel
+  /// during a logout or restart as the app refusing it, and an unattended output Mac
+  /// would stop restarting.
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply { .terminateNow }
 
   @objc private func toggleWindow() {
     if let window, window.isVisible, NSApp.isActive { window.orderOut(nil) } else { showWindow() }
