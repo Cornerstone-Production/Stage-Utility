@@ -190,13 +190,15 @@ The stored binding keeps the `output`, so a bound screen still names its port
 while the output is off.
 
 **On Screens.** The outputs of one Mac are grouped under the Mac in *Not set up
-yet*: its hostname, OS and address once, then a row per output, displays first and
-SDI ports after, each with the two actions above. An output that already has a
+yet*: its hostname, OS, address and the DeckLink card its SDI ports are on once,
+then a row per output, displays first and SDI ports after, each with the two
+actions above and what it is: a display reads `Built-in display · 1920 × 1080`
+and the refresh rate when the Mac reports one. An output that already has a
 screen stays in the group, dimmed, saying which screen it is set up as and
-whether that screen is showing. A Mac whose outputs are all set up is not listed.
-Outputs of one Mac are not flagged *Looks like … same MAC address* against each
-other; a device that is not an output keeps that hint. An output set up as a new
-screen starts named for the output, not for the Mac.
+whether that screen is showing. A Mac whose outputs are all set up is not
+listed. Outputs of one Mac are not flagged *Looks like … same MAC address*
+against each other; a device that is not an output keeps that hint. An output
+set up as a new screen starts named for the output, not for the Mac.
 
 A screen's card says `<hostname> · <port> · <mode>`: the Mac, the port, and the
 video mode the port sends (a display shows the size it is driven at). Its
@@ -222,8 +224,13 @@ late, and the frames the card has dropped. Three reports running with frames
 dropped or 5% or more repeated mark a DeckLink output **struggling**, and three
 clean ones in a row clear it. A display output is never marked: its rate comes
 from the display link, which stops while the display sleeps or the screen is
-locked, so it can report 0 fps while healthy, and Screens shows that as a dash. A reading that stops being refreshed is dropped after 60
-seconds.
+locked, so it can report 0 fps while healthy, and Screens shows that as a dash. A
+struggling output also puts a warning on its screen's card, under the preview: the
+port, what the report shows (the percent of frames repeated, the frames the card
+dropped) and what to check. A reading that stops being refreshed is dropped after
+60 seconds. Until one arrives, the Device section says the helper has not reported
+yet; after one was dropped, that it stopped reporting; and for a screen no page is
+showing, that it is offline.
 
 ## Removing one
 
