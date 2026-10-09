@@ -3,6 +3,7 @@
 import type { DragEndEvent } from "@dnd-kit/core";
 import type { useSensors } from "@dnd-kit/core";
 import type { DeviceChannel } from "@main/types/devices";
+import type { CreateScreenInput } from "@main/types/views";
 
 /**
  * One bindable wireless channel, as `/api/integrations/wireless/channels`
@@ -95,7 +96,9 @@ export interface SectionHandlers {
   handleRenamePreset: (id: string, name: string) => Promise<void>;
   handleOverwritePreset: (id: string) => Promise<void>;
   // Outputs (physical screens + routing)
-  handleAddOutput: () => Promise<void>;
+  /** Make a screen from the Screen settings panel's answers. Resolves with the
+   *  reason it was refused, or null when it was made. */
+  handleCreateScreen: (input: CreateScreenInput) => Promise<string | null>;
   handleRenameOutput: (id: string, name: string) => Promise<void>;
   handleSetOutputView: (id: string, viewId: string | null) => Promise<void>;
   handleSetOutputLocked: (id: string, locked: boolean) => Promise<void>;
@@ -103,6 +106,15 @@ export interface SectionHandlers {
   handleSetOutputAllowHls: (id: string, allowHls: boolean) => Promise<void>;
   handleSetOutputGroups: (id: string, groups: string[]) => Promise<void>;
   handleSetOutputMode: (id: string, mode: "display" | "panel") => Promise<void>;
+  /** Change one screen's role without changing any other screen. True when it
+   *  landed; a refusal is already toasted. */
+  handleSetOutputRole: (
+    id: string,
+    mode: "display" | "panel",
+    opts?: { copyView?: boolean; viewId?: string },
+  ) => Promise<boolean>;
+  handleSetOutputTextSize: (id: string, textSize: number) => Promise<void>;
+  handleSetViewShowInSidebar: (id: string, showInSidebar: boolean) => Promise<void>;
   handleSetViewSurface: (id: string, surface: "display" | "console") => Promise<void>;
   handleRemoveOutput: (id: string) => Promise<void>;
   handleReorderOutputs: (ids: string[]) => Promise<void>;

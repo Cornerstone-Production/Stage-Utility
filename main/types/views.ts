@@ -1166,6 +1166,19 @@ export function viewShownInSidebar(v: Pick<View, "showInSidebar">): boolean {
   return v.showInSidebar !== false;
 }
 
+/** What createScreen takes. `mode` absent is the legacy `{ name, viewId }` call. */
+export interface CreateScreenInput {
+  name?: string;
+  mode?: OutputMode;
+  /** An existing view. Alternative to `newView`. */
+  viewId?: string | null;
+  /** Make a blank view of the right kind, named after the screen. */
+  newView?: boolean;
+  slug?: string;
+  /** Written onto the view the screen shows, for a control surface only. */
+  showInSidebar?: boolean;
+}
+
 /** An Output's mode. Absent — or unrecognised — means "display". The safety
  *  property is an explicit opt-in, never an inference. */
 export function outputMode(o: Pick<Output, "mode">): OutputMode {

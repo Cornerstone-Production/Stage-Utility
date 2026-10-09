@@ -570,7 +570,7 @@ function EmptyNote({ text }: { text: string }) {
 }
 
 /** A fetch that failed, not a session that recorded nothing — the same
- *  danger-toned alert banner import-layout.tsx and screen-urls-dialog.tsx use
+ *  danger-toned alert banner import-layout.tsx and screen-settings-panel.tsx use
  *  for exactly this distinction. `role="alert"` announces it immediately,
  *  unlike EmptyNote's two neutral states. */
 function ErrorNote({ text }: { text: string }) {

@@ -19,7 +19,7 @@ import {
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
-import { viewSurface, viewShownInSidebar, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
+import { viewSurface, viewShownInSidebar, outputMode, type CreateScreenInput, type ViewSurface, type OutputMode } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
@@ -248,19 +248,6 @@ export class ScreenWriteError extends Error {
     );
     this.name = "ScreenWriteError";
   }
-}
-
-/** What createScreen takes. `mode` absent is the legacy `{ name, viewId }` call. */
-export interface CreateScreenInput {
-  name?: string;
-  mode?: OutputMode;
-  /** An existing view. Alternative to `newView`. */
-  viewId?: string | null;
-  /** Make a blank view of the right kind, named after the screen. */
-  newView?: boolean;
-  slug?: string;
-  /** Written onto the view the screen shows, for a control surface only. */
-  showInSidebar?: boolean;
 }
 
 export interface CreateScreenResult {

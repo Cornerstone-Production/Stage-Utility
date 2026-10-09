@@ -9,7 +9,8 @@ import { kioskDevicesStore, authorise, claim, release, findByOutput, matchByMac,
 import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen } from "../kiosk-presence.js";
 import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
 import { holdingScreen } from "../kiosk-holding-screen.js";
-import { ScreenWriteError, stageController, type CreateScreenInput } from "../stage-controller.js";
+import { ScreenWriteError, stageController } from "../stage-controller.js";
+import type { CreateScreenInput } from "../../types/views.js";
 import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, readCreateScreenBody } from "./screen-write.js";
 import { errorMessage } from "../errors.js";
 import { readFile } from "node:fs/promises";

@@ -7,7 +7,8 @@
 
 import type * as http from "node:http";
 
-import { ScreenWriteError, type CreateScreenInput } from "../stage-controller.js";
+import { ScreenWriteError } from "../stage-controller.js";
+import type { CreateScreenInput } from "../../types/views.js";
 import { errorMessage } from "../errors.js";
 import { error, json } from "./context.js";
 

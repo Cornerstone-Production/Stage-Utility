@@ -21,7 +21,7 @@
 //     Settings is routes inside the app rather than its own window
 
 import { useState, useEffect } from "react";
-import { viewSurface } from "@main/types/views";
+import { viewSurface, type CreateScreenInput } from "@main/types/views";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
@@ -726,8 +726,24 @@ export function useStageSettings(pinnedViewId?: string) {
   }
 
   // ── Outputs (physical screens + routing) ─────────────────────────────
-  async function handleAddOutput() {
-    await writeState("outputs:add", {}, { fail: "Failed to add display" });
+  /**
+   * Make a screen from the answers the Screen settings panel collected. Resolves
+   * with the reason it was refused, or null when it was made.
+   *
+   * Returned rather than toasted: the panel keeps its answers open after a
+   * refusal (a taken friendly link, a view that does not fit) and says why where
+   * the operator is already looking. Nothing is created until this is called, and
+   * the server validates before it writes and puts back what it made if a later
+   * step fails.
+   */
+  async function handleCreateScreen(input: CreateScreenInput): Promise<string | null> {
+    try {
+      const next = await ipc<StageState>("outputs:add", { ...input });
+      queryClient.setQueryData(["stage:getState"], next);
+      return null;
+    } catch (err) {
+      return errorMessage(err);
+    }
   }
 
   async function handleRenameOutput(id: string, name: string) {
@@ -836,6 +852,44 @@ export function useStageSettings(pinnedViewId?: string) {
     }
   }
 
+  /**
+   * Change one screen between a wall display and a control surface WITHOUT
+   * changing any other screen. Unlike handleSetOutputMode this is one server call:
+   * the copy of a shared view, the role and the pointing are four ordered writes,
+   * and the server puts back what landed if one fails. NOT optimistic, for the
+   * reason handleSetOutputMode is not: the refusal is the useful part.
+   */
+  async function handleSetOutputRole(
+    id: string,
+    mode: "display" | "panel",
+    opts: { copyView?: boolean; viewId?: string } = {},
+  ): Promise<boolean> {
+    return writeState("outputs:setRole", { id, mode, ...opts }, { fail: "Failed to change the screen's role" });
+  }
+
+  /** List a control surface's view in the sidebar, or keep it out. Optimistic:
+   *  the server refuses only an id that does not exist, and the switch has to
+   *  follow the operator's finger. */
+  async function handleSetViewShowInSidebar(id: string, showInSidebar: boolean) {
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, views: cur.views.map((v) => (v.id === id ? { ...v, showInSidebar } : v)) }),
+      () => ipc<StageState>("views:setShowInSidebar", { id, showInSidebar }),
+      "Failed to change whether the console is listed in the sidebar",
+    );
+  }
+
+  /** Keep the ServiceCue text size a display shows. Optimistic like the other
+   *  per-screen settings; the server refuses a value outside 50 to 300. */
+  async function handleSetOutputTextSize(id: string, textSize: number) {
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { textSize }) }),
+      () => ipc<StageState>("outputs:setTextSize", { id, textSize }),
+      "Failed to change the display's text size",
+    );
+  }
+
   /** Change what a View is for, and the screens showing it, in the order the
    *  guards allow. See handleSetOutputMode. */
   async function handleSetViewSurface(id: string, surface: "display" | "console") {
@@ -928,7 +982,7 @@ export function useStageSettings(pinnedViewId?: string) {
     handleReorderPresets,
     handleRenamePreset,
     handleOverwritePreset,
-    handleAddOutput,
+    handleCreateScreen,
     handleRenameOutput,
     handleSetOutputView,
     handleSetOutputLocked,
@@ -936,6 +990,9 @@ export function useStageSettings(pinnedViewId?: string) {
     handleSetOutputAllowHls,
     handleSetOutputGroups,
     handleSetOutputMode,
+    handleSetOutputRole,
+    handleSetOutputTextSize,
+    handleSetViewShowInSidebar,
     handleSetViewSurface,
     handleRemoveOutput,
     handleReorderOutputs,

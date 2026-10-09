@@ -110,15 +110,10 @@ function renderRow(struggles: Parameters<typeof OutputRow>[0]["struggles"], lags
         iconKey: OUTPUT.id,
         onRename: () => {},
         onRenameView: () => {},
-        onSetSlug: NOOP_ASYNC,
         onSetView: () => {},
-        onSetLocked: () => {},
-        onSetHideTopBar: () => {},
-        onSetAllowHls: () => {},
         messageGroups: { groups: [], known: true, failed: false },
-        onSetGroups: () => {},
-        onOpenMessagingSettings: () => {},
         onSetMode: NOOP_ASYNC,
+        onOpenSettings: () => {},
         onRefresh: () => {},
         onRemove: () => {},
         onRequestNewView: () => {},
@@ -262,7 +257,7 @@ test("OutputsSection shows the struggling feed's box, correctly naming it from v
     ]),
   );
   render(
-    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS, onOpenMessagingSettings: () => {} })),
+    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS, onOpenSettings: () => {}, onAddScreen: () => {} })),
   );
 
   await waitFor(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
@@ -285,7 +280,7 @@ test("OutputsSection builds the box from the pair's episode, not its live window
     ]),
   );
   render(
-    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS, onOpenMessagingSettings: () => {} })),
+    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS, onOpenSettings: () => {}, onAddScreen: () => {} })),
   );
 
   await waitFor(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
@@ -307,7 +302,7 @@ test("OutputsSection routes each screen's own struggles to its own card — a se
     ]),
   );
   render(
-    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT, OTHER]), handlers: NOOP_HANDLERS, onOpenMessagingSettings: () => {} })),
+    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT, OTHER]), handlers: NOOP_HANDLERS, onOpenSettings: () => {}, onAddScreen: () => {} })),
   );
 
   await waitFor(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
@@ -329,7 +324,7 @@ test("OutputsSection routes each screen's own struggles to its own card — a se
 test("OutputsSection shows no struggle box for any screen before video:state has hydrated struggling data", async () => {
   stubVideoState(videoState([]));
   render(
-    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS, onOpenMessagingSettings: () => {} })),
+    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS, onOpenSettings: () => {}, onAddScreen: () => {} })),
   );
   await waitFor(() => assert.ok(screen.getByText("Nothing assigned"))); // the unrouted-screen placeholder — proof the card mounted
   assert.equal(screen.queryByText(/Struggling with/) === null, true);
@@ -347,7 +342,7 @@ test("OutputsSection builds the lagging box from the pair's EPISODE — the wors
     ]),
   );
   render(
-    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT, OTHER]), handlers: NOOP_HANDLERS, onOpenMessagingSettings: () => {} })),
+    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT, OTHER]), handlers: NOOP_HANDLERS, onOpenSettings: () => {}, onAddScreen: () => {} })),
   );
 
   await waitFor(() => assert.ok(screen.getByText("Holding 3.2 s of Program (IMAG) in its own buffer.")));
