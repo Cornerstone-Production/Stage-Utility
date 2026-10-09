@@ -133,6 +133,27 @@ describe("onNotification on the EventSource path", () => {
     offC();
   });
 
+  test("two subscribers handing over the SAME function are two subscriptions", () => {
+    // The React Compiler hoists a callback that captures nothing to module
+    // scope, so every component using a hook like useDevices subscribes the
+    // identical `() => void refresh()`. A Set of callbacks kept ONE entry for
+    // all of them, and the first component to unmount unsubscribed the rest:
+    // closing a Screen settings panel stopped the Screens page hearing about
+    // new devices until a reload.
+    const ch = "kiosk:health";
+    let calls = 0;
+    const shared = () => { calls += 1; };
+    const offPanel = onNotification(ch, shared);
+    const offPage = onNotification(ch, shared);
+    offPanel();
+    stream().emit(ch, { any: 1 });
+    assert.equal(calls, 1, "the remaining subscriber was unsubscribed by the other's cleanup");
+    offPage();
+    stream().emit(ch, { any: 2 });
+    assert.equal(calls, 1, "a subscriber still receives after unsubscribing");
+    assert.equal(stream().count(ch), 0, "the wire listener outlived both subscribers");
+  });
+
   test("an unsubscribed callback stops receiving while a sibling keeps it", () => {
     const ch = "osc:targets-changed";
     const a: unknown[] = [];

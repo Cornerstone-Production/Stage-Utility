@@ -2305,8 +2305,16 @@ if (typeof document !== "undefined") {
  */
 export function onNotification(
   channel: string,
-  cb: (payload: unknown, replayed: boolean) => void,
+  handler: (payload: unknown, replayed: boolean) => void,
 ): () => void {
+  // Every subscription is its own entry in the registries below, whatever
+  // function it was handed. They are Sets, and the React Compiler hoists a
+  // callback that captures nothing to module scope: every component using a
+  // hook like useDevices hands over the IDENTICAL `() => void refresh()`, the
+  // Set kept one entry for all of them, and the first component to unmount
+  // unsubscribed every other. Closing a Screen settings panel, or removing a
+  // screen card, stopped the Screens page hearing about devices until a reload.
+  const cb = (payload: unknown, replayed: boolean) => handler(payload, replayed);
   // Replay THIS process's own cached snapshot to the new callback, on either
   // transport. `lastPayload` is written by `fanOut`, which runs for every frame
   // this tab receives regardless of whether it arrived over the worker or the
