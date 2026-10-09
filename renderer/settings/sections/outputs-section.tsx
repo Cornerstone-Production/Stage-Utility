@@ -220,24 +220,20 @@ export function resolveIconEntry(
   return { key, legacyKey, value: iconEntryAt(entries, key, legacyKey) };
 }
 
-/** A checkbox row in a screen's overflow menu: the checkmark column, then the label. */
+/** A checkbox row in a view card's overflow menu: the checkmark column, then the label. */
 function MenuCheckboxItem({
   checked,
   onCheckedChange,
-  keepOpen,
   children,
 }: {
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
-  /** Stay open across a click, so several can be set in one visit. */
-  keepOpen?: boolean;
   children: ReactNode;
 }) {
   return (
     <DropdownMenu.CheckboxItem
       checked={checked}
       onCheckedChange={onCheckedChange}
-      onSelect={keepOpen ? (e) => e.preventDefault() : undefined}
       className={MENU_ITEM}
     >
       <span className="flex size-3.5 shrink-0 items-center justify-center">
@@ -533,8 +529,9 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
           <LazyPreview
             viewId={output.viewId}
             // This card IS a screen, so its preview speaks for that screen and
-            // not merely for the View behind it. It is what makes "Hide top bar"
-            // below visibly do something: the card loses its bar too.
+            // not merely for the View behind it. It is what makes the Top bar
+            // switch in Screen settings visibly do something: the card loses
+            // its bar too.
             outputId={output.id}
             onExpand={onEditLayout}
             expandLabel={`Edit what ${output.name} shows`}

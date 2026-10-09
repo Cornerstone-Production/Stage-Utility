@@ -61,8 +61,8 @@ export function everyViewKind<const T extends readonly ViewKind[]>(kinds: T & Ex
  * all of it — this map is only about the default.
  *
  * Two readers, one fact: `stage-view.tsx` decides structurally which arms
- * render `ScreenTopBar`, and `outputs-section.tsx` decides whether the "Hide
- * top bar" and "Lock display" menu items would do anything on this screen.
+ * render `ScreenTopBar`, and `screen-settings-panel.tsx` decides whether the Top
+ * bar and Lock switches would do anything on this screen.
  * `stage-view-paths.test.tsx` renders every kind and asserts the real DOM
  * against this map, so the two cannot drift apart.
  */
