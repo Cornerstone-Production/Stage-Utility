@@ -171,11 +171,15 @@ gives every row's figures.
 | 18 / 5 ms | latency | 18.5 / 19.0 | 0 | 0 | 0 | 64%, 417 MB |
 | **20 / 5 ms (standard)** | stage | 20.0 / 20.0 | 1 in 125 s | 1 | 0 | 18%, 468 MB |
 | **20 / 5 ms (standard)** | latency | 20.5 / 21.0 | 0 | 0 | 0 | 63%, 419 MB |
+| **20 / 5 ms (standard)**, again after review fixes | stage | 20.0 / 20.0 | 0 in 123 s | 0 | 0 | 17%, 477 MB |
+| **20 / 5 ms (standard)**, again after review fixes | latency | 21.1 / 21.9 | 1 in 125 s | 0 | 0 | 63%, 422 MB |
 | 19 / 4 ms | stage | 19.0 / 19.0 | 0 | 0 | 1,173 | 18%, 473 MB |
 
-The pairs are head start / fill lead. The latency page's figures are half a
-millisecond higher because they are read from its stamp, which is on the epoch
-clock, and the two clocks are matched only to about that. The page costs more CPU
+The pairs are head start / fill lead. The latency page's figures run up to a
+millisecond higher, more as a run goes on, because they are read from its stamp:
+the page's clock is fixed when it loads, and the helper places it on the host clock
+through the wall clock, which macOS keeps adjusting. The helper's own figure for the
+same frames, from the begin frames, is 20.0 ms. The page costs more CPU
 because it draws a new picture every frame.
 
 - **Why 20 ms.** The head start has to cover the page's render, the conversion and
