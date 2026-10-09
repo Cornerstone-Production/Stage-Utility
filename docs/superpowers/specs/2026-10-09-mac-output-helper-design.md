@@ -106,9 +106,14 @@ The capture choices come from measurement, not preference:
 - **Measured on an M4 Mac mini (16 GB), 1080p, 59.94 Hz sampling:**
   - Snapshot plus pixel copy takes 2–4 ms per frame.
   - Four outputs at once cost about one CPU core and about 630 MB in total.
-  - With the display awake, 599 of 600 frames were new. With the screen locked,
-    or a window off every display, 89–99% were new: WebKit falls back to a timer
-    when no display is driving it.
+  - With the display awake, 599 of 600 frames were new.
+  - With the screen locked and the display asleep, an off-screen web view
+    without the switches produced 1 new frame in 600. With them (each read back
+    as off) it produced 587 of 600, and an on-screen one 533: WebKit falls back
+    to a timer when no display is driving it.
+  - The switches take a real `BOOL`. `perform(_:with: false)` passes an object
+    pointer, which reads as YES, so the helper calls each setter's
+    implementation directly and reads the value back.
   - A Mac with at least one awake display, a used built-in output or a dummy
     HDMI plug, gets the clean cadence. The test page was simple, and real
     displays will cost more.
