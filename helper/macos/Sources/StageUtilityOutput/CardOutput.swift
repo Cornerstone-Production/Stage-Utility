@@ -153,20 +153,22 @@ final class CardOutput: OutputSink {
 
   /// The next new frame the card is sent, decoded from UYVY back to RGB: the dump
   /// shows the Metal conversion, the turn and the scaling, not the page before
-  /// them. Copied on the port's thread; decoded, encoded and written off the main
-  /// thread, which the port's frames depend on.
-  func writeSnapshot(to file: URL, completion: @escaping (String?) -> Void) {
+  /// them. Copied as the page hands it over, on the main thread (once per dump);
+  /// decoded, encoded and written off it, since the pictures arrive there.
+  func writeSnapshot(to file: URL, completion: @escaping (FrameDumpOutcome) -> Void) {
     guard let source else {
-      completion("no frames: the output is not running")
+      completion(.failed("no frames: the output is not running"))
       return
     }
-    let done: @Sendable (String?) -> Void = { why in DispatchQueue.main.async { completion(why) } }
+    let done: @Sendable (FrameDumpOutcome) -> Void = { outcome in DispatchQueue.main.async { completion(outcome) } }
     source.captureNextFrame { frame in
       guard let frame else {
-        done("no new frame since the last dump")
+        done(.noNewFrame)
         return
       }
-      DispatchQueue.global(qos: .utility).async { done(CardDump.write(frame, to: file)) }
+      DispatchQueue.global(qos: .utility).async {
+        done(CardDump.write(frame, to: file).map(FrameDumpOutcome.failed) ?? .written)
+      }
     }
   }
 

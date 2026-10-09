@@ -64,10 +64,12 @@ public final class SurfaceFrameSource: CardFrameSource {
   /// repeats the previous picture meanwhile, so it shows in the repeat count.
   public var failure: String? { lock.withLock { _failure } }
 
-  /// The next new frame exactly as the card is sent it (converted, turned, scaled),
-  /// handed to `done` on the card's thread: what `--dump-frames` writes. A capture
-  /// still waiting when another is asked for gets nil, so a page that has stopped
-  /// drawing does not pile them up.
+  /// The next new picture exactly as the card is sent it (converted, turned,
+  /// scaled), handed to `done` on the thread that presented it, as soon as it is
+  /// converted: what `--dump-frames` writes. Taken there, not at the fill, because a
+  /// 4 MB copy on the clock thread made a frame late. A capture still waiting when
+  /// another is asked for gets nil, so a page that has stopped drawing does not pile
+  /// them up.
   public func captureNextFrame(_ done: @escaping (CardFrameCopy?) -> Void) {
     let replaced: ((CardFrameCopy?) -> Void)? = lock.withLock {
       let old = capture
@@ -124,13 +126,22 @@ public final class SurfaceFrameSource: CardFrameSource {
       throw error
     }
     let readyNs = now()
-    lock.withLock {
+    let done: ((CardFrameCopy?) -> Void)? = lock.withLock {
       // A size change while this one converted has replaced the buffers.
-      guard staged.indices.contains(chosen.slot), staged[chosen.slot].buffer === chosen.buffer else { return }
+      guard staged.indices.contains(chosen.slot), staged[chosen.slot].buffer === chosen.buffer else { return nil }
       staged[chosen.slot].picture = CardPicture(contentNs: chosen.content, paintNs: paintNs, readyNs: readyNs)
       newest = chosen.slot
       fresh = true
       _failure = nil
+      defer { capture = nil }
+      return capture
+    }
+    if let done {
+      let row = chosen.size.width * 2
+      done(
+        CardFrameCopy(
+          bytes: Array(UnsafeRawBufferPointer(start: chosen.buffer.contents(), count: row * chosen.size.height)),
+          width: chosen.size.width, height: chosen.size.height, rowBytes: row))
     }
   }
 
@@ -154,11 +165,6 @@ public final class SurfaceFrameSource: CardFrameSource {
         (target.bytes + y * target.rowBytes).copyMemory(from: from + y * row, byteCount: row)
       }
     }
-    let done: ((CardFrameCopy?) -> Void)? = lock.withLock {
-      defer { capture = nil }
-      return capture
-    }
-    done?(CardFrameCopy(target))
     return taken.picture
   }
 }
@@ -170,10 +176,10 @@ public struct CardFrameCopy: Sendable {
   public var height: Int
   public var rowBytes: Int
 
-  init(_ target: CardFrameTarget) {
-    bytes = Array(UnsafeRawBufferPointer(start: target.bytes, count: target.rowBytes * target.height))
-    width = target.width
-    height = target.height
-    rowBytes = target.rowBytes
+  init(bytes: [UInt8], width: Int, height: Int, rowBytes: Int) {
+    self.bytes = bytes
+    self.width = width
+    self.height = height
+    self.rowBytes = rowBytes
   }
 }

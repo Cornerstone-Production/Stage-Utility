@@ -16,7 +16,7 @@ protocol OutputSink: AnyObject {
   func setRotation(_ rotation: Rotation)
   /// Write what the output is showing to `file` as a PNG, turned the way it goes
   /// out. `completion` gets nil on success, else why not.
-  func writeSnapshot(to file: URL, completion: @escaping (String?) -> Void)
+  func writeSnapshot(to file: URL, completion: @escaping (FrameDumpOutcome) -> Void)
 }
 
 extension OutputSink {
@@ -69,8 +69,10 @@ final class DisplaySink: OutputSink {
 
   func setRotation(_ rotation: Rotation) { destination.setRotation(rotation) }
 
-  func writeSnapshot(to file: URL, completion: @escaping (String?) -> Void) {
-    SnapshotTurn.write(surface, turnedBy: destination.rotation, to: file, completion: completion)
+  func writeSnapshot(to file: URL, completion: @escaping (FrameDumpOutcome) -> Void) {
+    SnapshotTurn.write(surface, turnedBy: destination.rotation, to: file) { why in
+      completion(why.map(FrameDumpOutcome.failed) ?? .written)
+    }
   }
 }
 

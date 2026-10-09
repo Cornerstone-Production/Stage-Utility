@@ -87,6 +87,7 @@ final class AppModel: ObservableObject {
   static let deckLinkRescan: TimeInterval = 10
   private var dumpTimer: Timer?
   private var dumpSequence = 0
+  private var dumpLog = FrameDumpLog()
 
   init(options: Options, paths: HelperPaths) {
     self.options = options
@@ -673,8 +674,13 @@ final class AppModel: ObservableObject {
     let n = String(format: "%04d", dumpSequence)
     for key in order {
       guard let sink = runtimes[key]?.sink else { continue }
-      sink.writeSnapshot(to: dir.appendingPathComponent("\(key)-\(n).png")) { problem in
-        if let problem { Log.error(.output, "frame dump: \(problem)") }
+      let label = sink.descriptor.port
+      sink.writeSnapshot(to: dir.appendingPathComponent("\(key)-\(n).png")) { [weak self] outcome in
+        switch self?.dumpLog.line(for: key, label: label, outcome) {
+        case .notice(let text): Log.notice(.output, text)
+        case .error(let text): Log.error(.output, text)
+        case nil: break
+        }
       }
     }
     WindowSnapshot.write(model: self, to: dir.appendingPathComponent("window-\(n).png"))
