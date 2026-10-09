@@ -408,8 +408,11 @@ su_browser* CreateWindowless(int width, int height, const char* url, const su_br
   info.shared_texture_enabled = true;
   info.external_begin_frame_enabled = true;
   CefBrowserSettings settings = BlackSettings();
-  // The begin-frame interval CEF reports to the page; frames come from begin_frame.
-  settings.windowless_frame_rate = 60;
+  // Frames come from begin_frame; this is the most often Chromium's capture of the
+  // page may hand one over (its minimum capture period, 1 ms here). At 60 or 120 it
+  // held back the picture for the frame after a page change, until after the card
+  // needed it, a repeat every time a clock ticked (DECKLINK.md, "Latency").
+  settings.windowless_frame_rate = 1000;
   su_browser* b = new su_browser();
   b->client = new Client(b, *events, true, width, height);
   return Register(b, CefBrowserHost::CreateBrowserSync(info, b->client, url ? url : "about:blank", settings,
@@ -438,8 +441,10 @@ void BeginFrame(su_browser* b) {
   CefRefPtr<CefBrowserHost> host = HostOf(b);
   if (!host) return;
   // A page that has not changed would otherwise paint nothing, and a frame clock
-  // could not tell "nothing changed" from "the page is late". Invalidating first
-  // makes every begin frame paint.
+  // could not tell "nothing changed" from "the page is late". Invalidating asks
+  // Chromium's capture for a picture of the page as it is (RequestRefreshFrame), so
+  // every begin frame hands one over, a few hundred microseconds later when nothing
+  // changed.
   host->Invalidate(PET_VIEW);
   host->SendExternalBeginFrame();
 }
