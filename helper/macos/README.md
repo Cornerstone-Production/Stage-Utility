@@ -14,7 +14,8 @@ Pi kiosks, which run Chromium too.
 Needs macOS 14 or later and a Swift 6 toolchain: the tests use swift-testing, which
 ships with Swift 6. The Command Line Tools are enough; Xcode is not required. Python 3
 (in the Command Line Tools) is used to make a venv with CMake and Ninja for the
-browser host; nothing is installed system-wide.
+browser host, at the versions and wheel hashes pinned in `build-tools.txt`; nothing is
+installed system-wide.
 
 ```sh
 cd helper/macos
