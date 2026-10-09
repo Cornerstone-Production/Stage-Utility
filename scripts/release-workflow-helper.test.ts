@@ -28,6 +28,7 @@ interface Step {
   uses?: string;
   run?: string;
   with?: Record<string, unknown>;
+  env?: Record<string, string>;
 }
 interface Job {
   needs?: string | string[];
@@ -35,22 +36,28 @@ interface Job {
   "runs-on"?: string;
   "timeout-minutes"?: number;
   outputs?: Record<string, string>;
+  permissions?: Record<string, string>;
   steps?: Step[];
 }
 const doc = parse(fs.readFileSync(WORKFLOW, "utf8")) as { jobs: Record<string, Job> };
 const jobs = doc.jobs;
 const needsOf = (j: Job): string[] => (j.needs === undefined ? [] : Array.isArray(j.needs) ? j.needs : [j.needs]);
 
-type Ctx = { published: string; present: string };
+type Ctx = { published: string; present: string; helperResult?: string };
 
 /** Evaluate the subset of the expression language these `if`s use: always(),
- *  needs.<job>.outputs.<name> == '<literal>', and &&. Anything else throws, so a
- *  new shape is noticed rather than read as true. */
+ *  needs.<job>.outputs.<name> == '<literal>', needs.helper.result == '<literal>',
+ *  and &&. Anything else throws, so a new shape is noticed rather than read as true. */
 function evaluate(expr: string, ctx: Ctx): boolean {
   const body = expr.replace(/^\$\{\{\s*/, "").replace(/\s*\}\}$/, "");
   return body.split("&&").every((raw) => {
     const clause = raw.trim();
     if (clause === "always()") return true;
+    const result = /^needs\.helper\.result == '([^']*)'$/.exec(clause);
+    if (result) {
+      if (ctx.helperResult === undefined) throw new Error("this evaluation has no helper result");
+      return ctx.helperResult === result[1];
+    }
     const m = /^needs\.([\w-]+)\.outputs\.(\w+) == '([^']*)'$/.exec(clause);
     if (!m) throw new Error(`cannot evaluate: ${clause}`);
     const [, job, name, literal] = m;
@@ -163,3 +170,90 @@ describe("the release itself is unchanged by the helper", () => {
     assert.equal(create.run.includes("gh release upload"), false, "a published release cannot be added to");
   });
 });
+
+describe("the helper's download reaches the release", () => {
+  const artifacts = jobs["artifacts"];
+  const download = artifacts.steps?.find((st) => st.uses?.startsWith("actions/download-artifact@"));
+  const create = artifacts.steps?.find((st) => st.run?.includes("gh release create"));
+
+  /** The create step's own shell, run for real on a temp tree with `gh` and `node` stood in for. */
+  function runCreate(populate: (tree: string) => void): { status: number | null; err: string; attached: string[] } {
+    assert.ok(create?.run, "no create step");
+    const tree = fs.mkdtempSync(path.join(os.tmpdir(), "su-create-"));
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "su-create-bin-"));
+    try {
+      const log = path.join(tree, "gh.log");
+      fs.writeFileSync(path.join(bin, "gh"), '#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >>"$GH_LOG"; done\n', { mode: 0o755 });
+      fs.writeFileSync(path.join(bin, "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      fs.mkdirSync(path.join(tree, "dist"));
+      for (const n of ["stage-utility-1.2.3-linux-x64.tar.gz", "stage-utility-1.2.3-darwin-arm64.tar.gz"]) fs.writeFileSync(path.join(tree, "dist", n), "x");
+      populate(tree);
+      // The step writes its notes to /tmp/notes.md; keep that inside the temp tree.
+      const script = create.run!.replaceAll("/tmp/notes.md", path.join(tree, "notes.md"));
+      const r = spawnSync("bash", ["-c", script], {
+        cwd: tree,
+        encoding: "utf8",
+        env: { PATH: `${bin}:${process.env.PATH ?? ""}`, GH_LOG: log, GH_TOKEN: "x", V: "1.2.3", LAST: "v1.2.2", STABLE: "v1.2.0", PRE: "true" },
+      });
+      const args = fs.existsSync(log) ? fs.readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
+      return { status: r.status, err: r.stderr, attached: args.filter((a) => !a.startsWith("-") && /\.(tar\.gz|zip|sha256)$/.test(a)).sort() };
+    } finally {
+      fs.rmSync(tree, { recursive: true, force: true });
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
+  }
+
+  const HELPER_FILES = ["StageUtilityOutput-arm64.zip", "StageUtilityOutput-arm64.zip.sha256", "StageUtilityOutput-x86_64.zip", "StageUtilityOutput-x86_64.zip.sha256"];
+  const TARBALLS = ["dist/stage-utility-1.2.3-darwin-arm64.tar.gz", "dist/stage-utility-1.2.3-linux-x64.tar.gz"];
+
+  it("attaches the zips and checksums the download step puts down, wherever that step is told to put them", () => {
+    const dir = String(download?.with?.["path"]);
+    assert.ok(dir && dir !== "undefined", "the download step has no path");
+    const r = runCreate((tree) => {
+      fs.mkdirSync(path.join(tree, dir), { recursive: true });
+      for (const n of HELPER_FILES) fs.writeFileSync(path.join(tree, dir, n), "x");
+    });
+    assert.equal(r.status, 0, r.err);
+    assert.deepEqual(r.attached, [...TARBALLS, ...HELPER_FILES.map((n) => `${dir}/${n}`)].sort());
+  });
+
+  it("still creates the release, with the archives only, when there is no helper download", () => {
+    const r = runCreate(() => undefined);
+    assert.equal(r.status, 0, r.err);
+    assert.deepEqual(r.attached, TARBALLS);
+  });
+
+  it("says so, with an error annotation, only when the helper build failed", () => {
+    const say = artifacts.steps?.find((st) => st.run?.includes("::error") && st.if?.includes("needs.helper.result"));
+    assert.ok(say, "no step annotates a failed helper build");
+    for (const [result, want] of [["failure", true], ["success", false], ["skipped", false], ["cancelled", false]] as const) {
+      assert.equal(evaluate(say.if as string, { published: "true", present: "true", helperResult: result }), want, `helper ${result}`);
+    }
+    assert.match(say.run as string, /::error title=Mac output helper::.*released without StageUtilityOutput/);
+    // The release is still created, and not behind that condition.
+    assert.equal(create?.if, undefined, "the create step must not be conditional on the helper");
+    assert.ok((artifacts.steps ?? []).indexOf(say) < (artifacts.steps ?? []).indexOf(create as Step), "the annotation comes before the release is created");
+    assert.ok((artifacts.if as string).includes("always()"));
+  });
+});
+
+describe("the helper jobs hold only the permissions they use", () => {
+  it("the gate and the build read the repository and nothing else", () => {
+    // The workflow's default is contents: write and statuses: write.
+    assert.deepEqual(jobs["helper-gate"].permissions, { contents: "read" });
+    assert.deepEqual(jobs["helper"].permissions, { contents: "read" });
+  });
+});
+
+describe("the helper's signature is verified the way its build script verifies it", () => {
+  it("uses codesign --verify --strict, never --deep, on both the build and the unpacked zip", () => {
+    const build = jobs["helper"].steps?.find((st) => st.run?.includes("build-app.sh"));
+    assert.ok(build?.run);
+    // Comments explain why; only the commands count.
+    const code = build.run.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+    const verifies = code.match(/codesign --verify[^\n]*/g) ?? [];
+    assert.deepEqual(verifies, ['codesign --verify --strict "$app"', 'codesign --verify --strict "$check/StageUtilityOutput.app"']);
+    assert.ok(!code.includes("--deep"));
+  });
+});
+

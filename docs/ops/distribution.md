@@ -75,7 +75,9 @@ Each zip holds `StageUtilityOutput.app` (about 300 MB, nearly all of it Chromium
 each `.sha256` is one `shasum -a 256` line. They are for the Mac installer, which a
 server serves from its own cache; the updater never reads them. A tree without the
 build script skips the job and releases as before, and a macOS build that fails
-releases without the zips rather than holding the release. The assets are made before
+releases without the zips rather than holding the release; the run then carries an
+error annotation, and Macs whose server runs that version cannot install the helper
+until the server updates. The assets are made before
 the release is created, because a published release cannot be added to.
 
 The runtime ships inside the archive, so a server needs neither Node, nor npm, nor a

@@ -399,6 +399,9 @@ jobs:
     needs: release
     if: ${{ always() && needs.release.outputs.published == 'true' }}
     runs-on: ubuntu-latest
+    # It only reads the tagged tree. The workflow's default is contents: write.
+    permissions:
+      contents: read
     outputs:
       present: ${{ steps.probe.outputs.present }}
     steps:
@@ -460,7 +463,10 @@ jobs:
               || { echo "::error::$arch build is not $arch"; exit 1; }
             got=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
             test "$got" = "$V" || { echo "::error::$arch helper reports version $got, not $V"; exit 1; }
-            codesign --verify --deep --strict "$app"
+            # Not --deep: it reports the versioned Chromium framework as missing,
+            # although a plain --strict verifies every nested item including it.
+            # This is the same check helper/macos/build-app.sh ends with.
+            codesign --verify --strict "$app"
 
             # ditto keeps the framework's symlinks and the bundle layout, with the
             # app at the top of the zip, which is where the installer looks.
@@ -471,7 +477,7 @@ jobs:
             check="$RUNNER_TEMP/check-$arch"
             mkdir -p "$check"
             ditto -x -k "$zip" "$check"
-            codesign --verify --deep --strict "$check/StageUtilityOutput.app"
+            codesign --verify --strict "$check/StageUtilityOutput.app"
 
             ( cd helper-dist && shasum -a 256 "StageUtilityOutput-$arch.zip" > "StageUtilityOutput-$arch.zip.sha256" )
           done
@@ -528,12 +534,25 @@ jobs:
 
       - name: Fetch the Mac output helper
         # Only a helper that built and verified. A skipped or failed one leaves the
-        # release without it, which the installer reports and recovers from.
+        # release without it, and the installer does NOT recover from that: the
+        # release has no zips, so a Mac whose server runs this version cannot
+        # install the helper, from the server or from GitHub, until the server
+        # updates to a release that has them. The step below makes that loud.
         if: ${{ needs.helper.result == 'success' }}
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: output-helper
           path: helper-dist
+
+      - name: Say so when the Mac output helper failed
+        # The tag is already pushed, so the release is still created, without the
+        # helper. This only makes the gap visible in the run instead of leaving a
+        # green job that shipped a release Macs cannot install the helper from.
+        if: ${{ needs.helper.result == 'failure' }}
+        env:
+          V: ${{ needs.release.outputs.version }}
+        run: |
+          echo "::error title=Mac output helper::the helper build failed, so v$V is released without StageUtilityOutput-<arch>.zip. Macs whose server runs this version cannot install the helper until the server updates to a release that has it."
 
       - name: Smoke-test the Linux archive
         # An archive that unpacks is not the same as one that runs. This starts the

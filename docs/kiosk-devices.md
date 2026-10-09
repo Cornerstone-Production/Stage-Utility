@@ -120,8 +120,13 @@ its checksum is never stored and answers `502`.
 with the reason. The installer then goes to GitHub from the Mac itself, so a Mac
 with internet still installs; a Mac with none cannot until the server has the file,
 which any request for the zip made while the server is online puts in its cache. A
-release made before the helper existed has no zip, and answers `404` the same way. Each release attaches the two zips and their
-`.sha256` files when the build ran for it; see [distribution](ops/distribution.md#what-a-release-contains).
+release made before the helper existed has no zip, and answers `404` the same way.
+Each release attaches the two zips and their `.sha256` files when the build ran for it;
+see [distribution](ops/distribution.md#what-a-release-contains).
+
+A release whose helper build failed has no zips either, and the installer does not get
+around that: a Mac whose server runs that version cannot install the helper, from the
+server or from GitHub, until the server updates to a release that has them.
 
 **Coming from the Chrome kiosk.** If the earlier agent is there
 (`com.stageutility.kiosk`), the installer writes
