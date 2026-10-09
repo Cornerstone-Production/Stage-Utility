@@ -29,6 +29,15 @@ coming from a windowless Chromium browser; [How it plugs in](#how-it-plugs-in) s
 Every DeckLink device that can play out is one output. A card with several
 connectors (a Duo 2, a Quad 2) is several devices, one per sub-device.
 
+A connector set as an input in Desktop Video Setup (each of a DeckLink 8K Pro's four
+is an input or an output) is not an output. Desktop Video 16.4 still lists its
+modes, but refuses every one of them for playback, so a port that can play none
+of its modes is listed in the helper's window as "Set as an input in Desktop Video
+Setup", with no switch, and is not announced to the server. Desktop Video Setup sends
+no device notification when a connector changes, so the helper looks at the ports
+again every 10 s, off the main thread (a scan takes 22 to 45 ms on an 8K Pro). A
+port that has become an output is announced from the scan that finds it.
+
 | | |
 |---|---|
 | Output key | `decklink-<persistent id, hex>-<sub-device index>`, for example `decklink-1a2b3c4d-2`. A card that reports no persistent id gets `decklink-t<topological id>-<sub-device>`, which holds while it stays in the same slot. |
@@ -112,12 +121,124 @@ port was made: reported dropped by the card, or skipped.
 **Render to air** is the time from the page drawing a picture's content to the slot
 carrying it beginning to go out of the card: how far the card's output runs behind
 the page. Each slot's times are kept in the shim (`dl_frame_timing`, `FrameTiming`):
-when the picture's content was drawn, handed over, converted, filled, taken by the
-card, on air, and finished with. The health sample carries the window's median
-(`latencyMs`), the window shows it, and the log says it when it changes.
+when the picture's content was drawn, handed over, converted, filled, copied into
+the frame, taken by the card, on air, and finished with. The health sample carries
+the window's median (`latencyMs`), the window shows it ("20 ms behind the page"), and
+the log says it when it changes. The server's health route keeps only `fps`,
+`repeated`, `dropped` and `at`, so `latencyMs` stays in the helper for now.
 
-With the standard leads it is 20 ms at 1080p59.94: the head start. The method, the
-measurements and the frame-by-frame budget are below in [Measured](#measured).
+With the standard leads it is **20 ms at 1080p59.94**, down from 64.7 ms.
+
+### How it is measured
+
+- **Content.** For a page in general, a picture's content is taken to be drawn when
+  the begin frame it answers was asked for (the last before it arrived): Chromium's
+  animation frame runs on that begin frame's time. With `--test-pattern latency` the
+  page writes its animation frame's time into its corner as a row of black and white
+  blocks (`LatencyPage.Stamp`: a marker, 40 bits of microseconds, a checksum), and
+  the helper reads it back out of every picture, so content time is exact there.
+  It agreed with the begin frame's time to within 0.15 ms in every frame checked.
+- **Air.** The card's completion of a frame is the start of the next slot, on the
+  host clock: `GetFrameCompletionReferenceTimestamp` is already in
+  `mach_absolute_time` on an 8K Pro with Desktop Video 16.4, 0.14 ms before the
+  completion callback. The playback position from `GetScheduledStreamTime` agreed
+  with it to 0.05 ms. The card's hardware reference clock is a different clock.
+- **The card's need.** A frame handed to the card (`ScheduleVideoFrame` returned) 2.5
+  ms or more before its slot went out on time; at 1.9 ms or less it was shown late.
+  With a 4 ms fill lead, which gave the card 2.7 ms, it reported 1,173 of 7,190
+  frames late. `ScheduleVideoFrame` itself takes 0.7 to 1.0 ms; it copies the frame.
+- **Glass to glass.** Run the latency page on two outputs at once (a display and a
+  card port), photograph both screens in one shot, and subtract the clocks: the
+  difference between the two paths' delays, monitors included.
+
+### Measured
+
+On an M4 Mac mini, a DeckLink 8K Pro in a Thunderbolt enclosure, Desktop Video
+16.4, 1080p59.94 out of port 1, two minutes per row, the stage view (a clock ticking
+once a second) and the latency page (which changes every frame). `--frame-timings`
+gives every row's figures.
+
+| Pipeline | Page | Render to air, p50 / p95 | Repeats | Skipped | Card late | CPU (one core), memory |
+|---|---|---|---|---|---|---|
+| Before: filled at each completion, 3 frames queued | latency | 64.7 / 65.0 ms | 0 in 23 s | | | |
+| Before | stage | not stamped | 1 a second | | 0 | 23%, 1.07 GB, with three input ports each running a page |
+| 16 / 5 ms, capture at 60 fps, helper frames | stage | 16.0 / 16.0 | 61 in 59 s | 0 | 2 | |
+| 20 / 5 ms, capture at 60 fps | stage | 20.0 / 20.0 | 116 in 115 s | 0 | 0 | 19% |
+| 20 / 5 ms, capture at 120 fps | stage | 20.0 / 20.0 | 114 in 115 s | 0 | 1 | 19% |
+| 16 / 5 ms, capture at 1000 fps | stage | 16.0 / 16.0 | 2 in 118 s | 3 | 0 | 17%, 477 MB |
+| 16 / 5 ms, capture at 1000 fps | latency | 16.5 / 17.0 | 0 | 0 | 0 | 64%, 421 MB |
+| 18 / 5 ms | stage | 18.0 / 18.0 | 0 | 3 | 0 | 17%, 472 MB |
+| 18 / 5 ms | latency | 18.5 / 19.0 | 0 | 0 | 0 | 64%, 417 MB |
+| **20 / 5 ms (standard)** | stage | 20.0 / 20.0 | 1 in 125 s | 1 | 0 | 18%, 468 MB |
+| **20 / 5 ms (standard)** | latency | 20.5 / 21.0 | 0 | 0 | 0 | 63%, 419 MB |
+| 19 / 4 ms | stage | 19.0 / 19.0 | 0 | 0 | 1,173 | 18%, 473 MB |
+
+The pairs are head start / fill lead. The latency page's figures are half a
+millisecond higher because they are read from its stamp, which is on the epoch
+clock, and the two clocks are matched only to about that. The page costs more CPU
+because it draws a new picture every frame.
+
+- **Why 20 ms.** The head start has to cover the page's render, the conversion and
+  the fill lead. The stage view hands over a picture about 1 ms after its begin
+  frame when nothing changed, and up to 12 ms after on the frame its clock ticks or
+  the server pushes an update. The latency page takes 8 ms, and up to 9.2 at p99.
+  At 16 ms the stage view repeated twice in two minutes. At 18 ms the tightest
+  picture was ready 0.08 ms before its fill, which is luck, not margin. At 20 ms
+  there is about 2 ms to spare at the worst page render seen.
+- **Why 5 ms.** The fill copies the picture into the frame (0.5 ms) and the card
+  takes it (0.8 ms), leaving the card 3.7 ms (p50; 2.6 at the least outside a
+  driver stall) where it needs about 3. At 4 ms it showed one frame in six late.
+- **Capture rate.** Chromium's capture of a windowless page is limited to
+  `windowless_frame_rate` captures a second. At 60 or 120 it held back the picture
+  for the frame after a page change past the card's deadline, a repeat every time
+  the clock ticked. The host sets 1000; the begin frames set the cadence.
+- **What still costs a frame.** About once every one to two minutes the driver's
+  `ScheduleVideoFrame` slows down for a few seconds, from under 1 ms to 3, 10, and
+  at worst 30 to 55 ms. It happened with nothing else using the card, and in both
+  kinds of frame, though more in the helper's (`DeckLinkProbe bars` saw it there
+  with no browser running at all). A fill that waits that long makes the slots after
+  it too late, and they are skipped; the standard row's one repeat and one skip are
+  one such stall. A lead that rode it out would have to be more than 50 ms, more
+  than the whole delay this replaced. It is the one thing in the table not caused
+  by the page or the helper.
+
+### The budget, slot by slot
+
+At 1080p59.94 a slot is 16.68 ms. Times are before the slot goes to air, the
+standard leads, the medians measured above.
+
+| ms before air | Stage view (a still page) | Latency page (a new picture every frame) |
+|---|---|---|
+| 20.0 | Begin frame sent; Chromium runs the page's animation frame on this time | The same |
+| 19.0 | Picture handed over (Chromium's capture of the page as it is) | |
+| 17.6 | Converted to UYVY, ready | |
+| 12.0 | | Picture handed over, the page drawn |
+| 10.7 | | Converted, ready |
+| 5.0 | Fill: the newest picture copied into one of the card's frames (0.5 ms) | The same |
+| 4.5 | `ScheduleVideoFrame`: the card takes it (0.8 ms) | The same |
+| 3.7 | In the card's queue | The same |
+| 0 | The slot begins going out of the SDI port: **20 ms after the content was drawn** | The same |
+| -16.7 | The last line of the frame has gone out; the card reports it complete | The same |
+
+The monitor then adds its own delay. The SDI picture's top line leaves at 0 and its
+bottom line 16.7 ms later, as on any progressive output.
+
+### Glass to glass
+
+`--test-pattern latency` puts the latency page on every output that is on, a
+display output as well as a card port. Both read the same clock, so a photograph of
+the two screens shows their difference, each monitor included:
+
+```sh
+STAGE_UTILITY_OUTPUT_STATE_DIR=<a folder of its own> \
+  dist/arm64/StageUtilityOutput.app/Contents/MacOS/StageUtilityOutput --test-pattern latency --log-stderr
+```
+
+A card port is on from the start; the main display's output is off until it is
+turned on in the helper's window (or in that folder's `outputs.json`). It then covers
+the main display, menu bar included, and the helper's window opens over it: move
+the window off the clock, and quit from it when done. A shutter of 1/250 s or faster keeps the milliseconds legible; the moving
+bar and its tick marks give the same reading where they blur.
 
 ## Helper frames and card frames
 
@@ -237,13 +358,15 @@ Proven on a Mac with no DeckLink hardware and no driver:
   reads as not installed, the port list is empty, and opening a port says why,
   without crashing;
 - mode naming and refusal against the SDK's documented mode timings;
-- the scheduler, on the software clock: exactly the late frames repeat with the
-  previous picture, a stalled host resyncs once with no frames dropped, an unplugged
-  port is lost and reopens, health samples and the start/stop log lines;
-- the card-frame fallback, on a software clock that refuses the helper's frames:
-  it opens in its own frames, frames flow whole (its lines are longer than the
-  helper's), the counts are right, the switch is said once, and closing frees
-  every frame it made;
+- the scheduler, on the software clock: each slot begun and filled at its leads,
+  exactly the late frames repeat with the previous picture, a slot whose frames the
+  card still holds or that is too late for the card is skipped, an unplugged port is
+  lost and reopens, every slot's times reach the health sample, the start and stop
+  lines;
+- the frame fallbacks, on software clocks: one that makes no frames gets the
+  helper's, one that refuses the helper's gets its own, frames flow whole (the
+  card's lines are longer than the picture's), the switch is said once, and closing
+  frees every frame made;
 - the Metal conversion on this Mac's GPU, against exact UYVY bytes for white,
   black, the 75% bars and turned patterns;
 - eight 1080p59.94 outputs on the software clock through the whole path;
@@ -252,16 +375,22 @@ Proven on a Mac with no DeckLink hardware and no driver:
   720p59.94, at 59.94 fps with no repeats or drops once settled (the frames checked
   by `--dump-frames`, which decodes what the card was sent).
 
-Only a card can prove:
+Proven on a DeckLink 8K Pro, Desktop Video 16.4, an M4 Mac mini, an SDI monitor on
+port 1:
 
-- whether the driver accepts the helper's own frames (an `IDeckLinkVideoFrame` over
-  helper memory, which the SDK allows) and DMAs from them, or refuses them at the
-  pre-roll so the fallback takes over; a driver that took them and then sent
-  garbage would not be caught, and is what `bars` with and without
-  `--card-frames` side by side is for;
-- port enumeration, persistent ids, sub-devices and the modes a real card reports;
-- the card's completion results and stream time under load, and the resync on real
-  timing;
+- port enumeration, persistent ids, four sub-devices, and the connectors set as
+  inputs (modes listed, none playable);
+- both kinds of frame accepted and shown, with no drops over two minutes of bars in
+  either; the helper's stalled `ScheduleVideoFrame` in episodes, the card's did not;
+- completion timestamps on the host clock, the playback position, the card's need of
+  2.5 to 3 ms, a skipped slot held by the card with nothing reported late;
+- the stage view and the latency page through Chromium at 59.94 fps, 20 ms render
+  to air, the counts above.
+
+Still only a card can prove:
+
+- unplug and re-plug notifications, and `E_ACCESSDENIED` when another app holds the
+  port;
 - unplug and re-plug notifications, and `E_ACCESSDENIED` when another app holds the
   port;
 - the colour on a scope, interlaced output, and the bandwidth of eight ports.
