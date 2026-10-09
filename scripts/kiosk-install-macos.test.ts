@@ -47,6 +47,47 @@ function sh(code: string, env: Record<string, string> = {}, args: string[] = [])
   });
 }
 
+const ME = os.userInfo().username;
+
+/**
+ * Stand-ins for every command that changes a real Mac: launchctl, pmset, defaults,
+ * pkill, chown, chgrp, plutil. Each appends one line to a log, "<name> <args> |
+ * marker=yes|no", where `marker` says whether the migration marker existed at that
+ * moment (that is how the ORDER of the migration is observed), and exits 0 unless
+ * SHIM_FAIL_<name> says otherwise. `launchctl print` answers "not loaded" and
+ * `pgrep` answers "none", so nothing looks running. Nothing here runs a real one.
+ */
+const SHIM = `#!/bin/sh
+name=$(basename "$0")
+here=no
+if [ -n "\${SHIM_MARKER:-}" ] && [ -e "$SHIM_MARKER" ]; then here=yes; fi
+line="$name"
+for a in "$@"; do line="$line $a"; done
+printf '%s | marker=%s\\n' "$line" "$here" >>"$SHIM_LOG"
+case "$name:\${1:-}" in
+  launchctl:print) exit "\${SHIM_PRINT_RC:-1}" ;;
+  pgrep:*) exit 1 ;;
+esac
+eval "rc=\\\${SHIM_FAIL_$name:-0}"
+exit "$rc"
+`;
+const SHIMMED = ["launchctl", "pmset", "defaults", "pgrep", "pkill", "chown", "chgrp", "plutil"];
+
+const shimDirs: string[] = [];
+
+function makeShims(): { dir: string; log: () => string[]; env: Record<string, string> } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "su-shims-"));
+  shimDirs.push(dir);
+  for (const name of SHIMMED) fs.writeFileSync(path.join(dir, name), SHIM, { mode: 0o755 });
+  const log = path.join(dir, "calls.log");
+  fs.writeFileSync(log, "");
+  return {
+    dir,
+    log: () => fs.readFileSync(log, "utf8").split("\n").filter(Boolean),
+    env: { PATH: `${dir}:${process.env.PATH ?? ""}`, SHIM_LOG: log },
+  };
+}
+
 const dryRun = (root: string, args: string[], env: Record<string, string> = {}) =>
   sh('exec sh "$@"', { STAGE_INSTALL_TEST_ROOT: root, ...env }, [SCRIPT, "--dry-run", ...args]);
 
@@ -56,6 +97,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   fs.rmSync(scratch, { recursive: true, force: true });
+  for (const d of shimDirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
 });
 
 describe("install-macos.sh is valid shell", () => {
@@ -78,7 +120,7 @@ describe("install-macos.sh is valid shell", () => {
 });
 
 describe("--dry-run", () => {
-  const server = { STAGE_SERVER: "http://192.0.2.10:8788", STAGE_INSTALL_TEST_UNAME_S: "Darwin", STAGE_INSTALL_TEST_OS_VERSION: "14.5" };
+  const server = { STAGE_SERVER: "http://192.0.2.10:8788", STAGE_INSTALL_TEST_UNAME_S: "Darwin", STAGE_INSTALL_TEST_OS_VERSION: "14.5", STAGE_INSTALL_TEST_CONSOLE_USER: ME };
 
   it("prints the helper's steps for each architecture, and changes nothing", async () => {
     for (const arch of ["arm64", "x86_64"]) {
@@ -96,6 +138,24 @@ describe("--dry-run", () => {
       assert.match(r.out, /Dry run: nothing was changed/);
     }
     assert.deepEqual(fs.readdirSync(scratch), [], "a dry run must not create a single file");
+  });
+
+  it("plans a system-wide agent, started now for the console user", async () => {
+    const r = await dryRun(scratch, [], { ...server, STAGE_INSTALL_TEST_UNAME_M: "arm64" });
+    assert.equal(r.status, 0, r.err);
+    assert.match(r.out, /write .*\/Library\/LaunchAgents\/com\.stageutility\.output\.plist, root-owned, which starts the helper at every login/);
+    assert.match(r.out, new RegExp(`start the helper now for ${ME}`));
+    assert.doesNotMatch(r.out, /Nobody is logged in/);
+  });
+
+  it("with nobody logged in, plans the same agent and says the helper starts at the next login", async () => {
+    const r = await dryRun(scratch, [], { ...server, STAGE_INSTALL_TEST_CONSOLE_USER: "none", STAGE_INSTALL_TEST_UNAME_M: "arm64" });
+    assert.equal(r.status, 0, r.err);
+    assert.match(r.out, /write .*\/Library\/LaunchAgents\/com\.stageutility\.output\.plist, root-owned/);
+    assert.match(r.out, /nobody is logged in, so the helper starts at the next login/);
+    assert.match(r.out, /Nobody is logged in, so the helper has not started: it starts at the next login\./);
+    assert.doesNotMatch(r.out, /start the helper now/);
+    assert.deepEqual(fs.readdirSync(scratch), []);
   });
 
   it("says it will keep an existing device id, and not make another", async () => {
@@ -245,16 +305,18 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
     host.routes.set(`${prefix}/StageUtilityOutput-arm64.zip.sha256`, { body: `${digest}  StageUtilityOutput-arm64.zip\n` });
   };
 
+  const baseEnv = (extra: Record<string, string> = {}): Record<string, string> => ({
+    STAGE_INSTALL_SOURCED: "1",
+    STAGE_INSTALL_TEST_ROOT: scratch,
+    STAGE_INSTALL_TEST_UNAME_M: "arm64",
+    STAGE_INSTALL_GITHUB_BASE: `${github.base}/releases`,
+    STAGE_SERVER: stageServer.base,
+    ...extra,
+  });
+
   /** Source the installer and run `steps` in it, as main() would, with the exit trap armed. */
   const install = (steps: string, extra: Record<string, string> = {}) =>
-    sh(`. "${SCRIPT}"; trap on_exit EXIT; WORK="$(mktemp -d)"; ${steps}`, {
-      STAGE_INSTALL_SOURCED: "1",
-      STAGE_INSTALL_TEST_ROOT: scratch,
-      STAGE_INSTALL_TEST_UNAME_M: "arm64",
-      STAGE_INSTALL_GITHUB_BASE: `${github.base}/releases`,
-      STAGE_SERVER: stageServer.base,
-      ...extra,
-    });
+    sh(`. "${SCRIPT}"; trap on_exit EXIT; WORK="$(mktemp -d)"; ${steps}`, baseEnv(extra));
 
   const app = () => path.join(scratch, "Applications", "StageUtilityOutput.app");
   const marker = () => fs.readFileSync(path.join(app(), "Contents", "MacOS", "StageUtilityOutput"), "utf8").trim().split(" ")[1];
@@ -369,6 +431,82 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
     assert.equal(r.status, 1);
     assert.match(r.err, /is not com\.stageutility\.output/);
     assert.ok(!fs.existsSync(app()));
+  });
+
+  // The whole of install_helper, in a test root, with launchctl and the other
+  // commands that change a Mac replaced by logging stand-ins (see SHIM). Nothing
+  // here touches launchd, pmset, defaults or a real account.
+  describe("a whole install, with the commands that change a Mac stubbed", { skip: !(has("uuidgen") && has("xxd")) && "needs uuidgen and xxd" }, () => {
+    const stateDir = () => path.join(scratch, "Library", "Application Support", "StageUtility");
+    const agents = () => path.join(scratch, "Library", "LaunchAgents");
+    const helperPlist = () => path.join(agents(), "com.stageutility.output.plist");
+    const kioskPlist = () => path.join(agents(), "com.stageutility.kiosk.plist");
+    const marker = () => path.join(stateDir(), "migrated-from-kiosk");
+
+    const seedKiosk = () => {
+      fs.mkdirSync(agents(), { recursive: true });
+      fs.mkdirSync(path.join(scratch, "usr", "local", "bin"), { recursive: true });
+      fs.writeFileSync(kioskPlist(), "<plist/>");
+      fs.writeFileSync(path.join(scratch, "usr", "local", "bin", "stage-utility-kiosk"), "#!/bin/sh\n");
+    };
+
+    let shims: ReturnType<typeof makeShims>;
+    beforeEach(() => {
+      shims = makeShims();
+    });
+
+    /** install_helper itself, as main() calls it, as the console user `who` ("none" for nobody). */
+    const whole = (who: string, extra: Record<string, string> = {}) =>
+      sh(`. "${SCRIPT}"; trap on_exit EXIT; install_helper`, baseEnv({ ...shims.env, SHIM_MARKER: marker(), STAGE_INSTALL_TEST_CONSOLE_USER: who, ...extra }));
+
+    it("with someone logged in: a root-owned system LaunchAgent, started in their session", async () => {
+      publish(stageServer, "/kiosk", zipA);
+      const r = await whole(ME);
+      assert.equal(r.status, 0, r.out + r.err);
+
+      assert.ok(fs.existsSync(helperPlist()), "the agent is in /Library/LaunchAgents, not a home folder");
+      assert.equal(fs.statSync(helperPlist()).mode & 0o777, 0o644);
+      const plist = fs.readFileSync(helperPlist(), "utf8");
+      assert.match(plist, /<key>Label<\/key><string>com\.stageutility\.output<\/string>/);
+      assert.match(plist, /<key>LimitLoadToSessionType<\/key><string>Aqua<\/string>/);
+
+      const calls = shims.log().map((l) => l.replace(/ \| marker=.*/, ""));
+      assert.ok(calls.includes(`chown root:wheel ${helperPlist()}`), calls.join("\n"));
+      const uid = (await sh("id -u")).out.trim();
+      assert.ok(calls.includes(`launchctl bootstrap gui/${uid} ${helperPlist()}`), calls.join("\n"));
+      assert.match(r.out, new RegExp(`started for ${ME}; it also starts at every login`));
+      assert.doesNotMatch(r.out, /Nobody is logged in/);
+      assert.doesNotMatch(calls.join("\n"), /dscl/, "no account lookup is needed any more");
+    });
+
+    it("with nobody logged in: the same agent, no start, and text that says it starts at the next login", async () => {
+      publish(stageServer, "/kiosk", zipA);
+      const r = await whole("none");
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.ok(fs.existsSync(helperPlist()), "still installed: it loads at the next GUI login of any account");
+      assert.equal(fs.statSync(helperPlist()).mode & 0o777, 0o644);
+      const calls = shims.log().map((l) => l.replace(/ \| marker=.*/, ""));
+      assert.deepEqual(calls.filter((c) => c.startsWith("launchctl")), [], "no session to start it in");
+      assert.match(r.out, /nobody is logged in at the console, so the helper was not started/);
+      assert.match(r.out, /starts at the next login/);
+      assert.doesNotMatch(r.out, /started for/);
+      // The token is for the administrators group, since no account owns it yet.
+      assert.equal(fs.statSync(path.join(stateDir(), "token")).mode & 0o777, 0o640);
+      assert.ok(calls.includes(`chgrp admin ${path.join(stateDir(), "token")}`), calls.join("\n"));
+      assert.match(r.out, /If the account\s+that logs in first is not one/);
+    });
+
+    it("with nobody logged in, still replaces the Chrome kiosk, and says it happens at the next login", async () => {
+      seedKiosk();
+      publish(stageServer, "/kiosk", zipA);
+      const r = await whole("none");
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.ok(fs.existsSync(marker()));
+      assert.ok(!fs.existsSync(kioskPlist()), "the kiosk's agent is gone");
+      assert.ok(fs.existsSync(helperPlist()), "and the helper's agent takes its place at the next login");
+      assert.match(r.out, /Nobody is logged in, so the kiosk is replaced at the next login/);
+      assert.deepEqual(shims.log().filter((l) => l.startsWith("launchctl")), []);
+    });
   });
 });
 

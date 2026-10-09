@@ -78,11 +78,17 @@ curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
 3. Unpacks it beside `/Applications`, checks it is the helper, then swaps it in. The
    old copy is kept until the new one is in place and put back if anything fails,
    so a Mac is never left without the app.
-4. Writes `~/Library/LaunchAgents/com.stageutility.output.plist` for the account at
-   the console and starts it. The helper starts at every login, is restarted if it
-   crashes, and stays closed if someone quits it.
+4. Writes `/Library/LaunchAgents/com.stageutility.output.plist`, root-owned, the same
+   place the Chrome kiosk's agent lived, so the helper starts at every GUI login of
+   any account, is restarted if it crashes, and stays closed if someone quits it. If
+   someone is logged in it is started for them now; if nobody is, it starts at the next
+   login, and the installer says so. The helper's own *Open at login* switch adds a
+   second way to start it, which does no harm: a second copy hands over to the first.
 5. Turns off display sleep and system sleep (`pmset`), and sets the console user's
-   screen saver to never and the password after it to off, where macOS accepts it.
+   screen saver to never and the password after it to off, where macOS accepts it. With
+   nobody logged in the screen saver is left alone, since it is a per-account setting,
+   and the token is readable by administrators until an account owns it: if the first
+   account to log in is not one, run the installer again after it has.
 
 Running it again upgrades in place.
 

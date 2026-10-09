@@ -7,7 +7,7 @@
 # menu bar app that makes each of the Mac's displays, and each DeckLink port, a
 # screen device of its own. It downloads the app from this server, falls back to
 # the GitHub release for the server's version, checks a published SHA-256, puts it
-# in /Applications and starts it at login.
+# in /Applications and starts it at login, for whichever account logs in.
 #
 #   --browser    the earlier Chrome kiosk instead: one full-screen browser. For a
 #                Mac the helper cannot run on.
@@ -57,6 +57,9 @@ SERVER="${STAGE_SERVER:-}"
 APP_NAME=StageUtilityOutput.app
 APP_EXEC=StageUtilityOutput
 HELPER_LABEL=com.stageutility.output
+# System-wide, like the Chrome kiosk's agent: root-owned, loaded at any GUI login,
+# so it needs no account to exist when this runs.
+HELPER_PLIST="$AGENT_DIR/$HELPER_LABEL.plist"
 GITHUB_BASE="${STAGE_INSTALL_GITHUB_BASE:-https://github.com/Cornerstone-Production/Stage-Utility/releases/download}"
 
 MODE=helper
@@ -143,16 +146,22 @@ check_macos() {
   fi
 }
 
-# The account at the keyboard. The installer runs as root, but the helper is a
-# per-user app and its LaunchAgent and settings belong to whoever is logged in.
+# The account at the keyboard, if any. The installer runs as root and the helper
+# is a per-user app, so this decides what can be done NOW: starting the helper in
+# that account's session, and handing it the token. With nobody logged in the
+# install still completes, and the helper starts at the next login.
 find_console_user() {
-  CONSOLE_USER="$(stat -f %Su /dev/console 2>/dev/null || true)"
-  if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != root ]; then
-    CONSOLE_UID="$(id -u "$CONSOLE_USER")"
+  if [ -n "${STAGE_INSTALL_TEST_CONSOLE_USER:-}" ]; then
+    CONSOLE_USER="$STAGE_INSTALL_TEST_CONSOLE_USER"
+    if [ "$CONSOLE_USER" = none ]; then CONSOLE_USER=""; fi
   else
-    CONSOLE_USER=""
-    CONSOLE_UID=""
+    CONSOLE_USER="$(stat -f %Su /dev/console 2>/dev/null || true)"
   fi
+  CONSOLE_UID=""
+  if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != root ]; then
+    CONSOLE_UID="$(id -u "$CONSOLE_USER" 2>/dev/null)" || CONSOLE_UID=""
+  fi
+  if [ -z "$CONSOLE_UID" ]; then CONSOLE_USER=""; fi
 }
 
 # ── The device's identity, kept across installs ────────────────────────────
@@ -166,7 +175,11 @@ write_state() {
       would "create a device id and a token in $STATE_DIR"
     fi
     if [ -n "$SERVER" ]; then would "write $SERVER to $STATE_DIR/server"; fi
-    would "give the token to the console user, mode 600"
+    if [ -n "$CONSOLE_USER" ]; then
+      would "give the token to $CONSOLE_USER, mode 600"
+    else
+      would "leave the token readable by administrators: nobody is logged in"
+    fi
     return 0
   fi
   mkdir -p "$STATE_DIR"
@@ -190,13 +203,15 @@ write_state() {
     chmod 600 "$STATE_DIR/token"
     say "    kiosk user: $CONSOLE_USER"
   else
-    # No GUI session yet -- an install over SSH before anyone has logged in. Leave
-    # it group-readable rather than unreadable, and SAY SO: a silent 0600 here is
-    # exactly the failure this block exists to prevent, and it presents as a screen
-    # that enrols for ever.
+    # No GUI session yet -- an install over SSH, or at the login window. The helper
+    # starts at the next login as whichever account that is, and it must be able to
+    # read the token then. Readable by the administrators group, not unreadable and
+    # not by everyone: a silent 0600 here is exactly the failure this block exists
+    # to prevent, and it presents as a screen that enrols for ever.
+    chgrp admin "$STATE_DIR/token" || warn "could not give the administrators group the token"
     chmod 640 "$STATE_DIR/token"
-    say "    no console user yet — token left group-readable; re-run this installer"
-    say "    after logging in if the screen never leaves the holding page."
+    say "    no console user yet: the token is readable by administrators. If the account"
+    say "    that logs in first is not one, re-run this installer after it has."
   fi
   say "    device id: $(cat "$STATE_DIR/device-id")"
 }
@@ -359,10 +374,6 @@ swap_app() {
 }
 
 # ── The agent that starts the helper at login ──────────────────────────────
-user_home() {
-  dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | sed 's/^NFSHomeDirectory: //'
-}
-
 # Never relaunch after a clean Quit from the app's window, always after a crash.
 write_helper_plist() {
   cat >"$1" <<PLIST
@@ -382,6 +393,8 @@ write_helper_plist() {
 </dict>
 </plist>
 PLIST
+  # launchd refuses a LaunchAgent in /Library that is not root's.
+  chown root:wheel "$1" || die "could not make $1 root-owned."
   chmod 644 "$1"
 }
 
@@ -406,37 +419,30 @@ stop_helper_agent() {
 
 start_helper_agent() {
   [ -n "$CONSOLE_UID" ] || return 0
-  plist="$(user_home)/Library/LaunchAgents/$HELPER_LABEL.plist"
-  [ -f "$plist" ] || return 0
-  launchctl bootstrap "gui/$CONSOLE_UID" "$plist"
+  [ -f "$HELPER_PLIST" ] || return 0
+  launchctl bootstrap "gui/$CONSOLE_UID" "$HELPER_PLIST"
 }
 
+# A system-wide LaunchAgent, so it loads at any GUI login and this needs no
+# account, home folder or console user. It is started now only when someone is
+# logged in to have a session for it.
 install_helper_agent() {
+  mkdir -p "$AGENT_DIR"
+  write_helper_plist "$HELPER_PLIST"
+  if command -v plutil >/dev/null 2>&1; then
+    plutil -lint "$HELPER_PLIST" >/dev/null || die "the LaunchAgent written to $HELPER_PLIST is not a valid property list."
+  fi
   if [ -z "$CONSOLE_USER" ]; then
-    say "    nobody is logged in at the console, so no login agent was written;"
-    say "    re-run this installer after logging in as the account that will run the Mac."
+    say "    nobody is logged in at the console, so the helper was not started:"
+    say "    it starts at the next login, whichever account that is"
     return 0
   fi
-  home="$(user_home)"
-  [ -d "$home" ] || die "could not find the home folder of $CONSOLE_USER."
-  agents="$home/Library/LaunchAgents"
-  if [ ! -d "$agents" ]; then
-    mkdir -p "$agents"
-    chown "$CONSOLE_USER" "$agents"
-  fi
-  plist="$agents/$HELPER_LABEL.plist"
-  write_helper_plist "$plist"
-  chown "$CONSOLE_USER" "$plist"
-  if command -v plutil >/dev/null 2>&1; then
-    plutil -lint "$plist" >/dev/null || die "the LaunchAgent written to $plist is not a valid property list."
-  fi
-  # Started now: the account is at the console, so it has a session. Through
-  # launchd rather than directly, so a crash is restarted and a logout stops it.
-  if launchctl bootstrap "gui/$CONSOLE_UID" "$plist"; then
-    AGENT_STOPPED=0
+  # Through launchd rather than directly, so a crash is restarted and a logout
+  # stops it.
+  if launchctl bootstrap "gui/$CONSOLE_UID" "$HELPER_PLIST"; then
     say "    started for $CONSOLE_USER; it also starts at every login"
   else
-    warn "could not start the helper now; it starts at the next login of $CONSOLE_USER"
+    warn "could not start the helper now; it starts at the next login"
   fi
 }
 
@@ -471,6 +477,10 @@ migrate_kiosk() {
   say "    removed $AGENT and $BIN"
   say "    this Mac keeps its device id and its screen: the helper brings it back by itself"
   say "    on the main display. The Chrome profile in $STATE_DIR is left in place."
+  if [ -z "$CONSOLE_USER" ]; then
+    say "    Nobody is logged in, so the kiosk is replaced at the next login: the Chrome"
+    say "    agent is gone and the helper's agent takes its place."
+  fi
 }
 
 # ── What an output Mac needs ───────────────────────────────────────────────
@@ -482,7 +492,11 @@ set_power() {
   say "==> Keeping the displays awake"
   if [ "$DRY" -eq 1 ]; then
     would "pmset -a displaysleep 0 sleep 0"
-    would "screen saver idle time 0, and no password after it, for the console user"
+    if [ -n "$CONSOLE_USER" ]; then
+      would "screen saver idle time 0, and no password after it, for $CONSOLE_USER"
+    else
+      would "leave the screen saver alone: it is per account and nobody is logged in"
+    fi
     return 0
   fi
   # Display sleep is the difference between a display and a black rectangle.
@@ -510,6 +524,9 @@ set_power() {
 
 notes() {
   say
+  if [ -z "$CONSOLE_USER" ]; then
+    say "    Nobody is logged in, so the helper has not started: it starts at the next login."
+  fi
   say "    Still to do at the Mac, once. macOS does not let a script do these:"
   say "      - System Settings > Users & Groups: set automatic login to this account."
   say "        The helper's browser needs a logged-in session."
@@ -535,7 +552,7 @@ install_helper() {
   say "==> Installing the Stage Utility Output helper"
   detect_arch
   say "    this Mac: $ARCH"
-  if [ "$DRY" -eq 0 ]; then find_console_user; fi
+  find_console_user
   write_state
 
   if [ "$DRY" -eq 1 ]; then
@@ -545,7 +562,12 @@ install_helper() {
     would "failing that, ask $origin/api/update/status for its version and download the GitHub release's StageUtilityOutput-$ARCH.zip"
     would "refuse a zip whose SHA-256 differs from the published one"
     would "unpack beside $APPS_DIR/$APP_NAME, check it is $HELPER_LABEL, then swap it in, keeping the old copy until that worked"
-    would "write ~/Library/LaunchAgents/$HELPER_LABEL.plist for the console user and start it"
+    would "write $HELPER_PLIST, root-owned, which starts the helper at every login"
+    if [ -n "$CONSOLE_USER" ]; then
+      would "start the helper now for $CONSOLE_USER"
+    else
+      would "nobody is logged in, so the helper starts at the next login"
+    fi
     migrate_kiosk
     set_power
     notes
@@ -573,6 +595,7 @@ install_helper() {
 # Today's Chrome kiosk.
 install_browser() {
   echo "==> Installing the Stage Utility kiosk agent"
+  find_console_user
 
   if [ "$DRY" -eq 1 ]; then
     write_state
@@ -582,7 +605,6 @@ install_browser() {
     return 0
   fi
 
-  find_console_user
   write_state
 
   # ── The launcher ────────────────────────────────────────────────────────
