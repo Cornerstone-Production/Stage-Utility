@@ -862,6 +862,25 @@ describe("guided creation", () => {
     assert.deepEqual(calls[0], ["create", { name: "lobby-pi", mode: "display" }, device]);
   });
 
+  test("a device bound elsewhere while the panel is open is not taken: it says so and Create is off", async () => {
+    // Another operator set the same waiting device up meanwhile. The server now
+    // refuses the claim, and the panel must not invite it.
+    const device = { id: "kiosk-aaaa", hostname: "lobby-pi", ip: "192.0.2.10" };
+    const { calls } = mount({ target: { kind: "new", device, defaultName: "lobby-pi" }, outputs: [MINE] });
+    await act(async () => { await settle(); await settle(); });
+    assert.equal(create().disabled, false, "Create is off for a device that is still waiting");
+    devicesPayload = {
+      scanning: false, seen: [], matches: {}, error: null,
+      bound: [{ id: "kiosk-aaaa", outputId: "display-1", macs: [], hostname: "lobby-pi" }],
+    };
+    const { refreshDevices } = await import("../../app/screens/use-devices.js");
+    await act(async () => { await refreshDevices(); await settle(); });
+    assert.match(screen.getByRole("status").textContent ?? "", /set up as "Lobby TV" meanwhile/);
+    assert.equal(create().disabled, true, "Create is still offered for a device that is bound");
+    await click(create());
+    assert.deepEqual(calls.filter((c) => c[0] === "create"), []);
+  });
+
   test("without a device it says to point a monitor at the address", () => {
     mount({ target: NEW_TARGET, outputs: [MINE] });
     assert.ok(screen.getByText("Nothing is created until you finish. Then point a monitor at its address."));

@@ -713,8 +713,9 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
 type Step = 1 | 2 | 3;
 const STEP_TITLES = ["What is this screen?", "What should it show?", "Name it"] as const;
 
-function GuidedBody({ target, views, baseUrl, step, setStep, actions, onClose }: {
+function GuidedBody({ target, outputs, views, baseUrl, step, setStep, actions, onClose }: {
   target: Extract<PanelTarget, { kind: "new" }>;
+  outputs: Output[];
   views: View[];
   baseUrl: string;
   step: Step;
@@ -729,6 +730,13 @@ function GuidedBody({ target, views, baseUrl, step, setStep, actions, onClose }:
   const [slug, setSlug] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // The device this is for may be bound by another operator while the form is
+  // open. It is no longer waiting then, the server refuses to make it a new
+  // screen, and the form says so rather than inviting a claim that fails.
+  const { bound } = useDevices();
+  const taken = target.device ? bound.find((d) => d.id === target.device!.id) : undefined;
+  const takenBy = taken ? (outputs.find((o) => o.id === taken.outputId)?.name ?? taken.outputId) : null;
 
   // A view picked for one role does not follow the screen to the other.
   const fits = viewChoice === NONE || viewChoice === NEW_VIEW || viewsFittingRole(views, role, null).some((v) => v.id === viewChoice);
@@ -813,6 +821,12 @@ function GuidedBody({ target, views, baseUrl, step, setStep, actions, onClose }:
             />
           </Section>
         )}
+        {takenBy !== null && (
+          <p role="status" className="mt-3 rounded-[9px] border border-warn-9/35 bg-warn-9/8 px-3 py-2.5 text-footnote text-fg">
+            This device was set up as "{takenBy}" meanwhile, so it cannot be made a new screen. Close this to keep that,
+            or release it from that screen first.
+          </p>
+        )}
         {error && <ErrorNote className="mt-3">{error}</ErrorNote>}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-[18px] py-3">
@@ -833,8 +847,9 @@ function GuidedBody({ target, views, baseUrl, step, setStep, actions, onClose }:
             </Button>
           )}
           {/* Enabled on every step: each one has a default (a wall display, no
-              view, a numbered name), so there is nothing to finish before it. */}
-          <Button type="button" variant="accent" size="medium" onClick={() => void create()} disabled={busy}>
+              view, a numbered name), so there is nothing to finish before it.
+              Off only for a device someone else has bound meanwhile. */}
+          <Button type="button" variant="accent" size="medium" onClick={() => void create()} disabled={busy || takenBy !== null}>
             Create screen
           </Button>
         </span>
@@ -916,7 +931,7 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
           <div className="border-t border-line px-[18px] py-3 text-caption1 text-fg-subtle">Changes save as you make them.</div>
         </>
       ) : target.kind === "new" ? (
-        <GuidedBody target={target} views={views} baseUrl={baseUrl} step={step} setStep={setStep} actions={actions} onClose={onClose} />
+        <GuidedBody target={target} outputs={outputs} views={views} baseUrl={baseUrl} step={step} setStep={setStep} actions={actions} onClose={onClose} />
       ) : null}
     </aside>
   );
