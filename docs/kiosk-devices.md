@@ -159,3 +159,18 @@ screen.
 
 Uninstalling the agent leaves the device id in place, so reinstalling on the same
 machine does not orphan the binding.
+
+## Mac output helper (beta)
+
+A Mac can be several screens at once. The helper is a menu bar app that announces
+one device for each of the Mac's displays; each is set up on its own under *Not set
+up yet*, like any other device. The server can be on another machine or on the same
+Mac. It renders each screen in the Mac's own WebKit, so it looks as it does in
+Safari.
+
+The main display, the one with the menu bar, is off until it is switched on in the
+helper, so the Mac keeps its desktop. Each display counts toward the number the Mac
+can drive.
+
+Build, flags, state files, the Local Network permission and how outputs map to
+devices are in [helper/macos/README.md](../helper/macos/README.md).
