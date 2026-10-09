@@ -368,6 +368,8 @@ launch), are also said in the helper's window. Chromium writes its own warnings 
 | `Sources/StageUtilityCEFHostAPI/` | The browser host's C API, and the few lines that open the host at run time. |
 | `CEFHost/` | The browser host, over CEF, built with CMake. |
 | `Tests/StageUtilityOutputCoreTests/` | swift-testing tests of the core. Nothing that needs Chromium running is unit-tested; that is driven end to end. |
+| `Vendor/DeckLink/`, `Sources/DeckLinkShim/`, `Sources/DeckLinkKit/`, `Sources/DeckLinkProbe/` | The DeckLink layer: the vendored SDK headers, the C++ shim and its scheduler, the Swift ports and Metal conversion, and a bench tool. See [DECKLINK.md](DECKLINK.md). |
+| `Tests/DeckLinkKitTests/` | The scheduler on a software clock, the driver with none installed, and the Metal conversion on this Mac's GPU. |
 
 An output is a `WebSurface` and somewhere for its pictures to go (`OutputSink`).
 `WebSurface` is a protocol with no engine in it (load, reload, a committed-address
