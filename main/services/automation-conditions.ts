@@ -278,6 +278,8 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
       key: "days",
       label: "Days",
       type: "multi-enum",
+      // Blank is every day: holds() reads it that way.
+      optional: true,
       options: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d, i) => ({ value: String(i), label: d })),
     }],
     holds: (_ctx, params, now) => {

@@ -49,12 +49,13 @@ function sourcesTheRegistriesAskFor(): string[] {
 }
 
 /**
- * The eight sources, sorted, one per line. A bare count cannot tell an add plus
+ * The nine sources, sorted, one per line. A bare count cannot tell an add plus
  * a remove from no change; a sorted list also merges cleanly when two branches
  * each wire up a different source.
  */
 const EXPECTED_SOURCES = [
   "displays",
+  "message-groups",
   "osc-targets",
   "plan-items",
   "propresenter-instances",
@@ -69,7 +70,7 @@ describe("runtime option sources", () => {
     assert.deepEqual([...OPTION_SOURCE_KEYS].sort(), sourcesTheRegistriesAskFor());
   });
 
-  test("eight sources, exactly", () => {
+  test("nine sources, exactly", () => {
     // An exact set, not a bare count. Change this list only alongside a source
     // that a registry param really names.
     assert.deepEqual(
@@ -108,6 +109,7 @@ describe("runtime option sources", () => {
       propresenterMacros: { items: junk },
       serviceTypes: junk,
       outputs: junk,
+      messagingConfig: { groups: junk },
     });
     for (const key of OPTION_SOURCE_KEYS) assert.deepEqual(sources[key].options, []);
   });
@@ -124,5 +126,42 @@ describe("runtime option sources", () => {
     });
     assert.deepEqual(sources["service-types"].options, [{ value: "st-1", label: "Sunday Morning" }]);
     assert.deepEqual(sources["displays"].options, [{ value: "out-1", label: "Lobby Wall" }]);
+  });
+
+  test("message groups list Everyone first, then each group in the config's order, by id", () => {
+    // `POST /api/messages` takes group ids in `to`, and Everyone is the built-in
+    // id, not a stored group. The config's order is kept, not sorted by name.
+    const sources = buildOptionSources({
+      messagingConfig: { groups: [{ id: "g-0000000b", name: "Stage" }, { id: "g-0000000a", name: "Green room" }] },
+    });
+    assert.deepEqual(sources["message-groups"].options, [
+      { value: "everyone", label: "Everyone" },
+      { value: "g-0000000b", label: "Stage" },
+      { value: "g-0000000a", label: "Green room" },
+    ]);
+  });
+
+  test("message groups are Everyone alone for a config with no groups, and nothing until it has answered", () => {
+    assert.deepEqual(buildOptionSources({ messagingConfig: { groups: [] } })["message-groups"].options, [
+      { value: "everyone", label: "Everyone" },
+    ]);
+    // Not even Everyone while the config is in flight: a saved group would read
+    // as "no longer offered" for as long as the answer took.
+    assert.deepEqual(buildOptionSources({})["message-groups"].options, []);
+    assert.deepEqual(buildOptionSources({ messagingConfig: {} })["message-groups"].options, []);
+  });
+
+  test("a failed read of the groups says so under the field, until an answer is held", () => {
+    // An empty To list otherwise reads as a config with no groups.
+    assert.equal(
+      buildOptionSources({ messagingFailed: true })["message-groups"].notice,
+      "The message groups could not be read.",
+    );
+    assert.equal(buildOptionSources({})["message-groups"].notice, undefined);
+    // A refetch that failed while an earlier answer is still held: the list is whole.
+    assert.equal(
+      buildOptionSources({ messagingConfig: { groups: [] }, messagingFailed: true })["message-groups"].notice,
+      undefined,
+    );
   });
 });
