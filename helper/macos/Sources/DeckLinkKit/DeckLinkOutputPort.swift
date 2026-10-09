@@ -139,6 +139,10 @@ public final class DeckLinkOutputPort: CardSink {
 
   public var state: State { queue.sync { current } }
 
+  /// The state, and why a running port is not sending the page (`CardWatch.Silence`):
+  /// what the window says, read together.
+  public var status: (state: State, silence: CardWatch.Silence?) { queue.sync { (current, watch.silence) } }
+
   /// The frame size of the mode it last opened in; nil before it has opened.
   public var frameSize: PixelSize? { queue.sync { openSize } }
 
@@ -458,6 +462,10 @@ public final class DeckLinkOutputPort: CardSink {
       case .stalled:
         // The owner says what it does about it.
         stalled?()
+      case .noPicture(let seconds):
+        log(.error, "\(label): no picture from the page in \(seconds) s of sending, so the card is sending black")
+      case .drawingAgain:
+        log(.info, "\(label): pictures from the page again")
       }
     }
   }

@@ -312,6 +312,7 @@ log stream --level info --predicate 'subsystem == "com.stageutility.output" && c
 | `<port>: render to air 20.0 ms (p95 20.1, max 20.2) over 591 new pictures` | When a health window first measures it, and again when it moves by 4 ms or more: how far behind the page the card's output runs (see [Latency](#latency)). |
 | `<port>: refused 1080p59.94: <reason>` | The mode cannot be played on that port. |
 | `<port>: could not open (<reason>)` / `lost (<reason>)` | A port that will not open or went away; retried. A running port that sends nothing for two seconds is lost with "the card stopped taking frames". |
+| `<port>: no picture from the page in 10 s of sending, so the card is sending black` / `pictures from the page again` | A running port whose page has never handed over a picture, and the first picture after that or after a stall (`CardWatch`). The window says "No picture from the page. Sending black" meanwhile, in place of the frame rate. |
 | `<port>: falling behind: r repeated and d dropped in the last second` / `keeping up again after n s` | A second with 5% or more of its frames repeated (the server's line: 3 at 59.94, 2 at 23.98 to 30) or any slot missed, and five good seconds in a row after it (`CardWatch`). |
 
 Healthy frames are not logged.
@@ -341,7 +342,7 @@ slot's timing is written out too.
 |---|---|
 | `CardFrameSource` | Starts the picture for slot *n* when asked (`begin`, the head start before air), and hands over the newest picture with its times (`fill`, the fill lead before air), on the output's clock thread. Nil for a repeat. |
 | `CardSink` | Pulls from a source on its own clock and counts: `counters` (`scheduled`, `rendered`, `repeated`, `dropped`, `resyncs`, `skipped`) and `takeHealthSample()`, in the server's units, with the window's render-to-air latency (`latencyMs`). |
-| `DeckLinkOutputPort` | The `CardSink` for a port. `.port(DeckLinkPort)` for a card; `.virtual` for a `--virtual-sdi` output, the scheduler on a software clock at the size and rate of whichever server mode it is opened in; `.softwareClock(…)`, a fixed size, for tests and the bench tool. Once a second it logs falling behind and catching up, and calls `onSourceStalled` when the source has had nothing new for 5 s. |
+| `DeckLinkOutputPort` | The `CardSink` for a port. `.port(DeckLinkPort)` for a card; `.virtual` for a `--virtual-sdi` output, the scheduler on a software clock at the size and rate of whichever server mode it is opened in; `.softwareClock(…)`, a fixed size, for tests and the bench tool. Once a second it logs falling behind and catching up, and a page that has never drawn 10 s after it started sending, and calls `onSourceStalled` when the source has had nothing new for 5 s; `status` carries why a running port is not sending the page. |
 | `SurfaceFrameSource` | A `CardFrameSource` an engine presents IOSurfaces to, with the `rotation`, the Metal conversion at the size of the frames it is asked to fill, and `captureNextFrame` for a dump of what the card was sent. |
 | `DeckLinkInventory`, `DeckLinkDriver.watchDevices` | The ports to announce (`seen`: every port found since launch), and when to look again. |
 

@@ -143,14 +143,17 @@ final class CardOutput: OutputSink {
     port.open(videoMode: asked)
   }
 
-  /// What keeps this output from sending, for its line in the window: a mode the
-  /// port cannot play, or a port that is gone. Nil while it runs.
+  /// What keeps this output from sending the page, for its line in the window: a
+  /// mode the port cannot play, a port that is gone, or a page that has drawn
+  /// nothing. Nil while the page goes out.
   var problem: String? {
     if let setupProblem { return setupProblem }
-    switch port?.state {
+    guard let status = port?.status else { return nil }
+    switch status.state {
     case .refused(let why): return "Cannot play \(videoMode ?? VideoModes.defaultMode): \(why)"
     case .lost(let why): return "Port unavailable (\(why)). Retrying"
-    case .running, .closed, nil: return nil
+    case .running: return status.silence.map(StatusText.silenceLine)
+    case .closed: return nil
     }
   }
 

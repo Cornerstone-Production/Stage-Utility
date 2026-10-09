@@ -75,30 +75,51 @@ public struct LagWatch: Equatable {
 }
 
 /// Everything a card output's counts say once a second: falling behind and
-/// catching up (`LagWatch`), and a page that has stopped drawing.
+/// catching up (`LagWatch`), a page that has stopped drawing, and one that never has.
 ///
-/// Nothing is judged until the page has drawn its first picture. Before it the
-/// browser is still being made, and every frame repeats by necessity, which is
-/// not falling behind.
+/// Falling behind is not judged until the page has drawn its first picture. Before
+/// it the browser is still being made, and every frame repeats by necessity.
 ///
 /// Every request for a frame paints, even when nothing on the page changed (see
 /// `begin_frame` in stage_cef_host.h), so a second with no new picture at all means
 /// the page has stopped, not that it is idle. After `stallSeconds` of those in a
-/// row it is reported stalled, once, and the owner reloads the page.
+/// row it is reported stalled, once, and the owner reloads the page. A page that has
+/// never handed over a picture `noPictureSeconds` after the output started sending
+/// is reported too: the card is sending its black pre-roll, and the frame rate
+/// alone would read as healthy. Either way `silence` says so until a picture comes.
 public struct CardWatch: Equatable {
   public enum Event: Equatable {
     case fellBehind(repeated: Int, dropped: Int)
     case caughtUp(afterSeconds: Int)
-    /// No new picture for this many seconds.
+    /// No new picture for this many seconds, after the page had drawn.
     case stalled(seconds: Int)
+    /// Sending for this many seconds, and the page has never drawn.
+    case noPicture(seconds: Int)
+    /// A new picture, after one of the two above.
+    case drawingAgain
+  }
+
+  /// Why an output that is sending frames is not sending the page.
+  public enum Silence: Equatable, Sendable {
+    /// The page has never handed over a picture: the card sends black.
+    case neverDrawn
+    /// The page has handed over nothing new for `stallSeconds`: the card holds its
+    /// last picture.
+    case stopped
   }
 
   /// 300 frames at 59.94.
   public static let stallSeconds = 5
+  /// Long enough for a browser to be made and its first page to paint, which takes
+  /// a second or two; a card output's begin frames paint even a blank page.
+  public static let noPictureSeconds = 10
 
   public private(set) var drawing = false
+  /// Why the output is not sending the page, while it is not; nil while it is.
+  public private(set) var silence: Silence?
   private var lag = LagWatch()
   private var silentRun = 0
+  private var undrawnRun = 0
 
   public init() {}
 
@@ -108,11 +129,22 @@ public struct CardWatch: Equatable {
   /// previous picture, `dropped` slots missed.
   public mutating func second(sent: Int, repeated: Int, dropped: Int) -> [Event] {
     let fresh = sent - repeated
+    var events: [Event] = []
+    if fresh > 0, silence != nil {
+      silence = nil
+      events.append(.drawingAgain)
+    }
     guard drawing else {
       drawing = fresh > 0
-      return []
+      if !drawing, sent > 0 {
+        undrawnRun += 1
+        if undrawnRun == CardWatch.noPictureSeconds {
+          silence = .neverDrawn
+          events.append(.noPicture(seconds: undrawnRun))
+        }
+      }
+      return events
     }
-    var events: [Event] = []
     switch lag.second(sent: sent, repeated: repeated, dropped: dropped) {
     case .none: break
     case .fellBehind(let r, let d): events.append(.fellBehind(repeated: r, dropped: d))
@@ -122,7 +154,10 @@ public struct CardWatch: Equatable {
       silentRun = 0
     } else if sent > 0 {
       silentRun += 1
-      if silentRun == CardWatch.stallSeconds { events.append(.stalled(seconds: silentRun)) }
+      if silentRun == CardWatch.stallSeconds {
+        silence = .stopped
+        events.append(.stalled(seconds: silentRun))
+      }
     }
     return events
   }

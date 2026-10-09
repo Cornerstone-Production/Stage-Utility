@@ -479,6 +479,34 @@ let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a so
     #expect(stalls.value == 1)
   }
 
+  /// A running port whose page has never drawn sends its black pre-roll at the full
+  /// rate: it says so in the log and its status, and health reports every frame
+  /// repeated. It says so again when the page draws.
+  @Test func aRunningPortWhosePageNeverDrawsSaysSo() {
+    let log = LogLines()
+    let source = NumberedSource()
+    source.missingNow = true
+    let port = softwarePort(source, log: log)
+    defer { port.close() }
+    port.open(videoMode: nil)
+    for _ in 0..<CardWatch.noPictureSeconds {
+      port.fakeTick(60)
+      port.pollForTest()
+    }
+    #expect(port.status.silence == .neverDrawn)
+    #expect(port.takeHealthSample().repeated == 100)
+    source.missingNow = false
+    port.fakeTick(60)
+    port.pollForTest()
+    #expect(port.status.silence == nil)
+    #expect(
+      log.lines == [
+        "SDI test: opened in 16x4 at 59.94 on a software clock",
+        "SDI test: no picture from the page in 10 s of sending, so the card is sending black",
+        "SDI test: pictures from the page again",
+      ])
+  }
+
   /// A virtual port opens in whichever of the server's modes it is asked for, at
   /// that mode's size, and refuses a name the server does not list.
   @Test func aVirtualPortTakesAnyListedMode() {

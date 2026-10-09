@@ -308,6 +308,11 @@ locked.
 - **Unplugged or failed.** The port's output closes, its line reads "Port unavailable
   (...). Retrying", it tries again every 2 s and at once when a device arrives, and
   it reopens with the same binding and counts.
+- **No picture.** A port that is sending but whose page has never handed over a
+  picture, 10 s after it started, reads "No picture from the page. Sending black" in
+  place of its frame rate, and the log says so; health reports every frame repeated.
+  A page that drew and then stopped for 5 s reads "No new picture from the page.
+  Reloading it" while it is reloaded. Both clear, with a log line, at the next picture.
 - **Health** is the scheduler's own count, as for every card output (see
   [Health](#health)); falling behind is logged at the server's line.
 

@@ -33,12 +33,39 @@ import Testing
   /// send yet: not falling behind, and not a stalled page.
   @Test func nothingIsJudgedBeforeThePageFirstDraws() {
     var w = CardWatch()
-    for _ in 0..<(CardWatch.stallSeconds * 2) { #expect(w.second(sent: 60, repeated: 60, dropped: 0) == []) }
+    for _ in 0..<(CardWatch.noPictureSeconds - 1) { #expect(w.second(sent: 60, repeated: 60, dropped: 0) == []) }
     #expect(!w.drawing)
     // The second it first draws in is mostly the wait for it.
     #expect(w.second(sent: 60, repeated: 50, dropped: 0) == [])
     #expect(w.drawing)
     #expect(w.second(sent: 60, repeated: 3, dropped: 0) == [.fellBehind(repeated: 3, dropped: 0)])
+  }
+
+  /// A page that never hands over a picture leaves the card sending its black
+  /// pre-roll at a full frame rate: said once, after `noPictureSeconds` of sending,
+  /// and the output is silent until a picture comes. Seconds with nothing sent (the
+  /// port lost) do not count.
+  @Test func aPageThatNeverDrawsIsSaidOnce() {
+    var w = CardWatch()
+    var events: [CardWatch.Event] = []
+    for n in 0..<(CardWatch.noPictureSeconds * 3) {
+      events += w.second(sent: n == 3 ? 0 : 60, repeated: n == 3 ? 0 : 60, dropped: 0)
+    }
+    #expect(events == [.noPicture(seconds: CardWatch.noPictureSeconds)])
+    #expect(w.silence == .neverDrawn)
+    #expect(w.second(sent: 60, repeated: 59, dropped: 0) == [.drawingAgain])
+    #expect(w.silence == nil)
+    #expect(w.drawing)
+  }
+
+  /// A stalled page is silent too, until it draws again.
+  @Test func aStalledPageIsSilentUntilItDrawsAgain() {
+    var w = CardWatch()
+    _ = w.second(sent: 60, repeated: 0, dropped: 0)
+    for _ in 0..<CardWatch.stallSeconds { _ = w.second(sent: 60, repeated: 60, dropped: 0) }
+    #expect(w.silence == .stopped)
+    #expect(w.second(sent: 60, repeated: 0, dropped: 0) == [.drawingAgain])
+    #expect(w.silence == nil)
   }
 
   @Test func aDroppedSlotFallsBehindAndCleanSecondsCatchUp() {

@@ -49,6 +49,15 @@ public enum StatusText {
   /// A DeckLink port with no modes to play: its connector is set as an input.
   public static let inputPortLine = "Set as an input in Desktop Video Setup"
 
+  /// A card output that is sending frames but not the page: its line in place of the
+  /// frame rate, which would read as healthy over black.
+  public static func silenceLine(_ silence: CardWatch.Silence) -> String {
+    switch silence {
+    case .neverDrawn: return "No picture from the page. Sending black"
+    case .stopped: return "No new picture from the page. Reloading it"
+    }
+  }
+
   public static func outputLine(_ i: Input) -> String {
     if !i.enabled {
       return i.isMain ? "The Mac's desktop. Off, so the menu bar stays here." : "Turned off here"

@@ -190,6 +190,16 @@ import Testing
       == "Latency test page · 59.94 fps · 16 ms behind the page")
   }
 
+  /// A card output sending frames but not the page says so in place of its frame
+  /// rate, which over black would read as healthy.
+  @Test func aCardOutputWithNoPictureSaysSoNotItsFrameRate() {
+    let line = StatusText.outputLine(I(
+      enabled: true, isMain: false, serverKnown: true, boundScreenName: "Wing", showingBound: true, fps: 59.94,
+      portProblem: StatusText.silenceLine(.neverDrawn), latencyMs: 20))
+    #expect(line == "Wing · No picture from the page. Sending black")
+    #expect(StatusText.silenceLine(.stopped) == "No new picture from the page. Reloading it")
+  }
+
   @Test func anOutputTurnedOffSaysOnlyThat() {
     #expect(StatusText.outputLine(I(enabled: false, isMain: false, serverKnown: true, portProblem: "x")) == "Turned off here")
   }
