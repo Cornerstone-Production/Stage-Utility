@@ -9,7 +9,7 @@ import Testing
 /// in `SurfaceFrameSource`, a `.virtual` port's software clock taking frames by
 /// itself, and the shim scheduler's counts. What the app wires up per card output
 /// (`CardOutput`), minus Chromium, which is driven end to end instead.
-@Suite struct CardPathTests {
+@Suite(.enabled(if: GPU.available, GPU.skipped)) struct CardPathTests {
   /// The first eight bytes of a UYVY line of white, or of black, read as the
   /// software clock records what went out (little-endian).
   static let white = Int64(littleEndian: Data([128, 235, 128, 235, 128, 235, 128, 235]).withUnsafeBytes { $0.load(as: Int64.self) })

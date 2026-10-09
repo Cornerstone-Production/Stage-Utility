@@ -26,6 +26,11 @@ cd helper/macos
 
 `test.sh` runs `swift test`. With only the Command Line Tools it names the
 `Testing` framework's location itself, which `swift test` does not find on its own.
+CI runs `swift build` and `./test.sh` on a macOS runner for every pull request that
+touches `helper/` (`.github/workflows/helper-macos.yml`). On a Mac with no Metal
+device, as a runner may be, the GPU conversion tests are skipped with that reason
+rather than failed; `STAGE_UTILITY_TEST_NO_METAL=1 ./test.sh` skips them the same way
+on a Mac that has one.
 `swift build` builds the Swift app alone; it starts, but says in its window that
 Chromium is missing, because the browser host is only ever inside the app bundle.
 

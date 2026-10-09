@@ -70,7 +70,7 @@ extension SurfaceFrameSource {
   }
 }
 
-@Suite struct UYVYConverterTests {
+@Suite(.enabled(if: GPU.available, GPU.skipped)) struct UYVYConverterTests {
   let converter: UYVYConverter
   init() throws { converter = try UYVYConverter() }
 
