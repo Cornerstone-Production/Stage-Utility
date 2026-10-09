@@ -66,6 +66,7 @@ function card(over: {
     baseUrl: "http://display.invalid",
     online: false,
     struggles: [],
+    lags: [],
     canRemove: true,
     iconKey: "display-1",
     onRename: noop,
