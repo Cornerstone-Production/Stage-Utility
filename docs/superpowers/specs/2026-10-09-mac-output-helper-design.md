@@ -188,6 +188,23 @@ on the bench.
   `swift build`, assembles the bundle and signs it ad hoc. A file fetched with
   `curl` carries no quarantine flag, so Gatekeeper does not block it.
   Notarisation with a Developer ID is a follow-up if Henry wants it.
+- **Local Network permission.** Since macOS Sequoia, an app that finds or
+  talks to other machines on the LAN asks once:
+  - "Allow Stage Utility Output to find devices on local networks?"
+  - Someone at the Mac answers it during setup. The helper also shows, in its
+    own window, when it is missing.
+  - The answer is tied to the app's code signature. An ad hoc signature changes
+    with every build, so after an update macOS may ask again.
+  - A Developer ID signature (Apple Developer Program) keeps the identity
+    stable across updates. It is the reason to get one before the helper is on
+    several Macs. It also lets a copy downloaded in a browser open without the
+    Gatekeeper warning.
+  - The app must run from `/Applications` for the permission to hold.
+- **Updates.** The helper follows the server. On launch, and when the server's
+  version changes, it compares its own version with `/api/version`. If they
+  differ, it downloads the matching release, replaces itself in
+  `/Applications` and relaunches. A failed update keeps the running version and
+  says so.
 - Auto-login, never-sleep and no screen lock are still required on an output
   Mac, and the installer still prints them.
 
