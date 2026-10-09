@@ -17,6 +17,42 @@ struct WindowPlacement: Equatable {
   }
 }
 
+/// The window's content: a black field holding the web view, which it lays out at
+/// the size the turn needs and turns about its centre.
+///
+/// The turn is the view's `frameCenterRotation`, not a transform on the web view's
+/// layer: AppKit then does the hit-testing in the turned view's own coordinates. The
+/// web view's `takeSnapshot` draws the page upright whatever the view's turn, so a
+/// snapshot is turned afterwards to match (see `SnapshotTurn`).
+@MainActor
+private final class TurnedSurfaceView: NSView {
+  var rotation: Rotation = .none {
+    didSet {
+      if rotation != oldValue { needsLayout = true }
+    }
+  }
+  private let surface: NSView
+
+  init(surface: NSView) {
+    self.surface = surface
+    super.init(frame: .zero)
+    surface.autoresizingMask = []
+    addSubview(surface)
+  }
+
+  required init?(coder: NSCoder) { fatalError("not made from a nib") }
+
+  override func layout() {
+    super.layout()
+    let l = rotation.layout(inWindow: bounds.size)
+    // Un-turn before setting a frame: a turned view's frame is its bounding box.
+    surface.frameCenterRotation = 0
+    surface.frame = l.frame
+    // AppKit turns a non-flipped view counterclockwise for a positive angle.
+    surface.frameCenterRotation = CGFloat(-l.clockwiseDegrees)
+  }
+}
+
 /// A borderless window at a placement, with the web view as its content.
 @MainActor
 final class WindowDestination: NSObject, OutputDestination {
@@ -25,6 +61,8 @@ final class WindowDestination: NSObject, OutputDestination {
   private var ticks = 0
   private var sampleStart = CACurrentMediaTime()
   private var placement: WindowPlacement
+  private var turned: TurnedSurfaceView?
+  private(set) var rotation: Rotation = .none
 
   init(placement: WindowPlacement) {
     self.placement = placement
@@ -40,11 +78,19 @@ final class WindowDestination: NSObject, OutputDestination {
     win.backgroundColor = .black
     win.hasShadow = false
     win.hidesOnDeactivate = false
-    win.contentView = view
+    let field = TurnedSurfaceView(surface: view)
+    field.rotation = rotation
+    turned = field
+    win.contentView = field
     win.setFrame(placement.frame, display: true)
     win.orderFrontRegardless()
     window = win
     startLink(on: screen)
+  }
+
+  func setRotation(_ new: Rotation) {
+    rotation = new
+    turned?.rotation = new
   }
 
   func detach() {
@@ -53,6 +99,7 @@ final class WindowDestination: NSObject, OutputDestination {
     window?.orderOut(nil)
     window?.close()
     window = nil
+    turned = nil
   }
 
   /// The display moved or changed size, or the tile did: follow it.

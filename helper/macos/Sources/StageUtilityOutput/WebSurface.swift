@@ -57,24 +57,19 @@ final class WebSurface: NSObject, WKNavigationDelegate {
     requested = nil
   }
 
-  /// Write what the web view is showing to `file` as a PNG. `completion` gets nil on
-  /// success, else why not.
-  func writeSnapshot(to file: URL, completion: @escaping (String?) -> Void) {
+  /// What the web view is showing, as the page draws it: before any turn the
+  /// window gives it. `completion` gets the picture, or why there is none.
+  func snapshot(completion: @escaping @MainActor (CGImage?, String?) -> Void) {
     let config = WKSnapshotConfiguration()
     config.afterScreenUpdates = false
     config.snapshotWidth = NSNumber(value: Double(webView.bounds.width))
     webView.takeSnapshot(with: config) { image, error in
-      guard let image, let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-        let png = rep.representation(using: .png, properties: [:])
-      else {
-        completion("no snapshot: \(error?.localizedDescription ?? "web view returned nothing")")
-        return
-      }
-      do {
-        try png.write(to: file, options: .atomic)
-        completion(nil)
-      } catch {
-        completion("could not write \(file.path): \(error.localizedDescription)")
+      MainActor.assumeIsolated {
+        guard let image, let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+          completion(nil, "no snapshot: \(error?.localizedDescription ?? "web view returned nothing")")
+          return
+        }
+        completion(cg, nil)
       }
     }
   }

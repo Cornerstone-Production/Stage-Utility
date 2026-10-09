@@ -14,17 +14,16 @@ enum HealthReporter {
     }
   }
 
-  /// The name of the screen an output id belongs to, from `GET /api/outputs`.
-  /// Throws the failure to the caller, who decides what to say about it.
-  static func screenName(server: String, outputRef: String) async throws -> String? {
-    guard let base = EnrollURL.normalise(server: server), let url = URL(string: "\(base)/api/outputs") else { return nil }
+  /// The server's screens, from `GET /api/outputs`: names, and the rotation each
+  /// carries. Throws why it could not be read; the caller decides what to say.
+  static func screens(server: String) async throws -> [ScreenRecord] {
+    guard let base = EnrollURL.normalise(server: server), let url = URL(string: "\(base)/api/outputs") else {
+      throw ScreenList.ReadError.notAList
+    }
     var request = URLRequest(url: url, timeoutInterval: 5)
     request.cachePolicy = .reloadIgnoringLocalCacheData
     let (data, response) = try await URLSession.shared.data(for: request)
-    guard (response as? HTTPURLResponse)?.statusCode == 200,
-      let list = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-    else { return nil }
-    let match = list.first { ($0["id"] as? String) == outputRef || ($0["slug"] as? String) == outputRef }
-    return match?["name"] as? String
+    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    return try ScreenList.parse(status: status, body: data).get()
   }
 }

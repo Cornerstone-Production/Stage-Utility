@@ -42,6 +42,11 @@ final class AppModel: ObservableObject {
     var page: ScreenPage = .other
     var showingBound: Bool { page.isBound }
     var boundScreenName: String?
+    /// The bound screen's rotation, as the server last said. Kept when the page goes
+    /// back to the holding screen: it describes how the monitor is mounted.
+    var rotation: Rotation = .none
+    /// Why the screens could not be read, while they cannot: logged once, not per try.
+    var screenReadProblem: String?
     var fps: Double?
     var spiProblems: [String] = []
     init(display: ConnectedDisplay) { self.display = display }
@@ -203,6 +208,8 @@ final class AppModel: ObservableObject {
     rt.loaded = false
     rt.unreachable = false
     rt.page = .other
+    rt.rotation = .none
+    rt.screenReadProblem = nil
     rt.boundScreenName = nil
     rt.fps = nil
     healthBoard.forget(key)
@@ -286,21 +293,62 @@ final class AppModel: ObservableObject {
     rt.page = page
     if !page.isBound { rt.boundScreenName = nil }
     refresh()
-    guard case .bound(let ref) = page else { return }
-    Task { @MainActor in
-      do {
-        let name = try await HealthReporter.screenName(server: server, outputRef: ref)
-        if rt.page == page { rt.boundScreenName = name }
-      } catch {
-        Log.error(.output, "\(port): could not read the screen's name: \(error.localizedDescription)")
-      }
-      self.refresh()
+    if page.isBound { readScreens() }
+  }
+
+  /// Read the screens the bound outputs show: their names and rotations. One request
+  /// per server, answered for every output bound to it. Called when a page becomes a
+  /// screen and every ten seconds after, so a rotation chosen in Screens is applied
+  /// within one health interval.
+  private func readScreens() {
+    var byServer: [String: [Runtime]] = [:]
+    for key in order {
+      if let rt = runtimes[key], rt.sink != nil, rt.page.isBound, let server = rt.serverURL { byServer[server, default: []].append(rt) }
     }
+    for (server, outputs) in byServer {
+      Task { @MainActor in
+        do {
+          let screens = try await HealthReporter.screens(server: server)
+          for rt in outputs { self.applyScreen(rt, from: screens) }
+        } catch {
+          for rt in outputs { self.screenReadFailed(rt, "\(error)") }
+        }
+        self.refresh()
+      }
+    }
+  }
+
+  private func applyScreen(_ rt: Runtime, from screens: [ScreenRecord]) {
+    guard let sink = rt.sink, case .bound(let ref) = rt.page else { return }
+    let port = rt.display.descriptor.port
+    guard let screen = ScreenList.find(ref, in: screens) else {
+      screenReadFailed(rt, "the server lists no screen called \(ref)")
+      return
+    }
+    if rt.screenReadProblem != nil {
+      Log.notice(.output, "\(port): the screen's name and rotation can be read again")
+      rt.screenReadProblem = nil
+    }
+    rt.boundScreenName = screen.name
+    // `videoMode` is deliberately not read: it is a DeckLink port's setting (step 3).
+    if screen.rotation != rt.rotation {
+      Log.notice(.output, "\(port): rotation \(rt.rotation.rawValue) -> \(screen.rotation.rawValue) degrees, from \(screen.name)")
+      rt.rotation = screen.rotation
+      sink.setRotation(screen.rotation)
+    }
+  }
+
+  private func screenReadFailed(_ rt: Runtime, _ why: String) {
+    if rt.screenReadProblem != why {
+      Log.error(.output, "\(rt.display.descriptor.port): could not read the screen's name and rotation: \(why)")
+    }
+    rt.screenReadProblem = why
   }
 
   // MARK: Health
 
   private func healthTick() {
+    readScreens()
     let now = Date()
     for key in order {
       guard let rt = runtimes[key], let sink = rt.sink else { continue }
