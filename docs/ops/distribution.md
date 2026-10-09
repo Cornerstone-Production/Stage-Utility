@@ -62,6 +62,22 @@ stage-utility-<version>-<os>-<arch>.tar.gz
 
 Targets: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, `win-x64`.
 
+When the release's tree has the [Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper)
+(`helper/macos/build-app.sh`), a macOS job also builds it, once per architecture, and
+the same release carries four more assets:
+
+```
+StageUtilityOutput-arm64.zip     StageUtilityOutput-arm64.zip.sha256
+StageUtilityOutput-x86_64.zip    StageUtilityOutput-x86_64.zip.sha256
+```
+
+Each zip holds `StageUtilityOutput.app` (about 300 MB, nearly all of it Chromium) and
+each `.sha256` is one `shasum -a 256` line. They are for the Mac installer, which a
+server serves from its own cache; the updater never reads them. A tree without the
+build script skips the job and releases as before, and a macOS build that fails
+releases without the zips rather than holding the release. The assets are made before
+the release is created, because a published release cannot be added to.
+
 The runtime ships inside the archive, so a server needs neither Node, nor npm, nor a
 build toolchain — installed or to update. About 35 MB compressed, 115 MB on disk, of
 which the runtime is nearly all.
