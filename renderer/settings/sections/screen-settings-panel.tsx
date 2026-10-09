@@ -714,6 +714,11 @@ function GuidedBody({ target, views, baseUrl, step, setStep, actions, onClose }:
   const fits = viewChoice === NONE || viewChoice === NEW_VIEW || viewsFittingRole(views, role, null).some((v) => v.id === viewChoice);
   const effectiveChoice = fits ? viewChoice : NONE;
   const hasView = effectiveChoice !== NONE;
+  // What the switch shows until the operator moves it: the listing of the
+  // console chosen, which may already be kept out of the sidebar, else listed,
+  // which is what a new view is.
+  const chosenView = views.find((v) => v.id === effectiveChoice);
+  const shownListed = listed ?? (chosenView ? viewShownInSidebar(chosenView) : true);
 
   async function create() {
     setBusy(true);
@@ -747,7 +752,7 @@ function GuidedBody({ target, views, baseUrl, step, setStep, actions, onClose }:
         {step === 1 && (
           <Section title="What this screen is">
             <RoleCards role={role} onChoose={setRole} />
-            {role === "panel" && <SidebarRow checked={listed ?? true} onChange={setListed} />}
+            {role === "panel" && <SidebarRow checked={shownListed} onChange={setListed} />}
           </Section>
         )}
         {step === 2 && (

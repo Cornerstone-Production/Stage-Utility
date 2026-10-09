@@ -762,6 +762,18 @@ describe("guided creation", () => {
       "an existing console that is hidden must not be re-listed by a screen made for it");
   });
 
+  test("the sidebar switch reads the listing of the console chosen, not 'on'", async () => {
+    // A console already kept out of the sidebar is still out of it; a switch
+    // reading on would say otherwise, and moving it would re-list the console.
+    mount({ target: NEW_TARGET, outputs: [MINE], views: [WALL_A, { ...CTL_B, showInSidebar: false }] });
+    await click(role("Control surface"));
+    assert.equal(sw("List in the sidebar").getAttribute("aria-checked"), "true", "a new view is listed unless told otherwise");
+    await click(screen.getByRole("button", { name: "Next" }));
+    await choose(screen.getByLabelText("View"), "ctl-b");
+    await click(screen.getByRole("button", { name: "Back" }));
+    assert.equal(sw("List in the sidebar").getAttribute("aria-checked"), "false", "a hidden console reads as listed");
+  });
+
   test("the picker is filtered to the role chosen on step 1", async () => {
     mount({ target: NEW_TARGET, outputs: [MINE] });
     await click(role("Control surface"));
