@@ -164,6 +164,41 @@ import Testing
       ])
   }
 
+  /// An output switched to an input in Desktop Video Setup while the helper runs
+  /// is an input from the next scan: no longer announced, so its output is closed,
+  /// rather than retried for ever with "does not play ... in 8-bit YUV". Set as an
+  /// output again, it is announced again.
+  @Test func anOutputSetAsAnInputIsAnInputFromTheNextScan() {
+    var refused = Self.p59
+    refused.supportsYUV8 = false
+    func port(_ modes: [CardMode]) -> DeckLinkPort {
+      DeckLinkPort(
+        id: DeckLinkPortID(persistentID: 0x10, subDevice: 0), displayName: "DeckLink 8K Pro (1)",
+        modelName: "DeckLink 8K Pro", modes: modes)
+    }
+    let log = LogLines()
+    let reading = Locked<(DeckLinkDriver.Status, [DeckLinkPort])>((.installed(version: "16.4"), [port([Self.p59])]))
+    let inventory = DeckLinkInventory(read: { reading.value }, log: log.write)
+    _ = inventory.scan()
+    #expect(inventory.seen.map(\.displayName) == ["DeckLink 8K Pro (1)"])
+
+    reading.value = (.installed(version: "16.4"), [port([refused])])
+    #expect(inventory.scan().changed)
+    #expect(inventory.seen.isEmpty)
+    #expect(inventory.inputs.map(\.displayName) == ["DeckLink 8K Pro (1)"])
+
+    reading.value = (.installed(version: "16.4"), [port([Self.p59])])
+    #expect(inventory.scan().changed)
+    #expect(inventory.seen.map(\.displayName) == ["DeckLink 8K Pro (1)"])
+    #expect(inventory.inputs.isEmpty)
+    #expect(
+      log.lines == [
+        "Desktop Video 16.4: 1 output port: DeckLink 8K Pro (1) (decklink-10-0)",
+        "Desktop Video 16.4: 0 output ports; set as inputs in Desktop Video Setup: DeckLink 8K Pro (1) (decklink-10-0)",
+        "Desktop Video 16.4: 1 output port: DeckLink 8K Pro (1) (decklink-10-0)",
+      ])
+  }
+
   /// With the driver and no card at that id: the open fails and says why, and
   /// there is a driver to watch for devices.
   @Test(.enabled(if: DriverTests.installed, "needs Desktop Video"))

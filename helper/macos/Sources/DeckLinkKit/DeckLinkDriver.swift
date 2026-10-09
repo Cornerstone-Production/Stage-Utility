@@ -199,8 +199,9 @@ private final class DeviceListener {
 /// (a DeckLink 8K Pro's four connectors are each an input or an output; Desktop
 /// Video 16.4 still lists an input's modes, and refuses every one of them for
 /// playback). It is not an output to announce, and is listed apart (`inputs`),
-/// until a scan finds it can play. Desktop Video Setup sends no device notification
-/// for that, so the helper scans again now and then (`AppModel`).
+/// until a scan finds it can play; an output a scan finds set as an input goes back
+/// to the list. Desktop Video Setup sends no device notification for either, so the
+/// helper scans again now and then (`AppModel`).
 public final class DeckLinkInventory {
   public typealias Reader = () -> (DeckLinkDriver.Status, [DeckLinkPort])
 
@@ -222,11 +223,11 @@ public final class DeckLinkInventory {
   /// Every port any scan has found able to play, in the order first found, each as
   /// its latest scan described it: the outputs to announce. A port that leaves a
   /// scan stays, because an unplugged card is still a screen's output; its port says
-  /// it is lost and reopens when the card is back.
+  /// it is lost and reopens when the card is back. A port a scan finds set as an
+  /// input leaves it.
   public var seen: [DeckLinkPort] { lock.withLock { _seen } }
 
-  /// The ports the latest scan found set as inputs, and never found able to play:
-  /// for the window, not to announce.
+  /// The ports the latest scan found set as inputs: for the window, not to announce.
   public var inputs: [DeckLinkPort] { lock.withLock { _inputs } }
 
   /// The ports now. Call at launch, when a device arrives or goes, and now and then.
@@ -240,7 +241,11 @@ public final class DeckLinkInventory {
       for port in ports {
         if let at = _seen.firstIndex(where: { $0.id == port.id }) { _seen[at] = port } else { _seen.append(port) }
       }
-      let inputs = all.filter { port in !port.canPlay && !_seen.contains { $0.id == port.id } }
+      // A port the scan finds set as an input is not an output, even one that was:
+      // Desktop Video Setup turned it, and its output is closed rather than retried
+      // for ever. A port missing from the scan (unplugged) stays an output.
+      let inputs = all.filter { !$0.canPlay }
+      _seen.removeAll { seen in inputs.contains { $0.id == seen.id } }
       _inputs = inputs
       let inputKeys = inputs.map(\.id.outputKey)
       defer { last = (status, keys, inputKeys) }

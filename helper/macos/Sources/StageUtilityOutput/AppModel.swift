@@ -239,7 +239,12 @@ final class AppModel: ObservableObject {
       + VirtualCards.outputs(count: options.virtualSDI).map { PresentOutput(descriptor: $0, card: .virtual) }
     let present = Set(outputs.map { $0.descriptor.key })
     for key in order where !present.contains(key) {
-      Log.notice(.output, "\(runtimes[key]?.descriptor.port ?? key) is gone; its window is closed")
+      let name = runtimes[key]?.descriptor.port ?? key
+      if deckLink.inputs.contains(where: { $0.id.outputKey == key }) {
+        Log.notice(.output, "\(name) is now set as an input in Desktop Video Setup; its output is closed")
+      } else {
+        Log.notice(.output, "\(name) is gone; its window is closed")
+      }
       deactivate(key)
       runtimes[key] = nil
     }

@@ -36,7 +36,9 @@ of its modes is listed in the helper's window as "Set as an input in Desktop Vid
 Setup", with no switch, and is not announced to the server. Desktop Video Setup sends
 no device notification when a connector changes, so the helper looks at the ports
 again every 10 s, off the main thread (a scan takes 22 to 45 ms on an 8K Pro). A
-port that has become an output is announced from the scan that finds it.
+port that has become an output is announced from the scan that finds it, and an
+output that has become an input is closed from the scan that finds that, rather
+than retried for ever.
 
 | | |
 |---|---|

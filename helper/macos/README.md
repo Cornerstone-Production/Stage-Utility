@@ -169,8 +169,8 @@ its desktop. Every other display starts on. The default is decided once, when th
 display is first seen, and stored.
 
 A display that is unplugged closes its window; when it returns it reopens with the
-same binding. A DeckLink port found once stays an output until the helper quits: a card
-unplugged is logged, its line in the window says the port is unavailable, and it
+same binding. A DeckLink port found once stays an output until the helper quits, or a
+scan finds it set as an input in Desktop Video Setup: a card unplugged is logged, its line in the window says the port is unavailable, and it
 reopens when the card is back. The outputs follow a change in the displays only after it has held for
 one second, so a display that vanishes for a moment on wake does not tear down every
 page.
@@ -302,8 +302,11 @@ locked.
 - **What appears.** One output per port that can play out, named as the driver names
   it ("DeckLink Quad 2 (3)"), keyed `decklink-<persistent id>-<sub-device>` (see [How
   outputs map to devices](#how-outputs-map-to-devices)), with the modes it can play.
-  The helper scans at launch and whenever the driver reports a device arriving or
-  going. A port found once stays an output until the helper quits.
+  The helper scans at launch, whenever the driver reports a device arriving or going,
+  and every 10 s, because Desktop Video Setup turning a connector between input and
+  output sends no notification. A port found once stays an output until the helper
+  quits, or until a scan finds it set as an input: its output is then closed, and its
+  line reads "Set as an input in Desktop Video Setup".
 - **Format.** The screen's `videoMode` (Screen settings > Device > Format on the
   server), 1080p59.94 when it has none, opens the port in that mode, at its frame
   size; a change reopens it. The format is kept in `outputs.json`, so the next start
