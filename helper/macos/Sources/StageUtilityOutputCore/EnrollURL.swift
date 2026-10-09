@@ -17,9 +17,9 @@ public enum EnrollURL {
     public var description: String {
       switch self {
       case .empty: return "the server address is empty"
-      case .noHost(let given): return "\"\(given)\" has no host"
+      case .noHost(let given): return "\"\(Redact.url(given))\" has no host"
       case .notAtTheRoot(let given, let use):
-        return "\"\(given)\" has a path. Stage Utility has to be served from the root of its address, because its "
+        return "\"\(Redact.url(given))\" has a path. Stage Utility has to be served from the root of its address, because its "
           + "redirects and assets start at \"/\"; use \"\(use)\""
       }
     }

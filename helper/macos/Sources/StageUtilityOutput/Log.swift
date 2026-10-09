@@ -1,5 +1,6 @@
 import DeckLinkKit
 import Foundation
+import StageUtilityOutputCore
 import os
 
 /// The unified log, subsystem `com.stageutility.output`. Read it with
@@ -24,15 +25,18 @@ enum Log {
 
   // Public on purpose: the default is to redact interpolated strings, which would
   // turn every line into "<private>" for the person reading it at 9am on a Sunday.
-  // Nothing logged here is a secret; tokens never reach a log line.
+  // The one secret near a line is an output's token, in the address it loads: every
+  // line has the query cut from any address in it first (`Redact`).
   static func notice(_ category: Category, _ message: String) {
-    loggers[category]?.notice("\(message, privacy: .public)")
-    mirror("notice", category, message)
+    let line = Redact.addresses(in: message)
+    loggers[category]?.notice("\(line, privacy: .public)")
+    mirror("notice", category, line)
   }
 
   static func error(_ category: Category, _ message: String) {
-    loggers[category]?.error("\(message, privacy: .public)")
-    mirror("error", category, message)
+    let line = Redact.addresses(in: message)
+    loggers[category]?.error("\(line, privacy: .public)")
+    mirror("error", category, line)
   }
 
   private static func mirror(_ level: String, _ category: Category, _ message: String) {

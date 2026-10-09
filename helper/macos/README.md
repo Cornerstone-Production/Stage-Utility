@@ -443,7 +443,9 @@ repeated frames, 5%, the server's own line, or any dropped) and keeping up again
 is under `output`. Trouble that
 continues (a probe socket that will not open, every probe failing to send) is logged
 when it starts and when it ends, not on every try. Healthy frames are not logged.
-Tokens never are.
+Tokens never are: every line has the query and fragment cut from any address in it
+(`Redact`), so a page that did not load is logged as loading
+`http://<server>/enroll`, without the device id and token the address carries.
 
 Chromium did not start, and an output's page that has crashed (with how many times since
 launch), are also said in the helper's window. Chromium writes its own warnings to

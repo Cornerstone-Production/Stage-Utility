@@ -155,13 +155,13 @@ final class OutputDiscovery {
     let bound = boundTo()
     if case .ignore(let firstTime) = filter.decide(reply, boundTo: bound) {
       if firstTime {
-        Log.error(.discovery, "\(label): ignored an answer from \"\(reply.name)\" (\(reply.serverId)) at \(reply.url): this output is bound to server \(bound ?? "?"). Another host on the network may be answering for it")
+        Log.error(.discovery, "\(label): ignored an answer from \"\(reply.name)\" (\(reply.serverId)) at \(Redact.url(reply.url)): this output is bound to server \(bound ?? "?"). Another host on the network may be answering for it")
       }
       return
     }
     if !answered {
       answered = true
-      Log.notice(.discovery, "\(label): answered by \"\(reply.name)\" (\(reply.serverId)) at \(reply.url)")
+      Log.notice(.discovery, "\(label): answered by \"\(reply.name)\" (\(reply.serverId)) at \(Redact.url(reply.url))")
     }
     onReply?(reply)
   }

@@ -1,4 +1,5 @@
 import Foundation
+import StageUtilityOutputCore
 import os
 
 /// The DeckLink layer's lines in the unified log, under the helper's subsystem:
@@ -14,10 +15,12 @@ public enum DeckLinkLog {
   static let logger = Logger(subsystem: "com.stageutility.output", category: "decklink")
 
   /// Where a port's lines go unless it is given somewhere else.
+  /// No address in a line keeps its query (`Redact`).
   public static func write(_ level: Level, _ message: String) {
+    let line = Redact.addresses(in: message)
     switch level {
-    case .info: logger.info("\(message, privacy: .public)")
-    case .error: logger.error("\(message, privacy: .public)")
+    case .info: logger.info("\(line, privacy: .public)")
+    case .error: logger.error("\(line, privacy: .public)")
     }
   }
 }

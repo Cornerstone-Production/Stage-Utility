@@ -115,7 +115,7 @@ final class AppModel: ObservableObject {
       Log.error(.discovery, "\(problem); it is ignored and the server is looked for on the network")
       setNote("server-file", "Ignoring \(problem).")
     }
-    if let server = identity.server { Log.notice(.discovery, "server file names \(server); probes go to it alone, by unicast") }
+    if let server = identity.server { Log.notice(.discovery, "server file names \(Redact.url(server)); probes go to it alone, by unicast") }
     if let problem = store.readProblem {
       Log.error(.state, "\(problem); it is left as it is and nothing is saved until it is fixed or removed and the helper restarted")
       setNote("state-unreadable", "\(problem). Outputs keep working, but nothing is saved, and each launch makes new tokens, until it is fixed or removed and the helper restarted.")
@@ -395,7 +395,7 @@ final class AppModel: ObservableObject {
     clearLocalNetworkSuspicion()
     // A server file names the server; an answer from it only says it is there.
     if identity.server == nil, rt.serverURL != reply.url {
-      Log.notice(.discovery, "\(rt.descriptor.port): server is \"\(reply.name)\" at \(reply.url)")
+      Log.notice(.discovery, "\(rt.descriptor.port): server is \"\(reply.name)\" at \(Redact.url(reply.url))")
       rt.serverURL = reply.url
       navigate(rt)
     }

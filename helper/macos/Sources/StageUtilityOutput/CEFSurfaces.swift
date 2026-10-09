@@ -52,12 +52,7 @@ final class BrowserEvents {
     }
     finished = { _ in loader.finished() }
     failed = { code, text, url in
-      // ERR_ABORTED: our own load replacing one in flight, not the server failing.
-      let error =
-        code == CEFNetError.aborted
-        ? NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
-        : NSError(domain: "net", code: code, userInfo: [NSLocalizedDescriptionKey: "\(text) loading \(url)"])
-      loader.failed(error)
+      loader.failed(PageLoadTracker.navigationError(code: code, text: text, url: url))
     }
     processGone = { status, code, text in
       let why = CEFTermination.describe(status: status, code: code, text: text)
@@ -65,11 +60,6 @@ final class BrowserEvents {
       loader.processEnded(why)
     }
   }
-}
-
-enum CEFNetError {
-  /// net::ERR_ABORTED, in net_error_list.h.
-  static let aborted = -3
 }
 
 enum CEFTermination {

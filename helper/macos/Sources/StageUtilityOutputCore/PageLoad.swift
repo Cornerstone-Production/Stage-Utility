@@ -84,6 +84,20 @@ public struct PageLoadTracker: Equatable {
 
   public mutating func processTerminated() -> Outcome { fail("the page's renderer process ended") }
 
+  /// What a browser reports when a navigation fails, as `navigationFailed` reads it:
+  /// the engine's own words for the error, and where the page was going, by its
+  /// scheme, host and path only. The address an output loads carries its token
+  /// (`EnrollURL`), and this reason is written to the log (`Redact`).
+  public static func navigationError(code: Int, text: String, url: String) -> NSError {
+    // net::ERR_ABORTED: our own load replacing one in flight, not the server failing.
+    if code == abortedCode { return NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled) }
+    return NSError(
+      domain: "net", code: code, userInfo: [NSLocalizedDescriptionKey: "\(text) loading \(Redact.url(url))"])
+  }
+
+  /// net::ERR_ABORTED, in Chromium's net_error_list.h.
+  public static let abortedCode = -3
+
   private mutating func fail(_ reason: String) -> Outcome {
     failures += 1
     return .failed(Failure(failures: failures, reason: reason, delay: Backoff.reloadDelay(failures: failures)))
