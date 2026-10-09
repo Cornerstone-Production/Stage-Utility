@@ -151,6 +151,89 @@ image like any other Raspberry Pi OS one — so they go in at flash time, on the
 machine doing the flashing. This repository is public; a released image must
 never carry a credential or a site's server address.
 
+## Mac output helper
+
+A Mac running the **output helper** (a menu bar app) is not one screen but
+several: each of its own displays and each port of a Blackmagic DeckLink or
+UltraStudio card is a separate output. The helper announces one device per
+output and the server sets each up like any other. A screen can therefore go out
+over SDI from a Mac mini, and the SDI ports are not counted against the Mac's
+limit on external displays.
+
+Each output is a device of its own, with an id of the form
+`<the Mac's device id>.<output key>`. A binding is to an output, so moving a
+cable to another port moves which screen goes out where. All of a Mac's outputs
+share its MAC addresses and hostname. Screens groups outputs by the Mac's id in
+that name, not by MAC address: Intel Macs with a T2 chip report the same MAC, and
+two of them stay two machines.
+
+The probe gains an `output` object, otherwise the probe described under
+[Discovery](#discovery):
+
+| Field | |
+|---|---|
+| `kind` | `display` or `decklink`. A probe with any other kind is treated as a plain device |
+| `name` | What the row calls it, for example `SDI 1 · Card A` |
+| `port` | The physical port, for example `SDI 1` |
+| `modes` | Optional. The video modes a DeckLink port reported, for example `1080p59.94` |
+
+A probe without `output` behaves exactly as it always has. Every field is
+bounded like the rest of the probe: names and ports at 128 characters, at most
+24 modes of 32 characters each.
+
+**On the server's own Mac.** The responder ignores a probe that carries one of
+the server's own MAC addresses, because a kiosk agent on the server's machine was
+never a wall screen. A probe with an `output` is let through, so the helper on the
+server's Mac works.
+
+The stored binding keeps the `output`, so a bound screen still names its port
+while the output is off.
+
+**On Screens.** The outputs of one Mac are grouped under the Mac in *Not set up
+yet*: its hostname, OS, address and the DeckLink card its SDI ports are on once,
+then a row per output, displays first and SDI ports after, each with the two
+actions above and what it is: a display reads `Built-in display · 1920 × 1080`
+and the refresh rate when the Mac reports one. An output that already has a
+screen stays in the group, dimmed, saying which screen it is set up as and
+whether that screen is showing. A Mac whose outputs are all set up is not
+listed. Outputs of one Mac are not flagged *Looks like … same MAC address*
+against each other; a device that is not an output keeps that hint. An output
+set up as a new screen starts named for the output, not for the Mac.
+
+A screen's card says `<hostname> · <port> · <mode>`: the Mac, the port, and the
+video mode the port sends (a display shows the size it is driven at). Its
+[Screen settings](features/operator-app.md#adding-a-screen) Device section shows the port and
+card, whether the screen is online, **Format** (DeckLink ports only, from the
+modes the port reported that the server accepts, otherwise all of them),
+**Rotation**, the output's health and **Release**. Releasing returns the output
+to *Not set up yet*.
+
+**Format and rotation** are settings of the screen, not of the Mac: a DeckLink
+port's video mode (`videoMode`, `1080p59.94` unless changed) and a quarter-turn
+rotation for a monitor on its side (`rotation`, 0 unless changed). They are
+written through `PATCH /api/outputs/:id`, are in every backup, and the helper
+reads its output's record from `GET /api/outputs`. The helper applies rotation to
+display outputs, and DeckLink outputs apply Format; the helper does not drive
+DeckLink ports yet, so Format is saved but nothing sends it. See the
+[API](reference/api.md).
+
+**Health.** Each output reports every ten seconds, authenticated by the device's
+own secret, and the server keeps the latest in memory only. It is shown with the
+screen: frames per second, the percent of frames repeated because the page was
+late, and the frames the card has dropped. A DeckLink output that has measured it
+also shows its **latency**, in milliseconds from render to air; the line is absent
+until the helper reports one. Latency is information only and does not count
+towards *struggling*. Three reports running with frames dropped or 5% or more
+repeated mark a DeckLink output **struggling**, and three clean ones in a row clear it. A display output is never marked: its rate comes
+from the display link, which stops while the display sleeps or the screen is
+locked, so it can report 0 fps while healthy, and Screens shows that as a dash. A
+struggling output also puts a warning on its screen's card, under the preview: the
+port, what the report shows (the percent of frames repeated, the frames the card
+dropped) and what to check. A reading that stops being refreshed is dropped after
+60 seconds. Until one arrives, the Device section says the helper has not reported
+yet; after one was dropped, that it stopped reporting; and for a screen no page is
+showing, that it is offline.
+
 ## Removing one
 
 *Release*, on the screen's card, unbinds it: the screen keeps its view and its

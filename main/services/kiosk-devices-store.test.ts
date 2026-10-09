@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { describe, test } from "node:test";
+import crypto from "node:crypto";
+import { describe, mock, test } from "node:test";
 
 import {
   kioskDevicesStore, authorise, claim, release, touch, matchByMac, withoutTokens, pinSecret, recordScreen,
@@ -63,6 +64,35 @@ describe("authorising an enrolment", () => {
     assert.equal(pinned[0].token, "whatever-it-says");
     // ...and from then on, only that one.
     assert.equal(authorise(pinned, "d1", "something-else"), null);
+  });
+});
+
+describe("the secret is compared in constant time", () => {
+  // How long a comparison takes cannot be measured reliably in a unit test, so
+  // this runs the real path and watches what it hands to crypto.timingSafeEqual:
+  // two equal-length digests. A bare `===` never calls it; timingSafeEqual on the
+  // raw strings throws on a length mismatch, which is the case the second test
+  // sends.
+  const devices = [dev({ token: "tok-1" })];
+
+  test("a right and a wrong secret are both judged by timingSafeEqual, over 32-byte digests", () => {
+    const spy = mock.method(crypto, "timingSafeEqual");
+    try {
+      assert.equal(authorise(devices, "d1", "tok-1")?.outputId, "display-1");
+      assert.equal(authorise(devices, "d1", "tok-2"), null);
+      assert.deepEqual(
+        spy.mock.calls.map((c) => [(c.arguments[0] as Buffer).length, (c.arguments[1] as Buffer).length]),
+        [[32, 32], [32, 32]],
+      );
+    } finally {
+      spy.mock.restore();
+    }
+  });
+
+  test("a secret of a different length, or in other characters, is refused rather than thrown at", () => {
+    for (const presented of ["t", "tok-1-and-then-some", "tök-1", "tok-1\u0000"]) {
+      assert.equal(authorise(devices, "d1", presented), null, JSON.stringify(presented));
+    }
   });
 });
 
@@ -233,5 +263,38 @@ describe("who may report a screen's size", () => {
   test("a size for an output with no bound device changes nothing", () => {
     const bound = claim([], "d1", "display-3", {}).devices;
     assert.equal(recordScreen(bound, "display-9", { w: 800, h: 600 }), bound);
+  });
+});
+
+describe("an output of a helper Mac", () => {
+  const output = { kind: "decklink" as const, name: "SDI 1 · Card A", port: "SDI 1", modes: ["1080p59.94"] };
+
+  test("claiming keeps which output it is, so the bound screen can say", () => {
+    const { devices } = claim([], "mac1.sdi-1", "display-1", { output, hostname: "booth-mini" });
+    assert.deepEqual(devices[0].output, output);
+  });
+
+  test("a re-claim without the output keeps the one already stored", () => {
+    const first = claim([], "mac1.sdi-1", "display-1", { output }).devices;
+    const again = claim(first, "mac1.sdi-1", "display-2", {}).devices;
+    assert.deepEqual(again[0].output, output);
+  });
+
+  test("a card reporting different modes is recorded", () => {
+    const stored = [dev({ id: "mac1.sdi-1", output })];
+    const next = touch(stored, "mac1.sdi-1", { output: { ...output, modes: ["1080p59.94", "720p50"] }, now: 1 });
+    assert.notEqual(next, stored, "new modes were not recorded");
+    assert.deepEqual(next[0].output?.modes, ["1080p59.94", "720p50"]);
+  });
+
+  test("the same output again is not a write", () => {
+    const stored = [dev({ id: "mac1.sdi-1", output })];
+    assert.equal(touch(stored, "mac1.sdi-1", { output: { ...output, modes: [...output.modes] }, now: 1 }), stored);
+  });
+
+  test("a probe without an output leaves the stored one alone", () => {
+    const stored = [dev({ id: "mac1.sdi-1", output })];
+    assert.equal(touch(stored, "mac1.sdi-1", { now: 1 }), stored);
+    assert.deepEqual(touch(stored, "mac1.sdi-1", { hostname: "renamed", now: 1 })[0].output, output);
   });
 });

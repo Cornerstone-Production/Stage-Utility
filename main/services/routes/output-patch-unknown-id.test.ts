@@ -27,6 +27,8 @@ const FIELDS: [name: string, body: Record<string, unknown>][] = [
   ["allowHls", { allowHls: false }],
   ["groups", { groups: [] }],
   ["textSize", { textSize: 150 }],
+  ["rotation", { rotation: 90 }],
+  ["videoMode", { videoMode: "1080p50" }],
 ];
 
 describe("PATCH /api/outputs/:id — an unknown id, for every boolean flag and for name", () => {

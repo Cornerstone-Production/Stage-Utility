@@ -14,9 +14,11 @@
 // rather than duplicates — are testable without a filesystem.
 
 
+import crypto from "node:crypto";
+
 import { announceDevices } from "./kiosk-presence.js";
 import { mergeScreen, sameScreen, screenFrom } from "./kiosk-screen-size.js";
-import type { BoundDevice, ScreenSize } from "../types/kiosk.js";
+import type { BoundDevice, DeviceOutput, ScreenSize } from "../types/kiosk.js";
 import { DataStore } from "./data-store.js";
 
 export const kioskDevicesStore = new DataStore<BoundDevice[]>("kiosk-devices.json", [], "config");
@@ -52,7 +54,20 @@ export function authorise(
   // secret presented and pin it. The window is between claiming and the screen's
   // next load, on a LAN this server already trusts for reads.
   if (device.token === "") return device;
-  return secret === device.token ? device : null;
+  return secretsMatch(secret, device.token) ? device : null;
+}
+
+/**
+ * Two secrets, compared in constant time.
+ *
+ * `===` stops at the first differing byte, so how long a wrong guess took says how
+ * much of it was right. timingSafeEqual needs equal lengths and throws otherwise,
+ * so each side is hashed first: the digests are always 32 bytes, and the length of
+ * a stored secret is not something a caller can probe either.
+ */
+function secretsMatch(presented: string, stored: string): boolean {
+  const digest = (s: string) => crypto.createHash("sha256").update(s).digest();
+  return crypto.timingSafeEqual(digest(presented), digest(stored));
 }
 
 /** Pin the secret a device presented, if it has not got one yet. Returns the
@@ -78,6 +93,8 @@ export interface ClaimDetails {
    *  across so the size is on the card the moment it is set up, rather than
    *  blank until the display next sends a heartbeat. */
   screen?: ScreenSize;
+  /** Which output of a helper Mac this is, so a bound screen can say. */
+  output?: DeviceOutput;
   label?: string;
   now?: number;
 }
@@ -117,6 +134,7 @@ export function claim(
     os: details.os ?? existing?.os,
     ip: details.ip ?? existing?.ip,
     screen: details.screen ?? existing?.screen,
+    output: details.output ?? existing?.output,
     lastSeen: details.now ?? existing?.lastSeen,
   };
   const kept = devices.filter((d) => d.id !== id && d.id !== displaced?.id);
@@ -160,7 +178,7 @@ export function recordScreen(
 export function touch(
   devices: readonly BoundDevice[],
   id: string,
-  seen: { macs?: string[]; hostname?: string; os?: string; ip?: string; mode?: string; now: number },
+  seen: { macs?: string[]; hostname?: string; os?: string; ip?: string; mode?: string; output?: DeviceOutput; now: number },
 ): BoundDevice[] {
   const i = devices.findIndex((d) => d.id === id);
   if (i === -1) return devices as BoundDevice[];
@@ -171,6 +189,8 @@ export function touch(
     d.hostname !== (seen.hostname ?? d.hostname) ||
     d.os !== (seen.os ?? d.os) ||
     d.ip !== (seen.ip ?? d.ip) ||
+    // A probe without `output` leaves the stored one alone.
+    (seen.output !== undefined && JSON.stringify(seen.output) !== JSON.stringify(d.output)) ||
     macs.length !== d.macs.length ||
     macs.some((m, k) => m !== d.macs[k]);
   // lastSeen alone is deliberately not a reason to write: it changes constantly
@@ -182,6 +202,7 @@ export function touch(
     hostname: seen.hostname ?? d.hostname,
     os: seen.os ?? d.os,
     ip: seen.ip ?? d.ip,
+    output: seen.output ?? d.output,
     screen: mergeScreen(d.screen, seen.mode === undefined ? undefined : { mode: seen.mode }),
     lastSeen: seen.now,
   };
