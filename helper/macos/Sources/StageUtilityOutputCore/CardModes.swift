@@ -117,7 +117,7 @@ public enum VideoModes {
   }
 
   /// "59.94", "60", "23.98": to two places, without a trailing zero.
-  static func rateText(_ rate: Double) -> String {
+  public static func rateText(_ rate: Double) -> String {
     let hundredths = Int((rate * 100).rounded())
     if hundredths % 100 == 0 { return "\(hundredths / 100)" }
     let text = String(format: "%d.%02d", hundredths / 100, hundredths % 100)

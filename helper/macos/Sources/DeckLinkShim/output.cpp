@@ -172,7 +172,8 @@ void Output::completed(IDeckLinkVideoFrame *frame, Completion result) {
   // The next frame has to go out after the one on air now. If it would not (the
   // host was held up and the card moved on), jump to just ahead of the card, rather
   // than going on scheduling frames in the past: those are shown late, which is
-  // delay that never goes away, or dropped, which freezes the picture.
+  // delay that never goes away, or dropped, which holds the picture until the
+  // schedule has caught up.
   int64_t now = 0;
   if (card_->streamTime(timeScale_, &now)) {
     const int64_t onAir = floorDiv(now, frameDuration_);
