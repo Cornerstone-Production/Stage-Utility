@@ -162,16 +162,24 @@ machine does not orphan the binding.
 
 ### Running the helper (beta)
 
-Build it with `helper/macos/build-app.sh` (macOS 14 or later; the Command Line Tools
-are enough). That writes `StageUtilityOutput.app`, a universal menu bar app signed ad
-hoc. Open it: the menu bar icon opens its window, where each of the Mac's displays has
-a switch and a status line. Launching it again brings the window back.
+Build it with `helper/macos/build-app.sh --arch arm64` (or `x86_64`; macOS 14 or later,
+and the Command Line Tools are enough). That downloads the pinned Chromium Embedded
+Framework, checks its checksums, and writes `StageUtilityOutput.app` for that
+architecture, about 325 MB, signed ad hoc. It renders every screen in Chromium, as the
+Raspberry Pi kiosks do. Open it: the menu bar icon opens its window, where each of the
+Mac's displays has a switch and a status line. Launching it again brings the window
+back.
 
 Flags, for a Mac nobody is looking at: `--show-window`, `--list-outputs` (reads the
 stored state and exits), `--dump-frames <dir>` (a PNG of every output and of the window
-every 5 s, with no Screen Recording permission), `--discovery-port <n>` and
-`--log-stderr`. The log is the unified log, subsystem `com.stageutility.output`.
+every 5 s, with no Screen Recording permission), `--discovery-port <n>`, `--log-stderr`,
+and, for development, `--virtual-sdi <n>` (n SDI outputs with no card behind them, so
+the card path runs on any Mac). The log is the unified log, subsystem
+`com.stageutility.output`.
 
-Everything else about it (state files, discovery, health, rotation, the Local Network
-permission, recovering an output from a server that is gone) is in
-[helper/macos/README.md](../helper/macos/README.md).
+A Mac that was a Chrome kiosk keeps its screen when the installer replaces the kiosk with
+the helper: its main display takes over the kiosk's device id and secret.
+
+Everything else about it (state files, discovery, health, rotation, Chromium and its
+sandbox, card outputs, the Local Network permission, recovering an output from a server
+that is gone) is in [helper/macos/README.md](../helper/macos/README.md).

@@ -1,41 +1,66 @@
 # Mac output helper
 
 A menu bar app that turns a Mac into several Stage Utility screens at once. Each
-of the Mac's displays is its own device, set up on the server like any other. It
-is a beta feature.
+of the Mac's displays is its own device, set up on the server like any other, and so
+will be each port of a Blackmagic DeckLink card. It is a beta feature.
 
 The helper is a client. The server can be on another machine or on the same Mac.
-It renders each screen's own URL in a `WKWebView`, so every view, widget and
-layout works as it does in Safari.
+It renders each screen's own URL in Chromium, embedded through the Chromium Embedded
+Framework (CEF), so every view, widget and layout works as it does on the Raspberry
+Pi kiosks, which run Chromium too.
 
 ## Build and run
 
 Needs macOS 14 or later and a Swift 6 toolchain: the tests use swift-testing, which
-ships with Swift 6 (`swift build` alone only needs 5.9). The Command Line Tools are
-enough; Xcode is not required.
+ships with Swift 6. The Command Line Tools are enough; Xcode is not required. Python 3
+(in the Command Line Tools) is used to make a venv with CMake and Ninja for the
+browser host; nothing is installed system-wide.
 
 ```sh
 cd helper/macos
-swift build                 # a debug build, .build/debug/StageUtilityOutput
-./test.sh                   # the core library's tests
-./build-app.sh              # StageUtilityOutput.app, signed ad hoc
+./test.sh                        # the core library's tests; needs no CEF
+./build-app.sh --arch arm64      # dist/arm64/StageUtilityOutput.app, signed ad hoc
+./build-app.sh --arch x86_64     # dist/x86_64/StageUtilityOutput.app
 ```
 
 `test.sh` runs `swift test`. With only the Command Line Tools it names the
 `Testing` framework's location itself, which `swift test` does not find on its own.
+`swift build` builds the Swift app alone; it starts, but says in its window that
+Chromium is missing, because the browser host is only ever inside the app bundle.
 
-`build-app.sh` writes the bundle next to itself (or into `$OUT`). It is universal
-(arm64 and x86_64, joined with `lipo`: `swift build --arch` needs Xcode's xcbuild, so
-each is built with `--triple`). Its version is the repository's `package.json`
-version, kept whole in `CFBundleShortVersionString`; `CFBundleVersion` has to be
-dotted integers, so it is the part before any `-` (`1.26.0` for `1.26.0-beta.4`). Its
-bundle id is `com.stageutility.output`, and it is an agent app (`LSUIElement`): a menu
-bar icon, no Dock icon.
+`build-app.sh --arch <arm64|x86_64>` writes `$OUT/StageUtilityOutput.app`, `OUT`
+defaulting to `dist/<arch>` (gitignored); without `--arch` it builds for the Mac it runs
+on. It fetches CEF (below), builds the browser host with CMake (`build-cef-host.sh`,
+into `.cef-build/<arch>`, with CMake and Ninja from a venv in `.tools/`), builds the
+Swift app with `swift build --triple`, and assembles CEF's bundle layout:
+
+| In `Contents/` | What |
+|---|---|
+| `MacOS/StageUtilityOutput` | The Swift app |
+| `Frameworks/libStageUtilityCEFHost.dylib` | The browser host (`CEFHost/`): CEF behind a small C API |
+| `Frameworks/Chromium Embedded Framework.framework` | Chromium, in CEF's versioned framework layout |
+| `Frameworks/StageUtilityOutput Helper.app`, `Helper (Alerts)`, `(GPU)`, `(Plugin)`, `(Renderer)` | CEF's helper apps, one executable under five names; Chromium starts its other processes from them |
+
+It is signed ad hoc from the inside out: the framework's libraries, the framework,
+the host, each helper, then the app. The app is about 325 MB for arm64 and 340 MB for
+x86_64, almost all of it the framework.
+
+There is one app per architecture, not a universal one: CEF ships a separate
+framework for each, and a universal app would carry both, about 650 MB, to every Mac.
+The installer is to pick by `uname -m` (`arm64` or `x86_64`); the release job calls
+`build-app.sh --arch` once for each.
+
+The version is the repository's `package.json` version, kept whole in
+`CFBundleShortVersionString`; `CFBundleVersion` has to be dotted integers, so it is the
+part before any `-` (`1.26.0` for `1.26.0-beta.4`). The bundle id is
+`com.stageutility.output` (the helpers' are `com.stageutility.output.helper` and
+`.helper.gpu` and so on), and it is an agent app (`LSUIElement`): a menu bar icon, no
+Dock icon. `NSAppSleepDisabled` and an activity held while any card output runs keep
+App Nap from slowing a card's clock.
 
 ### The CEF download
 
-The helper renders with Chromium through the Chromium Embedded Framework (CEF). The
-CEF version is pinned in `cef.json`, with the download URL, size, SHA-1 (from CEF's
+The CEF version is pinned in `cef.json`, with the download URL, size, SHA-1 (from CEF's
 index) and SHA-256 for each architecture. `./fetch-cef.sh [arm64|x86_64]` downloads the
 "minimal" distribution (about 135 MB) into `.cef/downloads/`, checks both checksums,
 and unpacks it beside them (about 800 MB). A mismatch deletes the download and fails;
@@ -48,7 +73,7 @@ scratch folder and open the window:
 ```sh
 mkdir /tmp/suo
 STAGE_UTILITY_OUTPUT_STATE_DIR=/tmp/suo \
-  .build/debug/StageUtilityOutput --show-window --log-stderr
+  dist/arm64/StageUtilityOutput.app/Contents/MacOS/StageUtilityOutput --show-window --log-stderr
 ```
 
 ## Opening the window
@@ -67,17 +92,19 @@ main display, and again when a change in the displays newly covers it.
 | Flag | What it does |
 |---|---|
 | `--show-window` | Open the window at launch. Without it the window opens only on a first run (no `outputs.json` yet) or from the menu bar icon. |
-| `--dump-frames <dir>` | Every 5 s, write a PNG of what each output is showing (`<output key>-NNNN.png`) and of the helper's own window (`window-NNNN.png`). It is how to check rendering on a Mac nobody is looking at: it uses `WKWebView.takeSnapshot`, which needs no Screen Recording permission. |
+| `--dump-frames <dir>` | Every 5 s, write a PNG of what each output is showing (`<output key>-NNNN.png`), turned as it goes out, and of the helper's own window (`window-NNNN.png`). It is how to check rendering on a Mac nobody is looking at, with the screen locked: a display output's picture comes from Chromium's DevTools (`Page.captureScreenshot`), a card output's is the frame itself, copied from Chromium's IOSurface; neither needs Screen Recording permission. Copying four frames at once costs a card output a few repeated frames every 5 s, so leave it off when measuring. |
 | `--list-outputs` | Print the stored state and exit: each display's output key, device id, and whether it is on (stored) or what it would default to. It only reads; a Mac with no device id yet is told so, not given one. |
 | `--discovery-port <n>` | The UDP port to probe. Default 8789, or `STAGE_KIOSK_PORT`. |
 | `--log-stderr` | Also print the log to the terminal. |
+| `--virtual-sdi <n>` | For development: add n card outputs, 1 to 16, with no card behind them (below). Without it, none are shown. |
 
 ## State
 
 | What | Where |
 |---|---|
-| The Mac's device id, the optional `server` file, the installer's token | `/Library/Application Support/StageUtility/`, written by `install-macos.sh`. Read only. |
-| Per-output state: `outputs.json` (enabled, token, the server it is bound to) | `~/Library/Application Support/StageUtilityOutput/` |
+| The Mac's device id, the optional `server` file, the installer's token, the `migrated-from-kiosk` marker | `/Library/Application Support/StageUtility/`, written by `install-macos.sh`. Read only. |
+| Per-output state: `outputs.json` (enabled, token, the server it is bound to, whether it holds the kiosk's identity) | `~/Library/Application Support/StageUtilityOutput/` |
+| Chromium's profile (cookies, local storage, cache) and its own log, `chromium.log` | `Chromium/` and `chromium.log` in the same user folder |
 | A device id, when the installer never wrote one | `generated-device-id` in the same user folder. The window says so. |
 
 `STAGE_UTILITY_OUTPUT_STATE_DIR` replaces both folders, for tests and development.
@@ -114,6 +141,9 @@ lower-cased. It survives reboots and re-plugging. The name is `<connector> · <s
 name>`, where the connector is "Built-in" for the Mac's own panel and "Display N"
 for everything else, because macOS does not say which port a display is on.
 
+A card output's key will be the card's persistent id and the port's index. A virtual
+one (`--virtual-sdi`) is `virtual-sdi-<n>`.
+
 The display with the menu bar is **off** until it is switched on, so the Mac keeps
 its desktop. Every other display starts on. The default is decided once, when the
 display is first seen, and stored.
@@ -121,7 +151,7 @@ display is first seen, and stored.
 A display that is unplugged closes its window; when it returns it reopens with the
 same binding. The outputs follow a change in the displays only after it has held for
 one second, so a display that vanishes for a moment on wake does not tear down every
-web view.
+page.
 
 ## A Mac that was a Chrome kiosk
 
@@ -188,7 +218,10 @@ whichever server is scanning. Until then it will not follow another server.
 Every 10 s, an output that is showing a set-up screen posts
 `{ at, dropped, fps, repeated }` to `/api/devices/<id>/health` with its token in the
 `x-device-token` header. A display's fps is its display link's tick rate; `repeated`
-and `dropped` are 0.
+and `dropped` are 0. A card output's are its frame clock's: fps is frames sent per
+second, `repeated` the percent of them that repeated the one before because the page's
+picture was late, and `dropped` the frames the clock skipped since the output opened
+(a total, so a lower number than last time means the output was reopened).
 
 A **401 or 404** means the server does not recognise this output with this token (it
 was released in Screens, or never set up; the server answers 401 for both so ids cannot
@@ -204,24 +237,86 @@ A screen's `rotation` (0, 90, 180 or 270, clockwise; absent is 0), set in the se
 Screens panel, is applied to a display output. The helper reads it from the screen's
 record in `/api/outputs` when a page becomes a screen and every 10 s after, together with
 the screen's name. The window lays the page out at the turned size (a portrait page for 90
-or 270) and turns the view about its centre, so the screen is laid out for its real shape
-and not squeezed. `--dump-frames` PNGs are turned to match what the window shows. The page
-shows upright for a moment at launch, before the first read. `videoMode` is a DeckLink
-port's setting and is not read.
+or 270) and turns the view Chromium draws in about its centre (`frameCenterRotation` on the
+view that holds it), so the screen is laid out for its real shape and not squeezed. AppKit
+does the hit-testing in the turned view's coordinates, so a click or a touch lands where it
+looks: driven with a 90° turn on a 1920 x 1080 display, clicks at window points (100, 200)
+and (1800, 900) reached the page at (200, 1820) and (900, 120). A card output lays its
+page out at the turned size too; turning its frames back is the DeckLink layer's, so
+for now only its dump is turned. `--dump-frames` PNGs are turned to match what the
+output shows. The page shows upright for a moment at launch, before the first read.
+`videoMode` is a DeckLink port's setting and is not read yet.
 
-## Keeping a display painting
+## Chromium
 
-WebKit stops painting a window it thinks is hidden: a locked screen, an asleep
-display. The helper turns that off with four private WebKit switches:
+**The host.** `CEFHost/` is a small C++ and Objective-C++ layer over CEF with a C API
+(`Sources/StageUtilityCEFHostAPI/include/stage_cef_host.h`): start and stop CEF, make a
+windowed browser in a view or a windowless one of a given size, load, reload, resize, ask
+a windowless browser for a frame, call a DevTools method, and report back a committed
+page, a failed load with Chromium's net error, a renderer that ended, and each windowless
+frame as an IOSurface. The Swift app does not link it: it opens the dylib at run time and
+checks its API version, so `swift build` and the tests need no CEF, and an app whose host
+is missing or damaged starts, finds the server and lists its outputs, and says in its
+window that Chromium did not start.
 
-- `-[WKWebView _setWindowOcclusionDetectionEnabled:]`
-- `-[WKPreferences _setHiddenPageDOMTimerThrottlingEnabled:]`
-- `-[WKPreferences _setHiddenPageDOMTimerThrottlingAutoIncreases:]`
-- `-[WKPreferences _setPageVisibilityBasedProcessSuppressionEnabled:]`
+**The event loop** is CEF's own (`CefRunMessageLoop`). On macOS that is AppKit's
+`-[NSApplication run]` with Chromium's work on the same run loop, so the menu bar, the
+window, the timers and every browser share one loop. CEF's alternative, an external pump
+that calls `CefDoMessageLoopWork` from a timer, exists for apps that cannot hand over
+their loop, and CEF documents it as slower; this app can. The app object is
+`StageUtilityCEFApplication`, an `NSApplication` subclass in the host that conforms to
+`CefAppProtocol`, as CEF requires; it is the bundle's `NSPrincipalClass`, and the app
+makes it before anything else touches `NSApplication`. Quitting closes every page and
+stops every clock, then ends the loop and shuts CEF down, so Chromium's processes go with
+the app.
 
-Each is checked every time an output is switched on (each output has its own web view),
-set with a real `BOOL`, and read back. One that is missing or does not take is logged and
-shown in the window. They are not public API and can change in any macOS release.
+**The sandbox is on.** Chromium's renderer, GPU and utility processes run in its macOS
+sandbox (seatbelt; each is started with `--seatbelt-client`). It needs no entitlement and
+works with the ad hoc signature. It matters here because the pages are the server's own,
+but a layout can embed outside content: a web page, a video.
+
+**Display outputs** are windowed browsers, a child of a view in the output's borderless
+window, so Chromium takes clicks, touches, scrolling and typing itself and a display
+output can be a control surface. They keep drawing when macOS thinks their window is
+hidden (a locked screen, an asleep display) through three public Chromium switches:
+`--disable-backgrounding-occluded-windows`, `--disable-renderer-backgrounding` and
+`--disable-background-timer-throttling`. `--use-mock-keychain` keeps Chromium from ever
+asking for the login keychain. Popups (`window.open`), JavaScript dialogs and the context
+menu are refused: an output has nobody to answer them.
+
+**Card outputs** are windowless browsers, 1920 x 1080, with shared textures and external
+begin frames: they draw a frame only when asked, and hand it over as an IOSurface that is
+valid only inside the callback. A scheduler (`FrameScheduler`) asks for one frame per slot
+of the card's clock and sends the newest picture at each slot, or the last one again if
+none came in time. Each request first invalidates the page, so a page that has not
+changed still draws, and a repeat always means late, never idle. `FrameLedger` (core,
+tested) counts each slot as new, repeated or dropped. A page that draws nothing for 300
+frames (5 s) is reloaded.
+
+**`--virtual-sdi <n>`** adds n card outputs named "SDI n (virtual)", keyed
+`virtual-sdi-n` (so each keeps its device id and binding between runs), kind `decklink`,
+mode `1080p59.94`. Each runs the whole card path, a windowless page and the scheduler,
+through a `NullCardSink`: a 59.94 Hz software clock (1001/60000 s) that takes each
+frame and sends it nowhere. They are listed, claimed, rotated and report health like a
+real port. Without the flag they do not exist. The DeckLink layer replaces the null sink
+with a port's scheduled playback, clocked by the card.
+
+**Measured** on an M4 Mac mini with the screen locked, a display output and four
+virtual card outputs, all claimed and showing a static screen, over 2 minutes: health
+59.91 to 60.02 fps, 0% repeated, 0 dropped; the app and all its Chromium processes used
+0.14 of a core and 630 MB (phys footprint), against 0.001 core and 113 MB with no
+output on. A static screen is a floor; animated layouts cost more GPU and renderer time.
+
+**Updating Chromium is part of every release.** CEF follows Chrome's release train, about
+every four weeks, and a browser's security fixes matter. To move to a new CEF: find the
+newest `stable` entry for `macosarm64` and `macosx64` in
+`https://cef-builds.spotifycdn.com/index.json`, put its version, file names, URLs, sizes
+and SHA-1s in `cef.json`, download each and add its SHA-256 (after checking the SHA-1),
+then build both architectures and drive the app.
+
+Ad hoc signing makes Chromium log `Unable to derive validation category for current
+process ... -67030` at launch; it has no effect seen so far. A Developer ID signature
+should be checked for it before the helper is on many Macs.
 
 ## Local Network permission
 
@@ -250,23 +345,36 @@ log stream --level info --predicate 'subsystem == "com.stageutility.output"'
 It logs decisions and failures: an output appearing, going or switching, an answer from
 a server, a probe that could not be sent, a page that did not load and when it will be
 retried, health posts refused or paused, a rotation applied, a foreign server's answer
-ignored, a missing WebKit switch, a state file that could not be read or saved. Trouble
-that continues (a probe socket that will not open, every probe failing to send) is
-logged when it starts and when it ends, not on every try. Healthy frames are not logged. Tokens never are.
+ignored, a state file that could not be read or saved. Chromium's own (category `cef`):
+whether it started, with its version and whether the sandbox is on, or why not; a page's
+renderer process ending, and the reload; the GPU process ending (Chromium starts
+another). A card output logs when it falls behind (a second with 3 or more repeated
+frames, 5%, the server's own line, or any dropped) and when it has kept up again for 5 s,
+on the change only, and a page that drew nothing for 5 s being reloaded. Trouble that
+continues (a probe socket that will not open, every probe failing to send) is logged
+when it starts and when it ends, not on every try. Healthy frames are not logged.
+Tokens never are.
+
+Chromium did not start, and an output's page that has crashed (with how many times since
+launch), are also said in the helper's window. Chromium writes its own warnings to
+`chromium.log` in the helper's state folder, beside its profile (`Chromium/`).
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `Sources/StageUtilityOutputCore/` | Everything decidable without a window: the probe, reply, ids, URLs, state files, timing, wording. Foundation only. |
-| `Sources/StageUtilityOutput/` | The app: displays, windows, sockets, the menu bar, the window. |
-| `Tests/StageUtilityOutputCoreTests/` | swift-testing tests of the core. |
+| `Sources/StageUtilityOutputCore/` | Everything decidable without a window: the probe, reply, ids, URLs, state files, timing, frame accounting, wording. Foundation only. |
+| `Sources/StageUtilityOutput/` | The app: displays, windows, sockets, the menu bar, the window, the Chromium surfaces and the card scheduler. |
+| `Sources/StageUtilityCEFHostAPI/` | The browser host's C API, and the few lines that open the host at run time. |
+| `CEFHost/` | The browser host, over CEF, built with CMake. |
+| `Tests/StageUtilityOutputCoreTests/` | swift-testing tests of the core. Nothing that needs Chromium running is unit-tested; that is driven end to end. |
 
-An output is a `WebSurface` placed by a destination. `WebSurface` is a protocol with no
-engine in it (load, reload, a committed-address callback, a load-result callback, a
-snapshot); `SurfaceLoader` is the part every engine shares (the retry, the backoff, what a
-5xx means), and `WKWebSurface` is the WebKit surface (with `KeepPainting`, the only code that names WebKit
-or its keep-painting switches). A display output puts the surface's view in a borderless window
-over a whole display (`WindowDestination`, which takes a placement, so it can later take a
-tile of a canvas display, and which turns the view for a rotation without knowing what draws
-in it); a DeckLink port will be another destination.
+An output is a `WebSurface` and somewhere for its pictures to go (`OutputSink`).
+`WebSurface` is a protocol with no engine in it (load, reload, a committed-address
+callback, a load-result callback, a renderer-gone callback, a snapshot); `SurfaceLoader`
+is the part every engine shares (the retry, the backoff, what a 5xx means). A display
+output (`DisplaySink`) is a `CEFWindowedSurface` in a borderless window over a whole
+display (`WindowDestination`, which takes a placement and turns the view for a rotation
+without knowing what draws in it). A card output (`CardOutput`) is a
+`CEFWindowlessSurface` and a `FrameScheduler` driving a `CardSink`: today the
+`NullCardSink`, next a DeckLink port.
