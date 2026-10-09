@@ -99,7 +99,7 @@ import Testing
     port.pollForTest()
     #expect(
       log.lines.filter { $0.contains("completion times") } == [
-        "SDI test: the card said a frame finished 50.0 ms after it reported it; completion times more than 20 ms off are not used, and the slots are timed from its playback position"
+        "SDI test: the card gave a frame's completion a time 50.0 ms after its callback; completion times more than 20 ms from their callback are not used, and the slots are timed from its playback position"
       ])
   }
 }

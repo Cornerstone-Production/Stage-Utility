@@ -306,7 +306,11 @@ final class AppModel: ObservableObject {
     if let screen = rt.output.screen {
       sink = DisplaySink(descriptor: d, screen: screen)
     } else if let card = rt.output.card {
-      sink = CardOutput(descriptor: d, hardware: card, settings: cardSettings)
+      let output = CardOutput(descriptor: d, hardware: card, settings: cardSettings)
+      // The port's line changes as it opens, is lost, or its page goes silent: the
+      // window says so then, not at the next health tick.
+      output.onProblemChange = { [weak self] in self?.refresh() }
+      sink = output
     } else {
       Log.error(.output, "\(d.port): neither a display nor a card port; not started")
       return

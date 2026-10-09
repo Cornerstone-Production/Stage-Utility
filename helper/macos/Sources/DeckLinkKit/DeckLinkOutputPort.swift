@@ -97,6 +97,8 @@ public final class DeckLinkOutputPort: CardSink {
   private var lastSample: (at: TimeInterval, counters: CardCounters)
   private var openSize: PixelSize?
   private var opened: ((PixelSize) -> Void)?
+  private var statusHandler: ((Status) -> Void)?
+  private var published: Status?
   /// A test's stand-in for a port another application holds: every open fails so.
   private var refusingOpens: String?
   /// Render to air of each new picture sent since the last health sample, ms.
@@ -140,9 +142,22 @@ public final class DeckLinkOutputPort: CardSink {
 
   public var state: State { queue.sync { current } }
 
-  /// The state, and why a running port is not sending the page (`CardWatch.Silence`):
-  /// what the window says, read together.
-  public var status: (state: State, silence: CardWatch.Silence?) { queue.sync { (current, watch.silence) } }
+  /// The state, and why a running port is not sending the page: what the window says.
+  public struct Status: Equatable {
+    public var state: State
+    public var silence: CardWatch.Silence?
+  }
+
+  public var status: Status { queue.sync { Status(state: current, silence: watch.silence) } }
+
+  /// Called on the port's own queue whenever its status changes: opened, refused,
+  /// lost, closed, or its page silent or drawing again. An owner that shows the
+  /// status keeps this copy rather than asking (`status` waits on the queue, which
+  /// may be in the middle of opening the card). Hop to the owner's thread.
+  public var onStatus: ((Status) -> Void)? {
+    get { queue.sync { statusHandler } }
+    set { queue.sync { statusHandler = newValue } }
+  }
 
   /// The frame size of the mode it last opened in; nil before it has opened.
   public var frameSize: PixelSize? { queue.sync { openSize } }
@@ -184,6 +199,7 @@ public final class DeckLinkOutputPort: CardSink {
       stopTimers()
       closeHandle()
       current = .closed
+      publish()
     }
   }
 
@@ -237,6 +253,7 @@ public final class DeckLinkOutputPort: CardSink {
   /// retry. A retry that fails again says nothing more; the line that said the port
   /// was lost is enough, and its timer keeps trying.
   private func openNow(retrying: Bool) {
+    defer { publish() }
     switch attempt() {
     case .opened(let mode, let frames):
       stopTimers()
@@ -360,6 +377,15 @@ public final class DeckLinkOutputPort: CardSink {
     current = .lost(reason)
     log(.error, "\(label): lost (\(reason)); trying again every \(Int(retryInterval)) s")
     startRetrying()
+    publish()
+  }
+
+  /// Tell the owner the status, if it changed.
+  private func publish() {
+    let now = Status(state: current, silence: watch.silence)
+    guard now != published else { return }
+    published = now
+    statusHandler?(now)
   }
 
   private func countsNow() -> CardCounters {
@@ -450,7 +476,7 @@ public final class DeckLinkOutputPort: CardSink {
       log(
         .error,
         String(
-          format: "%@: the card said a frame finished %.1f ms %@ it reported it; completion times more than 20 ms off are not used, and the slots are timed from its playback position",
+          format: "%@: the card gave a frame's completion a time %.1f ms %@ its callback; completion times more than 20 ms from their callback are not used, and the slots are timed from its playback position",
           label, abs(ms), ms > 0 ? "after" : "before"))
     }
     let counts = countsNow()
@@ -463,6 +489,7 @@ public final class DeckLinkOutputPort: CardSink {
       handleLost("the card stopped taking frames", from: nil)
       return
     }
+    defer { publish() }
     for event in watch.second(sent: Int(sent), repeated: Int(repeated), dropped: Int(missed)) {
       switch event {
       case .fellBehind(let r, let d):

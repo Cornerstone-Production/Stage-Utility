@@ -45,6 +45,10 @@ final class CardOutput: OutputSink {
   /// Why this output cannot send anything at all, for the window; nil when it can.
   private let setupProblem: String?
   private var layout: CardPageLayout
+  /// The port's status as it last said (`onStatus`), on the main thread.
+  private var portStatus: DeckLinkOutputPort.Status?
+  /// Called on the main thread when `problem` may have changed.
+  var onProblemChange: (() -> Void)?
   /// The screen's `videoMode` as last applied; nil is the default.
   private var videoMode: String?
   /// Why the last picture could not be copied, said once per cause.
@@ -101,6 +105,15 @@ final class CardOutput: OutputSink {
     port.onOpened = { [weak self] size in
       DispatchQueue.main.async { MainActor.assumeIsolated { self?.portOpened(size) } }
     }
+    port.onStatus = { [weak self] status in
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          self.portStatus = status
+          self.onProblemChange?()
+        }
+      }
+    }
     port.open(videoMode: nil)
   }
 
@@ -148,7 +161,7 @@ final class CardOutput: OutputSink {
   /// nothing. Nil while the page goes out.
   var problem: String? {
     if let setupProblem { return setupProblem }
-    guard let status = port?.status else { return nil }
+    guard let status = portStatus else { return nil }
     switch status.state {
     case .refused(let why): return "Cannot play \(videoMode ?? VideoModes.defaultMode): \(why)"
     case .lost(let why): return "Port unavailable (\(why)). Retrying"

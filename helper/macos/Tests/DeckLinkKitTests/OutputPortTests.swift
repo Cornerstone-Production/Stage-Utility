@@ -507,6 +507,42 @@ let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a so
       ])
   }
 
+  /// A port tells its owner each time its status changes, so the window says so
+  /// then, without asking the port's queue: opened, lost, opened again, and its page
+  /// silent and drawing again. Nothing is said twice.
+  @Test func aPortSaysEachChangeOfItsStatus() {
+    let source = NumberedSource()
+    let port = softwarePort(source)
+    let said = Locked<[DeckLinkOutputPort.Status]>([])
+    port.onStatus = { said.value.append($0) }
+    let running = DeckLinkOutputPort.Status(state: softwareMode, silence: nil)
+    port.open(videoMode: nil)
+    port.fakeTick(60)
+    port.pollForTest()
+    port.fakeUnplug()
+    port.sync()
+    port.retry()
+    port.sync()
+    source.missingNow = true
+    for _ in 0...CardWatch.stallSeconds {
+      port.fakeTick(60)
+      port.pollForTest()
+    }
+    source.missingNow = false
+    port.fakeTick(60)
+    port.pollForTest()
+    port.close()
+    #expect(
+      said.value == [
+        running,
+        DeckLinkOutputPort.Status(state: .lost("the device was removed"), silence: nil),
+        running,
+        DeckLinkOutputPort.Status(state: softwareMode, silence: .stopped),
+        running,
+        DeckLinkOutputPort.Status(state: .closed, silence: nil),
+      ])
+  }
+
   /// A virtual port opens in whichever of the server's modes it is asked for, at
   /// that mode's size, and refuses a name the server does not list.
   @Test func aVirtualPortTakesAnyListedMode() {
