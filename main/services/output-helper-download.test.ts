@@ -259,6 +259,79 @@ describe("fetching the helper from the release", () => {
     assert.ok(again.ok, JSON.stringify(again));
   });
 
+  it("never shows a half-downloaded zip under its real name", { timeout: 5000 }, async (t) => {
+    captureConsole(t, "log", "warn");
+    const first = Buffer.alloc(30_000, 1);
+    const rest = Buffer.alloc(30_000, 2);
+    release.publish(ZIP.name, Buffer.concat([first, rest]));
+    // A body the test holds open: one chunk now, the rest when it says.
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    const real = release.fetch;
+    release.fetch = async (input, init) => {
+      if (!String(input).endsWith(".zip")) return real(input, init);
+      return new Response(new ReadableStream<Uint8Array>({ start: (c) => { body = c; c.enqueue(new Uint8Array(first)); } }), { status: 200 });
+    };
+    const flight = make().resolve(ZIP);
+    const partName = async () => (await fs.readdir(cacheDir()).catch(() => [] as string[])).find((n) => n.endsWith(".part"));
+    for (let i = 0; i < 200 && !(await partName().then(async (n) => n && (await fs.stat(path.join(cacheDir(), n))).size > 0)); i++) await new Promise((r) => setTimeout(r, 10));
+
+    // Mid-download: the bytes are on disk, but not under the name a request serves.
+    assert.ok(await partName(), "the download is being written to a .part file");
+    assert.ok(!(await listCache()).includes(ZIP.name), "the final name must not exist until the file is whole and checked");
+
+    body.enqueue(new Uint8Array(rest));
+    body.close();
+    const r = await flight;
+    assert.ok(r.ok, JSON.stringify(r));
+    assert.deepEqual(await listCache(), [ZIP.name, SUM.name], "whole now, under its real name, and no .part left");
+  });
+
+  it("leaves no zip, whole or partial, when the connection drops mid-body", { timeout: 5000 }, async (t) => {
+    captureConsole(t, "warn");
+    release.publish(ZIP.name, Buffer.alloc(60_000, 3));
+    const real = release.fetch;
+    release.fetch = async (input, init) => {
+      if (!String(input).endsWith(".zip")) return real(input, init);
+      return new Response(new ReadableStream<Uint8Array>({ start: (c) => { c.enqueue(new Uint8Array(30_000)); c.error(new Error("connection reset")); } }), { status: 200 });
+    };
+    const r = await make().resolve(ZIP);
+    assert.ok(!r.ok);
+    assert.match(r.message, /did not finish downloading: connection reset/);
+    assert.deepEqual(await listCache(), [SUM.name]);
+  });
+
+  describe("the checksum file's size cap", () => {
+    const sumBody = (extra: number) => {
+      const digest = sha(Buffer.from("zip bytes"));
+      const line = `${digest}  ${ZIP.name}\n`;
+      return Buffer.concat([Buffer.from(line), Buffer.alloc(extra, 0x20)]);
+    };
+
+    it("refuses a checksum body over 4 KiB, even when its first line is a good digest", async (t) => {
+      captureConsole(t, "warn");
+      release.publish(ZIP.name, Buffer.from("zip bytes"));
+      release.files.set(`/v${VERSION}/${ZIP.name}.sha256`, { body: sumBody(8 * 1024) });
+      const r = await make().resolve(SUM);
+      assert.ok(!r.ok);
+      assert.equal(r.status, 502);
+      assert.match(r.message, /StageUtilityOutput-arm64\.zip\.sha256 is larger than 4096 bytes; refusing it/);
+      assert.deepEqual(await listCache(), [], "nothing is stored");
+    });
+
+    it("accepts one of exactly 4 KiB, and refuses one a byte over", async (t) => {
+      captureConsole(t, "log", "warn");
+      const exact = sumBody(0);
+      const padded = Buffer.concat([exact, Buffer.alloc(4096 - exact.length, 0x20)]);
+      assert.equal(padded.length, 4096);
+      release.publish(ZIP.name, Buffer.from("zip bytes"));
+      release.files.set(`/v${VERSION}/${ZIP.name}.sha256`, { body: padded });
+      assert.ok((await make().resolve(SUM)).ok);
+      await fs.rm(cacheDir(), { recursive: true, force: true });
+      release.files.set(`/v${VERSION}/${ZIP.name}.sha256`, { body: Buffer.concat([padded, Buffer.from(" ")]) });
+      assert.ok(!(await make().resolve(SUM)).ok);
+    });
+  });
+
   it("reads the running version once per request, however many steps the request takes", async (t) => {
     captureConsole(t, "log", "warn");
     release.publish(ZIP.name, crypto.randomBytes(1000));

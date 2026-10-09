@@ -98,7 +98,7 @@ describe("GET /kiosk/StageUtilityOutput-<arch>.zip", () => {
     assert.equal(first.headers.get("content-length"), String(zip.length));
     assert.deepEqual(Buffer.from(await first.arrayBuffer()), zip);
     const hits = githubHits.length;
-    assert.ok(hits >= 2, "the checksum and the zip are both fetched");
+    assert.equal(hits, 2, "the checksum and the zip, and nothing else, are fetched");
 
     const second = await fetch(`${appBase}/kiosk/${ZIP}`);
     assert.deepEqual(Buffer.from(await second.arrayBuffer()), zip);
@@ -165,5 +165,40 @@ describe("GET /kiosk/install-macos.sh", () => {
     assert.equal(r.status, 200);
     assert.ok(r.body.split("\n").includes('FETCHED_FROM=""'));
     assert.ok(!r.body.includes("id; "));
+  });
+});
+
+describe("GET /kiosk/install-macos.sh behind TLS", () => {
+  // A real TLS handshake needs a certificate. What the route reads is
+  // `req.socket.encrypted`, which Node sets on a TLS socket, so this serves the
+  // route from a socket that carries that flag, the way an https server's does.
+  it("stamps an https address, and an http one when the socket is not encrypted", async () => {
+    const serve = (encrypted: boolean) =>
+      http.createServer((req, res) => {
+        if (encrypted) Object.defineProperty(req.socket, "encrypted", { value: true });
+        const url = new URL(req.url ?? "/", "http://localhost");
+        void kioskDeviceRoutes({ req, res, url, pathname: url.pathname, method: "GET" });
+      });
+    const stamped = async (encrypted: boolean) => {
+      const server = serve(encrypted);
+      const base = await listen(server);
+      try {
+        const u = new URL(base);
+        return await new Promise<string>((resolve, reject) => {
+          http
+            .get({ host: u.hostname, port: u.port, path: "/kiosk/install-macos.sh", headers: { host: "192.0.2.10:8788" } }, (res) => {
+              let body = "";
+              res.setEncoding("utf8");
+              res.on("data", (c: string) => (body += c));
+              res.on("end", () => resolve(body.split("\n").find((l) => l.startsWith("FETCHED_FROM=")) ?? "no FETCHED_FROM line"));
+            })
+            .on("error", reject);
+        });
+      } finally {
+        await new Promise((r) => server.close(r));
+      }
+    };
+    assert.equal(await stamped(true), 'FETCHED_FROM="https://192.0.2.10:8788"');
+    assert.equal(await stamped(false), 'FETCHED_FROM="http://192.0.2.10:8788"');
   });
 });
