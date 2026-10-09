@@ -37,7 +37,7 @@ describe("setting a view to a control surface", () => {
   test("writes only the screens that actually differ", () => {
     // `showing` is filtered to the ones not already in the wanted mode, so a
     // pairing does not re-write half the wall to no effect.
-    assert.match(src, /\(o\.mode \?\? "display"\) !== wantMode/);
+    assert.match(src, /surfaceForMode\(outputMode\(o\)\) !== surface/);
   });
 
   test("does nothing further when the first write was refused", () => {
