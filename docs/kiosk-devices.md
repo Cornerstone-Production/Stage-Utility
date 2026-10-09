@@ -56,7 +56,7 @@ identical Pis apart.
 On macOS 14 or later, on Apple silicon or Intel, `install-macos.sh` installs the
 **Stage Utility Output** helper, a menu bar app that turns the Mac's displays and
 DeckLink SDI ports into screen devices. What the helper does once it runs is
-under [Mac output helper](#mac-output-helper); this is how it gets there.
+under *Mac output helper*; this is how it gets there.
 
 ```sh
 curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
