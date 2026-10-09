@@ -8,11 +8,15 @@ import * as path from "path";
 import { getUserDataPath } from "./app-paths.js";
 import { downscaleAvatarUrl } from "./avatar-geometry.js";
 import { pruneCacheDir } from "./cache-prune.js";
+import { readCapped } from "./capped-download.js";
 import { scrub, scrubError } from "./scrub.js";
 
 // Photos are small; keep ~90 days of them, capped at 250 MB.
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_BYTES = 250 * 1024 * 1024;
+/** Kept here for the callers and tests that named it here; it lives in capped-download.ts. */
+export { readCapped };
+
 /** A single photo is an avatar, not a payload. Refuse anything absurd. */
 const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 
@@ -273,38 +277,6 @@ export async function prunePhotoCache(): Promise<void> {
   if (r.removed > 0) {
     console.log(`[photo-cache] pruned ${scrub(r.removed)} file(s), freed ${scrub((r.freedBytes / 1e6).toFixed(1))} MB`);
   }
-}
-
-/**
- * Read a response body, giving up once it exceeds `maxBytes`.
- *
- * Returns null rather than throwing when it is over — the caller treats that the
- * same as any other unusable response. Cancels the stream so the transfer stops
- * rather than running to completion in the background.
- */
-export async function readCapped(response: Response, maxBytes: number): Promise<Buffer | null> {
-  if (!response.body) {
-    const buf = Buffer.from(await response.arrayBuffer());
-    return buf.byteLength > maxBytes ? null : buf;
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel().catch(() => {});
-        return null;
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  return Buffer.concat(chunks, total);
 }
 
 async function fetchPhoto(photoUrl: string): Promise<Buffer | null> {

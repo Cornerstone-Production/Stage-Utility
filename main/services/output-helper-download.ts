@@ -27,8 +27,10 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { withoutDataDir } from "./app-paths.js";
+import { commitPart, readCapped, streamToPart } from "./capped-download.js";
 import { errorMessage, fetchFailureMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
+import { atomicWrite } from "./write-queue.js";
 
 export const HELPER_ARCHES = ["arm64", "x86_64"] as const;
 export type HelperArch = (typeof HELPER_ARCHES)[number];
@@ -213,13 +215,15 @@ export class OutputHelperDownloads {
   private async fetchChecksum(asset: HelperAsset, file: string): Promise<Resolution> {
     const zipName = asset.name.replace(/\.sha256$/, "");
     const res = await this.get(asset.name, this.sumTimeoutMs);
-    const text = Buffer.from(await readCapped(res, MAX_SUM_BYTES, asset.name)).toString("utf8");
+    const body = await readCapped(res, MAX_SUM_BYTES);
+    if (!body) throw new Refusal(502, `${asset.name} is larger than ${MAX_SUM_BYTES} bytes; refusing it`);
+    const text = body.toString("utf8");
     const digest = parseChecksum(text);
     if (!digest) throw new Refusal(502, `${asset.name} does not start with a SHA-256 digest`);
     // Normalised to `shasum` form, which is what the installer's check reads.
     const line = `${digest}  ${zipName}\n`;
     await fs.mkdir(path.dirname(file), { recursive: true });
-    await writeAtomically(file, line);
+    await atomicWrite(file, line, { mode: 0o644 });
     console.log(`[output-helper] fetched ${scrub(asset.name)} from the release`);
     return { ok: true, file, size: Buffer.byteLength(line), source: "release" };
   }
@@ -249,22 +253,17 @@ export class OutputHelperDownloads {
     for (const failed of stale) console.warn(`[output-helper] could not remove a leftover partial download: ${scrub(failed)}`);
     const part = path.join(dir, `${asset.name}.${process.pid}-${crypto.randomUUID()}.part`);
     const hash = crypto.createHash("sha256");
-    let size = 0;
-    const out = await fs.open(part, "wx", 0o644);
+    let size: number;
     try {
-      try {
-        if (!res.body) throw new Refusal(502, `${asset.name} came with no body`);
-        for await (const chunk of chunksOf(res.body)) {
-          size += chunk.byteLength;
-          if (size > this.maxZipBytes) {
-            throw new Refusal(502, `${asset.name} went past the ${this.maxZipBytes} byte limit; refusing it`);
-          }
-          hash.update(chunk);
-          await out.write(chunk);
-        }
-      } finally {
-        await out.close();
-      }
+      if (!res.body) throw new Refusal(502, `${asset.name} came with no body`);
+      const written = await streamToPart(res.body, part, {
+        maxBytes: this.maxZipBytes,
+        exclusive: true,
+        mode: 0o644,
+        onChunk: (chunk) => void hash.update(chunk),
+      });
+      if (!written.ok) throw new Refusal(502, `${asset.name} went past the ${this.maxZipBytes} byte limit; refusing it`);
+      size = written.bytes;
       const got = hash.digest("hex");
       if (got !== expected) {
         // Neither file stays: the zip is wrong, and the checksum that said so may
@@ -272,7 +271,7 @@ export class OutputHelperDownloads {
         await fs.rm(sumFile, { force: true });
         throw new Refusal(502, `${asset.name} did not match its published SHA-256 (expected ${expected}, got ${got}); not stored`);
       }
-      await fs.rename(part, file);
+      await commitPart(part, file);
     } catch (err) {
       await fs.rm(part, { force: true });
       if (err instanceof Refusal) throw err;
@@ -317,30 +316,6 @@ async function statFile(file: string): Promise<number | null> {
   }
 }
 
-async function writeAtomically(file: string, text: string): Promise<void> {
-  const tmp = `${file}.${process.pid}-${crypto.randomUUID()}.part`;
-  try {
-    await fs.writeFile(tmp, text, { mode: 0o644 });
-    await fs.rename(tmp, file);
-  } catch (err) {
-    await fs.rm(tmp, { force: true });
-    throw err;
-  }
-}
-
-/** A whole body, refused past `max` bytes. */
-async function readCapped(res: Response, max: number, name: string): Promise<Uint8Array> {
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  if (!res.body) return new Uint8Array();
-  for await (const chunk of chunksOf(res.body)) {
-    size += chunk.byteLength;
-    if (size > max) throw new Refusal(502, `${name} is larger than ${max} bytes; refusing it`);
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
 /** Remove partial downloads left by a fetch that died. Returns what it could not. */
 async function sweepParts(dir: string): Promise<string[]> {
   const failed: string[] = [];
@@ -361,21 +336,4 @@ async function sweepParts(dir: string): Promise<string[]> {
     }
   }
   return failed;
-}
-
-/** A fetch body's chunks. Read through its reader because the DOM typings give
- *  ReadableStream no async iterator, though Node's has one. */
-async function* chunksOf(body: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
-  const reader = body.getReader();
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) return;
-      yield value;
-    }
-  } finally {
-    // Cancels when the consumer stopped early (a cap, a mismatch) so the socket is
-    // not left reading a file nobody wants.
-    await reader.cancel().catch(() => undefined);
-  }
 }
