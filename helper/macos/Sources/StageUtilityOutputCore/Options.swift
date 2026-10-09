@@ -2,22 +2,25 @@ import Foundation
 
 /// Command-line flags. Parsed by hand: there are five and none is worth a
 /// dependency.
-struct Options {
+public struct Options: Equatable {
   /// `--dump-frames <dir>`: write a PNG of every output every 5 s.
-  var dumpFramesDir: URL?
+  public var dumpFramesDir: URL?
   /// `--show-window`: open the helper's window at launch (a menu bar app does not,
   /// otherwise, once it has been set up).
-  var showWindow = false
+  public var showWindow = false
   /// `--list-outputs`: print each display's key, id and default, then exit.
-  var listOutputs = false
+  public var listOutputs = false
   /// `--discovery-port <n>`, else STAGE_KIOSK_PORT (the installer's variable), else 8789.
-  var discoveryPort: UInt16 = 8789
+  /// The flag wins over the variable.
+  public var discoveryPort: UInt16 = 8789
   /// `--log-stderr`: mirror the log to stderr.
-  var logToStderr = false
+  public var logToStderr = false
 
-  static let dumpInterval: TimeInterval = 5
+  public init() {}
 
-  static func parse(_ args: [String], environment: [String: String]) -> (Options, [String]) {
+  public static let dumpInterval: TimeInterval = 5
+
+  public static func parse(_ args: [String], environment: [String: String]) -> (Options, [String]) {
     var o = Options()
     var problems: [String] = []
     if let p = environment["STAGE_KIOSK_PORT"], !p.isEmpty {
