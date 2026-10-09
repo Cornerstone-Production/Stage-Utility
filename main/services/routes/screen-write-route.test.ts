@@ -241,6 +241,23 @@ describe("POST /api/devices/claim — a new screen", () => {
     assert.equal((await kioskDevicesStore.load()).length, 0);
   });
 
+  it("puts an existing console back in the sidebar when the binding fails", async () => {
+    // The listing is written on a view that existed before the claim, so taking
+    // back the screen and any view made for it is not enough.
+    recordSeen(device);
+    const file = path.join(TMP, "kiosk-devices.json");
+    await fs.rm(file, { force: true });
+    await fs.mkdir(file);
+    try {
+      const r = await claim({ name: "Wing", mode: "panel", viewId: "ctl-a", showInSidebar: false });
+      assert.equal(r.status, 500, JSON.stringify(r.json));
+    } finally {
+      await fs.rm(file, { recursive: true, force: true });
+    }
+    assert.equal(outputs().some((o) => o.name === "Wing"), false, "the empty screen was left behind");
+    assert.notEqual(views().find((v) => v.id === "ctl-a")!.showInSidebar, false, "the failed claim left the console hidden from the sidebar");
+  });
+
   it("takes the screen AND the view it made back when the binding then fails", async () => {
     recordSeen(device);
     // A directory where the devices file goes: the write onto it cannot succeed.
@@ -249,7 +266,9 @@ describe("POST /api/devices/claim — a new screen", () => {
     await fs.mkdir(file);
     try {
       const r = await claim({ name: "Wing", mode: "panel", newView: true });
-      assert.equal(r.status, 400, JSON.stringify(r.json));
+      // A failure part-way, answered as POST /api/outputs answers one.
+      assert.equal(r.status, 500, JSON.stringify(r.json));
+      assert.equal((r.json as { failed: string }).failed, "bind the device");
     } finally {
       await fs.rm(file, { recursive: true, force: true });
     }

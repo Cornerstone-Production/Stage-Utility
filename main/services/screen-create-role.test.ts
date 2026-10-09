@@ -443,22 +443,38 @@ describe("checks hold against a write that lands while they wait", () => {
   });
 });
 
-describe("undoCreateScreen", () => {
-  it("removes the screen and the view, even when that view is the only one", async () => {
-    const { output, createdViewId } = await stageController.createScreen({ name: "Temp", mode: "display", newView: true });
-    // Leave exactly one user view: deleteView would refuse to drop it, and a
-    // rollback that cannot drop the view it made is not a rollback.
-    ctl.state = { ...ctl.state, views: views().filter((v) => v.id === createdViewId) };
-    const left = await stageController.undoCreateScreen({ outputId: output.id, viewId: createdViewId });
-    assert.deepEqual(left, []);
-    assert.equal(outputs().some((o) => o.id === output.id), false);
-    assert.equal(views().some((v) => v.id === createdViewId), false);
+describe("createScreen — a caller's last step that fails", () => {
+  // The claim route binds a device as createScreen's last step, so a binding
+  // that fails is taken back by the same rollback as everything else.
+  const failing = { label: "bind the device", run: async () => { throw new Error("devices file unwritable"); } };
+
+  it("takes back the screen, the view made for it, and an existing view's listing", async () => {
+    await assert.rejects(
+      () => stageController.createScreen({ name: "Kiosk", mode: "panel", viewId: "ctl-b", showInSidebar: false }, failing),
+      (err: unknown) => {
+        assert.ok(err instanceof ScreenWriteError, String(err));
+        assert.equal(err.failed, "bind the device");
+        assert.deepEqual(err.rolledBack.sort(), ["add the screen", "set the sidebar listing"]);
+        return true;
+      },
+    );
+    assert.equal(outputs().some((o) => o.name === "Kiosk"), false, "the screen was left behind");
+    assert.notEqual(view("ctl-b").showInSidebar, false, "the console was left hidden from the sidebar");
   });
 
-  it("returns what it could not remove instead of throwing", async () => {
-    const left = await stageController.undoCreateScreen({ outputId: "display-nope", viewId: null });
-    assert.equal(left.length, 1);
-    assert.match(left[0], /display-nope/);
+  it("drops the view it made even when that view is the only one", async () => {
+    // deleteView refuses the last view; a rollback that could not drop the view
+    // it made would not be a rollback.
+    ctl.state = { ...ctl.state, views: [] };
+    await assert.rejects(() => stageController.createScreen({ name: "Only", mode: "display", newView: true }, failing), ScreenWriteError);
+    assert.deepEqual(views(), []);
+    assert.equal(outputs().some((o) => o.name === "Only"), false);
+  });
+
+  it("hands the step the screen it made", async () => {
+    let given: string | null = null;
+    const { output } = await stageController.createScreen({ name: "Handed" }, { label: "look", run: async (o) => { given = o.id; } });
+    assert.equal(given, output.id);
   });
 });
 

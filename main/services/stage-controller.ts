@@ -216,7 +216,7 @@ export class SlotsNotFoundError extends Error {
 }
 
 /** One write in a multi-write screen change, and how to take it back. */
-interface ScreenStep {
+export interface ScreenStep {
   label: string;
   run: () => Promise<unknown>;
   /** Put the step back. Runs even for the step that failed, so it must be safe
@@ -3729,8 +3729,17 @@ export class StageController {
    * `mode` absent is the legacy `{ name, viewId }` call and behaves exactly as it
    * always did: a display, and the view id is taken as given. Only a caller that
    * states a role has the view checked against it.
+   *
+   * `last` is a caller's own write that belongs to the same screen (a device to
+   * bind to it), run as the final step. If it fails, everything before it is put
+   * back by the same rollback, including a sidebar listing written on a view
+   * that existed before: a caller undoing the parts it knows about after the
+   * fact missed that one.
    */
-  async createScreen(input: CreateScreenInput): Promise<CreateScreenResult> {
+  async createScreen(
+    input: CreateScreenInput,
+    last?: { label: string; run: (output: Output) => Promise<unknown> },
+  ): Promise<CreateScreenResult> {
     const { mode } = input;
     if (mode !== undefined && mode !== "display" && mode !== "panel") {
       throw new Error('outputs:add — mode must be "display" or "panel"');
@@ -3791,38 +3800,13 @@ export class StageController {
             undo: async () => { if (sidebarWas === undefined || !viewId) return false; await this.setViewShowInSidebar(viewId, sidebarWas); },
           }]
         : []),
+      ...(last ? [{ label: last.label, run: () => last.run(output!) }] : []),
     ]);
     console.log(
       `[stage-controller] createScreen id=${scrub(output!.id)} name="${scrub(output!.name)}" mode=${scrub(mode ?? "display")} ` +
         `view=${scrub(viewId ?? "(none)")}${scrub(createdViewId ? " (made for it)" : "")}${scrub(slug ? ` slug="${slug}"` : "")}`,
     );
     return { state: this.state, output: output!, createdViewId };
-  }
-
-  /**
-   * Take back a screen createScreen made, and the view it made for it. For the
-   * caller that has more to do after creating (a device to bind) and must undo
-   * the whole thing if that fails. Returns what could not be removed, so the
-   * caller can say so; nothing is thrown for a half-undo.
-   */
-  async undoCreateScreen(created: { outputId: string; viewId: string | null }): Promise<string[]> {
-    const left: string[] = [];
-    try {
-      await this.removeOutput(created.outputId);
-    } catch (err) {
-      left.push(`the screen ${created.outputId} (${errorMessage(err)})`);
-    }
-    if (created.viewId) {
-      try {
-        await this.dropView(created.viewId);
-      } catch (err) {
-        left.push(`the view ${created.viewId} (${errorMessage(err)})`);
-      }
-    }
-    console.warn(
-      `[stage-controller] undoCreateScreen ${scrub(created.outputId)}: ${left.length === 0 ? "removed" : `COULD NOT remove ${scrub(left.join(", "))}`}`,
-    );
-    return left;
   }
 
   /**
