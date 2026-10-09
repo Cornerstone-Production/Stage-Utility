@@ -111,7 +111,7 @@ next login with the real state.
 | `--virtual-sdi <n>` | For development: add n card outputs, 1 to 16, with no card behind them (below). Without it, none are shown. |
 | `--test-pattern latency` | For development: every output that is on shows a latency test page instead of its server's screen: a large clock to photograph side by side with another output, and a stamp in its corner from which a card output times each picture exactly ([DECKLINK.md](DECKLINK.md#latency)). |
 | `--frame-timings <file>` | For development: write every card output's slots to a CSV file, one line each with the times of its picture on the way to the card. |
-| `--head-start <ms>`, `--fill-lead <ms>` | For development: when each card output's slot is asked for and filled, before it goes to air. Without them, the measured defaults (20 and 5 ms). |
+| `--head-start <ms>`, `--fill-lead <ms>` | For development: when each card output's slot is asked for and filled, before it goes to air. Without them, the measured defaults (20 and 5 ms). The helper will not start with a fill lead under 3.5 ms (a card shows such a frame late) or one not shorter than the head start, and says why. |
 
 ## State
 

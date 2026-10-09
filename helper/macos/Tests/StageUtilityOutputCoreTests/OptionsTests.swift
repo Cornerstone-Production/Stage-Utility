@@ -69,6 +69,31 @@ import Testing
     }
   }
 
+  /// The pair the leads make is checked when the flags are read, with the standard
+  /// for the one not given: a fill lead under the card's 3.5 ms would skip every
+  /// slot, and one not shorter than the head start leaves the page no time and the
+  /// port would never open. Either refuses to start, saying why.
+  @Test func leadsThatCannotRunAreRefusedAtTheStart() {
+    #expect(parse(["--head-start", "16", "--fill-lead", "4"]).1.isEmpty)
+    #expect(parse(["--fill-lead", "3.5"]).1.isEmpty)
+    #expect(
+      parse(["--fill-lead", "3"]).1 == [
+        "--fill-lead must be at least 3.5 ms, the least before its slot a card takes a frame on time: 3"
+      ])
+    #expect(
+      parse(["--head-start", "5"]).1 == [
+        "--fill-lead (5 ms) must be less than --head-start (5 ms), or the page has no time to draw"
+      ])
+    #expect(
+      parse(["--head-start", "8", "--fill-lead", "9"]).1 == [
+        "--fill-lead (9 ms) must be less than --head-start (8 ms), or the page has no time to draw"
+      ])
+    #expect(
+      parse(["--fill-lead", "25"]).1 == [
+        "--fill-lead (25 ms) must be less than --head-start (20 ms), or the page has no time to draw"
+      ])
+  }
+
   @Test func aFlagWithoutItsValueIsAProblem() {
     #expect(parse(["--dump-frames"]).1 == ["--dump-frames needs a value"])
     #expect(parse(["--discovery-port"]).1 == ["--discovery-port needs a value"])

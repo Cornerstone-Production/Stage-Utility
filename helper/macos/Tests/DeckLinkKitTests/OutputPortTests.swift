@@ -1,3 +1,4 @@
+import DeckLinkShim
 import Foundation
 import StageUtilityOutputCore
 import Testing
@@ -424,6 +425,13 @@ let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a so
     #expect(reads > 20 && reads < 1_000, "\(reads) reads in 200 ms")
     port.pollForTest()
     #expect(log.lines.contains("SDI test: the card would not say where its playback is, so no frame could be timed"))
+  }
+
+  /// The limits the command line checks the leads against are the shim's own.
+  @Test func theLeadLimitsAreTheShims() {
+    #expect(CardLeads.standard == CardLeads(
+      headStartMs: CardLeadLimits.standardHeadStartMs, fillLeadMs: CardLeadLimits.standardFillLeadMs))
+    #expect(Double(DL_CARD_MIN_LEAD_US) / 1000 == CardLeadLimits.minFillLeadMs)
   }
 
   /// A head start no longer than the fill lead leaves the page no time at all:

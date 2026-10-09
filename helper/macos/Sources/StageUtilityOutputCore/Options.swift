@@ -94,6 +94,41 @@ public struct Options: Equatable {
       }
       i += 1
     }
+    if o.headStartMs != nil || o.fillLeadMs != nil,
+      let problem = CardLeadLimits.problem(
+        headStartMs: o.headStartMs ?? CardLeadLimits.standardHeadStartMs,
+        fillLeadMs: o.fillLeadMs ?? CardLeadLimits.standardFillLeadMs)
+    {
+      problems.append(problem)
+    }
     return (o, problems)
   }
+}
+
+/// When a card slot's picture is asked for and when the slot is filled, before air:
+/// the standard leads, and what a pair of them must be to run at all. The shim's
+/// DL_DEFAULT_HEAD_START_US, DL_DEFAULT_FILL_LEAD_US and DL_CARD_MIN_LEAD_US, which
+/// the DeckLinkKit tests hold these equal to.
+public enum CardLeadLimits {
+  public static let standardHeadStartMs = 20.0
+  public static let standardFillLeadMs = 5.0
+  /// A fill that starts later than this before its slot is skipped: the card would
+  /// show it late.
+  public static let minFillLeadMs = 3.5
+
+  /// Why `--head-start` and `--fill-lead` cannot run together, or nil. Refused when
+  /// the flags are read, rather than leaving a port that never opens (a fill lead not
+  /// shorter than the head start) or skips every slot (a fill lead under the card's
+  /// need).
+  public static func problem(headStartMs: Double, fillLeadMs: Double) -> String? {
+    if fillLeadMs < minFillLeadMs {
+      return "--fill-lead must be at least \(text(minFillLeadMs)) ms, the least before its slot a card takes a frame on time: \(text(fillLeadMs))"
+    }
+    if fillLeadMs >= headStartMs {
+      return "--fill-lead (\(text(fillLeadMs)) ms) must be less than --head-start (\(text(headStartMs)) ms), or the page has no time to draw"
+    }
+    return nil
+  }
+
+  private static func text(_ ms: Double) -> String { String(format: "%g", ms) }
 }
