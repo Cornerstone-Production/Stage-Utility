@@ -12,6 +12,12 @@
 // The rule is one line: whichever side is being made MORE permissive goes first.
 // Becoming a control surface, the screen leads. Becoming a wall screen, the view
 // does.
+//
+// ONE screen's role is no longer two writes from here: it is one call to the
+// role route, and the server orders its own writes (setOutputRole's
+// inGuardOrder, driven against the real guards in
+// main/services/screen-create-role.test.ts). What is left here is the view
+// card's convert-every-screen path, which still makes the writes itself.
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
@@ -29,29 +35,6 @@ function firstWrite(src: string): "view" | "output" | null {
   if (o < 0) return "view";
   return v < o ? "view" : "output";
 }
-
-describe("turning a screen back into a display", () => {
-  const src = handlerBody("handleSetOutputMode");
-  const branch = src.slice(src.indexOf('mode === "display"'));
-
-  test("changes the VIEW first, or the server refuses and nothing moves", () => {
-    assert.equal(firstWrite(branch), "view", "the screen is still set first — this deadlocks");
-  });
-
-  test("and stops if that write was refused", () => {
-    assert.match(branch, /if \(!\(await writeState\("views:setSurface"[\s\S]{0,80}?\)\)\) return;/);
-  });
-});
-
-describe("making a screen a control surface", () => {
-  const src = handlerBody("handleSetOutputMode");
-  const tail = src.slice(src.lastIndexOf("if (!(await writeState(\"outputs:setMode\""));
-
-  test("changes the SCREEN first — the view cannot lead here", () => {
-    // setViewSurface(console) refuses while the screen is still a display.
-    assert.equal(firstWrite(tail), "output");
-  });
-});
 
 describe("turning a view into a control surface", () => {
   const src = handlerBody("handleSetViewSurface");
@@ -76,16 +59,13 @@ describe("turning a view back into a wall screen", () => {
   });
 });
 
-describe("both handlers", () => {
-  test("decide from the cache at CALL TIME, not a snapshot the hook closed over", () => {
-    // NOT a claim that either handler re-reads between its two writes — neither
-    // does, and the name this test used to carry said it did. What it catches is
-    // the real regression: replacing stateNow() with a value destructured in the
-    // hook body, which is stale by the time a click arrives and would pick the
-    // wrong side to move first.
+describe("the view card's handler", () => {
+  test("decides from the cache at CALL TIME, not a snapshot the hook closed over", () => {
+    // NOT a claim that it re-reads between its writes — it does not. What it
+    // catches is the real regression: replacing stateNow() with a value
+    // destructured in the hook body, which is stale by the time a click arrives
+    // and would pick the wrong screens to move.
     assert.match(SETTINGS_SRC, /const stateNow = \(\) => queryClient\.getQueryData<StageState>/);
-    for (const fn of ["handleSetOutputMode", "handleSetViewSurface"]) {
-      assert.match(handlerBody(fn), /stateNow\(\)/, `${fn} works from a stale snapshot`);
-    }
+    assert.match(handlerBody("handleSetViewSurface"), /stateNow\(\)/, "handleSetViewSurface works from a stale snapshot");
   });
 });

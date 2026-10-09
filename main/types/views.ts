@@ -61,8 +61,8 @@ export function everyViewKind<const T extends readonly ViewKind[]>(kinds: T & Ex
  * all of it — this map is only about the default.
  *
  * Two readers, one fact: `stage-view.tsx` decides structurally which arms
- * render `ScreenTopBar`, and `outputs-section.tsx` decides whether the "Hide
- * top bar" and "Lock display" menu items would do anything on this screen.
+ * render `ScreenTopBar`, and `screen-settings-panel.tsx` decides whether the Top
+ * bar and Lock switches would do anything on this screen.
  * `stage-view-paths.test.tsx` renders every kind and asserts the real DOM
  * against this map, so the two cannot drift apart.
  */
@@ -232,6 +232,22 @@ export interface View {
    * flipping a console to a display and back does not lose the setting.
    */
   hideChrome?: boolean;
+  /**
+   * Whether this console is listed in the operator app's sidebar. Absent = shown,
+   * so every console that exists today stays listed; only an explicit `false`
+   * takes it out. Read through {@link viewShownInSidebar}, never directly.
+   *
+   * It is about the LIST and nothing else. A hidden console keeps its live
+   * controls on every screen showing it, still opens at `/consoles/<id>`, still
+   * has a titled page, and a screen card's Open link still reaches it. A control
+   * surface on a stage display is a screen first, and listing its view as a
+   * place the operator works was the wrong default for it.
+   *
+   * DORMANT on a display View, the way {@link hideChrome} is: a display is not a
+   * sidebar entry at all. It is stored rather than refused so flipping a console
+   * to a display and back does not lose the choice.
+   */
+  showInSidebar?: boolean;
   /**
    * @deprecated No longer read or written — the PCO Live Prev/Next controls were
    * removed from the script display. Kept only so an existing `views.json` still
@@ -1144,10 +1160,87 @@ export function viewSurface(v: Pick<View, "surface">): ViewSurface {
   return v.surface === "console" ? "console" : "display";
 }
 
+/** Is this View listed in the sidebar? Absent means yes: a console written
+ *  before the switch existed was listed, and stays so until it is turned off. */
+export function viewShownInSidebar(v: Pick<View, "showInSidebar">): boolean {
+  return v.showInSidebar !== false;
+}
+
+/** What createScreen takes. `mode` absent is the legacy `{ name, viewId }` call. */
+export interface CreateScreenInput {
+  name?: string;
+  mode?: OutputMode;
+  /** An existing view. Alternative to `newView`. */
+  viewId?: string | null;
+  /** Make a blank view of the right kind, named after the screen. */
+  newView?: boolean;
+  slug?: string;
+  /** Written onto the view the screen shows, for a control surface only. */
+  showInSidebar?: boolean;
+}
+
 /** An Output's mode. Absent — or unrecognised — means "display". The safety
  *  property is an explicit opt-in, never an inference. */
 export function outputMode(o: Pick<Output, "mode">): OutputMode {
   return o.mode === "panel" ? "panel" : "display";
+}
+
+/** The surface of the views a screen of this role shows: a control surface shows
+ *  consoles, a wall display shows display views. */
+export function surfaceForMode(mode: OutputMode): ViewSurface {
+  return mode === "panel" ? "console" : "display";
+}
+
+/**
+ * Can this view, or a copy of it, be made into what a screen of `mode` shows?
+ *
+ * Any view can be a wall screen. Only a custom view can be a console: it is the
+ * only kind with a layout to put a control on, which is why createView makes
+ * anything else a display whatever it was asked for, and why the view card does
+ * not offer the switch for one. A calendar "console" is a promise nothing keeps.
+ */
+export function viewCanTakeRole(view: Pick<View, "kind">, mode: OutputMode): boolean {
+  return mode === "display" || view.kind === "custom";
+}
+
+/** Does this view already fit a screen of `mode`, with nothing to change? */
+export function viewFitsRole(view: Pick<View, "kind" | "surface">, mode: OutputMode): boolean {
+  return viewSurface(view) === surfaceForMode(mode) && viewCanTakeRole(view, mode);
+}
+
+/** What the copy of a view made for one screen's new role is called. */
+export function copyViewName(view: Pick<View, "name">, mode: OutputMode): string {
+  return `${view.name} (${mode === "panel" ? "control surface" : "wall"})`;
+}
+
+/**
+ * Would changing this screen to `mode` change its view in a way that is not this
+ * screen's to make? The panel's preview and the server's decision, so the two
+ * cannot disagree about when to ask.
+ *
+ * Null when the change is plain: the screen shows nothing, its view already has
+ * the surface the role needs, or only this screen shows the view and the view can
+ * take the role (it then changes with the screen). Otherwise:
+ *
+ *   others    the other screens showing the view, which changing it would change
+ *             too. Empty when only this screen shows it but it cannot take the
+ *             role at all.
+ *   copyName  what a copy made for this screen would be called, or null when a
+ *             copy could not take the role either. Then the only way is a
+ *             different view.
+ */
+export function roleChangeConflict(
+  output: Pick<Output, "id" | "viewId">,
+  outputs: readonly Output[],
+  views: readonly View[],
+  mode: OutputMode,
+): { view: View; others: Output[]; copyName: string | null } | null {
+  const view = output.viewId ? views.find((v) => v.id === output.viewId) : undefined;
+  if (!view || viewSurface(view) === surfaceForMode(mode)) return null;
+  const others = outputs.filter((o) => o.id !== output.id && o.viewId === view.id);
+  const convertible = viewCanTakeRole(view, mode);
+  if (others.length === 0 && convertible) return null;
+  return { view, others, copyName: convertible ? copyViewName(view, mode) : null };
 }
 
 /** A physical screen at a URL slug, routed to exactly one View (or none). */

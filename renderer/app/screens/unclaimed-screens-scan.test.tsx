@@ -29,7 +29,7 @@ test("a scan that cannot start says so, rather than reading as an empty network"
     return ok(NOTHING_HEARD);
   });
   try {
-    render(React.createElement(UnclaimedScreens, { outputs: [] }));
+    render(React.createElement(UnclaimedScreens, { outputs: [], onSetUpNew: () => {} }));
     await settle();
     await settle();
     assert.match(alerts(), /Couldn't look for screens on the network/, `no error shown: "${alerts()}"`);
@@ -45,7 +45,7 @@ test("a scan that cannot start says so, rather than reading as an empty network"
 test("a scan that starts shows nothing while nothing has been heard", async () => {
   const f = stubFetchWithLog(() => ok(NOTHING_HEARD));
   try {
-    render(React.createElement(UnclaimedScreens, { outputs: [] }));
+    render(React.createElement(UnclaimedScreens, { outputs: [], onSetUpNew: () => {} }));
     await settle();
     await settle();
     assert.equal(alerts(), "");

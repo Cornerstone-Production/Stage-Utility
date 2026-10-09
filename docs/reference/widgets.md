@@ -641,7 +641,7 @@ request is what brings it up.
 feeds page while a layout still points at it, and while a feed that dropped
 waits for its next attempt. **Can't play here** is this screen's browser
 lacking WebRTC or HLS support for the feed's address, or this screen's own
-**Use HLS on this screen** switch (Screens page) turned off for a feed that
+**Use HLS** switch (its Screen settings, on Screens) turned off for a feed that
 needs HLS to play at all.
 
 ---

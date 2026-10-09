@@ -73,10 +73,13 @@ describe("binding a view to a screen", () => {
       (e: Error) => {
         assert.match(e.message, /FOH Console/, "must name the view");
         assert.match(e.message, /Lobby/, "must name the screen");
-        // The exact words the screen's menu uses. An instruction naming
-        // something the operator cannot find is worse than no instruction —
-        // this refusal used to say "panel mode", which appears nowhere in the UI.
-        assert.match(e.message, /Use as a control surface/, "must name the menu item, in its words");
+        // The exact words the UI uses: the card menu's "Screen settings" and the
+        // panel's "Control surface" role. An instruction naming something the
+        // operator cannot find is worse than no instruction — this refusal used
+        // to say "panel mode", which appears nowhere in the UI, and then named a
+        // menu item the Screen settings panel replaced.
+        assert.match(e.message, /Screen settings/, "must name where the role is set, in its words");
+        assert.match(e.message, /"Control surface"/, "must name the role, in its words");
         assert.ok(!/^\w+:\w+ —/.test(e.message), "must not carry the internal handler name");
         return true;
       },
@@ -165,8 +168,13 @@ describe("converting a view's surface", () => {
     await stageController.setOutputView("wall", "vd");
     await assert.rejects(
       () => stageController.setViewSurface("vd", "console"),
-      /Lobby/,
-      "the refusal must name the screen it would strand, not just say no",
+      (e: Error) => {
+        assert.match(e.message, /Lobby/, "the refusal must name the screen it would strand, not just say no");
+        // Where the role is set now, in the UI's words; see "names both sides".
+        assert.match(e.message, /Screen settings/);
+        assert.match(e.message, /"Control surface"/);
+        return true;
+      },
     );
   });
 

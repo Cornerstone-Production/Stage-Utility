@@ -53,8 +53,14 @@ A console can also ask the app to get out of its way. See
 [Running a console without the app's chrome](../features/operator-app.md#running-a-console-without-the-apps-chrome).
 The flag is stored on the view, so it follows the console to every phone that
 opens it, and it is carried by a duplicate and by an exported view bundle. It is
-a different thing from a screen's **Hide top bar**, which is per screen and hides
+a different thing from a screen's **Top bar** switch, which is per screen and hides
 the *display's* bar in a different page altogether.
+
+A console can also be kept out of the operator app's sidebar. The flag is
+`showInSidebar`, absent meaning listed, and it changes only the list: the console
+keeps its live controls, its page at `/consoles/<view id>` and its title, and the
+**Open** link on a screen's card still opens that screen. It is stored on the view and travels the
+same way the chrome flag does, in a duplicate and in an exported view bundle.
 
 ### Home
 
@@ -174,14 +180,14 @@ placeholder screens (loading, unrouted, empty, not configured, view missing)
 draw a bar whatever the routing says, because there is no content yet to fill
 the panel.
 
-A **locked** display (set on Screens) strips the escape hatches a kiosk
-otherwise shows. Its only effect is on the bar, so the Screens card offers it
-only where there is a bar to strip. A display with its **top bar hidden** (also
-set on Screens) draws no top bar at all — no brand, plan context or QR — and its
+A **locked** display (set in its Screen settings) strips the escape hatches a kiosk
+otherwise shows. Its only effect is on the bar, so the panel offers it
+only where there is a bar to strip. A display with its **top bar hidden** (the
+**Top bar** switch off, also in Screen settings) draws no top bar at all — no brand, plan context or QR — and its
 content fills the strip instead; the two are independent, since a lock keeps the
 bar and only removes its links.
 
-A display's **Use HLS on this screen** switch (also set on Screens,
+A display's **Use HLS** switch (also in Screen settings,
 `Output.allowHls`, on by default) is independent of both: it decides whether a
 Video widget here may fall back to HLS at all. Off, a feed that needs HLS
 (its device sends B-frames, or an unsupported codec) shows **This screen
@@ -198,7 +204,7 @@ that output, and answers the four per-screen settings differently:
 | Blackout | Ignored | The Screens page would be a grid of black rectangles. |
 | Lock | Ignored | The preview lives inside the console, whose navigation must keep working. |
 | Hidden top bar | **Honoured** | Purely visual, and showing what the screen will look like is what the card is for. |
-| Use HLS on this screen | Ignored (always on) | A settings-page card is not the real screen, and must not refuse to play a feed the wall it stands in for can play fine. |
+| Use HLS | Ignored (always on) | A settings-page card is not the real screen, and must not refuse to play a feed the wall it stands in for can play fine. |
 
 The hidden top bar is honoured only when the preview knows which screen it
 stands in for. The route names a *view*, and two screens can show one view with

@@ -190,7 +190,6 @@ as such rather than given a doc link it doesn't need.
 | `[cues]` | Cue-to-Companion-button pairing and state-source inference, and built-in cues: [Cues](../automation.md#cues) |
 | `[data-store]` | Any JSON-backed store finding its file corrupt, backing it up and starting fresh, and rewriting a save that landed while it did: [Under load](reliability.md#under-load) |
 | `[device-manager]` | Wireless provider connections starting, stopping, or failing to disconnect: [Wireless](../integrations/wireless.md) |
-| `[devices]` | Kiosk device enrollment cleanup after a failed claim: [Kiosk devices](../kiosk-devices.md) |
 | `[displays]` | A display's reported screen size failing to record: [Size](../kiosk-devices.md#size) |
 | `[encryption]` | The encryption key generated on first run, or rejected as the wrong length: [When credentials all read as "not configured"](reliability.md#when-credentials-all-read-as-not-configured) |
 | `[events]` | SSE and poll-transport clients connecting, closing, or expiring: [Polling transport](../display-urls.md#polling-transport) |
@@ -242,7 +241,7 @@ as such rather than given a doc link it doesn't need.
 | `[spectera]` | A Sennheiser Spectera wireless connection's protocol trace, only under `SPECTERA_DEBUG` (an SSE buffer-overflow resync always shows): [Wireless](../integrations/wireless.md) |
 | `[spl-recorder]` | The SPL recording resumed or rebuilt from the archive, and archive-close failures: [Sound levels](../features/attendance-and-history.md#sound-levels) |
 | `[spl-series]` | A raw SPL sample series failing to read: [Sound levels](../features/attendance-and-history.md#sound-levels) |
-| `[stage-controller]` | Layout template and group library changes (saved, updated, deleted) — internal bookkeeping, not an operator signal |
+| `[stage-controller]` | Layout template and group library changes (saved, updated, deleted) — internal bookkeeping, not an operator signal. Also a screen being made (`createScreen`) or changing role (`setOutputRole … copied view X to Y`), and, when a multi-step screen write fails, a warning naming the step that failed, what was put back, and anything that could not be: [Screens](../features/operator-app.md#screens) |
 | `[stream-starts]` | The first-seen live timestamp for a streaming platform failing to persist or clear |
 | `[surface-migration]` | A one-time internal layout-surface migration — internal plumbing, not an operator signal |
 | `[tsl]` | Connection state to a Ross multiviewer over TSL UMD: [Ross MultiViewer](../integrations/ross-tsl.md) |

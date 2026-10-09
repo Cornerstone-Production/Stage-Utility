@@ -471,6 +471,7 @@ export type IpcChannel =
   | "outputs:setHideTopBar"
   | "outputs:setLocked"
   | "outputs:setMode"
+  | "outputs:setRole"
   | "outputs:setSlug"
   | "outputs:setTextSize"
   | "outputs:setView"
@@ -602,6 +603,7 @@ export type IpcChannel =
   | "views:setLayout"
   | "views:setServiceCueLayout"
   | "views:setSlots"
+  | "views:setShowInSidebar"
   | "views:setSlotsLayout"
   | "views:setSurface"
   | "window:closeSettings"
@@ -1156,6 +1158,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { serviceCueLayoutId: p.serviceCueLayoutId });
     }
 
+    case "views:setShowInSidebar": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { showInSidebar: p.showInSidebar });
+    }
+
     case "views:setHideChrome": {
       const id = p.id as string;
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { hideChrome: p.hideChrome });
@@ -1559,6 +1566,17 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "outputs:setMode":
       return patch<T>(`/api/outputs/${encodeURIComponent(String(p.id))}`, { mode: p.mode });
+
+    // Change a screen's role without changing any other screen: `copyView` makes a
+    // copy of its view for the new role, `viewId` points it at one that already
+    // fits. The server runs the writes in the order its own guards allow and puts
+    // back what landed if one fails.
+    case "outputs:setRole":
+      return post<T>(`/api/outputs/${encodeURIComponent(String(p.id))}/role`, {
+        mode: p.mode,
+        copyView: p.copyView,
+        viewId: p.viewId,
+      });
 
     case "barItems:set":
       return post<T>("/api/bar-items", p);
@@ -2287,8 +2305,16 @@ if (typeof document !== "undefined") {
  */
 export function onNotification(
   channel: string,
-  cb: (payload: unknown, replayed: boolean) => void,
+  handler: (payload: unknown, replayed: boolean) => void,
 ): () => void {
+  // Every subscription is its own entry in the registries below, whatever
+  // function it was handed. They are Sets, and the React Compiler hoists a
+  // callback that captures nothing to module scope: every component using a
+  // hook like useDevices hands over the IDENTICAL `() => void refresh()`, the
+  // Set kept one entry for all of them, and the first component to unmount
+  // unsubscribed every other. Closing a Screen settings panel, or removing a
+  // screen card, stopped the Screens page hearing about devices until a reload.
+  const cb = (payload: unknown, replayed: boolean) => handler(payload, replayed);
   // Replay THIS process's own cached snapshot to the new callback, on either
   // transport. `lastPayload` is written by `fanOut`, which runs for every frame
   // this tab receives regardless of whether it arrived over the worker or the

@@ -27,7 +27,15 @@ import type { Output } from "@main/types/views";
  *  actually looking, which is the house rule applied to a UDP socket. */
 const HOLDER = "screens-page";
 
-export function UnclaimedScreens({ outputs }: { outputs: Output[] }) {
+export function UnclaimedScreens({
+  outputs,
+  onSetUpNew,
+}: {
+  outputs: Output[];
+  /** "Set up as a new screen": open the Screen settings panel for this device.
+   *  The screen is made, and the device claimed, when the panel finishes. */
+  onSetUpNew: (device: { id: string; hostname?: string; ip?: string }) => void;
+}) {
   const data = useDevices();
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -64,10 +72,10 @@ export function UnclaimedScreens({ outputs }: { outputs: Output[] }) {
     };
   }, []);
 
-  async function claim(deviceId: string, outputId: string | null, newName?: string) {
+  async function claim(deviceId: string, outputId: string) {
     setBusy(deviceId);
     try {
-      await invoke("devices:claim", { deviceId, outputId, newName });
+      await invoke("devices:claim", { deviceId, outputId });
       // refreshDevices returns its failure rather than throwing, so it is
       // checked here instead of being caught below. A claim that worked but
       // whose refresh did not still has to say the list is stale.
@@ -149,7 +157,7 @@ export function UnclaimedScreens({ outputs }: { outputs: Output[] }) {
                   variant="accent"
                   size="small"
                   disabled={busy === d.id}
-                  onClick={() => void claim(d.id, null, d.hostname || "New screen")}
+                  onClick={() => onSetUpNew({ id: d.id, hostname: d.hostname, ip: d.ip })}
                 >
                   Set up as a new screen
                 </Button>

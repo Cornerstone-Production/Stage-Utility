@@ -1,10 +1,10 @@
 import { ScreenDevice } from "../../app/screens/screen-device";
-import { useState, useEffect, type ChangeEvent, type ReactNode } from "react";
+import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { DropdownMenu } from "radix-ui";
-import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, LockIcon, LockOpenIcon, MoreVerticalIcon, CopyIcon, LinkIcon, PencilIcon, PanelTopIcon, PanelTopDashedIcon, CheckIcon, ChevronRightIcon, UsersIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, MonitorIcon, HandIcon, ExternalLinkIcon, RefreshCwIcon, MoreVerticalIcon, CopyIcon, PencilIcon, CheckIcon, SlidersHorizontalIcon } from "lucide-react";
 import { LazyPreview } from "./lazy-preview";
 import { cn } from "../../lib/cn";
 
@@ -25,18 +25,18 @@ import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
 import { iconEntryAt } from "../../components/editable-icon";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
-import { ScreenUrlsDialog } from "./screen-urls-dialog";
 import { ImportLayout } from "./import-layout";
-import { viewSurface, outputMode, KIND_DRAWS_TOP_BAR } from "@main/types/views";
+import { SCREEN_PANEL_ID, confirmRole } from "./screen-settings-panel";
+import { viewSurface, viewShownInSidebar, outputMode } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
-import { invoke, onNotification } from "../../lib/api";
+
 import type { SectionProps } from "../types";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useSortableRow } from "../../lib/use-sortable-row";
 import { useVideoState } from "../../main/video/use-video-state";
 import { useMessageGroups, type MessageGroups } from "../../main/use-message-groups";
-import type { MessageGroup } from "@main/types/messages";
+import { useDisplayPresence } from "../../app/screens/use-display-presence";
 
 
 const UNROUTED = "__none__";
@@ -159,26 +159,20 @@ export interface OutputRowProps {
   /** Where it was stored before that key moved, if it did. Undefined when the two
    *  are the same key. Read as a fallback, migrated on the next write. */
   legacyIconKey?: string;
-  /** Save the friendly URL slug ("" clears it). Rejects with a reason the card shows. */
-  onSetSlug: (slug: string) => Promise<void>;
   onSetView: (viewId: string | null) => void;
   /** Rename the view this screen is showing (not the screen). */
   onRenameView: (viewId: string, name: string) => void;
-  onSetLocked: (locked: boolean) => void;
-  /** Show or hide THIS display's kiosk top bar (brand, plan context, QR). */
-  onSetHideTopBar: (hideTopBar: boolean) => void;
-  /** Allow or refuse HLS playback for a Video widget on THIS screen. Off keeps
-   *  a struggling Pi on WebRTC only. */
-  onSetAllowHls: (allowHls: boolean) => void;
-  /** The message groups that exist, and whether they have been read. */
+  /** The message groups that exist, and whether they have been read. The card
+   *  draws the ones this screen is in as chips under its name; choosing them is
+   *  the Screen settings panel's job. */
   messageGroups: MessageGroups;
-  /** Replace this screen's message groups with these ids. */
-  onSetGroups: (groups: string[]) => void;
-  /** Open Settings -> Messages, where groups are made. */
-  onOpenMessagingSettings: () => void;
-  /** Awaited: switching a screen to a panel must LAND before a console view
-   *  is assigned to it, because the server refuses the pair in the wrong order. */
-  onSetMode: (mode: "display" | "panel") => Promise<void>;
+  /** Change this screen's role, through the role route. True when it landed;
+   *  a refusal is already on screen. */
+  onSetRole: (mode: "display" | "panel", opts: { viewId?: string }) => Promise<boolean>;
+  /** Open the Screen settings panel on this screen. */
+  onOpenSettings: () => void;
+  /** This screen's panel is open: the card says which one it is for. */
+  selected?: boolean;
   onRefresh: () => void;
   onRemove: () => void;
   /** Open the layout editor for this display's view. Absent when it has no
@@ -226,24 +220,20 @@ export function resolveIconEntry(
   return { key, legacyKey, value: iconEntryAt(entries, key, legacyKey) };
 }
 
-/** A checkbox row in a screen's overflow menu: the checkmark column, then the label. */
+/** A checkbox row in a view card's overflow menu: the checkmark column, then the label. */
 function MenuCheckboxItem({
   checked,
   onCheckedChange,
-  keepOpen,
   children,
 }: {
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
-  /** Stay open across a click, so several can be set in one visit. */
-  keepOpen?: boolean;
   children: ReactNode;
 }) {
   return (
     <DropdownMenu.CheckboxItem
       checked={checked}
       onCheckedChange={onCheckedChange}
-      onSelect={keepOpen ? (e) => e.preventDefault() : undefined}
       className={MENU_ITEM}
     >
       <span className="flex size-3.5 shrink-0 items-center justify-center">
@@ -256,72 +246,15 @@ function MenuCheckboxItem({
   );
 }
 
-/** What the Groups submenu lists when there is nothing to tick. */
-function NoGroupsNote({ messageGroups, onOpenMessagingSettings }: { messageGroups: MessageGroups; onOpenMessagingSettings: () => void }) {
-  if (messageGroups.failed) return <p className="px-2 py-1.5 text-caption1 text-danger-11">Couldn't load the groups.</p>;
-  if (!messageGroups.known) return <p className="px-2 py-1.5 text-caption1 text-fg-subtle">Loading groups...</p>;
-  return (
-    <DropdownMenu.Item onSelect={onOpenMessagingSettings} className={MENU_ITEM}>
-      No groups yet. Make some in Settings → Messages
-    </DropdownMenu.Item>
-  );
+/** The views a screen picker lists: Home left out, sorted by name. The cards and
+ *  the Screen settings panel offer the same list, so it is built in one place. */
+export function screenPickerViews(views: readonly View[]): View[] {
+  return screensListViews(views).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** A screen's message groups, one checkbox per group in the config's order. */
-function GroupsSubmenu({
-  messageGroups,
-  inGroups,
-  onSetGroups,
-  onOpenMessagingSettings,
-}: {
-  messageGroups: MessageGroups;
-  /** The groups this screen is in, in the config's order. */
-  inGroups: readonly MessageGroup[];
-  onSetGroups: (groups: string[]) => void;
-  onOpenMessagingSettings: () => void;
-}) {
-  // The whole new list goes out, never the one id clicked: it is what the server
-  // stores, in the config's order. Built from `inGroups` and the config's own
-  // groups, so an id the config no longer holds is not sent back and refused.
-  function toggle(id: string, on: boolean) {
-    const chosen = new Set(inGroups.map((g) => g.id));
-    if (on) chosen.add(id);
-    else chosen.delete(id);
-    onSetGroups(messageGroups.groups.map((g) => g.id).filter((x) => chosen.has(x)));
-  }
-  return (
-    <DropdownMenu.Sub>
-      <DropdownMenu.SubTrigger className={cn(MENU_ITEM, "data-[state=open]:bg-fill")}>
-        <UsersIcon className="size-3.5 text-fg-subtle" />
-        Groups
-        <ChevronRightIcon className="ml-auto size-3.5 text-fg-subtle" />
-      </DropdownMenu.SubTrigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.SubContent sideOffset={6} alignOffset={-4} className={menuContent()}>
-          {messageGroups.groups.map((g) => (
-            <MenuCheckboxItem key={g.id} keepOpen checked={inGroups.some((s) => s.id === g.id)} onCheckedChange={(on) => toggle(g.id, on)}>
-              {g.name}
-            </MenuCheckboxItem>
-          ))}
-          {messageGroups.groups.length === 0 && (
-            <NoGroupsNote messageGroups={messageGroups} onOpenMessagingSettings={onOpenMessagingSettings} />
-          )}
-        </DropdownMenu.SubContent>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Sub>
-  );
-}
-
-export function OutputRow({ output, views, baseUrl, online, struggles, lags, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetSlug, onSetView, onSetLocked, onSetHideTopBar, onSetAllowHls, messageGroups, onSetGroups, onOpenMessagingSettings, onSetMode, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+export function OutputRow({ output, views, baseUrl, online, struggles, lags, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, onSetRole, onOpenSettings, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
-  // Both bar items below are about a strip that only some kinds draw. Offering
-  // them where no bar exists is not a harmless extra: "Lock display" shipped
-  // that way, and on a calendar or a script wall it persisted a flag, turned its
-  // icon accent, and changed nothing on the screen — the operator reads that as
-  // a locked display. An unrouted screen still shows a bar (the placeholder
-  // draws one whatever the routing says), so no view assigned means keep them.
-  const drawsTopBar = assignedView ? KIND_DRAWS_TOP_BAR[assignedView.kind] : true;
   const [renamingView, setRenamingView] = useState(false);
   const [viewName, setViewName] = useState("");
 
@@ -347,24 +280,20 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
    * find the second switch in a different menu, before the view they wanted
    * even appeared in the list.
    *
-   * So the offer comes FIRST and the mode change is awaited. Decline it and
-   * nothing is assigned, because the server would refuse that binding anyway —
-   * an assignment that silently failed would be worse than one that did not
-   * happen.
+   * So the offer comes FIRST. Decline it and nothing is assigned, because the
+   * server would refuse that binding anyway — an assignment that silently failed
+   * would be worse than one that did not happen. Accept it and the role and the
+   * view go in ONE call, the role route with the view named: the screen's own
+   * role change would also have tried to turn the view it is LEAVING into a
+   * console, which changes every other screen showing it.
    */
   async function assignView(viewId: string | null): Promise<void> {
     if (!viewId) { onSetView(null); return; }
     const picked = views.find((v) => v.id === viewId);
-    const needsPanel = picked && viewSurface(picked) === "console" && outputMode(output) !== "panel";
-    if (needsPanel) {
-      const ok = await confirm({
-        title: `Use "${output.name}" as a control surface?`,
-        message: `"${picked.name}" has live controls, so it can only go on a control surface. Its buttons will work for anyone standing at this screen.`,
-        confirmLabel: "Use as a control surface",
-        cancelLabel: "Cancel",
-      });
-      if (!ok) return;
-      await onSetMode("panel");
+    if (picked && viewSurface(picked) === "console" && outputMode(output) !== "panel") {
+      if (!(await confirmRole(output.name, "panel", `"${picked.name}" has live controls, so it can only go on a control surface.`))) return;
+      await onSetRole("panel", { viewId });
+      return;
     }
     onSetView(viewId);
   }
@@ -380,19 +309,19 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
 
   const outputUrl = `${baseUrl}/${encodeURIComponent(output.id)}`;
 
-  // The friendly-URL editor is revealed from the overflow menu rather than
-  // always shown. It is set once per screen and then never touched, and two
-  // permanent rows of mono URL per card buried the thing the card is FOR — what
-  // that screen is showing.
   const [nameFocused, setNameFocused] = useState(false);
-  const [urlsOpen, setUrlsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const openingSettings = useRef(false);
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className="flex flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]"
+      className={cn(
+        "flex flex-col overflow-hidden rounded-xl border bg-surface shadow-[var(--su-shadow-1)]",
+        // The card whose settings are open beside it.
+        selected ? "border-accent" : "border-line",
+      )}
     >
       {/* Header: the drag handle + tinted icon + editable name + status + overflow.
           Only the HEADER drags. The card as a whole cannot, because the preview
@@ -445,7 +374,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
         />
         {outputMode(output) === "panel" && (
           <Tooltip label="A control surface: controls on this screen are live">
-            <span className="shrink-0 rounded-full border border-accent bg-accent-a3 px-2 py-0.5 text-caption2 font-medium text-accent">
+            <span className="shrink-0 rounded-full border border-accent bg-accent/12 px-2 py-0.5 text-caption2 font-medium text-accent">
               panel
             </span>
           </Tooltip>
@@ -457,9 +386,10 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
           </span>
         </Tooltip>
 
-        {/* Everything set-once lives here: opening, locking, the URLs, refresh
-            and remove. The card face keeps only what an operator changes while
-            working — what it shows, and the way into its layout. */}
+        {/* Actions only: opening, renaming the view, copying the address,
+            refresh, and remove. Settings are in the Screen settings panel. The
+            card face keeps what an operator changes while working — what it
+            shows, and the way into its layout. */}
         <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenu.Trigger asChild>
             <button
@@ -475,7 +405,21 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
             </button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
-            <DropdownMenu.Content align="end" sideOffset={4} className={menuContent()}>
+            <DropdownMenu.Content
+              align="end"
+              sideOffset={4}
+              className={menuContent()}
+              onCloseAutoFocus={(e) => {
+                if (openingSettings.current) {
+                  // The menu traps focus while it is open, so the panel cannot
+                  // take it until the menu has finished closing: this is that
+                  // moment. Without it focus lands back on this card's trigger.
+                  e.preventDefault();
+                  openingSettings.current = false;
+                  document.getElementById(SCREEN_PANEL_ID)?.focus({ preventScroll: true });
+                }
+              }}
+            >
               {/* Opens the SAME address the "Open" link below does. This used
                   to go through a handler that built the URL from
                   window.location.origin, while the link used `baseUrl` —
@@ -501,79 +445,6 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
                 </DropdownMenu.Item>
               )}
               <DropdownMenu.Item
-                // Confirmed, and the confirm says what actually changes. Turning
-                // a screen into a panel makes its controls live to anyone
-                // standing at it, which is not something to do by misclick.
-                onSelect={async () => {
-                  const toPanel = outputMode(output) !== "panel";
-                  const ok = await confirm({
-                    title: toPanel ? `Use "${output.name}" as a control surface?` : `Make "${output.name}" a display again?`,
-                    message: toPanel
-                      ? "Buttons on this screen will work. Anyone standing at it can press them."
-                      : "This screen becomes read-only. Its buttons will render but do nothing.",
-                    confirmLabel: toPanel ? "Use as a control surface" : "Make it a display",
-                  });
-                  if (ok) await onSetMode(toPanel ? "panel" : "display");
-                }}
-                className={MENU_ITEM}
-              >
-                {outputMode(output) === "panel"
-                  ? <MonitorIcon className="size-3.5 text-fg-subtle" />
-                  : <HandIcon className="size-3.5 text-fg-subtle" />}
-                {outputMode(output) === "panel" ? "Use as a display" : "Use as a control surface"}
-              </DropdownMenu.Item>
-              {/* The lock's ONLY effect is on the top bar: it strips the home
-                  link and the QR and leaves the rest. So it belongs with the
-                  item below, and neither is offered on a screen with no bar. */}
-              {drawsTopBar && (
-                <DropdownMenu.Item
-                  onSelect={() => onSetLocked(!(output.locked ?? false))}
-                  className={MENU_ITEM}
-                >
-                  {output.locked ? <LockIcon className="size-3.5 text-accent" /> : <LockOpenIcon className="size-3.5 text-fg-subtle" />}
-                  {output.locked ? "Unlock display" : "Lock display"}
-                </DropdownMenu.Item>
-              )}
-              {/* Per display, not global: some screens want the plan context and
-                  the QR, a stage-facing wall wants that strip back. Separate from
-                  the lock above, which KEEPS the bar and only strips its links. */}
-              {drawsTopBar && (
-                <DropdownMenu.Item
-                  onSelect={() => onSetHideTopBar(!(output.hideTopBar ?? false))}
-                  className={MENU_ITEM}
-                >
-                  {output.hideTopBar
-                    ? <PanelTopDashedIcon className="size-3.5 text-accent" />
-                    : <PanelTopIcon className="size-3.5 text-fg-subtle" />}
-                  {output.hideTopBar ? "Show top bar" : "Hide top bar"}
-                </DropdownMenu.Item>
-              )}
-              {/* Per display, not per view kind: a Video widget can land on
-                  any custom layout this screen might be routed to next, so the
-                  switch stays offered whatever it currently shows. */}
-              <MenuCheckboxItem checked={output.allowHls !== false} onCheckedChange={onSetAllowHls}>
-                Use HLS on this screen
-              </MenuCheckboxItem>
-              {output.allowHls === false && (
-                // w-0 min-w-full: the caption adds nothing to the menu's own
-                // width and fills whatever the other items make it, so the
-                // menu is the same width checked or not, and the sentence
-                // wraps instead of stretching the menu over the card.
-                // pl-[1.875rem] is the row's own px-2 (8px) plus the
-                // indicator column's width and gap (14px + 8px), so the
-                // caption starts under the LABEL text, not the checkmark.
-                <p className="w-0 min-w-full whitespace-normal pl-[1.875rem] pr-2 pb-1.5 text-caption1 text-fg-subtle">
-                  Off, this screen plays only WebRTC. A feed that needs HLS says it can't play here.
-                </p>
-              )}
-              {/* Which message groups this screen is in. */}
-              <GroupsSubmenu
-                messageGroups={messageGroups}
-                inGroups={screenGroups}
-                onSetGroups={onSetGroups}
-                onOpenMessagingSettings={onOpenMessagingSettings}
-              />
-              <DropdownMenu.Item
                 // preventDefault keeps the menu OPEN across the copy. Without it
                 // Radix closes and returns focus to the trigger, which discards
                 // the textarea selection the fallback path copies from - so over
@@ -589,7 +460,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
                   void copyText(outputUrl, menu).then((ok) => {
                     setMenuOpen(false);
                     if (ok) toast.success("URL copied");
-                    else toast.error("Couldn't copy — use Friendly URL below to see it");
+                    else toast.error("Couldn't copy — open Screen settings to see the address");
                   });
                 }}
                 className={MENU_ITEM}
@@ -597,18 +468,28 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
                 <CopyIcon className="size-3.5 text-fg-subtle" />
                 Copy URL
               </DropdownMenu.Item>
-              <DropdownMenu.Item
-                onSelect={() => setUrlsOpen(true)}
-                className={MENU_ITEM}
-              >
-                <LinkIcon className="size-3.5 text-fg-subtle" />
-                URLs and friendly link
-              </DropdownMenu.Item>
-              <DropdownMenu.Separator className="my-1 h-px bg-line" />
               <DropdownMenu.Item onSelect={onRefresh} className={MENU_ITEM}>
                 <RefreshCwIcon className="size-3.5 text-fg-subtle" />
                 Refresh display
               </DropdownMenu.Item>
+              <DropdownMenu.Separator className="my-1 h-px bg-line" />
+              {/* Everything that is a SETTING lives in the panel: the role, the
+                  lock, the top bar, HLS, the message groups, the friendly link.
+                  This menu is actions. */}
+              <DropdownMenu.Item
+                onSelect={() => {
+                  // Focus is handed to the panel as the menu finishes closing
+                  // (onCloseAutoFocus above); every other item leaves it where
+                  // it belongs, on the trigger.
+                  openingSettings.current = true;
+                  onOpenSettings();
+                }}
+                className={MENU_ITEM}
+              >
+                <SlidersHorizontalIcon className="size-3.5 text-fg-subtle" />
+                Screen settings…
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator className="my-1 h-px bg-line" />
               <DropdownMenu.Item
                 onSelect={onRemove}
                 disabled={!canRemove}
@@ -648,8 +529,9 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
           <LazyPreview
             viewId={output.viewId}
             // This card IS a screen, so its preview speaks for that screen and
-            // not merely for the View behind it. It is what makes "Hide top bar"
-            // below visibly do something: the card loses its bar too.
+            // not merely for the View behind it. It is what makes the Top bar
+            // switch in Screen settings visibly do something: the card loses
+            // its bar too.
             outputId={output.id}
             onExpand={onEditLayout}
             expandLabel={`Edit what ${output.name} shows`}
@@ -756,18 +638,6 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
         </Tooltip>
       </div>
 
-      {/* Revealed from the menu. The permanent address never changes, so a Pi, a
-          bookmark or a printed QR keeps working whatever is typed here. */}
-      <ScreenUrlsDialog
-        open={urlsOpen}
-        onOpenChange={setUrlsOpen}
-        outputName={output.name}
-        outputUrl={outputUrl}
-        baseUrl={baseUrl}
-        slug={output.slug ?? ""}
-        onSave={onSetSlug}
-      />
-
       {/* The machine showing this screen, when one is bound. Nothing when it is
           a browser tab somebody opened. */}
       <ScreenDevice outputId={output.id} name={output.name} />
@@ -784,6 +654,7 @@ function UnassignedViewCard({
   onRename,
   onDuplicate,
   onToggleSurface,
+  onSetShowInSidebar,
   onRemove,
   onEditLayout,
 }: {
@@ -791,6 +662,8 @@ function UnassignedViewCard({
   onRename: (name: string) => void;
   onDuplicate: () => void;
   onToggleSurface: () => void;
+  /** List this console in the sidebar, or keep it out. */
+  onSetShowInSidebar: (show: boolean) => void;
   onRemove: () => void;
   onEditLayout?: () => void;
 }) {
@@ -831,6 +704,13 @@ function UnassignedViewCard({
                     : <HandIcon className="size-3.5 text-fg-subtle" />}
                   {viewSurface(view) === "console" ? "Make it a wall screen" : "Make it a control surface"}
                 </DropdownMenu.Item>
+              )}
+              {/* A console on no screen has no Screen settings panel to hold this
+                  switch, so it is here. A screen's panel writes the same flag. */}
+              {viewSurface(view) === "console" && (
+                <MenuCheckboxItem checked={viewShownInSidebar(view)} onCheckedChange={onSetShowInSidebar}>
+                  Show in the sidebar
+                </MenuCheckboxItem>
               )}
               <DropdownMenu.Item onSelect={onDuplicate} className={MENU_ITEM}>
                 <CopyIcon className="size-3.5 text-fg-subtle" />
@@ -890,11 +770,17 @@ export function OutputsSection({
   stageState,
   handlers,
   onEditLayout,
-  onOpenMessagingSettings,
+  onOpenSettings,
+  onAddScreen,
+  selectedOutputId = null,
   serviceTypes = [],
 }: Pick<SectionProps, "stageState" | "handlers"> & {
-  /** Open Settings -> Messages, from a screen's empty Groups menu. */
-  onOpenMessagingSettings: () => void;
+  /** Open the Screen settings panel on a screen. */
+  onOpenSettings: (outputId: string) => void;
+  /** Open the panel in guided mode. Nothing is made until it finishes. */
+  onAddScreen: () => void;
+  /** The screen whose panel is open, so its card says so. */
+  selectedOutputId?: string | null;
   /** For a plan import's service type picker. Defaulted so the one other
    *  caller — none today — is not forced to thread it. */
   serviceTypes?: SectionProps["serviceTypes"];
@@ -907,7 +793,7 @@ export function OutputsSection({
   // an order that needs no maintaining. See docs/design/app-shell-redesign.md.
   // Home is filtered out: it is the operator's front door, edited in its own
   // tab, and it has no geometry — see main/services/home-view.ts.
-  const views = screensListViews(stageState.views ?? []).sort((a, b) => a.name.localeCompare(b.name));
+  const views = screenPickerViews(stageState.views ?? []);
 
   // Which output asked for a new view, so the created view can be assigned back
   // to it. "" means the dialog was opened from the unassigned section, where
@@ -931,15 +817,7 @@ export function OutputsSection({
 
   // Live per-display presence (Connected/Offline dot). The server broadcasts the
   // connected-output set on change; kiosk pages heartbeat to keep it fresh.
-  const [connected, setConnected] = useState<Set<string>>(new Set());
-  useEffect(
-    () =>
-      onNotification("displays:presence", (p: unknown) => {
-        const ids = (p as { connected?: string[] } | null)?.connected ?? [];
-        setConnected(new Set(ids));
-      }),
-    [],
-  );
+  const connected = useDisplayPresence();
 
   // Every screen's own struggling feeds, keyed by outputId — the same
   // change-driven video:state channel the Video feeds page and every Video
@@ -1022,15 +900,11 @@ export function OutputsSection({
                 legacyIconKey={icon.legacyKey}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
                 onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
-                onSetSlug={(slug) => invoke("outputs:setSlug", { id: output.id, slug })}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
-                onSetLocked={(locked) => handlers.handleSetOutputLocked(output.id, locked)}
-                onSetHideTopBar={(hideTopBar) => handlers.handleSetOutputHideTopBar(output.id, hideTopBar)}
-                onSetAllowHls={(allowHls) => handlers.handleSetOutputAllowHls(output.id, allowHls)}
                 messageGroups={messageGroups}
-                onSetGroups={(groups) => handlers.handleSetOutputGroups(output.id, groups)}
-                onOpenMessagingSettings={onOpenMessagingSettings}
-                onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
+                onSetRole={(mode, opts) => handlers.handleSetOutputRole(output.id, mode, opts)}
+                onOpenSettings={() => onOpenSettings(output.id)}
+                selected={selectedOutputId === output.id}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => handlers.handleRemoveOutput(output.id)}
                 onRequestNewView={() => setCreatingFor(output.id)}
@@ -1050,7 +924,7 @@ export function OutputsSection({
                 was below the fold on the page where you would want it. */}
             <button
               type="button"
-              onClick={handlers.handleAddOutput}
+              onClick={onAddScreen}
               className="flex flex-col rounded-xl border border-dashed border-line bg-transparent p-3 text-left transition-colors hover:border-line-strong hover:bg-fill"
             >
               <span className="flex items-center gap-2 px-0.5 pb-2 pt-0.5">
@@ -1095,6 +969,7 @@ export function OutputsSection({
                     onToggleSurface={() =>
                       handlers.handleSetViewSurface(v.id, viewSurface(v) === "console" ? "display" : "console")
                     }
+                    onSetShowInSidebar={(show) => handlers.handleSetViewShowInSidebar(v.id, show)}
                     onRemove={() => handlers.handleRemoveView(v.id)}
                     onEditLayout={onEditLayout ? () => onEditLayout(v.id) : undefined}
                   />

@@ -778,8 +778,8 @@ describe("StageView honours a display's hidden top bar", () => {
 describe("KIND_DRAWS_TOP_BAR is what the arms actually render", () => {
   // The anti-drift guard. `stage-view.tsx` decides a bar in two places — the
   // KioskFrame arms read the map, the slots and custom shells are bespoke — and
-  // `outputs-section.tsx` reads the map to decide whether its two bar menu items
-  // are worth offering. Nothing keeps those in step except this.
+  // `screen-settings-panel.tsx` reads the map to decide whether its Top bar and
+  // Lock switches are worth offering. Nothing keeps those in step except this.
   //
   // It loops the MAP, not a hand-written list, so a ViewKind added tomorrow is
   // rendered here the moment it is given a value — there is no row to forget.

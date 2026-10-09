@@ -21,7 +21,7 @@
 //     Settings is routes inside the app rather than its own window
 
 import { useState, useEffect } from "react";
-import { viewSurface } from "@main/types/views";
+import { outputMode, surfaceForMode, type CreateScreenInput } from "@main/types/views";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
@@ -726,122 +726,126 @@ export function useStageSettings(pinnedViewId?: string) {
   }
 
   // ── Outputs (physical screens + routing) ─────────────────────────────
-  async function handleAddOutput() {
-    await writeState("outputs:add", {}, { fail: "Failed to add display" });
+  /**
+   * Make a screen from the answers the Screen settings panel collected. Resolves
+   * with the reason it was refused, or null when it was made.
+   *
+   * Returned rather than toasted: the panel keeps its answers open after a
+   * refusal (a taken friendly link, a view that does not fit) and says why where
+   * the operator is already looking. Nothing is created until this is called, and
+   * the server validates before it writes and puts back what it made if a later
+   * step fails.
+   */
+  async function handleCreateScreen(input: CreateScreenInput): Promise<string | null> {
+    try {
+      const next = await ipc<StageState>("outputs:add", { ...input });
+      queryClient.setQueryData(["stage:getState"], next);
+      return null;
+    } catch (err) {
+      return errorMessage(err);
+    }
   }
 
   async function handleRenameOutput(id: string, name: string) {
     await writeState("outputs:rename", { id, name }, { fail: "Failed to rename display" });
   }
 
-  async function handleSetOutputView(id: string, viewId: string | null) {
-    // Optimistically update so the controlled <Select> reflects the new view
-    // immediately instead of snapping back to the stale cached value while the
-    // request is in flight; reconcile (or roll back) once the server responds.
-    await optimistic<StageState>(
+  /**
+   * One screen field, written optimistically: the switch, checkbox or picker
+   * follows the operator's finger, and the cache reconciles to the server's
+   * answer, or rolls back with `fail` toasted. For the fields the server refuses
+   * only for an id that does not exist or a value out of range. Six handlers
+   * were this, verbatim, each with its own copy to drift.
+   */
+  function setOutputField(channel: IpcChannel, id: string, patch: Partial<Output>, fail: string): Promise<unknown> {
+    return optimistic<StageState>(
       ["stage:getState"],
-      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { viewId }) }),
-      () => ipc<StageState>("outputs:setView", { id, viewId }),
-      "Failed to route display",
+      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, patch) }),
+      () => ipc<StageState>(channel, { id, ...patch }),
+      fail,
     );
+  }
+
+  /** Optimistic so the controlled <Select> shows the new view at once instead
+   *  of snapping back to the cached one while the request is in flight. */
+  async function handleSetOutputView(id: string, viewId: string | null) {
+    await setOutputField("outputs:setView", id, { viewId }, "Failed to route display");
   }
 
   async function handleSetOutputLocked(id: string, locked: boolean) {
-    await optimistic<StageState>(
-      ["stage:getState"],
-      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { locked }) }),
-      () => ipc<StageState>("outputs:setLocked", { id, locked }),
-      "Failed to update display lock",
-    );
+    await setOutputField("outputs:setLocked", id, { locked }, "Failed to update display lock");
   }
 
-  /** Show or hide one display's kiosk top bar. Optimistic like the lock: the
-   *  server only refuses an id that does not exist, and the menu label has to
-   *  flip under the operator's finger. */
+  /** Show or hide one display's kiosk top bar. */
   async function handleSetOutputHideTopBar(id: string, hideTopBar: boolean) {
-    await optimistic<StageState>(
-      ["stage:getState"],
-      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { hideTopBar }) }),
-      () => ipc<StageState>("outputs:setHideTopBar", { id, hideTopBar }),
-      "Failed to update the display's top bar",
-    );
+    await setOutputField("outputs:setHideTopBar", id, { hideTopBar }, "Failed to update the display's top bar");
   }
 
-  /** Allow or refuse HLS on one display's Video widgets. Optimistic like the
-   *  lock and the top bar: the server only refuses an id that does not exist. */
+  /** Allow or refuse HLS on one display's Video widgets. */
   async function handleSetOutputAllowHls(id: string, allowHls: boolean) {
-    await optimistic<StageState>(
-      ["stage:getState"],
-      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { allowHls }) }),
-      () => ipc<StageState>("outputs:setAllowHls", { id, allowHls }),
-      "Failed to update the display's HLS setting",
-    );
+    await setOutputField("outputs:setAllowHls", id, { allowHls }, "Failed to update the display's HLS setting");
   }
 
-  /** Put one screen in message groups. Optimistic like the lock: the server only
-   *  refuses an id that does not exist, and the chips under the name have to
-   *  follow the menu under the operator's finger. */
+  /** Put one screen in message groups. The chips under the card's name follow. */
   async function handleSetOutputGroups(id: string, groups: string[]) {
-    await optimistic<StageState>(
-      ["stage:getState"],
-      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { groups }) }),
-      () => ipc<StageState>("outputs:setGroups", { id, groups }),
-      "Failed to update the screen's groups",
-    );
+    await setOutputField("outputs:setGroups", id, { groups }, "Failed to update the screen's groups");
   }
 
   /**
-   * Make a screen a read-only display or an interactive control surface.
+   * Change one screen between a wall display and a control surface WITHOUT
+   * changing any other screen. One server call: the copy of a shared view, the
+   * role, the view's kind and the pointing are up to four writes, which the
+   * server orders for its guards and puts back if one fails.
    *
-   * NOT optimistic. The server refuses some of these — demoting a panel that is
-   * showing a console, for one — and an optimistic flip would show the operator
-   * the change happening and then silently undo it. The refusal is the useful
-   * part; it says what to do instead.
+   * NOT optimistic. The server refuses some of these (a shared view with neither
+   * a copy nor another view, a view that cannot be a control surface), and an
+   * optimistic flip would show the change happening and then silently undo it.
+   * The refusal is the useful part; it says what to do instead.
    */
+  async function handleSetOutputRole(
+    id: string,
+    mode: "display" | "panel",
+    opts: { copyView?: boolean; viewId?: string } = {},
+  ): Promise<boolean> {
+    return writeState("outputs:setRole", { id, mode, ...opts }, { fail: "Failed to change the screen's role" });
+  }
+
+  /** List a control surface's view in the sidebar, or keep it out. Optimistic:
+   *  the server refuses only an id that does not exist, and the switch has to
+   *  follow the operator's finger. */
+  async function handleSetViewShowInSidebar(id: string, showInSidebar: boolean) {
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, views: cur.views.map((v) => (v.id === id ? { ...v, showInSidebar } : v)) }),
+      () => ipc<StageState>("views:setShowInSidebar", { id, showInSidebar }),
+      "Failed to change whether the console is listed in the sidebar",
+    );
+  }
+
+  /** Keep the ServiceCue text size a display shows; the server refuses a value
+   *  outside 50 to 300. */
+  async function handleSetOutputTextSize(id: string, textSize: number) {
+    await setOutputField("outputs:setTextSize", id, { textSize }, "Failed to change the display's text size");
+  }
+
   /**
-   * A screen's mode and its view's surface move together, and the ORDER is not
-   * a detail.
+   * Change what a View is for, and EVERY screen showing it: the view card's
+   * deliberate "all of them" path. (One screen's role is handleSetOutputRole,
+   * which never changes another screen.)
    *
-   * Two guards on the server refuse in opposite directions, each waiting for the
-   * other side to move first:
+   * The order is not a detail. Two guards on the server refuse in opposite
+   * directions, each waiting for the other side to move first:
    *
    *   setOutputMode(display)   refuses while the view it shows is a console
    *   setViewSurface(console)  refuses while a screen showing it is not a panel
    *
-   * So there is one rule: whichever side is being made MORE permissive goes
-   * first. Becoming a control surface, the screen leads; becoming a wall screen,
-   * the view does. Doing it the other way round is a deadlock — "Use as a
-   * display" was refused outright, with the server correctly explaining that the
-   * screen was still showing a control surface, and no order of clicking could
-   * get out of it.
+   * So whichever side is being made MORE permissive goes first: becoming a
+   * control surface, the screens lead; becoming a wall screen, the view does.
+   * The other way round is a deadlock no order of clicking gets out of.
    */
-  async function handleSetOutputMode(id: string, mode: "display" | "panel") {
-    const shown = stateNow()?.outputs.find((o) => o.id === id)?.viewId ?? null;
-    const wantSurface = mode === "panel" ? "console" : "display";
-    const viewNeedsIt = (() => {
-      const v = stateNow()?.views.find((x) => x.id === shown);
-      return v ? viewSurface(v) !== wantSurface : false;
-    })();
-
-    if (mode === "display" && shown && viewNeedsIt) {
-      // The view first: the screen cannot become a display while it is on one.
-      if (!(await writeState("views:setSurface", { id: shown, surface: "display" }))) return;
-      await writeState("outputs:setMode", { id, mode });
-      return;
-    }
-
-    if (!(await writeState("outputs:setMode", { id, mode }))) return;
-    if (shown && viewNeedsIt) {
-      await writeState("views:setSurface", { id: shown, surface: wantSurface });
-    }
-  }
-
-  /** Change what a View is for, and the screens showing it, in the order the
-   *  guards allow. See handleSetOutputMode. */
   async function handleSetViewSurface(id: string, surface: "display" | "console") {
-    const wantMode = surface === "console" ? "panel" : "display";
     const showing = (stateNow()?.outputs ?? []).filter(
-      (o) => o.viewId === id && (o.mode ?? "display") !== wantMode,
+      (o) => o.viewId === id && surfaceForMode(outputMode(o)) !== surface,
     );
 
     if (surface === "console") {
@@ -928,14 +932,16 @@ export function useStageSettings(pinnedViewId?: string) {
     handleReorderPresets,
     handleRenamePreset,
     handleOverwritePreset,
-    handleAddOutput,
+    handleCreateScreen,
     handleRenameOutput,
     handleSetOutputView,
     handleSetOutputLocked,
     handleSetOutputHideTopBar,
     handleSetOutputAllowHls,
     handleSetOutputGroups,
-    handleSetOutputMode,
+    handleSetOutputRole,
+    handleSetOutputTextSize,
+    handleSetViewShowInSidebar,
     handleSetViewSurface,
     handleRemoveOutput,
     handleReorderOutputs,

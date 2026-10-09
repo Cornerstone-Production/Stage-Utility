@@ -436,7 +436,7 @@ export function MessagesSection({
         <div className="flex flex-col gap-2 px-4 pb-4 pt-3">
           <p className="text-caption2 text-fg-subtle">
             A group is a set of screens that gets a message together: Green room, Stage, Booth. Put a screen in groups
-            from its menu on the Screens page. Everyone is built in and reaches every screen.
+            from its Screen settings on the Screens page. Everyone is built in and reaches every screen.
           </p>
           <ul className="flex flex-col gap-1.5">
             {config.groups.map((g) => (

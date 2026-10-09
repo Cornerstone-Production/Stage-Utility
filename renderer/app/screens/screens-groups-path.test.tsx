@@ -1,11 +1,11 @@
 // A screen's message groups, from the click to the server.
 //
-// output-groups-menu.test.tsx drives OutputRow with injected props, so it cannot
-// see the half of the path that is wired in elsewhere: which output id a tick
-// sends, whether the page hands the card the groups the server really holds,
-// what the Screens page does when the PATCH fails, and where "No groups yet"
-// goes. Replacing onSetGroups with a no-op, passing the wrong output id, feeding
-// the card a made-up group list, dropping the link and sending `{ groups: [] }`
+// screen-settings-panel.test.tsx drives the panel with injected callbacks, so it
+// cannot see the half of the path that is wired in elsewhere: which output id a
+// tick sends, whether the page hands the panel the groups the server really
+// holds, what the Screens page does when the PATCH fails, and where "No groups
+// yet" goes. Replacing onSetGroups with a no-op, passing the wrong output id, feeding
+// the panel a made-up group list, dropping the link and sending `{ groups: [] }`
 // from api.ts each stayed green there.
 //
 // This mounts the real Screens route, through the real stage-settings hook and
@@ -132,7 +132,7 @@ async function mountScreens() {
   return router;
 }
 
-/** The overflow menu of the screen with this name (cards are in the outputs' order), then its Groups submenu. */
+/** The overflow menu of the screen with this name (cards are in the outputs' order), then its Screen settings panel. */
 async function openGroups(screenName: string): Promise<void> {
   const triggers = screen.getAllByLabelText(/more actions/i);
   const index = outputs.findIndex((o) => o.name === screenName);
@@ -141,18 +141,21 @@ async function openGroups(screenName: string): Promise<void> {
     fireEvent.click(triggers[index]);
     await settle();
   });
+  const item = screen.getByRole("menuitem", { name: "Screen settings…" });
   await act(async () => {
-    fireEvent.keyDown(screen.getByText("Groups"), { key: "ArrowRight" });
+    fireEvent.pointerDown(item, { button: 0, ctrlKey: false });
+    fireEvent.pointerUp(item, { button: 0, ctrlKey: false });
+    fireEvent.click(item);
     await settle();
   });
 }
 
-describe("ticking a group on a screen's card", () => {
+describe("ticking a group in a screen's settings panel", () => {
   test("PATCHes THAT screen with the whole new list, and the chip appears", async () => {
     await mountScreens();
     await openGroups("Booth");
     await act(async () => {
-      fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Stage" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: "Stage" }));
       await settle();
       await settle();
     });
@@ -171,11 +174,11 @@ describe("ticking a group on a screen's card", () => {
     await mountScreens();
     await openGroups("Booth");
     await act(async () => {
-      fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Green room" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: "Green room" }));
       await settle();
     });
     await act(async () => {
-      fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Stage" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: "Stage" }));
       await settle();
     });
     assert.deepEqual(
@@ -194,7 +197,7 @@ describe("ticking a group on a screen's card", () => {
     messageGroups = [{ id: "g-44444444", name: "Lobby crew" }];
     await mountScreens();
     await openGroups("Stage left");
-    const boxes = screen.getAllByRole("menuitemcheckbox").map((b) => b.textContent);
+    const boxes = screen.getAllByRole("checkbox").map((b) => b.closest("label")?.textContent);
     assert.deepEqual(boxes.filter((t) => t === "Lobby crew" || t === "Green room" || t === "Stage"), ["Lobby crew"]);
   });
 
@@ -203,7 +206,7 @@ describe("ticking a group on a screen's card", () => {
     await mountScreens();
     await openGroups("Booth");
     await act(async () => {
-      fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Green room" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: "Green room" }));
       await settle();
       await settle();
       await settle();

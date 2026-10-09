@@ -25,7 +25,9 @@ reaches the same screen. Both addresses work.
 It is an alias, not a rename — the id keeps working, and clearing a slug only
 removes the alias. Nothing is rekeyed, so nothing is lost.
 
-Slugs are rejected, with the reason shown on the card, if they are reserved, start
+The friendly link is set in the screen's **Screen settings** (or in the last of the
+three steps when adding a screen). Slugs are rejected, with the reason shown
+beside the field, if they are reserved, start
 with `preview-`, collide with another display's id or slug, or contain anything
 outside `a-z`, `0-9` and `-`.
 
@@ -55,8 +57,8 @@ address.
 
 Append `?kiosk=1` to any display's address and its top bar drops the escape
 hatches — the QR/settings link and the clickable brand logo — while leaving
-the rest of the bar alone. It is the same effect as that screen's own **Lock
-display** toggle on Screens, as a link rather than a setting: use it for a
+the rest of the bar alone. It is the same effect as the **Lock** switch in that screen's
+**Screen settings** on Screens, as a link rather than a setting: use it for a
 one-off address handed to someone outside Production, so opening it can't lead
 to Settings or another display. Soft by design, like the toggle it matches —
 editing the URL undoes it — a guardrail, not access control.
