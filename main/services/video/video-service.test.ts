@@ -967,7 +967,7 @@ test("a pull feed removed mid-outage and added again under the same name logs it
     assert.equal(current, id, "sanity: the same name mints the same id");
     // The add reconciled the relay, which starts a poll of its own; one still in
     // flight would swallow the poll below.
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    await videoService.whenPollsIdle();
 
     t.mock.timers.tick(RECENT_REQUEST_MS);
     await dialOnce();
@@ -999,7 +999,7 @@ test("a successful reconcile is followed by a poll, so a feed it just set up rea
     await pollOnce();
     assert.equal(await stateOf(), "offline", "sanity: a polled relay with no path for the feed");
     assert.equal(await videoService.reconcileRelay(), true);
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    await videoService.whenPollsIdle(); // the poll the reconcile started
     assert.equal(await stateOf(), "standby");
   } finally {
     await videoService.detachRelay();
@@ -1195,13 +1195,20 @@ test("a reconcile that finishes after a respawn does not count for the new proce
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
   let release: () => void = () => {};
-  const relay = fakeRelay({ reconcile: () => new Promise<void>((resolve) => (release = resolve)) });
+  let entered: () => void = () => {};
+  const inReconcile = new Promise<void>((resolve) => (entered = resolve));
+  const relay = fakeRelay({
+    reconcile: () => {
+      entered();
+      return new Promise<void>((resolve) => (release = resolve));
+    },
+  });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
   attach(relay, supervisor);
   try {
     const pending = videoService.reconcileRelay();
-    await new Promise((r) => setImmediate(r)); // into relay.reconcile()
+    await inReconcile; // relayFeeds() reads the feed file first: no fixed number of turns reaches this
     supervisor.current = { state: "running", since: 2 };
     supervisor.emit("status", supervisor.current); // the process it was talking to is gone
     release();
