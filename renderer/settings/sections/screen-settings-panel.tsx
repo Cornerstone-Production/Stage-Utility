@@ -619,10 +619,13 @@ function OutputDeviceSection({ output, device, online, health, actions }: {
           ))}
         </div>
       </SettingRow>
-      <div aria-hidden="true" className="grid h-[120px] place-items-center">
+      {/* Tall enough to hold the picture turned on its side. Smaller than the
+          mockup's 160 x 90: turned, that is 160 high, which ran over the figures
+          under it. */}
+      <div aria-hidden="true" className="grid h-[144px] place-items-center">
         <i
           style={{ transform: `rotate(${rotation}deg)` }}
-          className="grid h-[90px] w-[160px] place-items-center rounded border border-line-strong bg-bg text-caption2 not-italic text-fg-subtle transition-transform duration-(--motion-settled) ease-(--motion-ease) motion-reduce:transition-none"
+          className="grid h-[72px] w-[128px] place-items-center rounded border border-line-strong bg-bg text-caption2 not-italic text-fg-subtle transition-transform duration-(--motion-settled) ease-(--motion-ease) motion-reduce:transition-none"
         >
           {sideways ? "1080 × 1920" : "1920 × 1080"}
         </i>
