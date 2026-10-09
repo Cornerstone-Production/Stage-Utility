@@ -8,8 +8,9 @@
 // `1%2F2` do the same inside Services. Checked per route that was one regex in one
 // of five routes, so the check is made where the string is built instead: a path
 // is written with the `pcoUrl` tag, and the tag takes nothing that has not been
-// through `pcoId` (a value that must look like a PCO id) or `pcoSegment` (a fixed
-// word of the code's own).
+// through `pcoId` (a value that must look like a PCO id), `pcoAttachmentId` (the
+// one other shape Planning Center issues, an attachment id) or `pcoSegment` (a
+// fixed word of the code's own).
 //
 // What the compiler enforces: `pcoUrl` returns a `PcoUrl`, a branded string, and
 // every credentialed request entry point in pco-service.ts takes a `PcoUrl`. A
@@ -42,8 +43,8 @@ export class PcoUrlRefused extends Error {
 /** Held only by this module, so nothing outside it can make a PcoPathPart. */
 const CHECKED = Symbol("checked by pcoId or pcoSegment");
 
-/** A value that may be written into a `pcoUrl` path. Made only by pcoId and
- *  pcoSegment: the constructor wants a token no other module holds, and the
+/** A value that may be written into a `pcoUrl` path. Made only by pcoId,
+ *  pcoAttachmentId and pcoSegment: the constructor wants a token no other module holds, and the
  *  private field makes the type nominal, so a plain `{ value }` object does not
  *  pass for one either. */
 export class PcoPathPart {
@@ -64,6 +65,16 @@ export class PcoPathPart {
 /** The shape of every id Planning Center issues: a run of digits. */
 const PCO_ID = /^\d{1,20}$/;
 
+/**
+ * An attachment id from `all_attachments`. Almost always a run of digits, but a
+ * plan's stage plot comes back with a suffixed id: `84892470-stage`, observed on
+ * a live plan in Oct 2026, listed as a "Plan file". The suffix is a short
+ * lowercase word. Only attachment ids take this shape, which is why it is its own
+ * check and not a loosening of PCO_ID: a service type or plan id with a suffix is
+ * still refused.
+ */
+const PCO_ATTACHMENT_ID = /^\d{1,20}(?:-[a-z]{1,20})?$/;
+
 /** Is `value` shaped like an id Planning Center issues? */
 export function isPcoId(value: unknown): value is string {
   return typeof value === "string" && PCO_ID.test(value);
@@ -76,6 +87,23 @@ export function isPcoId(value: unknown): value is string {
 export function pcoId(name: string, value: unknown): PcoPathPart {
   if (!isPcoId(value)) {
     throw new PcoUrlRefused(`${name} is not a Planning Center id`);
+  }
+  return new PcoPathPart(CHECKED, value);
+}
+
+/** Is `value` shaped like an `all_attachments` id (digits, or digits-word)? */
+export function isPcoAttachmentId(value: unknown): value is string {
+  return typeof value === "string" && PCO_ATTACHMENT_ID.test(value);
+}
+
+/**
+ * `value` as a path part where an attachment id belongs. Same promise as `pcoId`
+ * (the shape has no `/`, `.`, `?`, `#` or `%`, so it cannot leave its path
+ * segment), for the one id that may carry a `-word` suffix.
+ */
+export function pcoAttachmentId(name: string, value: unknown): PcoPathPart {
+  if (!isPcoAttachmentId(value)) {
+    throw new PcoUrlRefused(`${name} is not a Planning Center attachment id`);
   }
   return new PcoPathPart(CHECKED, value);
 }

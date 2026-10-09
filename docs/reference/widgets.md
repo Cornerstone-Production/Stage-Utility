@@ -94,6 +94,23 @@ Center marks as post-service are left out. The time renders in the app's time zo
 and 12/24-hour setting ([Settings → Advanced](../ops/install-and-config.md#time-zone)),
 so a screen driven from a UTC server still reads the venue's clock.
 
+**Plan file** picks its file by name: the first file on the current plan whose
+name (or the item it hangs off) contains the **Match** text. It keeps checking
+until it has one. A plan with no matching file shows a notice and is asked
+again every two minutes, so a stage plot attached after the display loaded
+appears by itself. A load that fails (Planning Center unreachable, a download
+link that expired) is retried after 5, 15 and 45 seconds and then every two
+minutes. Once the file is up it is checked every five minutes. The server reads
+the plan's file list from Planning Center at most every three minutes (45 seconds
+around a service), so a revised file on the same plan replaces it within about
+eight minutes, and a page that has just loaded may show the browser's copy until its
+first check. A check that finds the same file does nothing, and the old picture
+stays until the new one is ready. A failed
+check never swaps a picture, or the notice on screen, for another one. Switching
+plans loads the new plan's file at once. A display that is still failing after
+its quick retries logs a `[plan-file]` line once, so `/log` says which page and
+which file, and one more when the file draws again.
+
 **Embedded view** and **Embedded screen** can be expanded: on an operator
 surface each tile carries a control in its bottom-right corner that grows it to
 fill the window, and Escape or the panel's close button brings it back. Nothing
