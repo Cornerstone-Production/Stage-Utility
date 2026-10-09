@@ -32,8 +32,8 @@ public final class SurfaceFrameSource: CardFrameSource {
   private var _frameSize: (width: Int, height: Int)?
   private var _failure: String?
   private var capture: ((CardFrameCopy?) -> Void)?
-  /// When the last begin frame was asked for, host ns; 0 before any.
-  private var lastBegin: UInt64 = 0
+  /// The begin frame asked for that no picture has answered yet, host ns.
+  private var unanswered: UInt64?
   private let now: () -> UInt64
 
   /// Called on the output's clock thread each time a slot's picture is to be
@@ -81,9 +81,21 @@ public final class SurfaceFrameSource: CardFrameSource {
     replaced?(nil)
   }
 
+  /// A begin frame with no picture this long after it is taken as never answered.
+  public static let answerWithinNs: UInt64 = 100_000_000
+
+  /// A picture is timed from the begin frame it answers, which for a picture slower
+  /// than a frame is not the last one asked for. CEF sends no begin frame while one
+  /// it sent is still being drawn (`SendExternalBeginFrame` returns at once while its
+  /// begin frame is pending), so a begin asked for while an earlier one is unanswered
+  /// makes no picture of its own, and the next picture answers the earlier one. It
+  /// is not kept: kept, every picture after a slow one would be timed a frame early.
   public func begin(_ request: CardFrameRequest) {
     let at = now()
-    lock.withLock { lastBegin = at }
+    lock.withLock {
+      if let pending = unanswered, at >= pending, at - pending < Self.answerWithinNs { return }
+      unanswered = at
+    }
     onBeginFrame?(request)
   }
 
@@ -91,8 +103,8 @@ public final class SurfaceFrameSource: CardFrameSource {
   /// at. Converted before this returns. Call it from one thread.
   ///
   /// - Parameter contentNs: when the picture's content was drawn, if the caller
-  ///   knows (the latency page says, in its stamp). Otherwise it is the last begin
-  ///   frame asked for: the one this picture answers.
+  ///   knows (the latency page says, in its stamp). Otherwise it is the begin frame
+  ///   this picture answers (`begin`), or 0, unknown, for a picture that answers none.
   public func present(_ surface: IOSurfaceRef, contentNs: UInt64? = nil) throws {
     guard let texture = converter.texture(for: surface) else {
       throw UYVYConverter.Failure.gpu("could not read the surface as BGRA")
@@ -104,6 +116,13 @@ public final class SurfaceFrameSource: CardFrameSource {
     let paintNs = now()
     typealias Chosen = (slot: Int, buffer: MTLBuffer, rotation: Rotation, size: (width: Int, height: Int), content: UInt64)
     let chosen: Chosen? = try lock.withLock {
+      // Answered, whether or not the picture can be used. A begin asked for after
+      // the picture was handed over is not what it answers.
+      var answered: UInt64 = 0
+      if let pending = unanswered, pending <= paintNs {
+        answered = pending
+        unanswered = nil
+      }
       guard let size = _frameSize else { return nil }
       if stagedSize.map({ $0.width != size.width || $0.height != size.height }) ?? true {
         guard reading == nil else { throw UYVYConverter.Failure.gpu("the frame changed size mid-frame") }
@@ -115,7 +134,7 @@ public final class SurfaceFrameSource: CardFrameSource {
         fresh = false
       }
       let slot = (0..<3).first { $0 != newest && $0 != reading }!
-      let content = contentNs ?? (lastBegin <= paintNs ? lastBegin : 0)
+      let content = contentNs ?? answered
       return (slot, staged[slot].buffer, _rotation, size, content)
     }
     guard let chosen else { return }

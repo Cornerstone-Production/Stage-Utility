@@ -219,9 +219,9 @@ extension SurfaceFrameSource {
     #expect(source.fill(CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000), into: bigger.target) == nil)
   }
 
-  /// A picture's times: drawn for the begin frame it answers (the last asked for
-  /// before it arrived), handed over when presented, ready once converted; or
-  /// drawn when the caller says, as the latency page's stamp does.
+  /// A picture's times: drawn for the begin frame it answers, handed over when
+  /// presented, ready once converted; or drawn when the caller says, as the latency
+  /// page's stamp does.
   @Test func aPictureCarriesTheTimesItWasMadeAt() throws {
     let clock = Locked<UInt64>(1_000)
     let source = SurfaceFrameSource(converter: converter, now: { clock.value })
@@ -231,18 +231,81 @@ extension SurfaceFrameSource {
     let white = bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)])
 
     source.begin(request)  // at 1000
-    clock.value = 1_500
-    source.begin(request)  // at 1500
     clock.value = 2_000
     try source.present(white)
     let picture = try #require(source.fill(request, into: frame.target))
-    #expect(picture.contentNs == 1_500)
+    #expect(picture.contentNs == 1_000)
     #expect(picture.paintNs == 2_000)
     #expect(picture.readyNs == 2_000)
 
     clock.value = 3_000
     try source.present(white, contentNs: 2_750)
     #expect(source.fill(request, into: frame.target)?.contentNs == 2_750)
+    // Handed over with no begin frame to answer: when it was drawn is unknown.
+    try source.present(white)
+    #expect(source.fill(request, into: frame.target)?.contentNs == 0)
+  }
+
+  /// A picture slower than a frame arrives after the next begin frame was asked
+  /// for. CEF sent no begin frame for that one (one was still being drawn), so the
+  /// picture answers the first: it is timed from it, 20 ms, not from the second, which
+  /// would read 3.3 ms. The begin after the picture is answered by the next.
+  @Test func aSlowPictureIsTimedFromTheBeginItAnswers() throws {
+    let clock = Locked<UInt64>(1_000_000)
+    let source = SurfaceFrameSource(converter: converter, now: { clock.value })
+    source.learnSize(width: 2, height: 1)
+    let frame = FrameMemory(width: 2, height: 1)
+    let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
+    let white = bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)])
+
+    source.begin(request)  // 1 ms
+    clock.value = 17_683_333
+    source.begin(request)  // a frame later, while the first is still being drawn
+    clock.value = 21_000_000
+    try source.present(white)
+    #expect(source.fill(request, into: frame.target)?.contentNs == 1_000_000)
+
+    clock.value = 34_366_667
+    source.begin(request)
+    clock.value = 35_000_000
+    try source.present(white)
+    #expect(source.fill(request, into: frame.target)?.contentNs == 34_366_667)
+  }
+
+  /// A begin frame the clock thread asks for just after the main thread took the
+  /// picture's time is not what that picture answers: the picture is unknown, and
+  /// the begin is left for the next.
+  @Test func aBeginAfterThePictureIsNotWhatItAnswers() throws {
+    let clock = Locked<UInt64>(5_000_000)
+    let source = SurfaceFrameSource(converter: converter, now: { clock.value })
+    source.learnSize(width: 2, height: 1)
+    let frame = FrameMemory(width: 2, height: 1)
+    let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
+    let white = bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)])
+    source.begin(request)  // stamped at 5 ms
+    clock.value = 4_000_000  // the picture's time, taken before it
+    try source.present(white)
+    #expect(source.fill(request, into: frame.target)?.contentNs == 0)
+    clock.value = 6_000_000
+    try source.present(white)
+    #expect(source.fill(request, into: frame.target)?.contentNs == 5_000_000)
+  }
+
+  /// A begin frame no picture ever answered (a browser that drew nothing for it) is
+  /// given up after `answerWithinNs`, so it does not time the pictures after it.
+  @Test func aBeginNeverAnsweredIsGivenUp() throws {
+    let clock = Locked<UInt64>(1_000_000)
+    let source = SurfaceFrameSource(converter: converter, now: { clock.value })
+    source.learnSize(width: 2, height: 1)
+    let frame = FrameMemory(width: 2, height: 1)
+    let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
+    source.begin(request)
+    clock.value += SurfaceFrameSource.answerWithinNs + 1
+    let later = clock.value
+    source.begin(request)
+    clock.value += 2_000_000
+    try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
+    #expect(source.fill(request, into: frame.target)?.contentNs == later)
   }
 
   /// Two pictures before the card takes a frame: the newer goes out, once, and the

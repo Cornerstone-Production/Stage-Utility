@@ -137,8 +137,10 @@ With the standard leads it is **20 ms at 1080p59.94**, down from 64.7 ms.
 ### How it is measured
 
 - **Content.** For a page in general, a picture's content is taken to be drawn when
-  the begin frame it answers was asked for (the last before it arrived): Chromium's
-  animation frame runs on that begin frame's time. With `--test-pattern latency` the
+  the begin frame it answers was asked for: Chromium's animation frame runs on that
+  begin frame's time. CEF sends no begin frame while one it sent is still being
+  drawn, so a begin asked for before the last picture arrived made no picture of
+  its own, and a picture slower than a frame answers the begin before the last. With `--test-pattern latency` the
   page writes its animation frame's time into its corner as a row of black and white
   blocks (`LatencyPage.Stamp`: a marker, 40 bits of microseconds, a checksum), and
   the helper reads it back out of every picture, so content time is exact there.
