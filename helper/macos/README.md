@@ -239,8 +239,8 @@ logged when it starts and when it ends, not on every try. Healthy frames are not
 An output is a `WebSurface` placed by a destination. `WebSurface` is a protocol with no
 engine in it (load, reload, a committed-address callback, a load-result callback, a
 snapshot); `SurfaceLoader` is the part every engine shares (the retry, the backoff, what a
-5xx means), and `WKWebSurface` is the WebKit surface, the only file that names WebKit or
-its keep-painting switches. A display output puts the surface's view in a borderless window
+5xx means), and `WKWebSurface` is the WebKit surface (with `KeepPainting`, the only code that names WebKit
+or its keep-painting switches). A display output puts the surface's view in a borderless window
 over a whole display (`WindowDestination`, which takes a placement, so it can later take a
 tile of a canvas display, and which turns the view for a rotation without knowing what draws
 in it); a DeckLink port will be another destination.

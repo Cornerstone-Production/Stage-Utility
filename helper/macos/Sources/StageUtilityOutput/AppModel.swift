@@ -351,7 +351,10 @@ final class AppModel: ObservableObject {
           let screens = try await HealthReporter.screens(server: server)
           for rt in outputs { self.applyScreen(rt, from: screens) }
         } catch {
-          for rt in outputs { self.screenReadFailed(rt, "\(error)") }
+          // The text, not the error value: it carries addresses and task ids that differ
+          // each time, and the same trouble must read as the same trouble.
+          let why = (error as? ScreenList.ReadError)?.description ?? error.localizedDescription
+          for rt in outputs { self.screenReadFailed(rt, why) }
         }
         self.refresh()
       }
@@ -415,7 +418,12 @@ final class AppModel: ObservableObject {
     case .recovered:
       Log.notice(.health, "\(port): health posts are accepted again")
     case .paused(let status, let retryIn):
-      Log.notice(.health, "\(port): the server does not recognise this output (HTTP \(status): released in Screens, not set up, or a token it does not hold); health posts for this output are paused, retried in \(Int(retryIn)) s or when it is set up again")
+      Log.notice(.health, "\(port): the server does not recognise this output (HTTP \(status): released in Screens, not set up, or a token it does not hold); health posts for this output are paused, retried in \(Int(retryIn)) s or when it is set up again; reloading its page so it shows what the server now says")
+      // The page on screen is from before the server stopped recognising this output
+      // (a release leaves a set-up screen up), and a screen set up again only pins the
+      // output's token when the output asks at /enroll. Asking again is how it learns
+      // it is on the holding screen, and how it is set up again.
+      rt.sink?.surface.reload()
     case .failing(let why):
       Log.error(.health, "\(port): \(why)")
     case .rediscover(let misses):
