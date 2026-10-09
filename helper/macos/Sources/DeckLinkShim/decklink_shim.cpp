@@ -177,6 +177,8 @@ class CompletionSink final : public IDeckLinkVideoOutputCallback {
 
 class DeckLinkCard final : public Card {
  public:
+  // The clock is kept by Card's ClockAnchor, from the completions; readClock is the
+  // driver's answer when it has to be asked.
   DeckLinkCard(IDeckLink *device, IDeckLinkOutput *output, const dl_port_id &id)
       : device_(device), out_(output), id_(id), sink_(new CompletionSink) {}
 
@@ -218,46 +220,6 @@ class DeckLinkCard final : public Card {
     return made;
   }
 
-  /// Where the card's clock is, from the completions (`slotBegan`): asking the
-  /// driver (GetScheduledStreamTime) takes 74 us typically and up to 0.8 ms on an 8K
-  /// Pro over Thunderbolt, too slow and too uncertain to ask before every begin and
-  /// fill. It is asked until the first completion arrives, and again after three
-  /// frames in a row went out late (`clockSuspect`). Three on-time completions in a
-  /// row that disagree with it are believed instead.
-  bool hostTimeOf(int64_t streamTime, int64_t timeScale, uint64_t *hostNs) override {
-    if (!started_) return false;
-    std::unique_lock<std::mutex> lock(clock_);
-    if (!anchored_) {
-      lock.unlock();
-      int64_t stream = 0;
-      uint64_t host = 0;
-      if (!readClock(timeScale, &stream, &host)) return false;
-      lock.lock();
-      setAnchor(stream, timeScale, host);
-    }
-    *hostNs = mapLocked(streamTime, timeScale);
-    return true;
-  }
-
-  void clockSuspect() override {
-    std::lock_guard<std::mutex> lock(clock_);
-    anchored_ = false;
-  }
-
-  void slotBegan(int64_t streamTime, int64_t timeScale, uint64_t hostNs) override {
-    std::lock_guard<std::mutex> lock(clock_);
-    if (anchored_) {
-      const double off = static_cast<double>(hostNs) - static_cast<double>(mapLocked(streamTime, timeScale));
-      // A completion more than a millisecond off is a frame held on, or shown late,
-      // not the clock moving: three in a row, and the completions are believed.
-      if (off > 1e6 || off < -1e6) {
-        if (++disagreements_ < 3) return;
-      }
-    }
-    disagreements_ = 0;
-    setAnchor(streamTime, timeScale, hostNs);
-  }
-
   uint64_t minLeadNs() const override { return static_cast<uint64_t>(DL_CARD_MIN_LEAD_US) * 1000; }
 
   /// When the card finished with `frame`, on the host clock: the driver reports it
@@ -293,8 +255,9 @@ class DeckLinkCard final : public Card {
   dl_port_id id_;
   CompletionSink *sink_;
   /// The playback position and the host clock, read together; of three tries the
-  /// quickest, whose middle is surest.
-  bool readClock(int64_t timeScale, int64_t *stream, uint64_t *host) {
+  /// quickest, whose middle is surest (ClockAnchor says when it is asked).
+  bool readClock(int64_t timeScale, int64_t *stream, uint64_t *host) override {
+    if (!started_) return false;
     uint64_t best = UINT64_MAX;
     for (int i = 0; i < 3; i++) {
       double speed = 0;
@@ -311,24 +274,8 @@ class DeckLinkCard final : public Card {
     return true;
   }
 
-  void setAnchor(int64_t stream, int64_t scale, uint64_t host) {
-    anchorStreamNs_ = static_cast<double>(stream) * 1e9 / static_cast<double>(scale);
-    anchorHost_ = host;
-    anchored_ = true;
-  }
-
-  uint64_t mapLocked(int64_t streamTime, int64_t timeScale) const {
-    const double ns = static_cast<double>(streamTime) * 1e9 / static_cast<double>(timeScale);
-    return static_cast<uint64_t>(static_cast<double>(anchorHost_) + ns - anchorStreamNs_);
-  }
-
   std::atomic<bool> started_{false};
   bool stopped_ = false;
-  std::mutex clock_;
-  bool anchored_ = false;
-  double anchorStreamNs_ = 0;
-  uint64_t anchorHost_ = 0;
-  int disagreements_ = 0;
 };
 
 uint64_t completionTime(DeckLinkCard *card, IDeckLinkVideoFrame *frame) { return card->completedAt(frame); }

@@ -89,9 +89,14 @@ card's clock:
 - **A clock of its own.** Each output has a real-time thread that sleeps until the
   next begin or fill. The card's clock is read from its completions (each frame
   finishes exactly as the next slot begins), not by asking the driver, which takes
-  up to 0.8 ms to answer. A real-time thread wakes within about 35 us of when it
-  asked; at user-interactive priority macOS woke it 1.4 ms late, most of a fill
-  lead.
+  up to 0.8 ms to answer (`ClockAnchor`, shared by the card and the software clock).
+  The driver is asked once, when playback starts. A completion more than 1 ms from
+  where the clock puts its slot is a frame held on, not the clock moving, and only
+  three in a row are believed; three frames in a row shown late have the driver
+  asked again. A completion time more than 20 ms from when it arrives is not when
+  the frame finished, and is not used at all. A real-time thread wakes within about
+  35 us of when it asked; at user-interactive priority macOS woke it 1.4 ms late,
+  most of a fill lead.
 - **Frames.** Three of the card's frames per output: the one on air, the one
   scheduled after it, and one to fill while a completion is on its way. More frames
   add no delay; when a frame goes out is set by the leads. Two are filled before
@@ -311,6 +316,7 @@ log stream --level info --predicate 'subsystem == "com.stageutility.output" && c
 | `<port>: the card would not make frames of its own, so it gets the helper's frames` / `the card refused the helper's own frames, so it gets the card's frames` | Once per port, the first time it switches. |
 | `<port>: render to air 20.0 ms (p95 20.1, max 20.2) over 591 new pictures` | When a health window first measures it, and again when it moves by 4 ms or more: how far behind the page the card's output runs (see [Latency](#latency)). |
 | `<port>: refused 1080p59.94: <reason>` | The mode cannot be played on that port. |
+| `<port>: the card said a frame finished 50.0 ms after it reported it; completion times more than 20 ms off are not used, …` | Once per port, the first completion time that cannot be right. The slots are timed from the driver's playback position instead. |
 | `<port>: could not open (<reason>)` / `lost (<reason>)` | A port that will not open or went away; retried. A running port that sends nothing for two seconds is lost with "the card stopped taking frames". |
 | `<port>: no picture from the page in 10 s of sending, so the card is sending black` / `pictures from the page again` | A running port whose page has never handed over a picture, and the first picture after that or after a stall (`CardWatch`). The window says "No picture from the page. Sending black" meanwhile, in place of the frame rate. |
 | `<port>: falling behind: r repeated and d dropped in the last second` / `keeping up again after n s` | A second with 5% or more of its frames repeated (the server's line: 3 at 59.94, 2 at 23.98 to 30) or any slot missed, and five good seconds in a row after it (`CardWatch`). |

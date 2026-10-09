@@ -77,6 +77,84 @@ struct CardFrame {
 /// mach_absolute_time in nanoseconds: the host clock every time here is on.
 uint64_t hostNowNs();
 
+/// Where a card's playback is, kept on the host clock: one stream time and the host
+/// time it went to air, and the mode's rate through it.
+///
+/// Asking the driver (GetScheduledStreamTime) takes 74 us typically and up to 0.8 ms
+/// on an 8K Pro over Thunderbolt, too slow and too uncertain to ask before every
+/// begin and fill. So the driver is asked once, and after that the clock is kept
+/// from the completions (`slotBegan`): each frame shown on time finished exactly as
+/// the next slot began. A completion more than a millisecond off is a frame held
+/// on, or shown late, not the clock moving: three in a row are believed. When frames
+/// keep going out late (`suspect`), the driver is asked again.
+///
+/// Both kinds of card keep their clock with one of these, so the software clock
+/// tests the same rules a DeckLink port runs.
+class ClockAnchor {
+ public:
+  /// How far a completion may be from where the anchor puts its slot and still agree.
+  static constexpr double kAgreeNs = 1e6;
+  /// Disagreeing completions in a row that are believed.
+  static constexpr int kBelievedAfter = 3;
+
+  /// When stream time `streamTime` (in `timeScale`) is, or was, on air on the host
+  /// clock. Not anchored, it asks `read(timeScale, &stream, &host)` where playback
+  /// is, outside its lock; false when that cannot say.
+  template <typename ReadClock>
+  bool hostTimeOf(int64_t streamTime, int64_t timeScale, uint64_t *hostNs, ReadClock read) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!anchored_) {
+      lock.unlock();
+      int64_t stream = 0;
+      uint64_t host = 0;
+      if (!read(timeScale, &stream, &host)) return false;
+      lock.lock();
+      // A completion may have anchored it meanwhile; it is the surer of the two.
+      if (!anchored_) set(stream, timeScale, host);
+    }
+    *hostNs = map(streamTime, timeScale);
+    return true;
+  }
+
+  /// Slot `streamTime` began at `hostNs`, by a completion.
+  void slotBegan(int64_t streamTime, int64_t timeScale, uint64_t hostNs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (anchored_) {
+      const double off = static_cast<double>(hostNs) - static_cast<double>(map(streamTime, timeScale));
+      if (off > kAgreeNs || off < -kAgreeNs) {
+        if (++disagreements_ < kBelievedAfter) return;
+      }
+    }
+    disagreements_ = 0;
+    set(streamTime, timeScale, hostNs);
+  }
+
+  /// Frames keep going out late: forget the clock as kept, and read it again.
+  void suspect() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    anchored_ = false;
+    disagreements_ = 0;
+  }
+
+ private:
+  void set(int64_t stream, int64_t scale, uint64_t host) {
+    anchorStreamNs_ = static_cast<double>(stream) * 1e9 / static_cast<double>(scale);
+    anchorHost_ = host;
+    anchored_ = true;
+  }
+
+  uint64_t map(int64_t streamTime, int64_t timeScale) const {
+    const double ns = static_cast<double>(streamTime) * 1e9 / static_cast<double>(timeScale);
+    return static_cast<uint64_t>(static_cast<double>(anchorHost_) + ns - anchorStreamNs_);
+  }
+
+  std::mutex mutex_;
+  bool anchored_ = false;
+  double anchorStreamNs_ = 0;
+  uint64_t anchorHost_ = 0;
+  int disagreements_ = 0;
+};
+
 /// The thing that plays frames out on its own clock: a DeckLink port, or the
 /// software clock that stands in for one.
 class Card {
@@ -93,13 +171,19 @@ class Card {
   virtual CardFrame createFrame(int32_t width, int32_t height, int32_t rowBytes) = 0;
   /// When stream time `streamTime` (in `timeScale`) is, or was, on air, on this
   /// card's host clock (`now`). False before playback has started.
-  virtual bool hostTimeOf(int64_t streamTime, int64_t timeScale, uint64_t *hostNs) = 0;
+  bool hostTimeOf(int64_t streamTime, int64_t timeScale, uint64_t *hostNs) {
+    return clock_.hostTimeOf(streamTime, timeScale, hostNs,
+                             [this](int64_t scale, int64_t *stream, uint64_t *host) {
+                               return readClock(scale, stream, host);
+                             });
+  }
   /// The card finished the frame before slot `streamTime` (in `timeScale`) at
-  /// `hostNs`: when that slot began, for a card that keeps its clock from its
-  /// completions.
-  virtual void slotBegan(int64_t streamTime, int64_t timeScale, uint64_t hostNs) {}
+  /// `hostNs`: when that slot began (ClockAnchor::slotBegan).
+  void slotBegan(int64_t streamTime, int64_t timeScale, uint64_t hostNs) {
+    clock_.slotBegan(streamTime, timeScale, hostNs);
+  }
   /// Frames keep going out late: forget the clock as kept, and read it again.
-  virtual void clockSuspect() {}
+  void clockSuspect() { clock_.suspect(); }
   /// The host clock as this card keeps it: the real one, or a test's own.
   virtual uint64_t now() { return hostNowNs(); }
   /// True for a clock only tests move: the card runs the output's begins and fills
@@ -113,7 +197,14 @@ class Card {
   virtual bool isFake() const { return false; }
 
  protected:
+  /// Where playback is now, asked of the card itself: a stream time in `timeScale`
+  /// and the host time it was on air. False before playback has started, or when
+  /// the card will not say. Asked only while the clock is not anchored.
+  virtual bool readClock(int64_t timeScale, int64_t *stream, uint64_t *host) = 0;
   Output *output_ = nullptr;
+
+ private:
+  ClockAnchor clock_;
 };
 
 class Output {
@@ -134,7 +225,13 @@ class Output {
 
   /// The card has finished with `frame`, at `completedNs` on the host clock (0 if
   /// it cannot say). Counts a late or dropped result and frees the frame.
+  ///
+  /// A time further than `kPlausibleCompletionNs` from now is not when the frame
+  /// finished (a driver whose timestamp is on another clock, or wrong): it is taken
+  /// as unknown, so it neither times the frame nor moves the clock, which stays
+  /// on the driver's playback position. Said once (dl_counters).
   void completed(IDeckLinkVideoFrame *frame, Completion result, uint64_t completedNs);
+  static constexpr uint64_t kPlausibleCompletionNs = 20000000;
 
   /// The port is gone or refused us. Stops scheduling and tells the owner, once.
   void lose(const char *reason);
@@ -232,6 +329,9 @@ class Output {
   std::atomic<bool> lost_{false};
   std::atomic<bool> notRealtime_{false};
   std::atomic<bool> clockUnknown_{false};
+  std::atomic<bool> implausible_{false};
+  /// How far from now the first implausible completion said it was, ns.
+  std::atomic<int64_t> implausibleOffsetNs_{0};
   /// Completions reported late or dropped in a row; touched under state_.
   int lateRun_ = 0;
   std::atomic<uint64_t> scheduled_{0};

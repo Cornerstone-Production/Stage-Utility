@@ -426,6 +426,16 @@ Output::Slot *Output::slotFor(IDeckLinkVideoFrame *frame) {
 
 void Output::completed(IDeckLinkVideoFrame *frame, Completion result, uint64_t completedNs) {
   if (closing_ || lost_) return;
+  if (completedNs != 0) {
+    const uint64_t now = card_->now();
+    const uint64_t off = completedNs > now ? completedNs - now : now - completedNs;
+    if (off > kPlausibleCompletionNs) {
+      if (!implausible_.exchange(true)) {
+        implausibleOffsetNs_ = static_cast<int64_t>(completedNs) - static_cast<int64_t>(now);
+      }
+      completedNs = 0;
+    }
+  }
   std::lock_guard<std::mutex> lock(state_);
   Slot *mine = slotFor(frame);
   if (mine == nullptr) return;
@@ -510,6 +520,8 @@ void Output::counters(dl_counters *out) const {
   out->lost = lost_;
   out->clock_not_realtime = notRealtime_;
   out->clock_unknown = clockUnknown_;
+  out->completion_implausible = implausible_;
+  out->implausible_offset_us = implausibleOffsetNs_ / 1000;
 }
 
 }  // namespace dlshim

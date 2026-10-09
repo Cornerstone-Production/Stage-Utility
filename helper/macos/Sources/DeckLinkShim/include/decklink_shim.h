@@ -224,7 +224,8 @@ dl_output *dl_fake_output_open(int32_t width, int32_t height, int64_t frame_dura
                                const dl_fake_behaviour *behaviour, const dl_callbacks *callbacks, char *why,
                                size_t why_len);
 
-/// How many times the output has asked a software clock where its playback is.
+/// How many times the output has asked a software clock where its playback is: once
+/// when it starts, and again each time its clock as kept is suspect (ClockAnchor).
 int64_t dl_fake_clock_reads(const dl_output *output);
 
 /// Frames the software clocks that count them (`count_frames`) have made and not
@@ -258,6 +259,11 @@ typedef struct {
   bool clock_not_realtime;
   /// The card could not say where its playback is, so nothing could be timed.
   bool clock_unknown;
+  /// A completion time came more than 20 ms from when it was reported: completion
+  /// times that far off are not used (Output::completed). `implausible_offset_us`
+  /// is how far the first one was, positive in the future.
+  bool completion_implausible;
+  int64_t implausible_offset_us;
 } dl_counters;
 
 void dl_output_counters(const dl_output *output, dl_counters *out);
@@ -325,6 +331,12 @@ void dl_fake_hold_completions(dl_output *output, bool hold);
 void dl_fake_report_late(dl_output *output, int32_t frames);
 /// As if the device were unplugged.
 void dl_fake_unplug(dl_output *output);
+/// Have the clock's playback position, when the output asks for it, say a host time
+/// `us` later than the truth, as a driver's answer can be off by its own latency.
+void dl_fake_clock_read_error(dl_output *output, int64_t us);
+/// Report the next `count` completions `us` later than the slot boundary they
+/// happened at, as a frame held on longer would, or a timestamp on another clock.
+void dl_fake_completion_offset(dl_output *output, int64_t us, int32_t count);
 /// What went out, one entry per frame of the clock: the first eight bytes of the
 /// frame on air, read as a little-endian int64 (a test source writes its picture
 /// number at the start of every line), or -2 when the frame's last line does not

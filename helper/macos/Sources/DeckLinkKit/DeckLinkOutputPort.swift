@@ -70,6 +70,7 @@ public final class DeckLinkOutputPort: CardSink {
   /// would not say where its playback is.
   private var saidNotRealtime = false
   private var saidClockUnknown = false
+  private var saidImplausible = false
   private let source: CardFrameSource
   private let depth: Int
   private let leads: CardLeads
@@ -443,6 +444,15 @@ public final class DeckLinkOutputPort: CardSink {
       saidClockUnknown = true
       log(.error, "\(label): the card would not say where its playback is, so no frame could be timed")
     }
+    if raw.completion_implausible, !saidImplausible {
+      saidImplausible = true
+      let ms = Double(raw.implausible_offset_us) / 1000
+      log(
+        .error,
+        String(
+          format: "%@: the card said a frame finished %.1f ms %@ it reported it; completion times more than 20 ms off are not used, and the slots are timed from its playback position",
+          label, abs(ms), ms > 0 ? "after" : "before"))
+    }
     let counts = countsNow()
     let sent = counts.scheduled - lastPolled.scheduled
     let repeated = counts.repeated - lastPolled.repeated
@@ -479,6 +489,10 @@ public final class DeckLinkOutputPort: CardSink {
   func fakeHold(_ on: Bool) { queue.sync { if let handle { dl_fake_hold_completions(handle, on) } } }
   func fakeReportLate(_ frames: Int) { queue.sync { if let handle { dl_fake_report_late(handle, Int32(frames)) } } }
   func fakeUnplug() { queue.sync { if let handle { dl_fake_unplug(handle) } } }
+  func fakeClockReadError(us: Int64) { queue.sync { if let handle { dl_fake_clock_read_error(handle, us) } } }
+  func fakeCompletionOffset(us: Int64, count: Int) {
+    queue.sync { if let handle { dl_fake_completion_offset(handle, us, Int32(count)) } }
+  }
   func timingsForTest() -> [FrameTiming] {
     queue.sync {
       var all: [FrameTiming] = []

@@ -10,7 +10,11 @@
 // - a frame scheduled for a slot that has already begun is never shown, and
 //   completes as dropped;
 // - a slot with no frame of ours shows the card's last picture again;
-// - a frame completes once its slot is over;
+// - a frame completes once its slot is over, at the slot boundary (a card's
+//   completion time is its hardware's, not the callback's);
+// - its playback position, when asked, is the slot on air and when it began; the
+//   output keeps the clock from there and from the completions, as for a card
+//   (ClockAnchor);
 // - completions can be held back, as a host stuck elsewhere would hold them;
 // - it can refuse frames it did not make, as a driver that will not take
 //   application memory would, and make its own.
@@ -142,13 +146,15 @@ class FakeCard final : public Card {
     return made;
   }
 
-  bool hostTimeOf(int64_t streamTime, int64_t timeScale, uint64_t *hostNs) override {
+  /// Where playback is: the slot on air and when it began, as a card's
+  /// GetScheduledStreamTime and the host clock read together would say, off by
+  /// `readErrorNs_` when a test asks.
+  bool readClock(int64_t timeScale, int64_t *stream, uint64_t *host) override {
     clockReads_++;
     std::lock_guard<std::mutex> lock(mutex_);
     if (!started_ || clockUnknown_) return false;
-    // The stream time in the clock's own scale, as nanoseconds since playback began.
-    const double ns = static_cast<double>(streamTime) * 1e9 / static_cast<double>(timeScale);
-    *hostNs = startNs_ + static_cast<uint64_t>(std::max(0.0, ns));
+    *stream = onAir_ * frameDuration_ * timeScale / timeScale_;
+    *host = static_cast<uint64_t>(static_cast<int64_t>(startNs_ + slotNs(onAir_)) + readErrorNs_);
     return true;
   }
 
@@ -209,6 +215,17 @@ class FakeCard final : public Card {
     lateReports_ += frames;
   }
 
+  void readError(int64_t us) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    readErrorNs_ = us * 1000;
+  }
+
+  void completionOffset(int64_t us, int32_t count) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    completionOffsetNs_ = us * 1000;
+    offsetCompletions_ = count;
+  }
+
   void unplug() {
     {
       std::lock_guard<std::mutex> lock(mutex_);
@@ -261,7 +278,13 @@ class FakeCard final : public Card {
       if (!started_ || stopped_ || unplugged_) return;
       onAir_++;
       virtualNs_ = next;
-      at = timer_ ? hostNowNs() : next;
+      // The slot boundary, as a card's completion timestamp is its hardware's
+      // time, not when the callback ran.
+      at = next;
+      if (offsetCompletions_ > 0) {
+        offsetCompletions_--;
+        at = static_cast<uint64_t>(static_cast<int64_t>(at) + completionOffsetNs_);
+      }
       for (auto it = pending_.begin(); it != pending_.end();) {
         if (it->index < onAir_) {
           Completion result = it->late ? Completion::dropped : Completion::completed;
@@ -360,6 +383,11 @@ class FakeCard final : public Card {
   /// Completions still to be reported late although they were shown on time, as a
   /// card under load reports them.
   int32_t lateReports_ = 0;
+  /// Added to the host time a read of the clock reports.
+  int64_t readErrorNs_ = 0;
+  /// Added to the next `offsetCompletions_` completion times.
+  int64_t completionOffsetNs_ = 0;
+  int32_t offsetCompletions_ = 0;
 };
 
 FakeCard *fakeOf(const dl_output *output) {
@@ -413,6 +441,14 @@ extern "C" void dl_fake_report_late(dl_output *output, int32_t frames) {
 
 extern "C" void dl_fake_unplug(dl_output *output) {
   if (auto *fake = fakeOf(output)) fake->unplug();
+}
+
+extern "C" void dl_fake_clock_read_error(dl_output *output, int64_t us) {
+  if (auto *fake = fakeOf(output)) fake->readError(us);
+}
+
+extern "C" void dl_fake_completion_offset(dl_output *output, int64_t us, int32_t count) {
+  if (auto *fake = fakeOf(output)) fake->completionOffset(us, count);
 }
 
 extern "C" int32_t dl_fake_shown(const dl_output *output, int64_t *pictures, int32_t capacity) {
