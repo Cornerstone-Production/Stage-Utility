@@ -56,7 +56,7 @@ interface Call { url: string; init: RequestInit | undefined }
 
 /** A fetch that answers each plan-file request from `answer(n)`, n counting the
  *  requests for the file (1-based), and records the client-log posts apart. */
-function scriptFetch(answer: (n: number) => Answer) {
+function scriptFetch(answer: (n: number) => Answer | Promise<Answer>) {
   const calls: Call[] = [];
   const logs: string[] = [];
   const original = globalThis.fetch;
@@ -67,7 +67,7 @@ function scriptFetch(answer: (n: number) => Answer) {
       return new Response("{}", { status: 200 });
     }
     calls.push({ url, init });
-    const a = answer(calls.length);
+    const a = await answer(calls.length);
     if (a === "file") return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png" } });
     return new Response("no", { status: a === "404" ? 404 : 502 });
   }) as typeof fetch;
@@ -263,6 +263,29 @@ describe("a plan change", () => {
     await flush();
     assert.equal(f.calls.length, 3, "a plan change while on the notice waited for the slow re-check");
     assert.match(f.calls[2].url, /plan=plan-c/);
+  });
+
+  test("a response that arrives after the plan changed is not drawn", async () => {
+    // Plan A's request is held. The plan changes to B (no file). Then A's file
+    // arrives: it belongs to the old plan and must not be drawn over B's notice.
+    let release!: () => void;
+    const held = new Promise<Answer>((resolve) => { release = () => resolve("file"); });
+    const f = scriptFetch((n) => (n === 1 ? held : "404"));
+    restore.push(f.restore);
+
+    const view = draw("plan-a");
+    await flush();
+    assert.equal(f.calls.length, 1);
+
+    view.rerender(tree("plan-b"));
+    await flush();
+    assert.equal(f.calls.length, 2);
+    assert.match(text(view), /No "stage plot" on this plan/);
+
+    release();
+    await flush();
+    assert.equal(drawn(view), null, "the old plan's file was drawn after the plan changed");
+    assert.match(text(view), /No "stage plot" on this plan/);
   });
 
   test("the old plan's loop stops, so a late timer cannot ask for the old plan", async () => {
