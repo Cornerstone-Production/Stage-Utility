@@ -1,8 +1,8 @@
 // PATCH /api/outputs/:id's `rotation` and `videoMode`, driven through the real
 // handler and the real controller, and read back from the file on disk.
 //
-// Both are for the Mac output helper, which reads them from the outputs in the
-// stage state. What matters is that a value the route accepts is the value that
+// Both are for the Mac output helper, which reads them from `GET /api/outputs`.
+// What matters is that a value the route accepts is the value that
 // is stored and survives a restart, and that a value it refuses leaves the
 // screen exactly as it was: a 400 that had already half-applied would send a
 // monitor to the wrong rotation while the operator read an error.

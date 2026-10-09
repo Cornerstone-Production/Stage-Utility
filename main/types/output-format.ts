@@ -40,7 +40,7 @@ export const VIDEO_MODES = [
   "720p60",
 ] as const;
 
-export type VideoMode = (typeof VIDEO_MODES)[number];
+type VideoMode = (typeof VIDEO_MODES)[number];
 
 export function isVideoMode(v: unknown): v is VideoMode {
   return typeof v === "string" && (VIDEO_MODES as readonly string[]).includes(v);

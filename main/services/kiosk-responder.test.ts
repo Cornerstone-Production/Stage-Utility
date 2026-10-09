@@ -138,9 +138,8 @@ describe("a helper output bound to this server", () => {
 
   test("is not logged as 'output seen' however long it keeps probing", async () => {
     // The line is once per output HEARD, so a bound one - which is not a candidate
-    // to claim - is never one. It was recorded and forgotten on every probe, and
-    // the per-id limit let each minute's through. Probes a minute apart, by the
-    // clock the presence module reads, over a real socket.
+    // to claim - is never one. Probes a minute apart, by the clock the presence
+    // module reads, over a real socket.
     await bind();
     const t0 = Date.now();
     mock.timers.enable({ apis: ["Date"], now: t0 });
@@ -191,8 +190,7 @@ describe("a helper output bound to this server", () => {
 
   test("a released output is listed at its very next probe", async () => {
     // Bound and heard, then released while the helper still says it is bound here
-    // (it only learns otherwise from the server): back on the list at once,
-    // not after the minute the record limit used to hold it.
+    // (it only learns otherwise from the server): back on the list at once.
     await bind();
     await probe(bound);
     assert.deepEqual(seenDevices().map((d) => d.id), []);

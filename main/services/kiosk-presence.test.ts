@@ -84,7 +84,7 @@ describe("devices heard", () => {
 
   test("a device claimed and released inside a minute is listed again at once", () => {
     // Heard, claimed (forgotten), released: the output is a candidate again the
-    // moment it is next heard, with no wait for a record limit to lapse.
+    // moment it is next heard.
     const t0 = 1_000_000;
     recordSeen(dev("d1"), t0);
     forgetSeen("d1");

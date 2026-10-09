@@ -1296,7 +1296,7 @@ export interface Output {
   /** The video mode a DeckLink port sends this screen in, one of VIDEO_MODES in
    *  output-format.ts. Absent means DEFAULT_VIDEO_MODE. Meaningful only for a
    *  screen bound to a DeckLink output of the Mac output helper, which reads it
-   *  from the outputs in the stage state. */
+   *  from `GET /api/outputs`. */
   videoMode?: string;
 }
 
