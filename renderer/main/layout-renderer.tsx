@@ -2621,16 +2621,28 @@ export async function loadProcessedAttachment(
   // 200's max-age says ("no-cache" sends If-None-Match itself; the browser turns a
   // 304 into the stored 200, which is why the ETag is compared below as well).
   const cache: RequestCache | undefined = how.revalidate ? "no-cache" : how.recheck ? "reload" : undefined;
-  const resp = await fetch(
-    `/api/pco/attachment?match=${encodeURIComponent(match)}${bust}`,
-    cache ? { cache } : undefined,
-  );
-  if (resp.status === 404) return "empty";
-  if (!resp.ok) return null;
-  const etag = resp.headers.get("etag");
-  if (how.revalidate && etag !== null && etag === how.revalidate.etag) return "unchanged";
-  const ct = resp.headers.get("content-type") ?? "";
-  const buf = await resp.arrayBuffer();
+  // An AbortController on setTimeout rather than AbortSignal.timeout, so a test with
+  // mocked timers can fire it. The timer runs until the body is in; rasterizing the
+  // file is local work and is not on it.
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), PLAN_ATTACHMENT_FETCH_TIMEOUT_MS);
+  let ct: string;
+  let buf: ArrayBuffer;
+  let etag: string | null;
+  try {
+    const resp = await fetch(`/api/pco/attachment?match=${encodeURIComponent(match)}${bust}`, {
+      signal: ctl.signal,
+      ...(cache ? { cache } : {}),
+    });
+    if (resp.status === 404) return "empty";
+    if (!resp.ok) return null;
+    etag = resp.headers.get("etag");
+    if (how.revalidate && etag !== null && etag === how.revalidate.etag) return "unchanged";
+    ct = resp.headers.get("content-type") ?? "";
+    buf = await resp.arrayBuffer();
+  } finally {
+    clearTimeout(timer);
+  }
   let canvas = ct.includes("pdf") ? await rasterizePdf(buf, opts.page) : await rasterizeImage(buf, ct);
   if (opts.crop && (opts.crop.top || opts.crop.right || opts.crop.bottom || opts.crop.left)) {
     canvas = cropCanvas(canvas, opts.crop);
@@ -2651,6 +2663,11 @@ export const PLAN_ATTACHMENT_RETRY_MS: readonly number[] = [5_000, 15_000, 45_00
  *  checking until the file turns up. Each check is one cached Planning Center
  *  read on the server, so a slow cadence costs next to nothing. */
 export const PLAN_ATTACHMENT_RECHECK_MS = 2 * 60_000;
+
+/** How long one request for the file may take, headers and body, before it counts
+ *  as a failure. Without it a server that accepts the connection and never answers
+ *  parks the loop, which is the only thing that would ask again, for good. */
+export const PLAN_ATTACHMENT_FETCH_TIMEOUT_MS = 30_000;
 
 /** How often a display that is showing the file asks whether it is still the
  *  current one, so a stage plot revised on the same plan replaces the old one
@@ -2727,36 +2744,40 @@ function PlanAttachment({
             logged = false;
             logToServer("plan-file", `"${match}" draws again on ${window.location.pathname}`);
           }
-          // No ETag, nothing to ask "is it still current" against.
-          if (drawnEtag === null) return;
-          await sleep(PLAN_ATTACHMENT_REVALIDATE_MS);
-        } else if (revalidating) {
-          // Unchanged, or "empty" or a failure while a good picture is up: leave it.
-          await sleep(PLAN_ATTACHMENT_REVALIDATE_MS);
-        } else if (result === "empty") {
-          failures = 0;
-          logged = false;
-          shown = "empty";
-          setStatus("empty");
-          await sleep(PLAN_ATTACHMENT_RECHECK_MS);
-        } else {
-          failures += 1;
-          if (shown === "loading") {
-            shown = "error";
-            setStatus("error");
+        } else if (!revalidating) {
+          if (result === "empty") {
+            failures = 0;
+            logged = false;
+            shown = "empty";
+            setStatus("empty");
+            await sleep(PLAN_ATTACHMENT_RECHECK_MS);
+          } else {
+            failures += 1;
+            if (shown === "loading") {
+              shown = "error";
+              setStatus("error");
+            }
+            if (failures > PLAN_ATTACHMENT_RETRY_MS.length && !logged) {
+              logged = true;
+              // The server cannot say which display this is, and a wall stuck on
+              // "Couldn't load file" is otherwise invisible on /log. Once per
+              // outage, not once per slow re-check, and a line when it recovers.
+              logToServer(
+                "plan-file",
+                `"${match}" still not loading on ${window.location.pathname} after ${failures} tries; checking again every ${PLAN_ATTACHMENT_RECHECK_MS / 60_000} min`,
+              );
+            }
+            await sleep(PLAN_ATTACHMENT_RETRY_MS[failures - 1] ?? PLAN_ATTACHMENT_RECHECK_MS);
           }
-          if (failures > PLAN_ATTACHMENT_RETRY_MS.length && !logged) {
-            logged = true;
-            // The server cannot say which display this is, and a wall stuck on
-            // "Couldn't load file" is otherwise invisible on /log. Once per
-            // outage, not once per slow re-check, and a line when it recovers.
-            logToServer(
-              "plan-file",
-              `"${match}" still not loading on ${window.location.pathname} after ${failures} tries; checking again every ${PLAN_ATTACHMENT_RECHECK_MS / 60_000} min`,
-            );
-          }
-          await sleep(PLAN_ATTACHMENT_RETRY_MS[failures - 1] ?? PLAN_ATTACHMENT_RECHECK_MS);
+          if (cancelled) return;
+          continue;
         }
+        // A file is on screen: just drawn, or kept through a re-validation that
+        // found it unchanged, empty or failed. One cadence for all three.
+        // Without an ETag there is nothing to ask "is it still current" against,
+        // and asking anyway would download and rasterize it every time.
+        if (drawnEtag === null) return;
+        await sleep(PLAN_ATTACHMENT_REVALIDATE_MS);
         if (cancelled) return;
       }
     })();

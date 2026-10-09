@@ -33,7 +33,7 @@ const React = (await import("react")).default;
 const { act } = await import("react");
 const { TooltipProvider } = await import("../components/ui/tooltip-provider.js");
 const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
-const { ObjectContent, PLAN_ATTACHMENT_RETRY_MS, PLAN_ATTACHMENT_RECHECK_MS, PLAN_ATTACHMENT_REVALIDATE_MS } = await import("./layout-renderer.js");
+const { ObjectContent, PLAN_ATTACHMENT_RETRY_MS, PLAN_ATTACHMENT_RECHECK_MS, PLAN_ATTACHMENT_REVALIDATE_MS, PLAN_ATTACHMENT_FETCH_TIMEOUT_MS } = await import("./layout-renderer.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -56,12 +56,12 @@ const PLOT = {
 
 type Answer = "404" | "502" | "file";
 /** The ETag every "file" answer carries; a test changes it to replace the file. */
-let etag = '"v1"';
+let etag: string | null = '"v1"';
 interface Call { url: string; init: RequestInit | undefined }
 
 /** A fetch that answers each plan-file request from `answer(n)`, n counting the
  *  requests for the file (1-based), and records the client-log posts apart. */
-function scriptFetch(answer: (n: number) => Answer | Promise<Answer>) {
+function scriptFetch(answer: (n: number) => Answer | "hang" | Promise<Answer>) {
   const calls: Call[] = [];
   const logs: string[] = [];
   const original = globalThis.fetch;
@@ -73,7 +73,13 @@ function scriptFetch(answer: (n: number) => Answer | Promise<Answer>) {
     }
     calls.push({ url, init });
     const a = await answer(calls.length);
-    if (a === "file") return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png", etag } });
+    if (a === "hang") {
+      // A server that accepts the connection and never answers: settles only when aborted.
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      });
+    }
+    if (a === "file") return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png", ...(etag ? { etag } : {}) } });
     return new Response("no", { status: a === "404" ? 404 : 502 });
   }) as typeof fetch;
   return { calls, logs, restore: () => { globalThis.fetch = original; } };
@@ -193,8 +199,41 @@ describe("a plan attachment that fails to load", () => {
     draw();
     await flush();
     await tick(PLAN_ATTACHMENT_RETRY_MS[0]);
-    assert.equal(f.calls[0].init, undefined, "the first load must use the normal cache path");
+    assert.equal(f.calls[0].init?.cache, undefined, "the first load must use the normal cache path");
     assert.equal(f.calls[1].init?.cache, "reload", "a retry must not be answered from the HTTP cache");
+  });
+});
+
+describe("a server that never answers", () => {
+  test("is a failure after the timeout, so the retries carry on", async () => {
+    const f = scriptFetch((n) => (n === 1 ? "hang" : "file"));
+    restore.push(f.restore);
+    const view = draw();
+    await flush();
+    assert.equal(f.calls.length, 1);
+    assert.match(text(view), /Loading/);
+
+    await tick(PLAN_ATTACHMENT_FETCH_TIMEOUT_MS - 1);
+    assert.match(text(view), /Loading/, "gave up before the timeout");
+    await tick(1);
+    assert.match(text(view), /Couldn.t load file/, "a request that never answered parked the widget on Loading…");
+
+    await tick(PLAN_ATTACHMENT_RETRY_MS[0]);
+    assert.equal(f.calls.length, 2, "no retry followed the timeout");
+    assert.equal(drawn(view), PNG(0));
+  });
+
+  test("a re-validation that hangs leaves the picture and is asked again", async () => {
+    const f = scriptFetch((n) => (n === 2 ? "hang" : "file"));
+    restore.push(f.restore);
+    const view = draw();
+    await flush();
+    await tick(PLAN_ATTACHMENT_REVALIDATE_MS);
+    assert.equal(f.calls.length, 2);
+    await tick(PLAN_ATTACHMENT_FETCH_TIMEOUT_MS);
+    assert.equal(drawn(view), PNG(0));
+    await tick(PLAN_ATTACHMENT_REVALIDATE_MS);
+    assert.equal(f.calls.length, 3, "a hung re-validation stopped all later ones");
   });
 });
 
@@ -256,8 +295,13 @@ describe("a plan attachment that is drawn", () => {
     assert.equal(f.calls.length, 2, "a drawn file was never asked about again; a replaced file would stay up");
     assert.equal(f.calls[1].init?.cache, "no-cache", "the re-validation must be a conditional request, not a cached read");
 
-    // The same ETag again: nothing is rasterized and the picture is untouched.
-    for (let i = 0; i < 3; i++) await tick(PLAN_ATTACHMENT_REVALIDATE_MS);
+    // The same ETag again: nothing is rasterized and the picture is untouched, and
+    // the next look is a full re-validation interval away, not the 2-minute re-check.
+    await tick(PLAN_ATTACHMENT_REVALIDATE_MS - 1);
+    assert.equal(f.calls.length, 2, "after an unchanged re-validation the next one came early");
+    await tick(1);
+    assert.equal(f.calls.length, 3);
+    for (let i = 0; i < 2; i++) await tick(PLAN_ATTACHMENT_REVALIDATE_MS);
     assert.equal(f.calls.length, 5);
     assert.equal(decodes, 1, "an unchanged file was rasterized again");
     assert.equal(drawn(view), PNG(0));
@@ -296,12 +340,28 @@ describe("a plan attachment that is drawn", () => {
     const view = draw();
     await flush();
     for (const expectedCalls of [2, 3, 4]) {
-      await tick(PLAN_ATTACHMENT_REVALIDATE_MS);
+      await tick(PLAN_ATTACHMENT_REVALIDATE_MS - 1);
+      assert.equal(f.calls.length, expectedCalls - 1, "after a failed or empty re-validation the next one came early");
+      await tick(1);
       assert.equal(f.calls.length, expectedCalls);
       assert.equal(drawn(view), PNG(0), "a failed or empty re-validation replaced the picture");
       assert.doesNotMatch(text(view), /Loading|Couldn.t load|No "stage plot"/);
     }
     assert.equal(f.logs.length, 0, "a good picture with a failed re-validation is not an outage");
+  });
+
+  test("a file served without an ETag is not asked about again", async () => {
+    // Nothing to compare against, so asking would download and rasterize the file
+    // every interval.
+    etag = null;
+    const f = scriptFetch(() => "file");
+    restore.push(f.restore);
+    const view = draw();
+    await flush();
+    assert.equal(drawn(view), PNG(0));
+    for (let i = 0; i < 4; i++) await tick(PLAN_ATTACHMENT_REVALIDATE_MS);
+    assert.equal(f.calls.length, 1, "a file with no ETag was fetched again");
+    assert.equal(decodes, 1);
   });
 
   test("stops re-validating when unmounted", async () => {
