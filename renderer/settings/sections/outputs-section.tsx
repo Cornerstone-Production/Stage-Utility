@@ -1,4 +1,6 @@
 import { ScreenDevice } from "../../app/screens/screen-device";
+import { useDevices } from "../../app/screens/use-devices";
+import { outputStruggleSentences, struggleByScreen, type OutputStruggle } from "../../app/screens/output-helpers";
 import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
@@ -134,6 +136,20 @@ function ScreenLagBox({ lag }: { lag: ScreenLag }) {
   );
 }
 
+/**
+ * The warn box for an output of a Mac output helper that is falling behind: the
+ * same callout as the two above, under the preview with them. The figures come
+ * from the output's own health report, so it names the port, says what the
+ * report shows and what to check.
+ */
+function OutputStruggleBox({ struggle }: { struggle: OutputStruggle }) {
+  return (
+    <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+      <span className="font-semibold">Struggling on {struggle.port}.</span> {outputStruggleSentences(struggle).join(" ")}
+    </p>
+  );
+}
+
 export interface OutputRowProps {
   output: Output;
   views: View[];
@@ -149,6 +165,9 @@ export interface OutputRowProps {
   /** This screen's own currently-lagging feeds, the same way, from the
    *  pair's lagging episode. */
   lags: ScreenLag[];
+  /** The output of a Mac output helper showing this screen, when it is falling
+   *  behind. Absent otherwise, which is every screen with no such output. */
+  outputStruggle?: OutputStruggle;
   canRemove: boolean;
   onRename: (name: string) => void;
   /** This display's icon tint, or undefined for the theme default. */
@@ -252,7 +271,7 @@ export function screenPickerViews(views: readonly View[]): View[] {
   return screensListViews(views).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function OutputRow({ output, views, baseUrl, online, struggles, lags, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, onSetRole, onOpenSettings, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+export function OutputRow({ output, views, baseUrl, online, struggles, lags, outputStruggle, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, onSetRole, onOpenSettings, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   const [renamingView, setRenamingView] = useState(false);
@@ -556,6 +575,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
       {lags.map((l) => (
         <ScreenLagBox key={l.feedId} lag={l} />
       ))}
+      {outputStruggle && <OutputStruggleBox struggle={outputStruggle} />}
 
       {/* What it shows, and the way into its layout. The two controls an
           operator actually reaches for. */}
@@ -827,6 +847,10 @@ export function OutputsSection({
   // exactly then (see ScreenVideoHealth's own comment) — never read off the
   // live window fields, which dilute out from under a still-struggling pair.
   const video = useVideoState();
+  // The same for an output of a Mac output helper: whether its own last health
+  // report says it is falling behind, by the screen it shows.
+  const { bound, health: outputHealth } = useDevices();
+  const outputStruggles = struggleByScreen(bound, outputHealth);
   // The message groups, for the Groups menu and the chips. Live, so a group
   // renamed or deleted in Settings reaches an open Screens page.
   const messageGroups = useMessageGroups();
@@ -894,6 +918,7 @@ export function OutputsSection({
                 online={connected.has(output.id)}
                 struggles={strugglesByOutput.get(output.id) ?? []}
                 lags={lagsByOutput.get(output.id) ?? []}
+                outputStruggle={outputStruggles.get(output.id)}
                 canRemove={outputs.length > 1}
                 iconColor={icon.value}
                 iconKey={icon.key}

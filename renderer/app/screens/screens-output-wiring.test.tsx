@@ -11,7 +11,7 @@
 // the server does, and asserts on the requests AND on what the card then reads.
 //
 // Also here, because it is the same route: the name a Not set up yet output gets
-// as a new screen.
+// as a new screen, and the card's warning when its output is falling behind.
 //
 // Every id and name is invented. Layout (the dashed machine card, the warning's
 // colours) is not asserted: jsdom loads no stylesheet, so those were checked in a
@@ -221,5 +221,27 @@ describe("a Not set up yet output, set up as a new screen", () => {
       url: "/api/devices/claim",
       body: { deviceId: "n.sdi-2", outputId: null, name: "SDI 2 · Card A", mode: "display" },
     }]);
+  });
+});
+
+describe("an output falling behind", () => {
+  const report = (over: Record<string, unknown>) => ({ deviceId: "m.sdi-1", fps: 59.94, repeated: 12.4, dropped: 41, at: 1, receivedAt: 2, struggling: true, ...over });
+
+  test("puts a warning on ITS screen's card, naming the port, what the report shows and what to check", async () => {
+    health = [report({})];
+    await mountScreens();
+    const box = await screen.findByText(/Struggling on SDI 1\./);
+    assert.equal(
+      box.parentElement?.textContent,
+      "Struggling on SDI 1. 12% of its frames repeated because the page ran late. The card has dropped 41 frames since the output opened. Check the Mac's load and how much this screen's view draws.",
+    );
+    assert.equal(screen.getAllByText(/Struggling on/).length, 1, "the other screen's card has one too");
+  });
+
+  test("says nothing for an output that is keeping up", async () => {
+    health = [report({ struggling: false })];
+    await mountScreens();
+    await screen.findByText("booth-mini · SDI 1 · 1080p59.94");
+    assert.equal(screen.queryByText(/Struggling on/) !== null, false, "a healthy output was called struggling");
   });
 });
