@@ -178,9 +178,10 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       // `name` first, then `newName` the Screens page used to send, then the
-      // device's own hostname.
+      // device's own hostname. `||` for the hostname, as it always was: a device
+      // that reports an empty one is "New screen", not "Display N".
       const named = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
-      read.name = named(body.name) ?? named(body.newName) ?? seen?.hostname ?? "New screen";
+      read.name = named(body.name) ?? named(body.newName) ?? (seen?.hostname || "New screen");
       input = read;
     } else if (CREATE_SCREEN_FIELDS.some((f) => f in body)) {
       // Naming a screen to take over AND describing a new one: one of the two is a

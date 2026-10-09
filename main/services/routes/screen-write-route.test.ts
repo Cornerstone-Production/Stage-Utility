@@ -207,6 +207,13 @@ describe("POST /api/devices/claim — a new screen", () => {
     assert.equal((r.json as { outputId: string }).outputId, made!.id);
   });
 
+  it("names the screen 'New screen' for a device that reports an empty hostname, as it always did", async () => {
+    recordSeen({ ...device, hostname: "" });
+    const r = await claim({});
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(outputs().find((o) => o.id === (r.json as { outputId: string }).outputId)?.name, "New screen");
+  });
+
   it("still takes the name the Screens page used to send as newName", async () => {
     recordSeen(device);
     await claim({ newName: "Atrium" });
