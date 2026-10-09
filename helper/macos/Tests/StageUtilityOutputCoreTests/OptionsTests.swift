@@ -17,10 +17,15 @@ import Testing
   @Test func readsEveryFlag() {
     let (o, problems) = parse([
       "--show-window", "--list-outputs", "--log-stderr", "--dump-frames", "/tmp/frames", "--discovery-port", "9000",
-      "--virtual-sdi", "4",
+      "--virtual-sdi", "4", "--test-pattern", "latency", "--frame-timings", "/tmp/t.csv", "--head-start", "10.5",
+      "--fill-lead", "5",
     ])
     #expect(o.showWindow && o.listOutputs && o.logToStderr)
     #expect(o.virtualSDI == 4)
+    #expect(o.testPattern == .latency)
+    #expect(o.frameTimingsFile?.path == "/tmp/t.csv")
+    #expect(o.headStartMs == 10.5)
+    #expect(o.fillLeadMs == 5)
     #expect(o.dumpFramesDir?.path == "/tmp/frames")
     #expect(o.discoveryPort == 9000)
     #expect(problems.isEmpty)
@@ -50,6 +55,17 @@ import Testing
       let (o, problems) = parse(["--virtual-sdi", bad])
       #expect(o.virtualSDI == 0)
       #expect(problems == ["--virtual-sdi takes 1 to 16: \(bad)"])
+    }
+  }
+
+  @Test func anUnknownTestPatternOrABadLeadIsAProblem() {
+    let (a, pa) = parse(["--test-pattern", "bars"])
+    #expect(a.testPattern == nil)
+    #expect(pa == ["--test-pattern takes latency: bars"])
+    for bad in ["0", "-3", "1000", "soon"] {
+      let (o, problems) = parse(["--head-start", bad])
+      #expect(o.headStartMs == nil)
+      #expect(problems == ["--head-start takes milliseconds, more than 0 and less than 1000: \(bad)"])
     }
   }
 

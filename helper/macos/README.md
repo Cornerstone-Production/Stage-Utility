@@ -105,6 +105,9 @@ per-user login item (`SMAppService`).
 | `--discovery-port <n>` | The UDP port to probe. Default 8789, or `STAGE_KIOSK_PORT`. |
 | `--log-stderr` | Also print the log to the terminal. |
 | `--virtual-sdi <n>` | For development: add n card outputs, 1 to 16, with no card behind them (below). Without it, none are shown. |
+| `--test-pattern latency` | For development: every output that is on shows a latency test page instead of its server's screen: a large clock to photograph side by side with another output, and a stamp in its corner from which a card output times each picture exactly ([DECKLINK.md](DECKLINK.md#latency)). |
+| `--frame-timings <file>` | For development: write every card output's slots to a CSV file, one line each with the times of its picture on the way to the card. |
+| `--head-start <ms>`, `--fill-lead <ms>` | For development: when each card output's slot is asked for and filled, before it goes to air. Without them, the measured defaults (20 and 5 ms). |
 
 ## State
 
@@ -349,19 +352,22 @@ menu are refused: an output has nobody to answer them.
 textures and external begin frames: they draw a frame only when asked, and hand it over
 as an IOSurface that is valid only inside the callback. Each one feeds a
 `DeckLinkOutputPort` (see [DECKLINK.md](DECKLINK.md)), whose scheduler, in the C++ shim,
-runs on the card's clock:
+runs on the card's clock, on a real-time thread of its own:
 
-1. When the card finishes with a frame, the scheduler asks the output's
-   `SurfaceFrameSource` for the frame three ahead. The source converts the newest
-   picture to UYVY on the GPU, turned for the screen's rotation, straight into that
-   frame's memory; if no new picture came, the frame carries the previous one again
-   and counts as repeated.
-2. Taking the frame sends the browser its next begin frame (`source.onFrameTaken` calls
-   the host's `begin_frame`, which CEF runs on its UI thread). Each request first
-   invalidates the page, so a page that has not changed still draws, and a repeat
-   always means late, never idle.
-3. The picture arrives in `OnAcceleratedPaint`, on the main thread, and
-   `source.present` copies it on the GPU before the callback returns.
+1. 20 ms before a slot goes to air, the scheduler asks the output's
+   `SurfaceFrameSource` to begin it, which sends the browser a begin frame
+   (`source.onBeginFrame` calls the host's `begin_frame`, which CEF runs on its UI
+   thread). Each request first asks Chromium's capture for a picture, so a page that
+   has not changed still hands one over, and a repeat always means late, never idle.
+2. The picture arrives in `OnAcceleratedPaint`, on the main thread, and
+   `source.present` converts it to UYVY on the GPU, turned for the screen's rotation,
+   at the card's frame size, before the callback returns.
+3. 5 ms before the slot goes to air, the scheduler has the source copy the newest
+   converted picture into one of the card's frames and schedules it; if no new
+   picture came, the frame carries the previous one again and counts as repeated.
+
+How those times were chosen, and where the 20 ms goes, is in
+[DECKLINK.md](DECKLINK.md#latency).
 
 The scheduler is the one count of what went out (`CardCounters`: scheduled, repeated,
 dropped, resyncs, skipped). Health is taken from it, and once a second it decides

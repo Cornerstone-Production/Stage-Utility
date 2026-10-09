@@ -11,13 +11,16 @@
 //   swift run DeckLinkProbe null [seconds] [outputs]
 //       The same on the software clock instead of a card, at 1920 x 1080 59.94.
 //
-//   --card-frames, with bars or null, sends in frames the card makes, each picture
-//   copied in, instead of the helper's own: the mode a port falls back to when its
-//   driver refuses the helper's frames.
+//   --helper-frames, with bars or null, sends in frames of the helper's own memory
+//   instead of frames the card makes: the kind a port falls back to when its card
+//   will not make frames.
+//   --head-start <ms> and --fill-lead <ms> set when each slot's picture is asked
+//   for and when the slot is filled, before it goes to air (DECKLINK.md, "Latency").
 //
-// Each picture is drawn when the clock takes the frame before it, on another
-// thread, as a windowless browser's begin frame would be: a picture that is not
-// ready in time shows up as a repeat.
+// Each picture is drawn when the clock asks for it, on another thread, as a
+// windowless browser's begin frame would be: a picture that is not ready by the
+// fill shows up as a repeat. At the end it prints where the delay went, from each
+// picture being drawn to its slot going out of the card.
 
 import DeckLinkKit
 import Foundation
@@ -78,11 +81,13 @@ final class TimedSource: CardFrameSource {
 
   init(_ inner: SurfaceFrameSource) { self.inner = inner }
 
-  func fill(_ request: CardFrameRequest, into target: CardFrameTarget) -> Bool {
+  func begin(_ request: CardFrameRequest) { inner.begin(request) }
+
+  func fill(_ request: CardFrameRequest, into target: CardFrameTarget) -> CardPicture? {
     let start = DispatchTime.now().uptimeNanoseconds
     let filled = inner.fill(request, into: target)
     let ms = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6
-    if filled {
+    if filled != nil {
       lock.withLock {
         fills += 1
         total += ms
@@ -95,18 +100,20 @@ final class TimedSource: CardFrameSource {
   var summary: String {
     lock.withLock {
       fills == 0
-        ? "no frames converted"
-        : String(format: "%d frames converted, %.2f ms each on average, %.2f ms at worst", fills, total / Double(fills), worst)
+        ? "no frames filled"
+        : String(format: "%d frames filled, %.2f ms each on average, %.2f ms at worst", fills, total / Double(fills), worst)
     }
   }
 }
 
 func feed(_ source: SurfaceFrameSource, painter: BarsPainter, label: String) -> DispatchQueue {
-  let render = DispatchQueue(label: "render \(label)")
-  source.onFrameTaken = { request in
+  source.frameSize = (painter.width, painter.height)
+  let render = DispatchQueue(label: "render \(label)", qos: .userInteractive)
+  source.onBeginFrame = { request in
     render.async {
-      painter.draw(frame: request.index + 1)
-      do { try source.present(painter.surface) } catch { print("\(label): could not present: \(error)") }
+      let drawn = DispatchTime.now().uptimeNanoseconds
+      painter.draw(frame: request.index)
+      do { try source.present(painter.surface, contentNs: drawn) } catch { print("\(label): could not present: \(error)") }
     }
   }
   render.async {
@@ -116,7 +123,46 @@ func feed(_ source: SurfaceFrameSource, painter: BarsPainter, label: String) -> 
   return render
 }
 
+/// Every slot's timing, from each port's once-a-second collection.
+final class TimingLog {
+  private let lock = NSLock()
+  private var all: [FrameTiming] = []
+  func add(_ batch: [FrameTiming]) { lock.withLock { all.append(contentsOf: batch) } }
+  var timings: [FrameTiming] { lock.withLock { all } }
+}
+
+func describe(_ name: String, _ d: Distribution?) -> String {
+  guard let d else { return "  \(name): none" }
+  return "  " + name.padding(toLength: 26, withPad: " ", startingAt: 0)
+    + String(format: "p50 %6.2f  p95 %6.2f  max %6.2f ms  (%d)", d.p50, d.p95, d.max, d.count)
+}
+
+func printBreakdown(_ label: String, _ timings: [FrameTiming]) {
+  if let path = ProcessInfo.processInfo.environment["DECKLINK_PROBE_CSV"] {
+    let lines = timings.map {
+      "\($0.index),\($0.fresh ? 1 : 0),\($0.skipped ? 1 : 0),\($0.result),\($0.contentNs),\($0.paintNs),\($0.readyNs),\($0.fillNs),\($0.copiedNs),\($0.scheduledNs),\($0.airNs),\($0.completedNs)"
+    }
+    try? (["index,fresh,skipped,result,content_ns,paint_ns,ready_ns,fill_ns,copied_ns,scheduled_ns,air_ns,completed_ns"] + lines)
+      .joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+  }
+  let b = LatencyBreakdown.of(timings)
+  print("\(label): render to air, over the new pictures that went out")
+  print(describe("drawn to air", b.renderToAir))
+  print(describe("drawn to handed over", b.contentToPaint))
+  print(describe("handed over to ready", b.paintToReady))
+  print(describe("ready to filled", b.readyToFill))
+  print(describe("filled to copied", b.fillToCopied))
+  print(describe("copied to card", b.copiedToScheduled))
+  print(describe("card to air", b.scheduledToAir))
+  print(describe("air to completed", b.airToCompleted))
+}
+
 func run(_ ports: [(DeckLinkOutputPort, TimedSource)], seconds: Double) {
+  let logs = ports.map { (port, _) -> TimingLog in
+    let log = TimingLog()
+    port.onTimings = { log.add($0) }
+    return log
+  }
   let end = Date().addingTimeInterval(seconds)
   while Date() < end {
     Thread.sleep(forTimeInterval: 1)
@@ -125,9 +171,10 @@ func run(_ ports: [(DeckLinkOutputPort, TimedSource)], seconds: Double) {
       print("\(port.label): \(port.state)  scheduled \(c.scheduled)  rendered \(c.rendered)  repeated \(c.repeated)  dropped \(c.dropped)  resyncs \(c.resyncs)  skipped \(c.skipped)")
     }
   }
-  for (port, timed) in ports {
+  for ((port, timed), log) in zip(ports, logs) {
     port.close()
     print("\(port.label): \(timed.summary)")
+    printBreakdown(port.label, log.timings)
   }
 }
 
@@ -136,8 +183,19 @@ func printLog(_ level: DeckLinkLog.Level, _ message: String) {
   print("[decklink] \(message)")
 }
 
-let cardFrames = CommandLine.arguments.contains("--card-frames")
-let args = Array(CommandLine.arguments.dropFirst().filter { $0 != "--card-frames" })
+var frames = DeckLinkOutputPort.Frames.card
+var leads = CardLeads.standard
+var args: [String] = []
+var rest = Array(CommandLine.arguments.dropFirst())
+while !rest.isEmpty {
+  let arg = rest.removeFirst()
+  switch arg {
+  case "--helper-frames": frames = .helper
+  case "--head-start" where !rest.isEmpty: leads.headStartMs = Double(rest.removeFirst()) ?? leads.headStartMs
+  case "--fill-lead" where !rest.isEmpty: leads.fillLeadMs = Double(rest.removeFirst()) ?? leads.fillLeadMs
+  default: args.append(arg)
+  }
+}
 
 switch args.first {
 case "list":
@@ -176,7 +234,8 @@ case "bars" where args.count >= 2:
   let render = feed(source, painter: painter, label: found.descriptor.name)
   render.sync {}
   let port = DeckLinkOutputPort(
-    label: found.descriptor.name, hardware: .port(found), source: timed, cardFrames: cardFrames, log: printLog)
+    label: found.descriptor.name, hardware: .port(found), source: timed, leads: leads, frames: frames,
+    log: printLog)
   _ = DeckLinkDriver.watchDevices { port.retry() }
   port.open(videoMode: mode)
   run([(port, timed)], seconds: args.count >= 4 ? Double(args[3]) ?? 10 : 10)
@@ -197,7 +256,7 @@ case "null":
     let port = DeckLinkOutputPort(
       label: label,
       hardware: .softwareClock(width: 1920, height: 1080, frameDuration: 1001, timeScale: 60000, ticksByItself: true),
-      source: timed, cardFrames: cardFrames, log: printLog)
+      source: timed, leads: leads, frames: frames, log: printLog)
     port.open(videoMode: nil)
     ports.append((port, timed))
   }
@@ -207,8 +266,8 @@ default:
   print(
     """
     usage: DeckLinkProbe list
-           DeckLinkProbe bars <output key> [mode] [seconds] [--card-frames]
-           DeckLinkProbe null [seconds] [outputs] [--card-frames]
+           DeckLinkProbe bars <output key> [mode] [seconds] [--helper-frames] [--head-start ms] [--fill-lead ms]
+           DeckLinkProbe null [seconds] [outputs] [--helper-frames] [--head-start ms] [--fill-lead ms]
     """)
   exit(2)
 }

@@ -177,6 +177,19 @@ import Testing
     #expect(StatusText.outputLine(I(enabled: true, isMain: false, serverKnown: false, portProblem: why)) == why)
   }
 
+  /// A card output says how far behind the page it runs, beside its frame rate;
+  /// a paused one says only why it is paused.
+  @Test func aCardOutputSaysItsLatency() {
+    #expect(StatusText.outputLine(I(
+      enabled: true, isMain: false, serverKnown: true, boundScreenName: "Wing", showingBound: true, fps: 59.94,
+      latencyMs: 20.04)) == "Wing · 59.94 fps · 20 ms behind the page")
+    #expect(StatusText.outputLine(I(
+      enabled: true, isMain: false, serverKnown: true, boundScreenName: "Wing", showingBound: true, fps: 59.94,
+      healthPaused: true, latencyMs: 20)) == "Wing · not recognised by the server, health paused")
+    #expect(StatusText.outputLine(I(enabled: true, isMain: false, serverKnown: false, fps: 59.94, latencyMs: 16, testPattern: true))
+      == "Latency test page · 59.94 fps · 16 ms behind the page")
+  }
+
   @Test func anOutputTurnedOffSaysOnlyThat() {
     #expect(StatusText.outputLine(I(enabled: false, isMain: false, serverKnown: true, portProblem: "x")) == "Turned off here")
   }

@@ -56,47 +56,58 @@ public final class UYVYConverter {
   /// Convert `source` into `target`, turned by `rotation`. Returns once the GPU has
   /// written the frame.
   public func convert(_ source: MTLTexture, rotation: Rotation, into target: CardFrameTarget) throws {
-    guard target.width > 0, target.width % 2 == 0, target.height > 0 else {
-      throw Failure.notPixelPairs(width: target.width)
-    }
-    guard target.rowBytes >= target.width * 2, target.rowBytes % 4 == 0,
-      target.length >= target.rowBytes * target.height
-    else { throw Failure.targetTooSmall }
+    try check(width: target.width, height: target.height, rowBytes: target.rowBytes, length: target.length)
     // The frame's memory is page-aligned and a whole number of pages, so Metal maps
     // it rather than copying it. Made per frame: a buffer kept over memory that is
     // later freed would point the GPU at pages that are no longer the frame's.
     guard
       let buffer = device.makeBuffer(
-        bytesNoCopy: target.bytes, length: target.length, options: .storageModeShared, deallocator: nil),
-      let commands = queue.makeCommandBuffer(), let encoder = commands.makeComputeCommandEncoder()
+        bytesNoCopy: target.bytes, length: target.length, options: .storageModeShared, deallocator: nil)
     else { throw Failure.gpu("could not make a buffer over the frame") }
+    try encode(source, rotation: rotation, into: buffer, width: target.width, height: target.height, rowBytes: target.rowBytes)
+  }
 
+  /// Convert `source` into `buffer`, `rowBytes` a line, turned by `rotation`.
+  /// Returns once the GPU has written it.
+  public func convert(
+    _ source: MTLTexture, rotation: Rotation, into buffer: MTLBuffer, width: Int, height: Int, rowBytes: Int
+  ) throws {
+    try check(width: width, height: height, rowBytes: rowBytes, length: buffer.length)
+    try encode(source, rotation: rotation, into: buffer, width: width, height: height, rowBytes: rowBytes)
+  }
+
+  /// A buffer for `convert(_:rotation:into:width:height:rowBytes:)` that the CPU can
+  /// read: shared memory, `rowBytes * height` long.
+  public func makeFrameBuffer(rowBytes: Int, height: Int) throws -> MTLBuffer {
+    guard let buffer = device.makeBuffer(length: rowBytes * height, options: .storageModeShared) else {
+      throw Failure.gpu("could not make a buffer for the picture")
+    }
+    return buffer
+  }
+
+  private func check(width: Int, height: Int, rowBytes: Int, length: Int) throws {
+    guard width > 0, width % 2 == 0, height > 0 else { throw Failure.notPixelPairs(width: width) }
+    guard rowBytes >= width * 2, rowBytes % 4 == 0, length >= rowBytes * height else { throw Failure.targetTooSmall }
+  }
+
+  private func encode(
+    _ source: MTLTexture, rotation: Rotation, into buffer: MTLBuffer, width: Int, height: Int, rowBytes: Int
+  ) throws {
+    guard let commands = queue.makeCommandBuffer(), let encoder = commands.makeComputeCommandEncoder() else {
+      throw Failure.gpu("could not make a command buffer")
+    }
     var params = Params(
-      width: UInt32(target.width), height: UInt32(target.height), rowPairs: UInt32(target.rowBytes / 4),
+      width: UInt32(width), height: UInt32(height), rowPairs: UInt32(rowBytes / 4),
       rotation: UInt32(rotation.rawValue), sourceWidth: UInt32(source.width), sourceHeight: UInt32(source.height))
     encoder.setComputePipelineState(pipeline)
     encoder.setTexture(source, index: 0)
     encoder.setBuffer(buffer, offset: 0, index: 0)
     encoder.setBytes(&params, length: MemoryLayout<Params>.stride, index: 1)
-    let width = pipeline.threadExecutionWidth
-    let height = max(1, pipeline.maxTotalThreadsPerThreadgroup / width)
+    let w = pipeline.threadExecutionWidth
+    let h = max(1, pipeline.maxTotalThreadsPerThreadgroup / w)
     encoder.dispatchThreads(
-      MTLSize(width: target.width / 2, height: target.height, depth: 1),
-      threadsPerThreadgroup: MTLSize(width: width, height: height, depth: 1))
+      MTLSize(width: width / 2, height: height, depth: 1), threadsPerThreadgroup: MTLSize(width: w, height: h, depth: 1))
     encoder.endEncoding()
-    commands.commit()
-    commands.waitUntilCompleted()
-    if let error = commands.error { throw Failure.gpu(error.localizedDescription) }
-  }
-
-  /// A private copy of `source` the caller can keep: a browser's surface is valid
-  /// only inside the callback that hands it over. Returns once the copy is made.
-  func copy(_ source: MTLTexture, into destination: MTLTexture) throws {
-    guard let commands = queue.makeCommandBuffer(), let blit = commands.makeBlitCommandEncoder() else {
-      throw Failure.gpu("could not copy the picture")
-    }
-    blit.copy(from: source, to: destination)
-    blit.endEncoding()
     commands.commit()
     commands.waitUntilCompleted()
     if let error = commands.error { throw Failure.gpu(error.localizedDescription) }

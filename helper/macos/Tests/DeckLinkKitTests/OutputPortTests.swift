@@ -6,29 +6,43 @@ import Testing
 /// A source that writes each frame's index at the start of every line, so the
 /// software clock's record of what went out says which picture each slot carried
 /// (and that the whole frame carried it), and has nothing new for the frames in
-/// `missing`.
+/// `missing`. It records the order it is asked to begin and to fill frames in
+/// ("b2", "f2"), and stamps each picture as drawn `drawnBeforeAir` before its
+/// slot on the software clock's own time (slot n at n frame durations).
 final class NumberedSource: CardFrameSource {
   private let lock = NSLock()
   private let missing: Set<Int64>
   private var _asked: [Int64] = []
+  private var _events: [String] = []
   private var _missingNow = false
+  private let drawnBeforeAirNs: Double?
 
-  init(missing: Set<Int64> = []) { self.missing = missing }
+  init(missing: Set<Int64> = [], drawnBeforeAirMs: Double? = nil) {
+    self.missing = missing
+    drawnBeforeAirNs = drawnBeforeAirMs.map { $0 * 1e6 }
+  }
 
   var asked: [Int64] { lock.withLock { _asked } }
+  var events: [String] { lock.withLock { _events } }
   /// While set, every frame has nothing new: a page that has stopped drawing.
   var missingNow: Bool {
     get { lock.withLock { _missingNow } }
     set { lock.withLock { _missingNow = newValue } }
   }
 
-  func fill(_ request: CardFrameRequest, into target: CardFrameTarget) -> Bool {
-    lock.withLock { _asked.append(request.index) }
-    if missingNow || missing.contains(request.index) { return false }
+  func begin(_ request: CardFrameRequest) { lock.withLock { _events.append("b\(request.index)") } }
+
+  func fill(_ request: CardFrameRequest, into target: CardFrameTarget) -> CardPicture? {
+    lock.withLock {
+      _asked.append(request.index)
+      _events.append("f\(request.index)")
+    }
+    if missingNow || missing.contains(request.index) { return nil }
     for line in 0..<target.height {
       target.bytes.storeBytes(of: request.index.littleEndian, toByteOffset: line * target.rowBytes, as: Int64.self)
     }
-    return true
+    guard let before = drawnBeforeAirNs else { return .untimed }
+    return CardPicture(contentNs: UInt64(max(0, request.seconds * 1e9 - before)))
   }
 }
 
@@ -41,13 +55,17 @@ final class LogLines {
 
 /// 59.94 on a clock that only the test moves, at a frame small enough to be quick.
 func softwarePort(
-  _ source: CardFrameSource, log: LogLines = LogLines(), clock: @escaping () -> TimeInterval = { 0 }
+  _ source: CardFrameSource, log: LogLines = LogLines(), leads: CardLeads = .standard, minLeadMs: Double = 0,
+  clock: @escaping () -> TimeInterval = { 0 }
 ) -> DeckLinkOutputPort {
   DeckLinkOutputPort(
     label: "SDI test",
-    hardware: .softwareClock(width: 16, height: 4, frameDuration: 1001, timeScale: 60000, ticksByItself: false),
-    source: source, retryInterval: 3600, pollInterval: 3600, log: log.write, clock: clock)
+    hardware: .softwareClock(
+      width: 16, height: 4, frameDuration: 1001, timeScale: 60000, ticksByItself: false, minLeadMs: minLeadMs),
+    source: source, leads: leads, retryInterval: 3600, pollInterval: 3600, log: log.write, clock: clock)
 }
+
+let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a software clock", frames: .card)
 
 @Suite struct OutputPortTests {
   /// The source has nothing new for frames 5, 9 and 10: exactly those three go out
@@ -58,7 +76,7 @@ func softwarePort(
     let source = NumberedSource(missing: [5, 9, 10])
     let port = softwarePort(source)
     defer { port.close() }
-    #expect(port.open(videoMode: nil) == .running(mode: "16x4 at 59.94 on a software clock", frames: .helper))
+    #expect(port.open(videoMode: nil) == softwareMode)
 
     port.fakeTick(20)
 
@@ -66,23 +84,41 @@ func softwarePort(
     #expect(counts.repeated == 3)
     #expect(counts.dropped == 0)
     #expect(counts.resyncs == 0)
-    #expect(counts.scheduled == 23)  // three of pre-roll, one per completed frame
-    #expect(counts.rendered == 20)
-    #expect(source.asked == Array(0...22))
+    #expect(counts.scheduled == 21)  // two of pre-roll, then one per slot as its fill comes due
+    #expect(counts.rendered == 18)
+    #expect(source.asked == Array(0...20))
     #expect(port.fakeShown() == [0, 1, 2, 3, 4, 4, 6, 7, 8, 8, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20])
   }
 
-  /// The host is held up for ten frames while the card's clock runs on. The
-  /// schedule is moved to just ahead of the card once, and from then on each slot
-  /// carries its own frame again: none dropped by the card, no delay left behind.
-  /// The nine slots the move passed over are counted as skipped, and the health
-  /// post reports them as dropped: they went out with no frame of ours.
-  ///
-  /// Without the move the frames after the stall are scheduled in the past. The
-  /// software clock drops those (eleven here, and the picture holds for two more
-  /// slots) until the schedule has caught up; a card that shows a late frame
-  /// instead of dropping it would carry the delay from then on.
-  @Test func aStalledHostResyncsInsteadOfFallingBehind() {
+  /// Each slot is begun the head start before it goes to air and filled the fill
+  /// lead before, both on the card's clock: with the standard 20 and 5 ms at 59.94
+  /// (16.68 ms a slot), slot n is begun 3.3 ms before slot n - 1 begins, after
+  /// slot n - 1 was filled, and filled 5 ms before its own. A short head start
+  /// begins a slot after the one before it has gone to air. The pre-roll (0 and 1)
+  /// is filled before the clock runs and never begun.
+  @Test func eachSlotIsBegunAndFilledAtItsLeadsBeforeAir() {
+    let standard = NumberedSource()
+    let port = softwarePort(standard)
+    port.open(videoMode: nil)
+    port.fakeTick(4)
+    port.close()
+    #expect(standard.events == ["f0", "f1", "b2", "f2", "b3", "f3", "b4", "f4", "b5"])
+
+    let short = NumberedSource()
+    let late = softwarePort(short, leads: CardLeads(headStartMs: 10, fillLeadMs: 5))
+    late.open(videoMode: nil)
+    late.fakeTick(4)
+    late.close()
+    #expect(short.events == ["f0", "f1", "b2", "f2", "b3", "f3", "b4", "f4"])
+  }
+
+  /// The card's frames are held up for eight slots (its completions do not come),
+  /// while its clock runs on. The output cannot fill a frame the card still holds,
+  /// so it skips those slots, the card holding its last picture, and is filling
+  /// every slot on time again as soon as the frames come back: none dropped by
+  /// the card, no delay left behind. The skipped slots are one resync, and the
+  /// health post reports them as dropped: they went out with no frame of ours.
+  @Test func framesTheCardHoldsOnToAreSkippedNotSentLate() {
     let source = NumberedSource()
     let port = softwarePort(source)
     defer { port.close() }
@@ -97,31 +133,37 @@ func softwarePort(
     let counts = port.counters
     #expect(counts.resyncs == 1)
     #expect(counts.dropped == 0)
-    #expect(counts.skipped == 9)
-    #expect(port.takeHealthSample().dropped == 9)
+    #expect(counts.skipped == 8)
+    let skipped = port.timingsForTest().filter(\.skipped)
+    #expect(skipped.map(\.index) == Array(13...20))
+    #expect(skipped.allSatisfy { $0.result == 1 })  // every frame was still with the card
+    #expect(port.takeHealthSample().dropped == 8)
     let shown = port.fakeShown()
     #expect(shown.count == 51)
-    // On time up to the stall; the card holds frame 12 through the slots nobody
-    // filled; from slot 22 every slot carries its own frame.
+    // On time until the frames run out; the card holds frame 12 through the slots
+    // nobody could fill; from slot 21 every slot carries its own frame.
     #expect(Array(shown[0...12]) == Array(0...12))
-    #expect(Array(shown[13...21]) == Array(repeating: 12, count: 9))
-    #expect(Array(shown[22...50]) == Array(22...50))
+    #expect(Array(shown[13...20]) == Array(repeating: 12, count: 8))
+    #expect(Array(shown[21...50]) == Array(21...50))
   }
 
-  /// The host is held up for exactly the frames in flight, so the next frame would
-  /// go out in the very slot on air: too late, and moved like any later one.
-  @Test func aScheduleThatWouldLandOnTheFrameOnAirResyncs() {
-    let port = softwarePort(NumberedSource())
+  /// A card that needs a frame longer before its slot than the fill lead gives
+  /// would show every frame late: each slot is skipped instead, and the card holds
+  /// the pre-roll. A fill that cannot make it is never sent.
+  @Test func aFillTooLateForTheCardIsSkippedNotSent() {
+    let source = NumberedSource()
+    let port = softwarePort(source, minLeadMs: 6)
     defer { port.close() }
     port.open(videoMode: nil)
-    port.fakeTick(5)
-    port.fakeHold(true)
-    port.fakeTick(3)
-    port.fakeHold(false)
     port.fakeTick(10)
-    #expect(port.counters.resyncs == 1)
-    #expect(port.counters.dropped == 0)
-    #expect(port.counters.skipped == 2)  // the slot on air and the one after it
+    let counts = port.counters
+    #expect(counts.scheduled == 2)
+    #expect(counts.skipped == 9)
+    #expect(counts.resyncs == 1)
+    #expect(counts.dropped == 0)
+    #expect(port.fakeShown() == [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+    #expect(source.asked == [0, 1])
+    #expect(port.timingsForTest().filter(\.skipped).allSatisfy { $0.result == 0 })  // too late, not short of frames
   }
 
   /// Frames the card reports displayed late are counted as dropped.
@@ -146,11 +188,16 @@ func softwarePort(
     port.fakeTick(3)
     port.pollForTest()
     port.pollForTest()  // nothing sent since the last poll: one quiet poll
-    #expect(port.state == .running(mode: "16x4 at 59.94 on a software clock", frames: .helper))
+    #expect(port.state == softwareMode)
     port.pollForTest()
     #expect(port.state == .lost("the card stopped taking frames"))
     #expect(log.lines.last == "SDI test: lost (the card stopped taking frames); trying again every 3600 s")
   }
+
+  // Not unit-tested: that the clock thread wakes when it asks to. A software clock
+  // only tests move runs every begin and fill at its exact time; on a card it is a
+  // real-time thread's wake, which was measured instead (DECKLINK.md, "Timing":
+  // within 35 us, against 1.4 ms late at user-interactive priority).
 
   // Not unit-tested: that a loss reported on the card's thread never takes a strong
   // reference to the port there (CallbackBox). The failure is a race between the
@@ -167,14 +214,14 @@ func softwarePort(
     port.fakeUnplug()
     port.sync()
     #expect(port.state == .lost("the device was removed"))
-    #expect(port.counters.scheduled == 8)
+    #expect(port.counters.scheduled == 6)
     port.fakeTick(5)  // nothing to tick: the output is closed
-    #expect(port.counters.scheduled == 8)
+    #expect(port.counters.scheduled == 6)
 
     port.retry()
     port.sync()
-    #expect(port.state == .running(mode: "16x4 at 59.94 on a software clock", frames: .helper))
-    #expect(port.counters.scheduled == 11)  // the count runs on across the reopening
+    #expect(port.state == softwareMode)
+    #expect(port.counters.scheduled == 8)  // the count runs on across the reopening
     #expect(
       log.lines == [
         "SDI test: opened in 16x4 at 59.94 on a software clock",
@@ -232,13 +279,38 @@ func softwarePort(
     defer { port.close() }
     port.open(videoMode: nil)
     port.fakeReportLate(2)
-    port.fakeTick(57)
+    port.fakeTick(59)
     now.value = 1.0
-    // 60 sent in a second: three of pre-roll and 57 rescheduled. 3 of 60 is 5%.
+    // 60 sent in a second: two of pre-roll and 58 filled as they came due. 3 of 60
+    // is 5%. Nothing said when its pictures were drawn, so no latency.
     #expect(port.takeHealthSample() == HealthSample(fps: 60, repeated: 5, dropped: 2))
     port.fakeTick(30)
     now.value = 1.5
     #expect(port.takeHealthSample() == HealthSample(fps: 60, repeated: 0, dropped: 2))
+  }
+
+  /// The health sample's latency is the median, over the window's new pictures, from
+  /// each picture being drawn to its slot going out of the card, as the shim timed
+  /// it on the card's clock: here every picture is drawn 18 ms before its slot.
+  /// Repeats carry the time of the picture they repeat, older with every slot,
+  /// so they are left out: here more than half the window repeats.
+  @Test func theHealthSampleCarriesTheRenderToAirLatency() throws {
+    let port = softwarePort(NumberedSource(missing: Set(10...25), drawnBeforeAirMs: 18))
+    defer { port.close() }
+    port.open(videoMode: nil)
+    port.fakeTick(30)
+    let latency = try #require(port.takeHealthSample().latencyMs)
+    #expect(abs(latency - 18) < 0.001)
+    port.fakeTick(10)
+    let timings = port.timingsForTest()
+    #expect(timings.map(\.index) == Array(30...39))  // the slots the card has finished with since the sample
+    for t in timings {
+      #expect(t.fresh && !t.skipped)
+      let air = Double(t.index) * 1001 / 60000 * 1e9
+      #expect(abs(Double(t.airNs) - air) < 2)
+      #expect(abs(Double(t.fillNs) - (air - 5e6)) < 2)
+      #expect(t.renderToAirMs.map { abs($0 - 18) < 0.001 } == true)
+    }
   }
 
   @Test func aNewPortStartsTheDropTotalAtNothing() {
@@ -253,7 +325,9 @@ func softwarePort(
   /// is jitter and says nothing.
   @Test func fallingBehindIsLoggedWhenItStartsAndWhenItEnds() {
     let log = LogLines()
-    let port = softwarePort(NumberedSource(missing: [20, 21, 40, 41, 42]), log: log)
+    // The port fills slots 0 to 10 in the first second and ten a second after:
+    // 15 and 16 are two repeats in one second, 42 to 44 three.
+    let port = softwarePort(NumberedSource(missing: [15, 16, 42, 43, 44]), log: log)
     defer { port.close() }
     port.open(videoMode: nil)
     for _ in 0..<12 {
@@ -327,9 +401,9 @@ func softwarePort(
       label: "SDI 2 (virtual)", hardware: .virtual, source: NumberedSource(), retryInterval: 3600, pollInterval: 3600,
       log: log.write)
     defer { port.close() }
-    #expect(port.open(videoMode: nil) == .running(mode: "1080p59.94 on a software clock", frames: .helper))
+    #expect(port.open(videoMode: nil) == .running(mode: "1080p59.94 on a software clock", frames: .card))
     #expect(port.frameSize.map { [$0.width, $0.height] } == [1920, 1080])
-    #expect(port.open(videoMode: "720p59.94") == .running(mode: "720p59.94 on a software clock", frames: .helper))
+    #expect(port.open(videoMode: "720p59.94") == .running(mode: "720p59.94 on a software clock", frames: .card))
     #expect(port.frameSize.map { [$0.width, $0.height] } == [1280, 720])
     #expect(port.open(videoMode: "4Kp60") == .refused("4Kp60 is not a mode the helper knows"))
     #expect(

@@ -14,7 +14,7 @@ public struct CardFrameRequest: Equatable {
 }
 
 /// The memory a picture goes into: 8-bit UYVY, `rowBytes` per line. Page-aligned
-/// and a whole number of pages long, so Metal can write into it without a copy.
+/// and a whole number of pages long, so Metal could write into it without a copy.
 public struct CardFrameTarget {
   public var bytes: UnsafeMutableRawPointer
   public var length: Int
@@ -35,19 +35,50 @@ public struct CardFrameTarget {
   }
 }
 
-/// What feeds a card: asked for each frame on the card's clock.
+/// When a picture was made, on the host clock (`DispatchTime.uptimeNanoseconds`,
+/// mach_absolute_time), 0 where unknown: what a frame's timing is measured from.
+public struct CardPicture: Equatable, Sendable {
+  /// When the page drew the picture's content: the begin frame it rendered for.
+  public var contentNs: UInt64
+  /// When the page handed the picture over.
+  public var paintNs: UInt64
+  /// When it was converted and ready to go into a frame.
+  public var readyNs: UInt64
+
+  public init(contentNs: UInt64 = 0, paintNs: UInt64 = 0, readyNs: UInt64 = 0) {
+    self.contentNs = contentNs
+    self.paintNs = paintNs
+    self.readyNs = readyNs
+  }
+
+  /// A picture whose times nobody kept.
+  public static let untimed = CardPicture()
+}
+
+/// What feeds a card: told when to start each frame's picture, and asked for it
+/// later, both on the card's clock.
 ///
 /// The name is the card side's half of a pair: a `CardSink` pulls, a
 /// `CardFrameSource` answers. A windowless browser that renders on command (a begin
 /// frame per card frame) is the source this is shaped for.
 public protocol CardFrameSource: AnyObject {
-  /// Write the picture for `request` into `target` and return true; or return
-  /// false, having written nothing, when there is no new picture, and the previous
-  /// one goes out again as a repeat.
+  /// Start on the picture for `request`: called the head start before the frame
+  /// goes to air. Return at once.
+  func begin(_ request: CardFrameRequest)
+
+  /// Write the newest picture into `target` and return its times; or return nil,
+  /// having written nothing, when there is no new picture, and the previous one
+  /// goes out again as a repeat.
   ///
-  /// Called on the card's thread while the card waits: no locks held elsewhere for
-  /// long, no main-thread hops, back within a frame.
-  func fill(_ request: CardFrameRequest, into target: CardFrameTarget) -> Bool
+  /// Called on the output's clock thread the fill lead before the frame goes to
+  /// air, while the card waits: a copy, not a render. No locks held elsewhere for
+  /// long, no main-thread hops.
+  func fill(_ request: CardFrameRequest, into target: CardFrameTarget) -> CardPicture?
+}
+
+extension CardFrameSource {
+  /// A source that draws when it likes has nothing to start.
+  public func begin(_ request: CardFrameRequest) {}
 }
 
 /// An output's frame counts since it was made, across reopenings: the one count
@@ -59,10 +90,11 @@ public struct CardCounters: Equatable {
   public var repeated: UInt64 = 0
   /// Frames the card reported late or dropped.
   public var dropped: UInt64 = 0
-  /// Times the schedule fell behind the card and was moved forward.
+  /// Times the output found itself too late to fill a slot on time and skipped
+  /// ahead: a run of skipped slots is one.
   public var resyncs: UInt64 = 0
-  /// Slots those moves passed over, which went out with no frame of ours: the card
-  /// held its last picture.
+  /// Slots skipped, which went out with no frame of ours: the card held its last
+  /// picture.
   public var skipped: UInt64 = 0
 
   /// New pictures sent: every frame scheduled that was not a repeat.

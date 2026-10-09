@@ -108,13 +108,18 @@ IDeckLink *findDevice(const dl_port_id &want) {
 
 // MARK: Completion callbacks
 
+class DeckLinkCard;
+/// When `card` finished with `frame`, on the host clock (DeckLinkCard::completedAt).
+uint64_t completionTime(DeckLinkCard *card, IDeckLinkVideoFrame *frame);
+
 /// What the driver calls back. Reference counted on its own, because the driver
 /// may hold it a moment after the output is gone; `output` is cleared first.
 class CompletionSink final : public IDeckLinkVideoOutputCallback {
  public:
-  void setOutput(Output *output) {
+  void setOutput(Output *output, DeckLinkCard *card) {
     std::lock_guard<std::mutex> lock(mutex_);
     output_ = output;
+    card_ = card;
   }
   void setStopping() { stopping_ = true; }
 
@@ -151,7 +156,7 @@ class CompletionSink final : public IDeckLinkVideoOutputCallback {
         break;
     }
     std::lock_guard<std::mutex> lock(mutex_);
-    if (output_ != nullptr) output_->completed(frame, c);
+    if (output_ != nullptr) output_->completed(frame, c, card_ != nullptr ? completionTime(card_, frame) : 0);
     return S_OK;
   }
 
@@ -166,6 +171,7 @@ class CompletionSink final : public IDeckLinkVideoOutputCallback {
   std::atomic<ULONG> refs_{1};
   std::mutex mutex_;
   Output *output_ = nullptr;
+  DeckLinkCard *card_ = nullptr;
   std::atomic<bool> stopping_{false};
 };
 
@@ -186,7 +192,7 @@ class DeckLinkCard final : public Card {
 
   bool attach(Output *output) override {
     Card::attach(output);
-    sink_->setOutput(output);
+    sink_->setOutput(output, this);
     return out_->SetScheduledFrameCompletionCallback(sink_) == S_OK;
   }
 
@@ -212,12 +218,50 @@ class DeckLinkCard final : public Card {
     return made;
   }
 
-  bool streamTime(int64_t timeScale, int64_t *now) override {
-    double speed = 0;
-    BMDTimeValue t = 0;
-    if (out_->GetScheduledStreamTime(timeScale, &t, &speed) != S_OK) return false;
-    *now = t;
+  /// Where the card's clock is, from the completions (`slotBegan`): asking the
+  /// driver (GetScheduledStreamTime) takes 74 us typically and up to 0.8 ms on an 8K
+  /// Pro over Thunderbolt, too slow and too uncertain to ask before every begin and
+  /// fill. It is asked only until the first completion arrives, and after a run of
+  /// completions that disagree with the clock as kept.
+  bool hostTimeOf(int64_t streamTime, int64_t timeScale, uint64_t *hostNs) override {
+    if (!started_) return false;
+    std::unique_lock<std::mutex> lock(clock_);
+    if (!anchored_) {
+      lock.unlock();
+      int64_t stream = 0;
+      uint64_t host = 0;
+      if (!readClock(timeScale, &stream, &host)) return false;
+      lock.lock();
+      setAnchor(stream, timeScale, host);
+    }
+    *hostNs = mapLocked(streamTime, timeScale);
     return true;
+  }
+
+  void slotBegan(int64_t streamTime, int64_t timeScale, uint64_t hostNs) override {
+    std::lock_guard<std::mutex> lock(clock_);
+    if (anchored_) {
+      const double off = static_cast<double>(hostNs) - static_cast<double>(mapLocked(streamTime, timeScale));
+      // A completion more than a millisecond off is a frame held on, or shown late,
+      // not the clock moving: three in a row, and the completions are believed.
+      if (off > 1e6 || off < -1e6) {
+        if (++disagreements_ < 3) return;
+      }
+    }
+    disagreements_ = 0;
+    setAnchor(streamTime, timeScale, hostNs);
+  }
+
+  uint64_t minLeadNs() const override { return static_cast<uint64_t>(DL_CARD_MIN_LEAD_US) * 1000; }
+
+  /// When the card finished with `frame`, on the host clock: the driver reports it
+  /// in mach_absolute_time already (measured on an 8K Pro with Desktop Video 16.4:
+  /// it lands 0.14 ms before the completion callback, while the card's hardware
+  /// reference clock is a different clock altogether). 0 when the card cannot say.
+  uint64_t completedAt(IDeckLinkVideoFrame *frame) {
+    BMDTimeValue done = 0;
+    if (out_->GetFrameCompletionReferenceTimestamp(frame, 1000000000, &done) != S_OK || done <= 0) return 0;
+    return static_cast<uint64_t>(done);
   }
 
   bool start(int64_t at, int64_t timeScale) override {
@@ -233,7 +277,7 @@ class DeckLinkCard final : public Card {
     out_->SetScheduledFrameCompletionCallback(nullptr);
     // After this nothing reaches the Output, even a completion the driver had
     // already begun to deliver.
-    sink_->setOutput(nullptr);
+    sink_->setOutput(nullptr, nullptr);
     out_->DisableVideoOutput();
   }
 
@@ -242,9 +286,46 @@ class DeckLinkCard final : public Card {
   IDeckLinkOutput *out_;
   dl_port_id id_;
   CompletionSink *sink_;
-  bool started_ = false;
+  /// The playback position and the host clock, read together; of three tries the
+  /// quickest, whose middle is surest.
+  bool readClock(int64_t timeScale, int64_t *stream, uint64_t *host) {
+    uint64_t best = UINT64_MAX;
+    for (int i = 0; i < 3; i++) {
+      double speed = 0;
+      BMDTimeValue now = 0;
+      const uint64_t before = hostNowNs();
+      if (out_->GetScheduledStreamTime(timeScale, &now, &speed) != S_OK) return false;
+      const uint64_t after = hostNowNs();
+      if (after - before < best) {
+        best = after - before;
+        *stream = now;
+        *host = before + (after - before) / 2;
+      }
+    }
+    return true;
+  }
+
+  void setAnchor(int64_t stream, int64_t scale, uint64_t host) {
+    anchorStreamNs_ = static_cast<double>(stream) * 1e9 / static_cast<double>(scale);
+    anchorHost_ = host;
+    anchored_ = true;
+  }
+
+  uint64_t mapLocked(int64_t streamTime, int64_t timeScale) const {
+    const double ns = static_cast<double>(streamTime) * 1e9 / static_cast<double>(timeScale);
+    return static_cast<uint64_t>(static_cast<double>(anchorHost_) + ns - anchorStreamNs_);
+  }
+
+  std::atomic<bool> started_{false};
   bool stopped_ = false;
+  std::mutex clock_;
+  bool anchored_ = false;
+  double anchorStreamNs_ = 0;
+  uint64_t anchorHost_ = 0;
+  int disagreements_ = 0;
 };
+
+uint64_t completionTime(DeckLinkCard *card, IDeckLinkVideoFrame *frame) { return card->completedAt(frame); }
 
 // MARK: Open outputs and device changes
 
@@ -546,6 +627,13 @@ extern "C" void dl_output_counters(const dl_output *output, dl_counters *out) {
   *out = dl_counters{};
   if (output != nullptr) output->output->counters(out);
 }
+
+extern "C" int32_t dl_output_take_timings(dl_output *output, dl_frame_timing *out, int32_t capacity) {
+  if (output == nullptr || out == nullptr || capacity <= 0) return 0;
+  return output->output->takeTimings(out, capacity);
+}
+
+extern "C" uint64_t dl_host_now_ns(void) { return hostNowNs(); }
 
 extern "C" bool dl_watch_devices(dl_devices_changed_fn changed, void *ctx) {
   DeviceWatch::shared().setListener(changed, ctx);

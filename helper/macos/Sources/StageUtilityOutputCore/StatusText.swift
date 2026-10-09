@@ -21,11 +21,16 @@ public enum StatusText {
     /// What keeps a card output from sending: a mode its port refused, a port that
     /// is gone. It sends nothing, so it says so whatever the server is doing.
     public var portProblem: String?
+    /// A card output's render-to-air latency over the last health window.
+    public var latencyMs: Double?
+    /// The output shows the latency test page (`--test-pattern latency`), not a
+    /// server's screen.
+    public var testPattern: Bool
 
     public init(
       enabled: Bool, isMain: Bool, serverKnown: Bool, unreachable: Bool = false,
       boundScreenName: String? = nil, showingBound: Bool = false, fps: Double? = nil,
-      healthPaused: Bool = false, portProblem: String? = nil
+      healthPaused: Bool = false, portProblem: String? = nil, latencyMs: Double? = nil, testPattern: Bool = false
     ) {
       self.enabled = enabled
       self.isMain = isMain
@@ -36,6 +41,8 @@ public enum StatusText {
       self.fps = fps
       self.healthPaused = healthPaused
       self.portProblem = portProblem
+      self.latencyMs = latencyMs
+      self.testPattern = testPattern
     }
   }
 
@@ -46,18 +53,25 @@ public enum StatusText {
     if let problem = i.portProblem {
       return i.boundScreenName.map { "\($0) · \(problem)" } ?? problem
     }
+    if i.testPattern { return (["Latency test page"] + rates(i)).joined(separator: " · ") }
     if !i.serverKnown { return "Looking for Stage Utility" }
     if i.unreachable { return "Cannot reach the server. Retrying" }
     if i.boundScreenName != nil || i.showingBound {
       var parts = [i.boundScreenName ?? "Showing a screen"]
       if i.healthPaused {
         parts.append("not recognised by the server, health paused")
-      } else if let fps = i.fps, fps > 0 {
-        parts.append(String(format: "%.2f fps", fps))
+      } else {
+        parts += rates(i)
       }
       return parts.joined(separator: " · ")
     }
     return "Waiting to be set up on the server"
+  }
+
+  /// "59.94 fps", and for a card output "20 ms behind the page".
+  private static func rates(_ i: Input) -> [String] {
+    guard let fps = i.fps, fps > 0 else { return [] }
+    return [String(format: "%.2f fps", fps)] + (i.latencyMs.map { [String(format: "%.0f ms behind the page", $0)] } ?? [])
   }
 
   public enum Connection: Equatable {

@@ -6,10 +6,12 @@
 // loaded at run time. Without it every call here answers "not installed", "no
 // ports" or "could not open"; none of them crashes.
 //
-// An output schedules frames on the card's clock. Each time the card finishes with
-// a frame it asks the frame source (`dl_fill_fn`) for the picture of the frame that
-// frame's memory will carry next, and schedules it. The same scheduler runs over a
-// software clock (`dl_fake_output_open`) so it can be tested without a card.
+// An output schedules frames on the card's clock, one slot at a time, at fixed
+// times before each slot goes to air: it asks the page for the slot's picture
+// (`dl_begin_fn`) a head start ahead, and fills and schedules the slot
+// (`dl_fill_fn`) a fill lead ahead, with whatever picture is newest by then. The
+// same scheduler runs over a software clock (`dl_fake_output_open`) so it can be
+// tested without a card.
 
 #ifndef DECKLINK_SHIM_H
 #define DECKLINK_SHIM_H
@@ -113,16 +115,28 @@ typedef struct {
   int32_t width;
   int32_t height;
   int32_t slot;
+  /// Written by the source with a new picture: when the picture's content was
+  /// drawn (the page's begin frame), when the page handed it over, and when it was
+  /// ready to copy. Host time in nanoseconds (mach_absolute_time), 0 when unknown.
+  uint64_t content_ns;
+  uint64_t paint_ns;
+  uint64_t ready_ns;
 } dl_frame_target;
 
-/// Write the picture for frame `frame_index` (shown at `stream_time`, in the mode's
-/// time scale) into `target`, and return true. Return false, having written
+/// Write the newest picture for frame `frame_index` (shown at `stream_time`, in the
+/// mode's time scale) into `target`, and return true. Return false, having written
 /// nothing, when there is no new picture: the output then sends the previous
 /// picture again and counts a repeat.
 ///
-/// Called on the card's thread, while the card waits; return within a frame. Never
+/// Called on the output's clock thread `fill_lead_us` before the frame goes to air,
+/// while the card waits: return well within that (a copy, not a render). Never
 /// close the output from inside it.
-typedef bool (*dl_fill_fn)(void *ctx, int64_t frame_index, int64_t stream_time, const dl_frame_target *target);
+typedef bool (*dl_fill_fn)(void *ctx, int64_t frame_index, int64_t stream_time, dl_frame_target *target);
+
+/// Ask the page for the picture of frame `frame_index`: called on the output's
+/// clock thread `head_start_us` before the frame goes to air. Return at once; the
+/// picture arrives in its own time and the fill takes the newest there is.
+typedef void (*dl_begin_fn)(void *ctx, int64_t frame_index, int64_t stream_time);
 
 /// The output stopped and will not schedule again: the device was removed, the
 /// driver refused a frame, or playback stopped on its own. Called once, on whatever
@@ -134,14 +148,36 @@ typedef struct {
   dl_fill_fn fill;
   dl_lost_fn lost;
   void *ctx;
-  /// Frames in flight, all of them scheduled before playback starts (the
-  /// pre-roll). 0 means 3; at least 2.
+  /// Frames of memory: the frame on air, the one scheduled after it, and room to
+  /// fill the next while a completion is still on its way. 0 means 3; at least 2.
+  /// More frames do not add delay: when a frame goes out is set by the leads below.
   int32_t depth;
-  /// Use the card's own frames from the start. Without it the helper's frames go
-  /// to the card, and only a card that refuses them during the pre-roll gets its
-  /// own (see dl_output_frames).
+  /// Send in frames the card makes (CreateVideoFrame), which the helper asks for:
+  /// the driver takes them without a stall (DECKLINK.md, "Helper frames and card
+  /// frames"). Without it, frames of the helper's own memory. A card that will not
+  /// have the kind asked for (will not make its own, or refuses the helper's
+  /// during the pre-roll) gets the other (see dl_output_frames).
   bool card_frames;
+  /// May be NULL: nothing is asked for, and the fill takes whatever is newest.
+  dl_begin_fn begin;
+  /// How long before a frame goes to air the page is asked for it. 0 means
+  /// DL_DEFAULT_HEAD_START_US.
+  int64_t head_start_us;
+  /// How long before a frame goes to air it is filled and scheduled. 0 means
+  /// DL_DEFAULT_FILL_LEAD_US.
+  int64_t fill_lead_us;
 } dl_callbacks;
+
+/// The defaults, measured on a DeckLink 8K Pro (DECKLINK.md, "Latency"): a page
+/// gets 20 ms from being asked to being filled less the 5 ms fill lead, and the
+/// card gets the frame about 3.7 ms before its slot.
+#define DL_DEFAULT_HEAD_START_US 20000
+#define DL_DEFAULT_FILL_LEAD_US 5000
+/// A fill that starts later than this before its slot is skipped, the card holding
+/// its previous picture, rather than sent late: the copy and the driver taking the
+/// frame (about 1.3 ms) and the card's own need (it shows a frame late when it has
+/// it less than 2.3 to 2.8 ms before its slot) would not fit.
+#define DL_CARD_MIN_LEAD_US 3500
 
 /// Which frames carry an output's pictures.
 typedef enum {
@@ -160,15 +196,30 @@ typedef struct dl_output dl_output;
 dl_output *dl_output_open(const dl_port_id *port, uint32_t display_mode, const dl_callbacks *callbacks, char *why,
                           size_t why_len);
 
-/// The same scheduler over a software clock, for tests and for running without a
-/// card. With `timer` the clock ticks by itself every frame on its own thread;
-/// without it, only `dl_fake_tick` moves it. With `refuse_helper_frames` it
-/// refuses any frame it did not make itself, as a driver that will not take
-/// application memory would.
-dl_output *dl_fake_output_open(int32_t width, int32_t height, int64_t frame_duration, int64_t time_scale, bool timer,
-                               bool refuse_helper_frames, const dl_callbacks *callbacks, char *why, size_t why_len);
+/// How a software clock behaves.
+typedef struct {
+  /// The clock ticks by itself every frame on its own thread, on the host's time.
+  /// Without it only `dl_fake_tick` moves it, on time of its own.
+  bool timer;
+  /// It refuses any frame it did not make itself, as a driver that will not take
+  /// application memory would.
+  bool refuse_helper_frames;
+  /// It will not make frames of its own.
+  bool make_no_frames;
+  /// It needs a frame this long before its slot (Card::minLeadNs); 0 for none.
+  int64_t min_lead_us;
+  /// The frames it makes are counted in dl_fake_card_frames_alive.
+  bool count_frames;
+} dl_fake_behaviour;
 
-/// Frames the software clocks have made and not yet freed, across the process.
+/// The same scheduler over a software clock, for tests and for running without a
+/// card.
+dl_output *dl_fake_output_open(int32_t width, int32_t height, int64_t frame_duration, int64_t time_scale,
+                               const dl_fake_behaviour *behaviour, const dl_callbacks *callbacks, char *why,
+                               size_t why_len);
+
+/// Frames the software clocks that count them (`count_frames`) have made and not
+/// yet freed, across the process.
 int32_t dl_fake_card_frames_alive(void);
 
 dl_frames dl_output_frames(const dl_output *output);
@@ -185,15 +236,55 @@ typedef struct {
   /// Frames the card reported late (bmdOutputFrameDisplayedLate) or dropped
   /// (bmdOutputFrameDropped).
   uint64_t dropped;
-  /// Times the schedule had fallen behind the card and was moved forward.
+  /// Times the output found itself too late to fill a slot on time (the host was
+  /// held up, or the card had not given a frame back) and skipped ahead.
   uint64_t resyncs;
-  /// Slots a resync passed over: no frame of ours was scheduled for them, so the
-  /// card held its last picture. Not counted in `scheduled`.
+  /// Slots skipped: no frame of ours was scheduled for them, so the card held its
+  /// last picture. Not counted in `scheduled`.
   uint64_t skipped;
   bool lost;
 } dl_counters;
 
 void dl_output_counters(const dl_output *output, dl_counters *out);
+
+/// What became of one slot, with the times of its picture on the way: host time in
+/// nanoseconds (mach_absolute_time), 0 when unknown.
+typedef struct {
+  int64_t index;
+  /// A new picture; false for a repeat of the one before (whose times it carries).
+  bool fresh;
+  /// Nothing of ours went out in this slot.
+  bool skipped;
+  /// The card's report: 0 completed, 1 displayed late, 2 dropped. For a skip, why:
+  /// 0 too late to reach the card in time, 1 every frame was still with the card.
+  int32_t result;
+  /// The picture: when its content was drawn, when the page handed it over, when it
+  /// was ready to copy (the source's stamps, dl_frame_target).
+  uint64_t content_ns;
+  uint64_t paint_ns;
+  uint64_t ready_ns;
+  /// When the fill began (the fill lead before air), when the picture was in the
+  /// frame, and when the card had taken it (ScheduleVideoFrame returned).
+  uint64_t fill_ns;
+  uint64_t copied_ns;
+  uint64_t scheduled_ns;
+  /// When the slot began going out of the card: its display time on the card's
+  /// clock, mapped to the host's.
+  uint64_t air_ns;
+  /// When the card said it had finished with the frame: the end of its slot on the
+  /// card's clock (GetFrameCompletionReferenceTimestamp), mapped to the host's. 0
+  /// for a skip, or a software clock.
+  uint64_t completed_ns;
+} dl_frame_timing;
+
+/// The slots finished since the last call, oldest first, up to `capacity`; returns
+/// how many were copied. At most DL_TIMINGS_KEPT are kept between calls: older
+/// ones are dropped.
+int32_t dl_output_take_timings(dl_output *output, dl_frame_timing *out, int32_t capacity);
+#define DL_TIMINGS_KEPT 1024
+
+/// The host clock every time above is on: mach_absolute_time in nanoseconds.
+uint64_t dl_host_now_ns(void);
 
 // MARK: Device changes
 
@@ -207,8 +298,9 @@ bool dl_watch_devices(dl_devices_changed_fn changed, void *ctx);
 
 // MARK: The software clock's controls (fake outputs only; ignored on a real one)
 
-/// Advance the clock `frames` frames, delivering each frame's completion as a card
-/// would.
+/// Advance the clock `frames` frames, running each begin and fill that falls due on
+/// the way and delivering each frame's completion, as a card would. A clock that
+/// only the tests move keeps time of its own: slot n begins at n frame durations.
 void dl_fake_tick(dl_output *output, int32_t frames);
 /// Hold completions back as a busy host would: the clock moves, the callbacks do
 /// not run. Releasing delivers everything held, in order.

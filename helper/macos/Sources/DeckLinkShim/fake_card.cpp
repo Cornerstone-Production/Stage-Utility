@@ -3,7 +3,10 @@
 // helper run, without one.
 //
 // It models what the scheduler depends on:
-// - the clock moves one frame per tick, whether or not the host keeps up;
+// - the clock moves one frame per tick, whether or not the host keeps up; a clock
+//   that ticks by itself keeps the host's time, one that only tests move keeps its
+//   own, slot n beginning at n frame durations, and runs the output's begins and
+//   fills as its time passes them;
 // - a frame scheduled for a slot that has already begun is never shown, and
 //   completes as dropped;
 // - a slot with no frame of ours shows the card's last picture again;
@@ -14,6 +17,7 @@
 
 #include "output.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -32,10 +36,10 @@ std::atomic<int32_t> gCardFramesAlive{0};
 /// memory is plain malloc, not page-aligned, as nothing promises a card's is.
 class FakeCardFrame final : public IDeckLinkMutableVideoFrame {
  public:
-  FakeCardFrame(int32_t width, int32_t height, int32_t rowBytes)
-      : width_(width), height_(height), rowBytes_(rowBytes),
+  FakeCardFrame(int32_t width, int32_t height, int32_t rowBytes, bool counted)
+      : width_(width), height_(height), rowBytes_(rowBytes), counted_(counted),
         bytes_(static_cast<uint8_t *>(std::calloc(static_cast<size_t>(rowBytes) * height, 1))) {
-    gCardFramesAlive++;
+    if (counted_) gCardFramesAlive++;
   }
 
   bool valid() const { return bytes_ != nullptr; }
@@ -80,19 +84,26 @@ class FakeCardFrame final : public IDeckLinkMutableVideoFrame {
  private:
   ~FakeCardFrame() override {
     std::free(bytes_);
-    gCardFramesAlive--;
+    if (counted_) gCardFramesAlive--;
   }
   std::atomic<ULONG> refs_{1};
   int32_t width_;
   int32_t height_;
   int32_t rowBytes_;
+  bool counted_;
   uint8_t *bytes_;
 };
 
 class FakeCard final : public Card {
  public:
-  FakeCard(int64_t frameDuration, int64_t timeScale, bool timer, bool refuseHelperFrames)
-      : frameDuration_(frameDuration), timeScale_(timeScale), timer_(timer), refuseHelperFrames_(refuseHelperFrames) {}
+  FakeCard(int64_t frameDuration, int64_t timeScale, const dl_fake_behaviour &b)
+      : frameDuration_(frameDuration),
+        timeScale_(timeScale),
+        timer_(b.timer),
+        refuseHelperFrames_(b.refuse_helper_frames),
+        makeNoFrames_(b.make_no_frames),
+        countFrames_(b.count_frames),
+        minLeadNs_(static_cast<uint64_t>(std::max<int64_t>(0, b.min_lead_us)) * 1000) {}
 
   ~FakeCard() override { stop(); }
 
@@ -108,11 +119,14 @@ class FakeCard final : public Card {
     return true;
   }
 
+  uint64_t minLeadNs() const override { return minLeadNs_; }
+
   CardFrame createFrame(int32_t width, int32_t height, int32_t rowBytes) override {
     CardFrame made;
+    if (makeNoFrames_) return made;
     // Rows padded past the picture, as a card may pad them, so the copy that
     // honours the card's row length is the one exercised.
-    auto *frame = new FakeCardFrame(width, height, rowBytes + 64);
+    auto *frame = new FakeCardFrame(width, height, rowBytes + 64, countFrames_);
     if (!frame->valid()) {
       frame->Release();
       return made;
@@ -127,19 +141,30 @@ class FakeCard final : public Card {
     return made;
   }
 
-  bool streamTime(int64_t timeScale, int64_t *now) override {
+  bool hostTimeOf(int64_t streamTime, int64_t timeScale, uint64_t *hostNs) override {
     std::lock_guard<std::mutex> lock(mutex_);
-    const int64_t frames = started_ ? onAir_ : 0;
-    // The clock's own scale, converted to the one asked for.
-    *now = frames * frameDuration_ * timeScale / timeScale_;
+    if (!started_) return false;
+    // The stream time in the clock's own scale, as nanoseconds since playback began.
+    const double ns = static_cast<double>(streamTime) * 1e9 / static_cast<double>(timeScale);
+    *hostNs = startNs_ + static_cast<uint64_t>(std::max(0.0, ns));
     return true;
   }
+
+  uint64_t now() override {
+    if (timer_) return hostNowNs();
+    std::lock_guard<std::mutex> lock(mutex_);
+    return virtualNs_;
+  }
+
+  bool drivesClock() const override { return !timer_; }
 
   bool start(int64_t at, int64_t) override {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       started_ = true;
       onAir_ = floorDiv(at, frameDuration_);
+      startNs_ = timer_ ? hostNowNs() : 0;
+      virtualNs_ = slotNs(onAir_);
       showLocked();
     }
     if (timer_) thread_ = std::thread([this] { run(); });
@@ -167,12 +192,14 @@ class FakeCard final : public Card {
 
   void hold(bool on) {
     Done done;
+    uint64_t at = 0;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       holding_ = on;
       if (!on) done.swap(held_);
+      at = timer_ ? hostNowNs() : virtualNs_;
     }
-    deliver(done);
+    deliver(done, at);
   }
 
   void reportLate(int32_t frames) {
@@ -208,12 +235,29 @@ class FakeCard final : public Card {
   /// Keeps memory bounded on a fake left running for hours.
   static constexpr size_t kShownCap = 1 << 16;
 
+  /// Where slot `index` begins, in nanoseconds since playback began.
+  uint64_t slotNs(int64_t index) const {
+    return static_cast<uint64_t>(static_cast<double>(index * frameDuration_) * 1e9 / static_cast<double>(timeScale_));
+  }
+
   void tickOnce() {
+    // A clock only tests move runs the output's begins and fills that fall before
+    // the next slot begins, in order, before the slot changes.
+    uint64_t next = 0;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!started_ || stopped_ || unplugged_) return;
+      next = startNs_ + slotNs(onAir_ + 1);
+    }
+    if (!timer_ && output_ != nullptr) output_->runUntil(next);
     Done done;
+    uint64_t at = 0;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       if (!started_ || stopped_ || unplugged_) return;
       onAir_++;
+      virtualNs_ = next;
+      at = timer_ ? hostNowNs() : next;
       for (auto it = pending_.begin(); it != pending_.end();) {
         if (it->index < onAir_) {
           Completion result = it->late ? Completion::dropped : Completion::completed;
@@ -233,7 +277,7 @@ class FakeCard final : public Card {
         done.clear();
       }
     }
-    deliver(done);
+    deliver(done, at);
   }
 
   /// Record what is on air for the slot that just began: the first eight bytes of
@@ -257,25 +301,27 @@ class FakeCard final : public Card {
     if (shown_.size() < kShownCap) shown_.push_back(lastShown_);
   }
 
-  void deliver(Done &done) {
+  /// A software clock has no completion timestamps of its own to report: the
+  /// slot boundary it ticked at stands in.
+  void deliver(Done &done, uint64_t at) {
     for (auto &d : done) {
-      if (output_ != nullptr) output_->completed(d.first, d.second);
+      if (output_ != nullptr) output_->completed(d.first, d.second, at);
       d.first->Release();
     }
   }
 
   void run() {
-    using clock = std::chrono::steady_clock;
-    const auto period = std::chrono::duration_cast<clock::duration>(
-        std::chrono::duration<double>(static_cast<double>(frameDuration_) / static_cast<double>(timeScale_)));
-    auto next = clock::now() + period;
-    for (;;) {
+    for (int64_t k = onAir_ + 1;; k++) {
+      const uint64_t due = startNs_ + slotNs(k);
       {
         std::unique_lock<std::mutex> lock(mutex_);
-        if (wake_.wait_until(lock, next, [this] { return stopped_; })) return;
+        const uint64_t now = hostNowNs();
+        if (now < due && wake_.wait_for(lock, std::chrono::nanoseconds(due - now), [this] { return stopped_; })) {
+          return;
+        }
+        if (stopped_) return;
       }
       tickOnce();
-      next += period;
     }
   }
 
@@ -283,6 +329,9 @@ class FakeCard final : public Card {
   const int64_t timeScale_;
   const bool timer_;
   const bool refuseHelperFrames_;
+  const bool makeNoFrames_;
+  const bool countFrames_;
+  const uint64_t minLeadNs_;
   /// The frames this card made; only compared, never dereferenced.
   std::set<const IDeckLinkVideoFrame *> made_;
 
@@ -293,6 +342,10 @@ class FakeCard final : public Card {
   Done held_;
   std::vector<int64_t> shown_;
   int64_t onAir_ = 0;
+  /// The host time playback began at; 0 for a clock only tests move.
+  uint64_t startNs_ = 0;
+  /// A clock only tests move: where its time is.
+  uint64_t virtualNs_ = 0;
   int64_t lastShown_ = -1;
   bool started_ = false;
   bool stopped_ = false;
@@ -315,17 +368,18 @@ FakeCard *fakeOf(const dl_output *output) {
 using namespace dlshim;
 
 extern "C" dl_output *dl_fake_output_open(int32_t width, int32_t height, int64_t frame_duration, int64_t time_scale,
-                                          bool timer, bool refuse_helper_frames, const dl_callbacks *callbacks,
+                                          const dl_fake_behaviour *behaviour, const dl_callbacks *callbacks,
                                           char *why, size_t why_len) {
-  if (callbacks == nullptr) {
-    copyReason("no callbacks", why, why_len);
+  if (callbacks == nullptr || behaviour == nullptr) {
+    copyReason("no callbacks or no behaviour", why, why_len);
     return nullptr;
   }
+  const dl_fake_behaviour b = *behaviour;
   std::string reason;
   dl_output *handle = openOutput(
       [&](std::string &, Geometry &g) -> Card * {
         g = Geometry{width, height, frame_duration, time_scale};
-        return new FakeCard(frame_duration, time_scale, timer, refuse_helper_frames);
+        return new FakeCard(frame_duration, time_scale, b);
       },
       *callbacks, reason);
   if (handle == nullptr) copyReason(reason, why, why_len);

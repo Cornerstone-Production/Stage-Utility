@@ -7,14 +7,15 @@ import StageUtilityOutputCore
 /// An output that is a card port, real or virtual: a windowless page whose pictures
 /// go out of a `DeckLinkOutputPort`, on the port's clock.
 ///
-/// - The port's thread asks the `SurfaceFrameSource` for each frame. The source
-///   converts the newest picture to UYVY, turned by the screen's rotation, into the
-///   frame's memory, or has none and the port repeats the last.
-/// - Each time it takes a frame, the source sends the browser its begin frame
-///   (`onFrameTaken`); CEF runs `SendExternalBeginFrame` on its UI thread, so the
-///   page renders once per output frame, ahead of the frame that will carry it.
-/// - The page's picture arrives in `OnAcceleratedPaint` and is copied into the
-///   source there, since the IOSurface is valid only inside that callback.
+/// - The port's clock thread asks the `SurfaceFrameSource` to start each slot's
+///   picture the head start before the slot goes to air: the source sends the
+///   browser its begin frame (`onBeginFrame`), and CEF runs `SendExternalBeginFrame`
+///   on its UI thread, so the page renders once per output frame.
+/// - The page's picture arrives in `OnAcceleratedPaint` and is converted there, to
+///   UYVY at the card's frame size and turned by the screen's rotation, since the
+///   IOSurface is valid only inside that callback.
+/// - The fill lead before air, the clock thread copies the newest converted picture
+///   into the slot's frame, or has none and the port repeats the last.
 /// - The page lays out at the port's frame size, turned for a quarter turn.
 ///
 /// The counts (new, repeated, dropped, resyncs) are the shim scheduler's, the same
@@ -22,6 +23,18 @@ import StageUtilityOutputCore
 /// from them (`DeckLinkOutputPort`).
 @MainActor
 final class CardOutput: OutputSink {
+  /// How a card output runs, from the command line: development settings, all of
+  /// them off or at their measured defaults in use.
+  struct Settings {
+    /// When each slot's picture is asked for and filled (`--head-start`, `--fill-lead`).
+    var leads = CardLeads.standard
+    /// The page is the latency page (`--test-pattern latency`): read when each
+    /// picture's content was drawn from its stamp, rather than estimating it.
+    var readsLatencyStamp = false
+    /// Every slot's timing, on the port's queue (`--frame-timings`).
+    var onTimings: ((String, [FrameTiming]) -> Void)?
+  }
+
   let descriptor: OutputDescriptor
   let surface: WebSurface
   private let port: DeckLinkOutputPort?
@@ -36,9 +49,11 @@ final class CardOutput: OutputSink {
   /// Keeps App Nap from slowing the clock while any card output runs: the helper
   /// is an agent app and may have no window on screen at all.
   private let activity: NSObjectProtocol
+  private let readsLatencyStamp: Bool
 
-  init(descriptor: OutputDescriptor, hardware: DeckLinkOutputPort.Hardware) {
+  init(descriptor: OutputDescriptor, hardware: DeckLinkOutputPort.Hardware, settings: Settings = Settings()) {
     self.descriptor = descriptor
+    readsLatencyStamp = settings.readsLatencyStamp
     let label = descriptor.port
     activity = ProcessInfo.processInfo.beginActivity(
       options: [.userInitiated, .latencyCritical], reason: "\(label) sends frames on a clock")
@@ -61,10 +76,12 @@ final class CardOutput: OutputSink {
       return
     }
     let source = SurfaceFrameSource(converter: converter)
-    // On the port's thread, once per frame it takes. The browser is closed only
-    // after the port is (see `stop`), so it outlives every call.
-    source.onFrameTaken = { _ in api.pointee.begin_frame!(browser) }
-    let port = DeckLinkOutputPort(label: label, hardware: hardware, source: source, log: Log.decklink)
+    // On the port's clock thread, once per slot. The browser is closed only after
+    // the port is (see `stop`), so it outlives every call.
+    source.onBeginFrame = { _ in api.pointee.begin_frame!(browser) }
+    let port = DeckLinkOutputPort(
+      label: label, hardware: hardware, source: source, leads: settings.leads, log: Log.decklink)
+    if let onTimings = settings.onTimings { port.onTimings = { onTimings(label, $0) } }
     port.onSourceStalled = { [weak page] in
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
@@ -153,18 +170,34 @@ final class CardOutput: OutputSink {
     }
   }
 
-  /// The page at the port's frame size, portrait for a quarter turn.
+  /// The page at the port's frame size, portrait for a quarter turn; its pictures
+  /// converted to the frame size.
   private func layOut() {
     guard let page = surface as? CEFWindowlessSurface, let size = port?.frameSize else { return }
+    source?.frameSize = size
     let w = CGFloat(size.width)
     let h = CGFloat(size.height)
     page.resize(to: rotation.swapsAxes ? CGSize(width: h, height: w) : CGSize(width: w, height: h))
   }
 
+  /// The latency page's stamp has been read, and the last picture had one.
+  private var readingStamps = false
+
   /// On the main thread, inside the paint callback.
   private func present(_ surface: IOSurfaceRef) {
+    var drawn: UInt64?
+    if readsLatencyStamp {
+      drawn = LatencyStampReader.contentNs(surface)
+      // Said on the change only: a page still loading has no stamp yet.
+      if drawn != nil, !readingStamps {
+        Log.notice(.output, "\(descriptor.port): reading the latency page's stamps")
+      } else if drawn == nil, readingStamps {
+        Log.error(.output, "\(descriptor.port): a picture had no latency stamp; it is timed from its begin frame")
+      }
+      readingStamps = drawn != nil
+    }
     do {
-      try source?.present(surface)
+      try source?.present(surface, contentNs: drawn)
       if presentProblem != nil {
         Log.notice(.output, "\(descriptor.port): its pictures can be copied again")
         presentProblem = nil
@@ -194,5 +227,28 @@ enum CardDump {
     } catch {
       return "could not write \(file.path): \(error.localizedDescription)"
     }
+  }
+}
+
+/// Reads the latency page's stamp (`LatencyPage.Stamp`) out of a picture the page
+/// handed over: when its content was drawn, on the host clock. Only with
+/// `--test-pattern latency`, where every picture carries one.
+enum LatencyStampReader {
+  static func contentNs(_ surface: IOSurfaceRef) -> UInt64? {
+    let size = LatencyPage.Stamp.blockSize
+    guard IOSurfaceGetWidth(surface) >= LatencyPage.Stamp.blocks * size, IOSurfaceGetHeight(surface) >= size,
+      IOSurfaceLock(surface, .readOnly, nil) == kIOReturnSuccess
+    else { return nil }
+    defer { IOSurfaceUnlock(surface, .readOnly, nil) }
+    let base = IOSurfaceGetBaseAddress(surface)
+    let rowBytes = IOSurfaceGetBytesPerRow(surface)
+    // The middle of each block; BGRA, so green is the second byte.
+    let stamp = LatencyPage.Stamp.decode { i in
+      base.load(fromByteOffset: (size / 2) * rowBytes + (i * size + size / 2) * 4 + 1, as: UInt8.self) > 128
+    }
+    guard let stamp else { return nil }
+    return LatencyPage.Stamp.hostNs(
+      of: stamp, epochNowMicros: UInt64(Date().timeIntervalSince1970 * 1e6),
+      hostNowNs: DispatchTime.now().uptimeNanoseconds)
   }
 }

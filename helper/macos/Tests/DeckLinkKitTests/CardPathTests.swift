@@ -30,12 +30,13 @@ import Testing
   func run(rotation: Rotation) async throws -> (counts: CardCounters, shown: [Int64], taken: Int, health: HealthSample) {
     let source = SurfaceFrameSource(converter: try UYVYConverter())
     let taken = Locked(0)
-    source.onFrameTaken = { _ in taken.value += 1 }
+    source.onBeginFrame = { _ in taken.value += 1 }
     source.rotation = rotation
     let port = DeckLinkOutputPort(
       label: "SDI 1 (virtual)", hardware: .virtual, source: source, retryInterval: 3600, pollInterval: 3600,
       log: LogLines().write)
-    #expect(port.open(videoMode: "720p59.94") == .running(mode: "720p59.94 on a software clock", frames: .helper))
+    #expect(port.open(videoMode: "720p59.94") == .running(mode: "720p59.94 on a software clock", frames: .card))
+    source.frameSize = port.frameSize
     try source.present(Self.portraitPage())
     try await Task.sleep(nanoseconds: 250_000_000)
     // What went out is the software clock's record, gone once the output closes.
@@ -52,9 +53,10 @@ import Testing
     #expect(r.counts.scheduled > 6)
     #expect(r.counts.repeated == r.counts.scheduled - 1)
     #expect(r.counts.missed == 0)
-    // The page is asked to draw once for every frame the port takes. A frame
-    // being filled as the output closes is taken and never scheduled: one more.
-    #expect((r.counts.scheduled...(r.counts.scheduled + 1)).contains(UInt64(r.taken)))
+    // The page is asked to draw once for every slot after the two of pre-roll,
+    // its head start (20 ms) before air: 3.3 ms after the slot before it was
+    // filled, so the slot after the last one filled may have been asked for too.
+    #expect(((r.counts.scheduled - 2)...(r.counts.scheduled - 1)).contains(UInt64(r.taken)))
     // What went out: the turned picture, whole (no line torn from another), held.
     let first = try #require(r.shown.firstIndex(of: Self.white), "the turned picture never went out: \(Set(r.shown))")
     #expect(r.shown[first...].allSatisfy { $0 == Self.white })
@@ -84,6 +86,7 @@ import Testing
       label: "SDI 1 (virtual)", hardware: .virtual, source: source, retryInterval: 3600, pollInterval: 3600,
       log: LogLines().write)
     port.open(videoMode: "720p59.94")
+    source.frameSize = port.frameSize
     try source.present(Self.portraitPage())
     try await Task.sleep(nanoseconds: 150_000_000)
     port.close()

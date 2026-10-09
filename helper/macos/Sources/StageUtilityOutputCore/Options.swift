@@ -1,8 +1,14 @@
 import Foundation
 
-/// Command-line flags. Parsed by hand: there are six and none is worth a
+/// Command-line flags. Parsed by hand: there are a handful and none is worth a
 /// dependency.
 public struct Options: Equatable {
+  /// What `--test-pattern` shows instead of a server's screen.
+  public enum TestPattern: String, Equatable, CaseIterable {
+    /// `LatencyPage`: a clock to photograph, and a stamp the helper reads back.
+    case latency
+  }
+
   /// `--dump-frames <dir>`: write a PNG of every output every 5 s.
   public var dumpFramesDir: URL?
   /// `--show-window`: open the helper's window at launch (a menu bar app does not,
@@ -18,6 +24,17 @@ public struct Options: Equatable {
   /// `--virtual-sdi <n>`, for development: add n card outputs with no card behind
   /// them (`VirtualCards`), so the card path runs end to end on any Mac. 0 without it.
   public var virtualSDI = 0
+  /// `--test-pattern latency`, for development: every output that is on shows the
+  /// latency page instead of its server's screen (DECKLINK.md, "Latency").
+  public var testPattern: TestPattern?
+  /// `--frame-timings <file>`, for development: every card output's slots, one CSV
+  /// line each, appended once a second (`FrameTimingCSV`).
+  public var frameTimingsFile: URL?
+  /// `--head-start <ms>` and `--fill-lead <ms>`, for development: when each card
+  /// slot's picture is asked for and when the slot is filled, before air. Nil keeps
+  /// the measured defaults.
+  public var headStartMs: Double?
+  public var fillLeadMs: Double?
 
   public init() {}
 
@@ -49,6 +66,25 @@ public struct Options: Equatable {
             o.virtualSDI = n
           } else {
             problems.append("--virtual-sdi takes 1 to \(VirtualCards.maxCount): \(v)")
+          }
+        }
+      case "--test-pattern":
+        if let v = value("--test-pattern") {
+          if let p = TestPattern(rawValue: v) {
+            o.testPattern = p
+          } else {
+            problems.append("--test-pattern takes \(TestPattern.allCases.map(\.rawValue).joined(separator: ", ")): \(v)")
+          }
+        }
+      case "--frame-timings":
+        if let v = value("--frame-timings") { o.frameTimingsFile = URL(fileURLWithPath: v) }
+      case "--head-start", "--fill-lead":
+        let flag = args[i]
+        if let v = value(flag) {
+          if let ms = Double(v), ms > 0, ms < 1000 {
+            if flag == "--head-start" { o.headStartMs = ms } else { o.fillLeadMs = ms }
+          } else {
+            problems.append("\(flag) takes milliseconds, more than 0 and less than 1000: \(v)")
           }
         }
       case "--show-window": o.showWindow = true

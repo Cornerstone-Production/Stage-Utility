@@ -88,10 +88,17 @@ public struct HealthSample: Equatable {
   /// Frames dropped since the output opened. Cumulative: the server reads a count
   /// lower than the last as the output having been reopened, not as a drop.
   public var dropped: Int
+  /// A card output's delay over the window, the median from a picture's content
+  /// being drawn to its frame going out of the card (`FrameTiming.renderToAirMs`).
+  /// Nil when nothing measured it: a display output, or no new picture went out.
+  /// Shown in the helper's window and log; not sent to the server, whose health
+  /// route keeps only the fields above.
+  public var latencyMs: Double?
 
-  public init(fps: Double, repeated: Double = 0, dropped: Int = 0) {
+  public init(fps: Double, repeated: Double = 0, dropped: Int = 0, latencyMs: Double? = nil) {
     self.fps = fps
     self.repeated = repeated
     self.dropped = dropped
+    self.latencyMs = latencyMs
   }
 }

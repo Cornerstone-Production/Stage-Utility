@@ -162,23 +162,65 @@ final class FrameMemory {
 
   @Test func aSurfaceSourceSendsEachPictureOnceAndThenRepeats() throws {
     let source = SurfaceFrameSource(converter: converter)
+    source.frameSize = (4, 1)
     let frame = FrameMemory(width: 4, height: 1)
     let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
-    var taken: [Int64] = []
-    source.onFrameTaken = { taken.append($0.index) }
+    var begun: [Int64] = []
+    source.onBeginFrame = { begun.append($0.index) }
 
-    #expect(source.fill(request, into: frame.target) == false)  // nothing presented yet
+    #expect(source.fill(request, into: frame.target) == nil)  // nothing presented yet
+    source.begin(CardFrameRequest(index: 7, streamTime: 0, timeScale: 60000))
     try source.present(bgraSurface(width: 4, height: 1, Array(repeating: .grey(255), count: 4)))
-    #expect(source.fill(request, into: frame.target) == true)
+    #expect(source.fill(request, into: frame.target) != nil)
     #expect(frame.pairs == [[128, 235, 128, 235], [128, 235, 128, 235]])
-    #expect(source.fill(request, into: frame.target) == false)  // the same picture: a repeat
+    #expect(source.fill(request, into: frame.target) == nil)  // the same picture: a repeat
 
     source.rotation = .clockwise180
     try source.present(bgraSurface(width: 4, height: 1, [.grey(0), .grey(0), .grey(255), .grey(255)]))
-    #expect(source.fill(request, into: frame.target) == true)
+    #expect(source.fill(request, into: frame.target) != nil)
     #expect(frame.pairs == [[128, 235, 128, 235], [128, 16, 128, 16]])
-    #expect(taken == [0, 0, 0, 0])
+    #expect(begun == [7])
     #expect(source.failure == nil)
+  }
+
+  /// A picture is converted when it is presented, at the card's frame size: until
+  /// the source knows that size there is nothing to convert to, and the picture
+  /// is dropped rather than sent at the wrong size.
+  @Test func aPictureBeforeTheFrameSizeIsKnownIsDropped() throws {
+    let source = SurfaceFrameSource(converter: converter)
+    let frame = FrameMemory(width: 2, height: 1)
+    let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
+    try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
+    #expect(source.fill(request, into: frame.target) == nil)
+    source.frameSize = (2, 1)
+    try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
+    #expect(source.fill(request, into: frame.target) != nil)
+  }
+
+  /// A picture's times: drawn for the begin frame it answers (the last asked for
+  /// before it arrived), handed over when presented, ready once converted; or
+  /// drawn when the caller says, as the latency page's stamp does.
+  @Test func aPictureCarriesTheTimesItWasMadeAt() throws {
+    let clock = Locked<UInt64>(1_000)
+    let source = SurfaceFrameSource(converter: converter, now: { clock.value })
+    source.frameSize = (2, 1)
+    let frame = FrameMemory(width: 2, height: 1)
+    let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
+    let white = bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)])
+
+    source.begin(request)  // at 1000
+    clock.value = 1_500
+    source.begin(request)  // at 1500
+    clock.value = 2_000
+    try source.present(white)
+    let picture = try #require(source.fill(request, into: frame.target))
+    #expect(picture.contentNs == 1_500)
+    #expect(picture.paintNs == 2_000)
+    #expect(picture.readyNs == 2_000)
+
+    clock.value = 3_000
+    try source.present(white, contentNs: 2_750)
+    #expect(source.fill(request, into: frame.target)?.contentNs == 2_750)
   }
 
   /// Two pictures before the card takes a frame: the newer goes out, once, and the
@@ -187,10 +229,11 @@ final class FrameMemory {
     let source = SurfaceFrameSource(converter: converter)
     let frame = FrameMemory(width: 2, height: 1)
     let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
+    source.frameSize = (2, 1)
     try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
     try source.present(bgraSurface(width: 2, height: 1, [.grey(0), .grey(0)]))
-    #expect(source.fill(request, into: frame.target) == true)
+    #expect(source.fill(request, into: frame.target) != nil)
     #expect(frame.pairs == [[128, 16, 128, 16]])
-    #expect(source.fill(request, into: frame.target) == false)
+    #expect(source.fill(request, into: frame.target) == nil)
   }
 }

@@ -68,56 +68,88 @@ off until the screen's mode changes.
 
 ## Timing
 
-The card's clock drives each output, through scheduled playback.
+The card's clock drives each output, through scheduled playback. Every slot (one
+frame of the mode) is handled at two fixed times before it goes to air, on the
+card's clock:
 
-- **Frames in flight.** Three frames, all filled and scheduled before playback
-  starts. The frames' memory is the helper's own, page-aligned, so Metal writes the
-  picture straight into it (see [Helper frames and card frames](#helper-frames-and-card-frames)).
-- **Each frame.** When the card finishes showing frame *k* (`ScheduledFrameCompleted`),
-  the source is asked for frame *k* + 3, two slots after the one on air, and that
-  frame is scheduled.
-- **A late source.** If the source has no new picture, the frame carries the previous
-  picture again and counts as **repeated**. Nothing waits for the page.
+| When | What |
+|---|---|
+| **Head start**, 20 ms before air | The page is asked for the slot's picture: a begin frame to Chromium (`begin`). |
+| **Fill lead**, 5 ms before air | The newest picture the page has handed over is copied into one of the card's frames, and the frame is scheduled (`fill`). |
+
+- **A clock of its own.** Each output has a real-time thread that sleeps until the
+  next begin or fill. The card's clock is read from its completions (each frame
+  finishes exactly as the next slot begins), not by asking the driver, which takes
+  up to 0.8 ms to answer. A real-time thread wakes within about 35 us of when it
+  asked; at user-interactive priority macOS woke it 1.4 ms late, most of a fill
+  lead.
+- **Frames.** Three of the card's frames per output: the one on air, the one
+  scheduled after it, and one to fill while a completion is on its way. More frames
+  add no delay; when a frame goes out is set by the leads. Two are filled before
+  playback starts (the pre-roll).
+- **A late page.** If the page has handed over nothing new since the last fill, the
+  frame carries the previous picture again and counts as **repeated**. Nothing waits
+  for the page.
+- **A late fill.** A fill that starts with less than 3.5 ms left before its slot
+  could not reach the card in time, and one that finds every frame still with the
+  card (its completions are late) has nothing to write into. Either way the slot is
+  **skipped**: nothing of ours is sent for it, and the card holds its previous
+  picture, rather than showing a frame late. A run of skipped slots is one **resync**.
 - **The card's own report.** A frame the card reports displayed late
   (`bmdOutputFrameDisplayedLate`) or dropped (`bmdOutputFrameDropped`) counts as
   **dropped**.
-- **A schedule that slips.** If the host was held up and the next frame would go out
-  at or before the frame on air, the schedule jumps to two frames ahead of the card
-  (**resync**) instead of scheduling frames in the past, which would be shown late
-  for good or dropped until it caught up.
+
+The leads are measured, not guessed: see [Latency](#latency). `DeckLinkOutputPort`
+takes others (`CardLeads`), and the helper's `--head-start` and `--fill-lead`
+flags set them for every card output, for measuring.
 
 Health posts report `fps` as frames sent per second (repeats included), `repeated` as
 the percent of those that were repeats, and `dropped` as every slot missed since the
-port was made: reported dropped by the card, or passed over by a resync (`skipped`).
+port was made: reported dropped by the card, or skipped.
+
+## Latency
+
+**Render to air** is the time from the page drawing a picture's content to the slot
+carrying it beginning to go out of the card: how far the card's output runs behind
+the page. Each slot's times are kept in the shim (`dl_frame_timing`, `FrameTiming`):
+when the picture's content was drawn, handed over, converted, filled, taken by the
+card, on air, and finished with. The health sample carries the window's median
+(`latencyMs`), the window shows it, and the log says it when it changes.
+
+With the standard leads it is 20 ms at 1080p59.94: the head start. The method, the
+measurements and the frame-by-frame budget are below in [Measured](#measured).
 
 ## Helper frames and card frames
 
 A port sends its pictures in one of two kinds of frame, shown in its state
-(`.running(mode:frames:)`, `port.frames`):
+(`.running(mode:frames:)`, `port.frames`). Either way the page's picture, already
+converted to UYVY when the page handed it over, is copied straight into the frame
+at the fill: one `memcpy` of 4 MB per 1080p frame, about 0.5 ms.
 
-| Frames | What happens per frame | Cost |
+| Frames | What they are | Used |
 |---|---|---|
-| **The helper's** (the default) | Metal writes the picture into the helper's own page-aligned memory, which is handed to the card as an `IDeckLinkVideoFrame`. | No copy. |
-| **The card's** | Metal writes into the same helper memory, then the picture is copied into a frame the card made (`IDeckLinkOutput::CreateVideoFrame`, 8-bit YUV), a line at a time if the card pads its lines. | One `memcpy` of 4 MB per 1080p frame: about 0.1 ms on an M4 Mac mini (0.07-0.10 ms, about 45 GB/s, measured with buffers larger than the caches). Eight outputs at 59.94 is about 5% of one core and 4 GB/s more memory traffic. |
+| **The card's** (the default) | Frames the card made (`IDeckLinkOutput::CreateVideoFrame`). | Always, unless the card will not make them. |
+| **The helper's** | Page-aligned memory of the helper's own, handed to the card as an `IDeckLinkVideoFrame`. | When the card will not make frames, or when asked for. |
 
-The SDK lets an application hand over its own frames, but whether a given driver
-takes them is unproven until a card is on the bench. So a port that has its own
-frames refused while it is filling the pre-roll opens again by itself in the
-card's frames for the rest of that open (a reopening tries the helper's frames
-first again), and logs the switch once per port:
+On an 8K Pro with Desktop Video 16.4, the driver took the helper's frames, but now
+and then `ScheduleVideoFrame` stalled on them for 3 to 38 ms at a time, in episodes
+of a few seconds, with nothing else running; over the same two minutes in the card's
+frames it never took more than 2 ms (`DeckLinkProbe bars`, 7,240 frames each). So a
+port asks for the card's frames. One whose card will not make frames opens again by
+itself in the helper's, and one asked for the helper's whose card refuses them during
+the pre-roll opens again in the card's; either switch is logged once per port:
 
 ```
-<port>: the card refused the helper's own frames, so it gets the card's frames, with one copy of each picture
+<port>: the card would not make frames of its own, so it gets the helper's frames
+<port>: the card refused the helper's own frames, so it gets the card's frames
 ```
 
-Its open line then reads `opened in 1080p59.94 with the card's frames`. A frame
-refused once playback is running is not a refusal of the kind of frame but a
-failed port, and is handled as one. The card's frames are not written by Metal
-directly, because nothing promises their memory is page-aligned and a whole number
-of pages, which a Metal buffer without a copy needs.
+and its open line then reads `opened in 1080p59.94 with the helper's frames`. A frame
+refused once playback is running is not a refusal of the kind of frame but a failed
+port, and is handled as one.
 
-`DeckLinkOutputPort(cardFrames: true)` and `DeckLinkProbe … --card-frames` use the
-card's frames from the start.
+`DeckLinkOutputPort(frames: .helper)` and `DeckLinkProbe … --helper-frames` ask for the
+helper's frames.
 
 ## Bandwidth
 
@@ -150,8 +182,9 @@ log stream --level info --predicate 'subsystem == "com.stageutility.output" && c
 |---|---|
 | `Desktop Video is not installed, so there are no DeckLink outputs; install it and restart the helper` | At the first scan, and again only if that changes. Likewise too old or not loading. |
 | `Desktop Video 14.2: 2 output ports: …` | The driver found, or its ports changed. |
-| `<port>: opened in 1080p59.94` / `reopened in …` | A port started, or came back. `… with the card's frames` when it sends in those. |
-| `<port>: the card refused the helper's own frames, so it gets the card's frames, …` | Once per port, the first time it falls back. |
+| `<port>: opened in 1080p59.94` / `reopened in …` | A port started, or came back. `… with the helper's frames` when it sends in those; `; pictures asked for 16 ms and filled 4 ms before air` when the leads are not the standard ones. |
+| `<port>: the card would not make frames of its own, so it gets the helper's frames` / `the card refused the helper's own frames, so it gets the card's frames` | Once per port, the first time it switches. |
+| `<port>: render to air 20.0 ms (p95 20.1, max 20.2) over 591 new pictures` | When a health window first measures it, and again when it moves by 4 ms or more: how far behind the page the card's output runs (see [Latency](#latency)). |
 | `<port>: refused 1080p59.94: <reason>` | The mode cannot be played on that port. |
 | `<port>: could not open (<reason>)` / `lost (<reason>)` | A port that will not open or went away; retried. A running port that sends nothing for two seconds is lost with "the card stopped taking frames". |
 | `<port>: falling behind: r repeated and d dropped in the last second` / `keeping up again after n s` | A second with 3 or more repeats (5% at 59.94, the server's line) or any slot missed, and five good seconds in a row after it (`CardWatch`). |
@@ -162,40 +195,39 @@ Healthy frames are not logged.
 
 ```sh
 swift run DeckLinkProbe list                       # the driver, the ports, their modes
-swift run DeckLinkProbe bars <output key> [mode] [seconds] [--card-frames]
-swift run DeckLinkProbe null [seconds] [outputs] [--card-frames]   # the software clock, no card
+swift run DeckLinkProbe bars <output key> [mode] [seconds] [--helper-frames] [--head-start ms] [--fill-lead ms]
+swift run DeckLinkProbe null [seconds] [outputs] [--helper-frames] [--head-start ms] [--fill-lead ms]
 ```
 
-`--card-frames` sends in frames the card makes, as a port does when its driver
-refuses the helper's: the way to check that mode on a card that would take either.
+`--helper-frames` sends in frames of the helper's own memory, as a port does when its
+card will not make frames: the way to check that kind on a card that would take
+either. `--head-start` and `--fill-lead` move the two times each slot is handled at.
 
 `bars` and `null` play 75% colour bars with a moving white line through the whole
 path (an IOSurface presented, the Metal conversion, the scheduler) and print the
-counts every second. Each picture is drawn when the clock takes the frame before
-it, on another thread, as a browser's begin frame would be.
+counts every second, and at the end where the delay went, stage by stage
+(`LatencyBreakdown`). Each picture is drawn when the clock asks for it, on another
+thread, as a browser's begin frame would be. With `DECKLINK_PROBE_CSV=<file>` every
+slot's timing is written out too.
 
 ## How it plugs in
 
 | Type | Role |
 |---|---|
-| `CardFrameSource` | Answers "the picture for frame *n*", on the card's thread. Return false for a repeat. |
-| `CardSink` | Pulls from a source on its own clock and counts: `counters` (`scheduled`, `rendered`, `repeated`, `dropped`, `resyncs`, `skipped`) and `takeHealthSample()`, in the server's units. |
+| `CardFrameSource` | Starts the picture for slot *n* when asked (`begin`, the head start before air), and hands over the newest picture with its times (`fill`, the fill lead before air), on the output's clock thread. Nil for a repeat. |
+| `CardSink` | Pulls from a source on its own clock and counts: `counters` (`scheduled`, `rendered`, `repeated`, `dropped`, `resyncs`, `skipped`) and `takeHealthSample()`, in the server's units, with the window's render-to-air latency (`latencyMs`). |
 | `DeckLinkOutputPort` | The `CardSink` for a port. `.port(DeckLinkPort)` for a card; `.virtual` for a `--virtual-sdi` output, the scheduler on a software clock at the size and rate of whichever server mode it is opened in; `.softwareClock(…)`, a fixed size, for tests and the bench tool. Once a second it logs falling behind and catching up, and calls `onSourceStalled` when the source has had nothing new for 5 s. |
 | `SurfaceFrameSource` | A `CardFrameSource` an engine presents IOSurfaces to, with the `rotation`, the Metal conversion, and `captureNextFrame` for a dump of what the card was sent. |
 | `DeckLinkInventory`, `DeckLinkDriver.watchDevices` | The ports to announce (`seen`: every port found since launch), and when to look again. |
 
 In the helper, each card output (`CardOutput`) is a windowless CEF browser at the
 port's frame size, a `SurfaceFrameSource` and a `DeckLinkOutputPort`. The browser's
-`OnAcceleratedPaint` presents into the source, which copies the surface before the
-callback returns; the source's `onFrameTaken` sends the browser its next begin frame
-(CEF runs `SendExternalBeginFrame` on its UI thread), so the page renders once per
-output frame, ahead of the frame that will carry it; the screen's `rotation` is the
+`OnAcceleratedPaint` presents into the source, which converts the surface to UYVY at
+the frame size before the callback returns; the source's `onBeginFrame` sends the
+browser its begin frame for each slot (CEF runs `SendExternalBeginFrame` on its UI
+thread), so the page renders once per output frame; the screen's `rotation` is the
 source's, with the browser laid out at the turned size; its `videoMode` opens the
 port. The helper's [README](README.md#chromium) has the rest.
-
-The scheduling follows the general approach MxU Slides describes (scheduled playback
-clocked by the completion callback, the latest picture copied into the returned
-frame). MxU's code is PolyForm Shield, not open source; none of it is used.
 
 ## What is proven, and what needs a card
 

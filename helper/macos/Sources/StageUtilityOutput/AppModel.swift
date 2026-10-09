@@ -59,6 +59,8 @@ final class AppModel: ObservableObject {
     /// Why the screens could not be read, while they cannot: logged once, not per try.
     var screenReadProblem: String?
     var fps: Double?
+    /// A card output's render-to-air latency over the last health window.
+    var latencyMs: Double?
     /// Times the page's renderer has ended since launch, for the window.
     var crashes = 0
     init(output: PresentOutput) { self.output = output }
@@ -143,6 +145,25 @@ final class AppModel: ObservableObject {
   }
 
   private let gpuWatch = GPUProcessWatch()
+
+  /// Every card output's settings, from the command line.
+  private lazy var cardSettings: CardOutput.Settings = {
+    var settings = CardOutput.Settings()
+    if let ms = options.headStartMs { settings.leads.headStartMs = ms }
+    if let ms = options.fillLeadMs { settings.leads.fillLeadMs = ms }
+    settings.readsLatencyStamp = options.testPattern == .latency
+    if let file = options.frameTimingsFile {
+      do {
+        let log = try FrameTimingFile(file)
+        settings.onTimings = { output, timings in log.append(output: output, timings) }
+        Log.notice(.app, "writing every card output's frame timings to \(file.path)")
+      } catch {
+        Log.error(.app, "--frame-timings: cannot write \(file.path): \(error.localizedDescription)")
+        setNote("frame-timings", "--frame-timings: cannot write \(file.path)")
+      }
+    }
+    return settings
+  }()
 
   // MARK: Outputs
 
@@ -258,7 +279,7 @@ final class AppModel: ObservableObject {
     if let screen = rt.output.screen {
       sink = DisplaySink(descriptor: d, screen: screen)
     } else if let card = rt.output.card {
-      sink = CardOutput(descriptor: d, hardware: card)
+      sink = CardOutput(descriptor: d, hardware: card, settings: cardSettings)
     } else {
       Log.error(.output, "\(d.port): neither a display nor a card port; not started")
       return
@@ -319,6 +340,7 @@ final class AppModel: ObservableObject {
     rt.screenReadProblem = nil
     rt.boundScreenName = nil
     rt.fps = nil
+    rt.latencyMs = nil
     healthBoard.forget(key)
     // A server from discovery is looked for again on the next turn-on; one from the
     // server file stays.
@@ -359,6 +381,10 @@ final class AppModel: ObservableObject {
   }
 
   private func navigate(_ rt: Runtime) {
+    if options.testPattern == .latency {
+      rt.sink?.show(url: LatencyPage.url)
+      return
+    }
     guard let server = rt.serverURL, let token = store.record(for: rt.descriptor.key)?.token,
       let url = EnrollURL.make(server: server, deviceId: deviceId(rt), token: token)
     else {
@@ -471,6 +497,7 @@ final class AppModel: ObservableObject {
       guard let rt = runtimes[key], let sink = rt.sink else { continue }
       let sample = sink.takeHealthSample()
       rt.fps = sample.fps
+      rt.latencyMs = sample.latencyMs
       guard rt.showingBound, healthBoard.isDue(key, at: now), let server = rt.serverURL,
         let token = store.record(for: key)?.token,
         let request = HealthPost.request(
@@ -553,7 +580,8 @@ final class AppModel: ObservableObject {
         .init(
           enabled: record.enabled, isMain: d.isMain, serverKnown: rt.serverURL != nil,
           unreachable: rt.unreachable, boundScreenName: rt.boundScreenName, showingBound: rt.showingBound,
-          fps: rt.fps, healthPaused: healthBoard.isPaused(key), portProblem: (rt.sink as? CardOutput)?.problem))
+          fps: rt.fps, healthPaused: healthBoard.isPaused(key), portProblem: (rt.sink as? CardOutput)?.problem,
+          latencyMs: rt.latencyMs, testPattern: options.testPattern != nil))
       return OutputRow(id: key, title: d.isMain ? "\(d.name) (main)" : d.name, enabled: record.enabled, status: status)
     }
     connection = StatusText.connection(
