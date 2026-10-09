@@ -78,7 +78,11 @@ export function startKioskResponder(opts: ResponderOptions): void {
         hostname: probe.hostname,
         os: probe.os,
         ip: rinfo.address,
-        boundTo: probe.boundTo,
+        // Only a binding to ANOTHER server is worth showing. A device that names this
+        // server but is not bound here (released, or claimed on a previous install)
+        // is simply unclaimed; keeping its boundTo drew "Set up on another server,
+        // which it cannot reach" under a device that can reach this one fine.
+        boundTo: probe.boundTo === opts.serverId ? undefined : probe.boundTo,
         unreachable: probe.unreachable,
         screen: probe.mode ? { w: 0, h: 0, mode: probe.mode } : undefined,
         output: probe.output,

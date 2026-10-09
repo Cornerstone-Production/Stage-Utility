@@ -203,5 +203,10 @@ describe("a helper output bound to this server", () => {
       [ID],
       "a released output was not listed at its next probe",
     );
+    assert.equal(
+      seenDevices()[0].boundTo,
+      undefined,
+      "a released output that names THIS server was listed as set up on another one",
+    );
   });
 });
