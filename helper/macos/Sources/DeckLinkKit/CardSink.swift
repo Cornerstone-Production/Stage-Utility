@@ -13,8 +13,8 @@ public struct CardFrameRequest: Equatable {
   public var seconds: Double { Double(streamTime) / Double(timeScale) }
 }
 
-/// The memory a picture goes into: 8-bit UYVY, `rowBytes` per line. Page-aligned
-/// and a whole number of pages long, so Metal could write into it without a copy.
+/// The memory a picture goes into: 8-bit UYVY, `rowBytes` per line, `length` long:
+/// a frame the card made, or one of the helper's own.
 public struct CardFrameTarget {
   public var bytes: UnsafeMutableRawPointer
   public var length: Int
@@ -71,8 +71,9 @@ public protocol CardFrameSource: AnyObject {
   /// goes out again as a repeat.
   ///
   /// Called on the output's clock thread the fill lead before the frame goes to
-  /// air, while the card waits: a copy, not a render. No locks held elsewhere for
-  /// long, no main-thread hops.
+  /// air, while the card waits (the pre-roll's two on the thread opening the
+  /// output): a copy, not a render. No locks held elsewhere for long, no
+  /// main-thread hops.
   func fill(_ request: CardFrameRequest, into target: CardFrameTarget) -> CardPicture?
 }
 

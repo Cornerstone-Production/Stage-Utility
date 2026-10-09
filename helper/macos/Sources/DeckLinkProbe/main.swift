@@ -139,11 +139,12 @@ func describe(_ name: String, _ d: Distribution?) -> String {
 
 func printBreakdown(_ label: String, _ timings: [FrameTiming]) {
   if let path = ProcessInfo.processInfo.environment["DECKLINK_PROBE_CSV"] {
-    let lines = timings.map {
-      "\($0.index),\($0.fresh ? 1 : 0),\($0.skipped ? 1 : 0),\($0.result),\($0.contentNs),\($0.paintNs),\($0.readyNs),\($0.fillNs),\($0.copiedNs),\($0.scheduledNs),\($0.airNs),\($0.completedNs)"
+    let text = ([FrameTimingCSV.header] + timings.map { FrameTimingCSV.line(output: label, $0) }).joined(separator: "\n")
+    do {
+      try text.write(toFile: path, atomically: true, encoding: .utf8)
+    } catch {
+      print("could not write \(path): \(error.localizedDescription)")
     }
-    try? (["index,fresh,skipped,result,content_ns,paint_ns,ready_ns,fill_ns,copied_ns,scheduled_ns,air_ns,completed_ns"] + lines)
-      .joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
   }
   let b = LatencyBreakdown.of(timings)
   print("\(label): render to air, over the new pictures that went out")

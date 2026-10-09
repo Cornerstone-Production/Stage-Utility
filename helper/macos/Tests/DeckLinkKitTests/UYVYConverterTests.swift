@@ -197,6 +197,17 @@ final class FrameMemory {
     #expect(source.fill(request, into: frame.target) != nil)
   }
 
+  /// A picture converted for one frame size is not copied into a frame of another:
+  /// a port reopened in a bigger mode fills its pre-roll before the source learns
+  /// the new size, and copying the old picture would read past its buffer.
+  @Test func aPictureOfTheOldSizeIsNotCopiedIntoANewFrame() throws {
+    let source = SurfaceFrameSource(converter: converter)
+    source.frameSize = (2, 1)
+    try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
+    let bigger = FrameMemory(width: 4, height: 2)
+    #expect(source.fill(CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000), into: bigger.target) == nil)
+  }
+
   /// A picture's times: drawn for the begin frame it answers (the last asked for
   /// before it arrived), handed over when presented, ready once converted; or
   /// drawn when the caller says, as the latency page's stamp does.

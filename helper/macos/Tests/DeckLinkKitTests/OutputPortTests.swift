@@ -313,6 +313,49 @@ let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a so
     }
   }
 
+  /// A frame the card showed late or dropped did not go out when its time says,
+  /// so it is left out of the latency: 28 new pictures timed, 2 of them late.
+  @Test func framesShownLateAreLeftOutOfTheLatency() {
+    let log = LogLines()
+    let port = softwarePort(NumberedSource(drawnBeforeAirMs: 18), log: log)
+    defer { port.close() }
+    port.open(videoMode: nil)
+    port.fakeTick(5)
+    port.fakeReportLate(2)  // frames 5 and 6
+    port.fakeTick(25)
+    _ = port.takeHealthSample()
+    #expect(log.lines.last?.hasSuffix("over 26 new pictures") == true, "\(log.lines)")
+  }
+
+  /// A card that cannot say where its playback is leaves nothing to time a slot
+  /// by. The clock thread asks again every millisecond rather than spinning, and
+  /// the port says why it sends nothing.
+  @Test func aCardThatCannotSayWhereItIsIsAskedEveryMillisecond() async throws {
+    let log = LogLines()
+    let port = DeckLinkOutputPort(
+      label: "SDI test",
+      hardware: .softwareClock(
+        width: 16, height: 4, frameDuration: 1001, timeScale: 60000, ticksByItself: true, clockUnknown: true),
+      source: NumberedSource(), retryInterval: 3600, pollInterval: 3600, log: log.write)
+    defer { port.close() }
+    port.open(videoMode: nil)
+    try await Task.sleep(nanoseconds: 200_000_000)
+    let reads = port.fakeClockReads()
+    #expect(reads > 20 && reads < 1_000, "\(reads) reads in 200 ms")
+    port.pollForTest()
+    #expect(log.lines.contains("SDI test: the card would not say where its playback is, so no frame could be timed"))
+  }
+
+  /// A head start no longer than the fill lead leaves the page no time at all:
+  /// the open is refused and says why.
+  @Test func aHeadStartNoLongerThanTheFillLeadIsRefused() {
+    let port = softwarePort(NumberedSource(), leads: CardLeads(headStartMs: 5, fillLeadMs: 5))
+    defer { port.close() }
+    #expect(
+      port.open(videoMode: nil)
+        == .lost("the head start is not longer than the fill lead, so no picture could be ready in time"))
+  }
+
   @Test func aNewPortStartsTheDropTotalAtNothing() {
     let port = softwarePort(NumberedSource())
     defer { port.close() }

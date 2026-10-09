@@ -85,6 +85,25 @@ import Testing
     #expect(dl_fake_card_frames_alive() == before)
   }
 
+  /// A card that will take neither kind is tried once in each and refused: the open
+  /// returns, rather than switching back and forth for ever. Opened on another
+  /// thread, so an open that never returns fails this test after 5 s instead of
+  /// hanging the run (the time limit of a test cannot stop a loop that never waits).
+  @Test func aCardThatTakesNeitherKindIsTriedOnceInEach() {
+    let port = fakePort(NumberedSource(), log: LogLines(), refuses: true, makesNoFrames: true)
+    let state = Locked<DeckLinkOutputPort.State?>(nil)
+    let done = DispatchSemaphore(value: 0)
+    Thread.detachNewThread {
+      state.value = port.open(videoMode: nil)
+      done.signal()
+    }
+    let returned = done.wait(timeout: .now() + 5) == .success
+    #expect(returned, "the open did not return in 5 s")
+    guard returned else { return }
+    #expect(state.value == .lost("the card refused the helper's own frames"))
+    port.close()
+  }
+
   @Test func helperFramesOnACardThatTakesThemMakeNone() {
     let before = dl_fake_card_frames_alive()
     let port = fakePort(NumberedSource(), log: LogLines(), frames: .helper)

@@ -82,6 +82,8 @@ final class AppModel: ObservableObject {
   private let deckLink = DeckLinkInventory(log: Log.decklink)
   private let deckLinkScans = DispatchQueue(label: "com.stageutility.output.decklink-scan", qos: .utility)
   private var deckLinkTimer: Timer?
+  /// Set by `stopAll`: a scan finishing after it changes nothing.
+  private var stopping = false
   /// How often the ports are looked at again: Desktop Video Setup turning a port
   /// from an input to an output sends no device notification.
   static let deckLinkRescan: TimeInterval = 10
@@ -154,6 +156,7 @@ final class AppModel: ObservableObject {
 
   /// Before the app quits: close every output's page and stop every clock.
   func stopAll() {
+    stopping = true
     gpuWatch.stop()
     deckLinkTimer?.invalidate()
     for key in order { deactivate(key) }
@@ -216,7 +219,7 @@ final class AppModel: ObservableObject {
       let scan = deckLink.scan()
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
-          guard let self else { return }
+          guard let self, !self.stopping else { return }
           self.deckLinkScanned(scan.status)
           if scan.changed || devicesChanged { self.reconcile() }
           if devicesChanged { for key in self.order { (self.runtimes[key]?.sink as? CardOutput)?.retry() } }

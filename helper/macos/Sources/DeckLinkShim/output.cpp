@@ -158,8 +158,8 @@ bool Output::start(std::string &why) {
     why = "an output needs at least two frames";
     return false;
   }
-  if (headStartNs_ < fillLeadNs_) {
-    why = "the head start is shorter than the fill lead, so no picture could be ready in time";
+  if (headStartNs_ <= fillLeadNs_) {
+    why = "the head start is not longer than the fill lead, so no picture could be ready in time";
     return false;
   }
   for (int32_t n = 0; n < callbacks_.depth; n++) {
@@ -316,16 +316,9 @@ bool Output::fillAndSchedule(Slot &slot, int64_t index, uint64_t now, uint64_t a
     // No new picture: this frame's memory still holds whatever it carried frames
     // ago, so the previous picture is copied in, with its times. Sending the stale
     // one would step the picture backwards.
+    // Every slot of an output is the same kind of frame, so the same row length.
     if (last_ != nullptr && last_ != &slot) {
-      const size_t row = static_cast<size_t>(width_) * 2;
-      if (slot.rowBytes() == last_->rowBytes()) {
-        std::memcpy(slot.bytes(), last_->bytes(), static_cast<size_t>(slot.rowBytes()) * height_);
-      } else {
-        for (int32_t y = 0; y < height_; y++) {
-          std::memcpy(slot.bytes() + static_cast<size_t>(y) * slot.rowBytes(),
-                      last_->bytes() + static_cast<size_t>(y) * last_->rowBytes(), row);
-        }
-      }
+      std::memcpy(slot.bytes(), last_->bytes(), static_cast<size_t>(slot.rowBytes()) * height_);
       timing.content_ns = last_->timing.content_ns;
       timing.paint_ns = last_->timing.paint_ns;
       timing.ready_ns = last_->timing.ready_ns;
@@ -333,10 +326,19 @@ bool Output::fillAndSchedule(Slot &slot, int64_t index, uint64_t now, uint64_t a
   }
   timing.copied_ns = started_ ? card_->now() : 0;
   {
+    // Recorded before the card has it: a driver may report the frame complete
+    // before ScheduleVideoFrame returns, and the completion must find this slot's
+    // own times, not the last frame's.
     std::lock_guard<std::mutex> lock(state_);
     slot.busy = true;
+    slot.timing = timing;
+    slot.scheduledIndex = index;
   }
   if (!card_->schedule(slot.sent(), at, frameDuration_, timeScale_)) {
+    {
+      std::lock_guard<std::mutex> lock(state_);
+      slot.scheduledIndex = -1;
+    }
     if (!started_ && !cardFrames_) {
       // Refused before playback began, in the helper's own frames: the driver
       // may not take application memory. Not a loss; the open is made again with
@@ -347,13 +349,13 @@ bool Output::fillAndSchedule(Slot &slot, int64_t index, uint64_t now, uint64_t a
     }
     return false;
   }
-  timing.scheduled_ns = started_ ? card_->now() : 0;
+  const uint64_t scheduledNs = started_ ? card_->now() : 0;
   if (!fresh) repeated_++;
   scheduled_++;
   skipping_ = false;
   std::lock_guard<std::mutex> lock(state_);
-  slot.timing = timing;
-  slot.scheduledIndex = index;
+  // Unless the card has already finished with it, and kept its times without this.
+  if (slot.scheduledIndex == index) slot.timing.scheduled_ns = scheduledNs;
   last_ = &slot;
   return true;
 }
@@ -371,6 +373,8 @@ void Output::clockLoop() {
   policy.preemptible = 1;
   if (thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY,
                         reinterpret_cast<thread_policy_t>(&policy), THREAD_TIME_CONSTRAINT_POLICY_COUNT) != KERN_SUCCESS) {
+    // Refused: run as well as a normal thread can, and say so (dl_counters).
+    notRealtime_ = true;
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
   }
   while (!closing_ && !lost_) {
@@ -381,19 +385,26 @@ void Output::clockLoop() {
       run(event, now);
       continue;
     }
-    // Not due yet, or the card cannot say where its clock is: wait, briefly in the
-    // second case. A timed wait on a condition variable wakes 2 to 3 ms late on
+    // The card cannot say where its clock is: ask again in a millisecond.
+    if (event == Event::none) {
+      clockUnknown_ = true;
+      std::unique_lock<std::mutex> lock(state_);
+      if (closing_ || lost_) break;
+      wake_.wait_for(lock, std::chrono::milliseconds(1));
+      continue;
+    }
+    // Not due yet. A timed wait on a condition variable wakes 2 to 3 ms late on
     // macOS (the kernel coalesces timers), which is most of a fill lead, so the
     // last stretch is slept with mach_wait_until, which wakes within tens of
     // microseconds. That stretch cannot be cut short by close(), so it is kept short.
-    const uint64_t wait = event == Event::none ? 1000000 : at - now;
+    const uint64_t wait = at - now;
     if (wait > kPreciseNs) {
       std::unique_lock<std::mutex> lock(state_);
       if (closing_ || lost_) break;
       wake_.wait_for(lock, std::chrono::nanoseconds(wait - kPreciseNs));
       continue;
     }
-    if (event != Event::none) mach_wait_until(hostTicksAt(at));
+    mach_wait_until(hostTicksAt(at));
   }
 }
 
@@ -424,7 +435,17 @@ void Output::completed(IDeckLinkVideoFrame *frame, Completion result, uint64_t c
     mine->scheduledIndex = -1;
     return;
   }
-  if (result == Completion::late || result == Completion::dropped) dropped_++;
+  if (result == Completion::late || result == Completion::dropped) {
+    dropped_++;
+    // Three in a row may be the card's clock as kept being wrong, sending every
+    // frame late: read it from the driver again.
+    if (++lateRun_ >= 3) {
+      lateRun_ = 0;
+      card_->clockSuspect();
+    }
+  } else {
+    lateRun_ = 0;
+  }
   dl_frame_timing t = mine->timing;
   t.result = result == Completion::late ? 1 : result == Completion::dropped ? 2 : 0;
   t.completed_ns = completedNs;
@@ -473,11 +494,11 @@ void Output::close() {
   }
   wake_.notify_all();
   if (clock_.joinable()) clock_.join();
+  // No completion reaches this output once the card has stopped: a DeckLink card
+  // clears its sink's output under the sink's own lock, and a software clock joins
+  // its thread.
   card_->stop();
-  // A fill or completion that was already running when closing_ was set finishes
-  // before this returns.
   std::lock_guard<std::mutex> work(work_);
-  std::lock_guard<std::mutex> lock(state_);
 }
 
 void Output::counters(dl_counters *out) const {
@@ -487,6 +508,8 @@ void Output::counters(dl_counters *out) const {
   out->resyncs = resyncs_;
   out->skipped = skipped_;
   out->lost = lost_;
+  out->clock_not_realtime = notRealtime_;
+  out->clock_unknown = clockUnknown_;
 }
 
 }  // namespace dlshim

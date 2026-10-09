@@ -221,8 +221,9 @@ class DeckLinkCard final : public Card {
   /// Where the card's clock is, from the completions (`slotBegan`): asking the
   /// driver (GetScheduledStreamTime) takes 74 us typically and up to 0.8 ms on an 8K
   /// Pro over Thunderbolt, too slow and too uncertain to ask before every begin and
-  /// fill. It is asked only until the first completion arrives, and after a run of
-  /// completions that disagree with the clock as kept.
+  /// fill. It is asked until the first completion arrives, and again after three
+  /// frames in a row went out late (`clockSuspect`). Three on-time completions in a
+  /// row that disagree with it are believed instead.
   bool hostTimeOf(int64_t streamTime, int64_t timeScale, uint64_t *hostNs) override {
     if (!started_) return false;
     std::unique_lock<std::mutex> lock(clock_);
@@ -236,6 +237,11 @@ class DeckLinkCard final : public Card {
     }
     *hostNs = mapLocked(streamTime, timeScale);
     return true;
+  }
+
+  void clockSuspect() override {
+    std::lock_guard<std::mutex> lock(clock_);
+    anchored_ = false;
   }
 
   void slotBegan(int64_t streamTime, int64_t timeScale, uint64_t hostNs) override {

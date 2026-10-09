@@ -103,6 +103,7 @@ class FakeCard final : public Card {
         refuseHelperFrames_(b.refuse_helper_frames),
         makeNoFrames_(b.make_no_frames),
         countFrames_(b.count_frames),
+        clockUnknown_(b.clock_unknown),
         minLeadNs_(static_cast<uint64_t>(std::max<int64_t>(0, b.min_lead_us)) * 1000) {}
 
   ~FakeCard() override { stop(); }
@@ -142,8 +143,9 @@ class FakeCard final : public Card {
   }
 
   bool hostTimeOf(int64_t streamTime, int64_t timeScale, uint64_t *hostNs) override {
+    clockReads_++;
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!started_) return false;
+    if (!started_ || clockUnknown_) return false;
     // The stream time in the clock's own scale, as nanoseconds since playback began.
     const double ns = static_cast<double>(streamTime) * 1e9 / static_cast<double>(timeScale);
     *hostNs = startNs_ + static_cast<uint64_t>(std::max(0.0, ns));
@@ -214,6 +216,8 @@ class FakeCard final : public Card {
     }
     if (output_ != nullptr) output_->lose("the device was removed");
   }
+
+  int64_t clockReads() const { return clockReads_; }
 
   int32_t shown(int64_t *pictures, int32_t capacity) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -331,6 +335,7 @@ class FakeCard final : public Card {
   const bool refuseHelperFrames_;
   const bool makeNoFrames_;
   const bool countFrames_;
+  const bool clockUnknown_;
   const uint64_t minLeadNs_;
   /// The frames this card made; only compared, never dereferenced.
   std::set<const IDeckLinkVideoFrame *> made_;
@@ -342,6 +347,7 @@ class FakeCard final : public Card {
   Done held_;
   std::vector<int64_t> shown_;
   int64_t onAir_ = 0;
+  std::atomic<int64_t> clockReads_{0};
   /// The host time playback began at; 0 for a clock only tests move.
   uint64_t startNs_ = 0;
   /// A clock only tests move: where its time is.
@@ -387,6 +393,11 @@ extern "C" dl_output *dl_fake_output_open(int32_t width, int32_t height, int64_t
 }
 
 extern "C" int32_t dl_fake_card_frames_alive(void) { return gCardFramesAlive; }
+
+extern "C" int64_t dl_fake_clock_reads(const dl_output *output) {
+  if (auto *fake = fakeOf(output)) return fake->clockReads();
+  return 0;
+}
 
 extern "C" void dl_fake_tick(dl_output *output, int32_t frames) {
   if (auto *fake = fakeOf(output)) fake->tick(frames);

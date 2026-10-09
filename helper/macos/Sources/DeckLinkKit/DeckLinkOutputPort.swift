@@ -26,11 +26,12 @@ public final class DeckLinkOutputPort: CardSink {
     /// it refuses the helper's own frames, as a driver that will not take
     /// application memory would; with `makesNoFrames` it will not make its own; it
     /// needs a frame `minLeadMs` before its slot; with `countsFrames` the frames it
-    /// makes are counted (`dl_fake_behaviour`).
+    /// makes are counted; with `clockUnknown` it cannot say where its playback is
+    /// (`dl_fake_behaviour`).
     case softwareClock(
       width: Int, height: Int, frameDuration: Int64, timeScale: Int64, ticksByItself: Bool,
       refusesHelperFrames: Bool = false, makesNoFrames: Bool = false, minLeadMs: Double = 0,
-      countsFrames: Bool = false)
+      countsFrames: Bool = false, clockUnknown: Bool = false)
     /// A port with no card that offers every mode the server lists
     /// (`VideoModes.standard`): the software clock, ticking by itself, at the
     /// geometry and rate of whichever mode it is opened in. A `--virtual-sdi`
@@ -65,6 +66,10 @@ public final class DeckLinkOutputPort: CardSink {
   private let preferredFrames: Frames
   /// A switch to the other frames is said once per port, not on every reopening.
   private var saidSwitch = false
+  /// Likewise a clock thread that could not be made real-time, and a card that
+  /// would not say where its playback is.
+  private var saidNotRealtime = false
+  private var saidClockUnknown = false
   private let source: CardFrameSource
   private let depth: Int
   private let leads: CardLeads
@@ -253,19 +258,21 @@ public final class DeckLinkOutputPort: CardSink {
       box = CallbackBox(source: source, timeScale: mode.timeScale, port: self, queue: queue)
       var callbacks = box.callbacks(depth: depth, leads: leads, frames: preferredFrames)
       var behaviour = dl_fake_behaviour(
-        timer: true, refuse_helper_frames: false, make_no_frames: false, min_lead_us: 0, count_frames: false)
+        timer: true, refuse_helper_frames: false, make_no_frames: false, min_lead_us: 0, count_frames: false,
+        clock_unknown: false)
       opened = dl_fake_output_open(
         Int32(mode.width), Int32(mode.height), mode.frameDuration, mode.timeScale, &behaviour, &callbacks, &why,
         why.count)
       if opened != nil { openSize = (mode.width, mode.height) }
     case .softwareClock(
-      let width, let height, let duration, let scale, let ticks, let refuses, let noFrames, let lead, let counts):
+      let width, let height, let duration, let scale, let ticks, let refuses, let noFrames, let lead, let counts,
+      let unknown):
       modeName = "\(width)x\(height) at \(VideoModes.rateText(Double(scale) / Double(duration))) on a software clock"
       box = CallbackBox(source: source, timeScale: scale, port: self, queue: queue)
       var callbacks = box.callbacks(depth: depth, leads: leads, frames: preferredFrames)
       var behaviour = dl_fake_behaviour(
         timer: ticks, refuse_helper_frames: refuses, make_no_frames: noFrames, min_lead_us: Int64(lead * 1000),
-        count_frames: counts)
+        count_frames: counts, clock_unknown: unknown)
       opened = dl_fake_output_open(
         Int32(width), Int32(height), duration, scale, &behaviour, &callbacks, &why, why.count)
       if opened != nil { openSize = (width, height) }
@@ -340,7 +347,9 @@ public final class DeckLinkOutputPort: CardSink {
       batch.append(contentsOf: timingBuffer[0..<n].map(FrameTiming.init))
     }
     guard !batch.isEmpty else { return }
-    for t in batch where t.fresh && !t.skipped {
+    // New pictures the card showed on time: one it showed late or dropped did not
+    // go out when its time says.
+    for t in batch where t.fresh && !t.skipped && t.result == 0 {
       if let ms = t.renderToAirMs { sampleLatencies.append(ms) }
     }
     timingsHandler?(batch)
@@ -386,8 +395,18 @@ public final class DeckLinkOutputPort: CardSink {
   /// a port that has stopped taking frames as lost: a card that goes silent without
   /// reporting anything would otherwise sit frozen with no line in the log.
   private func pollNow() {
-    guard handle != nil else { return }
+    guard let handle else { return }
     drainTimings()
+    var raw = dl_counters()
+    dl_output_counters(handle, &raw)
+    if raw.clock_not_realtime, !saidNotRealtime {
+      saidNotRealtime = true
+      log(.error, "\(label): macOS would not make its clock thread real-time, so frames may be filled late and repeat")
+    }
+    if raw.clock_unknown, !saidClockUnknown {
+      saidClockUnknown = true
+      log(.error, "\(label): the card would not say where its playback is, so no frame could be timed")
+    }
     let counts = countsNow()
     let sent = counts.scheduled - lastPolled.scheduled
     let repeated = counts.repeated - lastPolled.repeated
@@ -429,6 +448,7 @@ public final class DeckLinkOutputPort: CardSink {
       return all
     }
   }
+  func fakeClockReads() -> Int64 { queue.sync { handle.map { dl_fake_clock_reads($0) } ?? 0 } }
   func fakeShown() -> [Int64] {
     queue.sync {
       guard let handle else { return [] }

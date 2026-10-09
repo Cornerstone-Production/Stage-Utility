@@ -98,6 +98,8 @@ class Card {
   /// `hostNs`: when that slot began, for a card that keeps its clock from its
   /// completions.
   virtual void slotBegan(int64_t streamTime, int64_t timeScale, uint64_t hostNs) {}
+  /// Frames keep going out late: forget the clock as kept, and read it again.
+  virtual void clockSuspect() {}
   /// The host clock as this card keeps it: the real one, or a test's own.
   virtual uint64_t now() { return hostNowNs(); }
   /// True for a clock only tests move: the card runs the output's begins and fills
@@ -228,6 +230,10 @@ class Output {
 
   std::atomic<bool> closing_{false};
   std::atomic<bool> lost_{false};
+  std::atomic<bool> notRealtime_{false};
+  std::atomic<bool> clockUnknown_{false};
+  /// Completions reported late or dropped in a row; touched under state_.
+  int lateRun_ = 0;
   std::atomic<uint64_t> scheduled_{0};
   std::atomic<uint64_t> repeated_{0};
   std::atomic<uint64_t> dropped_{0};

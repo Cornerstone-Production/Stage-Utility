@@ -105,9 +105,9 @@ void dl_port_list_free(dl_port_list *list);
 // MARK: An output
 
 /// The memory of the frame about to be scheduled: 8-bit UYVY, `row_bytes` per
-/// line, page-aligned and `length` (a whole number of pages) long, so a Metal
-/// buffer can be made over it without a copy. `slot` names which of the output's
-/// frames it is, and stays the same memory for the life of the output.
+/// line, `length` long. The helper's own frames are page-aligned and a whole number
+/// of pages; the card's need not be. `slot` names which of the output's frames it
+/// is, and stays the same memory for the life of the output.
 typedef struct {
   void *bytes;
   size_t length;
@@ -129,8 +129,9 @@ typedef struct {
 /// picture again and counts a repeat.
 ///
 /// Called on the output's clock thread `fill_lead_us` before the frame goes to air,
-/// while the card waits: return well within that (a copy, not a render). Never
-/// close the output from inside it.
+/// while the card waits: return well within that (a copy, not a render). The
+/// pre-roll's two are called on the thread opening the output. Never close the
+/// output from inside it.
 typedef bool (*dl_fill_fn)(void *ctx, int64_t frame_index, int64_t stream_time, dl_frame_target *target);
 
 /// Ask the page for the picture of frame `frame_index`: called on the output's
@@ -141,7 +142,9 @@ typedef void (*dl_begin_fn)(void *ctx, int64_t frame_index, int64_t stream_time)
 /// The output stopped and will not schedule again: the device was removed, the
 /// driver refused a frame, or playback stopped on its own. Called once, on whatever
 /// thread noticed. Close the output (not from inside this call) and open it again
-/// when the port returns.
+/// when the port returns. It can also come during dl_output_open, for a first try
+/// that the open then makes again in the other kind of frame: `ctx` is the same,
+/// but there is no handle to close.
 typedef void (*dl_lost_fn)(void *ctx, const char *reason);
 
 typedef struct {
@@ -183,14 +186,14 @@ typedef struct {
 typedef enum {
   /// The helper's own page-aligned memory, which the source writes straight into.
   DL_FRAMES_HELPER = 0,
-  /// Frames the card made (IDeckLinkOutput::CreateVideoFrame). The source still
-  /// writes into the helper's memory; each frame is then copied into the card's.
+  /// Frames the card made (IDeckLinkOutput::CreateVideoFrame). The source writes
+  /// the picture straight into them.
   DL_FRAMES_CARD = 1,
 } dl_frames;
 
 typedef struct dl_output dl_output;
 
-/// Open `port` in `display_mode`, 8-bit YUV, with scheduled playback: `depth`
+/// Open `port` in `display_mode`, 8-bit YUV, with scheduled playback: the first two
 /// frames are filled and scheduled, then playback starts. NULL on failure, with the
 /// reason in `why`.
 dl_output *dl_output_open(const dl_port_id *port, uint32_t display_mode, const dl_callbacks *callbacks, char *why,
@@ -210,6 +213,9 @@ typedef struct {
   int64_t min_lead_us;
   /// The frames it makes are counted in dl_fake_card_frames_alive.
   bool count_frames;
+  /// It cannot say where its playback is (Card::hostTimeOf fails), as a driver
+  /// that will not answer GetScheduledStreamTime.
+  bool clock_unknown;
 } dl_fake_behaviour;
 
 /// The same scheduler over a software clock, for tests and for running without a
@@ -217,6 +223,9 @@ typedef struct {
 dl_output *dl_fake_output_open(int32_t width, int32_t height, int64_t frame_duration, int64_t time_scale,
                                const dl_fake_behaviour *behaviour, const dl_callbacks *callbacks, char *why,
                                size_t why_len);
+
+/// How many times the output has asked a software clock where its playback is.
+int64_t dl_fake_clock_reads(const dl_output *output);
 
 /// Frames the software clocks that count them (`count_frames`) have made and not
 /// yet freed, across the process.
@@ -243,6 +252,12 @@ typedef struct {
   /// last picture. Not counted in `scheduled`.
   uint64_t skipped;
   bool lost;
+  /// The clock thread asked to be real-time and was refused: its waits may then
+  /// end a millisecond or more late. False before the thread has asked, and for a
+  /// clock only tests move, which has no thread.
+  bool clock_not_realtime;
+  /// The card could not say where its playback is, so nothing could be timed.
+  bool clock_unknown;
 } dl_counters;
 
 void dl_output_counters(const dl_output *output, dl_counters *out);
@@ -271,9 +286,9 @@ typedef struct {
   /// When the slot began going out of the card: its display time on the card's
   /// clock, mapped to the host's.
   uint64_t air_ns;
-  /// When the card said it had finished with the frame: the end of its slot on the
-  /// card's clock (GetFrameCompletionReferenceTimestamp), mapped to the host's. 0
-  /// for a skip, or a software clock.
+  /// When the card said it had finished with the frame: the end of its slot
+  /// (GetFrameCompletionReferenceTimestamp, which is on the host clock); a software
+  /// clock gives the time it ticked. 0 for a skip.
   uint64_t completed_ns;
 } dl_frame_timing;
 
