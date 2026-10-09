@@ -14,9 +14,12 @@
 // and unmounting stops it.
 //
 // jsdom has no canvas and never fires Image.onload, so "ready" needs a stand-in
-// for both (stubImageDecode below). What jsdom cannot show — the notice's real
-// size and position, a picture actually painted — is not unit-tested here; it was
-// driven in a browser instead.
+// for both (stubImageDecode below). What jsdom cannot show is not unit-tested here:
+// a picture actually painted, the notice's real size and position, and the
+// browser's own HTTP cache turning a conditional request's 304 into the stored
+// 200. Those were driven in headless Chrome against a real server (a download that
+// fails and is fixed, a plan with no file that gets one, and a drawn file whose
+// version changes), not asserted in this file.
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
@@ -30,7 +33,7 @@ const React = (await import("react")).default;
 const { act } = await import("react");
 const { TooltipProvider } = await import("../components/ui/tooltip-provider.js");
 const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
-const { ObjectContent, PLAN_ATTACHMENT_RETRY_MS, PLAN_ATTACHMENT_RECHECK_MS } = await import("./layout-renderer.js");
+const { ObjectContent, PLAN_ATTACHMENT_RETRY_MS, PLAN_ATTACHMENT_RECHECK_MS, PLAN_ATTACHMENT_REVALIDATE_MS } = await import("./layout-renderer.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -52,6 +55,8 @@ const PLOT = {
 } as never;
 
 type Answer = "404" | "502" | "file";
+/** The ETag every "file" answer carries; a test changes it to replace the file. */
+let etag = '"v1"';
 interface Call { url: string; init: RequestInit | undefined }
 
 /** A fetch that answers each plan-file request from `answer(n)`, n counting the
@@ -68,7 +73,7 @@ function scriptFetch(answer: (n: number) => Answer | Promise<Answer>) {
     }
     calls.push({ url, init });
     const a = await answer(calls.length);
-    if (a === "file") return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png" } });
+    if (a === "file") return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png", etag } });
     return new Response("no", { status: a === "404" ? 404 : 502 });
   }) as typeof fetch;
   return { calls, logs, restore: () => { globalThis.fetch = original; } };
@@ -76,7 +81,10 @@ function scriptFetch(answer: (n: number) => Answer | Promise<Answer>) {
 
 /** The decode path a browser has and jsdom lacks: an Image that "loads", and a
  *  canvas that can be read back. Only what rasterizeImage and the PNG export touch. */
+let decodes = 0;
+const PNG = (n: number) => `data:image/png;base64,${String.fromCharCode(65, 65, 65, 65 + n)}`; // AAAA, AAAB, ...
 function stubImageDecode() {
+  decodes = 0;
   const g = globalThis as unknown as { Image?: unknown };
   const originalImage = g.Image;
   g.Image = class {
@@ -85,6 +93,7 @@ function stubImageDecode() {
     onload: (() => void) | null = null;
     onerror: (() => void) | null = null;
     set src(_v: string) {
+      decodes += 1;
       queueMicrotask(() => this.onload?.());
     }
   };
@@ -92,7 +101,7 @@ function stubImageDecode() {
   mock.method(document, "createElement", (tag: string, ...rest: unknown[]) => {
     const el = (realCreate as (t: string, ...r: unknown[]) => HTMLElement)(tag, ...rest);
     if (tag === "canvas") {
-      Object.assign(el, { getContext: () => ({ drawImage() {} }), toDataURL: () => "data:image/png;base64,AAAA" });
+      Object.assign(el, { getContext: () => ({ drawImage() {} }), toDataURL: () => PNG(decodes - 1) });
     }
     return el;
   });
@@ -104,6 +113,7 @@ function stubImageDecode() {
 let restore: Array<() => void> = [];
 beforeEach(() => {
   restore = [];
+  etag = '"v1"';
   mock.timers.enable({ apis: ["setTimeout"] });
   restore.push(() => mock.timers.reset());
   restore.push(stubImageDecode());
@@ -146,6 +156,7 @@ describe("a plan attachment that fails to load", () => {
 
     let expected = 1;
     for (const gap of PLAN_ATTACHMENT_RETRY_MS) {
+      assert.equal(f.logs.length, 0, `logged before the fast retries were spent (request ${expected})`);
       await tick(gap - 1);
       assert.equal(f.calls.length, expected, `retried before its ${gap}ms gap was up`);
       await tick(1);
@@ -170,7 +181,10 @@ describe("a plan attachment that fails to load", () => {
     // The 7th request answers with a file.
     await tick(PLAN_ATTACHMENT_RECHECK_MS);
     assert.equal(f.calls.length, 7);
-    assert.equal(drawn(view), "data:image/png;base64,AAAA", "the file was not drawn when the load recovered");
+    assert.equal(drawn(view), PNG(0), "the file was not drawn when the load recovered");
+    assert.equal(f.logs.length, 2, "a display that logged an outage must log that it recovered");
+    assert.match(f.logs[1], /plan-file/);
+    assert.match(f.logs[1], /draws again/);
   });
 
   test("a retry goes around the browser's HTTP cache; the first load does not", async () => {
@@ -203,7 +217,7 @@ describe("a plan attachment that is not on the plan", () => {
 
     await tick(PLAN_ATTACHMENT_RECHECK_MS);
     assert.equal(f.calls.length, 3);
-    assert.equal(drawn(view), "data:image/png;base64,AAAA", "the file that was attached later was not drawn");
+    assert.equal(drawn(view), PNG(0), "the file that was attached later was not drawn");
   });
 
   test("a failure on a re-check leaves the notice, and the checks go on", async () => {
@@ -221,24 +235,83 @@ describe("a plan attachment that is not on the plan", () => {
     await tick(PLAN_ATTACHMENT_RETRY_MS[0]);
     assert.equal(f.calls.length, 3);
     await tick(PLAN_ATTACHMENT_RECHECK_MS);
-    assert.equal(drawn(view), "data:image/png;base64,AAAA");
+    assert.equal(drawn(view), PNG(0));
   });
 });
 
 describe("a plan attachment that is drawn", () => {
-  test("is not asked for again, and stays on screen", async () => {
+  test("is re-validated every few minutes, and an unchanged file is not redrawn", async () => {
     const f = scriptFetch(() => "file");
     restore.push(f.restore);
 
     const view = draw();
     await flush();
-    assert.equal(drawn(view), "data:image/png;base64,AAAA");
+    assert.equal(drawn(view), PNG(0));
     assert.equal(f.calls.length, 1);
+    assert.equal(decodes, 1);
 
-    await tick(30 * 60_000);
-    assert.equal(f.calls.length, 1, "a drawn file was fetched again; the server's cached 200 is not being used");
-    assert.equal(drawn(view), "data:image/png;base64,AAAA", "the picture was replaced");
+    await tick(PLAN_ATTACHMENT_REVALIDATE_MS - 1);
+    assert.equal(f.calls.length, 1, "re-validated before the interval was up");
+    await tick(1);
+    assert.equal(f.calls.length, 2, "a drawn file was never asked about again; a replaced file would stay up");
+    assert.equal(f.calls[1].init?.cache, "no-cache", "the re-validation must be a conditional request, not a cached read");
+
+    // The same ETag again: nothing is rasterized and the picture is untouched.
+    for (let i = 0; i < 3; i++) await tick(PLAN_ATTACHMENT_REVALIDATE_MS);
+    assert.equal(f.calls.length, 5);
+    assert.equal(decodes, 1, "an unchanged file was rasterized again");
+    assert.equal(drawn(view), PNG(0));
     assert.doesNotMatch(text(view), /Loading|Couldn.t load/);
+  });
+
+  test("a file that changed is drawn over the old one, which stays up until then", async () => {
+    let release!: () => void;
+    const f = scriptFetch((n) => (n === 2 ? new Promise<Answer>((r) => { release = () => r("file"); }) : "file"));
+    restore.push(f.restore);
+
+    const view = draw();
+    await flush();
+    assert.equal(drawn(view), PNG(0));
+
+    etag = '"v2"';
+    await tick(PLAN_ATTACHMENT_REVALIDATE_MS);
+    assert.equal(f.calls.length, 2);
+    assert.equal(drawn(view), PNG(0), "the old picture was taken down while the new file was loading");
+    assert.doesNotMatch(text(view), /Loading/);
+
+    release();
+    await flush();
+    assert.equal(drawn(view), PNG(1), "a replaced file was not drawn");
+    assert.equal(decodes, 2);
+
+    // And the new ETag is the one compared from now on.
+    await tick(PLAN_ATTACHMENT_REVALIDATE_MS);
+    assert.equal(decodes, 2, "the new version was redrawn although it had not changed again");
+  });
+
+  test("a failed re-validation leaves the picture, whatever it fails with", async () => {
+    const f = scriptFetch((n) => (n === 1 ? "file" : n === 2 ? "502" : n === 3 ? "404" : "file"));
+    restore.push(f.restore);
+
+    const view = draw();
+    await flush();
+    for (const expectedCalls of [2, 3, 4]) {
+      await tick(PLAN_ATTACHMENT_REVALIDATE_MS);
+      assert.equal(f.calls.length, expectedCalls);
+      assert.equal(drawn(view), PNG(0), "a failed or empty re-validation replaced the picture");
+      assert.doesNotMatch(text(view), /Loading|Couldn.t load|No "stage plot"/);
+    }
+    assert.equal(f.logs.length, 0, "a good picture with a failed re-validation is not an outage");
+  });
+
+  test("stops re-validating when unmounted", async () => {
+    const f = scriptFetch(() => "file");
+    restore.push(f.restore);
+    const view = draw();
+    await flush();
+    view.unmount();
+    await tick(60 * 60_000);
+    assert.equal(f.calls.length, 1, "a drawn widget kept re-validating after it was unmounted");
   });
 });
 
@@ -250,7 +323,7 @@ describe("a plan change", () => {
 
     const view = draw("plan-a");
     await flush();
-    assert.equal(drawn(view), "data:image/png;base64,AAAA");
+    assert.equal(drawn(view), PNG(0));
 
     view.rerender(tree("plan-b"));
     await flush();

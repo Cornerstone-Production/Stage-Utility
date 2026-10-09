@@ -2607,17 +2607,28 @@ export async function loadProcessedAttachment(
   match: string,
   opts: AttachmentProcessOpts,
   cacheBust?: string | null,
-  recheck = false,
-): Promise<{ dataUrl: string; width: number; height: number } | "empty" | null> {
+  how: {
+    /** Ask again after "empty" or a failure: go around the browser's HTTP cache. */
+    recheck?: boolean;
+    /** Ask whether what is on screen is still current: `etag` is the ETag of the
+     *  file drawn. Answers "unchanged", without reading the body, if it is. */
+    revalidate?: { etag: string };
+  } = {},
+): Promise<{ dataUrl: string; width: number; height: number; etag: string | null } | "empty" | "unchanged" | null> {
   const bust = cacheBust ? `&plan=${encodeURIComponent(cacheBust)}` : "";
   // A re-check follows a 404 or a failure, which is exactly the answer the
-  // browser must not reuse. Only those are re-asked, so no cached 200 is lost.
+  // browser must not reuse. A revalidation is a conditional request whatever the
+  // 200's max-age says ("no-cache" sends If-None-Match itself; the browser turns a
+  // 304 into the stored 200, which is why the ETag is compared below as well).
+  const cache: RequestCache | undefined = how.revalidate ? "no-cache" : how.recheck ? "reload" : undefined;
   const resp = await fetch(
     `/api/pco/attachment?match=${encodeURIComponent(match)}${bust}`,
-    recheck ? { cache: "reload" } : undefined,
+    cache ? { cache } : undefined,
   );
   if (resp.status === 404) return "empty";
   if (!resp.ok) return null;
+  const etag = resp.headers.get("etag");
+  if (how.revalidate && etag !== null && etag === how.revalidate.etag) return "unchanged";
   const ct = resp.headers.get("content-type") ?? "";
   const buf = await resp.arrayBuffer();
   let canvas = ct.includes("pdf") ? await rasterizePdf(buf, opts.page) : await rasterizeImage(buf, ct);
@@ -2626,7 +2637,7 @@ export async function loadProcessedAttachment(
   }
   if (opts.trim) canvas = trimCanvas(canvas);
   if (opts.background && opts.background !== "keep") recolorBackground(canvas, opts.background);
-  return { dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height };
+  return { dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height, etag };
 }
 
 /** Gaps between the first retries of a failed plan-attachment load. Three tries
@@ -2640,6 +2651,12 @@ export const PLAN_ATTACHMENT_RETRY_MS: readonly number[] = [5_000, 15_000, 45_00
  *  checking until the file turns up. Each check is one cached Planning Center
  *  read on the server, so a slow cadence costs next to nothing. */
 export const PLAN_ATTACHMENT_RECHECK_MS = 2 * 60_000;
+
+/** How often a display that is showing the file asks whether it is still the
+ *  current one, so a stage plot revised on the same plan replaces the old one
+ *  within about this long. A conditional request: when nothing changed the server
+ *  answers without a body and nothing is redrawn. */
+export const PLAN_ATTACHMENT_REVALIDATE_MS = 5 * 60_000;
 
 function PlanAttachment({
   match,
@@ -2661,17 +2678,21 @@ function PlanAttachment({
   });
 
   // One loop per target (file name, options, plan), started at once when the
-  // plan changes. It stops when a file is drawn; until then it asks again:
+  // plan changes, and running until it is unmounted or the target changes:
   //   - "error" (a failed load): after each gap of PLAN_ATTACHMENT_RETRY_MS, then
   //     every PLAN_ATTACHMENT_RECHECK_MS.
   //   - "empty" (no such file on the plan): every PLAN_ATTACHMENT_RECHECK_MS, so
   //     a stage plot attached after the display first asked appears by itself.
+  //   - drawn: every PLAN_ATTACHMENT_REVALIDATE_MS, a conditional request, so a
+  //     file revised on the same plan replaces the one on screen.
   // A failed load used to be final after three tries, and "empty" was final
   // outright, so either left the wall on its notice until someone refreshed it.
   //
   // Only an answer changes what is on screen. The first failure shows "Couldn't
-  // load file" and a later one leaves whatever is there (a notice, never a
-  // flash of "Loading…"), and an image that has been drawn is not asked for again.
+  // load file" and a later one leaves whatever is there (a notice, never a flash
+  // of "Loading…"). Once a file is drawn nothing but a newer file replaces it: not
+  // a notice, not an error, not "empty", and the old picture stays up until the
+  // new one is ready.
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -2683,20 +2704,36 @@ function PlanAttachment({
       let shown: "loading" | "empty" | "error" = "loading";
       let failures = 0; // consecutive failed loads
       let logged = false;
+      let drawnEtag: string | null | undefined; // undefined: nothing drawn yet
       for (let tries = 0; ; tries++) {
+        const revalidating = drawnEtag !== undefined;
         let result: Awaited<ReturnType<typeof loadProcessedAttachment>>;
         try {
-          result = await loadProcessedAttachment(match, JSON.parse(optsKey) as AttachmentProcessOpts, planId, tries > 0);
+          result = await loadProcessedAttachment(
+            match,
+            JSON.parse(optsKey) as AttachmentProcessOpts,
+            planId,
+            revalidating ? { revalidate: { etag: drawnEtag! } } : { recheck: tries > 0 },
+          );
         } catch {
           result = null;
         }
         if (cancelled) return;
-        if (result && result !== "empty") {
+        if (result && result !== "empty" && result !== "unchanged") {
           setSrc(result.dataUrl);
           setStatus("ready");
-          return;
-        }
-        if (result === "empty") {
+          drawnEtag = result.etag;
+          if (logged) {
+            logged = false;
+            logToServer("plan-file", `"${match}" draws again on ${window.location.pathname}`);
+          }
+          // No ETag, nothing to ask "is it still current" against.
+          if (drawnEtag === null) return;
+          await sleep(PLAN_ATTACHMENT_REVALIDATE_MS);
+        } else if (revalidating) {
+          // Unchanged, or "empty" or a failure while a good picture is up: leave it.
+          await sleep(PLAN_ATTACHMENT_REVALIDATE_MS);
+        } else if (result === "empty") {
           failures = 0;
           logged = false;
           shown = "empty";
@@ -2712,7 +2749,7 @@ function PlanAttachment({
             logged = true;
             // The server cannot say which display this is, and a wall stuck on
             // "Couldn't load file" is otherwise invisible on /log. Once per
-            // outage, not once per slow re-check.
+            // outage, not once per slow re-check, and a line when it recovers.
             logToServer(
               "plan-file",
               `"${match}" still not loading on ${window.location.pathname} after ${failures} tries; checking again every ${PLAN_ATTACHMENT_RECHECK_MS / 60_000} min`,

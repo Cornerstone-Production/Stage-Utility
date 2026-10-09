@@ -604,7 +604,7 @@ export function PlanAttachmentConfig({
         trim: c.trim,
         background: c.background,
       });
-      if (r && r !== "empty" && r.height > 0) {
+      if (r && typeof r === "object" && r.height > 0) {
         const aspect = r.width / r.height; // w:h of the image in px
         const newH = (o.w * canvas.width) / aspect / canvas.height;
         onGeom({ h: clamp(newH, 0.03, 1 - o.y) });
