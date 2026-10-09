@@ -263,8 +263,11 @@ void Output::fill(uint64_t now) {
   Slot *free = nullptr;
   {
     std::lock_guard<std::mutex> lock(state_);
+    // The slot carrying the last picture may be refilled once the card has given
+    // it back: a repeat into it is already there, and a new picture is written over
+    // memory the card is done with.
     for (Slot &slot : slots_) {
-      if (!slot.busy && &slot != last_) {
+      if (!slot.busy) {
         free = &slot;
         free->busy = true;
         break;
@@ -317,8 +320,9 @@ bool Output::fillAndSchedule(Slot &slot, int64_t index, uint64_t now, uint64_t a
     // ago, so the previous picture is copied in, with its times. Sending the stale
     // one would step the picture backwards.
     // Every slot of an output is the same kind of frame, so the same row length.
-    if (last_ != nullptr && last_ != &slot) {
-      std::memcpy(slot.bytes(), last_->bytes(), static_cast<size_t>(slot.rowBytes()) * height_);
+    // Into the slot that carried it, it is there already: only its times are taken.
+    if (last_ != nullptr) {
+      if (last_ != &slot) std::memcpy(slot.bytes(), last_->bytes(), static_cast<size_t>(slot.rowBytes()) * height_);
       timing.content_ns = last_->timing.content_ns;
       timing.paint_ns = last_->timing.paint_ns;
       timing.ready_ns = last_->timing.ready_ns;

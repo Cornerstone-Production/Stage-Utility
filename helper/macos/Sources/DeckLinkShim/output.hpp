@@ -310,8 +310,7 @@ class Output {
   // The clock's own: touched only by the clock thread (or runUntil).
   int64_t nextBegin_ = kPreroll;
   int64_t nextFill_ = kPreroll;
-  /// The slot carrying the last picture sent: what a repeat copies, so never
-  /// filled again until another has been sent.
+  /// The slot carrying the last picture sent: what a repeat copies.
   Slot *last_ = nullptr;
   /// The previous slot was skipped: a run of skips is one resync.
   bool skipping_ = false;

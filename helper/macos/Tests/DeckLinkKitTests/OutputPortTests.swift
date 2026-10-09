@@ -147,6 +147,30 @@ let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a so
     #expect(Array(shown[21...50]) == Array(21...50))
   }
 
+  /// With two frames, the card holding both, and the last picture's frame the
+  /// first free when it gives them back, the next slot is filled into that same
+  /// frame. Here it is a repeat: the picture is already there, so it goes out as it
+  /// is, carrying that picture's times.
+  @Test func aRepeatIntoTheFrameThatCarriesThePictureKeepsIt() {
+    let port = DeckLinkOutputPort(
+      label: "SDI test",
+      hardware: .softwareClock(width: 16, height: 4, frameDuration: 1001, timeScale: 60000, ticksByItself: false),
+      source: NumberedSource(missing: [13], drawnBeforeAirMs: 18), depth: 2, retryInterval: 3600,
+      pollInterval: 3600, log: LogLines().write)
+    defer { port.close() }
+    port.open(videoMode: nil)
+    port.fakeTick(9)
+    port.fakeHold(true)  // frame 10 is filled into the first frame; 11 and 12 find none free
+    port.fakeTick(3)
+    port.fakeHold(false)
+    port.fakeTick(2)  // 13 has no new picture: a repeat, into the frame that holds 10
+    let repeat13 = port.timingsForTest().first { $0.index == 13 }
+    let air10 = 10 * 1001.0 / 60000 * 1e9
+    #expect(repeat13?.fresh == false)
+    #expect(repeat13.map { abs(Double($0.contentNs) - (air10 - 18e6)) < 2 } == true, "\(String(describing: repeat13))")
+    #expect(Array(port.fakeShown()[10...14]) == [10, 10, 10, 10, 14])
+  }
+
   /// A card that needs a frame longer before its slot than the fill lead gives
   /// would show every frame late: each slot is skipped instead, and the card holds
   /// the pre-roll. A fill that cannot make it is never sent.
