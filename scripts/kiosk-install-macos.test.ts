@@ -450,14 +450,16 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
       fs.writeFileSync(path.join(scratch, "usr", "local", "bin", "stage-utility-kiosk"), "#!/bin/sh\n");
     };
 
+    const marker2 = () => fs.readFileSync(path.join(app(), "Contents", "MacOS", "StageUtilityOutput"), "utf8").trim().split(" ")[1];
+
     let shims: ReturnType<typeof makeShims>;
     beforeEach(() => {
       shims = makeShims();
     });
 
     /** install_helper itself, as main() calls it, as the console user `who` ("none" for nobody). */
-    const whole = (who: string, extra: Record<string, string> = {}) =>
-      sh(`. "${SCRIPT}"; trap on_exit EXIT; install_helper`, baseEnv({ ...shims.env, SHIM_MARKER: marker(), STAGE_INSTALL_TEST_CONSOLE_USER: who, ...extra }));
+    const whole = (who: string, extra: Record<string, string> = {}, before = "") =>
+      sh(`. "${SCRIPT}"; trap on_exit EXIT; ${before || ":"}; install_helper`, baseEnv({ ...shims.env, SHIM_MARKER: marker(), STAGE_INSTALL_TEST_CONSOLE_USER: who, ...extra }));
 
     it("with someone logged in: a root-owned system LaunchAgent, started in their session", async () => {
       publish(stageServer, "/kiosk", zipA);
@@ -494,6 +496,56 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
       assert.equal(fs.statSync(path.join(stateDir(), "token")).mode & 0o777, 0o640);
       assert.ok(calls.includes(`chgrp admin ${path.join(stateDir(), "token")}`), calls.join("\n"));
       assert.match(r.out, /If the account\s+that logs in first is not one/);
+    });
+
+    describe("a failure after the swap leaves the Mac exactly as it was", () => {
+      const noCalls = (l: string[]) => l.map((c) => c.replace(/ \| marker=.*/, ""));
+
+      it("an upgrade that fails in the agent step brings back the old app, its agent file and the running helper", async () => {
+        publish(stageServer, "/kiosk", zipA);
+        assert.equal((await whole(ME)).status, 0);
+        const plistBefore = fs.readFileSync(helperPlist(), "utf8");
+        fs.appendFileSync(helperPlist(), "<!-- the previous agent file -->\n");
+        const edited = fs.readFileSync(helperPlist(), "utf8");
+        assert.notEqual(edited, plistBefore);
+        const uid = (await sh("id -u")).out.trim();
+
+        publish(stageServer, "/kiosk", zipB);
+        const before = shims.log().length;
+        // launchctl print answering 0 means the helper is running, so it is stopped first.
+        const r = await whole(ME, { SHIM_PRINT_RC: "0", SHIM_FAIL_plutil: "1" });
+        assert.equal(r.status, 1, r.out + r.err);
+        assert.match(r.err, /is not a valid property list/);
+
+        assert.equal(marker2(), "build-a", "the previous app is the app again");
+        assert.deepEqual(leftovers(), [], "no .StageUtilityOutput.app.old.* or .new.* is left in /Applications");
+        assert.equal(fs.readFileSync(helperPlist(), "utf8"), edited, "the previous agent file is back, byte for byte");
+        const calls = noCalls(shims.log().slice(before)).filter((c) => c.startsWith("launchctl") && !c.startsWith("launchctl print"));
+        assert.deepEqual(calls, [`launchctl bootout gui/${uid}/com.stageutility.output`, `launchctl bootstrap gui/${uid} ${helperPlist()}`], "the helper was stopped, then started again from the restored file");
+        assert.match(r.out, /restored the previous StageUtilityOutput\.app/);
+      });
+
+      it("on a Mac with no helper yet, a failure after the swap removes the new app and the agent file", async () => {
+        publish(stageServer, "/kiosk", zipA);
+        // An exit nobody wrapped: write_helper_plist returning 1 is a bare `set -e` exit.
+        const r = await whole(ME, {}, "write_helper_plist() { return 1; }");
+        assert.equal(r.status, 1, r.out + r.err);
+        assert.ok(!fs.existsSync(app()), "the helper that was just swapped in is gone");
+        assert.deepEqual(leftovers(), []);
+        assert.ok(!fs.existsSync(helperPlist()));
+        assert.match(r.out, /removed the StageUtilityOutput\.app that was just installed/);
+        assert.deepEqual(noCalls(shims.log()).filter((c) => c.startsWith("launchctl bootstrap")), [], "nothing was started");
+      });
+
+      it("a successful upgrade removes the old copy", async () => {
+        publish(stageServer, "/kiosk", zipA);
+        assert.equal((await whole(ME)).status, 0);
+        publish(stageServer, "/kiosk", zipB);
+        const r = await whole(ME);
+        assert.equal(r.status, 0, r.out + r.err);
+        assert.equal(marker2(), "build-b");
+        assert.deepEqual(leftovers(), []);
+      });
     });
 
     it("with nobody logged in, still replaces the Chrome kiosk, and says it happens at the next login", async () => {

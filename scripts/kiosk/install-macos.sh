@@ -73,7 +73,13 @@ CONSOLE_UID=""
 WORK=""
 STAGING=""
 OLD_APP=""
+# What this run has changed, so a failure can put each thing back. Nothing is
+# "done" until FINISHED=1, which is set only once the whole install worked.
+APP_SWAPPED=0
 AGENT_STOPPED=0
+AGENT_STARTED=0
+PLIST_WRITTEN=0
+PLIST_BACKUP=""
 FINISHED=0
 MIGRATED=0
 # Tells the helper this Mac was a Chrome kiosk, so its main display takes over the
@@ -105,22 +111,54 @@ USAGE
 }
 
 # ── Cleanup, and never a half-installed app ────────────────────────────────
-# Runs on every exit. A failure after the old app was moved aside puts it back;
-# a failure after the helper's agent was stopped starts it again, so the Mac is
-# never left with neither the old app nor the new one.
+# Runs on every exit, including a `set -e` exit from a command nobody wrapped, so
+# any failure after the first change leaves the Mac as it was: the new app gone and
+# the old one back, the helper's agent file as it was, and the helper running again
+# if it was running. On success the old copy is deleted.
+roll_back() {
+  if [ "$AGENT_STARTED" -eq 1 ] && [ -n "$CONSOLE_UID" ]; then
+    launchctl bootout "gui/$CONSOLE_UID/$HELPER_LABEL" || warn "could not stop the new helper again"
+  fi
+  if [ -n "$OLD_APP" ] && [ -d "$OLD_APP" ]; then
+    rm -rf "${APPS_DIR:?}/$APP_NAME"
+    if mv "$OLD_APP" "$APPS_DIR/$APP_NAME"; then
+      say "    restored the previous $APP_NAME"
+    else
+      warn "could not put the previous $APP_NAME back; it is at $OLD_APP"
+    fi
+  elif [ "$APP_SWAPPED" -eq 1 ]; then
+    rm -rf "${APPS_DIR:?}/$APP_NAME"
+    say "    removed the $APP_NAME that was just installed"
+  fi
+  if [ "$PLIST_WRITTEN" -eq 1 ]; then
+    if [ -n "$PLIST_BACKUP" ] && [ -f "$PLIST_BACKUP" ]; then
+      if cp -p "$PLIST_BACKUP" "$HELPER_PLIST"; then
+        say "    restored the previous $HELPER_PLIST"
+      else
+        warn "could not restore $HELPER_PLIST"
+      fi
+    else
+      rm -f "$HELPER_PLIST"
+      say "    removed $HELPER_PLIST"
+    fi
+  fi
+  if [ "$AGENT_STOPPED" -eq 1 ]; then
+    start_helper_agent || warn "could not restart the helper after a failed install; it starts at the next login"
+  fi
+}
+
 on_exit() {
+  status=$?
+  # A failing command in a cleanup must not end the cleanup.
+  set +e
   if [ "$FINISHED" -ne 1 ]; then
-    if [ -n "$OLD_APP" ] && [ -d "$OLD_APP" ] && [ ! -d "$APPS_DIR/$APP_NAME" ]; then
-      mv "$OLD_APP" "$APPS_DIR/$APP_NAME" && say "    restored the previous $APP_NAME"
-    fi
-    if [ "$AGENT_STOPPED" -eq 1 ]; then
-      start_helper_agent || warn "could not restart the helper after a failed install; it starts at the next login"
-    fi
+    roll_back
   elif [ -n "$OLD_APP" ]; then
     rm -rf "$OLD_APP"
   fi
   if [ -n "$STAGING" ]; then rm -rf "$STAGING"; fi
   if [ -n "$WORK" ]; then rm -rf "$WORK"; fi
+  exit "$status"
 }
 
 # ── What this Mac is ───────────────────────────────────────────────────────
@@ -359,7 +397,8 @@ stage_app() {
 }
 
 # The old copy is moved aside, the new one renamed in, and the old one deleted
-# only after that worked. A failure between the two puts the old one back.
+# only once the whole install has worked. Any failure until then, here or in a later
+# step, puts the old one back.
 swap_app() {
   OLD_APP="$APPS_DIR/.$APP_NAME.old.$$"
   rm -rf "$OLD_APP"
@@ -368,15 +407,16 @@ swap_app() {
   else
     OLD_APP=""
   fi
-  # On failure the exit trap puts the old copy back; see on_exit.
+  # From here a failure puts the old copy back and removes the new one; see roll_back.
   mv "$STAGING/$APP_NAME" "$APPS_DIR/$APP_NAME" ||
     die "could not put the new $APP_NAME in $APPS_DIR; the previous one is kept."
+  APP_SWAPPED=1
 }
 
 # ── The agent that starts the helper at login ──────────────────────────────
 # Never relaunch after a clean Quit from the app's window, always after a crash.
 write_helper_plist() {
-  cat >"$1" <<PLIST
+  cat >"$1" <<PLIST || die "could not write $1."
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -395,7 +435,7 @@ write_helper_plist() {
 PLIST
   # launchd refuses a LaunchAgent in /Library that is not root's.
   chown root:wheel "$1" || die "could not make $1 root-owned."
-  chmod 644 "$1"
+  chmod 644 "$1" || die "could not set the mode of $1."
 }
 
 stop_helper_agent() {
@@ -427,7 +467,12 @@ start_helper_agent() {
 # account, home folder or console user. It is started now only when someone is
 # logged in to have a session for it.
 install_helper_agent() {
-  mkdir -p "$AGENT_DIR"
+  mkdir -p "$AGENT_DIR" || die "could not create $AGENT_DIR."
+  if [ -f "$HELPER_PLIST" ]; then
+    PLIST_BACKUP="$WORK/helper-plist.previous"
+    cp -p "$HELPER_PLIST" "$PLIST_BACKUP" || die "could not keep a copy of $HELPER_PLIST."
+  fi
+  PLIST_WRITTEN=1
   write_helper_plist "$HELPER_PLIST"
   if command -v plutil >/dev/null 2>&1; then
     plutil -lint "$HELPER_PLIST" >/dev/null || die "the LaunchAgent written to $HELPER_PLIST is not a valid property list."
@@ -440,6 +485,7 @@ install_helper_agent() {
   # Through launchd rather than directly, so a crash is restarted and a logout
   # stops it.
   if launchctl bootstrap "gui/$CONSOLE_UID" "$HELPER_PLIST"; then
+    AGENT_STARTED=1
     say "    started for $CONSOLE_USER; it also starts at every login"
   else
     warn "could not start the helper now; it starts at the next login"
@@ -743,6 +789,8 @@ main() {
     esac
   done
 
+  # A hang-up or Ctrl-C ends the script through the EXIT trap, so it rolls back too.
+  trap 'exit 1' HUP INT TERM
   trap on_exit EXIT
   check_macos
   if [ "$DRY" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
