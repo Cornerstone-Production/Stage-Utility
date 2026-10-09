@@ -195,6 +195,18 @@ can't play video** instead of falling back, while every other screen with the
 switch on keeps playing it. See
 [Video feeds](../integrations/video-feeds.md#the-device-pushes-to-stage-utility).
 
+A screen shown by the [Mac output helper](../kiosk-devices.md#mac-output-helper)
+has two more fields, kept on the `Output` like the settings above and carried by
+every config export and backup with the rest of `settings.json`:
+
+| Field | Values | Absent means |
+| --- | --- | --- |
+| `rotation` | `0`, `90`, `180` or `270`: quarter turns the helper applies before the picture leaves, for a monitor mounted on its side | `0` |
+| `videoMode` | A mode name from the list in `main/types/output-format.ts` (`1080p59.94`, `1080i50`, `720p60` and the like), what a DeckLink port sends | `1080p59.94` |
+
+A browser showing the screen ignores both. The helper reads them from the outputs
+in the stage state it already receives.
+
 A **preview** — the live thumbnail on a Screens card, at `/preview-<viewId>` —
 renders the previewed view directly, regardless of what is actually routed to
 that output, and answers the four per-screen settings differently:

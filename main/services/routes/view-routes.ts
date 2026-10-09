@@ -659,8 +659,10 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // (boolean = draw no kiosk top bar), { allowHls? } (boolean = whether a Video
     // widget here may play over HLS), { groups? } (string[] = the message groups this
     // screen belongs to), { textSize? } (number 50-300 = the ServiceCue
-    // text size this display shows), and/or { slug? } (string; "" clears the
-    // friendly URL alias)
+    // text size this display shows), { rotation? } (0, 90, 180 or 270 = how far
+    // the Mac output helper turns the picture), { videoMode? } (a name from
+    // VIDEO_MODES = what a DeckLink port sends), and/or { slug? } (string; ""
+    // clears the friendly URL alias)
     const outputPatchMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
     if (method === "PATCH" && outputPatchMatch) {
       const id = outputPatchMatch[1];
@@ -680,11 +682,15 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       // number from 50 to 300, so junk is a 400 with the reason rather than an
       // ignored field.
       const hasTextSize = "textSize" in body;
+      // Present at all counts, as with textSize: a rotation or a mode the server
+      // does not accept is a 400 naming what is accepted.
+      const hasRotation = "rotation" in body;
+      const hasVideoMode = "videoMode" in body;
       const hasSlug = typeof body.slug === "string";
       const mode = body.mode === "panel" ? "panel" : body.mode === "display" ? "display" : null;
       const hasMode = mode !== null;
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasGroups && !hasTextSize && !hasSlug && !hasMode) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.groups (string[]), body.textSize (number, 50 to 300), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasGroups && !hasTextSize && !hasRotation && !hasVideoMode && !hasSlug && !hasMode) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.groups (string[]), body.textSize (number, 50 to 300), body.rotation (0, 90, 180 or 270), body.videoMode (string), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
@@ -705,6 +711,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         if (hasAllowHls) state = await stageController.setOutputAllowHls(id, body.allowHls as boolean);
         if (hasGroups) state = await stageController.setOutputGroups(id, body.groups);
         if (hasTextSize) state = await stageController.setOutputTextSize(id, body.textSize);
+        if (hasRotation) state = await stageController.setOutputRotation(id, body.rotation);
+        if (hasVideoMode) state = await stageController.setOutputVideoMode(id, body.videoMode);
         if (hasSlug) state = await stageController.setOutputSlug(id, body.slug as string);
       } catch (err) {
         error(res, errorMessage(err));
