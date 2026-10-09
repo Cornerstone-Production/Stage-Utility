@@ -39,7 +39,8 @@ import { KIND_DRAWS_TOP_BAR, outputMode, roleChangeConflict, viewFitsRole, viewS
 import { useResyncOn } from "../../lib/use-resync-on";
 import { useDevices } from "../../app/screens/use-devices";
 import { releaseDevice } from "../../app/screens/screen-device";
-import { DEFAULT_VIDEO_MODE, modeChoices, ROTATIONS, type Rotation } from "@main/types/output-format";
+import { cardOf, outputModeLine } from "../../app/screens/output-helpers";
+import { modeChoices, ROTATIONS, type Rotation } from "@main/types/output-format";
 import type { DeviceOutput } from "@main/types/kiosk";
 import type { OutputHealth } from "@main/types/output-health";
 import type { MessageGroups } from "../../main/use-message-groups";
@@ -544,13 +545,6 @@ function Stat({ value, label }: { value: string; label: string }) {
   );
 }
 
-/** The card's name out of an output's, which reads `<port> · <card>`; the whole
- *  name when it does not start with the port. */
-function cardOf(output: DeviceOutput): string {
-  const prefix = `${output.port} · `;
-  return output.name.startsWith(prefix) ? output.name.slice(prefix.length) : output.name;
-}
-
 /**
  * The Device section for a screen shown by one output of a Mac output helper:
  * which port, what it sends, how far it is turned, and how it is doing.
@@ -567,7 +561,7 @@ function OutputDeviceSection({ output, device, online, health, actions }: {
   const [busy, setBusy] = useState(false);
   const rotation = output.rotation ?? 0;
   const sideways = rotation === 90 || rotation === 270;
-  const mode = output.videoMode ?? DEFAULT_VIDEO_MODE;
+  const mode = outputModeLine(device.output, output.videoMode, undefined);
   const who = [device.hostname || device.label || "Set up on a device", device.output.port].join(" · ");
   const via = [cardOf(device.output), device.ip ? `via the output helper on ${device.ip}` : "via the output helper"].join(" · ");
 

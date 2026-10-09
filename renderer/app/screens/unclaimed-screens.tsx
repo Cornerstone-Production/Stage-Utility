@@ -21,11 +21,12 @@ import { ErrorNote } from "../../components/ui/error-note";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../../components/ui/select";
 import { cn } from "../../lib/cn";
 import { useDevices, refreshDevices, describeScreen } from "./use-devices";
+import { outputModeLine } from "./output-helpers";
 import { useDisplayPresence } from "./use-display-presence";
 import { groupByMachine, type Machine, type MachineRow } from "./machine-groups";
-import { DEFAULT_VIDEO_MODE } from "@main/types/output-format";
 import type { DeviceOutput, SeenDevice } from "@main/types/kiosk";
 import type { Output } from "@main/types/views";
+import type { PanelDevice } from "../../settings/sections/screen-settings-panel";
 
 /** The page holds a scan open while it is on screen — work gated on somebody
  *  actually looking, which is the house rule applied to a UDP socket. */
@@ -38,7 +39,7 @@ export function UnclaimedScreens({
   outputs: Output[];
   /** "Set up as a new screen": open the Screen settings panel for this device.
    *  The screen is made, and the device claimed, when the panel finishes. */
-  onSetUpNew: (device: { id: string; hostname?: string; ip?: string; name?: string }) => void;
+  onSetUpNew: (device: PanelDevice) => void;
 }) {
   const data = useDevices();
   const connected = useDisplayPresence();
@@ -193,7 +194,7 @@ function DeviceActions({ device, outputs, busy, onSetUpNew, onClaim, describedBy
   device: SeenDevice;
   outputs: Output[];
   busy: boolean;
-  onSetUpNew: (device: { id: string; hostname?: string; ip?: string; name?: string }) => void;
+  onSetUpNew: (device: PanelDevice) => void;
   onClaim: (outputId: string) => void;
   /** The id of the text naming this device, for when the page offers the same two
    *  actions for several of them. */
@@ -232,8 +233,8 @@ function DeviceActions({ device, outputs, busy, onSetUpNew, onClaim, describedBy
  *  have, so it says the house one until the screen is set; a display says what
  *  the Mac is driving it at, when it has said. */
 function outputLine(output: DeviceOutput, device: SeenDevice): string {
-  if (output.kind === "decklink") return `Video output · ${DEFAULT_VIDEO_MODE} until set`;
-  return ["Display", describeScreen(device.screen)].filter(Boolean).join(" · ");
+  const mode = outputModeLine(output, undefined, device.screen);
+  return output.kind === "decklink" ? `Video output · ${mode} until set` : ["Display", mode].filter(Boolean).join(" · ");
 }
 
 function OutputIcon({ kind }: { kind: DeviceOutput["kind"] }) {
@@ -263,7 +264,7 @@ function MachineCard({ machine, outputs, connected, busy, lookedLikeNames, onSet
   connected: ReadonlySet<string>;
   busy: string | null;
   lookedLikeNames: (id: string) => string;
-  onSetUpNew: (device: { id: string; hostname?: string; ip?: string; name?: string }) => void;
+  onSetUpNew: (device: PanelDevice) => void;
   onClaim: (deviceId: string, outputId: string) => void;
 }) {
   return (
@@ -302,7 +303,7 @@ function OutputRow({ row, outputs, connected, busy, lookedLikeNames, onSetUpNew,
   connected: ReadonlySet<string>;
   busy: string | null;
   lookedLikeNames: (id: string) => string;
-  onSetUpNew: (device: { id: string; hostname?: string; ip?: string; name?: string }) => void;
+  onSetUpNew: (device: PanelDevice) => void;
   onClaim: (deviceId: string, outputId: string) => void;
 }) {
   const output = row.device.output!;
@@ -311,7 +312,7 @@ function OutputRow({ row, outputs, connected, busy, lookedLikeNames, onSetUpNew,
 
   if (row.state === "bound") {
     const screen = outputs.find((o) => o.id === row.device.outputId);
-    const mode = output.kind === "decklink" ? ` · ${screen?.videoMode ?? DEFAULT_VIDEO_MODE}` : "";
+    const mode = outputModeLine(output, screen?.videoMode, row.device.screen);
     const showing = connected.has(row.device.outputId);
     return (
       <div className={cn(base, "opacity-55")}>
@@ -319,7 +320,7 @@ function OutputRow({ row, outputs, connected, busy, lookedLikeNames, onSetUpNew,
         <div className="min-w-0">
           <b className="block truncate text-footnote font-semibold text-fg">{output.name}</b>
           <span className="block truncate text-caption1 text-fg-subtle">
-            Set up as &ldquo;{screen?.name ?? row.device.outputId}&rdquo;{mode}
+            Set up as &ldquo;{screen?.name ?? row.device.outputId}&rdquo;{mode && ` · ${mode}`}
           </span>
         </div>
         <span className="rounded-full border border-line-strong px-2 text-caption2 text-fg-muted max-sm:col-span-full">

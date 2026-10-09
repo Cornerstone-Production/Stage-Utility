@@ -16,8 +16,8 @@ import { Tooltip, toast } from "../../components/ui";
 import { errorMessage } from "@main/services/errors";
 import type { PublicDevice } from "@main/services/kiosk-devices-store";
 import type { DeviceOutput } from "@main/types/kiosk";
-import { DEFAULT_VIDEO_MODE } from "@main/types/output-format";
 import { useDevices, refreshDevices, describeScreen } from "./use-devices";
+import { outputModeLine } from "./output-helpers";
 
 /**
  * Unbind a device from the screen it shows, and say so. One function for the two
@@ -44,7 +44,7 @@ export async function releaseDevice(deviceId: string, screenName: string): Promi
  *  a display runs at whatever the Mac drives it at. */
 export function outputSummary(device: PublicDevice & { output: DeviceOutput }, videoMode: string | undefined): string {
   const { output } = device;
-  const mode = output.kind === "decklink" ? (videoMode ?? DEFAULT_VIDEO_MODE) : describeScreen(device.screen);
+  const mode = outputModeLine(output, videoMode, device.screen);
   return [device.hostname || device.label || "Set up on a device", output.port, mode].filter(Boolean).join(" · ");
 }
 
