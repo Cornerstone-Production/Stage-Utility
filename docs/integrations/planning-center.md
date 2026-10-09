@@ -98,6 +98,24 @@ A response that is a web page, JSON or XML rather than an image (a captive
 portal, a proxy's error page) is refused on a `[photo-cache]` line and never
 cached, so the next request asks again.
 
+## Plan files
+
+The Plan file widget and the editor's file picker read the plan's
+`all_attachments`, which covers files on the plan, on its items and on their
+songs and arrangements. A file is found by name, so the same layout shows each
+week's file without being re-pointed. Planning Center gives most attachments an
+id that is a run of digits; the plan's own stage plot comes back with a word on
+the end (`84892470-stage`), and an attachment id may take that form. No other
+Planning Center id does, and one with anything else in it is refused before a
+request is made.
+
+Planning Center hands out short-lived download links, so each file is fetched
+once and kept on disk (`cache/attachments/`), named by its attachment id, then
+served to every display. A link that expires early is re-opened once. A file
+that will not download is logged once per outage with its name and the reason,
+and recovers on its own: the widget keeps asking
+([Plan file](../reference/widgets.md#pco--service)).
+
 ## API version
 
 PCO versions each product by date. A request selects one with an

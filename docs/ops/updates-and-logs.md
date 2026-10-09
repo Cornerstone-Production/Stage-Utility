@@ -169,7 +169,7 @@ as such rather than given a doc link it doesn't need.
 | `[app-paths]` | Recovering (or failing to recover) config from a legacy data-directory name across an upgrade |
 | `[app-root]` | An ignored or unusable `STAGE_UTILITY_ROOT` override: [Environment](install-and-config.md#environment) |
 | `[archive]` | A data-archive read, write or import failure: [Data archive](../data-archive.md) |
-| `[attachment-cache]` | Plan attachments cached from Planning Center: prunes, and fetch/redirect/size refusals: [Planning Center](../integrations/planning-center.md) |
+| `[attachment-cache]` | Plan attachments cached from Planning Center: prunes, and fetch/redirect/size refusals; a file that will not download is one line per outage naming the file, its attachment id and why, a reminder if it keeps failing, and one when it downloads again: [Plan files](../integrations/planning-center.md#plan-files) |
 | `[attendance-recorder]` | The attendance-trend recorder's debounced save failing to persist |
 | `[automation]` | Rules added, changed, removed, saved with issues, failing to fire, or run by hand from a Run button (who ran it, and what came of it); on the browser, the rule list failing to load: [Automation](../automation.md) |
 | `[automation-log]` | The Activity log itself failing to persist an entry to disk |
@@ -210,6 +210,7 @@ as such rather than given a doc link it doesn't need.
 | `[pco-calendar]` | Calendar instances with no start time, left undrawn: [Calendar](../integrations/planning-center.md#calendar) |
 | `[photo-cache]` | Person photos cached from Planning Center: prunes, fetch/redirect/size refusals, and a smaller copy PCO would not give, with what was served instead: [Planning Center](../integrations/planning-center.md#photos) |
 | `[plan-export]` | A view bundle built for export to another install, and its counts: [Moving a view between installs](../moving-a-view.md) |
+| `[plan-file]` | Browser-side: a Plan file widget still failing to load after its quick retries, with the page it is on and the file name, once per outage rather than on every slow re-check: [Plan file](../reference/widgets.md#pco--service) |
 | `[plans]` | The upcoming-plans list refreshing or failing, and the plan switcher's mode: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
 | `[prodcom]` | Connection state, transcript source (websocket vs. SSE fallback), and idle/heartbeat timeouts: [ProdCom](../integrations/prodcom.md) |
 | `[propresenter]` | Macro triggers and their failures, and unsupported status endpoints: [ProPresenter](../integrations/propresenter.md) |
