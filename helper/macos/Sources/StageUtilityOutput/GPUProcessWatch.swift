@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import StageUtilityOutputCore
 
 /// Logs Chromium's GPU process ending. CEF reports a renderer that ends (each
 /// output's page logs that itself) but nothing for the GPU process, which every
@@ -50,33 +51,18 @@ final class GPUProcessWatch {
 
   private static func gpuChildren() -> [pid_t] {
     var pids = [pid_t](repeating: 0, count: 256)
-    let bytes = proc_listchildpids(getpid(), &pids, Int32(pids.count * MemoryLayout<pid_t>.size))
-    guard bytes > 0 else { return [] }
-    // proc_listchildpids returns a count of pids on macOS, despite the name of its
-    // size argument; take whichever reading fits the buffer.
-    let count = Int(bytes) <= pids.count ? Int(bytes) : Int(bytes) / MemoryLayout<pid_t>.size
-    return pids.prefix(count).filter { $0 > 0 && arguments(of: $0).contains("--type=gpu-process") }
+    let returned = proc_listchildpids(getpid(), &pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+    let count = ProcessArguments.childCount(returned: returned, capacity: pids.count)
+    return pids.prefix(count).filter { $0 > 0 && ProcessArguments.isGPUProcess(arguments(of: $0)) }
   }
 
-  /// A process's arguments (KERN_PROCARGS2: argc, the executable path, padding, then
-  /// argc NUL-terminated strings). Empty when they cannot be read.
+  /// A process's arguments, empty when they cannot be read (`ProcessArguments`).
   private static func arguments(of pid: pid_t) -> [String] {
     var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
     var size = 0
     guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return [] }
     var buffer = [UInt8](repeating: 0, count: size)
     guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return [] }
-    let argc = buffer.withUnsafeBytes { $0.load(as: Int32.self) }
-    var i = MemoryLayout<Int32>.size
-    while i < size && buffer[i] != 0 { i += 1 }  // the executable path
-    while i < size && buffer[i] == 0 { i += 1 }  // its padding
-    var args: [String] = []
-    while args.count < argc && i < size {
-      let start = i
-      while i < size && buffer[i] != 0 { i += 1 }
-      args.append(String(decoding: buffer[start..<i], as: UTF8.self))
-      i += 1
-    }
-    return args
+    return ProcessArguments.parse(procargs2: Array(buffer.prefix(size)))
   }
 }
