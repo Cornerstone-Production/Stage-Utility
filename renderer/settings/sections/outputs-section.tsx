@@ -376,7 +376,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
         />
         {outputMode(output) === "panel" && (
           <Tooltip label="A control surface: controls on this screen are live">
-            <span className="shrink-0 rounded-full border border-accent bg-accent-a3 px-2 py-0.5 text-caption2 font-medium text-accent">
+            <span className="shrink-0 rounded-full border border-accent bg-accent/12 px-2 py-0.5 text-caption2 font-medium text-accent">
               panel
             </span>
           </Tooltip>
