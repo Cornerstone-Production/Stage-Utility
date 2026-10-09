@@ -160,17 +160,18 @@ screen.
 Uninstalling the agent leaves the device id in place, so reinstalling on the same
 machine does not orphan the binding.
 
-## Mac output helper (beta)
+### Running the helper (beta)
 
-A Mac can be several screens at once. The helper is a menu bar app that announces
-one device for each of the Mac's displays; each is set up on its own under *Not set
-up yet*, like any other device. The server can be on another machine or on the same
-Mac. It renders each screen in the Mac's own WebKit, so it looks as it does in
-Safari.
+Build it with `helper/macos/build-app.sh` (macOS 14 or later; the Command Line Tools
+are enough). That writes `StageUtilityOutput.app`, a universal menu bar app signed ad
+hoc. Open it: the menu bar icon opens its window, where each of the Mac's displays has
+a switch and a status line. Launching it again brings the window back.
 
-The main display, the one with the menu bar, is off until it is switched on in the
-helper, so the Mac keeps its desktop. Each display counts toward the number the Mac
-can drive.
+Flags, for a Mac nobody is looking at: `--show-window`, `--list-outputs` (reads the
+stored state and exits), `--dump-frames <dir>` (a PNG of every output and of the window
+every 5 s, with no Screen Recording permission), `--discovery-port <n>` and
+`--log-stderr`. The log is the unified log, subsystem `com.stageutility.output`.
 
-Build, flags, state files, the Local Network permission and how outputs map to
-devices are in [helper/macos/README.md](../helper/macos/README.md).
+Everything else about it (state files, discovery, health, rotation, the Local Network
+permission, recovering an output from a server that is gone) is in
+[helper/macos/README.md](../helper/macos/README.md).
