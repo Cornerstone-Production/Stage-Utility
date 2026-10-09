@@ -13,13 +13,23 @@ import { stageController } from "../stage-controller.js";
 import type { CreateScreenInput } from "../../types/views.js";
 import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, readCreateScreenBody } from "./screen-write.js";
 import { errorMessage } from "../errors.js";
+import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import * as path from "node:path";
 import { APP_ROOT } from "../app-root.js";
+import { getUserDataPath } from "../app-paths.js";
+import { OutputHelperDownloads, parseHelperPath } from "../output-helper-download.js";
+import { pkgVersion } from "../updater.js";
+import { scrub } from "../scrub.js";
 
 /** Exactly what may be served from scripts/kiosk. An allowlist rather than a
  *  path join, because this reads a file from disk on request. */
 const KIOSK_INSTALLERS = new Set(["install-linux.sh", "install-macos.sh", "install-windows.ps1"]);
+
+/** The Mac output helper's zips, fetched from the release on first request and
+ *  kept in the data directory. See output-helper-download.ts. */
+const helperDownloads = new OutputHelperDownloads({ dataDir: getUserDataPath, version: pkgVersion });
 
 /** A device id from a query string is untrusted. Bound like the datagram is. */
 const clean = (v: string | null): string | undefined =>
@@ -105,6 +115,39 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       res.end(body);
     } catch {
       error(res, "installer not found in this build", 404);
+    }
+    return;
+  }
+
+  // ── The Mac output helper, and the checksum its installer verifies ──────
+  // A Mac on a network with no internet gets the app from here. The first
+  // request fetches it from the release this server is running; see
+  // output-helper-download.ts for what is bounded and why.
+  if (method === "GET" && pathname.startsWith("/kiosk/StageUtilityOutput-")) {
+    const asset = parseHelperPath(pathname);
+    if (!asset) {
+      error(res, "unknown download", 404);
+      return;
+    }
+    const got = await helperDownloads.resolve(asset);
+    if (!got.ok) {
+      error(res, got.message, got.status);
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": asset.kind === "zip" ? "application/zip" : "text/plain; charset=utf-8",
+      "content-length": String(got.size),
+      "content-disposition": `attachment; filename="${asset.name}"`,
+      "cache-control": "no-store",
+    });
+    try {
+      await pipeline(createReadStream(got.file), res);
+    } catch (err) {
+      // Headers are out, so there is no status left to send: closing the socket
+      // is what tells the client the file is short, and curl then fails the
+      // transfer. The line is for whoever asks why the install stopped.
+      console.warn(`[output-helper] transfer of ${scrub(asset.name)} did not finish: ${scrub(err)}`);
+      res.destroy();
     }
     return;
   }
