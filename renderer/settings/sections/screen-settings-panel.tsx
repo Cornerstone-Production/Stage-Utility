@@ -29,9 +29,10 @@
 // roleChangeConflict(), the function the server decides with.
 
 import { useEffect, useRef, useState, type ChangeEvent, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
-import { XIcon } from "lucide-react";
+import { CopyIcon, XIcon } from "lucide-react";
 
-import { Button, Checkbox, ErrorNote, Input, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, confirm } from "../../components/ui";
+import { Button, Checkbox, ErrorNote, Input, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Tooltip, confirm, toast } from "../../components/ui";
+import { copyText } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
 import { KIND_DRAWS_TOP_BAR, outputMode, roleChangeConflict, viewFitsRole, viewShownInSidebar, viewSurface, type CreateScreenInput, type OutputMode } from "@main/types/views";
@@ -613,9 +614,28 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
           className="h-8 w-full"
         />
         <SlugField slug={output.slug ?? ""} baseUrl={baseUrl} onSave={(s) => actions.onSetSlug(output.id, s)} />
-        <p className="mt-1.5 break-all font-mono text-caption1 text-fg-muted">
-          {output.slug ? `${baseUrl}/${output.slug} · also /${output.id}` : permanent}
-        </p>
+        <div className="mt-1.5 flex items-start gap-1.5">
+          <p className="min-w-0 flex-1 break-all font-mono text-caption1 text-fg-muted">
+            {output.slug ? `${baseUrl}/${output.slug} · also /${output.id}` : permanent}
+          </p>
+          {/* The permanent one, as the old URL dialog and the card's Copy URL
+              copy: it is what a Pi or a printed QR is pointed at. copyText
+              rather than navigator.clipboard, which prod's plain HTTP does not
+              have. */}
+          <Tooltip label="Copy the permanent URL">
+            <button
+              type="button"
+              aria-label="Copy the permanent URL"
+              onClick={async () => {
+                if (await copyText(permanent)) toast.success("URL copied");
+                else toast.error("Could not copy — select the URL and copy it by hand");
+              }}
+              className="shrink-0 rounded-md p-1 text-fg-subtle hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              <CopyIcon className="size-3.5" />
+            </button>
+          </Tooltip>
+        </div>
       </Section>
 
       <Section title="On the screen">

@@ -488,6 +488,25 @@ describe("name and address", () => {
     assert.ok(screen.getByText("http://display.invalid/lobby · also /display-1"));
   });
 
+  test("copies the permanent address over plain HTTP, where navigator.clipboard does not exist", async () => {
+    // Prod is served over plain HTTP, so copyText takes its execCommand path,
+    // which copies whatever is selected at that moment. Record what that is.
+    let copied: string | null = null;
+    const doc = document as unknown as { execCommand: (cmd: string) => boolean };
+    const had = doc.execCommand;
+    doc.execCommand = (cmd: string) => {
+      if (cmd === "copy") copied = (document.activeElement as HTMLTextAreaElement | null)?.value ?? null;
+      return true;
+    };
+    try {
+      mount({ outputs: [{ ...MINE, slug: "lobby" }] });
+      await click(screen.getByRole("button", { name: "Copy the permanent URL" }));
+    } finally {
+      doc.execCommand = had;
+    }
+    assert.equal(copied, "http://display.invalid/display-1");
+  });
+
   test("Save appears only once the link differs, and sends it lower-cased and trimmed", async () => {
     const { calls } = mount({});
     assert.equal(screen.queryByRole("button", { name: "Save" }) !== null, false, "it is on screen");
