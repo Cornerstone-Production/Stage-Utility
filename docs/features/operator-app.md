@@ -229,17 +229,20 @@ doing; see [Widgets](../reference/widgets.md#control). A console meant for a
 Ross Ultritouch panel has its own presets and a starter; see
 [Ultritouch](../integrations/ultritouch.md).
 
-**Changing what a view is for.** A view's editor has **What this view is for**,
-*Wall screen* or *Control surface*, and the card of a view no screen shows has
-*Make it a wall screen* or *Make it a control surface*. Either changes the view
-**and every screen showing it**: those screens become control surfaces, or wall
-displays, together with it. When any screen would change, a confirm names them
-first (*Lobby TV and Hallway TV will become control surfaces. Anyone at them can
-press their buttons.*) and declining changes nothing. A view no screen shows has
-nothing to confirm. The whole change is one write: if part of it fails, what
-already changed is put back and the message says which step failed. A view that
-cannot be a control surface (anything but a custom view) is refused with the
-reason. To change just one screen, use its **What this screen is** in
+**Changing what a view is for.** A custom view's editor has a dropdown beside
+its type reading *Wall screen* or *Control surface*, and the card of a view no
+screen shows has *Make it a wall screen* or *Make it a control surface* in its
+menu. Either changes the view **and every screen showing it**: those screens
+become control surfaces, or wall displays, together with it. When any screen
+would change, a confirm names them first (*Lobby TV and Hallway TV will become
+control surfaces. Anyone at them can press their buttons.*) and declining
+changes nothing. A view no screen shows has nothing to confirm. If somebody
+points a screen at the view, or away from it, while the confirm is open, you
+are asked again with the screens as they are now, so a screen you were not
+shown is never changed. The whole change is one call: if any part of it fails,
+what already changed is put back and the message says which step failed. A
+view that cannot be a control surface (anything but a custom view) is refused
+with the reason. To change just one screen, use its **What this screen is** in
 [Screen settings](#screen-settings), which never changes another screen.
 
 **Reaching one.** Every console gets its own row in the sidebar, at
