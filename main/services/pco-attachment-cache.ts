@@ -19,6 +19,9 @@ import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
 import { pruneCacheDir } from "./cache-prune.js";
+import { errorMessage } from "./errors.js";
+import { OutageLog } from "./repeat-log.js";
+import { scrub } from "./scrub.js";
 import { atomicWrite } from "./write-queue.js";
 
 // Attachments (PDFs/images) are larger but rarely change; keep ~90 days, 500 MB.
@@ -71,6 +74,28 @@ export function mimeForExt(ext: string): string {
 
 type CachedFile = { path: string; ext: string };
 
+/**
+ * Attachments that will not download, said once per outage. A display asks again
+ * for a file it could not get, so one refused or failing attachment used to write a
+ * line, and for a thrown error a stack, for every request from every display.
+ * Keyed by attachment id, with the reason as the kind: a new reason for the same
+ * file is news, the same one is not, and a success that holds ends the run with
+ * one "loading again" line.
+ */
+const outage = new OutageLog();
+
+function reportFailure(id: string, filename: string, reason: string): void {
+  const d = outage.fail(id, reason, Date.now());
+  if (d.log) {
+    console.error(`[attachment-cache] could not get "${scrub(filename)}" (attachment ${scrub(id)}): ${scrub(reason)}${scrub(d.note)}`);
+  }
+}
+
+function reportRecovered(id: string, filename: string): void {
+  const d = outage.ok(id, Date.now());
+  if (d.log) console.log(`[attachment-cache] "${scrub(filename)}" (attachment ${scrub(id)}) is downloading again${scrub(d.note)}`);
+}
+
 /** Downloads in flight, keyed by cache file path, so concurrent misses share one. */
 const inFlight = new Map<string, Promise<CachedFile | null>>();
 
@@ -78,6 +103,7 @@ const inFlight = new Map<string, Promise<CachedFile | null>>();
  *  ever see a complete file, and two racing writers cannot interleave. */
 async function download(
   id: string,
+  filename: string,
   filePath: string,
   ext: string,
   openUrl: (opts?: { fresh?: boolean }) => Promise<string>,
@@ -85,14 +111,18 @@ async function download(
   let resp = await fetch(await openUrl());
   if (resp.status === 401 || resp.status === 403) {
     // The cached signed link expired ahead of its TTL; one re-open, one retry.
-    console.warn(`[attachment-cache] link for ${id} rejected (HTTP ${resp.status}); re-opening`);
+    // Said while the file is still downloading, not while it is already in a
+    // failing run: a link that is dead every time would otherwise add this line
+    // to the one outage line on every request from every display.
+    if (!outage.failing(id)) console.warn(`[attachment-cache] link for ${scrub(id)} rejected (HTTP ${resp.status}); re-opening`);
     resp = await fetch(await openUrl({ fresh: true }));
   }
   if (!resp.ok) {
-    console.error(`[attachment-cache] fetch ${id} → HTTP ${resp.status}`);
+    reportFailure(id, filename, `the download link answered HTTP ${resp.status}`);
     return null;
   }
   await atomicWrite(filePath, Buffer.from(await resp.arrayBuffer()));
+  reportRecovered(id, filename);
   return { path: filePath, ext };
 }
 
@@ -124,11 +154,13 @@ export async function getAttachmentFile(
     const existing = inFlight.get(filePath);
     if (existing) return await existing;
 
-    const job = download(id, filePath, ext, openUrl).finally(() => inFlight.delete(filePath));
+    const job = download(id, filename, filePath, ext, openUrl).finally(() => inFlight.delete(filePath));
     inFlight.set(filePath, job);
     return await job;
   } catch (err) {
-    console.error("[attachment-cache] error:", err);
+    // The reason, not the stack: it is the same on every request until something
+    // changes, and a refused id or a failed open says everything in one line.
+    reportFailure(id, filename, errorMessage(err));
     return null;
   }
 }
