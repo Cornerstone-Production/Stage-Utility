@@ -63,50 +63,69 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
     if (method === "GET" && pathname === "/api/pco/attachment") {
       const match = url.searchParams.get("match") ?? "";
       try {
-        const att = await stageController.findPlanAttachment(match);
+        let att = await stageController.findPlanAttachment(match);
         if (!att) {
           res.writeHead(404, { "Content-Type": "text/plain" });
           res.end("No matching attachment on the current plan");
           return;
         }
         const { attachmentEtag, attachmentVersion, etagMatches, getAttachmentFile, mimeForExt } = await import("../pco-attachment-cache.js");
-        // The version is what tells a file REPLACED under the same id (a stage
-        // plot re-uploaded) from the one already cached and already on a display.
-        const version = attachmentVersion(att.updatedAt, att.fileSizeBytes);
-        const etag = attachmentEtag(att.id, version);
         const cacheControl = "private, max-age=300";
-        if (etagMatches(req.headers["if-none-match"], etag)) {
-          // The display already has these bytes: no download, no body.
-          res.writeHead(304, { ETag: etag, "Cache-Control": cacheControl });
-          res.end();
+        // Two passes at most. The second is for a file that was a version behind:
+        // a newer one was written, and removed this one, between resolving the
+        // attachment and reading its bytes.
+        for (let pass = 1; ; pass++) {
+          const cur = att;
+          // The version is what tells a file REPLACED under the same id (a stage
+          // plot re-uploaded) from the one already cached and already on a display.
+          const version = attachmentVersion(cur.updatedAt, cur.fileSizeBytes);
+          const etag = attachmentEtag(cur.id, version);
+          if (etagMatches(req.headers["if-none-match"], etag)) {
+            // The display already has these bytes: no download, no body.
+            res.writeHead(304, { ETag: etag, "Cache-Control": cacheControl });
+            res.end();
+            return;
+          }
+          const file = await getAttachmentFile(
+            cur.id,
+            cur.contentType,
+            cur.filename,
+            async (opts) => (await stageController.openPlanAttachment(cur.id, version ? { ...opts, version } : opts)).url,
+            version,
+          );
+          if (!file) {
+            res.writeHead(502, { "Content-Type": "text/plain" });
+            res.end("Could not download attachment from Planning Center");
+            return;
+          }
+          let data: Buffer;
+          try {
+            data = await fs.readFile(file.path);
+          } catch (err) {
+            if (pass === 1 && (err as NodeJS.ErrnoException).code === "ENOENT") {
+              const fresh = await stageController.findPlanAttachment(match);
+              if (fresh) {
+                att = fresh;
+                continue;
+              }
+            }
+            throw err;
+          }
+          res.writeHead(200, {
+            "Content-Type": mimeForExt(file.ext),
+            // The bytes are immutable per attachment id and version, so the ETag
+            // names that pair. `max-age=300` lets a page load reuse the file for five
+            // minutes without asking; a display that is already showing it asks with
+            // `cache: "no-cache"` (the Plan file widget does, every five minutes),
+            // which sends If-None-Match whatever max-age says, so max-age does not
+            // have to be dropped for a replaced file to be noticed. A new plan is a
+            // new URL (the widget adds ?plan=).
+            ETag: etag,
+            "Cache-Control": cacheControl,
+          });
+          res.end(data);
           return;
         }
-        const file = await getAttachmentFile(
-          att.id,
-          att.contentType,
-          att.filename,
-          async (opts) => (await stageController.openPlanAttachment(att.id, version ? { ...opts, version } : opts)).url,
-          version,
-        );
-        if (!file) {
-          res.writeHead(502, { "Content-Type": "text/plain" });
-          res.end("Could not download attachment from Planning Center");
-          return;
-        }
-        const data = await fs.readFile(file.path);
-        res.writeHead(200, {
-          "Content-Type": mimeForExt(file.ext),
-          // The bytes are immutable per attachment id and version, so the ETag
-          // names that pair. `max-age=300` lets a page load reuse the file for five
-          // minutes without asking; a display that is already showing it asks with
-          // `cache: "no-cache"` (the Plan file widget does, every five minutes),
-          // which sends If-None-Match whatever max-age says, so max-age does not
-          // have to be dropped for a replaced file to be noticed. A new plan is a
-          // new URL (the widget adds ?plan=).
-          ETag: etag,
-          "Cache-Control": cacheControl,
-        });
-        res.end(data);
       } catch (err) {
         const msg = errorMessage(err);
         error(res, `Attachment error: ${msg}`, 500);

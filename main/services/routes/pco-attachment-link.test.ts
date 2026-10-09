@@ -10,6 +10,8 @@
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import fsp from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, mock, test } from "node:test";
@@ -175,5 +177,41 @@ describe("/api/pco/attachment and a file that changes", () => {
     assert.equal(r.status, 304);
     assert.equal(seen.downloads, 0, "a 304 downloaded the file first");
     assert.equal(seen.opens, 0, "a 304 opened a signed link first");
+  });
+
+  test("a file removed between resolving and reading is resolved once more", async (t) => {
+    // A newer version was written, and this one pruned, after the route chose it.
+    const { att, seen } = setup(t, "84892473-stage");
+    const first = await get();
+    assert.equal(first.body, "first upload");
+
+    att.updatedAt = "2026-10-08T15:30:00Z";
+    seen.bytes = Buffer.from("second upload");
+    const real = fsp.readFile;
+    let thrown = 0;
+    mock.method(fsp, "readFile", async (...args: Parameters<typeof real>) => {
+      if (thrown === 0) {
+        thrown += 1;
+        throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+      }
+      return real(...args);
+    });
+    syncBuiltinESMExports();
+    t.after(() => { mock.restoreAll(); syncBuiltinESMExports(); });
+    const r = await get();
+    assert.equal(thrown, 1);
+    assert.equal(r.status, 200, `the vanished file was not re-resolved: ${r.status} ${r.body}`);
+    assert.equal(r.body, "second upload");
+  });
+
+  test("a file that is still missing after the second look is the 500 it was", async (t) => {
+    setup(t, "84892474-stage");
+    mock.method(fsp, "readFile", async () => {
+      throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+    });
+    syncBuiltinESMExports();
+    t.after(() => { mock.restoreAll(); syncBuiltinESMExports(); });
+    const r = await get();
+    assert.equal(r.status, 500);
   });
 });
