@@ -122,6 +122,14 @@ struct HelperWindowView: View {
         Spacer(minLength: 8)
         Text("v\(model.version)").font(.system(size: 12)).foregroundColor(Palette.subtle)
       }
+      // An agent app has no menu to quit from. Not in the mockup, kept small and quiet.
+      HStack {
+        Spacer(minLength: 0)
+        Button("Quit Stage Utility Output") { NSApp.terminate(nil) }
+          .buttonStyle(.plain)
+          .font(.system(size: 11))
+          .foregroundColor(Palette.subtle)
+      }
       if let error = model.launchAtLoginError {
         Text(error).font(.system(size: 11)).foregroundColor(Palette.warn).fixedSize(horizontal: false, vertical: true)
       }

@@ -22,6 +22,9 @@ final class AppModel: ObservableObject {
   @Published private(set) var launchAtLogin = false
   @Published private(set) var launchAtLoginError: String?
   let version: String
+  /// Called when a change in the displays leaves the menu bar covered by an output
+  /// that did not cover it before: the icon is hidden, so the window has to come up.
+  var onMenuBarCovered: (() -> Void)?
 
   private let options: Options
   private let identity: MacIdentity
@@ -137,8 +140,20 @@ final class AppModel: ObservableObject {
       if record.enabled, rt.sink == nil { activate(key) }
       if !record.enabled, rt.sink != nil { deactivate(key) }
     }
+    let covered = menuBarCovered
     refresh()
+    if HelperWindowPolicy.opensOnChange(wasCovered: wasMenuBarCovered, isCovered: covered) { onMenuBarCovered?() }
+    wasMenuBarCovered = covered
   }
+
+  /// An output window is over the display that has the menu bar, and so over the icon.
+  var menuBarCovered: Bool {
+    order.contains { key in
+      guard let rt = runtimes[key] else { return false }
+      return rt.display.descriptor.isMain && rt.sink != nil
+    }
+  }
+  private var wasMenuBarCovered = false
 
   private func ensureRecord(_ d: OutputDescriptor) -> OutputRecord {
     do {
@@ -159,6 +174,8 @@ final class AppModel: ObservableObject {
     }
     Log.notice(.output, "\(runtimes[key]!.display.descriptor.name): turned \(on ? "on" : "off") in the window")
     if on { activate(key) } else { deactivate(key) }
+    // Done from the window itself, which is up: nothing to pop.
+    wasMenuBarCovered = menuBarCovered
     refresh()
   }
 

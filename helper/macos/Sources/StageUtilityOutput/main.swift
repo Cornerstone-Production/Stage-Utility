@@ -25,6 +25,11 @@ if options.listOutputs {
   exit(0)
 }
 
+if SingleInstance.handOverToRunningCopy() {
+  FileHandle.standardError.write(Data("StageUtilityOutput: already running; its window was brought forward\n".utf8))
+  exit(0)
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 let delegate = MainActor.assumeIsolated { AppDelegate(options: options, paths: paths) }

@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var model: AppModel!
   private var statusItem: NSStatusItem!
   private var window: NSWindow?
+  private var showObserver: NSObjectProtocol?
 
   init(options: Options, paths: HelperPaths) {
     self.options = options
@@ -24,10 +25,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       button.action = #selector(toggleWindow)
     }
     model.start()
+    // After start, so launch is decided below and only a LATER change calls this.
+    model.onMenuBarCovered = { [weak self] in self?.showWindow() }
     // First run: say hello. Afterwards a menu bar app stays quiet unless asked.
-    if options.showWindow || !FileManager.default.fileExists(atPath: paths.userDir.appendingPathComponent("outputs.json").path) {
+    let hasState = FileManager.default.fileExists(atPath: paths.userDir.appendingPathComponent("outputs.json").path)
+    if HelperWindowPolicy.opensAtLaunch(showWindowFlag: options.showWindow, hasStateFile: hasState, menuBarCovered: model.menuBarCovered) {
       showWindow()
     }
+    // A second copy started by hand asks this one to show its window, then exits.
+    showObserver = DistributedNotificationCenter.default().addObserver(
+      forName: SingleInstance.showWindowRequest, object: nil, queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.showWindow() }
+    }
+  }
+
+  /// Launching the app again, or `open -a`, while it runs: bring the window back.
+  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    showWindow()
+    return true
   }
 
   func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { false }
