@@ -181,13 +181,19 @@ driver only when it starts. The screen's **Format** (1080p59.94 unless changed) 
 mode the port is opened in; a change reopens it, and a format the port does not have
 is refused, with the reason on that output's line in the helper's window. Rotation
 applies as it does on a display. A card unplugged keeps its screen and comes back by
-itself when plugged in again.
+itself when plugged in again. A connector set as an input in Desktop Video Setup is
+not an output: the window lists it as "Set as an input in Desktop Video Setup", and it
+appears under *Not set up yet* within about 10 s of being set as an output. A DeckLink
+output runs 20 ms behind its page at 1080p59.94, and its line in the window says how
+far behind it is.
 
 Flags, for a Mac nobody is looking at: `--show-window`, `--list-outputs` (reads the
 stored state and exits), `--dump-frames <dir>` (a PNG of every output and of the window
 every 5 s, with no Screen Recording permission), `--discovery-port <n>`, `--log-stderr`,
 and, for development, `--virtual-sdi <n>` (n SDI outputs with no card behind them,
-offering every format, so the whole card path runs on any Mac). The log is the unified log, subsystem
+offering every format, so the whole card path runs on any Mac), `--test-pattern
+latency` (a clock on every output, to photograph two side by side), `--frame-timings
+<file>` and `--head-start`/`--fill-lead <ms>`. The log is the unified log, subsystem
 `com.stageutility.output`.
 
 A Mac that was a Chrome kiosk keeps its screen when the installer replaces the kiosk with
