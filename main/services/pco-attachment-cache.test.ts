@@ -8,6 +8,8 @@
 
 import { strict as assert } from "node:assert";
 import * as fs from "node:fs/promises";
+import fsp from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, mock, test } from "node:test";
@@ -376,6 +378,34 @@ describe("attachment cache and a replaced file", () => {
     await getAttachmentFile("pre-12", "application/pdf", "c.pdf", open, "t1");
     await getAttachmentFile("pre-1", "application/pdf", "a.pdf", open, "t2");
     assert.deepEqual(await files("pre-1"), ["pre-1-stage.t1.pdf", "pre-1.t2.pdf", "pre-12.t1.pdf"]);
+  });
+
+  test("a v1.25.0 file (<id>.<ext>, no version) is replaced by the versioned download and pruned in the same call", async (t) => {
+    t.after(() => { globalThis.fetch = realFetch; });
+    await fs.writeFile(path.join(cacheDir, "legacy-1.pdf"), "legacy bytes");
+    const fetches = serve(Buffer.from("versioned bytes"));
+    const file = await getAttachmentFile("legacy-1", "application/pdf", "plot.pdf", open, "t5");
+    assert.equal(fetches(), 1, "the unversioned file was served for a versioned request");
+    assert.deepEqual(await fs.readFile(file!.path), Buffer.from("versioned bytes"));
+    assert.deepEqual(await files("legacy-1"), ["legacy-1.t5.pdf"], "the legacy file was left on disk");
+  });
+
+  test("failing to look for older copies does not fail the download", async (t) => {
+    t.after(() => { globalThis.fetch = realFetch; mock.restoreAll(); syncBuiltinESMExports(); });
+    const warns: string[] = [];
+    mock.method(console, "warn", (...a: unknown[]) => { warns.push(a.map(String).join(" ")); });
+    serve(Buffer.from("bytes"));
+    const realReaddir = fsp.readdir;
+    mock.method(fsp, "readdir", async (...args: Parameters<typeof realReaddir>) => {
+      if (String(args[0]) === cacheDir) throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+      return realReaddir(...args);
+    });
+    syncBuiltinESMExports();
+    const file = await getAttachmentFile("prune-fail-1", "application/pdf", "plot.pdf", open, "t1");
+    assert.ok(file, "a prune failure turned a good download into a failure");
+    assert.deepEqual(await fs.readFile(file.path), Buffer.from("bytes"));
+    assert.equal(warns.length, 1);
+    assert.match(warns[0], /could not look for older copies .*EACCES.* of "plot\.pdf"/);
   });
 
   test("a version cannot put anything but a name in the file name", async (t) => {

@@ -142,12 +142,19 @@ function reportRecovered(id: string, filename: string): void {
 const inFlight = new Map<string, Promise<CachedFile | null>>();
 
 /** Delete every other cached version of one attachment id (`<safe>.…`), now that
- *  the current one is complete. Returns how many it could not delete: they are
- *  only disk space, and the age sweep takes them in the end. */
-async function removeOtherVersions(dir: string, safe: string, keep: string): Promise<number> {
-  if (!safe) return 0; // no id to prefix by: the prefix would be "." and match scratch files
+ *  the current one is complete. Returns what it could not do, or null: it is only
+ *  disk space, the age sweep takes the rest in the end, and the file just written
+ *  is good whatever happens here. */
+async function removeOtherVersions(dir: string, safe: string, keep: string): Promise<string | null> {
+  if (!safe) return null; // no id to prefix by: the prefix would be "." and match scratch files
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch (err) {
+    return `could not look for older copies (${errorMessage(err)})`;
+  }
   let failed = 0;
-  for (const name of await fs.readdir(dir)) {
+  for (const name of names) {
     const full = path.join(dir, name);
     if (full === keep || !name.startsWith(`${safe}.`)) continue;
     try {
@@ -156,7 +163,7 @@ async function removeOtherVersions(dir: string, safe: string, keep: string): Pro
       failed += 1;
     }
   }
-  return failed;
+  return failed > 0 ? `could not remove ${plural(failed, "older copy", "older copies")}` : null;
 }
 
 /** Write bytes to a private temp file, then rename onto `filePath` — readers only
@@ -184,9 +191,9 @@ async function download(
     return null;
   }
   await atomicWrite(filePath, Buffer.from(await resp.arrayBuffer()));
-  const failed = await removeOtherVersions(dir, safe, filePath);
-  if (failed > 0) {
-    console.warn(`[attachment-cache] could not remove ${plural(failed, "older copy", "older copies")} of "${scrub(filename)}"; the age sweep will`);
+  const leftover = await removeOtherVersions(dir, safe, filePath);
+  if (leftover) {
+    console.warn(`[attachment-cache] ${scrub(leftover)} of "${scrub(filename)}"; the age sweep will`);
   }
   reportRecovered(id, filename);
   return { path: filePath, ext };
