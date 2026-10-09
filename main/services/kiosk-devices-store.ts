@@ -14,6 +14,8 @@
 // rather than duplicates — are testable without a filesystem.
 
 
+import crypto from "node:crypto";
+
 import { announceDevices } from "./kiosk-presence.js";
 import { mergeScreen, sameScreen, screenFrom } from "./kiosk-screen-size.js";
 import type { BoundDevice, DeviceOutput, ScreenSize } from "../types/kiosk.js";
@@ -52,7 +54,20 @@ export function authorise(
   // secret presented and pin it. The window is between claiming and the screen's
   // next load, on a LAN this server already trusts for reads.
   if (device.token === "") return device;
-  return secret === device.token ? device : null;
+  return secretsMatch(secret, device.token) ? device : null;
+}
+
+/**
+ * Two secrets, compared in constant time.
+ *
+ * `===` stops at the first differing byte, so how long a wrong guess took says how
+ * much of it was right. timingSafeEqual needs equal lengths and throws otherwise,
+ * so each side is hashed first: the digests are always 32 bytes, and the length of
+ * a stored secret is not something a caller can probe either.
+ */
+function secretsMatch(presented: string, stored: string): boolean {
+  const digest = (s: string) => crypto.createHash("sha256").update(s).digest();
+  return crypto.timingSafeEqual(digest(presented), digest(stored));
 }
 
 /** Pin the secret a device presented, if it has not got one yet. Returns the
