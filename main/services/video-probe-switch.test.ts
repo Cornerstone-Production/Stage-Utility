@@ -14,6 +14,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 
+import { within } from "./fixtures/within.js";
+
 process.env.STAGE_UTILITY_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "video-probe-switch-"));
 
 const { integrationManager } = await import("./integration-manager.js");
@@ -21,9 +23,9 @@ const { videoService, videoProbeDeps } = await import("./video/video-service.js"
 const { relayLifecycle } = await import("./video/relay-lifecycle.js");
 
 const states = (integrationManager as unknown as { states: Map<string, unknown> }).states;
-const settle = async (): Promise<void> => {
-  for (let i = 0; i < 30; i++) await new Promise((resolve) => setImmediate(resolve));
-};
+/** Every camera-check round the last call started has landed. A round reads
+ *  the feed file, so no fixed count of event-loop turns covers it under load. */
+const settle = (): Promise<void> => within(videoService.whenProbesIdle(), "the camera-check rounds to land");
 
 test("the switch, turned on and off through the integration manager, starts and stops the camera checks", async () => {
   states.set("video", { id: "video", enabled: false, connection: "disconnected", message: null, config: {} });
