@@ -179,7 +179,9 @@ the panel covers the page instead.
 | **Video** | **Use HLS**. Off, the screen plays only WebRTC, and a feed that needs HLS says it can't play there |
 | **Device** | the machine bound to the screen, with its hostname and address, and whether the screen is online. Read-only; release it from the card |
 
-**Changing one screen never changes another.** A view can be shown on several
+**Changing one screen never changes another.** (Changing what a *view* is for
+is the other way round, and does change every screen showing it: see
+[Consoles](#consoles).) A view can be shown on several
 screens. When you change a screen's role and the view no longer fits it, and
 another screen shows that view, the panel names those screens and offers two
 ways forward. **Use a copy on this screen** (the default) duplicates the view,
@@ -226,6 +228,19 @@ control on. A **cue button** on one fires a cue and shows what its device is
 doing; see [Widgets](../reference/widgets.md#control). A console meant for a
 Ross Ultritouch panel has its own presets and a starter; see
 [Ultritouch](../integrations/ultritouch.md).
+
+**Changing what a view is for.** A view's editor has **What this view is for**,
+*Wall screen* or *Control surface*, and the card of a view no screen shows has
+*Make it a wall screen* or *Make it a control surface*. Either changes the view
+**and every screen showing it**: those screens become control surfaces, or wall
+displays, together with it. When any screen would change, a confirm names them
+first (*Lobby TV and Hallway TV will become control surfaces. Anyone at them can
+press their buttons.*) and declining changes nothing. A view no screen shows has
+nothing to confirm. The whole change is one write: if part of it fails, what
+already changed is put back and the message says which step failed. A view that
+cannot be a control surface (anything but a custom view) is refused with the
+reason. To change just one screen, use its **What this screen is** in
+[Screen settings](#screen-settings), which never changes another screen.
 
 **Reaching one.** Every console gets its own row in the sidebar, at
 `/consoles/<view id>`, and the console's own name heads the page. Renaming the
