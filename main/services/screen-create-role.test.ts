@@ -280,6 +280,62 @@ describe("createScreen — a write that fails part-way is taken back", () => {
   });
 });
 
+/**
+ * Put a directory where a store's file goes, so the next write onto it fails
+ * for real (EISDIR) after the controller has already assigned its state, which
+ * is what a full disk does. Puts the file back afterwards.
+ */
+async function withUnwritable<T>(file: string, body: () => Promise<T>): Promise<T> {
+  const at = path.join(TMP, file);
+  const saved = await fs.readFile(at, "utf8");
+  await fs.rm(at);
+  await fs.mkdir(at);
+  try {
+    return await body();
+  } finally {
+    await fs.rm(at, { recursive: true, force: true });
+    await fs.writeFile(at, saved);
+  }
+}
+
+describe("a write that fails on disk leaves nothing behind in memory either", () => {
+  // The rollback used to learn what it made only when the call that made it
+  // RESOLVED, and these calls assign the state before they write. A write that
+  // failed left the thing in memory with nothing to undo it, the operator told
+  // "Nothing was changed", and the next successful write persisted it.
+  it("a screen whose settings.json write fails", async () => {
+    await stageController.createScreen({ name: "Warm" }); // settings.json exists and is cached
+    await withUnwritable("settings.json", () =>
+      assert.rejects(() => stageController.createScreen({ name: "Phantom", mode: "display" }), ScreenWriteError));
+    assert.equal(outputs().some((o) => o.name === "Phantom"), false, "the screen is still in memory");
+    // The next write that lands must not carry it to disk.
+    await stageController.renameOutput("display-1", "Lobby TV again");
+    assert.equal((await outputsOnDisk()).some((o) => o.name === "Phantom"), false, "the next write persisted the phantom screen");
+  });
+
+  it("a view made for a screen, whose views.json write fails", async () => {
+    await stageController.renameView("wall-b", "Hallway loop"); // views.json exists and is cached
+    const before = views().length;
+    await withUnwritable("views.json", () =>
+      assert.rejects(() => stageController.createScreen({ name: "Lost", mode: "panel", newView: true }), ScreenWriteError));
+    assert.equal(views().length, before, "the view made for the screen is still in memory");
+    assert.equal(outputs().some((o) => o.name === "Lost"), false);
+    await stageController.renameView("wall-b", "Hallway loop 2");
+    assert.equal((await viewsOnDisk()).some((v) => v.name === "Lost"), false, "the next write persisted the phantom view");
+  });
+
+  it("the copy of a shared view, whose views.json write fails", async () => {
+    await stageController.renameView("wall-b", "Hallway loop");
+    const before = snapshot(["display-3", "display-4"], ["ctl-a"]);
+    await withUnwritable("views.json", () =>
+      assert.rejects(() => stageController.setOutputRole("display-4", "display", { copyView: true }), ScreenWriteError));
+    assert.equal(views().some((v) => v.name === "Booth controls (wall)"), false, "the copy is still in memory");
+    assert.equal(snapshot(["display-3", "display-4"], ["ctl-a"]), before);
+    await stageController.renameView("wall-b", "Hallway loop 2");
+    assert.equal((await viewsOnDisk()).some((v) => v.name === "Booth controls (wall)"), false, "the next write persisted the phantom copy");
+  });
+});
+
 describe("undoCreateScreen", () => {
   it("removes the screen and the view, even when that view is the only one", async () => {
     const { output, createdViewId } = await stageController.createScreen({ name: "Temp", mode: "display", newView: true });

@@ -2973,6 +2973,9 @@ export class StageController {
     name: string | undefined,
     kind: ViewKind = "slots",
     surface: ViewSurface = "display",
+    /** Told the view in the same synchronous turn it enters the state, BEFORE the
+     *  write that can fail. See addOutput's `onAssigned`. */
+    onAssigned?: (view: View) => void,
   ): Promise<View> {
     const id = await this.allocateViewId();
     // Only a custom View has an editable layout, so only a custom View has
@@ -2991,6 +2994,7 @@ export class StageController {
     console.log(`[stage-controller] createView id=${scrub(id)} name="${scrub(view.name)}" kind=${scrub(kind)}`);
     const views = [...this.state.views, view];
     this.state = { ...this.state, views };
+    onAssigned?.(view);
     await viewsStore.save(views);
     if (kind === "slots") this.rawSlotsByView.set(id, []);
     this.recomputeResolved();
@@ -3205,8 +3209,9 @@ export class StageController {
     return this.state;
   }
 
-  /** duplicateView, returning the copy — see createViewRecord for why. */
-  private async copyViewRecord(id: string, name?: string): Promise<View> {
+  /** duplicateView, returning the copy — see createViewRecord for why, and for
+   *  `onAssigned`. */
+  private async copyViewRecord(id: string, name?: string, onAssigned?: (view: View) => void): Promise<View> {
     const src = this.state.views.find((v) => v.id === id);
     if (!src) throw new Error(`views:duplicate — view ${id} not found`);
     const newId = await this.allocateViewId();
@@ -3233,6 +3238,7 @@ export class StageController {
     console.log(`[stage-controller] duplicateView ${scrub(id)} → ${scrub(newId)} "${scrub(copy.name)}"`);
     const views = [...this.state.views, copy];
     this.state = { ...this.state, views };
+    onAssigned?.(copy);
     await viewsStore.save(views);
 
     // Deep-copy slot config with fresh slot ids, through the same copyKey the
@@ -3421,6 +3427,15 @@ export class StageController {
      *  only the new id, which does not exist until the allocation below, is
      *  checked here. */
     fields: Partial<Pick<Output, "name" | "viewId" | "mode" | "slug">> = {},
+    /**
+     * Told the new screen in the same synchronous turn it enters the state, and
+     * BEFORE the write that can fail. For a caller that has to take it back: the
+     * state is assigned first (below, for the reason given there), so a write
+     * that fails leaves the screen in memory, and a caller that learns the id only
+     * when this resolves never learns it at all. The next write that lands would
+     * then persist a screen the operator was told was never made.
+     */
+    onAssigned?: (output: Output) => void,
   ): Promise<{ state: StageState; output: Output }> {
     const { name, viewId, mode, slug } = fields;
     // One write: the id, the floor that stops it ever coming back, and the
@@ -3455,6 +3470,7 @@ export class StageController {
           // array, so settings.json lost the new display and the screen was
           // gone at the next restart.
           this.state = { ...this.state, outputs };
+          onAssigned?.(created);
           return { output: created, outputs };
         },
         (a) => ({ outputs: a.outputs }),
@@ -3704,18 +3720,17 @@ export class StageController {
             label: "make the view",
             run: async () => {
               // Custom, because only a custom view has a layout to put anything on.
-              const view = await this.createViewRecord(name, "custom", surfaceForMode(mode ?? "display"));
-              createdViewId = view.id;
-              viewId = view.id;
+              await this.createViewRecord(name, "custom", surfaceForMode(mode ?? "display"), (view) => {
+                createdViewId = view.id;
+                viewId = view.id;
+              });
             },
             undo: async () => { if (!createdViewId) return false; await this.dropView(createdViewId); },
           }]
         : []),
       {
         label: "add the screen",
-        run: async () => {
-          output = (await this.addOutput({ name, viewId, mode, slug: slug || undefined })).output;
-        },
+        run: () => this.addOutput({ name, viewId, mode, slug: slug || undefined }, (made) => { output = made; }),
         undo: async () => { if (!output) return false; await this.removeOutput(output.id); },
       },
       // Decided here from the INPUT, not from `viewId`: that is still null while
@@ -3861,7 +3876,7 @@ export class StageController {
       steps.push(
         {
           label: "copy the view",
-          run: async () => { copy = await this.copyViewRecord(view.id, copyViewName(view, mode)); },
+          run: () => this.copyViewRecord(view.id, copyViewName(view, mode), (made) => { copy = made; }),
           undo: async () => { if (!copy) return false; await this.dropView(copy.id); },
         },
         // Nobody shows the copy yet, so neither guard can refuse this.
