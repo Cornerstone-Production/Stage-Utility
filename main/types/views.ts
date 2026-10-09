@@ -233,6 +233,22 @@ export interface View {
    */
   hideChrome?: boolean;
   /**
+   * Whether this console is listed in the operator app's sidebar. Absent = shown,
+   * so every console that exists today stays listed; only an explicit `false`
+   * takes it out. Read through {@link viewShownInSidebar}, never directly.
+   *
+   * It is about the LIST and nothing else. A hidden console keeps its live
+   * controls on every screen showing it, still opens at `/consoles/<id>`, still
+   * has a titled page, and a screen card's Open link still reaches it. A control
+   * surface on a stage display is a screen first, and listing its view as a
+   * place the operator works was the wrong default for it.
+   *
+   * DORMANT on a display View, the way {@link hideChrome} is: a display is not a
+   * sidebar entry at all. It is stored rather than refused so flipping a console
+   * to a display and back does not lose the choice.
+   */
+  showInSidebar?: boolean;
+  /**
    * @deprecated No longer read or written — the PCO Live Prev/Next controls were
    * removed from the script display. Kept only so an existing `views.json` still
    * parses; nothing sets it, and nothing renders from it. Drop it once no
@@ -1142,6 +1158,12 @@ export type OutputMode = "display" | "panel";
  *  edit, a downgrade) must read as the read-only one rather than the live one. */
 export function viewSurface(v: Pick<View, "surface">): ViewSurface {
   return v.surface === "console" ? "console" : "display";
+}
+
+/** Is this View listed in the sidebar? Absent means yes: a console written
+ *  before the switch existed was listed, and stays so until it is turned off. */
+export function viewShownInSidebar(v: Pick<View, "showInSidebar">): boolean {
+  return v.showInSidebar !== false;
 }
 
 /** An Output's mode. Absent — or unrecognised — means "display". The safety

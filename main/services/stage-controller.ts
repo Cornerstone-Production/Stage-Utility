@@ -3086,6 +3086,27 @@ export class StageController {
   }
 
   /**
+   * List a console in the operator app's sidebar, or take it out of the list.
+   *
+   * Stored on any View rather than refused for a display, like the chrome flag:
+   * it is dormant there, and refusing it would lose the choice every time a
+   * console was flipped to a display and back. Nothing else reads it — a hidden
+   * console keeps its live controls, its page and its URL.
+   */
+  async setViewShowInSidebar(id: string, showInSidebar: boolean): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:setShowInSidebar — view ${id} not found`);
+    }
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, showInSidebar } : v));
+    console.log(`[stage-controller] setViewShowInSidebar id=${scrub(id)} → ${scrub(showInSidebar ? "listed" : "HIDDEN")}`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
    * Replace a custom View's layout (visual editor save).
    *
    * `expectedRev` is the revision the editor opened. When it no longer matches,
