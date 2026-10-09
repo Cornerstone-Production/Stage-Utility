@@ -175,6 +175,11 @@ describe("edit mode", () => {
     assert.equal(document.querySelector("aside") !== null, false, "a panel was drawn for a screen that is gone");
   });
 
+  test("takes focus when it opens, so a keyboard user is in the form", () => {
+    mount({});
+    assert.equal(document.activeElement === screen.getByRole("complementary", { name: "Screen settings" }), true, `focus is on ${document.activeElement?.tagName}`);
+  });
+
   test("Escape closes it", async () => {
     const { calls } = mount({});
     await act(async () => { fireEvent.keyDown(screen.getByRole("button", { name: "Close" }), { key: "Escape" }); await settle(); });

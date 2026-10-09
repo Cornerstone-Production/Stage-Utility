@@ -26,7 +26,7 @@
 // says which screens share it and offers a copy for this screen, or a different
 // view. See sharedRoleConflict().
 
-import { useState, type ChangeEvent, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { XIcon } from "lucide-react";
 
 import { Button, Checkbox, ErrorNote, Input, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, confirm } from "../../components/ui";
@@ -88,6 +88,10 @@ export interface ScreenSettingsPanelProps {
   actions: ScreenPanelActions;
   onClose: () => void;
 }
+
+/** The panel's element id: there is one panel on the page, and the card menu that
+ *  opens it needs to hand focus to it once the menu has finished closing. */
+export const SCREEN_PANEL_ID = "screen-settings-panel";
 
 const ROLE_LABEL: Record<OutputMode, string> = { display: "wall display", panel: "control surface" };
 
@@ -790,6 +794,11 @@ function GuidedBody({ target, views, baseUrl, step, setStep, actions, onClose }:
 
 export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, messageGroups, actions, onClose }: ScreenSettingsPanelProps) {
   const [step, setStep] = useState<Step>(1);
+  // Focus moves into the panel when it opens, so a keyboard user who chose
+  // "Screen settings…" is in the form rather than back on a card's menu button
+  // with the whole card grid between them and it.
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => ref.current?.focus({ preventScroll: true }), []);
   const output = target.kind === "edit" ? outputs.find((o) => o.id === target.outputId) : undefined;
   // The screen was removed (here or from another browser) while its panel was open.
   // Nothing is left to edit, and a panel on nothing is not a state to draw.
@@ -797,9 +806,12 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
 
   return (
     <aside
+      ref={ref}
+      id={SCREEN_PANEL_ID}
+      tabIndex={-1}
       aria-label="Screen settings"
       onKeyDown={(e) => { if (e.key === "Escape" && !e.defaultPrevented) onClose(); }}
-      className="flex min-h-0 min-w-0 flex-col border-line bg-surface max-lg:fixed max-lg:inset-y-0 max-lg:right-0 max-lg:z-40 max-lg:w-full max-lg:max-w-[400px] max-lg:border-l max-lg:shadow-2xl lg:rounded-xl lg:border"
+      className="flex min-h-0 min-w-0 flex-col border-line bg-surface max-lg:bg-bg max-lg:fixed max-lg:inset-y-0 max-lg:right-0 max-lg:z-40 max-lg:w-full max-lg:max-w-[400px] max-lg:border-l max-lg:shadow-2xl focus:outline-none lg:rounded-xl lg:border"
     >
       <div className="flex items-start gap-3 border-b border-line px-[18px] pb-2.5 pt-3.5">
         <div className="min-w-0 flex-1">

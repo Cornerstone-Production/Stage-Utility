@@ -195,6 +195,16 @@ describe("opening the panel", () => {
     assert.ok(panel().getByRole("heading", { name: "Lobby TV" }));
   });
 
+  test("focus ends up in the panel, not back on the card's menu button", async () => {
+    // Radix hands focus back to a menu's trigger as the menu closes, and that
+    // happens AFTER the panel has mounted and taken focus.
+    await mountScreens();
+    await openSettings("Lobby TV");
+    await act(async () => { await settle(); await settle(); });
+    const aside = screen.getByRole("complementary", { name: "Screen settings" });
+    assert.equal(aside.contains(document.activeElement), true, `focus is on ${document.activeElement?.tagName} "${document.activeElement?.getAttribute("aria-label")}"`);
+  });
+
   test("closing it leaves the page as it was and sends nothing", async () => {
     await mountScreens();
     await openSettings("Lobby TV");

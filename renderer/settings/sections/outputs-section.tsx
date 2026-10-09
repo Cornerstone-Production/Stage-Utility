@@ -1,5 +1,5 @@
 import { ScreenDevice } from "../../app/screens/screen-device";
-import { useState, type ChangeEvent, type ReactNode } from "react";
+import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
@@ -26,6 +26,7 @@ import { IconTint } from "../../components/icon-tint";
 import { iconEntryAt } from "../../components/editable-icon";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { ImportLayout } from "./import-layout";
+import { SCREEN_PANEL_ID } from "./screen-settings-panel";
 import { viewSurface, viewShownInSidebar, outputMode } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
@@ -312,6 +313,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
 
   const [nameFocused, setNameFocused] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const openingSettings = useRef(false);
 
   return (
     <div
@@ -405,7 +407,21 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
             </button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
-            <DropdownMenu.Content align="end" sideOffset={4} className={menuContent()}>
+            <DropdownMenu.Content
+              align="end"
+              sideOffset={4}
+              className={menuContent()}
+              onCloseAutoFocus={(e) => {
+                if (openingSettings.current) {
+                  // The menu traps focus while it is open, so the panel cannot
+                  // take it until the menu has finished closing: this is that
+                  // moment. Without it focus lands back on this card's trigger.
+                  e.preventDefault();
+                  openingSettings.current = false;
+                  document.getElementById(SCREEN_PANEL_ID)?.focus({ preventScroll: true });
+                }
+              }}
+            >
               {/* Opens the SAME address the "Open" link below does. This used
                   to go through a handler that built the URL from
                   window.location.origin, while the link used `baseUrl` —
@@ -462,7 +478,16 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
               {/* Everything that is a SETTING lives in the panel: the role, the
                   lock, the top bar, HLS, the message groups, the friendly link.
                   This menu is actions. */}
-              <DropdownMenu.Item onSelect={onOpenSettings} className={MENU_ITEM}>
+              <DropdownMenu.Item
+                onSelect={() => {
+                  // Focus is handed to the panel as the menu finishes closing
+                  // (onCloseAutoFocus above); every other item leaves it where
+                  // it belongs, on the trigger.
+                  openingSettings.current = true;
+                  onOpenSettings();
+                }}
+                className={MENU_ITEM}
+              >
                 <SlidersHorizontalIcon className="size-3.5 text-fg-subtle" />
                 Screen settings…
               </DropdownMenu.Item>
