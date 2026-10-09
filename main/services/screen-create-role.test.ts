@@ -227,9 +227,17 @@ describe("createScreen — the sidebar listing", () => {
     assert.equal(view("ctl-b").showInSidebar, false);
   });
 
-  it("does not touch a view for a wall display, where the listing means nothing", async () => {
-    await stageController.createScreen({ name: "Wall", mode: "display", viewId: "wall-b", showInSidebar: false });
+  it("refuses a listing for a wall display, or for a control surface with no view, rather than dropping it", async () => {
+    // The listing belongs to a control surface's view. Sent where there is none,
+    // it used to be accepted and silently ignored.
+    await assert.rejects(
+      () => stageController.createScreen({ name: "Wall", mode: "display", viewId: "wall-b", showInSidebar: false }),
+      /showInSidebar/,
+    );
+    await assert.rejects(() => stageController.createScreen({ name: "Bare", mode: "panel", showInSidebar: false }), /showInSidebar/);
+    await assert.rejects(() => stageController.createScreen({ name: "Legacy", showInSidebar: false }), /showInSidebar/);
     assert.equal(view("wall-b").showInSidebar, undefined);
+    assert.equal(outputs().length, 5, "a screen was made");
   });
 });
 

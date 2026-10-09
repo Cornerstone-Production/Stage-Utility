@@ -3756,12 +3756,14 @@ export class StageController {
     if (typeof input.viewId === "string" && input.newView) {
       throw new Error("outputs:add — viewId and newView are alternatives: name an existing view, or ask for a new one");
     }
+    // The listing is written on a control surface's view. Anywhere else there is
+    // nothing to write it on, and accepting it would be dropping it silently.
+    if (input.showInSidebar !== undefined && (mode !== "panel" || (typeof input.viewId !== "string" && !input.newView))) {
+      throw new Error('outputs:add — showInSidebar is the listing of a control surface\'s view: send it with mode "panel" and a viewId or newView');
+    }
     // The view is checked only when the caller states a role. Without one this is
     // the original `{ name, viewId }` call, which took the id as given.
-    const existing =
-      mode !== undefined && typeof input.viewId === "string"
-        ? this.requireViewForRole(input.viewId, mode)
-        : typeof input.viewId === "string" ? this.state.views.find((v) => v.id === input.viewId) : undefined;
+    if (mode !== undefined && typeof input.viewId === "string") this.requireViewForRole(input.viewId, mode);
     const slug = (input.slug ?? "").trim().toLowerCase();
     if (slug !== "") {
       const verdict = validateSlug(slug, this.takenSlugs());
@@ -3794,7 +3796,8 @@ export class StageController {
       },
       // Decided here from the INPUT, not from `viewId`: that is still null while
       // this list is built, because a view made for the screen does not exist yet.
-      ...(mode === "panel" && (existing || input.newView) && input.showInSidebar !== undefined
+      // The listing was refused above unless it has a control surface's view.
+      ...(input.showInSidebar !== undefined
         ? [{
             label: "set the sidebar listing",
             run: async () => {
