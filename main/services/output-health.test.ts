@@ -85,6 +85,14 @@ describe("whether an output is struggling", () => {
     assert.equal(t.at(-1)?.struggling, false);
   });
 
+  it("a reopen in the middle of a bad run is not the third bad report", () => {
+    // 0 is the baseline, 5 and 10 are drops, and 0 is the output reopening. A
+    // comparison that read any CHANGE as a drop counts that fourth report as a
+    // third bad one and flags a healthy output; only a rise is a drop.
+    const t = run([good(0), good(5), good(10), good(0)]);
+    assert.deepEqual(t.map((x) => x.struggling), [false, false, false, false], "a count falling was read as a drop");
+  });
+
   it("a good report in the middle starts the count again", () => {
     const t = run([late(), late(), good(), late(), late()]);
     assert.equal(t.at(-1)?.struggling, false, "bad reports that were not in a row were counted together");

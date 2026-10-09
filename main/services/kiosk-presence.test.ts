@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, test, beforeEach, mock } from "node:test";
+import { describe, test, beforeEach, afterEach, mock } from "node:test";
 
 import {
   scanning, startScan, stopScan, recordSeen, seenDevices, forgetSeen,
@@ -322,5 +322,64 @@ describe("output health", () => {
       quiet();
       mock.timers.reset();
     }
+  });
+});
+
+// The sweep is one timer for three jobs (expire a scan, drop a reading that went
+// quiet, tell the page a device aged out) and stops only when none of them has
+// anything left to do. Ticked ONE 15 s STEP AT A TIME: a single tick across the
+// whole span ran green against a sweep that stopped at its first step.
+describe("the sweep timer", () => {
+  const STEP = 15_000;
+  const T0 = 1_000_000;
+  const lines: string[] = [];
+  const realLog = console.log;
+  const frames: { seen: unknown[]; health: unknown[] }[] = [];
+  let listening = false;
+
+  beforeEach(() => {
+    lines.length = 0;
+    frames.length = 0;
+    console.log = (...a: unknown[]) => {
+      lines.push(a.map(String).join(" "));
+    };
+    if (!listening) {
+      listening = true;
+      addBroadcastListener((channel, payload) => {
+        if (channel === "kiosk:devices") frames.push(payload as (typeof frames)[number]);
+      });
+    }
+    mock.timers.enable({ apis: ["setInterval", "Date"], now: T0 });
+  });
+  afterEach(() => {
+    console.log = realLog;
+    mock.timers.reset();
+  });
+
+  const STOPPED = "[output-helper] mac1.sdi-1 stopped reporting health";
+
+  test("keeps running for a reading that has not yet gone quiet, then drops it on the first step past 60 s", () => {
+    recordHealth("mac1.sdi-1", { fps: 59.94, repeated: 0.2, dropped: 0, at: 1 }, "decklink");
+    const stopped: number[] = [];
+    for (let elapsed = STEP; elapsed <= 6 * STEP; elapsed += STEP) {
+      mock.timers.tick(STEP);
+      if (lines.includes(STOPPED) && stopped.length === 0) stopped.push(elapsed);
+    }
+    // 60 s is the TTL: the reading is still good at 45 s and gone at 60 s.
+    assert.deepEqual(stopped, [4 * STEP], `the reading was not dropped at the step it went quiet:\n${lines.join("\n")}`);
+    assert.equal(lines.filter((l) => l === STOPPED).length, 1);
+  });
+
+  test("keeps running for a device that is heard and not yet aged out, then tells the page at the first step past 90 s", () => {
+    recordSeen(dev("d1"), T0);
+    const announcedAt: number[] = [];
+    for (let elapsed = STEP; elapsed <= 8 * STEP; elapsed += STEP) {
+      const n = frames.length;
+      mock.timers.tick(STEP);
+      if (frames.length > n && (frames.at(-1)!.seen as unknown[]).length === 0) announcedAt.push(elapsed);
+    }
+    // lastSeen is T0, a device is kept while it is no more than 90 s old, so it
+    // is still listed at the 90 s step and gone from the 105 s one.
+    assert.deepEqual(announcedAt, [7 * STEP], "the page was never told the device aged out");
   });
 });
