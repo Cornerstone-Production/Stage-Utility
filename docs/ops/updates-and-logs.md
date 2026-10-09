@@ -190,7 +190,6 @@ as such rather than given a doc link it doesn't need.
 | `[cues]` | Cue-to-Companion-button pairing and state-source inference, and built-in cues: [Cues](../automation.md#cues) |
 | `[data-store]` | Any JSON-backed store finding its file corrupt, backing it up and starting fresh, and rewriting a save that landed while it did: [Under load](reliability.md#under-load) |
 | `[device-manager]` | Wireless provider connections starting, stopping, or failing to disconnect: [Wireless](../integrations/wireless.md) |
-| `[devices]` | Kiosk device enrollment cleanup after a failed claim: [Kiosk devices](../kiosk-devices.md) |
 | `[displays]` | A display's reported screen size failing to record: [Size](../kiosk-devices.md#size) |
 | `[encryption]` | The encryption key generated on first run, or rejected as the wrong length: [When credentials all read as "not configured"](reliability.md#when-credentials-all-read-as-not-configured) |
 | `[events]` | SSE and poll-transport clients connecting, closing, or expiring: [Polling transport](../display-urls.md#polling-transport) |
