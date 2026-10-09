@@ -99,7 +99,30 @@ test("says what each waiting output is", async () => {
   const f = await mount(PAYLOAD);
   try {
     assert.equal(screen.getAllByText("Video output · 1080p59.94 until set").length, 2);
-    assert.ok(screen.getByText("Display · 1920 × 1080"));
+    assert.ok(screen.getByText("Built-in display · 1920 × 1080"));
+  } finally {
+    f.restore();
+  }
+});
+
+test("a display's row has the refresh rate when the probe carries one, and none when it does not", async () => {
+  const withRate = {
+    ...PAYLOAD,
+    seen: PAYLOAD.seen.map((d) => (d.id === "m.hdmi-1" ? { ...d, screen: { w: 0, h: 0, mode: "1920x1080@60" } } : d)),
+  };
+  const f = await mount(withRate);
+  try {
+    assert.ok(screen.getByText("Built-in display · 1920 × 1080 · 60 Hz"));
+  } finally {
+    f.restore();
+  }
+});
+
+test("the machine's header names the card its SDI ports are on, once", async () => {
+  const f = await mount(PAYLOAD);
+  try {
+    // Three SDI ports and one set up, all on one card; the header says so once.
+    assert.equal(screen.getAllByText("Card A").length, 1, "the card was not named once in the header");
   } finally {
     f.restore();
   }

@@ -21,7 +21,7 @@ import { ErrorNote } from "../../components/ui/error-note";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../../components/ui/select";
 import { cn } from "../../lib/cn";
 import { useDevices, refreshDevices, describeScreen } from "./use-devices";
-import { outputModeLine } from "./output-helpers";
+import { cardOf, outputModeLine } from "./output-helpers";
 import { useDisplayPresence } from "./use-display-presence";
 import { groupByMachine, type Machine, type MachineRow } from "./machine-groups";
 import type { DeviceOutput, SeenDevice } from "@main/types/kiosk";
@@ -234,7 +234,7 @@ function DeviceActions({ device, outputs, busy, onSetUpNew, onClaim, describedBy
  *  the Mac is driving it at, when it has said. */
 function outputLine(output: DeviceOutput, device: SeenDevice): string {
   const mode = outputModeLine(output, undefined, device.screen);
-  return output.kind === "decklink" ? `Video output · ${mode} until set` : ["Display", mode].filter(Boolean).join(" · ");
+  return output.kind === "decklink" ? `Video output · ${mode} until set` : ["Built-in display", mode].filter(Boolean).join(" · ");
 }
 
 function OutputIcon({ kind }: { kind: DeviceOutput["kind"] }) {
@@ -267,13 +267,24 @@ function MachineCard({ machine, outputs, connected, busy, lookedLikeNames, onSet
   onSetUpNew: (device: PanelDevice) => void;
   onClaim: (deviceId: string, outputId: string) => void;
 }) {
+  // The card is named inside each DeckLink output's name; nothing else on the
+  // wire carries it, nor the driver or the helper's own version, so those are not
+  // shown.
+  const cards = [
+    ...new Set(machine.rows.flatMap((r) => (r.device.output?.kind === "decklink" ? [cardOf(r.device.output)] : []))),
+  ];
   return (
     <div className="mt-3 rounded-xl border border-dashed border-line-strong bg-surface px-3.5 py-3">
-      <div className="flex flex-wrap items-baseline gap-x-2.5">
+      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
         <b className="text-callout font-semibold text-fg">{machine.hostname || "Unconfigured Mac"}</b>
         <span className="font-mono text-caption2 text-fg-subtle">
           {[machine.os, machine.ip].filter(Boolean).join(" · ")}
         </span>
+        {cards.map((card) => (
+          <span key={card} className="rounded-full border border-line-strong px-2 text-caption2 text-fg-muted">
+            {card}
+          </span>
+        ))}
       </div>
       <div className="mt-2.5 grid gap-1.5">
         {machine.rows.map((row) => (
