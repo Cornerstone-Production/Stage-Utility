@@ -146,6 +146,10 @@ export async function getAttachmentFile(
 
     try {
       await fs.access(filePath);
+      // A file that is on disk is working. Once the first failure has aged past
+      // the settle window, this is the call that says so and closes the run: after
+      // a recovery every later request is a hit here and never reaches download().
+      reportRecovered(id, filename);
       return { path: filePath, ext };
     } catch {
       // Not cached yet — open + download.

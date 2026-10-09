@@ -302,9 +302,12 @@ describe("attachment cache logging", () => {
     mock.timers.tick(5_000);
     await getAttachmentFile("log-recover", "application/pdf", "plot.pdf", open);
     assert.deepEqual(out.logs.filter((l) => l.includes("downloading again")), [], "announced a recovery inside the settle window");
-    await fs.rm(path.join(cacheDir, "log-recover.pdf"));
+    // The file stays on disk, so every later request is a cache hit that never
+    // reaches the download. A hit has to be what ends the run.
+    assert.ok(await fs.stat(path.join(cacheDir, "log-recover.pdf")));
+    globalThis.fetch = (async () => { throw new Error("a cached file must not be fetched"); }) as typeof fetch;
     mock.timers.tick(3 * 60_000);
-    await getAttachmentFile("log-recover", "application/pdf", "plot.pdf", open);
+    await getAttachmentFile("log-recover", "application/pdf", "plot.pdf", async () => { throw new Error("a cached file must not open a link"); });
     const said = out.logs.filter((l) => l.includes("downloading again"));
     assert.equal(said.length, 1, `expected one recovery line, got ${said.length}`);
     assert.match(said[0], /"plot\.pdf" \(attachment log-recover\) is downloading again/);
