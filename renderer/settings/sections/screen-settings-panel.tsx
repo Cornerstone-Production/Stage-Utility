@@ -196,8 +196,8 @@ function RoleCards({ role, onChoose }: { role: OutputMode; onChoose: (mode: Outp
           aria-pressed={role === c.mode}
           onClick={() => onChoose(c.mode)}
           className={cn(
-            "rounded-[10px] border p-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
-            role === c.mode ? "border-accent bg-accent-a3" : "border-line-strong bg-fill hover:bg-fill-hover",
+            "flex flex-col items-start justify-start rounded-[10px] border p-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+            role === c.mode ? "border-accent bg-accent/12" : "border-line-strong bg-fill hover:bg-fill-hover",
           )}
         >
           <span className="block text-footnote font-semibold text-fg">{c.title}</span>
