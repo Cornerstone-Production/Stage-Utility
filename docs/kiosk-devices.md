@@ -104,6 +104,9 @@ does not cross. If that server cannot supply a zip
 that matches its checksum, it falls back to the GitHub release for the version in the
 server's `/api/update/status`. If neither works, it installs nothing and says what each
 answered.
+A server that has not cached the zip yet sends nothing until it has all of it, so the
+installer waits on a server for up to 2 hours 10 minutes. A download from GitHub is given
+up on after a minute below 1 KB/s, with the same overall limit.
 
 | Request | |
 |---|---|
