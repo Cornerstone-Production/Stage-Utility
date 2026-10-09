@@ -9,6 +9,12 @@ import Testing
     #expect(Backoff.reloadDelay(failures: 10_000) == 30)
   }
 
+  /// Discovery restarts once when the run of failures crosses the line, not once per
+  /// retry after it.
+  @Test func rediscoveryIsAskedForExactlyOnceAtTheThirdFailure() {
+    #expect((1...6).map { Backoff.shouldRediscover(afterFailureNumber: $0) } == [false, false, true, false, false, false])
+  }
+
   @Test func probesEveryTwoSecondsThenBackOff() {
     #expect(ProbeSchedule.interval(unanswered: 0, answered: false) == 2)
     #expect(ProbeSchedule.interval(unanswered: 9, answered: false) == 2)

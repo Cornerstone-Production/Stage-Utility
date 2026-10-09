@@ -306,7 +306,7 @@ final class AppModel: ObservableObject {
     } else {
       rt.unreachable = true
       // Only the failure that crosses the line: not one restart per retry.
-      if failures == Backoff.rediscoverAfterFailures, identity.server == nil {
+      if Backoff.shouldRediscover(afterFailureNumber: failures), identity.server == nil {
         Log.notice(.discovery, "\(rt.display.descriptor.port): \(failures) loads failed in a row; searching for the server again")
         rt.discovery?.restart()
       }
