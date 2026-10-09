@@ -139,6 +139,10 @@ public struct DeckLinkPort: Equatable {
     self.modes = modes
   }
 
+  /// It can play at least one of its modes in the 8-bit YUV the helper sends. A port
+  /// that can play none is set as an input (`DeckLinkInventory`).
+  public var canPlay: Bool { modes.contains(where: \.supportsYUV8) }
+
   /// The output as the server is told about it.
   public var descriptor: OutputDescriptor {
     let label = !displayName.isEmpty ? displayName : (!modelName.isEmpty ? modelName : "DeckLink \(id.subDevice + 1)")
@@ -190,14 +194,22 @@ private final class DeviceListener {
 
 /// The driver and its ports, scanned when asked, logged only when they change: the
 /// driver missing (once, not on every scan), a driver found, the ports it offers.
+///
+/// A port that can play none of its modes is set as an input in Desktop Video Setup
+/// (a DeckLink 8K Pro's four connectors are each an input or an output; Desktop
+/// Video 16.4 still lists an input's modes, and refuses every one of them for
+/// playback). It is not an output to announce, and is listed apart (`inputs`),
+/// until a scan finds it can play. Desktop Video Setup sends no device notification
+/// for that, so the helper scans again now and then (`AppModel`).
 public final class DeckLinkInventory {
   public typealias Reader = () -> (DeckLinkDriver.Status, [DeckLinkPort])
 
   private let read: Reader
   private let log: (DeckLinkLog.Level, String) -> Void
   private let lock = NSLock()
-  private var last: (status: DeckLinkDriver.Status, keys: [String])?
+  private var last: (status: DeckLinkDriver.Status, keys: [String], inputKeys: [String])?
   private var _seen: [DeckLinkPort] = []
+  private var _inputs: [DeckLinkPort] = []
 
   public init(
     read: @escaping Reader = { (DeckLinkDriver.status(), DeckLinkDriver.ports()) },
@@ -207,30 +219,44 @@ public final class DeckLinkInventory {
     self.log = log
   }
 
-  /// Every port any scan has found, in the order first found, each as its latest
-  /// scan described it: the outputs to announce. A port that leaves a scan stays,
-  /// because an unplugged card is still a screen's output; its port says it is lost
-  /// and reopens when the card is back.
+  /// Every port any scan has found able to play, in the order first found, each as
+  /// its latest scan described it: the outputs to announce. A port that leaves a
+  /// scan stays, because an unplugged card is still a screen's output; its port says
+  /// it is lost and reopens when the card is back.
   public var seen: [DeckLinkPort] { lock.withLock { _seen } }
 
-  /// The ports now. Call at launch and when a device arrives or goes.
-  public func scan() -> (status: DeckLinkDriver.Status, ports: [DeckLinkPort]) {
-    let (status, ports) = read()
+  /// The ports the latest scan found set as inputs, and never found able to play:
+  /// for the window, not to announce.
+  public var inputs: [DeckLinkPort] { lock.withLock { _inputs } }
+
+  /// The ports now. Call at launch, when a device arrives or goes, and now and then.
+  /// `ports` are those that can play; `changed` says the driver, the outputs or the
+  /// inputs differ from the scan before.
+  public func scan() -> (status: DeckLinkDriver.Status, ports: [DeckLinkPort], inputs: [DeckLinkPort], changed: Bool) {
+    let (status, all) = read()
+    let ports = all.filter(\.canPlay)
     let keys = ports.map(\.id.outputKey)
-    lock.withLock {
+    return lock.withLock {
       for port in ports {
         if let at = _seen.firstIndex(where: { $0.id == port.id }) { _seen[at] = port } else { _seen.append(port) }
       }
-      defer { last = (status, keys) }
-      if let last, last.status == status, last.keys == keys { return }
+      let inputs = all.filter { port in !port.canPlay && !_seen.contains { $0.id == port.id } }
+      _inputs = inputs
+      let inputKeys = inputs.map(\.id.outputKey)
+      defer { last = (status, keys, inputKeys) }
+      if let last, last.status == status, last.keys == keys, last.inputKeys == inputKeys {
+        return (status, ports, inputs, false)
+      }
       if let problem = status.problem {
         log(.error, problem)
       } else if case .installed(let version) = status {
         let names = ports.map { "\($0.descriptor.name) (\($0.id.outputKey))" }
+        let inputNames = inputs.map { "\($0.descriptor.name) (\($0.id.outputKey))" }
         log(.info, "Desktop Video \(version): \(ports.count) output port\(ports.count == 1 ? "" : "s")"
-          + (names.isEmpty ? "" : ": " + names.joined(separator: ", ")))
+          + (names.isEmpty ? "" : ": " + names.joined(separator: ", "))
+          + (inputNames.isEmpty ? "" : "; set as inputs in Desktop Video Setup: " + inputNames.joined(separator: ", ")))
       }
+      return (status, ports, inputs, true)
     }
-    return (status, ports)
   }
 }

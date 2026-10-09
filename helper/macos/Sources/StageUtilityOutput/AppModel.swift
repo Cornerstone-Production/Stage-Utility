@@ -4,12 +4,14 @@ import ServiceManagement
 import StageUtilityOutputCore
 import SwiftUI
 
-/// What the helper's window shows for one output.
+/// What the helper's window shows for one output, or for a DeckLink port that is
+/// not one (`switchable` false: set as an input, nothing to turn on).
 struct OutputRow: Identifiable, Equatable {
   var id: String
   var title: String
   var enabled: Bool
   var status: String
+  var switchable = true
 }
 
 /// Everything the helper decides, in one place: which outputs exist, which are on,
@@ -73,9 +75,16 @@ final class AppModel: ObservableObject {
   /// What each output's health posts have been told, by output key.
   private var healthBoard = HealthBoard()
   private var healthTimer: Timer?
-  /// The DeckLink driver and its ports: scanned at start and on every device
-  /// change, logged when they change.
+  /// The DeckLink driver and its ports: scanned at start, on every device change
+  /// and every `deckLinkRescan` seconds, logged when they change. A scan takes 20 to
+  /// 45 ms on an 8K Pro, so after launch it runs off the main thread, where every
+  /// card output's pictures arrive.
   private let deckLink = DeckLinkInventory(log: Log.decklink)
+  private let deckLinkScans = DispatchQueue(label: "com.stageutility.output.decklink-scan", qos: .utility)
+  private var deckLinkTimer: Timer?
+  /// How often the ports are looked at again: Desktop Video Setup turning a port
+  /// from an input to an output sends no device notification.
+  static let deckLinkRescan: TimeInterval = 10
   private var dumpTimer: Timer?
   private var dumpSequence = 0
 
@@ -119,11 +128,15 @@ final class AppModel: ObservableObject {
   // MARK: Start
 
   func start() {
-    scanDeckLink()
+    // Before any output runs, so on this thread.
+    deckLinkScanned(deckLink.scan().status)
     // On the driver's thread, for a device arriving or going. Without a driver
     // there is nothing to watch, and installing one takes a restart.
     DeckLinkDriver.watchDevices { [weak self] in
-      DispatchQueue.main.async { MainActor.assumeIsolated { self?.deckLinkDevicesChanged() } }
+      DispatchQueue.main.async { MainActor.assumeIsolated { self?.rescanDeckLink(devicesChanged: true) } }
+    }
+    deckLinkTimer = Timer.scheduledTimer(withTimeInterval: AppModel.deckLinkRescan, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated { self?.rescanDeckLink(devicesChanged: false) }
     }
     reconcile()
     NotificationCenter.default.addObserver(
@@ -141,6 +154,7 @@ final class AppModel: ObservableObject {
   /// Before the app quits: close every output's page and stop every clock.
   func stopAll() {
     gpuWatch.stop()
+    deckLinkTimer?.invalidate()
     for key in order { deactivate(key) }
   }
 
@@ -186,19 +200,28 @@ final class AppModel: ObservableObject {
     DispatchQueue.main.asyncAfter(deadline: .now() + AppModel.displayChangeSettle, execute: work)
   }
 
-  /// Read the DeckLink driver and its ports. Without a working driver the window
-  /// says why, once, and there are simply no DeckLink outputs.
-  private func scanDeckLink() {
-    let status = deckLink.scan().status
+  /// Without a working driver the window says why, once, and there are simply no
+  /// DeckLink outputs.
+  private func deckLinkScanned(_ status: DeckLinkDriver.Status) {
     if let problem = status.problem { setNote("decklink", "\(problem).") } else { clearNote("decklink") }
   }
 
-  /// A DeckLink device arrived or went: announce any new port, and have every lost
+  /// Read the driver and its ports again, off the main thread. A device arrived
+  /// or went (`devicesChanged`), or it is time to look: announce any port that can
+  /// play now, list the ones set as inputs, and on a device change have every lost
   /// port try again now rather than at its next retry.
-  private func deckLinkDevicesChanged() {
-    scanDeckLink()
-    reconcile()
-    for key in order { (runtimes[key]?.sink as? CardOutput)?.retry() }
+  private func rescanDeckLink(devicesChanged: Bool) {
+    deckLinkScans.async { [weak self, deckLink] in
+      let scan = deckLink.scan()
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          self.deckLinkScanned(scan.status)
+          if scan.changed || devicesChanged { self.reconcile() }
+          if devicesChanged { for key in self.order { (self.runtimes[key]?.sink as? CardOutput)?.retry() } }
+        }
+      }
+    }
   }
 
   /// Make the runtimes match the displays macOS lists now, every DeckLink port
@@ -583,6 +606,9 @@ final class AppModel: ObservableObject {
           fps: rt.fps, healthPaused: healthBoard.isPaused(key), portProblem: (rt.sink as? CardOutput)?.problem,
           latencyMs: rt.latencyMs, testPattern: options.testPattern != nil))
       return OutputRow(id: key, title: d.isMain ? "\(d.name) (main)" : d.name, enabled: record.enabled, status: status)
+    } + deckLink.inputs.map {
+      OutputRow(
+        id: $0.id.outputKey, title: $0.descriptor.name, enabled: false, status: StatusText.inputPortLine, switchable: false)
     }
     connection = StatusText.connection(
       order.compactMap { runtimes[$0] }.map {

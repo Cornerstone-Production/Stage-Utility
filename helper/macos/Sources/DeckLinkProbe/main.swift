@@ -199,6 +199,9 @@ while !rest.isEmpty {
 
 switch args.first {
 case "list":
+  let started = DispatchTime.now().uptimeNanoseconds
+  _ = DeckLinkDriver.ports()
+  print(String(format: "a scan of the ports took %.1f ms", Double(DispatchTime.now().uptimeNanoseconds - started) / 1e6))
   let status = DeckLinkDriver.status()
   print("Desktop Video: \(status)")
   if let problem = status.problem { print(problem) }

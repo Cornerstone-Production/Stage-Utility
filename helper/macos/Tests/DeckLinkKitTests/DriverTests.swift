@@ -66,20 +66,25 @@ import Testing
           modes: ["1080p59.94"]))
   }
 
+  static let p59 = CardMode(
+    code: 1, driverName: "1080p59.94", width: 1920, height: 1080, frameDuration: 1001, timeScale: 60000,
+    field: .progressive, supportsYUV8: true)
+
   /// The driver's state is logged when it changes, not on every scan: the helper
-  /// scans at launch and on every device change.
+  /// scans at launch, on every device change and every ten seconds.
   @Test func theInventoryLogsOnlyWhatChanged() {
     let log = LogLines()
     let duo = DeckLinkPort(
-      id: DeckLinkPortID(persistentID: 7, subDevice: 0), displayName: "DeckLink Duo (1)", modelName: "", modes: [])
+      id: DeckLinkPortID(persistentID: 7, subDevice: 0), displayName: "DeckLink Duo (1)", modelName: "",
+      modes: [Self.p59])
     let reading = Locked<(DeckLinkDriver.Status, [DeckLinkPort])>((.notInstalled, []))
     let inventory = DeckLinkInventory(read: { reading.value }, log: log.write)
 
-    _ = inventory.scan()
-    _ = inventory.scan()
+    #expect(inventory.scan().changed)
+    #expect(!inventory.scan().changed)
     reading.value = (.installed(version: "14.2"), [duo])
     #expect(inventory.scan().ports == [duo])
-    _ = inventory.scan()
+    #expect(!inventory.scan().changed)
     reading.value = (.installed(version: "14.2"), [])
     _ = inventory.scan()
     #expect(
@@ -94,12 +99,13 @@ import Testing
   /// stays (its port retries), one plugged in is added after the others, and a
   /// port found again carries its latest modes.
   @Test func theSeenPortsAreKeptAcrossAnUnplug() {
-    func port(_ id: Int64, _ modes: [CardMode] = []) -> DeckLinkPort {
+    let p50 = CardMode(
+      code: 2, driverName: "1080p50", width: 1920, height: 1080, frameDuration: 1000, timeScale: 50000,
+      field: .progressive, supportsYUV8: true)
+    func port(_ id: Int64, _ modes: [CardMode] = [p50]) -> DeckLinkPort {
       DeckLinkPort(id: DeckLinkPortID(persistentID: id, subDevice: 0), displayName: "P\(id)", modelName: "", modes: modes)
     }
-    let p59 = CardMode(
-      code: 1, driverName: "", width: 1920, height: 1080, frameDuration: 1001, timeScale: 60000, field: .progressive,
-      supportsYUV8: true)
+    let p59 = Self.p59
     let reading = Locked<(DeckLinkDriver.Status, [DeckLinkPort])>((.installed(version: "14.2"), [port(1), port(2)]))
     let inventory = DeckLinkInventory(read: { reading.value }, log: LogLines().write)
     _ = inventory.scan()
@@ -110,6 +116,52 @@ import Testing
     _ = inventory.scan()
     #expect(inventory.seen.map(\.displayName) == ["P1", "P2", "P3"])
     #expect(inventory.seen[0].modes == [p59])
+  }
+
+  /// A port that can play none of its modes is set as an input in Desktop Video
+  /// Setup: listed apart, never announced, and announced from the scan that finds
+  /// it can play, with a line saying so. The 8K Pro's connectors are each an input
+  /// or an output; Desktop Video 16.4 lists an input's modes and refuses them all.
+  @Test func aPortSetAsAnInputIsNotAnOutputUntilItCanPlay() {
+    var refused = Self.p59
+    refused.supportsYUV8 = false
+    func port(_ sub: Int64, _ modes: [CardMode]) -> DeckLinkPort {
+      DeckLinkPort(
+        id: DeckLinkPortID(persistentID: 0x10 + sub, subDevice: sub), displayName: "DeckLink 8K Pro (\(sub + 1))",
+        modelName: "DeckLink 8K Pro", modes: modes)
+    }
+    let log = LogLines()
+    let reading = Locked<(DeckLinkDriver.Status, [DeckLinkPort])>(
+      (.installed(version: "16.4"), [port(0, [Self.p59]), port(1, [refused]), port(2, [refused])]))
+    let inventory = DeckLinkInventory(read: { reading.value }, log: log.write)
+    let first = inventory.scan()
+    #expect(first.ports.map(\.displayName) == ["DeckLink 8K Pro (1)"])
+    #expect(inventory.seen.map(\.displayName) == ["DeckLink 8K Pro (1)"])
+    #expect(inventory.inputs.map(\.displayName) == ["DeckLink 8K Pro (2)", "DeckLink 8K Pro (3)"])
+
+    // Port 2 set as an output in Desktop Video Setup: the next scan announces it.
+    reading.value = (.installed(version: "16.4"), [port(0, [Self.p59]), port(1, [Self.p59]), port(2, [refused])])
+    #expect(inventory.scan().changed)
+    #expect(inventory.seen.map(\.displayName) == ["DeckLink 8K Pro (1)", "DeckLink 8K Pro (2)"])
+    #expect(inventory.inputs.map(\.displayName) == ["DeckLink 8K Pro (3)"])
+    #expect(!inventory.scan().changed)
+
+    // A fourth connector appears, set as an input: only the inputs change, and the
+    // window has to list it.
+    reading.value = (
+      .installed(version: "16.4"), [port(0, [Self.p59]), port(1, [Self.p59]), port(2, [refused]), port(3, [])]
+    )
+    #expect(inventory.scan().changed)
+    #expect(inventory.inputs.map(\.displayName) == ["DeckLink 8K Pro (3)", "DeckLink 8K Pro (4)"])
+    #expect(
+      log.lines == [
+        "Desktop Video 16.4: 1 output port: DeckLink 8K Pro (1) (decklink-10-0); set as inputs in Desktop Video Setup: "
+          + "DeckLink 8K Pro (2) (decklink-11-1), DeckLink 8K Pro (3) (decklink-12-2)",
+        "Desktop Video 16.4: 2 output ports: DeckLink 8K Pro (1) (decklink-10-0), DeckLink 8K Pro (2) (decklink-11-1); "
+          + "set as inputs in Desktop Video Setup: DeckLink 8K Pro (3) (decklink-12-2)",
+        "Desktop Video 16.4: 2 output ports: DeckLink 8K Pro (1) (decklink-10-0), DeckLink 8K Pro (2) (decklink-11-1); "
+          + "set as inputs in Desktop Video Setup: DeckLink 8K Pro (3) (decklink-12-2), DeckLink 8K Pro (4) (decklink-13-3)",
+      ])
   }
 
   /// With the driver and no card at that id: the open fails and says why, and

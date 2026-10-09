@@ -46,6 +46,9 @@ public enum StatusText {
     }
   }
 
+  /// A DeckLink port with no modes to play: its connector is set as an input.
+  public static let inputPortLine = "Set as an input in Desktop Video Setup"
+
   public static func outputLine(_ i: Input) -> String {
     if !i.enabled {
       return i.isMain ? "The Mac's desktop. Off, so the menu bar stays here." : "Turned off here"

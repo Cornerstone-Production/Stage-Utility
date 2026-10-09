@@ -99,13 +99,15 @@ struct HelperWindowView: View {
             .fixedSize(horizontal: false, vertical: true)
         }
         Spacer(minLength: 0)
-        Toggle(
-          "Use \(row.title)",
-          isOn: Binding(get: { row.enabled }, set: { model.setEnabled(row.id, $0) })
-        )
-        .toggleStyle(PillSwitch())
-        .labelsHidden()
-        .accessibilityLabel("Use \(row.title)")
+        if row.switchable {
+          Toggle(
+            "Use \(row.title)",
+            isOn: Binding(get: { row.enabled }, set: { model.setEnabled(row.id, $0) })
+          )
+          .toggleStyle(PillSwitch())
+          .labelsHidden()
+          .accessibilityLabel("Use \(row.title)")
+        }
       }
       .padding(.vertical, 8)
     }
