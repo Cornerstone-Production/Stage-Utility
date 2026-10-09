@@ -16,6 +16,14 @@ const dev = (id: string, over: Record<string, unknown> = {}) =>
 
 beforeEach(() => resetKioskPresence());
 
+describe("an output heard", () => {
+  test("is kept on the device so Screens can group and name it", () => {
+    const output = { kind: "display" as const, name: "HDMI 1", port: "HDMI 1" };
+    recordSeen(dev("mac1.hdmi-1", { output }), Date.now());
+    assert.deepEqual(seenDevices()[0].output, output);
+  });
+});
+
 describe("scan windows", () => {
   test("nothing is scanning until somebody asks", () => {
     assert.equal(scanning(), false);
@@ -186,6 +194,19 @@ describe("what is broadcast", () => {
     recordSeen(dev("d3"), now());
     recordSeen(dev("d3"), now());
     assert.equal(frames(), before, "an identical probe broadcast anyway");
+  });
+
+  test("an output's modes arriving or changing reach them", () => {
+    // The helper announces an output before its card has reported modes, then
+    // again with them. The row names the kind and mode, so the second probe is a
+    // change a person reads, not a heartbeat.
+    const out = { kind: "decklink" as const, name: "SDI 1", port: "SDI 1" };
+    recordSeen(dev("d6", { output: out }), now());
+    const before = frames();
+    recordSeen(dev("d6", { output: { ...out, modes: ["1080p59.94"] } }), now());
+    assert.equal(frames(), before + 1, "a port reporting its modes never left the server");
+    recordSeen(dev("d6", { output: { ...out, modes: ["1080p59.94"] } }), now());
+    assert.equal(frames(), before + 1, "an identical output broadcast anyway");
   });
 
   test("a device secret is never in the payload", () => {

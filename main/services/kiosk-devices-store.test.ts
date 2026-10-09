@@ -235,3 +235,36 @@ describe("who may report a screen's size", () => {
     assert.equal(recordScreen(bound, "display-9", { w: 800, h: 600 }), bound);
   });
 });
+
+describe("an output of a helper Mac", () => {
+  const output = { kind: "decklink" as const, name: "SDI 1 · Card A", port: "SDI 1", modes: ["1080p59.94"] };
+
+  test("claiming keeps which output it is, so the bound screen can say", () => {
+    const { devices } = claim([], "mac1.sdi-1", "display-1", { output, hostname: "booth-mini" });
+    assert.deepEqual(devices[0].output, output);
+  });
+
+  test("a re-claim without the output keeps the one already stored", () => {
+    const first = claim([], "mac1.sdi-1", "display-1", { output }).devices;
+    const again = claim(first, "mac1.sdi-1", "display-2", {}).devices;
+    assert.deepEqual(again[0].output, output);
+  });
+
+  test("a card reporting different modes is recorded", () => {
+    const stored = [dev({ id: "mac1.sdi-1", output })];
+    const next = touch(stored, "mac1.sdi-1", { output: { ...output, modes: ["1080p59.94", "720p50"] }, now: 1 });
+    assert.notEqual(next, stored, "new modes were not recorded");
+    assert.deepEqual(next[0].output?.modes, ["1080p59.94", "720p50"]);
+  });
+
+  test("the same output again is not a write", () => {
+    const stored = [dev({ id: "mac1.sdi-1", output })];
+    assert.equal(touch(stored, "mac1.sdi-1", { output: { ...output, modes: [...output.modes] }, now: 1 }), stored);
+  });
+
+  test("a probe without an output leaves the stored one alone", () => {
+    const stored = [dev({ id: "mac1.sdi-1", output })];
+    assert.equal(touch(stored, "mac1.sdi-1", { now: 1 }), stored);
+    assert.deepEqual(touch(stored, "mac1.sdi-1", { hostname: "renamed", now: 1 })[0].output, output);
+  });
+});

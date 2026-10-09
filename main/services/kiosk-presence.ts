@@ -10,6 +10,7 @@
 
 import { broadcast } from "./broadcaster.js";
 import { mergeScreen, sameScreen } from "./kiosk-screen-size.js";
+import { scrub } from "./scrub.js";
 import type { SeenDevice } from "../types/kiosk.js";
 
 /** Longest gap before a device is considered gone. The agent probes every 2s and
@@ -87,6 +88,14 @@ export function recordSeen(
     if (now - last < RECORD_EVERY_MS && last !== 0) return false;
     lastRecorded.set(d.id, now);
     seen.set(d.id, { ...d, firstSeen: now, lastSeen: now });
+    // One line per output appearing, not per probe: this branch runs once per
+    // sighting and a helper with six outputs is six lines, which is the
+    // operator's evidence that the Mac was heard and what it offered.
+    if (d.output) {
+      console.log(
+        `[output-helper] output seen: ${scrub(d.id)} (${scrub(d.output.kind)} "${scrub(d.output.name)}") on ${scrub(d.hostname ?? d.ip)}`,
+      );
+    }
     ensureSweep();
     announce(now);
     return true;
@@ -102,6 +111,9 @@ export function recordSeen(
     existing.boundTo !== d.boundTo ||
     !!existing.unreachable !== !!d.unreachable ||
     existing.hostname !== d.hostname ||
+    // A card reporting new modes, or an output renamed, is a change a person
+    // reads on the row. Compared as JSON: it is a small plain object.
+    JSON.stringify(existing.output) !== JSON.stringify(d.output) ||
     !sameScreen(existing.screen, screen);
   seen.set(d.id, { ...existing, ...d, screen, lastSeen: now });
   if (changed) announce(now);

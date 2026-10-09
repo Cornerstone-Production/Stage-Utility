@@ -16,7 +16,7 @@
 
 import { announceDevices } from "./kiosk-presence.js";
 import { mergeScreen, sameScreen, screenFrom } from "./kiosk-screen-size.js";
-import type { BoundDevice, ScreenSize } from "../types/kiosk.js";
+import type { BoundDevice, DeviceOutput, ScreenSize } from "../types/kiosk.js";
 import { DataStore } from "./data-store.js";
 
 export const kioskDevicesStore = new DataStore<BoundDevice[]>("kiosk-devices.json", [], "config");
@@ -78,6 +78,8 @@ export interface ClaimDetails {
    *  across so the size is on the card the moment it is set up, rather than
    *  blank until the display next sends a heartbeat. */
   screen?: ScreenSize;
+  /** Which output of a helper Mac this is, so a bound screen can say. */
+  output?: DeviceOutput;
   label?: string;
   now?: number;
 }
@@ -117,6 +119,7 @@ export function claim(
     os: details.os ?? existing?.os,
     ip: details.ip ?? existing?.ip,
     screen: details.screen ?? existing?.screen,
+    output: details.output ?? existing?.output,
     lastSeen: details.now ?? existing?.lastSeen,
   };
   const kept = devices.filter((d) => d.id !== id && d.id !== displaced?.id);
@@ -160,7 +163,7 @@ export function recordScreen(
 export function touch(
   devices: readonly BoundDevice[],
   id: string,
-  seen: { macs?: string[]; hostname?: string; os?: string; ip?: string; mode?: string; now: number },
+  seen: { macs?: string[]; hostname?: string; os?: string; ip?: string; mode?: string; output?: DeviceOutput; now: number },
 ): BoundDevice[] {
   const i = devices.findIndex((d) => d.id === id);
   if (i === -1) return devices as BoundDevice[];
@@ -171,6 +174,8 @@ export function touch(
     d.hostname !== (seen.hostname ?? d.hostname) ||
     d.os !== (seen.os ?? d.os) ||
     d.ip !== (seen.ip ?? d.ip) ||
+    // A probe without `output` leaves the stored one alone.
+    (seen.output !== undefined && JSON.stringify(seen.output) !== JSON.stringify(d.output)) ||
     macs.length !== d.macs.length ||
     macs.some((m, k) => m !== d.macs[k]);
   // lastSeen alone is deliberately not a reason to write: it changes constantly
@@ -182,6 +187,7 @@ export function touch(
     hostname: seen.hostname ?? d.hostname,
     os: seen.os ?? d.os,
     ip: seen.ip ?? d.ip,
+    output: seen.output ?? d.output,
     screen: mergeScreen(d.screen, seen.mode === undefined ? undefined : { mode: seen.mode }),
     lastSeen: seen.now,
   };

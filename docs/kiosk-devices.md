@@ -151,6 +151,42 @@ image like any other Raspberry Pi OS one — so they go in at flash time, on the
 machine doing the flashing. This repository is public; a released image must
 never carry a credential or a site's server address.
 
+## Mac output helper
+
+A Mac running the **output helper** (a menu bar app) is not one screen but
+several: each of its own displays and each port of a Blackmagic DeckLink or
+UltraStudio card is a separate output. The helper announces one device per
+output and the server sets each up like any other. A screen can therefore go out
+over SDI from a Mac mini, and the SDI ports are not counted against the Mac's
+limit on external displays.
+
+Each output is a device of its own, with an id of the form
+`<the Mac's device id>.<output key>`. A binding is to an output, so moving a
+cable to another port moves which screen goes out where. All of a Mac's outputs
+share its MAC addresses and hostname.
+
+The probe gains an `output` object, otherwise the probe described under
+[Discovery](#discovery):
+
+| Field | |
+|---|---|
+| `kind` | `display` or `decklink`. A probe with any other kind is treated as a plain device |
+| `name` | What the row calls it, for example `SDI 1 · Card A` |
+| `port` | The physical port, for example `SDI 1` |
+| `modes` | Optional. The video modes a DeckLink port reported, for example `1080p59.94` |
+
+A probe without `output` behaves exactly as it always has. Every field is
+bounded like the rest of the probe: names and ports at 128 characters, at most
+24 modes of 32 characters each.
+
+**On the server's own Mac.** The responder ignores a probe that carries one of
+the server's own MAC addresses, because a kiosk agent on the server's machine was
+never a wall screen. A probe with an `output` is let through, so the helper on the
+server's Mac works.
+
+The stored binding keeps the `output`, so a bound screen still names its port
+while the output is off.
+
 ## Removing one
 
 *Release*, on the screen's card, unbinds it: the screen keeps its view and its

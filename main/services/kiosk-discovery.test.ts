@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
-  encodeProbe, decodeProbe, encodeReply, decodeReply, decideProbe, MAX_DATAGRAM,
+  encodeProbe, decodeProbe, encodeReply, decodeReply, decideProbe, isFromThisMachine, MAX_DATAGRAM,
 } from "./kiosk-discovery.js";
 
 // The discovery exchange. Two things are worth testing here and they are not the
@@ -142,5 +142,98 @@ describe("what this server shows", () => {
     const d = decideProbe(probe({ boundTo: ME }), ME, { scanning: false, bound: false });
     assert.equal(d.list, "unclaimed");
     assert.equal(d.answer, true);
+  });
+});
+
+// The Mac output helper announces one device per output, each probe carrying an
+// `output`. It arrives on the same broadcast port as everything else, so every
+// field of it is as untrusted as the rest.
+describe("a helper output on the wire", () => {
+  const wire = (output: unknown, over: Record<string, unknown> = {}) =>
+    JSON.stringify({ stageUtility: "discover", v: 1, id: "mac1.sdi-1", macs: ["02:00:00:00:00:01"], output, ...over });
+
+  test("an output round-trips, modes and all", () => {
+    const p = probe({
+      id: "mac1.sdi-1",
+      output: { kind: "decklink" as const, name: "SDI 1 · Card A", port: "SDI 1", modes: ["1080p59.94", "720p50"] },
+    });
+    const d = decodeProbe(encodeProbe(p))!;
+    assert.equal(d.id, "mac1.sdi-1");
+    assert.deepEqual(d.output, p.output);
+  });
+
+  test("a display output has no modes and says none", () => {
+    const d = decodeProbe(wire({ kind: "display", name: "HDMI · Monitor", port: "HDMI 1" }))!;
+    assert.deepEqual(d.output, { kind: "display", name: "HDMI · Monitor", port: "HDMI 1" });
+  });
+
+  test("a probe without an output has no output key at all", () => {
+    // "Behaves exactly as today": not even an undefined property to trip a deep
+    // comparison or a spread that copies it over a stored value.
+    assert.equal("output" in decodeProbe(encodeProbe(probe()))!, false);
+  });
+
+  test("an unknown kind drops the output and keeps the probe", () => {
+    // A newer helper announcing a kind this server cannot name. The device is
+    // still a device, so it is not lost; it just reads as a plain one.
+    const d = decodeProbe(wire({ kind: "ndi", name: "NDI 1", port: "NDI 1" }))!;
+    assert.equal(d.id, "mac1.sdi-1");
+    assert.equal("output" in d, false, "an output of an unknown kind was kept");
+  });
+
+  test("an output with no name or no port is not one", () => {
+    for (const bad of [
+      { kind: "display", port: "HDMI 1" },
+      { kind: "display", name: "", port: "HDMI 1" },
+      { kind: "display", name: "HDMI 1" },
+    ]) {
+      assert.equal("output" in decodeProbe(wire(bad))!, false, JSON.stringify(bad));
+    }
+  });
+
+  test("a field that is not an object is not an output", () => {
+    for (const bad of ["decklink", 7, null, true, ["decklink"]]) {
+      assert.equal("output" in decodeProbe(wire(bad))!, false, JSON.stringify(bad));
+    }
+  });
+
+  test("an output is bounded like every other field", () => {
+    const d = decodeProbe(wire({
+      kind: "decklink",
+      name: "n".repeat(500),
+      port: "p".repeat(500),
+      modes: [...Array.from({ length: 60 }, (_, i) => `m${i}`), "x".repeat(200), 7, null, ""],
+    }))!;
+    assert.equal(d.output?.name.length, 128);
+    assert.equal(d.output?.port.length, 128);
+    assert.equal(d.output?.modes?.length, 24, "the modes list was not capped");
+    assert.deepEqual(d.output?.modes?.slice(0, 3), ["m0", "m1", "m2"]);
+  });
+
+  test("a mode longer than the cap is cut, not kept whole", () => {
+    const d = decodeProbe(wire({ kind: "decklink", name: "SDI", port: "SDI", modes: ["x".repeat(200)] }))!;
+    assert.equal(d.output?.modes?.[0].length, 32);
+  });
+});
+
+describe("a probe from this machine", () => {
+  const MINE = new Set(["aa:bb:cc:00:11:22"]);
+
+  test("a plain device on this machine's MAC is this machine", () => {
+    assert.equal(isFromThisMachine(probe({ macs: ["AA:BB:CC:00:11:22"] }), MINE), true);
+  });
+
+  test("a helper output on this machine's MAC is let through", () => {
+    // The helper on the server's own Mac is a supported setup: what it announces
+    // are that Mac's displays and SDI ports, which are screens on the wall.
+    const p = probe({
+      macs: ["aa:bb:cc:00:11:22"],
+      output: { kind: "display" as const, name: "HDMI 1", port: "HDMI 1" },
+    });
+    assert.equal(isFromThisMachine(p, MINE), false);
+  });
+
+  test("another machine's probe is not this machine", () => {
+    assert.equal(isFromThisMachine(probe({ macs: ["02:00:00:00:00:09"] }), MINE), false);
   });
 });

@@ -13,6 +13,7 @@ import { stageController } from "../stage-controller.js";
 import type { CreateScreenInput } from "../../types/views.js";
 import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, readCreateScreenBody } from "./screen-write.js";
 import { errorMessage } from "../errors.js";
+import { scrub } from "../scrub.js";
 import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { APP_ROOT } from "../app-root.js";
@@ -216,6 +217,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
           secret: secretFor(id),
           macs: seen?.macs, hostname: seen?.hostname, os: seen?.os, ip: seen?.ip,
           screen: seen?.screen,
+          output: seen?.output,
           label: typeof body.label === "string" ? body.label : undefined,
           now: Date.now(),
         });
@@ -239,6 +241,12 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // lingers in the unclaimed list for the whole TTL, which reads as the
       // claim not having worked.
       forgetSeen(id);
+      if (seen?.output) {
+        console.log(
+          `[output-helper] claimed: ${scrub(id)} (${scrub(seen.output.kind)} "${scrub(seen.output.name)}") now shows screen ${scrub(outputId)}`
+          + (displacedId ? `, displacing ${scrub(displacedId)}` : ""),
+        );
+      }
       // Tell the kiosk pages to reload: the device is sitting on the holding
       // screen and this is what sends it to its display. "all", not the output
       // id — the device is not showing that output yet, it is on /enroll, so
@@ -265,7 +273,11 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     try {
+      const output = findById(await kioskDevicesStore.load(), id)?.output;
       await updateDevices((current) => release(current, id));
+      if (output) {
+        console.log(`[output-helper] released: ${scrub(id)} (${scrub(output.kind)} "${scrub(output.name)}") is not set up again`);
+      }
       stageController.refreshDisplays("all");
       json(res, { ok: true });
     } catch (err) {
