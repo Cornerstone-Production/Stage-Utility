@@ -93,7 +93,11 @@ that file exists, the window's footer reads **Starts at login (installed)** and 
 switch, since a per-user login item beside it would start a second copy; one made
 before the installer ran is removed at launch, and the log says so. A copy run by hand
 on a Mac the installer never ran on has the **Open at login** switch instead, a
-per-user login item (`SMAppService`).
+per-user login item (`SMAppService`). A copy run with `STAGE_UTILITY_OUTPUT_STATE_DIR`
+never touches the login item, neither reading nor changing it, and its footer says
+Open at login is not available: the item belongs to the user and the app, not the
+state folder, so one a test made would outlive the test and start the helper at the
+next login with the real state.
 
 ## Flags
 
@@ -119,7 +123,7 @@ per-user login item (`SMAppService`).
 | A device id, when the installer never wrote one | `generated-device-id` in the same user folder. The window says so. |
 
 `STAGE_UTILITY_OUTPUT_STATE_DIR` replaces both folders, for tests and development, and the installer's LaunchAgent is then looked for in its `LaunchAgents/`.
-Nothing then reads or writes the real ones.
+Nothing then reads or writes the real ones, nor the per-user login item.
 
 `outputs.json` holds each output's secret token. The folder is created `0700` and the
 files `0600` from the first byte, not narrowed afterwards.

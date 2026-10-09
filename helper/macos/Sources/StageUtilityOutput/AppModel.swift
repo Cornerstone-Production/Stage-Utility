@@ -619,34 +619,26 @@ final class AppModel: ObservableObject {
 
   // MARK: Open at login
 
-  /// The installer's agent, when it exists, starts the helper at every login: the
-  /// window says so, and a per-user item beside it is removed. Otherwise the switch.
+  /// What "Open at login" offers (`LoginItemSwitch`, core). A copy with its own
+  /// state folder never makes the service, so never touches the login item.
+  private var loginItem: LoginItemSwitch!
+
   private func decideLoginItem() {
-    let agentInstalled = FileManager.default.fileExists(atPath: paths.launchAgent.path)
-    let decision = LoginItem.decide(agentInstalled: agentInstalled, userItemEnabled: SMAppService.mainApp.status == .enabled)
-    if decision.removeUserItem {
-      do {
-        try SMAppService.mainApp.unregister()
-        Log.notice(.app, "open at login: removed this app's own login item; \(paths.launchAgent.path) already starts it at every login")
-      } catch {
-        Log.error(.app, "could not remove this app's own login item beside \(paths.launchAgent.path), so two copies may start at login: \(error.localizedDescription)")
-        launchAtLoginError = "This app's own login item could not be removed: \(error.localizedDescription)"
-      }
-    }
-    loginOffer = decision.offer
+    loginItem = LoginItemSwitch(paths: paths, makeService: { MainAppLoginItem() })
+    showLoginItem()
   }
 
   func setLaunchAtLogin(_ on: Bool) {
-    guard case .userSwitch = loginOffer else { return }
-    do {
-      if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-      launchAtLoginError = nil
-      Log.notice(.app, "open at login: \(on ? "on" : "off")")
-    } catch {
-      launchAtLoginError = error.localizedDescription
-      Log.error(.app, "could not turn open at login \(on ? "on" : "off"): \(error.localizedDescription)")
+    loginItem.set(on)
+    showLoginItem()
+  }
+
+  private func showLoginItem() {
+    if let line = loginItem.logLine {
+      if line.isError { Log.error(.app, line.text) } else { Log.notice(.app, line.text) }
     }
-    loginOffer = .userSwitch(on: SMAppService.mainApp.status == .enabled)
+    loginOffer = loginItem.offer
+    launchAtLoginError = loginItem.error
   }
 
   // MARK: Debug: --dump-frames
@@ -685,4 +677,11 @@ final class AppModel: ObservableObject {
     }
     WindowSnapshot.write(model: self, to: dir.appendingPathComponent("window-\(n).png"))
   }
+}
+
+/// The app's own per-user login item.
+final class MainAppLoginItem: LoginItemService {
+  var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+  func register() throws { try SMAppService.mainApp.register() }
+  func unregister() throws { try SMAppService.mainApp.unregister() }
 }

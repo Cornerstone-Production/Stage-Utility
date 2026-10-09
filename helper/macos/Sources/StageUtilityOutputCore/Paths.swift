@@ -11,6 +11,9 @@ public struct HelperPaths: Equatable {
   /// The LaunchAgent `install-macos.sh` writes, system-wide, to start the helper at
   /// every login. Only whether it exists is read (`LoginItem`).
   public var launchAgent: URL
+  /// Both folders come from `STAGE_UTILITY_OUTPUT_STATE_DIR`: a test or development
+  /// copy, which must leave everything outside that folder alone (`LoginItem`).
+  public var isOverridden = false
 
   public static let overrideVariable = "STAGE_UTILITY_OUTPUT_STATE_DIR"
   /// The installer's agent: `HELPER_PLIST` in scripts/kiosk/install-macos.sh.
@@ -31,9 +34,11 @@ public struct HelperPaths: Equatable {
   public static func resolve(environment: [String: String], home: URL) -> HelperPaths {
     if let override = environment[overrideVariable], !override.isEmpty {
       let dir = URL(fileURLWithPath: override, isDirectory: true)
-      return HelperPaths(
+      var paths = HelperPaths(
         systemDir: dir, userDir: dir,
         launchAgent: dir.appendingPathComponent("LaunchAgents").appendingPathComponent(launchAgentName))
+      paths.isOverridden = true
+      return paths
     }
     return HelperPaths(
       systemDir: URL(fileURLWithPath: "/Library/Application Support/StageUtility", isDirectory: true),
