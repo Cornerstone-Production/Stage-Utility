@@ -342,17 +342,21 @@ slot's timing is written out too.
 | `CardFrameSource` | Starts the picture for slot *n* when asked (`begin`, the head start before air), and hands over the newest picture with its times (`fill`, the fill lead before air), on the output's clock thread. Nil for a repeat. |
 | `CardSink` | Pulls from a source on its own clock and counts: `counters` (`scheduled`, `rendered`, `repeated`, `dropped`, `resyncs`, `skipped`) and `takeHealthSample()`, in the server's units, with the window's render-to-air latency (`latencyMs`). |
 | `DeckLinkOutputPort` | The `CardSink` for a port. `.port(DeckLinkPort)` for a card; `.virtual` for a `--virtual-sdi` output, the scheduler on a software clock at the size and rate of whichever server mode it is opened in; `.softwareClock(…)`, a fixed size, for tests and the bench tool. Once a second it logs falling behind and catching up, and calls `onSourceStalled` when the source has had nothing new for 5 s. |
-| `SurfaceFrameSource` | A `CardFrameSource` an engine presents IOSurfaces to, with the `rotation`, the Metal conversion, and `captureNextFrame` for a dump of what the card was sent. |
+| `SurfaceFrameSource` | A `CardFrameSource` an engine presents IOSurfaces to, with the `rotation`, the Metal conversion at the size of the frames it is asked to fill, and `captureNextFrame` for a dump of what the card was sent. |
 | `DeckLinkInventory`, `DeckLinkDriver.watchDevices` | The ports to announce (`seen`: every port found since launch), and when to look again. |
 
-In the helper, each card output (`CardOutput`) is a windowless CEF browser at the
-port's frame size, a `SurfaceFrameSource` and a `DeckLinkOutputPort`. The browser's
-`OnAcceleratedPaint` presents into the source, which converts the surface to UYVY at
-the frame size before the callback returns; the source's `onBeginFrame` sends the
-browser its begin frame for each slot (CEF runs `SendExternalBeginFrame` on its UI
-thread), so the page renders once per output frame; the screen's `rotation` is the
-source's, with the browser laid out at the turned size; its `videoMode` opens the
-port. The helper's [README](README.md#chromium) has the rest.
+In the helper, each card output (`CardOutput`) is a windowless CEF browser, a
+`SurfaceFrameSource` and a `DeckLinkOutputPort`. The browser's `OnAcceleratedPaint`
+presents into the source, which converts the surface to UYVY before the callback
+returns, at the size of the frames the port last asked it to fill; the source's
+`onBeginFrame` sends the browser its begin frame for each slot (CEF runs
+`SendExternalBeginFrame` on its UI thread), so the page renders once per output frame;
+the screen's `rotation` is the source's; its `videoMode` opens the port. Every time
+the port opens, the first time or on a retry, it says so with its frame size
+(`onOpened`), and the browser is laid out at that size, turned for a quarter turn
+(`CardPageLayout`). Neither the conversion nor the layout follows the format asked
+for, so a port that opens late, or reopens in another format after it was lost, sends
+the page at its own size. The helper's [README](README.md#chromium) has the rest.
 
 ## What is proven, and what needs a card
 

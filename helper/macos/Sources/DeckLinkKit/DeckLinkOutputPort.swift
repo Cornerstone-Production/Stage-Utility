@@ -94,7 +94,10 @@ public final class DeckLinkOutputPort: CardSink {
   private var pollTimer: DispatchSourceTimer?
   private var retryTimer: DispatchSourceTimer?
   private var lastSample: (at: TimeInterval, counters: CardCounters)
-  private var openSize: (width: Int, height: Int)?
+  private var openSize: PixelSize?
+  private var opened: ((PixelSize) -> Void)?
+  /// A test's stand-in for a port another application holds: every open fails so.
+  private var refusingOpens: String?
   /// Render to air of each new picture sent since the last health sample, ms.
   private var sampleLatencies: [Double] = []
   /// The latency the log last gave, ms.
@@ -137,8 +140,15 @@ public final class DeckLinkOutputPort: CardSink {
   public var state: State { queue.sync { current } }
 
   /// The frame size of the mode it last opened in; nil before it has opened.
-  /// A browser feeding it lays out at this size (turned, for a quarter turn).
-  public var frameSize: (width: Int, height: Int)? { queue.sync { openSize } }
+  public var frameSize: PixelSize? { queue.sync { openSize } }
+
+  /// Called on the port's own queue every time it opens, the first time or on a
+  /// retry, with its frame size: for a browser, the cue to lay its page out at that
+  /// size (`CardPageLayout`). Hop to the owner's thread to act on it.
+  public var onOpened: ((PixelSize) -> Void)? {
+    get { queue.sync { opened } }
+    set { queue.sync { opened = newValue } }
+  }
 
   /// Which frames the port is sending in; nil when it is not running.
   public var frames: Frames? {
@@ -231,6 +241,7 @@ public final class DeckLinkOutputPort: CardSink {
         "\(label): \(retrying ? "reopened" : "opened") in \(mode)\(frames == .helper ? " with the helper's frames" : "")\(leads.text)"
       )
       startPolling()
+      if let openSize { opened?(openSize) }
     case .refused(let why):
       stopTimers()
       current = .refused(why)
@@ -303,6 +314,7 @@ public final class DeckLinkOutputPort: CardSink {
     case .failure(let refusal): return .refused(refusal.reason)
     case .success(let p): plan = p
     }
+    if let why = refusingOpens { return .failed(why) }
     let box = CallbackBox(source: source, timeScale: plan.timeScale, port: self, queue: queue)
     var callbacks = box.callbacks(depth: depth, leads: leads, frames: preferredFrames)
     var why = [CChar](repeating: 0, count: 256)
@@ -312,7 +324,7 @@ public final class DeckLinkOutputPort: CardSink {
     guard let opened else { return .failed(String(cString: why)) }
     handle = opened
     self.box = box
-    openSize = (plan.width, plan.height)
+    openSize = PixelSize(width: plan.width, height: plan.height)
     let frames: Frames = dl_output_frames(opened) == DL_FRAMES_CARD ? .card : .helper
     if frames != preferredFrames, !saidSwitch {
       saidSwitch = true
@@ -453,6 +465,7 @@ public final class DeckLinkOutputPort: CardSink {
   // MARK: Software clock controls, for tests
 
   func sync() { queue.sync {} }
+  func fakeRefuseOpens(_ why: String?) { queue.sync { refusingOpens = why } }
   func pollForTest() { queue.sync { pollNow() } }
   func fakeTick(_ frames: Int) { queue.sync { if let handle { dl_fake_tick(handle, Int32(frames)) } } }
   func fakeHold(_ on: Bool) { queue.sync { if let handle { dl_fake_hold_completions(handle, on) } } }

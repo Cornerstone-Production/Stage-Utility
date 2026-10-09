@@ -61,6 +61,15 @@ final class FrameMemory {
   var lumas: [UInt8] { pairs.flatMap { [$0[1], $0[3]] } }
 }
 
+extension SurfaceFrameSource {
+  /// Have a port of `width` x `height` ask for a frame, as its pre-roll does: the
+  /// source learns the size its pictures are converted to.
+  func learnSize(width: Int, height: Int) {
+    let frame = FrameMemory(width: width, height: height)
+    _ = fill(CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000), into: frame.target)
+  }
+}
+
 @Suite struct UYVYConverterTests {
   let converter: UYVYConverter
   init() throws { converter = try UYVYConverter() }
@@ -162,7 +171,7 @@ final class FrameMemory {
 
   @Test func aSurfaceSourceSendsEachPictureOnceAndThenRepeats() throws {
     let source = SurfaceFrameSource(converter: converter)
-    source.frameSize = (4, 1)
+    source.learnSize(width: 4, height: 1)
     let frame = FrameMemory(width: 4, height: 1)
     let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
     var begun: [Int64] = []
@@ -183,16 +192,18 @@ final class FrameMemory {
     #expect(source.failure == nil)
   }
 
-  /// A picture is converted when it is presented, at the card's frame size: until
-  /// the source knows that size there is nothing to convert to, and the picture
-  /// is dropped rather than sent at the wrong size.
+  /// A picture is converted when it is presented, at the card's frame size: until a
+  /// port has asked for a frame there is no size to convert to, and the picture is
+  /// dropped rather than sent at the wrong size. The first fill, empty, is where the
+  /// source learns it.
   @Test func aPictureBeforeTheFrameSizeIsKnownIsDropped() throws {
     let source = SurfaceFrameSource(converter: converter)
     let frame = FrameMemory(width: 2, height: 1)
     let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
     try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
+    #expect(source.frameSize == nil)
     #expect(source.fill(request, into: frame.target) == nil)
-    source.frameSize = (2, 1)
+    #expect(source.frameSize.map { [$0.width, $0.height] } == [2, 1])
     try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
     #expect(source.fill(request, into: frame.target) != nil)
   }
@@ -202,7 +213,7 @@ final class FrameMemory {
   /// the new size, and copying the old picture would read past its buffer.
   @Test func aPictureOfTheOldSizeIsNotCopiedIntoANewFrame() throws {
     let source = SurfaceFrameSource(converter: converter)
-    source.frameSize = (2, 1)
+    source.learnSize(width: 2, height: 1)
     try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
     let bigger = FrameMemory(width: 4, height: 2)
     #expect(source.fill(CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000), into: bigger.target) == nil)
@@ -214,7 +225,7 @@ final class FrameMemory {
   @Test func aPictureCarriesTheTimesItWasMadeAt() throws {
     let clock = Locked<UInt64>(1_000)
     let source = SurfaceFrameSource(converter: converter, now: { clock.value })
-    source.frameSize = (2, 1)
+    source.learnSize(width: 2, height: 1)
     let frame = FrameMemory(width: 2, height: 1)
     let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
     let white = bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)])
@@ -240,7 +251,7 @@ final class FrameMemory {
     let source = SurfaceFrameSource(converter: converter)
     let frame = FrameMemory(width: 2, height: 1)
     let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
-    source.frameSize = (2, 1)
+    source.learnSize(width: 2, height: 1)
     try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
     try source.present(bgraSurface(width: 2, height: 1, [.grey(0), .grey(0)]))
     #expect(source.fill(request, into: frame.target) != nil)

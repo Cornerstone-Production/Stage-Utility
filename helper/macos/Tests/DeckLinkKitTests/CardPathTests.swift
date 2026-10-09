@@ -36,7 +36,6 @@ import Testing
       label: "SDI 1 (virtual)", hardware: .virtual, source: source, retryInterval: 3600, pollInterval: 3600,
       log: LogLines().write)
     #expect(port.open(videoMode: "720p59.94") == .running(mode: "720p59.94 on a software clock", frames: .card))
-    source.frameSize = port.frameSize
     try source.present(Self.portraitPage())
     try await Task.sleep(nanoseconds: 250_000_000)
     // What went out is the software clock's record, gone once the output closes.
@@ -86,7 +85,6 @@ import Testing
       label: "SDI 1 (virtual)", hardware: .virtual, source: source, retryInterval: 3600, pollInterval: 3600,
       log: LogLines().write)
     port.open(videoMode: "720p59.94")
-    source.frameSize = port.frameSize
     try source.present(Self.portraitPage())
     try await Task.sleep(nanoseconds: 150_000_000)
     port.close()
@@ -96,6 +94,70 @@ import Testing
     func pixel(_ x: Int, _ y: Int) -> [UInt8] { Array(rgba[(y * frame.width + x) * 4..<(y * frame.width + x) * 4 + 3]) }
     #expect(pixel(0, 0) == [255, 255, 255] && pixel(3, 719) == [255, 255, 255])
     #expect(pixel(4, 0) == [0, 0, 0] && pixel(1279, 360) == [0, 0, 0])
+  }
+
+  /// A white picture, scaled to fit whatever the frame size is.
+  static func whitePage() -> IOSurfaceRef { bgraSurface(width: 4, height: 4, Array(repeating: .grey(255), count: 16)) }
+
+  func virtualPort(_ source: SurfaceFrameSource, opened: Locked<[PixelSize]>) -> DeckLinkOutputPort {
+    let port = DeckLinkOutputPort(
+      label: "SDI 1 (virtual)", hardware: .virtual, source: source, retryInterval: 3600, pollInterval: 3600,
+      log: LogLines().write)
+    port.onOpened = { size in opened.value.append(size) }
+    return port
+  }
+
+  /// A port another application holds when the output starts opens only on a
+  /// retry. The page's pictures go out from then: the source learns the frame size
+  /// from the port's first fill, whenever that comes, and the port says it opened,
+  /// and at what size, so the page is laid out then too. Laid out only when the
+  /// format was asked for, the source had no size and dropped every picture, and
+  /// the card sent black for good.
+  @Test func aPortThatOpensOnlyOnARetrySendsThePagesPictures() async throws {
+    let source = SurfaceFrameSource(converter: try UYVYConverter())
+    let opened = Locked<[PixelSize]>([])
+    let port = virtualPort(source, opened: opened)
+    port.fakeRefuseOpens("the port is in use by another application")
+    #expect(port.open(videoMode: "720p59.94") == .lost("the port is in use by another application"))
+    try source.present(Self.whitePage())  // nothing to convert to yet: dropped
+    port.fakeRefuseOpens(nil)
+    port.retry()
+    port.sync()
+    #expect(port.state == .running(mode: "720p59.94 on a software clock", frames: .card))
+    #expect(opened.value == [PixelSize(width: 1280, height: 720)])
+    try source.present(Self.whitePage())
+    try await Task.sleep(nanoseconds: 150_000_000)
+    let shown = port.fakeShown()
+    port.close()
+    #expect(shown.contains(Self.white), "the page's picture never went out: \(Set(shown))")
+  }
+
+  /// A screen's format changed while its port was unplugged: the port cannot open in
+  /// it then, and opens in it on the retry. Its pictures go out at the new size,
+  /// not refused for being converted at the old one.
+  @Test func aFormatChangedWhileThePortIsLostIsTheSizeItsPicturesGoOutAt() async throws {
+    let source = SurfaceFrameSource(converter: try UYVYConverter())
+    let opened = Locked<[PixelSize]>([])
+    let port = virtualPort(source, opened: opened)
+    defer { port.close() }
+    #expect(port.open(videoMode: "720p59.94") == .running(mode: "720p59.94 on a software clock", frames: .card))
+    try source.present(Self.whitePage())
+    try await Task.sleep(nanoseconds: 100_000_000)
+    #expect(port.fakeShown().contains(Self.white))
+
+    port.fakeRefuseOpens("the port is not connected")
+    port.fakeUnplug()
+    port.sync()
+    #expect(port.open(videoMode: "1080p59.94") == .lost("the port is not connected"))
+    port.fakeRefuseOpens(nil)
+    port.retry()
+    port.sync()
+    #expect(port.state == .running(mode: "1080p59.94 on a software clock", frames: .card))
+    #expect(opened.value == [PixelSize(width: 1280, height: 720), PixelSize(width: 1920, height: 1080)])
+    try source.present(Self.whitePage())
+    try await Task.sleep(nanoseconds: 150_000_000)
+    let shown = port.fakeShown()
+    #expect(shown.contains(Self.white), "no picture went out at the new size: \(Set(shown))")
   }
 
   /// A capture asked for again before a new frame came gets nothing, not a pile-up.

@@ -249,6 +249,26 @@ let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a so
       ])
   }
 
+  /// A port says each time it opens, the first time and on every retry, with its
+  /// frame size: the cue for its page to lay out. An open that fails says nothing.
+  @Test func aPortSaysEachTimeItOpensWithItsSize() {
+    let port = softwarePort(NumberedSource())
+    defer { port.close() }
+    let opened = Locked<[PixelSize]>([])
+    port.onOpened = { opened.value.append($0) }
+    port.fakeRefuseOpens("the port is in use by another application")
+    #expect(port.open(videoMode: nil) == .lost("the port is in use by another application"))
+    #expect(opened.value.isEmpty)
+    port.fakeRefuseOpens(nil)
+    port.retry()
+    port.sync()
+    port.fakeUnplug()
+    port.sync()
+    port.retry()
+    port.sync()
+    #expect(opened.value == [PixelSize(width: 16, height: 4), PixelSize(width: 16, height: 4)])
+  }
+
   static let p50 = CardMode(
     code: 0x4870_3530, driverName: "1080p50", width: 1920, height: 1080, frameDuration: 1000, timeScale: 50000,
     field: .progressive, supportsYUV8: true)
@@ -464,9 +484,9 @@ let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a so
       log: log.write)
     defer { port.close() }
     #expect(port.open(videoMode: nil) == .running(mode: "1080p59.94 on a software clock", frames: .card))
-    #expect(port.frameSize.map { [$0.width, $0.height] } == [1920, 1080])
+    #expect(port.frameSize == PixelSize(width: 1920, height: 1080))
     #expect(port.open(videoMode: "720p59.94") == .running(mode: "720p59.94 on a software clock", frames: .card))
-    #expect(port.frameSize.map { [$0.width, $0.height] } == [1280, 720])
+    #expect(port.frameSize == PixelSize(width: 1280, height: 720))
     #expect(port.open(videoMode: "4Kp60") == .refused("4Kp60 is not a mode the helper knows"))
     #expect(
       log.lines == [

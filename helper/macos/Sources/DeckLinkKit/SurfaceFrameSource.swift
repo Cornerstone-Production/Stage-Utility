@@ -53,12 +53,14 @@ public final class SurfaceFrameSource: CardFrameSource {
     set { lock.withLock { _rotation = newValue } }
   }
 
-  /// The card's frame size, which pictures are converted to. Until it is set,
-  /// pictures presented are dropped.
-  public var frameSize: (width: Int, height: Int)? {
-    get { lock.withLock { _frameSize } }
-    set { lock.withLock { _frameSize = newValue } }
-  }
+  /// The card's frame size, which pictures are converted to: the size of the frames
+  /// the port last asked to have filled. Until a port has asked (its pre-roll, as it
+  /// opens), pictures presented are dropped.
+  ///
+  /// Learnt from the fills, never set by an owner, so it cannot fall out of step with
+  /// the port: a port that opens only on a retry, or reopens in another format after
+  /// being lost, has its pictures converted at its own size from its first fill.
+  public var frameSize: (width: Int, height: Int)? { lock.withLock { _frameSize } }
 
   /// Why the last picture could not be converted, nil once one has been. The card
   /// repeats the previous picture meanwhile, so it shows in the repeat count.
@@ -147,6 +149,9 @@ public final class SurfaceFrameSource: CardFrameSource {
 
   public func fill(_ request: CardFrameRequest, into target: CardFrameTarget) -> CardPicture? {
     let taken: (buffer: MTLBuffer, picture: CardPicture)? = lock.withLock {
+      if _frameSize.map({ $0.width != target.width || $0.height != target.height }) ?? true {
+        _frameSize = (target.width, target.height)
+      }
       guard fresh, let newest, let size = stagedSize, size.width == target.width, size.height == target.height,
         target.rowBytes >= size.width * 2
       else { return nil }

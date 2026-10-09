@@ -16,7 +16,10 @@ import StageUtilityOutputCore
 ///   IOSurface is valid only inside that callback.
 /// - The fill lead before air, the clock thread copies the newest converted picture
 ///   into the slot's frame, or has none and the port repeats the last.
-/// - The page lays out at the port's frame size, turned for a quarter turn.
+/// - The page lays out at the port's frame size, turned for a quarter turn, each
+///   time the port opens (`CardPageLayout`), and the source converts to the size of
+///   the frames the port asks it to fill: neither can be out of step with a port
+///   that opens late or reopens in another format.
 ///
 /// The counts (new, repeated, dropped, resyncs) are the shim scheduler's, the same
 /// for a DeckLink port and a virtual one; health and the falling-behind lines come
@@ -41,7 +44,7 @@ final class CardOutput: OutputSink {
   private let source: SurfaceFrameSource?
   /// Why this output cannot send anything at all, for the window; nil when it can.
   private let setupProblem: String?
-  private var rotation: Rotation = .none
+  private var layout: CardPageLayout
   /// The screen's `videoMode` as last applied; nil is the default.
   private var videoMode: String?
   /// Why the last picture could not be copied, said once per cause.
@@ -58,6 +61,7 @@ final class CardOutput: OutputSink {
     activity = ProcessInfo.processInfo.beginActivity(
       options: [.userInitiated, .latencyCritical], reason: "\(label) sends frames on a clock")
     let fallback = CGSize(width: 1920, height: 1080)
+    layout = CardPageLayout(pageMadeAt: PixelSize(width: Int(fallback.width), height: Int(fallback.height)))
     guard let api = CEFEngine.api else {
       // Said once for the whole app (`CEFEngine.failure`).
       surface = DeadSurface(size: fallback)
@@ -94,8 +98,10 @@ final class CardOutput: OutputSink {
     self.port = port
     setupProblem = nil
     page.onPicture = { [weak self] surface in self?.present(surface) }
+    port.onOpened = { [weak self] size in
+      DispatchQueue.main.async { MainActor.assumeIsolated { self?.portOpened(size) } }
+    }
     port.open(videoMode: nil)
-    layOut()
   }
 
   /// One Metal device, queue and pipeline for every card output.
@@ -122,9 +128,8 @@ final class CardOutput: OutputSink {
 
   /// The source turns the frames in Metal; the page lays out at the turned size.
   func setRotation(_ new: Rotation) {
-    rotation = new
     source?.rotation = new
-    layOut()
+    if let size = layout.turned(new) { resizePage(size) }
   }
 
   /// The screen's `videoMode` (nil for the default, 1080p59.94): the port reopens
@@ -133,8 +138,9 @@ final class CardOutput: OutputSink {
     let asked = mode?.trimmingCharacters(in: .whitespaces).isEmpty == false ? mode : nil
     guard let port, (asked ?? VideoModes.defaultMode) != (videoMode ?? VideoModes.defaultMode) else { return }
     videoMode = asked
+    // The page is laid out again when the port opens in it (`portOpened`), which for
+    // a port that is lost is not now.
     port.open(videoMode: asked)
-    layOut()
   }
 
   /// What keeps this output from sending, for its line in the window: a mode the
@@ -172,14 +178,14 @@ final class CardOutput: OutputSink {
     }
   }
 
-  /// The page at the port's frame size, portrait for a quarter turn; its pictures
-  /// converted to the frame size.
-  private func layOut() {
-    guard let page = surface as? CEFWindowlessSurface, let size = port?.frameSize else { return }
-    source?.frameSize = size
-    let w = CGFloat(size.width)
-    let h = CGFloat(size.height)
-    page.resize(to: rotation.swapsAxes ? CGSize(width: h, height: w) : CGSize(width: w, height: h))
+  /// The port opened, first or again: the page at its frame size, portrait for a
+  /// quarter turn.
+  private func portOpened(_ size: PixelSize) {
+    if let page = layout.portOpened(size) { resizePage(page) }
+  }
+
+  private func resizePage(_ size: PixelSize) {
+    (surface as? CEFWindowlessSurface)?.resize(to: CGSize(width: size.width, height: size.height))
   }
 
   /// The latency page's stamp has been read, and the last picture had one.

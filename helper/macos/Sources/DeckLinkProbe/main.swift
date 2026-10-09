@@ -106,8 +106,9 @@ final class TimedSource: CardFrameSource {
   }
 }
 
+/// The pictures go out from the first begin frame: the source learns the frame size
+/// from the port's pre-roll, which goes out black.
 func feed(_ source: SurfaceFrameSource, painter: BarsPainter, label: String) -> DispatchQueue {
-  source.frameSize = (painter.width, painter.height)
   let render = DispatchQueue(label: "render \(label)", qos: .userInteractive)
   source.onBeginFrame = { request in
     render.async {
@@ -115,10 +116,6 @@ func feed(_ source: SurfaceFrameSource, painter: BarsPainter, label: String) -> 
       painter.draw(frame: request.index)
       do { try source.present(painter.surface, contentNs: drawn) } catch { print("\(label): could not present: \(error)") }
     }
-  }
-  render.async {
-    painter.draw(frame: 0)
-    do { try source.present(painter.surface) } catch { print("\(label): could not present: \(error)") }
   }
   return render
 }
@@ -235,8 +232,7 @@ case "bars" where args.count >= 2:
   let source = SurfaceFrameSource(converter: converter)
   let timed = TimedSource(source)
   let painter = BarsPainter(width: cardMode.width, height: cardMode.height)
-  let render = feed(source, painter: painter, label: found.descriptor.name)
-  render.sync {}
+  _ = feed(source, painter: painter, label: found.descriptor.name)
   let port = DeckLinkOutputPort(
     label: found.descriptor.name, hardware: .port(found), source: timed, leads: leads, frames: frames,
     log: printLog)
@@ -249,14 +245,11 @@ case "null":
   let count = args.count >= 3 ? Int(args[2]) ?? 1 : 1
   let converter = try UYVYConverter()
   var ports: [(DeckLinkOutputPort, TimedSource)] = []
-  var renders: [DispatchQueue] = []
   for n in 1...count {
     let source = SurfaceFrameSource(converter: converter)
     let timed = TimedSource(source)
     let label = "null \(n)"
-    let render = feed(source, painter: BarsPainter(width: 1920, height: 1080), label: label)
-    render.sync {}
-    renders.append(render)
+    _ = feed(source, painter: BarsPainter(width: 1920, height: 1080), label: label)
     let port = DeckLinkOutputPort(
       label: label,
       hardware: .softwareClock(width: 1920, height: 1080, frameDuration: 1001, timeScale: 60000, ticksByItself: true),
