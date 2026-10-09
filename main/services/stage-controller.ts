@@ -19,7 +19,7 @@ import {
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
-import { viewSurface, viewShownInSidebar, outputMode, surfaceForMode, copyViewName, type CreateScreenInput, type ViewSurface, type OutputMode } from "../types/views.js";
+import { viewSurface, viewShownInSidebar, outputMode, surfaceForMode, copyViewName, viewCanTakeRole, roleChangeConflict, type CreateScreenInput, type ViewSurface, type OutputMode } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
@@ -213,6 +213,15 @@ export class SlotsNotFoundError extends Error {
     super(message);
     this.name = "SlotsNotFoundError";
   }
+}
+
+/** Why a view cannot go on a control surface: it is not a custom view. One
+ *  wording for a view chosen for one, and for a view (or a copy) to become one. */
+function noControlSurfaceReason(view: View): string {
+  return (
+    `"${view.name}" is a ${defaultViewName(view.kind)} view, and only a custom view has a layout to put a control on, ` +
+    `so it cannot go on a control surface. Choose a control-surface view.`
+  );
 }
 
 /** One write in a multi-write screen change, and how to take it back. */
@@ -3811,7 +3820,9 @@ export class StageController {
 
   /**
    * The view a screen of `mode` is about to be pointed at, refused unless it
-   * exists, is not Home, and already fits the role. One check and one wording for
+   * exists, is not Home, and already fits the role. A control surface also needs
+   * a custom view (see viewCanTakeRole): a non-custom console can still exist,
+   * from an API call or an older build, and is not one to point a panel at. One check and one wording for
    * createScreen and setOutputRole, which used to word the same refusal two ways.
    */
   private requireViewForRole(viewId: string, mode: OutputMode): View {
@@ -3820,6 +3831,7 @@ export class StageController {
     }
     const view = this.state.views.find((v) => v.id === viewId);
     if (!view) throw new Error(`view ${viewId} not found`);
+    if (!viewCanTakeRole(view, mode)) throw new Error(noControlSurfaceReason(view));
     if (viewSurface(view) !== surfaceForMode(mode)) {
       throw new Error(
         mode === "panel"
@@ -3864,10 +3876,14 @@ export class StageController {
 
     const view = output.viewId ? this.state.views.find((v) => v.id === output.viewId) : undefined;
     const misfit = view !== undefined && viewSurface(view) !== wants;
-    const others = view ? this.state.outputs.filter((o) => o.id !== id && o.viewId === view.id) : [];
-    if (misfit && others.length > 0 && !opts.copyView && !chosen) {
+    // The same function the panel asks before it offers the choice, so the two
+    // cannot disagree about when there is one.
+    const conflict = chosen ? null : roleChangeConflict(output, this.state.outputs, this.state.views, mode);
+    if (conflict?.copyName === null) throw new Error(noControlSurfaceReason(conflict.view));
+    if (conflict && !opts.copyView) {
+      const { others } = conflict;
       throw new Error(
-        `"${view.name}" is also shown on ${others.map((o) => `"${o.name}"`).join(", ")}, so changing it would change ` +
+        `"${conflict.view.name}" is also shown on ${others.map((o) => `"${o.name}"`).join(", ")}, so changing it would change ` +
           `${others.length === 1 ? "that screen" : "those screens"} too. Use a copy on this screen, or choose a different view.`,
       );
     }

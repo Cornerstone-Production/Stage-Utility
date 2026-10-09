@@ -499,6 +499,47 @@ describe("setOutputRole — a view only this screen shows", () => {
   });
 });
 
+describe("a control surface shows only a custom view", () => {
+  // Only a custom view has a layout to put a control on. createView turns any
+  // other kind asked for as a console into a display, and the view card does
+  // not offer the switch; a role change must not be the way round that.
+  const calendar = { id: "cal-a", name: "Week ahead", kind: "calendar", surface: "display", createdAt: NOW, layout: null };
+  const calendarConsole = { id: "cal-c", name: "Old calendar console", kind: "calendar", surface: "console", createdAt: NOW, layout: null };
+  beforeEach(() => {
+    ctl.state = { ...ctl.state, views: [...views(), calendar, calendarConsole] as unknown as View[] };
+  });
+  const calendarConsoles = () => views().filter((v) => v.kind !== "custom" && viewSurface(v) === "console" && v.id !== "cal-c");
+
+  it("refuses a copy of a shared calendar view as a control surface, and changes nothing", async () => {
+    await stageController.setOutputView("display-1", "cal-a");
+    await stageController.setOutputView("display-2", "cal-a");
+    const before = snapshot(["display-1", "display-2"], ["cal-a"]);
+    await assert.rejects(() => stageController.setOutputRole("display-1", "panel", { copyView: true }), /Week ahead.*Calendar view/);
+    assert.deepEqual(calendarConsoles(), []);
+    assert.equal(snapshot(["display-1", "display-2"], ["cal-a"]), before);
+    assert.equal(views().length, 6, "a copy was made");
+  });
+
+  it("refuses to turn a calendar view only this screen shows into a console", async () => {
+    await stageController.setOutputView("display-5", "cal-a");
+    await assert.rejects(() => stageController.setOutputRole("display-5", "panel"), /Week ahead.*Calendar view/);
+    assert.deepEqual(calendarConsoles(), []);
+    assert.equal(outputMode(out("display-5")), "display");
+  });
+
+  it("refuses a non-custom console as the view for a control surface", async () => {
+    await assert.rejects(() => stageController.setOutputRole("display-5", "panel", { viewId: "cal-c" }), /Calendar view/);
+    await assert.rejects(() => stageController.createScreen({ name: "Nope", mode: "panel", viewId: "cal-c" }), /Calendar view/);
+    assert.equal(outputs().some((o) => o.name === "Nope"), false);
+  });
+
+  it("still lets a calendar view go to a wall display, copied or flipped", async () => {
+    await stageController.setOutputView("display-4", "cal-c");
+    await stageController.setOutputRole("display-4", "display");
+    assert.equal(viewSurface(view("cal-c")), "display");
+  });
+});
+
 describe("setOutputRole — a view other screens also show", () => {
   it("is refused when it would change them, naming them, and changes nothing", async () => {
     // display-4 is a panel on the console it shares with display-3.
