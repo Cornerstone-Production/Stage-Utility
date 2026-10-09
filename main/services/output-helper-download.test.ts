@@ -341,6 +341,68 @@ describe("fetching the helper from the release", () => {
     });
   });
 
+  describe("a cached zip that is damaged on disk", () => {
+    const zipPath = () => path.join(cacheDir(), ZIP.name);
+    /** The same size, different bytes, as a flipped bit on disk would leave it. */
+    const corrupt = async (keepStamp: boolean, at = 10) => {
+      const before = await fs.stat(zipPath());
+      const bytes = await fs.readFile(zipPath());
+      bytes[at] ^= 0xff;
+      await fs.writeFile(zipPath(), bytes);
+      if (keepStamp) await fs.utimes(zipPath(), before.atime, before.mtime);
+    };
+
+    it("is dropped and fetched again by a server that has just started, not served", async (t) => {
+      const lines = captureConsole(t, "log", "warn");
+      const good = crypto.randomBytes(50_000);
+      release.publish(ZIP.name, good);
+      assert.ok((await make().resolve(ZIP)).ok);
+      await corrupt(true);
+
+      const restarted = make(); // a new process: nothing is remembered as verified
+      const before = release.count(".zip");
+      const r = await restarted.resolve(ZIP);
+      assert.ok(r.ok, JSON.stringify(r));
+      assert.equal(r.source, "release", "fetched again, not served from the cache");
+      assert.equal(release.count(".zip"), before + 1);
+      assert.deepEqual(await fs.readFile(r.file), good, "and what is served is the good file");
+      assert.ok(lines.some((l) => l.startsWith("[output-helper] the cached StageUtilityOutput-arm64.zip is not trusted (its SHA-256 is ")), lines.join("\n"));
+    });
+
+    it("is not hashed again on every hit: a verified file is one stat call, until its size or mtime moves", async (t) => {
+      captureConsole(t, "log", "warn");
+      const good = crypto.randomBytes(50_000);
+      release.publish(ZIP.name, good);
+      const dl = make();
+      assert.ok((await dl.resolve(ZIP)).ok);
+      // Damage that leaves size and mtime exactly as they were: the cost bound this
+      // check accepts, and the reason a later hit is cheap. A restart catches it.
+      await corrupt(true);
+      const cheap = await dl.resolve(ZIP);
+      assert.ok(cheap.ok && cheap.source === "cache", "a verified, unchanged file is served without hashing it again");
+
+      // The same damage with a changed mtime is noticed in the very same process.
+      await corrupt(false, 20);
+      const later = new Date(Date.now() + 60_000);
+      await fs.utimes(zipPath(), later, later);
+      const before = release.count(".zip");
+      const r = await dl.resolve(ZIP);
+      assert.ok(r.ok && r.source === "release", JSON.stringify(r));
+      assert.equal(release.count(".zip"), before + 1);
+      assert.deepEqual(await fs.readFile(r.file), good);
+    });
+
+    it("is refetched, with its checksum, when the checksum beside it has gone", async (t) => {
+      captureConsole(t, "log", "warn");
+      release.publish(ZIP.name, Buffer.from("good zip"));
+      assert.ok((await make().resolve(ZIP)).ok);
+      await fs.rm(path.join(cacheDir(), SUM.name));
+      const r = await make().resolve(ZIP);
+      assert.ok(r.ok && r.source === "release", JSON.stringify(r));
+      assert.deepEqual(await listCache(), [ZIP.name, SUM.name]);
+    });
+  });
+
   it("keeps only the running version's files", async () => {
     const old = path.join(dataDir, "cache", "output-helper", "1.0.0");
     await fs.mkdir(old, { recursive: true });

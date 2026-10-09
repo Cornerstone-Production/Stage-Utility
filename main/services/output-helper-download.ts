@@ -14,7 +14,11 @@
 //     more than the helper can possibly weigh is refused, not stored;
 //   - a stall watchdog and a ceiling: a transfer that goes quiet for a minute ends,
 //     so the next request tries again instead of waiting behind it for ever; one
-//     that keeps moving, however slowly, is let finish, up to two hours in all.
+//     that keeps moving, however slowly, is let finish, up to two hours in all;
+//   - a re-check of what is cached: a zip is hashed against its checksum again the
+//     first time it is served after the server starts, and whenever its size or
+//     modification time changes, so a file damaged on disk is dropped and fetched
+//     again instead of being served for ever. Later hits are one stat call.
 //
 // A file reaches the cache only after its digest matched. It is written to a
 // temporary name and renamed into place, so a request never sees half a file.
@@ -28,7 +32,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { withoutDataDir } from "./app-paths.js";
-import { commitPart, downloadWatchdog, readCapped, streamToPart } from "./capped-download.js";
+import { commitPart, downloadWatchdog, readCapped, sha256OfFile, streamToPart } from "./capped-download.js";
 import { errorMessage, fetchFailureMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import { atomicWrite } from "./write-queue.js";
@@ -140,6 +144,10 @@ export class OutputHelperDownloads {
   private readonly base: () => string;
   /** The version whose older siblings were last removed. */
   private prunedFor: string | null = null;
+  /** Cached zips this process has hashed since they last changed: path to the
+   *  size and mtime they had when they matched. A Map: the path is derived from a
+   *  request. */
+  private readonly verified = new Map<string, string>();
 
   constructor(private readonly deps: DownloadDeps) {
     this.doFetch = deps.fetch ?? ((input, init) => fetch(input, init));
@@ -195,7 +203,9 @@ export class OutputHelperDownloads {
     const file = path.join(this.versionDir(version), asset.name);
     try {
       const have = await statFile(file);
-      if (have !== null) return { ok: true, file, size: have, source: "cache" };
+      if (have !== null && (asset.kind === "sha256" || (await this.zipStillMatches(file, have, version, asset)))) {
+        return { ok: true, file, size: have.size, source: "cache" };
+      }
       return asset.kind === "sha256" ? await this.fetchChecksum(asset, file, version) : await this.fetchZip(asset, file, version);
     } catch (err) {
       const refusal =
@@ -207,6 +217,32 @@ export class OutputHelperDownloads {
       console.warn(`[output-helper] ${scrub(asset.name)} failed: ${scrub(refusal.message)}`);
       return { ok: false, status: refusal.status, message: this.forClient(refusal.message) };
     }
+  }
+
+  /**
+   * Whether a cached zip still hashes to its checksum. Checked the first time it
+   * is served after the server starts, and again only when its size or mtime has
+   * changed since; a hit that has not changed costs the stat the caller already
+   * made. A zip that does not match, or has no checksum left to be checked
+   * against, is removed together with its checksum so the caller fetches both
+   * again. 145 MB hashes in a second or two once, even on a Pi.
+   */
+  private async zipStillMatches(file: string, have: FileStamp, version: string, asset: HelperAsset): Promise<boolean> {
+    const stamp = stampOf(have);
+    if (this.verified.get(file) === stamp) return true;
+    const sumFile = path.join(this.versionDir(version), `${asset.name}.sha256`);
+    const expected = parseChecksum(await fs.readFile(sumFile, "utf8").catch(() => ""));
+    const got = expected ? await sha256OfFile(file) : null;
+    if (expected && got === expected) {
+      this.verified.set(file, stamp);
+      return true;
+    }
+    const why = expected ? `its SHA-256 is ${got}, not the published ${expected}` : "its checksum is missing or unreadable";
+    console.warn(`[output-helper] the cached ${scrub(asset.name)} is not trusted (${scrub(why)}); fetching it again`);
+    this.verified.delete(file);
+    await fs.rm(file, { force: true });
+    await fs.rm(sumFile, { force: true });
+    return false;
   }
 
   /** A reply a LAN client reads: no filesystem path of the data directory. */
@@ -331,6 +367,9 @@ export class OutputHelperDownloads {
       // A timeout or a dropped connection mid-body: the download did not finish.
       throw new Refusal(502, `${asset.name} did not finish downloading: ${fetchFailureMessage(err, "the release host")}`);
     }
+    // It matched a moment ago: the next hit need not hash it again.
+    const st = await fs.stat(file);
+    this.verified.set(file, stampOf(st));
     return size;
   }
 }
@@ -367,10 +406,20 @@ export async function pruneOutputHelperCache(dataDir: string, keepVersion: strin
   return { removed, failed };
 }
 
-async function statFile(file: string): Promise<number | null> {
+interface FileStamp {
+  size: number;
+  mtimeMs: number;
+}
+
+/** What "unchanged" means for a verified file: its size and its mtime to the
+ *  millisecond, rounded as a Date rounds it (which is what utimes and most tools
+ *  restore, and they have nothing finer). */
+const stampOf = (st: FileStamp): string => `${st.size}:${Math.round(st.mtimeMs)}`;
+
+async function statFile(file: string): Promise<FileStamp | null> {
   try {
     const st = await fs.stat(file);
-    return st.isFile() && st.size > 0 ? st.size : null;
+    return st.isFile() && st.size > 0 ? { size: st.size, mtimeMs: st.mtimeMs } : null;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;

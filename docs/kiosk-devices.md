@@ -115,7 +115,10 @@ running version only, is not part of a config backup, and costs one download to
 rebuild. One fetch runs at a time per file, a transfer that goes a minute without data is
 given up on (one that keeps moving, however slowly, is not, up to two hours in all),
 and a file over 1 GB is refused. A download that does not match
-its checksum is never stored and answers `502`.
+its checksum is never stored and answers `502`. A cached zip is hashed again against
+its checksum the first time it is served after the server starts, and again whenever its
+size or modification time changes, so a file damaged on disk is dropped and fetched
+again rather than served; every other request is a single stat.
 
 **Disk use.** Each architecture's zip is about 145 MB, so a version takes about 290 MB
 once Macs of both kinds have asked for it, and only an architecture someone has asked
