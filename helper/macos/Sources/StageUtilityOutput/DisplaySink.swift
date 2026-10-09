@@ -2,10 +2,12 @@ import AppKit
 import StageUtilityOutputCore
 import WebKit
 
-/// Where an output's pictures go. A display is a full-screen window; step 3 adds a
-/// DeckLink port, whose destination keeps the web view off every display and reads
-/// its frames for a card. The web view itself, and everything about loading it, is
-/// the `WebSurface`.
+/// Where an output's pictures go. A display output is a window over a whole
+/// display. Step 3 adds a DeckLink port, whose page is a visible window tiled on a
+/// canvas display, with a tap that snapshots it on that display's refresh for the
+/// card; a web view that is off screen or covered stops painting, so it is never
+/// either. The web view itself, and everything about loading it, is the
+/// `WebSurface`, which knows nothing of windows or screens.
 @MainActor
 protocol OutputDestination: AnyObject {
   /// Put the web view where this destination shows it.
@@ -28,7 +30,7 @@ final class DisplaySink {
   init(descriptor: OutputDescriptor, screen: NSScreen) {
     self.descriptor = descriptor
     surface = WebSurface(label: descriptor.port, size: screen.frame.size)
-    destination = WindowDestination(screen: screen)
+    destination = WindowDestination(placement: .fullScreen(of: screen))
     destination.attach(surface.webView)
   }
 
@@ -40,7 +42,7 @@ final class DisplaySink {
   }
 
   /// A hot-plug or a resolution change moved the display: follow it.
-  func follow(_ screen: NSScreen) { destination.follow(screen) }
+  func follow(_ screen: NSScreen) { destination.move(to: .fullScreen(of: screen)) }
 
   func takeHealthSample() -> HealthSample { destination.takeHealthSample() }
 

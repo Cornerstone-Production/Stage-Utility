@@ -3,23 +3,37 @@ import QuartzCore
 import StageUtilityOutputCore
 import WebKit
 
-/// A borderless window covering one display, with the web view as its content.
+/// Where a window goes: a rectangle, in screen coordinates, on one display.
+///
+/// A display output takes the whole display. A DeckLink output will take a tile of
+/// a canvas display, one of several windows on it, so nothing here may assume that
+/// a window is a whole screen.
+struct WindowPlacement: Equatable {
+  var screen: NSScreen
+  var frame: NSRect
+
+  static func fullScreen(of screen: NSScreen) -> WindowPlacement {
+    WindowPlacement(screen: screen, frame: screen.frame)
+  }
+}
+
+/// A borderless window at a placement, with the web view as its content.
 @MainActor
 final class WindowDestination: NSObject, OutputDestination {
   private var window: NSWindow?
   private var link: CADisplayLink?
   private var ticks = 0
   private var sampleStart = CACurrentMediaTime()
-  private let initialScreen: NSScreen
+  private var placement: WindowPlacement
 
-  init(screen: NSScreen) {
-    initialScreen = screen
+  init(placement: WindowPlacement) {
+    self.placement = placement
     super.init()
   }
 
   func attach(_ view: WKWebView) {
-    let screen = initialScreen
-    let win = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false, screen: screen)
+    let screen = placement.screen
+    let win = NSWindow(contentRect: placement.frame, styleMask: .borderless, backing: .buffered, defer: false, screen: screen)
     win.isReleasedWhenClosed = false
     win.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 1)
     win.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
@@ -27,7 +41,7 @@ final class WindowDestination: NSObject, OutputDestination {
     win.hasShadow = false
     win.hidesOnDeactivate = false
     win.contentView = view
-    win.setFrame(screen.frame, display: true)
+    win.setFrame(placement.frame, display: true)
     win.orderFrontRegardless()
     window = win
     startLink(on: screen)
@@ -41,13 +55,14 @@ final class WindowDestination: NSObject, OutputDestination {
     window = nil
   }
 
-  func follow(_ screen: NSScreen) {
+  /// The display moved or changed size, or the tile did: follow it.
+  func move(to new: WindowPlacement) {
+    let screenChanged = new.screen != placement.screen
+    placement = new
     guard let window else { return }
-    if window.frame != screen.frame { window.setFrame(screen.frame, display: true) }
-    if window.screen != screen {
-      // The old display link belongs to the old screen.
-      startLink(on: screen)
-    }
+    if window.frame != new.frame { window.setFrame(new.frame, display: true) }
+    // The old display link belongs to the old screen.
+    if screenChanged || window.screen != new.screen { startLink(on: new.screen) }
   }
 
   func takeHealthSample() -> HealthSample {
