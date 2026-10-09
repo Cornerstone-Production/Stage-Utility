@@ -329,10 +329,12 @@ class FakeCard final : public Card {
   }
 
   /// A software clock has no completion timestamps of its own to report: the
-  /// slot boundary it ticked at stands in.
+  /// slot boundary it ticked at stands in. One that cannot say where its playback
+  /// is cannot say when a frame finished either: 0, unknown, so no completion
+  /// anchors its clock.
   void deliver(Done &done, uint64_t at) {
     for (auto &d : done) {
-      if (output_ != nullptr) output_->completed(d.first, d.second, at);
+      if (output_ != nullptr) output_->completed(d.first, d.second, clockUnknown_ ? 0 : at);
       d.first->Release();
     }
   }

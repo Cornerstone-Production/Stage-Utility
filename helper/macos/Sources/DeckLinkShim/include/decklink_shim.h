@@ -214,7 +214,8 @@ typedef struct {
   /// The frames it makes are counted in dl_fake_card_frames_alive.
   bool count_frames;
   /// It cannot say where its playback is (Card::hostTimeOf fails), as a driver
-  /// that will not answer GetScheduledStreamTime.
+  /// that will not answer GetScheduledStreamTime, nor when a frame finished (its
+  /// completions carry no time, so none of them anchors the clock).
   bool clock_unknown;
 } dl_fake_behaviour;
 
