@@ -51,16 +51,33 @@ import Testing
     #expect(l.newFrames == 2 && l.repeated == 1 && l.dropped == 2)
   }
 
-  @Test func aSampleIsSlotsSentPerSecondAndStartsTheCountsOver() {
+  /// In the server's units (output-health.ts): fps is slots sent per second,
+  /// repeated is a PERCENT of the window's slots, dropped is a TOTAL since the
+  /// output opened, which the next window does not start over.
+  @Test func aSampleIsInTheServersUnits() {
     var l = FrameLedger()
-    for i in 0..<60 {
+    for i in 0..<80 {
       if i % 10 != 0 { l.pictureArrived() }
       _ = l.slotsDue(1)
     }
     _ = l.slotsDue(3)
-    let sample = l.takeSample(seconds: 1)
-    #expect(sample == HealthSample(fps: 61, repeated: 7, dropped: 2))
-    #expect(l.takeSample(seconds: 1) == HealthSample(fps: 0, repeated: 0, dropped: 0))
+    // 81 slots sent in 2 s; 9 of them repeated (the 8 every tenth, and the last).
+    #expect(l.takeSample(seconds: 2) == HealthSample(fps: 40.5, repeated: 100 * 9 / 81, dropped: 2))
+    l.pictureArrived()
+    _ = l.slotsDue(1)
+    _ = l.slotsDue(2)
+    #expect(l.takeSample(seconds: 1) == HealthSample(fps: 2, repeated: 50, dropped: 3))
+    #expect(l.takeSample(seconds: 1) == HealthSample(fps: 0, repeated: 0, dropped: 3))
+  }
+
+  /// A new ledger is a reopened output: its total starts from 0, which the server
+  /// reads as a fresh baseline.
+  @Test func aNewLedgerStartsTheDropTotalOver() {
+    var l = FrameLedger()
+    _ = l.slotsDue(4)
+    #expect(l.takeSample(seconds: 1).dropped == 3)
+    var reopened = FrameLedger()
+    #expect(reopened.takeSample(seconds: 1).dropped == 0)
   }
 
   @Test func aNewPictureEndsTheRunOfRepeats() {

@@ -33,8 +33,8 @@ import Testing
   let at = Date(timeIntervalSince1970: 1_760_000_000.123)
 
   @Test func bodyIsExactBytes() {
-    let body = HealthPost.body(HealthSample(fps: 59.9401, repeated: 2, dropped: 1), at: at)
-    #expect(String(decoding: body, as: UTF8.self) == #"{"at":1760000000123,"dropped":1,"fps":59.94,"repeated":2}"#)
+    let body = HealthPost.body(HealthSample(fps: 59.9401, repeated: 1.6694, dropped: 1), at: at)
+    #expect(String(decoding: body, as: UTF8.self) == #"{"at":1760000000123,"dropped":1,"fps":59.94,"repeated":1.67}"#)
   }
 
   @Test func requestGoesToTheDevicesHealthRoute() throws {

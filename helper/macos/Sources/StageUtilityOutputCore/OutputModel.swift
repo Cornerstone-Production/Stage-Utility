@@ -74,13 +74,19 @@ public func defaultEnabled(kind: OutputKind, isMain: Bool) -> Bool {
   !(kind == .display && isMain)
 }
 
-/// What an output reports every ten seconds.
+/// What an output reports every ten seconds, in the units the server's health route
+/// takes (`parseHealthReport` in output-health.ts).
 public struct HealthSample: Equatable {
+  /// Frames per second over the window.
   public var fps: Double
-  public var repeated: Int
+  /// The percent of the window's frames that repeated the one before because the
+  /// page was late: 0 to 100.
+  public var repeated: Double
+  /// Frames dropped since the output opened. Cumulative: the server reads a count
+  /// lower than the last as the output having been reopened, not as a drop.
   public var dropped: Int
 
-  public init(fps: Double, repeated: Int = 0, dropped: Int = 0) {
+  public init(fps: Double, repeated: Double = 0, dropped: Int = 0) {
     self.fps = fps
     self.repeated = repeated
     self.dropped = dropped

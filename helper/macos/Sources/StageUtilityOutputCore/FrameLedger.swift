@@ -16,6 +16,10 @@ import Foundation
 /// - **dropped**: a slot not sent at all, because the schedule fell behind its clock
 ///   and skipped ahead rather than build delay.
 ///
+/// The health post reports repeats as a percent of the window's slots and drops as
+/// a total since the output opened (one ledger per opening), which is what the
+/// server's health route takes.
+///
 /// Every request for a frame paints, even when nothing on the page changed (see
 /// `begin_frame` in stage_cef_host.h), so a repeat always means late, never idle.
 public struct FrameLedger: Equatable {
@@ -28,6 +32,8 @@ public struct FrameLedger: Equatable {
   public private(set) var newFrames = 0
   public private(set) var repeated = 0
   public private(set) var dropped = 0
+  /// Since the output opened.
+  public private(set) var droppedTotal = 0
   /// Slots repeated in a row, up to now: how long the page has drawn nothing.
   public private(set) var repeatRun = 0
   private var pictureWaiting = false
@@ -41,7 +47,10 @@ public struct FrameLedger: Equatable {
   /// since the last call: 1 on time, more when it fell behind, in which case all
   /// but the last were skipped. Says what the slot now due is sent with.
   public mutating func slotsDue(_ elapsed: Int) -> Fill {
-    if elapsed > 1 { dropped += elapsed - 1 }
+    if elapsed > 1 {
+      dropped += elapsed - 1
+      droppedTotal += elapsed - 1
+    }
     if pictureWaiting {
       pictureWaiting = false
       newFrames += 1
@@ -53,12 +62,16 @@ public struct FrameLedger: Equatable {
     return .repeated
   }
 
-  /// The counts since the last sample, and a fresh start for the next. `fps` is
+  /// The window since the last sample, and a fresh start for the next. `fps` is
   /// slots sent per second, new and repeated alike: the rate the output actually
-  /// ran at, which only dropped slots lower.
+  /// ran at, which only dropped slots lower. `repeated` is the percent of those
+  /// slots that repeated; `dropped` is every slot dropped since the output opened.
   public mutating func takeSample(seconds: TimeInterval) -> HealthSample {
     let sent = newFrames + repeated
-    let sample = HealthSample(fps: seconds > 0 ? Double(sent) / seconds : 0, repeated: repeated, dropped: dropped)
+    let sample = HealthSample(
+      fps: seconds > 0 ? Double(sent) / seconds : 0,
+      repeated: sent > 0 ? 100 * Double(repeated) / Double(sent) : 0,
+      dropped: droppedTotal)
     newFrames = 0
     repeated = 0
     dropped = 0

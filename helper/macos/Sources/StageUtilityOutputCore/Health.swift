@@ -5,18 +5,19 @@ public enum HealthPost {
   public static let interval: TimeInterval = 10
 
   /// `{ at, dropped, fps, repeated }`, `at` in epoch milliseconds like every other
-  /// timestamp the server stores. fps is rounded to 2 places.
+  /// timestamp the server stores. fps and the repeated percent are rounded to 2
+  /// places.
   public static func body(_ sample: HealthSample, at: Date) -> Data {
     struct Wire: Encodable {
       var fps: Double
-      var repeated: Int
+      var repeated: Double
       var dropped: Int
       var at: Int64
     }
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
     let wire = Wire(
-      fps: (sample.fps * 100).rounded() / 100, repeated: sample.repeated, dropped: sample.dropped,
+      fps: (sample.fps * 100).rounded() / 100, repeated: (sample.repeated * 100).rounded() / 100, dropped: sample.dropped,
       at: Int64((at.timeIntervalSince1970 * 1000).rounded()))
     return try! encoder.encode(wire)
   }
