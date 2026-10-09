@@ -4,7 +4,7 @@ import Foundation
 /// How far a screen's picture is turned clockwise, for a monitor mounted on its
 /// side: the `rotation` of a screen on the server (0, 90, 180 or 270; absent is 0).
 /// Clockwise, like CSS `rotate()`, which the server's own preview uses.
-public enum Rotation: Int, Equatable {
+public enum Rotation: Int, Equatable, Sendable {
   case none = 0
   case clockwise90 = 90
   case clockwise180 = 180
@@ -26,10 +26,10 @@ public enum Rotation: Int, Equatable {
   /// be laid out at the window's height by its width.
   public var swapsAxes: Bool { self == .clockwise90 || self == .clockwise270 }
 
-  /// Where the web view goes inside a window of this size, and how it is turned
+  /// Where the page's view goes inside a window of this size, and how it is turned
   /// about its centre.
   ///
-  /// The web view's size is what the PAGE lays out at: for a window 1920 x 1080
+  /// The view's size is what the PAGE lays out at: for a window 1920 x 1080
   /// turned a quarter it is 1080 x 1920, so the page draws a portrait screen that
   /// the turn then lays flat across the window. Its frame is centred on the
   /// window's centre, which is what a rotation about its own centre needs.
@@ -42,7 +42,7 @@ public enum Rotation: Int, Equatable {
 }
 
 public struct SurfaceLayout: Equatable {
-  /// The web view's frame in the window's coordinates, before it is turned.
+  /// The page's view's frame in the window's coordinates, before it is turned.
   public var frame: CGRect
   public var clockwiseDegrees: Double
 }

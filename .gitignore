@@ -12,8 +12,7 @@ build/
 # The Mac output helper's SwiftPM build, the .app it assembles, the CEF download
 # cache and the CMake build of the browser host, and cmake/ninja in a venv
 helper/macos/.build/
-helper/macos/StageUtilityOutput.app/
-helper/macos/StageUtilityOutput-*.app/
+helper/macos/dist/
 helper/macos/.cef/
 helper/macos/.cef-build/
 helper/macos/.tools/

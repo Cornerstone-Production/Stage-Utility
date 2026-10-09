@@ -21,6 +21,10 @@ final class WKWebSurface: NSObject, WebSurface, WKNavigationDelegate {
     get { loader.onCommitted }
     set { loader.onCommitted = newValue }
   }
+  var onProcessGone: (@MainActor (String) -> Void)? {
+    get { loader.onProcessGone }
+    set { loader.onProcessGone = newValue }
+  }
 
   init(label: String, size: CGSize) {
     self.label = label
@@ -94,12 +98,6 @@ final class WKWebSurface: NSObject, WebSurface, WKNavigationDelegate {
 
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
     Log.error(.webkit, "\(label): the web content process ended; reloading")
-    loader.processEnded()
+    loader.processEnded("web content process ended")
   }
-}
-
-enum WebSurfaces {
-  /// The surface an output uses. The only place that picks an engine.
-  @MainActor
-  static func make(label: String, size: CGSize) -> WebSurface { WKWebSurface(label: label, size: size) }
 }

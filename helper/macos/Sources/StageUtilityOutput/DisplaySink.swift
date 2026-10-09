@@ -1,12 +1,32 @@
 import AppKit
 import StageUtilityOutputCore
 
-/// Where an output's pictures go. A display output is a window over a whole
-/// display. Step 3 adds a DeckLink port, whose page is a visible window tiled on a
-/// canvas display, with a tap that snapshots it on that display's refresh for the
-/// card; a page that is off screen or covered stops painting, so it is never
-/// either. The page itself, and everything about loading it, is the `WebSurface`,
-/// which knows nothing of windows or screens, nor which engine draws it.
+/// One output the helper drives: a page, and where its pictures go. A display output
+/// (`DisplaySink`) is a window over a display; a card output (`CardOutput`) is a
+/// windowless page whose frames go to a card on the card's clock.
+@MainActor
+protocol OutputSink: AnyObject {
+  var descriptor: OutputDescriptor { get }
+  var surface: WebSurface { get }
+  func show(url: URL)
+  func stop()
+  /// Counters since the last call, as the health post reports them.
+  func takeHealthSample() -> HealthSample
+  /// Turn the picture, as the screen's `rotation` says.
+  func setRotation(_ rotation: Rotation)
+  /// Write what the output is showing to `file` as a PNG, turned the way it goes
+  /// out. `completion` gets nil on success, else why not.
+  func writeSnapshot(to file: URL, completion: @escaping (String?) -> Void)
+}
+
+extension OutputSink {
+  /// What the engine could not set up, worded for the log and the window.
+  var surfaceProblems: [String] { surface.problems }
+}
+
+/// Where a display output's window goes, and what it counts. The page itself, and
+/// everything about loading it, is the `WebSurface`, which knows nothing of windows
+/// or screens, nor which engine draws it.
 @MainActor
 protocol OutputDestination: AnyObject {
   /// Put the surface's host view where this destination shows it.
@@ -23,17 +43,14 @@ protocol OutputDestination: AnyObject {
 
 /// An output that is a display: a web surface in a borderless window on one NSScreen.
 @MainActor
-final class DisplaySink {
+final class DisplaySink: OutputSink {
   let descriptor: OutputDescriptor
   let surface: WebSurface
   private let destination: WindowDestination
 
-  /// What the engine could not set up, worded for the log and the window.
-  var surfaceProblems: [String] { surface.problems }
-
   init(descriptor: OutputDescriptor, screen: NSScreen) {
     self.descriptor = descriptor
-    surface = WebSurfaces.make(label: descriptor.port, size: screen.frame.size)
+    surface = WebSurfaces.windowed(label: descriptor.port, size: screen.frame.size)
     destination = WindowDestination(placement: .fullScreen(of: screen))
     destination.attach(surface.hostView)
   }
@@ -50,38 +67,45 @@ final class DisplaySink {
 
   func takeHealthSample() -> HealthSample { destination.takeHealthSample() }
 
-  /// Turn the picture, as the screen's `rotation` says.
   func setRotation(_ rotation: Rotation) { destination.setRotation(rotation) }
 
-  /// Write what the output is showing to `file` as a PNG, turned the way the window
-  /// shows it. `completion` gets nil on success, else why not.
   func writeSnapshot(to file: URL, completion: @escaping (String?) -> Void) {
-    let rotation = destination.rotation
+    SnapshotTurn.write(surface, turnedBy: destination.rotation, to: file, completion: completion)
+  }
+}
+
+/// A snapshot comes from the page, drawn upright at the size the page laid out at.
+/// The output shows it turned; the dump should show what the output shows.
+enum SnapshotTurn {
+  /// The picture is taken on the main thread; turning, encoding and writing it are
+  /// not. Card outputs get their frames on the main thread, and a 1080p PNG encode
+  /// there held them up long enough to repeat a frame. `completion` runs on the main
+  /// thread.
+  @MainActor
+  static func write(_ surface: WebSurface, turnedBy rotation: Rotation, to file: URL, completion: @escaping (String?) -> Void) {
     surface.snapshot { image, problem in
       guard let image else {
         completion(problem)
         return
       }
-      guard let turned = SnapshotTurn.turned(image, by: rotation),
-        let png = NSBitmapImageRep(cgImage: turned).representation(using: .png, properties: [:])
-      else {
-        completion("could not encode the snapshot as a PNG")
-        return
-      }
-      do {
-        try png.write(to: file, options: .atomic)
-        completion(nil)
-      } catch {
-        completion("could not write \(file.path): \(error.localizedDescription)")
+      let done: @Sendable (String?) -> Void = { why in DispatchQueue.main.async { completion(why) } }
+      DispatchQueue.global(qos: .utility).async {
+        guard let turned = turned(image, by: rotation),
+          let png = NSBitmapImageRep(cgImage: turned).representation(using: .png, properties: [:])
+        else {
+          done("could not encode the snapshot as a PNG")
+          return
+        }
+        do {
+          try png.write(to: file, options: .atomic)
+          done(nil)
+        } catch {
+          done("could not write \(file.path): \(error.localizedDescription)")
+        }
       }
     }
   }
-}
 
-/// A snapshot comes from the web view, which draws the page upright at the size the
-/// page laid out at. The window shows it turned; the dump should show what the
-/// window shows.
-enum SnapshotTurn {
   static func turned(_ image: CGImage, by rotation: Rotation) -> CGImage? {
     if rotation == .none { return image }
     let w = CGFloat(image.width)

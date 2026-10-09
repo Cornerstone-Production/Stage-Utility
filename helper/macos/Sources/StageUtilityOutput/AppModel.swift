@@ -34,8 +34,9 @@ final class AppModel: ObservableObject {
 
   /// Per output, keyed by output key.
   private final class Runtime {
-    var display: ConnectedDisplay
-    var sink: DisplaySink?
+    var output: PresentOutput
+    var descriptor: OutputDescriptor { output.descriptor }
+    var sink: OutputSink?
     var discovery: OutputDiscovery?
     var serverURL: String?
     var serverName: String?
@@ -51,7 +52,9 @@ final class AppModel: ObservableObject {
     /// Why the screens could not be read, while they cannot: logged once, not per try.
     var screenReadProblem: String?
     var fps: Double?
-    init(display: ConnectedDisplay) { self.display = display }
+    /// Times the page's renderer has ended since launch, for the window.
+    var crashes = 0
+    init(output: PresentOutput) { self.output = output }
   }
   private var runtimes: [String: Runtime] = [:]
   private var order: [String] = []
@@ -96,6 +99,7 @@ final class AppModel: ObservableObject {
       Log.error(.state, "\(problem)")
       setNote("identity-read", "\(problem). It is left as it is.")
     }
+    if let why = CEFEngine.failure { setNote("cef", WebSurfaces.unavailable(why)) }
     launchAtLogin = SMAppService.mainApp.status == .enabled
   }
 
@@ -112,13 +116,22 @@ final class AppModel: ObservableObject {
       MainActor.assumeIsolated { self?.healthTick() }
     }
     if options.dumpFramesDir != nil { startDumping() }
+    gpuWatch.start()
   }
+
+  /// Before the app quits: close every output's page and stop every clock.
+  func stopAll() {
+    gpuWatch.stop()
+    for key in order { deactivate(key) }
+  }
+
+  private let gpuWatch = GPUProcessWatch()
 
   // MARK: Outputs
 
   /// How long the displays must stay as they are before the outputs follow them. A
   /// display can vanish for a moment on wake or when a hub renegotiates, and tearing
-  /// down a window and its web view for that, then building them again, drops the
+  /// down a window and its browser for that, then building them again, drops the
   /// page and reloads it.
   static let displayChangeSettle: TimeInterval = 1
   private var displayChange: DispatchWorkItem?
@@ -137,22 +150,22 @@ final class AppModel: ObservableObject {
 
   /// Make the runtimes match the displays macOS lists now.
   private func reconcile() {
-    let displays = DisplayEnumerator.current()
-    let present = Set(displays.map { $0.descriptor.key })
+    let outputs = DisplayEnumerator.current().map(PresentOutput.init(display:))
+    let present = Set(outputs.map { $0.descriptor.key })
     for key in order where !present.contains(key) {
-      Log.notice(.output, "\(runtimes[key]?.display.descriptor.port ?? key) is gone; its window is closed")
+      Log.notice(.output, "\(runtimes[key]?.descriptor.port ?? key) is gone; its window is closed")
       deactivate(key)
       runtimes[key] = nil
     }
-    order = displays.map { $0.descriptor.key }
-    for d in displays {
+    order = outputs.map { $0.descriptor.key }
+    for d in outputs {
       let key = d.descriptor.key
       let record = ensureRecord(d.descriptor)
       if let rt = runtimes[key] {
-        rt.display = d
-        rt.sink?.follow(d.screen)
+        rt.output = d
+        if let screen = d.screen { (rt.sink as? DisplaySink)?.follow(screen) }
       } else {
-        runtimes[key] = Runtime(display: d)
+        runtimes[key] = Runtime(output: d)
         Log.notice(.output, "\(d.descriptor.name) (\(d.descriptor.key)): \(record.enabled ? "on" : "off")\(d.descriptor.isMain ? ", main display" : "")")
       }
       let rt = runtimes[key]!
@@ -169,7 +182,7 @@ final class AppModel: ObservableObject {
   var menuBarCovered: Bool {
     order.contains { key in
       guard let rt = runtimes[key] else { return false }
-      return rt.display.descriptor.isMain && rt.sink != nil
+      return rt.descriptor.isMain && rt.sink != nil
     }
   }
   private var wasMenuBarCovered = false
@@ -196,7 +209,7 @@ final class AppModel: ObservableObject {
     } catch {
       noteSaveFailure(error)
     }
-    Log.notice(.output, "\(runtimes[key]!.display.descriptor.name): turned \(on ? "on" : "off") in the window")
+    Log.notice(.output, "\(runtimes[key]!.descriptor.name): turned \(on ? "on" : "off") in the window")
     if on { activate(key) } else { deactivate(key) }
     // Done from the window itself, which is up: nothing to pop.
     wasMenuBarCovered = menuBarCovered
@@ -205,12 +218,20 @@ final class AppModel: ObservableObject {
 
   private func activate(_ key: String) {
     guard let rt = runtimes[key], rt.sink == nil else { return }
-    let d = rt.display.descriptor
-    let sink = DisplaySink(descriptor: d, screen: rt.display.screen)
+    let d = rt.descriptor
+    guard let screen = rt.output.screen else { return }
+    let sink: OutputSink = DisplaySink(descriptor: d, screen: screen)
     rt.sink = sink
     if !sink.surfaceProblems.isEmpty {
       for problem in sink.surfaceProblems { Log.error(.output, "\(d.port): \(problem)") }
-      setNote("surface", sink.surfaceProblems.joined(separator: " "))
+      setNote("surface", Array(Set(sink.surfaceProblems)).sorted().joined(separator: " "))
+    }
+    sink.surface.onProcessGone = { [weak self, weak rt] _ in
+      guard let self, let rt else { return }
+      rt.crashes += 1
+      self.setNote(
+        "crash-\(key)",
+        "\(d.port): its page has crashed \(rt.crashes == 1 ? "once" : "\(rt.crashes) times") since launch. It is reloaded each time; the log says why.")
     }
     sink.surface.onLoadResult = { [weak self, weak rt] failures in
       guard let self, let rt else { return }
@@ -263,7 +284,7 @@ final class AppModel: ObservableObject {
 
   private func probe(for rt: Runtime?, unreachable: Bool) -> Data {
     guard let rt else { return Data() }
-    let d = rt.display.descriptor
+    let d = rt.descriptor
     return Probe(
       id: deviceId(rt), macs: macs, hostname: hostname, boundTo: store.record(for: d.key)?.boundTo,
       unreachable: unreachable, descriptor: d
@@ -271,7 +292,7 @@ final class AppModel: ObservableObject {
   }
 
   private func deviceId(_ rt: Runtime) -> String {
-    let key = rt.display.descriptor.key
+    let key = rt.descriptor.key
     return store.record(for: key)?.deviceId(mac: identity.deviceId, key: key) ?? DeviceIdentity.deviceId(mac: identity.deviceId, key: key)
   }
 
@@ -282,7 +303,7 @@ final class AppModel: ObservableObject {
     clearLocalNetworkSuspicion()
     // A server file names the server; an answer from it only says it is there.
     if identity.server == nil, rt.serverURL != reply.url {
-      Log.notice(.discovery, "\(rt.display.descriptor.port): server is \"\(reply.name)\" at \(reply.url)")
+      Log.notice(.discovery, "\(rt.descriptor.port): server is \"\(reply.name)\" at \(reply.url)")
       rt.serverURL = reply.url
       navigate(rt)
     }
@@ -295,10 +316,10 @@ final class AppModel: ObservableObject {
   }
 
   private func navigate(_ rt: Runtime) {
-    guard let server = rt.serverURL, let token = store.record(for: rt.display.descriptor.key)?.token,
+    guard let server = rt.serverURL, let token = store.record(for: rt.descriptor.key)?.token,
       let url = EnrollURL.make(server: server, deviceId: deviceId(rt), token: token)
     else {
-      Log.error(.output, "\(rt.display.descriptor.port): no usable server address to load")
+      Log.error(.output, "\(rt.descriptor.port): no usable server address to load")
       return
     }
     rt.sink?.show(url: url)
@@ -313,24 +334,24 @@ final class AppModel: ObservableObject {
       rt.unreachable = true
       // Only the failure that crosses the line: not one restart per retry.
       if Backoff.shouldRediscover(afterFailureNumber: failures), identity.server == nil {
-        Log.notice(.discovery, "\(rt.display.descriptor.port): \(failures) loads failed in a row; searching for the server again")
+        Log.notice(.discovery, "\(rt.descriptor.port): \(failures) loads failed in a row; searching for the server again")
         rt.discovery?.restart()
       }
     }
     refresh()
   }
 
-  /// A page committed in this output's web view.
+  /// A page committed in this output's browser.
   private func pageMoved(_ rt: Runtime, to url: URL) {
     guard let server = rt.serverURL else { return }
-    let port = rt.display.descriptor.port
+    let port = rt.descriptor.port
     let page = ScreenPage.classify(committed: url, server: server)
     guard page != rt.page else { return }
     switch page {
     case .bound(let ref):
       Log.notice(.output, "\(port): claimed, showing \(ref)")
       // Set up (again): the server may know this output now, so health posts resume.
-      healthBoard.boundAgain(rt.display.descriptor.key)
+      healthBoard.boundAgain(rt.descriptor.key)
     case .holding:
       Log.notice(.output, "\(port): showing the holding screen")
     case .other:
@@ -369,7 +390,7 @@ final class AppModel: ObservableObject {
 
   private func applyScreen(_ rt: Runtime, from screens: [ScreenRecord]) {
     guard let sink = rt.sink, case .bound(let ref) = rt.page else { return }
-    let port = rt.display.descriptor.port
+    let port = rt.descriptor.port
     guard let screen = ScreenList.find(ref, in: screens) else {
       screenReadFailed(rt, "the server lists no screen called \(ref)")
       return
@@ -379,7 +400,7 @@ final class AppModel: ObservableObject {
       rt.screenReadProblem = nil
     }
     rt.boundScreenName = screen.name
-    // `videoMode` is deliberately not read: it is a DeckLink port's setting (step 3).
+    // `videoMode` is deliberately not read: it is a DeckLink port's setting, read when the DeckLink layer lands.
     if screen.rotation != rt.rotation {
       Log.notice(.output, "\(port): rotation \(rt.rotation.rawValue) -> \(screen.rotation.rawValue) degrees, from \(screen.name)")
       rt.rotation = screen.rotation
@@ -389,7 +410,7 @@ final class AppModel: ObservableObject {
 
   private func screenReadFailed(_ rt: Runtime, _ why: String) {
     if rt.screenReadProblem != why {
-      Log.error(.output, "\(rt.display.descriptor.port): could not read the screen's name and rotation: \(why)")
+      Log.error(.output, "\(rt.descriptor.port): could not read the screen's name and rotation: \(why)")
     }
     rt.screenReadProblem = why
   }
@@ -417,7 +438,7 @@ final class AppModel: ObservableObject {
   }
 
   private func healthResult(_ key: String, _ rt: Runtime, _ outcome: HealthOutcome) {
-    let port = rt.display.descriptor.port
+    let port = rt.descriptor.port
     switch healthBoard.record(outcome, for: key, at: Date()) {
     case .none:
       break
@@ -480,7 +501,7 @@ final class AppModel: ObservableObject {
   private func refresh() {
     rows = order.compactMap { key in
       guard let rt = runtimes[key], let record = store.record(for: key) else { return nil }
-      let d = rt.display.descriptor
+      let d = rt.descriptor
       let status = StatusText.outputLine(
         .init(
           enabled: record.enabled, isMain: d.isMain, serverKnown: rt.serverURL != nil,

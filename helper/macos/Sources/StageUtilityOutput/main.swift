@@ -19,7 +19,8 @@ if options.listOutputs {
   _ = NSApplication.shared
   let store = OutputStateStore(directory: paths.userDir)
   let lines = OutputListing.lines(
-    identity: MacIdentity.stored(paths: paths), displays: DisplayEnumerator.current().map(\.descriptor),
+    identity: MacIdentity.stored(paths: paths),
+    displays: DisplayEnumerator.current().map(\.descriptor),
     record: { store.record(for: $0) }, readProblem: store.readProblem)
   for line in lines { print(line) }
   exit(0)
@@ -30,8 +31,10 @@ if SingleInstance.handOverToRunningCopy() {
   exit(0)
 }
 
-let app = NSApplication.shared
+// Chromium first: it needs the app object made from its own NSApplication subclass.
+let app = MainActor.assumeIsolated { CEFEngine.start(paths: paths) }
 app.setActivationPolicy(.accessory)
 let delegate = MainActor.assumeIsolated { AppDelegate(options: options, paths: paths) }
 app.delegate = delegate
-app.run()
+MainActor.assumeIsolated { CEFEngine.run(app) }
+exit(0)

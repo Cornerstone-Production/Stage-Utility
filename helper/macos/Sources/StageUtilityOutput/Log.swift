@@ -6,11 +6,12 @@ import os
 ///     log stream --level info --predicate 'subsystem == "com.stageutility.output"'
 ///
 /// Decisions and failures only: an output coming or going, an answer from a
-/// server, a reload, a missing WebKit switch, a refused health post. A healthy
+/// server, a reload, a renderer or GPU process gone, a card output falling
+/// behind or catching up, a refused health post. A healthy
 /// frame is not logged.
 enum Log {
   enum Category: String, CaseIterable {
-    case app, discovery, output, health, webkit, state
+    case app, discovery, output, health, webkit, cef, state
   }
 
   /// `--log-stderr`: also print each line, for a terminal run.

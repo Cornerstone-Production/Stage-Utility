@@ -1,10 +1,9 @@
 import AppKit
 import StageUtilityOutputCore
 
-/// A page shown in a view, whatever renders it. Today that is WebKit
-/// (`WKWebSurface`); a Chromium surface, windowless for a card or windowed for a
-/// display, is the other this is shaped for. Nothing above this protocol (a
-/// destination, a sink, the model) names an engine.
+/// A page, whatever renders it: Chromium through CEF, windowed for a display
+/// (`CEFWindowedSurface`) or windowless for a card (`CEFWindowlessSurface`). Nothing
+/// above this protocol (a destination, a sink, the model) names an engine.
 ///
 /// The engine reports what happened to a navigation; the retry, the backoff and the
 /// reading of a 5xx are `SurfaceLoader`, which every engine shares.
@@ -22,6 +21,9 @@ protocol WebSurface: AnyObject {
   /// /enroll to the screen. Never for a 5xx page, a load still in flight or one that
   /// failed.
   var onCommitted: (@MainActor (URL) -> Void)? { get set }
+  /// The page's renderer process ended (crashed, killed, out of memory), and why.
+  /// The surface reloads it by itself; this is for telling the operator.
+  var onProcessGone: (@MainActor (String) -> Void)? { get set }
   /// Show this address. The same address again does nothing.
   func load(_ url: URL)
   /// Load the current address again now.
@@ -36,12 +38,11 @@ protocol WebSurface: AnyObject {
 /// run of failures, the reload after a wait, and what a 5xx means. The engine calls
 /// the events; this calls `navigate` and the callbacks.
 ///
-/// An optional frame tap (a picture of the page on each display refresh, for a card)
-/// will sit beside this, on the surface; it is not built yet.
 @MainActor
 final class SurfaceLoader {
   var onLoadResult: (@MainActor (_ failures: Int) -> Void)?
   var onCommitted: (@MainActor (URL) -> Void)?
+  var onProcessGone: (@MainActor (String) -> Void)?
 
   private let label: String
   private let navigate: @MainActor (URL) -> Void
@@ -88,7 +89,10 @@ final class SurfaceLoader {
 
   func finished() { apply(tracker.finished()) }
   func failed(_ error: NSError) { apply(tracker.navigationFailed(error)) }
-  func processEnded() { apply(tracker.processTerminated()) }
+  func processEnded(_ why: String) {
+    onProcessGone?(why)
+    apply(tracker.processTerminated())
+  }
 
   private func apply(_ outcome: PageLoadTracker.Outcome) {
     switch outcome {
@@ -105,5 +109,42 @@ final class SurfaceLoader {
       if afterFailures > 0 { Log.notice(.output, "\(label): page loaded again after \(afterFailures) failures") }
       onLoadResult?(0)
     }
+  }
+}
+
+/// Stands in for a page when Chromium could not start: it draws black and loads
+/// nothing. The reason is said once, for the whole app (`CEFEngine.failure`), not
+/// once per output.
+@MainActor
+final class DeadSurface: WebSurface {
+  let hostView: NSView
+  let problems: [String] = []
+  var onLoadResult: (@MainActor (Int) -> Void)?
+  var onCommitted: (@MainActor (URL) -> Void)?
+  var onProcessGone: (@MainActor (String) -> Void)?
+
+  init(size: CGSize) {
+    hostView = NSView(frame: NSRect(origin: .zero, size: size))
+    hostView.wantsLayer = true
+    hostView.layer?.backgroundColor = NSColor.black.cgColor
+  }
+
+  func load(_ url: URL) {}
+  func reload() {}
+  func stop() {}
+  func snapshot(completion: @escaping @MainActor (CGImage?, String?) -> Void) {
+    completion(nil, "no picture: Chromium did not start")
+  }
+}
+
+enum WebSurfaces {
+  /// Why no output can draw, worded for the window.
+  static func unavailable(_ why: String) -> String { "Chromium did not start, so no output can show a screen: \(why)." }
+
+  /// A display output's page. The only place that picks an engine for one.
+  @MainActor
+  static func windowed(label: String, size: CGSize) -> WebSurface {
+    guard let api = CEFEngine.api else { return DeadSurface(size: size) }
+    return CEFWindowedSurface(api: api, label: label, size: size)
   }
 }

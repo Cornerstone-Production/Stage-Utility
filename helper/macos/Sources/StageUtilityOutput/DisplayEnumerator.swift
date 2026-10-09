@@ -7,6 +7,20 @@ struct ConnectedDisplay {
   var screen: NSScreen
 }
 
+/// An output the helper can drive now: a display, with the screen its window goes
+/// on, or a card port, which has none.
+struct PresentOutput {
+  var descriptor: OutputDescriptor
+  var screen: NSScreen?
+
+  init(descriptor: OutputDescriptor, screen: NSScreen?) {
+    self.descriptor = descriptor
+    self.screen = screen
+  }
+
+  init(display: ConnectedDisplay) { self.init(descriptor: display.descriptor, screen: display.screen) }
+}
+
 enum DisplayEnumerator {
   /// Every screen macOS lists, as outputs of kind "display".
   static func current() -> [ConnectedDisplay] {

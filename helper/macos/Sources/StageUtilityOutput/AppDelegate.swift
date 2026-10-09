@@ -18,6 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     model = AppModel(options: options, paths: paths)
+    // Outputs make browsers, which CEF allows only once its context is up.
+    CEFEngine.whenReady { [weak self] in self?.launch() }
+  }
+
+  private func launch() {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     if let button = statusItem.button {
       button.image = NSImage(systemSymbolName: "display", accessibilityDescription: "Stage Utility Output")
@@ -47,6 +52,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { false }
+
+  private var quitting = false
+
+  /// Every page is closed and every clock stopped before Chromium shuts down, so
+  /// its processes go with the app. CEF then ends the loop, and main() exits.
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard CEFEngine.api != nil else { return .terminateNow }
+    if !quitting {
+      quitting = true
+      Log.notice(.app, "quitting: closing every output's page")
+      model?.stopAll()
+      CEFEngine.quit()
+    }
+    return .terminateCancel
+  }
 
   @objc private func toggleWindow() {
     if let window, window.isVisible, NSApp.isActive { window.orderOut(nil) } else { showWindow() }
