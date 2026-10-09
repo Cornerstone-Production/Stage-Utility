@@ -3056,7 +3056,7 @@ export class StageController {
         const names = stranded.map((o) => o.name || o.id).join(", ");
         throw new Error(
           `"${view.name}" is showing on ${names}. ` +
-            `Open ${stranded.length === 1 ? "that screen's" : "those screens'"} menu and choose "Use as a control surface" first, ` +
+            `Open ${stranded.length === 1 ? "that screen's" : "those screens'"} Screen settings and choose "Control surface" first, ` +
             `or point ${stranded.length === 1 ? "it" : "them"} at a different view.`,
         );
       }
@@ -3638,7 +3638,7 @@ export class StageController {
         if (viewSurface(view) === "console" && outputMode(output) !== "panel") {
           throw new Error(
             `"${view.name}" has live controls, so it can only go on a control surface. ` +
-              `"${output.name}" is a wall screen — open its menu and choose "Use as a control surface" first.`,
+              `"${output.name}" is a wall screen — open its Screen settings and choose "Control surface" first.`,
           );
         }
       },
