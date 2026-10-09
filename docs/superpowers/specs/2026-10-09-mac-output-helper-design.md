@@ -13,9 +13,14 @@ settings, and the helper's own window. The mockup is the UI spec; where this tex
 and the mockup disagree, the mockup wins.
 
 **Decided with Henry, 9 Oct 2026:**
-- The helper is Swift, rendering with macOS's own WebKit, not Electron or
-  embedded Chromium. It is lighter, and operators already run Stage Utility in
-  Safari.
+- The helper is a Swift app that renders with Chromium, embedded through the
+  Chromium Embedded Framework (CEF).
+  - SDI outputs render with no window at all, so the Mac stays free for other
+    work, nothing can cover or freeze them, and they keep running with the
+    screen locked.
+  - Henry chose this over macOS's WebKit, which only paints reliably in a
+    visible window, after measuring both (see Rendering).
+  - The cost is a larger app and a Chromium update every release cycle.
 - It drives as many outputs as the hardware allows.
 - The format is nearly always 1080p59.94.
 - Outputs are plain. Splitting one output into slices for a hardware splitter
@@ -37,9 +42,9 @@ displays are capped at three, and DeckLink ports are limited only by the cards.
 | Piece | What it is | Where |
 |---|---|---|
 | Output helper | A menu bar app. It finds the server, announces one device per output, and draws each output's screen | `helper/macos/`, Swift package |
-| Display output | A borderless full-screen window on one of the Mac's displays, holding a web view of the screen's URL | Helper |
-| DeckLink output | A web view on a canvas display (normally a dummy HDMI plug) whose frames are sent to one DeckLink port on the card's clock | Helper, plus a C++ shim over the vendored SDK headers |
-| Canvas display | A display the helper tiles DeckLink pages across, visible and uncovered, so WebKit paints them every refresh | Helper; chosen in its window |
+| Display output | A borderless full-screen window on one of the Mac's displays, holding a CEF browser of the screen's URL | Helper |
+| DeckLink output | A windowless CEF browser, rendered on command once for every frame the card is about to send, whose frames go to one DeckLink port | Helper, plus a C++ shim over the vendored SDK headers |
+| Browser host | The CEF runtime and a small C++ layer Swift calls, the same shape as the DeckLink shim | Helper |
 | Output devices on Screens | A Mac's outputs, grouped under the Mac in *Not set up yet*, each set up on its own | Screens page |
 | Device section | For a helper output: which port, the format, rotation, and health | Screen settings panel |
 
@@ -71,94 +76,80 @@ displays are capped at three, and DeckLink ports are limited only by the cards.
 ## Rendering
 
 Every output renders the screen's own URL (`/enroll?device=<id>&token=…`, which
-redirects once claimed) in a `WKWebView`. Every view kind, widget and layout
-therefore works as it does in Safari, with no second renderer to keep in step.
+redirects once claimed) in a Chromium browser through CEF. Every view kind,
+widget and layout therefore renders as it does on the Raspberry Pi kiosks, which
+run Chromium, with no second renderer to keep in step.
 
 **Display outputs.**
-- A borderless window at `mainMenu + 1` level, covering the display.
+- A borderless window at `mainMenu + 1` level, covering the display, holding a
+  windowed CEF browser. Chromium handles touch, scrolling and text input
+  natively, which a control surface on a Mac-driven display needs.
 - It follows hot-plug: a display that goes away closes its window, and a display
   that comes back reopens it with the same binding.
 - The Mac's main display (the one with the menu bar) is off by default, so the
   booth Mac keeps its desktop. A headless Mac can turn it on.
+- Rotation is applied inside the window: the browser lays out at the turned size
+  and is rotated to fit.
 
-**DeckLink outputs.**
-- Each DeckLink port's page is a visible, uncovered 1080p window on a canvas
-  display: a display nobody watches, normally a 4K dummy HDMI plug.
-  - One plug holds four outputs; two hold eight.
-  - Each plug uses one of the Mac's three display slots.
-  - The canvas runs at 59.94 Hz where the plug offers it.
-- On every refresh of the canvas (a `CADisplayLink` tick), the helper takes
-  `WKWebView.takeSnapshot` (`afterScreenUpdates = false`) of each page.
-  - It stamps the picture with that refresh's timestamp.
-  - It keeps the last few pictures.
-  - The pixel copy and the Metal conversion to 8-bit YUV 4:2:2 (with rotation)
-    run off the main thread.
-- The card asks for frame n of its schedule, due at stream time n × 1001/60000 s.
-  The helper fills it with the newest picture stamped at least one frame (about
-  17 ms) before that due time.
-  - The choice depends only on the schedule and the stamps, never on when a
-    callback happens to run, so it cannot flicker between two pictures.
-  - That costs one frame of delay.
+**DeckLink outputs.** These have no window and no display:
+- **Setup:** a windowless CEF browser per port, 1920×1080, with
+  `windowless_rendering_enabled`, `shared_texture_enabled` and
+  `external_begin_frame_enabled`.
+- **On the card's clock:** when the card asks for frame n of its schedule, the
+  helper calls `CefBrowserHost::SendExternalBeginFrame()`. Chromium runs the
+  page's animation frame for that moment, composites it on the GPU, and hands
+  back the picture as an IOSurface in `OnAcceleratedPaint`.
+- **Copy:** the surface is valid only inside that callback, so it is blitted
+  there. Metal converts it to 8-bit YUV 4:2:2 and applies rotation, into the
+  DeckLink frame for slot n.
+- **One render per output frame.** Page animation steps exactly at the output
+  rate. There is no capture clock to reconcile with the card's, and no frame to
+  pick.
 
-Why a visible canvas and not off-screen windows, and what was measured, on an
-M4 Mac mini (16 GB), with the screen unlocked and no WebKit SPI:
+**Measured on an M4 Mac mini (16 GB), CEF 154 (Chromium 154.0.8037.98), with the
+screen locked for every run.** The test page was a bar moved by
+`requestAnimationFrame`, and begin frames came from a 59.94 Hz timer standing in
+for the card:
 
-- **No ScreenCaptureKit.** It needs the Screen Recording permission, and since
-  macOS Sequoia a monthly "Continue to allow" prompt. An unattended output box
-  must not raise a dialog. `takeSnapshot` needs no permission.
-- **Capture keeps up.** A visible web view snapshotted on each refresh gave a
-  new picture every refresh: about 1230 in 20.5 s at 60 Hz, none missed, also
-  with four views at once. Snapshot plus copy takes 2–4 ms per 1080p frame.
-- **A covered or hidden page freezes.**
-  - WebKit stops painting a window it considers hidden: covered by another
-    window, on a locked screen, or off every display.
-  - A covered view gave 1 new picture in 1200. That is why the pages sit
-    visible on a canvas.
-- **Choosing frames by schedule works; choosing by "latest" does not.**
-  - **The result.** Picking against the ideal schedule, four 960×540 outputs
-    each gave 1200 new frames out of 1200 in every run. Each run had one skip,
-    because the test display runs at 60.00 Hz against the output's 59.94. A
-    full-size 1080p output gave 1196–1200, with the few repeats matching runs
-    where the test, copying pixels on its main thread, missed a capture.
-  - **What does not work.** Picking whatever arrived last, or picking against
-    the moment a timer happened to fire, flickered between two pictures for
-    seconds at a time. That cost 2–4% of frames whenever the two clocks drifted
-    into phase.
-  - **What stays.** On a 59.94 Hz canvas the steady skip disappears, leaving a
-    slip every few minutes as the plug's and card's crystals drift. Every
-    unsynchronised source feeding SDI has that.
-- **WebKit SPI as a safety net only.** Four WebKit switches keep a hidden page
-  painting:
-  - `-[WKWebView _setWindowOcclusionDetectionEnabled:NO]`;
-  - on `WKPreferences`: `_setHiddenPageDOMTimerThrottlingEnabled:NO`,
-    `_setHiddenPageDOMTimerThrottlingAutoIncreases:NO` and
-    `_setPageVisibilityBasedProcessSuppressionEnabled:NO`.
+| Outputs (1920×1080) | New frames | Repeats / skips | Begin frame → frame (p50 / p95) | CPU, all processes | GPU | Memory |
+|---|---|---|---|---|---|---|
+| 1 | 1200 of 1200 | 0 / 0 | 3.6–4.0 / 4.2–6.1 ms | 0.1–0.17 core | under 10% | 290 MB |
+| 4 | 4800 of 4800 | 0 / 0 | 3.7–4.3 / 4.2–7.2 ms | 0.4–0.75 core | 13–18% | 600 MB |
+| 8 | 9600 of 9600 | 0 / 0 | 3.3–3.7 / 4.4–6.2 ms | 0.7–1.0 core | 27% | 1.0 GB |
+| 8, plus a full frame copy each | 9600 of 9600 | 0 / 0 | 5.1 / 8.0 ms | 1.1 core | 24% | 1.06 GB |
+| 16 | 19200 of 19200 | 0 / 0 | 4.7 / 8.7 ms | 1.6 cores | 50% | 1.7 GB |
 
-  With them, a page on a locked screen gave 587 new frames in 600 instead of
-  freezing. The helper sets them so a locked screen degrades rather than
-  freezes, but nothing depends on them.
-  - They take a real `BOOL`: `perform(_:with: false)` passes an object
-    pointer, which reads as YES.
-  - Each is checked with `respondsToSelector:` and read back. A missing one is
-    logged and shown.
-- **The output Mac must not lock.** The test Mac locked itself twice even with
-  its screen-lock setting off; a screen-sharing session ending is suspected.
-  The installer turns off every lock and display-sleep setting it can, and the
-  helper warns in its window and on the server when the session is locked.
+- **What the numbers mean.** Every begin frame produced exactly one new picture,
+  at every count. The animation stepped evenly. A full 1080p copy cost about
+  0.7 ms.
+- **The test page is a floor.** Real pages cost more, and Chromium's single GPU
+  process (35–50% of one core at eight outputs) is the first thing to watch.
+- **What it costs.** No permission prompt, no private API, and no Chromium
+  switch was needed for any of this. The app bundle is about 320 MB, almost all
+  of it the Chromium framework.
 
-**Timing.** The card's clock drives output, not the renderer:
-- Scheduled playback. In `ScheduledFrameCompleted`, the frame just returned is
-  filled with the picture chosen by schedule (above) and scheduled two frames
-  ahead.
-- If no picture is old enough yet, the previous one repeats rather than letting
-  the card run dry.
-- If the schedule falls behind the card's own stream time, it resyncs forward
-  instead of building delay.
+**Why not WebKit, which was measured first.**
+- `WKWebView` needs no bundled engine, but WebKit stops painting any window it
+  considers hidden: covered, off every display, or on a locked screen.
+- Getting clean frames from it took either a visible, uncovered window on an
+  awake display (a dummy HDMI plug as a canvas, one display slot per four
+  outputs), or private WebKit switches plus pages hidden behind the desktop.
+- Either way the screen had to stay unlocked, and the output had to pick
+  captured frames against the card's schedule rather than render on command.
+- It reached 1200 of 1200 only with all of that in place. CEF does it with none.
 
-Clocking scheduled playback from the card's completion callback is the approach
-MxU Slides takes. MxU's code is licensed PolyForm Shield, which is
-source-available, not open source, so this project takes the idea and none of
-the code.
+**Timing.**
+- **Who drives.** The card's clock drives output, through scheduled playback.
+  `ScheduledFrameCompleted` asks for the frame two slots ahead, and the helper
+  sends that browser its begin frame.
+- **When the page is late.** If its picture has not arrived in time, the
+  previous picture repeats rather than letting the card run dry.
+- **When the schedule slips.** If it falls behind the card's own stream time, it
+  resyncs forward instead of building delay.
+- **Where the idea comes from.** Clocking scheduled playback from the card's
+  completion callback is the approach MxU Slides takes. MxU's code is licensed
+  PolyForm Shield, which is source-available, not open source, so this project
+  takes the idea and none of the code.
 
 **Bandwidth.** Eight 1080p59.94 BGRA streams are about 4 GB/s, more than a
 Thunderbolt PCIe enclosure carries. 8-bit 4:2:2 halves that. Whether a DeckLink
@@ -220,8 +211,16 @@ on the bench.
   output with the same binding.
 - The Chrome kiosk path remains for a Mac where the helper cannot run, behind
   `--browser`.
-- **Packaging.** A macOS runner in the release workflow builds the app with
-  `swift build`, assembles the bundle and signs it ad hoc. A file fetched with
+- **Packaging.**
+  - A macOS runner in the release workflow downloads the pinned CEF binary
+    distribution and checks its checksum.
+  - It builds `libcef_dll_wrapper` and the C++ host with CMake and Ninja, and the
+    Swift app with `swift build`.
+  - It assembles CEF's bundle layout: the framework, plus the Helper, Helper
+    (GPU), (Renderer), (Plugin) and (Alerts) sub-apps.
+  - It signs the bundle from the inside out, ad hoc.
+  - The app is about 320 MB, so the server also serves the download, for a Mac
+    on a network with no internet. A file fetched with
   `curl` carries no quarantine flag, so Gatekeeper does not block it.
   Notarisation with a Developer ID is a follow-up if Henry wants it.
 - **Local Network permission.** Since macOS Sequoia, an app that finds or
@@ -236,13 +235,17 @@ on the bench.
     several Macs. It also lets a copy downloaded in a browser open without the
     Gatekeeper warning.
   - The app must run from `/Applications` for the permission to hold.
+- **Chromium updates.** CEF follows Chrome's release train, about every four
+  weeks, and a browser's security fixes matter. Bumping the pinned CEF version
+  is part of each release.
 - **Updates.** The helper follows the server. On launch, and when the server's
   version changes, it compares its own version with `/api/version`. If they
   differ, it downloads the matching release, replaces itself in
   `/Applications` and relaunches. A failed update keeps the running version and
   says so.
-- Auto-login, never-sleep and no screen lock are still required on an output
-  Mac, and the installer still prints them.
+- **Auto-login.** An output Mac still needs automatic login: Chromium's GPU
+  process needs a logged-in session. A locked screen and an asleep display do
+  not matter to SDI outputs; display outputs still need their displays awake.
 
 ## Logging
 
@@ -252,7 +255,7 @@ on the bench.
   - an output seen, claimed or released;
   - a port opened in a mode, or refused one;
   - a card unplugged;
-  - a missing WebKit SPI;
+  - a Chromium renderer or GPU process crashing, and the browser being reloaded;
   - a sustained drop in fps or rise in dropped frames.
 
   Every few seconds of healthy frames is not logged.
@@ -263,13 +266,19 @@ on the bench.
    on Screens, `rotation` and `videoMode`, the health route, and the Device
    section. All TypeScript, and testable now with probes sent by hand.
 2. **Helper core.** The menu bar app, discovery per output, display outputs
-   with hot-plug, the WebKit keep-painting switches, health posts and the
-   LaunchAgent. Testable on the dev Mac mini today.
-3. **DeckLink.** Vendored headers, the shim, scheduled output, Metal YUV and
+   with hot-plug, health posts and the LaunchAgent. It was built first on
+   WebKit, behind an engine-neutral web surface.
+3. **CEF.**
+   - The browser host and the CEF bundle layout.
+   - Windowed browsers for display outputs, replacing WebKit.
+   - Windowless browsers with external begin frames, which DeckLink outputs
+     will use.
+   - Packaging in the release workflow.
+4. **DeckLink.** Vendored headers, the shim, scheduled output, Metal YUV and
    rotation, and a null sink that runs the same scheduler on a software clock so
    the timing is testable without a card. Proven on real hardware once a
    DeckLink is connected.
-4. **Installer and release packaging.**
+5. **Installer.**
 
 ## Not in this
 
