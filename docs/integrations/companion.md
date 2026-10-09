@@ -903,6 +903,45 @@ while the baptism section is armed, **Next** starts "First person in" the same
 way Advance does, rather than skipping them — a key already bound to Next
 keeps working.
 
+**Stage messages** — the day's [stage messages](../features/stage-messages.md),
+sent and read from a button. The module follows the `messages:state` channel, so
+a renamed group, a new message or a running alert reaches a button without
+reconnecting. So does an edited quick list: the quick messages are read when the
+connection starts and again from every messages update the app sends after a
+change to them.
+
+| Actions | |
+|---|---|
+| `message_send` — **Send message** | **Groups** (Everyone, or one or more groups), **Text** (Companion variables are parsed), **Alert** (checkbox). Sends from `Companion` |
+| `message_send_quick` — **Send quick message** | **Quick message** (one of the quick messages), **Groups**, **Alert** |
+| `message_clear_alerts` — **Clear alerts** | no options; ends every running alert |
+
+| Feedback | |
+|---|---|
+| `message_alert_running` — **Alert running** | on while an alert runs. **Group** is optional: any group, or one |
+
+| Variables | Value |
+|---|---|
+| `message_last_text` | the newest message's text |
+| `message_last_from` | who sent it |
+| `message_last_to` | its groups by name, comma separated; `Everyone` for Everyone |
+| `message_reply_text` | the newest reply to any message today |
+| `message_reply_from` | who sent that reply |
+| `message_alert_active` | `true` while any alert runs, else `false` |
+| `message_alert_text` | the newest running alert's text, else empty |
+
+Every one except `message_alert_active` is an empty string when there is nothing
+yet, and after the nightly clear; `message_alert_active` reads `false`.
+
+**Presets** — a **Messages** category: one **Send** button per quick message,
+addressed to Everyone and editable after it is placed, and a **Clear alerts**
+button that wears the **Alert running** feedback.
+
+The same two things are available to rules and to any console's Action button as
+the automation actions **Send a stage message** and **Clear stage message
+alerts**; see [Automation](../automation.md#actions). Those send from
+`Automation`.
+
 ## Signals
 
 An automation rule can publish a named value that a **Companion Trigger** acts on.
@@ -984,18 +1023,21 @@ but it does mean a crosspoint someone changed by hand will be put back.
 and re-evaluates the two time-relative feedbacks — that runs in the module's own
 memory and puts nothing on the network.
 
-It listens to seven channels: `server:hello`, `stage:state-changed`, `pco:live`,
+It listens to fifteen channels: `server:hello`, `stage:state-changed`, `pco:live`,
 `propresenter:status`, `prodcom:transcript`, `wireless:connections-changed`,
-`people:count`.
+`people:count`, `companion:signals`, `obs:status`, `reaper:status`,
+`resi:status`, `youtube:status`, `pvp:status`, `baptism:state` and
+`messages:state`.
 
 REST is used for two things: writes (every action is a POST), and a hydrate on
-connect that fetches nine endpoints in one burst — state, views, outputs, service
-types, presets, wireless channels, PCO live, ProPresenter status and people
-count.
+connect that fetches seventeen endpoints in one burst — state, views, outputs,
+service types, presets, wireless channels, PCO live, ProPresenter, people count,
+OBS, REAPER, Resi, YouTube, ProVideoPlayer, baptism, `GET /api/messaging` and
+`GET /api/messages` — plus the plan list when a service type is chosen.
 
 **Poll fallback is off by default** (`0` seconds) and should stay that way unless
-an SSE connection cannot be kept open. When enabled it re-runs that nine-endpoint
-hydrate on every tick, so a five-second fallback is 108 requests a minute, most
+an SSE connection cannot be kept open. When enabled it re-runs that
+hydrate on every tick, so a five-second fallback is over 200 requests a minute, most
 of them for configuration that rarely changes.
 
 The module reports those channels to the server. It sends a `cid` on the event

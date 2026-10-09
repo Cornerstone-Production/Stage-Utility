@@ -64,6 +64,10 @@ just because that list came back short or without the stored value; the field
 shows an amber note instead and saves as it is, because the machine it names may
 simply be off right now.
 
+A field that picks several things from a list follows the same rule. A
+day-of-week condition left blank means every day, so its field is optional; a
+stage message's groups are required, so a blank one needs setup.
+
 ## Triggers
 
 | | Fires when |
@@ -213,6 +217,8 @@ for "idle", because before it runs we do not know that it is idle.
 | OBS virtual camera | Start or stop the virtual camera a video call picks up as a webcam, on the same connection and with the same start/stop idempotency |
 | Trigger a ProPresenter macro | runs one of your own ProPresenter macros, on a chosen instance — see [Triggering a macro from a rule](integrations/propresenter.md#triggering-a-macro-from-a-rule) |
 | Refresh all displays | reloads every connected display |
+| Send a stage message | a [stage message](features/stage-messages.md) to Everyone or to chosen groups, optionally as an alert — see below |
+| Clear stage message alerts | ends every alert that is running — see below |
 | Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
 | Press a Companion button | presses one button at a page/row/column. Reports "dispatched", never "on" — see [Pressing a button](integrations/companion.md#pressing-a-button) |
 | Fire a ProVideoPlayer cue | a cue from a playlist. ProVideoPlayer always plays it on the cue's own layer |
@@ -275,6 +281,32 @@ for "idle", because before it runs we do not know that it is idle.
 >
 > A rule whose ProPresenter is **switched off** triggers nothing and says so —
 > `MA is switched off` — rather than dialling the last address the card held.
+
+> **Send a stage message** and **Clear stage message alerts** are the
+> [stage messages](features/stage-messages.md) feature as automation. Both are
+> sent from `Automation`, the same sender a Companion button shows as `Companion`;
+> the rule's own name is not in an action's context, so it is not the sender.
+>
+> **Send a stage message** takes **To** (Everyone, or one or more groups — not
+> both), **Message** (1–280 characters) and **Alert** (No unless set; an alert
+> takes the screens over for 30 seconds; from `POST /api/action/invoke` it may be
+> `yes`, `true` or `"true"` for an alert and `no`, `false` or blank for none, and
+> anything else fails and sends nothing). It goes through the same rules as a
+> console's send. A rule saved with no groups or a blank message shows **Needs
+> setup**, and so does one that ticks Everyone beside a group. A group deleted
+> since the rule was saved does not stop the editor opening: the field says the
+> choice is no longer offered and keeps it, and the rule **fails** when it fires,
+> `not sent: no group has the id g-0a1b2c3d`, sending nothing. Simulate mode
+> checks the same rules and answers `would send to Stage (alert): "Walk now"`
+> without sending.
+>
+> **Clear stage message alerts** takes no settings. It ends every alert that is
+> running, on every group, and leaves the messages in the thread. With nothing
+> running it succeeds and says `no alert was running`.
+>
+> Each result is an Activity entry like any other, and the messages service logs
+> each send and each cleared alert on the [log](ops/updates-and-logs.md)
+> (`[messages] sent to …`, `[messages] alert … cleared by Automation`).
 
 > **Advance the baptism timer** is one action, not four. It does whatever the
 > [baptism timer's](features/servicecue-and-baptisms.md) own operator panel

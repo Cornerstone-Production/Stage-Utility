@@ -8,6 +8,7 @@ import { getUserDataPath } from "./app-paths.js";
 import { adoptLegacyStoreFiles } from "./store-file-adoption.js";
 import { migrateNeverChosenDefaults, countNeverChosen, migrateCardHairline, countFaintHairlines } from "./never-chosen-defaults.js";
 import { seedHomeView, screensListViews, HOME_VIEW_ID } from "./home-view";
+import { messagingStore } from "./messaging-store.js";
 import { notesStore, type NotesContent } from "./notes-store.js";
 import { checklistTicksStore } from "./checklist-ticks-store.js";
 import {
@@ -18,7 +19,7 @@ import {
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
-import { viewSurface, outputMode, type ViewSurface, type OutputMode } from "../types/views.js";
+import { viewSurface, viewShownInSidebar, outputMode, surfaceForMode, copyViewName, viewCanTakeRole, roleChangeConflict, type CreateScreenInput, type ViewSurface, type OutputMode } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
@@ -212,6 +213,57 @@ export class SlotsNotFoundError extends Error {
     super(message);
     this.name = "SlotsNotFoundError";
   }
+}
+
+/** Why a view cannot go on a control surface: it is not a custom view. One
+ *  wording for a view chosen for one, and for a view (or a copy) to become one. */
+function noControlSurfaceReason(view: View): string {
+  return (
+    `"${view.name}" is a ${defaultViewName(view.kind)} view, and only a custom view has a layout to put a control on, ` +
+    `so it cannot go on a control surface. Choose a control-surface view.`
+  );
+}
+
+/** One write in a multi-write screen change, and how to take it back. */
+export interface ScreenStep {
+  label: string;
+  run: () => Promise<unknown>;
+  /** Put the step back. Runs even for the step that failed, so it must be safe
+   *  when `run` did nothing: answer `false` then, and it is not reported as
+   *  having undone anything. */
+  undo?: () => Promise<unknown>;
+}
+
+/**
+ * A multi-step screen write (createScreen, setOutputRole) that failed part-way.
+ * Says which step failed and what was put back, and what could NOT be, so the
+ * caller never has to guess whether a half-made screen is still there.
+ */
+export class ScreenWriteError extends Error {
+  constructor(
+    readonly what: string,
+    readonly failed: string,
+    readonly reason: string,
+    readonly rolledBack: string[],
+    readonly notRolledBack: string[],
+  ) {
+    super(
+      `${what}: could not ${failed} (${reason}). ` +
+        (notRolledBack.length > 0
+          ? `Part of it could not be undone: ${notRolledBack.join(", ")}.`
+          : rolledBack.length > 0
+            ? `Undone: ${rolledBack.join(", ")}.`
+            : "Nothing was changed."),
+    );
+    this.name = "ScreenWriteError";
+  }
+}
+
+export interface CreateScreenResult {
+  state: StageState;
+  output: Output;
+  /** The view createScreen made, when it made one. */
+  createdViewId: string | null;
 }
 
 export class LayoutConflictError extends Error {
@@ -1649,7 +1701,7 @@ export class StageController {
   /** Temporary download link for one of the active plan's attachments. */
   async openPlanAttachment(
     attachmentId: string,
-    opts?: { fresh?: boolean },
+    opts?: { fresh?: boolean; version?: string },
   ): Promise<{ url: string; contentType: string | null }> {
     if (!this.pcoAppId || !this.pcoSecret) throw new Error("Planning Center not configured");
     if (!this.state.serviceTypeId || !this.state.planId) throw new Error("No plan selected");
@@ -2916,6 +2968,24 @@ export class StageController {
     kind: ViewKind = "slots",
     surface: ViewSurface = "display",
   ): Promise<StageState> {
+    await this.createViewRecord(name, kind, surface);
+    return this.state;
+  }
+
+  /**
+   * createView, returning the View it made. A caller that needs the new id must
+   * not read it back as the last entry of `state.views`: that is read after an
+   * await, and a second create landing in between hands both callers the later
+   * one (the same trap addOutput's comment describes).
+   */
+  private async createViewRecord(
+    name: string | undefined,
+    kind: ViewKind = "slots",
+    surface: ViewSurface = "display",
+    /** Told the view in the same synchronous turn it enters the state, BEFORE the
+     *  write that can fail. See addOutput's `onAssigned`. */
+    onAssigned?: (view: View) => void,
+  ): Promise<View> {
     const id = await this.allocateViewId();
     // Only a custom View has an editable layout, so only a custom View has
     // anywhere to put a control. Anything else asked for as a console would be
@@ -2933,11 +3003,12 @@ export class StageController {
     console.log(`[stage-controller] createView id=${scrub(id)} name="${scrub(view.name)}" kind=${scrub(kind)}`);
     const views = [...this.state.views, view];
     this.state = { ...this.state, views };
+    onAssigned?.(view);
     await viewsStore.save(views);
     if (kind === "slots") this.rawSlotsByView.set(id, []);
     this.recomputeResolved();
     this.broadcast();
-    return this.state;
+    return view;
   }
 
   async renameView(id: string, name: string): Promise<StageState> {
@@ -2963,9 +3034,26 @@ export class StageController {
    * drives, rather than silently unbinding them. Silently unbinding is how an
    * operator discovers on Sunday morning that a screen went blank on Thursday.
    */
-  async setViewSurface(id: string, surface: ViewSurface): Promise<StageState> {
+  async setViewSurface(
+    id: string,
+    surface: ViewSurface,
+    /** Refuse unless this screen is the only one showing the view. For a role
+     *  change that flips a view because only its own screen showed it: decided
+     *  before its first write, and checked again here, in the same turn as the
+     *  assignment, because another screen may have been pointed at it since. */
+    opts: { onlyShownBy?: string } = {},
+  ): Promise<StageState> {
     const view = this.state.views.find((v) => v.id === id);
     if (!view) throw new Error(`views:setSurface — view ${id} not found`);
+    if (opts.onlyShownBy !== undefined) {
+      const others = this.state.outputs.filter((o) => o.viewId === id && o.id !== opts.onlyShownBy);
+      if (others.length > 0) {
+        throw new Error(
+          `"${view.name}" is now also shown on ${others.map((o) => `"${o.name}"`).join(", ")}, so changing it would change ` +
+            `${others.length === 1 ? "that screen" : "those screens"} too.`,
+        );
+      }
+    }
 
     if (surface === "console") {
       // Every display-mode screen showing this View would become an invalid
@@ -2977,7 +3065,7 @@ export class StageController {
         const names = stranded.map((o) => o.name || o.id).join(", ");
         throw new Error(
           `"${view.name}" is showing on ${names}. ` +
-            `Open ${stranded.length === 1 ? "that screen's" : "those screens'"} menu and choose "Use as a control surface" first, ` +
+            `Open ${stranded.length === 1 ? "that screen's" : "those screens'"} Screen settings and choose "Control surface" first, ` +
             `or point ${stranded.length === 1 ? "it" : "them"} at a different view.`,
         );
       }
@@ -3085,6 +3173,27 @@ export class StageController {
   }
 
   /**
+   * List a console in the operator app's sidebar, or take it out of the list.
+   *
+   * Stored on any View rather than refused for a display, like the chrome flag:
+   * it is dormant there, and refusing it would lose the choice every time a
+   * console was flipped to a display and back. Nothing else reads it — a hidden
+   * console keeps its live controls, its page and its URL.
+   */
+  async setViewShowInSidebar(id: string, showInSidebar: boolean): Promise<StageState> {
+    if (!this.state.views.find((v) => v.id === id)) {
+      throw new Error(`views:setShowInSidebar — view ${id} not found`);
+    }
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, showInSidebar } : v));
+    console.log(`[stage-controller] setViewShowInSidebar id=${scrub(id)} → ${scrub(showInSidebar ? "listed" : "HIDDEN")}`);
+    this.state = { ...this.state, views };
+    await viewsStore.save(views);
+    this.recomputeResolved();
+    this.broadcast();
+    return this.state;
+  }
+
+  /**
    * Replace a custom View's layout (visual editor save).
    *
    * `expectedRev` is the revision the editor opened. When it no longer matches,
@@ -3122,6 +3231,13 @@ export class StageController {
   }
 
   async duplicateView(id: string, name?: string): Promise<StageState> {
+    await this.copyViewRecord(id, name);
+    return this.state;
+  }
+
+  /** duplicateView, returning the copy — see createViewRecord for why, and for
+   *  `onAssigned`. */
+  private async copyViewRecord(id: string, name?: string, onAssigned?: (view: View) => void): Promise<View> {
     const src = this.state.views.find((v) => v.id === id);
     if (!src) throw new Error(`views:duplicate — view ${id} not found`);
     const newId = await this.allocateViewId();
@@ -3148,6 +3264,7 @@ export class StageController {
     console.log(`[stage-controller] duplicateView ${scrub(id)} → ${scrub(newId)} "${scrub(copy.name)}"`);
     const views = [...this.state.views, copy];
     this.state = { ...this.state, views };
+    onAssigned?.(copy);
     await viewsStore.save(views);
 
     // Deep-copy slot config with fresh slot ids, through the same copyKey the
@@ -3173,7 +3290,7 @@ export class StageController {
     }
     this.recomputeResolved();
     this.broadcast();
-    return this.state;
+    return copy;
   }
 
   /**
@@ -3236,6 +3353,16 @@ export class StageController {
     if (screensListViews(this.state.views).length <= 1) {
       throw new Error("views:delete — cannot remove the last view");
     }
+    return this.dropView(id);
+  }
+
+  /**
+   * Remove a view and everything keyed to it, without deleteView's "not the last
+   * view" refusal. For undoing a view this controller itself just created: on an
+   * install whose only view is that one, deleteView would refuse, and the
+   * rollback would leave behind the very view it was asked to take back.
+   */
+  private async dropView(id: string): Promise<StageState> {
     console.log(`[stage-controller] deleteView id=${scrub(id)}`);
     const removed = this.state.views.find((v) => v.id === id);
     const views = this.state.views.filter((v) => v.id !== id);
@@ -3320,9 +3447,23 @@ export class StageController {
    * claim the same screen and the second silently displaces the first.
    */
   async addOutput(
-    name?: string,
-    viewId?: string | null,
+    /** What a new screen is born with. Every field is optional: no name is
+     *  "Display N" from the id, no view is unrouted, no mode is a display. `slug`
+     *  must already have passed validateSlug against the ids and slugs in use;
+     *  only the new id, which does not exist until the allocation below, is
+     *  checked here. */
+    fields: Partial<Pick<Output, "name" | "viewId" | "mode" | "slug">> = {},
+    /**
+     * Told the new screen in the same synchronous turn it enters the state, and
+     * BEFORE the write that can fail. For a caller that has to take it back: the
+     * state is assigned first (below, for the reason given there), so a write
+     * that fails leaves the screen in memory, and a caller that learns the id only
+     * when this resolves never learns it at all. The next write that lands would
+     * then persist a screen the operator was told was never made.
+     */
+    onAssigned?: (output: Output) => void,
   ): Promise<{ state: StageState; output: Output }> {
+    const { name, viewId, mode, slug } = fields;
     // One write: the id, the floor that stops it ever coming back, and the
     // outputs list that could not be built until the id existed. The whole
     // read-allocate-write happens inside the settings write queue, so two
@@ -3333,10 +3474,26 @@ export class StageController {
         (next): { output: Output; outputs: Output[] } => {
           const id = next(this.state.outputs.map((o) => o.id));
           const num = parseInt(id.replace("display-", ""), 10);
+          // Thrown before `this.state` is touched, so nothing has been assigned
+          // or written when it fires.
+          // Every check that depends on other screens or views is made HERE, in
+          // the same synchronous turn as the assignment below: createScreen
+          // checks the same things first so a refusal costs nothing, but by the
+          // time this runs another write may have taken the slug or turned the
+          // view into something else. See commitOutputPatch's `check`.
+          if (slug) {
+            const verdict = validateSlug(slug, [...this.takenSlugs(), id]);
+            if (!verdict.ok) throw new Error(verdict.reason);
+          }
+          // A stated role is checked against the view; no role is the original
+          // call, which took the view id as given.
+          if (mode !== undefined && viewId) this.requireViewForRole(viewId, mode);
           const created: Output = {
             id,
             name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
             viewId: viewId ?? null,
+            ...(mode ? { mode } : {}),
+            ...(slug ? { slug } : {}),
           };
           const outputs = [...this.state.outputs, created];
           // State FIRST, in the same synchronous turn as the read above and
@@ -3348,6 +3505,7 @@ export class StageController {
           // array, so settings.json lost the new display and the screen was
           // gone at the next restart.
           this.state = { ...this.state, outputs };
+          onAssigned?.(created);
           return { output: created, outputs };
         },
         (a) => ({ outputs: a.outputs }),
@@ -3393,14 +3551,28 @@ export class StageController {
    * `recomputeResolved` is not optional and not a caller's choice: an Output
    * field the kiosk reads lives on ResolvedOutput too, so skipping it leaves
    * every display rendering the previous value.
+   *
+   * `check` is where a caller that refuses some values refuses them. It runs
+   * inside the write queue, against the state as it is at that moment, in the
+   * same synchronous turn as the assignment, and throws to refuse. A check run
+   * before the call joined the queue is a check on a state that may be gone by
+   * the time the write lands: two screens both found /wing free and both took
+   * it, and a mode and a view each fine alone landed together as a wall display
+   * showing a console.
    */
   private async commitOutputPatch(
     id: string,
     patch: Partial<Output>,
     logLine: string,
+    check?: (output: Output) => void,
   ): Promise<StageState> {
-    console.log(scrub(logLine, 400));
     await this.outputWrites.enqueue(async () => {
+      if (check) {
+        const current = this.state.outputs.find((o) => o.id === id);
+        if (!current) throw new Error(`output ${id} not found`);
+        check(current);
+      }
+      console.log(scrub(logLine, 400));
       const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, ...patch } : o));
       this.state = { ...this.state, outputs };
       await settingsStore.patch({ outputs });
@@ -3424,22 +3596,21 @@ export class StageController {
       throw new Error(`outputs:slug — output ${id} not found`);
     }
     const trimmed = slug.trim().toLowerCase();
-
-    // Every id and slug in use EXCEPT this output's own, or re-saving would reject
-    // its existing slug.
-    const taken: string[] = [];
-    for (const o of this.state.outputs) {
-      if (o.id !== id) taken.push(o.id);
-      if (o.slug && o.id !== id) taken.push(o.slug);
-    }
-    const verdict = validateSlug(trimmed, taken);
-    if (!verdict.ok) throw new Error(verdict.reason);
-
     return this.commitOutputPatch(
       id,
       { slug: trimmed === "" ? undefined : trimmed },
       `[stage-controller] setOutputSlug id=${scrub(id)} slug="${scrub(trimmed)}"`,
+      () => {
+        const verdict = validateSlug(trimmed, this.takenSlugs(id));
+        if (!verdict.ok) throw new Error(verdict.reason);
+      },
     );
+  }
+
+  /** Every screen id and friendly link in use, except `exceptId`'s own: re-saving
+   *  a screen's slug must not collide with itself. */
+  private takenSlugs(exceptId?: string): string[] {
+    return this.state.outputs.filter((o) => o.id !== exceptId).flatMap((o) => (o.slug ? [o.id, o.slug] : [o.id]));
   }
 
   /** Route an output to a View (or null to unroute). The recall operation. */
@@ -3463,21 +3634,23 @@ export class StageController {
     // dropdown: a dropdown that only offers bindable views makes the mistake
     // hard to reach, but an API call, a Companion button or a restored config
     // can still ask for it. A wall screen must not be able to render a live
-    // control at all.
-    if (viewId !== null) {
-      const view = this.state.views.find((v) => v.id === viewId)!;
-      const output = this.state.outputs.find((o) => o.id === id)!;
-      if (viewSurface(view) === "console" && outputMode(output) !== "panel") {
-        throw new Error(
-          `"${view.name}" has live controls, so it can only go on a control surface. ` +
-            `"${output.name}" is a wall screen — open its menu and choose "Use as a control surface" first.`,
-        );
-      }
-    }
+    // control at all. Checked inside the write, against the screen's mode as it
+    // is then, so a mode change landing first cannot slip past it.
     return this.commitOutputPatch(
       id,
       { viewId },
       `[stage-controller] setOutputView output=${scrub(id)} → view=${scrub(viewId ?? "(none)")}`,
+      (output) => {
+        if (viewId === null) return;
+        const view = this.state.views.find((v) => v.id === viewId);
+        if (!view) throw new Error(`outputs:setView — view ${viewId} not found`);
+        if (viewSurface(view) === "console" && outputMode(output) !== "panel") {
+          throw new Error(
+            `"${view.name}" has live controls, so it can only go on a control surface. ` +
+              `"${output.name}" is a wall screen — open its Screen settings and choose "Control surface" first.`,
+          );
+        }
+      },
     );
   }
 
@@ -3489,24 +3662,307 @@ export class StageController {
    * nothing and no indication why.
    */
   async setOutputMode(id: string, mode: OutputMode): Promise<StageState> {
-    const output = this.state.outputs.find((o) => o.id === id);
-    if (!output) throw new Error(`outputs:setMode — output ${id} not found`);
-
-    if (mode === "display" && output.viewId) {
-      const view = this.state.views.find((v) => v.id === output.viewId);
-      if (view && viewSurface(view) === "console") {
-        throw new Error(
-          `"${output.name}" is showing the control surface "${view.name}". ` +
-            `Point it at a wall-screen view first, or it would be left showing nothing.`,
-        );
-      }
-    }
-
+    if (!this.state.outputs.find((o) => o.id === id)) throw new Error(`outputs:setMode — output ${id} not found`);
+    // Inside the write, against the view the screen shows then: see setOutputView.
     return this.commitOutputPatch(
       id,
       { mode },
       `[stage-controller] setOutputMode output=${scrub(id)} → ${scrub(mode)}`,
+      (output) => {
+        const view = mode === "display" && output.viewId ? this.state.views.find((v) => v.id === output.viewId) : undefined;
+        if (view && viewSurface(view) === "console") {
+          throw new Error(
+            `"${output.name}" is showing the control surface "${view.name}". ` +
+              `Point it at a wall-screen view first, or it would be left showing nothing.`,
+          );
+        }
+      },
     );
+  }
+
+  /**
+   * Run a screen write that is several writes, in order, and undo what landed if
+   * one of them fails.
+   *
+   * Each step names itself, so the failure can say WHICH step it was and which
+   * were put back; an undo that itself fails is reported as not rolled back
+   * rather than swallowed. The undos run newest first, because the guards that
+   * make the order of the steps matter make the order of the undos matter too.
+   */
+  private async runScreenSteps(
+    what: string,
+    steps: ScreenStep[],
+  ): Promise<void> {
+    const done: ScreenStep[] = [];
+    for (const step of steps) {
+      done.push(step);
+      try {
+        await step.run();
+      } catch (err) {
+        // The step that failed is undone too, FIRST: a write can land in memory
+        // and fail on disk, and every undo here is safe to run when its step did
+        // nothing (it answers `false`, and is not reported as having undone it).
+        const rolledBack: string[] = [];
+        const notRolledBack: string[] = [];
+        for (const prior of done.reverse()) {
+          if (!prior.undo) continue;
+          try {
+            if ((await prior.undo()) !== false) rolledBack.push(prior.label);
+          } catch (undoErr) {
+            notRolledBack.push(`${prior.label} (${errorMessage(undoErr)})`);
+          }
+        }
+        console.warn(
+          `[stage-controller] ${scrub(what)} failed at "${scrub(step.label)}": ${scrub(errorMessage(err))}; ` +
+            `rolled back: ${scrub(rolledBack.join(", ") || "nothing")}` +
+            (notRolledBack.length > 0 ? `; COULD NOT roll back: ${scrub(notRolledBack.join(", "))}` : ""),
+        );
+        throw new ScreenWriteError(what, step.label, errorMessage(err), rolledBack, notRolledBack);
+      }
+    }
+  }
+
+  /**
+   * Make a screen, completely, or not at all.
+   *
+   * ONE path for the Screens page's guided creation, `POST /api/outputs` and a
+   * device being claimed as a new screen. They used to be three things that
+   * happened to call addOutput: the claim route had its own rollback, and neither
+   * of the others validated anything.
+   *
+   * Validated BEFORE anything is written, so an answer the server would refuse
+   * (a view that does not fit the role, a slug that is taken) costs nothing and
+   * leaves nothing. What can only fail while writing is rolled back, and the
+   * failure says what was and was not put back.
+   *
+   * `mode` absent is the legacy `{ name, viewId }` call and behaves exactly as it
+   * always did: a display, and the view id is taken as given. Only a caller that
+   * states a role has the view checked against it.
+   *
+   * `last` is a caller's own write that belongs to the same screen (a device to
+   * bind to it), run as the final step. If it fails, everything before it is put
+   * back by the same rollback, including a sidebar listing written on a view
+   * that existed before: a caller undoing the parts it knows about after the
+   * fact missed that one.
+   */
+  async createScreen(
+    input: CreateScreenInput,
+    last?: { label: string; run: (output: Output) => Promise<unknown> },
+  ): Promise<CreateScreenResult> {
+    const { mode } = input;
+    if (mode !== undefined && mode !== "display" && mode !== "panel") {
+      throw new Error('outputs:add — mode must be "display" or "panel"');
+    }
+    if (typeof input.viewId === "string" && input.newView) {
+      throw new Error("outputs:add — viewId and newView are alternatives: name an existing view, or ask for a new one");
+    }
+    // The listing is written on a control surface's view. Anywhere else there is
+    // nothing to write it on, and accepting it would be dropping it silently.
+    if (input.showInSidebar !== undefined && (mode !== "panel" || (typeof input.viewId !== "string" && !input.newView))) {
+      throw new Error('outputs:add — showInSidebar is the listing of a control surface\'s view: send it with mode "panel" and a viewId or newView');
+    }
+    // The view is checked only when the caller states a role. Without one this is
+    // the original `{ name, viewId }` call, which took the id as given.
+    if (mode !== undefined && typeof input.viewId === "string") this.requireViewForRole(input.viewId, mode);
+    const slug = (input.slug ?? "").trim().toLowerCase();
+    if (slug !== "") {
+      const verdict = validateSlug(slug, this.takenSlugs());
+      if (!verdict.ok) throw new Error(verdict.reason);
+    }
+    const name = input.name?.trim() || undefined;
+
+    let createdViewId: string | null = null;
+    let output: Output | undefined;
+    let viewId: string | null = typeof input.viewId === "string" ? input.viewId : null;
+    let sidebarWas: boolean | undefined;
+    await this.runScreenSteps("createScreen", [
+      ...(input.newView
+        ? [{
+            label: "make the view",
+            run: async () => {
+              // Custom, because only a custom view has a layout to put anything on.
+              await this.createViewRecord(name, "custom", surfaceForMode(mode ?? "display"), (view) => {
+                createdViewId = view.id;
+                viewId = view.id;
+              });
+            },
+            undo: async () => { if (!createdViewId) return false; await this.dropView(createdViewId); },
+          }]
+        : []),
+      {
+        label: "add the screen",
+        run: () => this.addOutput({ name, viewId, mode, slug: slug || undefined }, (made) => { output = made; }),
+        undo: async () => { if (!output) return false; await this.removeOutput(output.id); },
+      },
+      // Decided here from the INPUT, not from `viewId`: that is still null while
+      // this list is built, because a view made for the screen does not exist yet.
+      // The listing was refused above unless it has a control surface's view.
+      ...(input.showInSidebar !== undefined
+        ? [{
+            label: "set the sidebar listing",
+            run: async () => {
+              const view = this.state.views.find((v) => v.id === viewId);
+              if (view && viewShownInSidebar(view) !== input.showInSidebar) {
+                // A view made here is dropped whole on rollback, so only an
+                // existing view's listing has anything to put back.
+                if (!createdViewId) sidebarWas = viewShownInSidebar(view);
+                await this.setViewShowInSidebar(viewId!, input.showInSidebar!);
+              }
+            },
+            undo: async () => { if (sidebarWas === undefined || !viewId) return false; await this.setViewShowInSidebar(viewId, sidebarWas); },
+          }]
+        : []),
+      ...(last ? [{ label: last.label, run: () => last.run(output!) }] : []),
+    ]);
+    console.log(
+      `[stage-controller] createScreen id=${scrub(output!.id)} name="${scrub(output!.name)}" mode=${scrub(mode ?? "display")} ` +
+        `view=${scrub(viewId ?? "(none)")}${scrub(createdViewId ? " (made for it)" : "")}${scrub(slug ? ` slug="${slug}"` : "")}`,
+    );
+    return { state: this.state, output: output!, createdViewId };
+  }
+
+  /**
+   * The view a screen of `mode` is about to be pointed at, refused unless it
+   * exists, is not Home, and already fits the role. A control surface also needs
+   * a custom view (see viewCanTakeRole): a non-custom console can still exist,
+   * from an API call or an older build, and is not one to point a panel at. One check and one wording for
+   * createScreen and setOutputRole, which used to word the same refusal two ways.
+   */
+  private requireViewForRole(viewId: string, mode: OutputMode): View {
+    if (viewId === HOME_VIEW_ID) {
+      throw new Error(`"Home" is the operator's front page, not a screen. Choose another view.`);
+    }
+    const view = this.state.views.find((v) => v.id === viewId);
+    if (!view) throw new Error(`view ${viewId} not found`);
+    if (!viewCanTakeRole(view, mode)) throw new Error(noControlSurfaceReason(view));
+    if (viewSurface(view) !== surfaceForMode(mode)) {
+      throw new Error(
+        mode === "panel"
+          ? `"${view.name}" is a wall-screen view, so it cannot go on a control surface. Choose a control-surface view.`
+          : `"${view.name}" has live controls, so it cannot go on a wall display. Choose a wall-screen view.`,
+      );
+    }
+    return view;
+  }
+
+  /**
+   * Change a screen between a wall display and a control surface, without
+   * changing any OTHER screen.
+   *
+   * The two guards (setOutputMode refuses display while the view is a console,
+   * setViewSurface refuses console while a screen showing it is not a panel)
+   * each wait for the other side, so the order is part of the job: whichever side
+   * is being made MORE permissive goes first. A view other screens also show
+   * cannot be flipped without changing them, so it is never flipped:
+   *
+   *   copyView  a copy of the view takes the new role and only this screen points
+   *             at it, named "<view> (control surface)" or "<view> (wall)"
+   *   viewId    this screen points at the view named, which must already fit
+   *   neither   refused when the view is shared and does not fit, naming the
+   *             screens; a view only this screen shows changes with it
+   *
+   * A step that fails puts back what already landed, including the copy.
+   */
+  async setOutputRole(
+    id: string,
+    mode: OutputMode,
+    opts: { copyView?: boolean; viewId?: string } = {},
+  ): Promise<{ state: StageState; copiedViewId: string | null }> {
+    const output = this.state.outputs.find((o) => o.id === id);
+    if (!output) throw new Error(`outputs:setRole — output ${id} not found`);
+    if (mode !== "display" && mode !== "panel") throw new Error('outputs:setRole — mode must be "display" or "panel"');
+    if (opts.copyView && opts.viewId !== undefined) {
+      throw new Error("outputs:setRole — copyView and viewId are alternatives");
+    }
+    const wants = surfaceForMode(mode);
+    const chosen = opts.viewId !== undefined ? this.requireViewForRole(opts.viewId, mode) : undefined;
+
+    const view = output.viewId ? this.state.views.find((v) => v.id === output.viewId) : undefined;
+    const misfit = view !== undefined && viewSurface(view) !== wants;
+    // The same function the panel asks before it offers the choice, so the two
+    // cannot disagree about when there is one.
+    const conflict = chosen ? null : roleChangeConflict(output, this.state.outputs, this.state.views, mode);
+    if (conflict?.copyName === null) throw new Error(noControlSurfaceReason(conflict.view));
+    if (conflict && !opts.copyView) {
+      const { others } = conflict;
+      throw new Error(
+        `"${conflict.view.name}" is also shown on ${others.map((o) => `"${o.name}"`).join(", ")}, so changing it would change ` +
+          `${others.length === 1 ? "that screen" : "those screens"} too. Use a copy on this screen, or choose a different view.`,
+      );
+    }
+
+    const before = { mode: output.mode, viewId: output.viewId ?? null };
+    // Idempotent, because the undos run for every step including the one that
+    // failed: it writes only when the screen is not already as it was.
+    //
+    // Both fields in one write, not through setOutputMode and setOutputView, whose
+    // checks each wait for the other. Not unchecked either: when an earlier undo
+    // could not put the view's kind back, the screen as it was would be a wall
+    // display on a console, so that is refused and reported as not put back,
+    // leaving the screen a control surface on it.
+    const restore = async () => {
+      const now = this.state.outputs.find((o) => o.id === id);
+      if (!now || (now.mode === before.mode && (now.viewId ?? null) === before.viewId)) return false;
+      await this.commitOutputPatch(
+        id,
+        { mode: before.mode, viewId: before.viewId },
+        `[stage-controller] setOutputRole output=${scrub(id)} restored mode=${scrub(before.mode ?? "(display)")} view=${scrub(before.viewId ?? "(none)")}`,
+        () => {
+          const was = before.viewId ? this.state.views.find((v) => v.id === before.viewId) : undefined;
+          if (was && viewSurface(was) === "console" && outputMode(before) !== "panel") {
+            throw new Error(`"${was.name}" is still a control surface, and a wall display cannot show it`);
+          }
+        },
+      );
+    };
+    const setMode: ScreenStep = { label: "set the screen's role", run: () => this.setOutputMode(id, mode), undo: restore };
+    // The two guards wait for each other (setOutputMode refuses a display while
+    // its view is a console; setViewSurface refuses a console while a screen
+    // showing it is not a panel), so whichever side is being made MORE permissive
+    // goes first: becoming a control surface the screen leads, becoming a wall
+    // display the view does. The other order is refused by the server's own
+    // guards, however the steps are undone.
+    const inGuardOrder = (viewStep: ScreenStep): ScreenStep[] => (mode === "panel" ? [setMode, viewStep] : [viewStep, setMode]);
+
+    let copy: View | undefined;
+    const steps: ScreenStep[] = [];
+    if (chosen) {
+      steps.push(...inGuardOrder({ label: "point the screen at the view", run: () => this.setOutputView(id, chosen.id), undo: restore }));
+    } else if (view && misfit && opts.copyView) {
+      steps.push(
+        {
+          label: "copy the view",
+          run: () => this.copyViewRecord(view.id, copyViewName(view, mode), (made) => { copy = made; }),
+          undo: async () => { if (!copy) return false; await this.dropView(copy.id); },
+        },
+        // Nobody shows the copy yet, so neither guard can refuse this.
+        { label: "give the copy its role", run: () => this.setViewSurface(copy!.id, wants) },
+        ...inGuardOrder({ label: "point the screen at the copy", run: () => this.setOutputView(id, copy!.id), undo: restore }),
+      );
+    } else if (view && misfit) {
+      // Only this screen shows it (checked above): the role and the view's kind
+      // change together.
+      const was = viewSurface(view);
+      steps.push(...inGuardOrder({
+        label: "change the view's kind",
+        run: () => this.setViewSurface(view.id, wants, { onlyShownBy: id }),
+        undo: async () => {
+          const now = this.state.views.find((v) => v.id === view.id);
+          if (!now || viewSurface(now) === was) return false;
+          await this.setViewSurface(view.id, was);
+        },
+      }));
+    } else {
+      steps.push(setMode);
+    }
+
+    await this.runScreenSteps("setOutputRole", steps);
+    if (copy) {
+      console.log(
+        `[stage-controller] setOutputRole output=${scrub(id)} → ${scrub(mode)}, copied view ${scrub(view!.id)} to ${scrub(copy.id)} "${scrub(copy.name)}"`,
+      );
+    }
+    return { state: this.state, copiedViewId: copy?.id ?? null };
   }
 
   /**
@@ -3602,6 +4058,95 @@ export class StageController {
       { allowHls },
       `[stage-controller] setOutputAllowHls output=${scrub(id)} → ${scrub(allowHls ? "allowed" : "WebRTC only")}`,
     );
+  }
+
+  /**
+   * Put a screen in message groups. Every id must be a group that exists in the
+   * messaging config; the answer is deduplicated and kept in that config's order,
+   * so the stored list does not depend on the order a client happened to click.
+   * The output is checked first, so an id naming no screen answers "not found"
+   * whatever else is in the body.
+   */
+  async setOutputGroups(id: string, groups: unknown): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) {
+      throw new Error(`outputs:setGroups — output ${id} not found`);
+    }
+    if (!Array.isArray(groups) || !groups.every((g) => typeof g === "string")) {
+      throw new Error("outputs:setGroups — groups must be an array of group ids");
+    }
+    await messagingStore.init();
+    const config = messagingStore.get().groups;
+    const known = new Set(config.map((g) => g.id));
+    const missing = groups.find((g) => !known.has(g));
+    if (missing !== undefined) {
+      throw new Error(`outputs:setGroups — no message group has the id ${missing}`);
+    }
+    const chosen = config.filter((g) => groups.includes(g.id));
+    return this.commitOutputPatch(
+      id,
+      { groups: chosen.map((g) => g.id) },
+      `[stage-controller] setOutputGroups output=${scrub(id)} → ${scrub(chosen.map((g) => g.name).join(", ") || "no groups")}`,
+    );
+  }
+
+  /**
+   * How many screens hold each message group that is not in `known`. Read only:
+   * what stripUnknownOutputGroups would take off, for a caller that has to decide
+   * whether to run it and say so.
+   */
+  unknownOutputGroups(known: ReadonlySet<string>): Map<string, number> {
+    const found = new Map<string, number>();
+    for (const o of this.state.outputs) {
+      for (const g of new Set(o.groups?.filter((x) => !known.has(x)))) found.set(g, (found.get(g) ?? 0) + 1);
+    }
+    return found;
+  }
+
+  /**
+   * Take every message group that is not in `known` off every screen, in ONE
+   * settings write. Returns, per group id taken off, how many screens it was
+   * taken off; empty when nothing was dangling, and then nothing is written or
+   * broadcast.
+   *
+   * Derived from the screens rather than told which groups were deleted, so it
+   * can be run again after it failed (or at boot, over a settings file edited by
+   * hand) and finish the job: a list of "the groups that just went" is empty on
+   * the retry and would leave the ids on the screens for good.
+   *
+   * One write rather than one per group per screen: the outputs list is rewritten
+   * whole each time (see outputWrites), so a loop of setOutputGroups calls would
+   * be a write and a broadcast per screen. Counted inside the queue, against the
+   * outputs the write is actually made from.
+   *
+   * A write that fails puts the in-memory outputs back, so the next call finds the
+   * same ids still there and tries the write again; leaving them stripped in
+   * memory would report the job done while the file still held them.
+   */
+  async stripUnknownOutputGroups(known: ReadonlySet<string>): Promise<Map<string, number>> {
+    const stripped = new Map<string, number>();
+    await this.outputWrites.enqueue(async () => {
+      const previous = this.state.outputs;
+      const outputs = previous.map((o) => {
+        const dangling = new Set(o.groups?.filter((g) => !known.has(g)));
+        if (dangling.size === 0) return o;
+        for (const g of dangling) stripped.set(g, (stripped.get(g) ?? 0) + 1);
+        return { ...o, groups: o.groups?.filter((g) => known.has(g)) };
+      });
+      if (stripped.size === 0) return;
+      this.state = { ...this.state, outputs };
+      try {
+        await settingsStore.patch({ outputs });
+      } catch (err) {
+        if (this.state.outputs === outputs) this.state = { ...this.state, outputs: previous };
+        stripped.clear();
+        throw err;
+      }
+    });
+    if (stripped.size > 0) {
+      this.recomputeResolved();
+      this.broadcast();
+    }
+    return stripped;
   }
 
   /** Keep the ServiceCue text size this output's display shows. Refuses anything
@@ -4246,6 +4791,7 @@ export class StageController {
         locked: output.locked ?? false,
         hideTopBar: output.hideTopBar ?? false,
         allowHls: output.allowHls ?? true,
+        groups: output.groups ?? [],
         textSize: output.textSize ?? null,
       };
     }

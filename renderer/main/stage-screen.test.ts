@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { resolveScreen, type ScreenInput } from "./stage-screen.js";
+import { ownScreen, resolveScreen, type ScreenInput } from "./stage-screen.js";
 
 // ---- fixtures ---------------------------------------------------------------
 
@@ -21,6 +21,7 @@ function resolvedOutput(over: Partial<ResolvedOutput> = {}): ResolvedOutput {
     locked: false,
     hideTopBar: false,
     allowHls: true,
+    groups: [],
     textSize: null,
     ...over,
   };
@@ -544,6 +545,30 @@ describe("the view kind", () => {
       }),
     }));
     assert.equal(preview.k === "view" && preview.allowHls, true, "a preview must always read HLS as allowed");
+  });
+
+  test("a real screen is its own id and message groups; a preview is no screen and has none", () => {
+    // What a Messages widget follows, and what the alert overlay draws for. A
+    // Screens-card iframe is a picture of another screen: if it answered for that
+    // screen's groups, looking at the Screens page would draw alerts into every
+    // thumbnail and offer replies for groups the thumbnail is not in.
+    const groups = ["g-00000001", "g-00000002"];
+    const state = stageState({
+      resolvedByOutput: { "display-1": resolvedOutput({ groups }), "preview-v1": resolvedOutput({ groups }) },
+    });
+    assert.deepEqual(ownScreen({ state, displayId: "display-1", previewViewId: null }), { outputId: "display-1", groups });
+    assert.equal(
+      ownScreen({ state, displayId: "preview-v1", previewViewId: "v1" }),
+      null,
+      "a preview answered for a screen's groups",
+    );
+  });
+
+  test("ownScreen: a page whose id matches no output is a screen in no group, and a preview is none", () => {
+    const state = stageState();
+    assert.deepEqual(ownScreen({ state, displayId: "nowhere", previewViewId: null }), { outputId: "nowhere", groups: [] });
+    assert.equal(ownScreen({ state, displayId: "preview-v1", previewViewId: "v1" }), null);
+    assert.deepEqual(ownScreen({ state: null, displayId: "display-1", previewViewId: null }), { outputId: "display-1", groups: [] });
   });
 
   test("a preview of a View that no longer exists says so, instead of drawing slots", () => {

@@ -106,6 +106,15 @@ const REQUEST_FACING = [
   // into an HTTP body.
   "home-assistant-yaml.ts",
   "integration-manager.ts",
+  // Its sent line names the groups, the sender and the TEXT of a message, all
+  // typed into POST /api/messages; its refusal line carries the reason, which
+  // can name an id off the wire.
+  "messages-service.ts",
+  // Its one warning counts the stored messages it could not read.
+  "messages-store.ts",
+  // Its one warning names the stored groups and quick messages that break a
+  // limit, text the operator typed into PUT /api/messaging.
+  "messaging-store.ts",
   "pco-service.ts",
   "person-directory.ts",
   // GET /photos?u= hands the caller's string to every one of its log lines: the
@@ -139,12 +148,17 @@ const REQUEST_FACING = [
   "routes/legacy-page-routes.ts",
   "routes/log-paths.ts",
   "routes/log-routes.ts",
+  // Logs nothing itself; the lines for a send, a refusal and a cleared alert are
+  // messages-service.ts's, above. Listed because every routes/ file is.
+  "routes/messages-routes.ts",
   "routes/operator-paths.ts",
   "routes/plan-routes.ts",
   "routes/preset-routes.ts",
   "routes/proxy-routes.ts",
   "routes/rosstalk-routes.ts",
   "routes/route-harness.ts",
+  // Logs nothing: it reads a creation body and answers a failure.
+  "routes/screen-write.ts",
   "routes/servicecue-routes.ts",
   "routes/state-routes.ts",
   "routes/status-routes.ts",
@@ -158,6 +172,9 @@ const REQUEST_FACING = [
   // typed into a POST /api/video/feeds body.
   "routes/video-routes.ts",
   "routes/view-routes.ts",
+  // Its one warning names the screen whose embedded views run past the cap; the id is
+  // scrubbed, and a reply request is what asks the question.
+  "screen-reach.ts",
   // Both recorders name a Planning Center PLAN ITEM TITLE on their re-run and
   // carry-over lines. A title is typed into Planning Center and arrives here in
   // an HTTP response body — outside data by every measure this file uses, and
@@ -402,6 +419,15 @@ function requestFacingFiles(): string[] {
     // then foldConfigEntries warns with the rejected KEY. That key is an
     // attacker's string, verbatim, and this file was missing from the list.
     path.join(HERE, "integration-manager.ts"),
+    // Its sent line names the groups, the sender and the TEXT of a message, all
+    // typed into POST /api/messages; its refusal line carries the reason, which
+    // can name an id off the wire.
+    path.join(HERE, "messages-service.ts"),
+    // Its one warning counts the stored messages it could not read.
+    path.join(HERE, "messages-store.ts"),
+    // Its one warning names the stored groups and quick messages that break a
+    // limit, text the operator typed into PUT /api/messaging.
+    path.join(HERE, "messaging-store.ts"),
     path.join(HERE, "pco-service.ts"),
     // Its lines name a by-person slot's person ID, which the operator types into
     // the slot editor and saves over HTTP; scrubbed at the logger.
@@ -420,6 +446,9 @@ function requestFacingFiles(): string[] {
     // title-fallback warning names a Planning Center plan item TITLE, read back
     // out of the raw archive, and POST /api/history/rebuild is what runs it.
     path.join(HERE, "archive/rebuild.ts"),
+    // Its one warning names the screen whose embedded views run past the cap; the id is
+    // scrubbed, and a reply request is what asks the question.
+    path.join(HERE, "screen-reach.ts"),
     // Both recorders log a Planning Center plan item TITLE — on the re-run line
     // and, for the timeline, on the carried-over-item line. A title is typed
     // into Planning Center and reaches this process in an HTTP response body.

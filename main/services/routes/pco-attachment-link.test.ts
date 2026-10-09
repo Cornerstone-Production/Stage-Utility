@@ -10,6 +10,8 @@
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import fsp from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, mock, test } from "node:test";
@@ -20,6 +22,8 @@ process.env.STAGE_UTILITY_DATA = DIR;
 const { proxyRoutes } = await import("./proxy-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { stageController } = await import("../stage-controller.js");
+const { pcoService } = await import("../pco-service.js");
+const { attachmentEtag, attachmentVersion } = await import("../pco-attachment-cache.js");
 
 after(() => {
   fs.rmSync(DIR, { recursive: true, force: true });
@@ -56,5 +60,158 @@ describe("/api/pco/attachment on a link Planning Center has already expired", ()
       [undefined, { fresh: true }],
       "the second open must ask for a FRESH link — anything else re-reads the cached, expired one",
     );
+  });
+});
+
+// Planning Center lists the plan's stage plot under a suffixed id. Everything from
+// the route down to the credentialed URL is real here (the controller's list is the
+// only stub, and its open goes to the real pcoService.openAttachment); only fetch
+// is faked, so the id that reaches Planning Center is the one asserted.
+describe("/api/pco/attachment for the plan's stage plot", () => {
+  test("serves a file whose Planning Center id is suffixed", async (t) => {
+    const stagePlot = { id: "84892470-stage", filename: "2026.10.08 Stage Plot.pdf", contentType: "application/pdf", sourceLabel: "Plan file" };
+    mock.method(stageController, "listPlanAttachments", async () => [
+      { id: "84892001", filename: "Lyrics.pdf", contentType: "application/pdf", sourceLabel: "Item" },
+      stagePlot,
+    ]);
+    mock.method(stageController, "openPlanAttachment", (id: string, opts?: { fresh?: boolean }) =>
+      pcoService.openAttachment("app", "secret", "11", "21", id, opts),
+    );
+    pcoService.clearCache();
+    const payload = Buffer.from("%PDF-1.4 stage plot bytes");
+    const requested: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requested.push(String(input));
+      if (String(input).includes("/open")) {
+        const body = { data: { id: "84892470-stage", type: "Attachment", attributes: { attachment_url: "https://s3.invalid/plot" } } };
+        return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(payload, { status: 200 });
+    }) as typeof fetch;
+    t.after(() => {
+      globalThis.fetch = realFetch;
+      pcoService.clearCache();
+      mock.restoreAll();
+    });
+
+    const r = await callRoute(proxyRoutes, "/api/pco/attachment?match=stage%20plot");
+
+    assert.equal(r.status, 200, `the stage plot was not served: ${r.status} ${r.body}`);
+    assert.equal(r.body, payload.toString());
+    assert.ok(
+      requested.some((u) => u.endsWith("/plans/21/all_attachments/84892470-stage/open")),
+      `Planning Center was never asked to open the suffixed id: ${requested.join(", ")}`,
+    );
+  });
+});
+
+// A stage plot replaced on the same plan. The display revalidates what it is showing
+// with If-None-Match; an unchanged file is a 304 with no download, a changed one is
+// fetched fresh even though the attachment id is the same.
+describe("/api/pco/attachment and a file that changes", () => {
+  function setup(t: { after: (fn: () => void) => void }, id: string) {
+    const att = { id, filename: "Revisit Stage Plot.pdf", contentType: "application/pdf", sourceLabel: "Plan file", fileSizeBytes: 20, updatedAt: "2026-10-08T14:00:00Z" };
+    mock.method(stageController, "listPlanAttachments", async () => [att]);
+    mock.method(stageController, "openPlanAttachment", (id: string, opts?: { fresh?: boolean; version?: string }) =>
+      pcoService.openAttachment("app", "secret", "11", "21", id, opts),
+    );
+    pcoService.clearCache();
+    const seen = { opens: 0, downloads: 0, bytes: Buffer.from("first upload") };
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input).includes("/open")) {
+        seen.opens += 1;
+        const body = { data: { id: "x", type: "Attachment", attributes: { attachment_url: `https://s3.invalid/link-${seen.opens}` } } };
+        return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      seen.downloads += 1;
+      return new Response(seen.bytes, { status: 200 });
+    }) as typeof fetch;
+    t.after(() => {
+      globalThis.fetch = realFetch;
+      pcoService.clearCache();
+      mock.restoreAll();
+    });
+    return { att, seen };
+  }
+  // The disk cache outlives a test, so each test names its own attachment.
+  const get = (inm?: string) => callRoute(proxyRoutes, "/api/pco/attachment?match=revisit", inm ? { headers: { "if-none-match": inm } } : {});
+
+  test("a 200 carries an ETag, and If-None-Match with it is a 304 with no download", async (t) => {
+    const { seen } = setup(t, "84892470-stage");
+    const first = await get();
+    assert.equal(first.status, 200);
+    const etag = first.headers["ETag"];
+    assert.match(etag, /^"84892470-stage\.t\d+"$/);
+    assert.match(first.headers["Cache-Control"], /max-age=300/);
+    assert.equal(seen.downloads, 1);
+
+    const again = await get(etag);
+    assert.equal(again.status, 304, "an unchanged file was sent again");
+    assert.equal(again.body, "");
+    assert.equal(again.headers["ETag"], etag);
+    assert.equal(seen.downloads, 1, "a 304 must not download");
+    assert.equal(seen.opens, 1, "a 304 must not open a new link");
+  });
+
+  test("the same id with a newer updated_at is downloaded fresh and served, under a new ETag", async (t) => {
+    const { att, seen } = setup(t, "84892471-stage");
+    const first = await get();
+    const oldTag = first.headers["ETag"];
+    assert.equal(first.body, "first upload");
+
+    att.updatedAt = "2026-10-08T15:30:00Z";
+    seen.bytes = Buffer.from("second upload");
+    const r = await get(oldTag);
+    assert.equal(r.status, 200, "the old ETag answered 304 for a replaced file");
+    assert.equal(r.body, "second upload", "the replaced file was served from the old bytes or the old link");
+    assert.notEqual(r.headers["ETag"], oldTag);
+    assert.equal(seen.opens, 2, "a replaced file reused the old file's signed link");
+  });
+
+  test("a 304 is answered before anything is downloaded, with nothing on disk", async (t) => {
+    // The test above warms the disk first, so it cannot tell a 304 sent before the
+    // download from one sent after it. Here the id and version have never been fetched.
+    const { att, seen } = setup(t, "84892472-stage");
+    const etag = attachmentEtag(att.id, attachmentVersion(att.updatedAt, att.fileSizeBytes));
+    const r = await get(etag);
+    assert.equal(r.status, 304);
+    assert.equal(seen.downloads, 0, "a 304 downloaded the file first");
+    assert.equal(seen.opens, 0, "a 304 opened a signed link first");
+  });
+
+  test("a file removed between resolving and reading is resolved once more", async (t) => {
+    // A newer version was written, and this one pruned, after the route chose it.
+    const { att, seen } = setup(t, "84892473-stage");
+    const first = await get();
+    assert.equal(first.body, "first upload");
+
+    att.updatedAt = "2026-10-08T15:30:00Z";
+    seen.bytes = Buffer.from("second upload");
+    const real = fsp.readFile;
+    let thrown = 0;
+    mock.method(fsp, "readFile", async (...args: Parameters<typeof real>) => {
+      if (thrown === 0) {
+        thrown += 1;
+        throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+      }
+      return real(...args);
+    });
+    syncBuiltinESMExports();
+    t.after(() => { mock.restoreAll(); syncBuiltinESMExports(); });
+    const r = await get();
+    assert.equal(thrown, 1);
+    assert.equal(r.status, 200, `the vanished file was not re-resolved: ${r.status} ${r.body}`);
+    assert.equal(r.body, "second upload");
+  });
+
+  test("a file that is still missing after the second look is the 500 it was", async (t) => {
+    setup(t, "84892474-stage");
+    mock.method(fsp, "readFile", async () => {
+      throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+    });
+    syncBuiltinESMExports();
+    t.after(() => { mock.restoreAll(); syncBuiltinESMExports(); });
+    const r = await get();
+    assert.equal(r.status, 500);
   });
 });

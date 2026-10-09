@@ -98,6 +98,36 @@ A response that is a web page, JSON or XML rather than an image (a captive
 portal, a proxy's error page) is refused on a `[photo-cache]` line and never
 cached, so the next request asks again.
 
+## Plan files
+
+The Plan file widget and the editor's file picker read the plan's
+`all_attachments`, which covers files on the plan, on the service type, and on
+the plan's items and their songs and arrangements. A file is found by name, so
+the same layout shows each week's file without being re-pointed.
+
+Planning Center gives most attachments an id that is a run of digits; the plan's
+own stage plot comes back with a word on the end (`84892470-stage`). This app
+accepts an attachment id that is 1 to 20 digits, optionally followed by a hyphen
+and a lowercase word of up to 20 letters (`84892470`, `84892470-stage`), and
+nothing else. No other Planning Center id takes the suffix, and an id with
+anything else in it is refused before a request is made.
+
+Planning Center hands out short-lived download links, so each file is fetched
+once and kept on disk (`cache/attachments/`), named by its attachment id and a
+version taken from the file's `updated_at` (its size when that is missing). A file
+replaced under the same id is a new version: it is downloaded again and the older
+copies are removed. `/api/pco/attachment` sends the version as an `ETag`, and a
+display that already has it is answered `304` without a download; the Plan file
+widget asks every five minutes, and the file list it is answered from is read from
+Planning Center at most every three minutes (45 seconds around a service). A
+replacement is noticed only if the version changes: when Planning Center reports
+neither `updated_at` nor a size, the id alone names the file and a replacement under
+the same id is not noticed, and when only the size is known, a replacement of the
+same size is not. A link that expires early is re-opened once. A
+file that will not download is logged once per outage with its name and the
+reason, and one line says when it downloads again
+([Plan file](../reference/widgets.md#pco--service)).
+
 ## API version
 
 PCO versions each product by date. A request selects one with an

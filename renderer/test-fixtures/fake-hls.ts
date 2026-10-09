@@ -3,7 +3,7 @@
 //
 // Under Node hls.js loads but has no MediaSource to attach to, so it cannot be
 // driven here. This records what startHls asked of it, raises ERROR events the
-// way hls.js does, and reports a fixed latency for the "N s behind" badge.
+// way hls.js does, and reports a fixed latency for the "N s behind" badge and the live catch-up.
 // `installFakeHls` also defines a MediaSource, which is what sends startHls to
 // hls.js rather than native HLS.
 
@@ -19,8 +19,14 @@ export class FakeHls {
   static instances: FakeHls[] = [];
   readonly calls: string[] = [];
   latency = 3.4;
+  /** What hls.js aims for, and where it would put the playhead to get there.
+   *  liveSyncPosition null (no playlist yet) means catchUp never jumps. */
+  targetLatency: number | null = 1.5;
+  liveSyncPosition: number | null = null;
+  readonly config: Record<string, unknown>;
   private listeners: Listener[] = [];
-  constructor() {
+  constructor(config: Record<string, unknown> = {}) {
+    this.config = config;
     FakeHls.last = this;
     FakeHls.instances.push(this);
   }

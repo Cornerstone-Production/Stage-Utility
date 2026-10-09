@@ -234,8 +234,8 @@ Profile baseline, or Keyframe interval 1 s with B-frames 0); a pulled camera
 or an SRT/RTMP push feed is not necessarily OBS, so the same message names
 "the device" instead.
 
-That fallback needs a screen willing to play HLS. A screen's own **Use HLS on
-this screen** switch (its overflow menu on the Screens page) can turn it off —
+That fallback needs a screen willing to play HLS. A screen's own **Use HLS**
+switch (in its **Screen settings** on the Screens page) can turn it off —
 a Pi 4 can freeze decoding HLS, so this keeps a struggling screen on WebRTC
 only. With it off, a feed that needs HLS shows **This screen can't play
 video** there instead, while it keeps playing normally on every other screen.
@@ -423,6 +423,20 @@ more at 30 fps; on HLS it is the buffer running dry. An embed's platform
 player, and a probe merely testing whether WebRTC works, report nothing —
 only a widget actually showing a picture does.
 
+A WebRTC report also carries one receive-delay figure, **jitter buffer**
+(`jitterBufferMs`): how long the frames of that report's interval waited in
+this screen's own receive buffer, on average, in milliseconds — the change in
+Chrome's `jitterBufferDelay` over the change in `jitterBufferEmittedCount`. It
+is how an operator tells whether a screen that looks behind is holding that
+delay in its own browser or is simply being sent a late picture. A healthy
+picture waits tens of milliseconds or less.
+
+A WebRTC report sends `null` for the figure when the browser reports neither
+counter or no frame left the buffer in the interval, and for a reading past
+10 minutes, which the server would refuse and which no live picture holds. An
+HLS report carries no such key; its delay is the "N s behind" badge on the
+widget.
+
 A widget whose stats take longer than 1.5 seconds to read is left out of that
 heartbeat and counts as a failed read (see Logging below). If the widgets
 have not all answered within 2 seconds, the heartbeat goes without any
@@ -435,6 +449,29 @@ of decoded frames dropped, or 3 or more stalls. Once struggling, it stays
 that way for 60 seconds after the last sample that kept it bad, even through
 cleaner reports arriving in between, so one bad spike cannot flap the warning
 on and off as the window's own totals dilute it.
+
+Over the same window the server keeps the worst jitter buffer figure the
+pair's reports carried, and marks the pair **lagging** when it goes over
+1000 ms. That is a separate flag from struggling, so a pair can be one, both
+or neither, but it holds the same way: 60 seconds after the last report over
+the line, with its own **episode** — the worst figure since it started
+lagging, which moves only when it rises by a tenth of a second. Two widgets on
+one screen showing the same feed fold to the worse figure, not a sum. HLS is
+never lagging.
+
+A lagging flag means that screen's own browser is holding the delay, so look
+at that screen first: its network (bursty delivery shows up as a deep jitter
+buffer) or its decoding. It does not clear the relay or the encoder. The other
+way round, a screen that looks seconds behind while its figure reads well
+under a second means the delay is upstream of the browser, at the relay or the
+encoder, and nothing on the screen will fix it. That reading holds only for a
+WebRTC screen whose reports carried a figure (not null) within the last
+minute. An HLS screen, a browser that cannot measure it and a screen that is
+not reporting are not measured, and "not lagging" there does not mean
+upstream. Each report's figure is an average over its own 10 seconds, so a
+brief spike inside one report is smoothed. Like struggling, a lagging flag
+holds for its 60 seconds, so a card can still show a lagging feed for up to a
+minute after the screen falls back to HLS.
 
 While a pair holds struggling, the server also holds its **episode**: the
 worst window since it started struggling, not the live one — the live
@@ -454,12 +491,18 @@ leaves out the dropped-frames and resolution sentences, since those are
 decode advice and a stall-only episode says nothing about decode load. The
 `[video]` struggling log line below reads from the same episode.
 
+A lagging screen's card reads the lagging episode the same way, in its own
+box beside any struggling one: **Holding N.N s of \<feed\> in its own
+buffer.** — the episode's worst figure — followed by **The delay is held on
+this screen: check its network or decoding.** The `[video]` lagging
+line below reads from the same episode.
+
 The Video feeds list's own meta line reads **On N screens** for any feed
 currently playing anywhere, struggling or not — every distinct screen a
 heartbeat has reported that feed's playback for in the last minute.
 
-Each transition into or out of struggling is a `[video]` line on the
-server's own log; see Logging below.
+Each transition into or out of struggling or lagging is a `[video]` line on
+the server's own log; see Logging below.
 
 ## Logging
 
@@ -533,6 +576,12 @@ from the server:
   numbers cannot be saved, once per outage for each screen, and `recording
   <screen>'s playback reports is working again` once they have saved again
   for two minutes. The heartbeat itself still counts either way.
+- A screen lagging on a feed — `is lagging on <feed>: holding N.N s in its
+  own buffer.`, then the same sentence the card ends with — the moment the
+  jitter buffer figure crosses 1000 ms, and `is no longer lagging on <feed>`
+  once the hold clears; each once per episode, not repeated while it stays true
+  or as the peak rises. A WebRTC feed that stays under the line logs nothing,
+  however many reports it sends.
 
 The relay's own error text can echo a feed's address back, so before any of
 it reaches `/log`, the status line or an API error, a username and password
@@ -549,8 +598,10 @@ Each screen writes its own `[video]` lines from the browser:
 - A relay feed falling back to HLS on a screen because WebRTC did not carry
   it there, once per outage, and a line when WebRTC is carrying it again.
   Its retries every 5 minutes are not logged.
-- A feed that needs HLS refused by a screen's own **Use HLS on this screen**
-  switch, once per outage, and a line once it can play again — the screen
+- An HLS picture jumping back to live after falling behind, with how many
+  seconds it skipped. At most one every 10 seconds per feed on a screen.
+- A feed that needs HLS refused by a screen's own **Use HLS** switch (Screen
+  settings), once per outage, and a line once it can play again — the screen
   allows HLS again, or the feed stops needing it. Nothing repeats while the
   switch stays off.
 - A playing widget's own stats failing to read (for the health report

@@ -5,13 +5,14 @@
 // SD card holds no display number and the server decides what a screen shows.
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
-import { kioskDevicesStore, authorise, claim, release, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
+import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
 import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen } from "../kiosk-presence.js";
 import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
 import { holdingScreen } from "../kiosk-holding-screen.js";
 import { stageController } from "../stage-controller.js";
+import type { CreateScreenInput } from "../../types/views.js";
+import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, readCreateScreenBody } from "./screen-write.js";
 import { errorMessage } from "../errors.js";
-import { scrub } from "../scrub.js";
 import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { APP_ROOT } from "../app-root.js";
@@ -146,6 +147,10 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/devices/claim") {
+    const alreadyBound = (on: string) => {
+      const screen = stageController.getOutputs().find((o) => o.id === on);
+      return `This device was set up as "${screen?.name ?? on}" meanwhile, so it is not made a new screen. Release it from that screen first.`;
+    };
     const body = (await readBody(req)) as Record<string, unknown>;
     const id = typeof body.deviceId === "string" ? body.deviceId : "";
     let outputId = typeof body.outputId === "string" ? body.outputId : "";
@@ -159,25 +164,55 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     // must not mint a screen nobody asked for, and deleting a phantom would not
     // stick while it kept announcing itself. Creation is the operator pressing
     // "Set up as a new screen".
-    // Created inside the try, and removed again if the binding fails. Otherwise
-    // an error banner leaves a brand new empty screen behind with nothing bound
-    // to it — the exact phantom the paragraph above says this avoids.
-    let created: string | null = null;
-    try {
-      if (!outputId) {
-        const name = typeof body.newName === "string" && body.newName.trim()
-          ? body.newName.trim()
-          : seen?.hostname || "New screen";
-        // The created output, not the last one in the returned state: two
-        // operators pressing this at once would otherwise both read the later
-        // id and claim the same screen.
-        const { output } = await stageController.addOutput(name, null);
-        outputId = output.id;
-        created = output.id;
+    //
+    // Through createScreen, the same path POST /api/outputs takes, so the guided
+    // setup can name a role, a view, a friendly link and the sidebar listing and
+    // have them validated before anything is written. The binding is its LAST
+    // step, so a binding that fails takes back everything before it in one
+    // rollback: the screen, a view made for it, and a sidebar listing written on
+    // a view that already existed. An error must not leave a brand new empty
+    // screen behind, the exact phantom the paragraph above says this avoids.
+    // Read BEFORE anything is written: a body that is wrong is refused with
+    // nothing created.
+    let input: CreateScreenInput | null = null;
+    if (!outputId) {
+      // A device that is already bound is not waiting, so it is not set up as a
+      // new screen: the panel offering that was opened on a device another
+      // operator has bound since, and a new screen would silently take it from
+      // the screen it shows. Moving it is the operator naming the screen
+      // (`outputId`), which stays allowed. Nothing else sends a claim without
+      // one: the Screens page lists only devices that are not bound here.
+      const already = findById(await kioskDevicesStore.load(), id);
+      if (already) {
+        error(res, alreadyBound(already.outputId), 409);
+        return;
       }
-      let displacedId: string | null = null;
-      await updateDevices((current) => {
-        const { devices, displaced } = claim(current, id, outputId, {
+      const read = readCreateScreenBody(body);
+      if ("error" in read) {
+        error(res, read.error);
+        return;
+      }
+      // `name` first, then `newName` the Screens page used to send, then the
+      // device's own hostname. `||` for the hostname, as it always was: a device
+      // that reports an empty one is "New screen", not "Display N".
+      const named = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+      read.name = named(body.name) ?? named(body.newName) ?? (seen?.hostname || "New screen");
+      input = read;
+    } else if (CREATE_SCREEN_FIELDS.some((f) => f in body)) {
+      // Naming a screen to take over AND describing a new one: one of the two is a
+      // mistake, and quietly ignoring the description would hide which.
+      error(res, `body.outputId names an existing screen, so ${CREATE_SCREEN_FIELDS.join(", ")} (which describe a new one) must not be sent`);
+      return;
+    }
+    let displacedId: string | null = null;
+    const bind = (target: string) =>
+      updateDevices((current) => {
+        // Checked again inside the write, for a binding that landed while the
+        // screen was being made. Throwing here fails createScreen's last step,
+        // which takes the new screen back.
+        const bound = input ? findById(current, id) : undefined;
+        if (bound) throw new Error(alreadyBound(bound.outputId));
+        const { devices, displaced } = claim(current, id, target, {
           secret: secretFor(id),
           macs: seen?.macs, hostname: seen?.hostname, os: seen?.os, ip: seen?.ip,
           screen: seen?.screen,
@@ -187,6 +222,19 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
         displacedId = displaced?.id ?? null;
         return devices;
       });
+    try {
+      if (input) {
+        // The created output, not the last one in the returned state: two
+        // operators pressing this at once would otherwise both read the later
+        // id and claim the same screen.
+        const made = await stageController.createScreen(input, {
+          label: "bind the device",
+          run: (output) => bind(output.id),
+        });
+        outputId = made.output.id;
+      } else {
+        await bind(outputId);
+      }
       // It is bound now, so it stops being something to claim. Without this it
       // lingers in the unclaimed list for the whole TTL, which reads as the
       // claim not having worked.
@@ -199,26 +247,12 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       stageController.refreshDisplays("all");
       // claim()'s `token` is deliberately not read: the device already holds the
       // secret, and a response carrying it would put it in a browser and a log.
-      json(res, { ok: true, displaced: displacedId });
+      json(res, { ok: true, displaced: displacedId, outputId });
     } catch (err) {
-      let orphan: string | null = null;
-      if (created) {
-        // Best-effort, and it SAYS SO when it fails. This used to only log, so a
-        // failed claim whose cleanup also failed left an empty screen the
-        // operator never asked for, with a response that mentioned only the
-        // original error -- exactly what the comment here promised not to do.
-        await stageController.removeOutput(created).catch((cleanup: unknown) => {
-          orphan = created;
-          console.warn(`[devices] could not remove the screen a failed claim created: ${scrub(String(cleanup))}`);
-        });
-      }
-      error(
-        res,
-        orphan
-          ? `${errorMessage(err)} — and an empty screen was left behind that could not be removed. ` +
-            `Delete it on the Screens page.`
-          : errorMessage(err),
-      );
+      // The same answer POST /api/outputs gives: a refusal made before anything
+      // was written is a 400; a failure part-way is a 500 saying what was and was
+      // not put back.
+      answerScreenWriteFailure(res, err);
     }
     return;
   }

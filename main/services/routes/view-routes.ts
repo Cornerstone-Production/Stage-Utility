@@ -20,7 +20,7 @@ import {
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
-import { isLayoutShape } from "../../types/views.js";
+import { isLayoutShape, type OutputMode } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
@@ -29,6 +29,7 @@ import { LayoutConflictError, SlotsNotFoundError, stageController } from "../sta
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
 import { datedExportFilename } from "../export-filename.js";
+import { answerScreenWriteFailure, readCreateScreenBody } from "./screen-write.js";
 
 /**
  * An untrusted body value that is a list of `{ id, name }` strings.
@@ -435,6 +436,14 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const serviceCueLayoutId = "serviceCueLayoutId" in body ? body.serviceCueLayoutId : body.scriptViewLayoutId;
       const hasServiceCueLayout = serviceCueLayoutId === null || typeof serviceCueLayoutId === "string";
       const hasHideChrome = typeof body.hideChrome === "boolean";
+      const hasShowInSidebar = typeof body.showInSidebar === "boolean";
+      // Present but not a boolean is a client error, not "nothing to change": a
+      // request that also names something valid would otherwise save the rest and
+      // quietly drop this, and the console stays listed with no word said.
+      if ("showInSidebar" in body && !hasShowInSidebar) {
+        error(res, "body.showInSidebar must be a boolean");
+        return;
+      }
       // Both calendar lists move together — a picker change sends the pair, so a
       // request carrying one and not the other is a client that has lost half its
       // state, not a partial update to honour.
@@ -451,8 +460,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       // as anything reading the code — or analysing it — can tell.
       const surface = body.surface === "console" ? "console" : body.surface === "display" ? "display" : null;
       const hasSurface = surface !== null;
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasServiceCueLayout && !hasSurface && !hasHideChrome && !calendarFilters) {
-        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.serviceCueLayoutId (string|null), body.hideChrome (boolean), or body.calendarSources + body.calendarTags (arrays) required");
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasServiceCueLayout && !hasSurface && !hasHideChrome && !hasShowInSidebar && !calendarFilters) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.serviceCueLayoutId (string|null), body.hideChrome (boolean), body.showInSidebar (boolean), or body.calendarSources + body.calendarTags (arrays) required");
         return;
       }
       let state = stageController.getState();
@@ -488,6 +497,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
       if (hasServiceCueLayout) state = await stageController.setViewServiceCueLayout(id, serviceCueLayoutId as string | null);
       if (hasHideChrome) state = await stageController.setViewHideChrome(id, body.hideChrome as boolean);
+      if (hasShowInSidebar) state = await stageController.setViewShowInSidebar(id, body.showInSidebar as boolean);
       if (calendarFilters) {
         state = await stageController.setViewCalendarFilters(id, calendarFilters.sources, calendarFilters.tags);
         // Forced past the subscriber gate and NOT awaited. The operator who just
@@ -585,12 +595,50 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // POST /api/outputs — { name?, viewId? } is the original call and still is. The
+    // Screens page's guided creation adds mode ("display"|"panel"), newView (make
+    // a blank view for it), slug and showInSidebar. All of it goes through
+    // stageController.createScreen, which validates before it writes.
     if (method === "POST" && pathname === "/api/outputs") {
       const body = await readBody(req) as Record<string, unknown>;
-      const name = typeof body.name === "string" ? body.name : undefined;
-      const viewId = typeof body.viewId === "string" ? body.viewId : null;
-      const { state } = await stageController.addOutput(name, viewId);
-      json(res, state, 201);
+      const input = readCreateScreenBody(body);
+      if ("error" in input) {
+        error(res, input.error);
+        return;
+      }
+      try {
+        const { state } = await stageController.createScreen(input);
+        json(res, state, 201);
+      } catch (err) {
+        answerScreenWriteFailure(res, err);
+      }
+      return;
+    }
+
+    // POST /api/outputs/:id/role — { mode, copyView?, viewId? }. Change a screen
+    // between a wall display and a control surface without changing any other
+    // screen: see stageController.setOutputRole, which refuses a mode that is
+    // neither. The checks here are the body's shape only.
+    const outputRoleMatch = pathname.match(/^\/api\/outputs\/([^/]+)\/role$/);
+    if (method === "POST" && outputRoleMatch) {
+      const body = await readBody(req) as Record<string, unknown>;
+      if ("copyView" in body && typeof body.copyView !== "boolean") {
+        error(res, "body.copyView must be a boolean");
+        return;
+      }
+      if ("viewId" in body && typeof body.viewId !== "string") {
+        error(res, "body.viewId must be a string");
+        return;
+      }
+      try {
+        const { state } = await stageController.setOutputRole(outputRoleMatch[1], body.mode as OutputMode, {
+          copyView: body.copyView as boolean | undefined,
+          viewId: body.viewId as string | undefined,
+        });
+        json(res, state);
+      } catch (err) {
+        answerScreenWriteFailure(res, err);
+      }
       return;
     }
 
@@ -609,7 +657,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // PATCH /api/outputs/:id — { name? }, { viewId? } (string|null = routing),
     // { blackout? } (boolean = full black screen), { locked? }, { hideTopBar? }
     // (boolean = draw no kiosk top bar), { allowHls? } (boolean = whether a Video
-    // widget here may play over HLS), { textSize? } (number 50-300 = the ServiceCue
+    // widget here may play over HLS), { groups? } (string[] = the message groups this
+    // screen belongs to), { textSize? } (number 50-300 = the ServiceCue
     // text size this display shows), and/or { slug? } (string; "" clears the
     // friendly URL alias)
     const outputPatchMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
@@ -623,6 +672,10 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasLocked = typeof body.locked === "boolean";
       const hasHideTopBar = typeof body.hideTopBar === "boolean";
       const hasAllowHls = typeof body.allowHls === "boolean";
+      // Present at all counts, for the same reason as textSize below:
+      // setOutputGroups says what is wrong with a value that is not a list of
+      // group ids, where an ignored field would answer 200 having done nothing.
+      const hasGroups = "groups" in body;
       // Present at all counts: setOutputTextSize refuses a value that is not a
       // number from 50 to 300, so junk is a 400 with the reason rather than an
       // ignored field.
@@ -630,8 +683,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasSlug = typeof body.slug === "string";
       const mode = body.mode === "panel" ? "panel" : body.mode === "display" ? "display" : null;
       const hasMode = mode !== null;
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasTextSize && !hasSlug && !hasMode) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.textSize (number, 50 to 300), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasGroups && !hasTextSize && !hasSlug && !hasMode) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.groups (string[]), body.textSize (number, 50 to 300), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
@@ -650,6 +703,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
         if (hasHideTopBar) state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
         if (hasAllowHls) state = await stageController.setOutputAllowHls(id, body.allowHls as boolean);
+        if (hasGroups) state = await stageController.setOutputGroups(id, body.groups);
         if (hasTextSize) state = await stageController.setOutputTextSize(id, body.textSize);
         if (hasSlug) state = await stageController.setOutputSlug(id, body.slug as string);
       } catch (err) {

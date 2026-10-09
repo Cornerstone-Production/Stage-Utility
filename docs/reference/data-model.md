@@ -53,8 +53,14 @@ A console can also ask the app to get out of its way. See
 [Running a console without the app's chrome](../features/operator-app.md#running-a-console-without-the-apps-chrome).
 The flag is stored on the view, so it follows the console to every phone that
 opens it, and it is carried by a duplicate and by an exported view bundle. It is
-a different thing from a screen's **Hide top bar**, which is per screen and hides
+a different thing from a screen's **Top bar** switch, which is per screen and hides
 the *display's* bar in a different page altogether.
+
+A console can also be kept out of the operator app's sidebar. The flag is
+`showInSidebar`, absent meaning listed, and it changes only the list: the console
+keeps its live controls, its page at `/consoles/<view id>` and its title, and the
+**Open** link on a screen's card still opens that screen. It is stored on the view and travels the
+same way the chrome flag does, in a duplicate and in an exported view bundle.
 
 ### Home
 
@@ -174,14 +180,14 @@ placeholder screens (loading, unrouted, empty, not configured, view missing)
 draw a bar whatever the routing says, because there is no content yet to fill
 the panel.
 
-A **locked** display (set on Screens) strips the escape hatches a kiosk
-otherwise shows. Its only effect is on the bar, so the Screens card offers it
-only where there is a bar to strip. A display with its **top bar hidden** (also
-set on Screens) draws no top bar at all — no brand, plan context or QR — and its
+A **locked** display (set in its Screen settings) strips the escape hatches a kiosk
+otherwise shows. Its only effect is on the bar, so the panel offers it
+only where there is a bar to strip. A display with its **top bar hidden** (the
+**Top bar** switch off, also in Screen settings) draws no top bar at all — no brand, plan context or QR — and its
 content fills the strip instead; the two are independent, since a lock keeps the
 bar and only removes its links.
 
-A display's **Use HLS on this screen** switch (also set on Screens,
+A display's **Use HLS** switch (also in Screen settings,
 `Output.allowHls`, on by default) is independent of both: it decides whether a
 Video widget here may fall back to HLS at all. Off, a feed that needs HLS
 (its device sends B-frames, or an unsupported codec) shows **This screen
@@ -198,7 +204,7 @@ that output, and answers the four per-screen settings differently:
 | Blackout | Ignored | The Screens page would be a grid of black rectangles. |
 | Lock | Ignored | The preview lives inside the console, whose navigation must keep working. |
 | Hidden top bar | **Honoured** | Purely visual, and showing what the screen will look like is what the card is for. |
-| Use HLS on this screen | Ignored (always on) | A settings-page card is not the real screen, and must not refuse to play a feed the wall it stands in for can play fine. |
+| Use HLS | Ignored (always on) | A settings-page card is not the real screen, and must not refuse to play a feed the wall it stands in for can play fine. |
 
 The hidden top bar is honoured only when the preview knows which screen it
 stands in for. The route names a *view*, and two screens can show one view with
@@ -272,6 +278,28 @@ object box fitted to its aspect ratio.
 **Layout templates** are named custom layouts saved to a reusable library. **Slot
 presets** snapshot a slot arrangement by name. Both are global and can be recalled
 onto any view or service type.
+
+## Stage messages
+
+A producer sends a short message to one or more **groups** of screens, or to
+**Everyone**. This is what is stored.
+
+Two stores, split by whose work they are:
+
+| File | Class | Holds |
+|---|---|---|
+| `messaging.json` | config | The groups (`{ id, name }`), the quick messages and the quick replies, and a `version` that goes up by one on every save (a file without one reads as 0). A save must carry the version it was built from, so a window that has not seen another window's change cannot overwrite it. Carried by every backup. |
+| `messages.json` | runtime | The day's messages and `lastClearedDate`. Not restored from a backup: a message is an observation about one day. |
+
+A screen is in any number of groups: `Output.groups` holds their ids, in the
+groups' own order, and is empty or absent when the screen is in none. **Everyone** is
+built in and is not stored; it reaches every screen whether the screen is in a
+group or not. Deleting a group takes its id off every screen that held it.
+
+A group's `id` is `g-` and eight hex characters, issued by the server and never
+changed, so renaming a group moves nothing that points at it. A message's `id` is
+sixteen hex characters. A message holds `to` (group ids, or `["everyone"]`), `text`,
+`alert` and `alertUntil`, `clearedAt`, `from` and its `replies`.
 
 ## How state reaches a screen
 

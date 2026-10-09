@@ -11,6 +11,7 @@ import { mock, test } from "node:test";
 import { DEFAULT_SETTLE_MS } from "@main/services/repeat-log";
 import { DRAIN_TIMEOUT_MS } from "./playback-reports.js";
 import { createSampler, STATS_READ_TIMEOUT_MS, trackDelta } from "./playback-stats.js";
+import { MAX_LAG_MS } from "@main/services/video/playback-health";
 
 /** Most tests here are not about logging at all. */
 const noLog = () => {};
@@ -58,9 +59,9 @@ test("webrtc: decoded/dropped are deltas since the last sample; width/height are
   const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, video, noLog);
   try {
     const first = await sampler.sample();
-    assert.deepEqual(first, { feedId: "feed-1", via: "webrtc", decoded: 30, dropped: 1, stalls: 0, width: 1280, height: 720 });
+    assert.deepEqual(first, { feedId: "feed-1", via: "webrtc", decoded: 30, dropped: 1, stalls: 0, width: 1280, height: 720, jitterBufferMs: null });
     const second = await sampler.sample();
-    assert.deepEqual(second, { feedId: "feed-1", via: "webrtc", decoded: 60, dropped: 2, stalls: 0, width: 1920, height: 1080 });
+    assert.deepEqual(second, { feedId: "feed-1", via: "webrtc", decoded: 60, dropped: 2, stalls: 0, width: 1920, height: 1080, jitterBufferMs: null });
   } finally {
     sampler.stop();
   }
@@ -211,6 +212,102 @@ test("webrtc: a session that started on `waiting` stays on it when a later repor
   }
 });
 
+// ── createSampler: webrtc receive delay ──────────────────────────────────
+//
+// jitterBufferMs is two cumulative counters read as deltas. The real browser
+// figures were measured against a live relay, see
+// docs/integrations/video-feeds.md.
+
+/** A peer connection whose getStats() answers each report in turn. */
+function fakePcDelay(reports: Record<string, number>[]) {
+  let call = 0;
+  return {
+    getStats: async () => {
+      const r = reports[Math.min(call, reports.length - 1)]!;
+      call += 1;
+      return new Map([["in", { type: "inbound-rtp", kind: "video", framesDecoded: 1, framesDropped: 0, frameWidth: 1280, frameHeight: 720, ...r }]]);
+    },
+  } as unknown as RTCPeerConnection;
+}
+
+test("webrtc: jitterBufferMs is the average wait per frame THIS interval, from the delta of the two counters", async () => {
+  const pc = fakePcDelay([
+    { jitterBufferDelay: 1, jitterBufferEmittedCount: 10 },
+    { jitterBufferDelay: 3, jitterBufferEmittedCount: 20 },
+  ]);
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc }, new FakeVideoEl() as unknown as HTMLVideoElement, noLog);
+  try {
+    assert.equal((await sampler.sample())!.jitterBufferMs, 100, "the first read is a delta against zero: 1 s over 10 frames");
+    assert.equal((await sampler.sample())!.jitterBufferMs, 200, "2 s over the next 10 frames, not the running 3 s over 20 (150)");
+  } finally {
+    sampler.stop();
+  }
+});
+
+test("webrtc: jitterBufferMs is null — never zero — when the counters are missing, did not advance, or restarted", async () => {
+  const missing = createSampler("feed-1", "Feed", { via: "webrtc", pc: fakePcDelay([{ jitterBufferDelay: 2 }]) }, new FakeVideoEl() as unknown as HTMLVideoElement, noLog);
+  try {
+    assert.equal((await missing.sample())!.jitterBufferMs, null, "no emitted count");
+  } finally {
+    missing.stop();
+  }
+
+  const flat = createSampler(
+    "feed-1",
+    "Feed",
+    {
+      via: "webrtc",
+      pc: fakePcDelay([
+        { jitterBufferDelay: 2, jitterBufferEmittedCount: 20 },
+        { jitterBufferDelay: 2.5, jitterBufferEmittedCount: 20 },
+        { jitterBufferDelay: 0.1, jitterBufferEmittedCount: 2 },
+      ]),
+    },
+    new FakeVideoEl() as unknown as HTMLVideoElement,
+    noLog,
+  );
+  try {
+    await flat.sample();
+    assert.equal((await flat.sample())!.jitterBufferMs, null, "delay moved but no frame left the buffer: nothing to average");
+    assert.equal((await flat.sample())!.jitterBufferMs, null, "counters that went backwards are a fresh session, a zero delta");
+  } finally {
+    flat.stop();
+  }
+});
+
+test("webrtc: a figure past what the server accepts is null, so it cannot cost the heartbeat its whole video array", async () => {
+  const sampler = createSampler(
+    "feed-1",
+    "Feed",
+    {
+      via: "webrtc",
+      pc: fakePcDelay([
+        { jitterBufferDelay: MAX_LAG_MS / 1000, jitterBufferEmittedCount: 1 },
+        { jitterBufferDelay: MAX_LAG_MS / 1000 + (MAX_LAG_MS + 1000) / 1000, jitterBufferEmittedCount: 2 },
+      ]),
+    },
+    new FakeVideoEl() as unknown as HTMLVideoElement,
+    noLog,
+  );
+  try {
+    assert.equal((await sampler.sample())!.jitterBufferMs, MAX_LAG_MS, "at the bound is reported as it is");
+    assert.equal((await sampler.sample())!.jitterBufferMs, null, "one second past it is not");
+  } finally {
+    sampler.stop();
+  }
+});
+
+test("hls: a report carries no receive-delay figure, not even as null", async () => {
+  const video = new FakeHlsVideoEl(1280, 720, 50, 2);
+  const sampler = createSampler("feed-2", "Feed", { via: "hls" }, video as unknown as HTMLVideoElement, noLog);
+  try {
+    const report = await sampler.sample();
+    assert.equal("jitterBufferMs" in report!, false);
+  } finally {
+    sampler.stop();
+  }
+});
+
 // ── createSampler: hls ───────────────────────────────────────────────────
 
 class FakeHlsVideoEl extends EventTarget {
@@ -235,6 +332,26 @@ class FakeHlsVideoEl extends EventTarget {
     return { totalVideoFrames: this.totalVideoFrames, droppedVideoFrames: this.droppedVideoFrames };
   }
 }
+
+test("webrtc: a sample reads stats only — it never waits on, or asks for, a frame from the screen", async () => {
+  // A hidden tab delivers no frames; a sample that waited for one would slow
+  // every heartbeat there, and a callback per sample is a page wake-up for
+  // nothing this report uses.
+  let asked = 0;
+  const video = Object.assign(new FakeVideoEl(), {
+    requestVideoFrameCallback: () => {
+      asked += 1;
+      return 1;
+    },
+  });
+  const sampler = createSampler("feed-1", "Feed", { via: "webrtc", pc: fakePcDelay([{ jitterBufferDelay: 1, jitterBufferEmittedCount: 10 }]) }, video as unknown as HTMLVideoElement, noLog);
+  try {
+    assert.equal((await sampler.sample())!.jitterBufferMs, 100);
+    assert.equal(asked, 0);
+  } finally {
+    sampler.stop();
+  }
+});
 
 test("hls: decoded is totalVideoFrames less droppedVideoFrames, both as deltas; videoWidth/Height are the current size", async () => {
   // totalVideoFrames counts dropped frames too; WebRTC's framesDecoded does

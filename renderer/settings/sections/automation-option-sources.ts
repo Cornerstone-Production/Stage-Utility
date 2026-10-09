@@ -6,7 +6,7 @@
 // is the only thing that answers them, and the rule editor reads nothing else.
 //
 // ONE RECORD, EXHAUSTIVE OVER THAT SET. `OptionSources` is keyed by the union
-// itself, so a ninth source added to ParamDef.optionsFrom is a compile error
+// itself, so a tenth source added to ParamDef.optionsFrom is a compile error
 // here until it is answered. That is the guarantee this file exists for: two of
 // the eight had no answer at all, and each was a select offering "Pick one…" and
 // nothing else —
@@ -23,9 +23,11 @@
 import { useMemo } from "react";
 
 import type { ParamDef } from "@main/types/automation";
+import { EVERYONE } from "@main/types/messages";
 import { invoke } from "../../lib/api";
 import { useQuery } from "@tanstack/react-query";
 import { useServiceTypes, useStageStateQuery } from "../../app/queries";
+import { messagingConfigQuery } from "../../lib/messaging-config";
 
 /** One runtime option source's name — the closed set ParamDef declares. */
 export type OptionSourceKey = NonNullable<ParamDef["optionsFrom"]>;
@@ -68,7 +70,7 @@ export type OptionSources = Record<OptionSourceKey, OptionSource>;
  * with no case for this URL — reached `.map` and threw inside the useMemo. That
  * is not a missing dropdown: it unmounts the whole Automation section and the
  * operator gets a blank page where their rules were. Every source goes through
- * here rather than eight copies of the same ternary.
+ * here rather than nine copies of the same ternary.
  */
 function list<T>(v: T[] | undefined): T[] {
   return Array.isArray(v) ? v : [];
@@ -99,6 +101,11 @@ export interface OptionSourceAnswers {
   pcoConfigured?: boolean;
   /** The app's own display outputs. See the "displays" source below. */
   outputs?: { id: string; name: string }[];
+  /** The messaging config, of which only the groups matter here. */
+  messagingConfig?: { groups?: { id: string; name: string }[] };
+  /** The read of it failed. Said under the field, because an empty To list
+   *  otherwise looks like a config with no groups. */
+  messagingFailed?: boolean;
 }
 
 /**
@@ -142,6 +149,16 @@ export function buildOptionSources(a: OptionSourceAnswers): OptionSources {
     // against that set. The param is labelled "Display" and stores an id, so
     // without this list an operator had to read one out of a URL and type it.
     "displays": { options: list(a.outputs).map((o) => ({ value: o.id, label: o.name })) },
+    // Everyone first, then the groups in the config's order; the VALUE is the id
+    // `POST /api/messages` takes in `to`. Empty until the config has answered,
+    // Everyone included: offering one choice while the groups are still loading
+    // would mark a saved group as "no longer offered" for as long as that took.
+    "message-groups": {
+      options: Array.isArray(a.messagingConfig?.groups)
+        ? [{ value: EVERYONE, label: "Everyone" }, ...a.messagingConfig.groups.map((g) => ({ value: g.id, label: g.name }))]
+        : [],
+      notice: a.messagingFailed && !a.messagingConfig ? "The message groups could not be read." : undefined,
+    },
   };
 }
 
@@ -162,12 +179,12 @@ export const OPTION_SOURCE_KEYS = Object.keys(buildOptionSources({})) as OptionS
  * ProPresenter pair — each answer with a list whatever the booth machines are
  * doing (an unreachable one yields an empty list, never an error), so none can
  * stop the editor opening. The macro read is cached server-side for 30s, which
- * is what keeps re-opening the editor off the LAN — the six queries below
- * share that same 30s as their own client-side staleTime (react-query's
- * default is 0), for the same reason: the layout editor's action-button
- * Inspector remounts per selection, so a bare `useQuery` re-fetched all six on
+ * is what keeps re-opening the editor off the LAN — each query below that is
+ * not an app-wide one takes that same 30s as its own client-side staleTime
+ * (react-query's default is 0), for the same reason: the layout editor's action-button
+ * Inspector remounts per selection, so a bare `useQuery` re-fetched every one on
  * every click between buttons, whatever those buttons' actions actually used —
- * selecting between four action buttons with no params at all issued ~28 GETs.
+ * even buttons whose actions take no params at all.
  * 30s trades a little staleness (a target added in Carbonite, an item added to
  * the plan, mid-edit) for not hammering the LAN every click; closing and
  * reopening the editor still forces a fresh read.
@@ -214,6 +231,13 @@ export function useOptionSources(): OptionSources {
     queryFn: () => invoke<{ items: Option[]; unreachable?: string[] }>("automation:propresenter-macros"),
     staleTime: OPTION_SOURCE_STALE_MS,
   });
+  // Local config, no network. Settings -> Messages invalidates this key when it
+  // saves; a group added from another window reaches the list once the 30 seconds
+  // pass.
+  const { data: messagingConfig, isError: messagingFailed } = useQuery({
+    ...messagingConfigQuery,
+    staleTime: OPTION_SOURCE_STALE_MS,
+  });
   const { data: stageState } = useStageStateQuery();
   const { data: serviceTypes } = useServiceTypes(stageState);
 
@@ -231,6 +255,8 @@ export function useOptionSources(): OptionSources {
         serviceTypes,
         outputs,
         pcoConfigured,
+        messagingConfig,
+        messagingFailed,
       }),
     [
       rosstalkTargets,
@@ -242,6 +268,8 @@ export function useOptionSources(): OptionSources {
       serviceTypes,
       outputs,
       pcoConfigured,
+      messagingConfig,
+      messagingFailed,
     ],
   );
 }

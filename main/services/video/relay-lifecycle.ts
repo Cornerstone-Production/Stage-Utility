@@ -47,6 +47,7 @@ import type { RelayFailureKind, RelayStatus, VideoPorts } from "../../types/vide
 import { atomicWrite } from "../write-queue.js";
 import { ensureBinary, relayDir, type EnsureBinaryOptions } from "./acquire.js";
 import { loadFeedsFile } from "./feed-store.js";
+import { InFlight } from "./in-flight.js";
 import { relayConfig } from "./mediamtx-config.js";
 import { MediaMtxRelay } from "./mediamtx-relay.js";
 import { MEDIAMTX_VERSION } from "./mediamtx-pin.js";
@@ -170,6 +171,10 @@ export class RelayLifecycle {
   private attempt = 0;
   private retryTimer: NodeJS.Timeout | null = null;
   private readinessTimer: NodeJS.Timeout | null = null;
+  /** Readiness ticks started and not yet finished, for whenIdle(). A set:
+   *  a stopped run's tick can still be inside its reconcile when the next
+   *  run starts one. */
+  private readonly readinessTicks = new InFlight();
   /** Bumped by stopReadinessPoll(): a readiness tick that was waiting on its
    *  reconcile when the poll stopped finds it moved on, and neither re-arms
    *  nor keeps the next poll from starting. */
@@ -240,6 +245,25 @@ export class RelayLifecycle {
   private async hasRelayFeeds(): Promise<boolean> {
     const { feeds } = await this.deps.loadFeedsFile();
     return feeds.some((f) => f.source.kind === "pull" || f.source.kind === "push");
+  }
+
+  /** Resolves once the chain, every readiness tick in flight, and the
+   *  publishes and settles they set off in the video service have all
+   *  finished, including any of them started while waiting. Not covered: a
+   *  retry or readiness timer not yet fired, and the status poll a successful
+   *  reconcile starts (polls are not tracked anywhere; video-service.ts only
+   *  guards against two at once). Rejects only if the chain does, which
+   *  takes stepFailed() itself throwing. For the caller that needs a step's
+   *  effects to have landed: a start reads the feed file and a secrets key,
+   *  and no count of event-loop turns covers how long that takes under load. */
+  async whenIdle(): Promise<void> {
+    for (;;) {
+      const chain = this.chain;
+      await chain;
+      await this.readinessTicks.whenIdle();
+      await videoService.whenBackgroundIdle();
+      if (chain === this.chain && this.readinessTicks.isIdle()) return;
+    }
   }
 
   /**
@@ -625,10 +649,11 @@ export class RelayLifecycle {
         return;
       }
       attempt++;
-      this.readinessTimer = setTimeout(() => void tick(), restartDelayMs(attempt));
+      this.readinessTimer = setTimeout(runTick, restartDelayMs(attempt));
       this.readinessTimer.unref?.();
     };
-    void tick();
+    const runTick = () => void this.readinessTicks.track(tick());
+    runTick();
   }
 
   /** "relay started", once per process, once its API has answered: a

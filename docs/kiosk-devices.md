@@ -34,7 +34,7 @@ that page is itself the scan. The new device offers two things:
 
 | | |
 |---|---|
-| **Set up as a new screen** | Creates a screen and binds the device to it in one step. |
+| **Set up as a new screen** | Opens the [Screen settings panel](features/operator-app.md#adding-a-screen) in three guided steps for this device. **Create screen** makes the screen and binds the device to it in one step; closing the panel first makes nothing. |
 | **Use for an existing screen** | Binds it to a screen that already exists — the hardware-swap case. |
 
 The screen redirects itself; you do not have to walk to it.

@@ -20,6 +20,7 @@ page first loads.
 | `slots:devices` | 4.5 KB | up to 6.7/s during a service — RF, battery, audio level |
 | `stage:state-changed` | ~35 KB | only when something structural changes |
 | `pco:live` | ~1.2 KB | on change, else a 15s keepalive |
+| `messages:state` | see below | when a message is sent, an alert is cleared or runs out, a group or a quick list changes, or the nightly clear removes messages |
 | `spl:metrics` | under 1 KB | up to 4 Hz while Smaart is connected |
 | People's photos | ~1.3 MB total | once, then cached |
 | App bundle | ~900 KB | once per deploy |
@@ -28,6 +29,36 @@ Wireless receivers report about once per second per channel, which is what sets 
 6.7/s ceiling — a 150 ms debounce collapses sixteen channels into at most that many
 pushes. Those readings travel on their own channel so a meter moving does not
 re-send the plan, slot configuration and layouts along with it.
+
+### Stage messages
+
+`messages:state` carries the day's [stage messages](../features/stage-messages.md)
+and what the screens offer for it: `{ rev, serverNow, groups, quickMessages,
+quickReplies, messages, alerts }`. The stock groups and quick lists are about 0.5 KB;
+at their limits (20 groups, 24 quick messages of 280 characters, 12 quick replies
+of 60) they are about 9 KB. A short message adds about 0.2 KB, a 280-character alert
+about 0.45 KB and each reply about 0.2 KB, so a day with twenty messages and a few
+replies is under 5 KB. The ceiling is 200 messages (the cap) of full-length alerts
+each carrying 20 replies (the most one keeps) of full length, about 0.85 MB; a real
+day is a small fraction of it. The whole state is sent on every change, not just
+the new message.
+
+A page that holds both the alert overlay and a Messages widget (a kiosk screen
+showing one) issues one small `GET /api/messages` per subscriber when it loads,
+deliberately: the read is a measured request and answer, which is how a screen with
+no other server timestamp learns the server's clock, so it is not shared between
+subscribers and is sent `no-store`.
+
+It changes only when somebody acts: one frame per send, per cleared alert, per
+save of the messaging config that changed a group (adding, renaming or removing
+one) or either quick list, once as each alert runs out, and at midnight only when the clear removed
+something. Between those it is silent, and with no messages sent it is a single small
+frame when a client connects. It is part of the connect-time snapshot, so a
+screen that connects while an alert is running shows it. A client that has named
+the channels it renders and left this one out is not sent the changes. Every kiosk
+screen names this channel, whatever it shows, so that an alert can draw over it;
+a Screens-card preview does not. In a layout it is otherwise named only by one
+that holds a Messages or Message composer widget.
 
 ## What keeps it small
 

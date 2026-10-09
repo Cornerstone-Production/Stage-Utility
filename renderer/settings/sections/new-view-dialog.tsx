@@ -69,6 +69,7 @@ export function NewViewDialog({
   open,
   onOpenChange,
   onCreated,
+  fixedSurface,
 }: {
   handlers: SectionHandlers;
   trigger: ReactNode;
@@ -76,11 +77,21 @@ export function NewViewDialog({
   onOpenChange?: (open: boolean) => void;
   /** Called with the new view's id, so a caller can assign or open it. */
   onCreated?: (id: string) => void;
+  /**
+   * What the view is FOR, already decided by the caller: a screen's panel asks
+   * for "a new control surface" or "a new wall view", and offering the choice
+   * again would let a control surface be given a view it cannot show. A console
+   * can only be a custom layout, so "console" fixes the kind as well.
+   */
+  fixedSurface?: ViewSurface;
 }) {
   const [name, setName] = useState("");
   const [kind, setKind] = useState<ViewKind>("slots");
   const [startFrom, setStartFrom] = useState<StartFrom>("blank");
-  const [surface, setSurface] = useState<ViewSurface>("display");
+  const [chosenSurface, setSurface] = useState<ViewSurface>("display");
+  const surface = fixedSurface ?? chosenSurface;
+  // A console can only be a custom layout: nothing else has anywhere to put a control.
+  const effectiveKind: ViewKind = fixedSurface === "console" ? "custom" : kind;
 
   return (
     <Dialog
@@ -94,8 +105,8 @@ export function NewViewDialog({
       onConfirm={async () => {
         // Only a custom View has a layout to put a control on, so only a custom
         // View can be a console. The server enforces this too.
-        const id = await handlers.handleAddView(name.trim(), kind, kind === "custom" ? surface : "display");
-        if (id && kind === "custom" && startFrom !== "blank") {
+        const id = await handlers.handleAddView(name.trim(), effectiveKind, effectiveKind === "custom" ? surface : "display");
+        if (id && effectiveKind === "custom" && startFrom !== "blank") {
           const strip = startFrom.startsWith("ultritouch-") ? (startFrom as UltritouchModel) : null;
           const objects = strip ? ultritouchTemplate(strip) : startFrom === "dashboard" ? dashboardTemplate() : confidenceMonitorTemplate();
           await handlers.handleSetViewLayout(id, {
@@ -119,22 +130,24 @@ export function NewViewDialog({
           className="text-fg"
           autoFocus
         />
-        <Select value={kind} onValueChange={(v: string) => setKind(v as ViewKind)}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {KIND_ORDER.map((k) => (
-              <SelectItem key={k} value={k}>
-                {KIND_LABELS[k]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {fixedSurface !== "console" && (
+          <Select value={kind} onValueChange={(v: string) => setKind(v as ViewKind)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {KIND_ORDER.map((k) => (
+                <SelectItem key={k} value={k}>
+                  {KIND_LABELS[k]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         {/* What it is FOR, in the operator's words rather than the schema's.
             Offered only for a custom layout: the built-in kinds have no editable
             layout, so a console among them could not carry a control. */}
-        {kind === "custom" && (
+        {effectiveKind === "custom" && !fixedSurface && (
           <fieldset className="flex flex-col gap-1.5 border-0 p-0 m-0">
             <legend className="text-caption2 text-fg-subtle p-0">What is it for</legend>
             {/* A themed RadioGroup, not bare `input type="radio"`. Those drew the
@@ -163,7 +176,7 @@ export function NewViewDialog({
             </RadioGroup>
           </fieldset>
         )}
-        {kind === "custom" && (
+        {effectiveKind === "custom" && (
           <label className="flex flex-col gap-1.5">
             <span className="text-caption2 text-fg-subtle">Start from</span>
             <Select value={startFrom} onValueChange={(v: string) => setStartFrom(v as StartFrom)}>

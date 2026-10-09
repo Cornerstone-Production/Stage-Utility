@@ -152,6 +152,7 @@ describe("every registered route resolves a title", () => {
         "/settings/advanced",
         "/settings/branding",
         "/settings/integrations",
+        "/settings/messages",
         "/video-feeds",
         "/views",
       ],
@@ -159,7 +160,7 @@ describe("every registered route resolves a title", () => {
     );
   });
 
-  test("nineteen of the twenty-four registered routes are titled", () => {
+  test("the registered routes that resolve a title are exactly these", () => {
     // The five untitled: /settings, /displays, /views, /scriptview and
     // /scriptview/$, every one a redirect. Everything else must resolve a label.
     const titled = REGISTERED.filter((p) => resolvePage(fill(p), CONSOLES)?.page.label);
@@ -184,6 +185,7 @@ describe("every registered route resolves a title", () => {
         "/settings/advanced",
         "/settings/branding",
         "/settings/integrations",
+        "/settings/messages",
         "/video-feeds",
       ],
       "a route's title status changed; update this list deliberately",

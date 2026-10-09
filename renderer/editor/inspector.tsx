@@ -59,6 +59,7 @@ import { useReaperStatus } from "../main/use-reaper-state";
 import { useCueLive } from "../main/use-cue-live";
 import { useOscTargets } from "../main/use-osc-state";
 import { pcoConnected, useStageState } from "../main/use-stage-state";
+import { toast } from "../components/ui/toast";
 import { useProdcomChannels } from "../main/use-prodcom-channels";
 import { useTranscript } from "../main/use-transcript";
 import { mergeChannels } from "../main/channel-color";
@@ -89,6 +90,7 @@ import {
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
 import { CuePicker } from "./cue-picker";
+import { MessagesGroupsPicker } from "./messages-groups-picker";
 import { ActionButtonInspector } from "./action-button-inspector";
 import { cn } from "../lib/cn";
 import { ColorField } from "../components/ui/color-field";
@@ -597,17 +599,28 @@ export function PlanAttachmentConfig({
   async function fitBoxToFile() {
     setFitting(true);
     try {
-      const r = await loadProcessedAttachment(c.match ?? "stage plot", {
-        page: c.page ?? 1,
-        crop: c.crop,
-        trim: c.trim,
-        background: c.background,
-      });
-      if (r && r !== "empty" && r.height > 0) {
+      // The active plan id busts the browser's cached copy, as it does on a display,
+      // and recheck goes around it: this is an operator asking now.
+      const r = await loadProcessedAttachment(
+        c.match ?? "stage plot",
+        { page: c.page ?? 1, crop: c.crop, trim: c.trim, background: c.background },
+        stage.state?.planId ?? null,
+        { recheck: true },
+      );
+      if (r && typeof r === "object" && r.height > 0) {
         const aspect = r.width / r.height; // w:h of the image in px
         const newH = (o.w * canvas.width) / aspect / canvas.height;
         onGeom({ h: clamp(newH, 0.03, 1 - o.y) });
+      } else {
+        // Nothing to size the box to. Doing nothing read as a button that does not work.
+        toast.error(
+          r === "empty"
+            ? `No file matching "${c.match ?? "stage plot"}" is on the current plan, so the box was left as it is.`
+            : "Couldn't load the file to fit the box to, so the box was left as it is.",
+        );
       }
+    } catch {
+      toast.error("Couldn't load the file to fit the box to, so the box was left as it is.");
     } finally {
       setFitting(false);
     }
@@ -1698,6 +1711,9 @@ export function Inspector({
           )}
           <p className="text-caption2 text-fg-muted leading-snug">Driven by the Baptisms tab. &ldquo;Live&rdquo; ticks the current testimony/baptism; others summarize the session.</p>
         </>
+      )}
+      {c.type === "messages" && (
+        <MessagesGroupsPicker groups={c.groups} onChange={(groups) => onConfig({ ...c, groups })} />
       )}
       {c.type === "image" && (
         <ImageConfig src={c.src} onChange={(v) => onConfig({ type: "image", src: v })} />

@@ -19,7 +19,8 @@ import { viewSurface, KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/view
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
 import { isPreviewSlug, previewOutputId, previewViewIdFromSlug } from "./preview-url";
-import { resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
+import { ownScreen, resolveScreen, type OwnScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
+import { MessageAlertOverlay } from "./message-alert-overlay";
 import { anyPlaying, drainReportsInTime, onAnyPlayingChange, VIDEO_HEARTBEAT_MS } from "./video/playback-reports";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
@@ -588,6 +589,10 @@ export function StageView() {
   // instead of leaving it dark.
   if (!state) return <KioskError message="State is unavailable." />;
 
+  // Which screen this page is, worked out once for what it draws and for the alert
+  // over it. Null on a preview, which is a picture of a screen and not one.
+  const own = ownScreen({ state, displayId, previewViewId });
+
   const body = ((): ReactNode => {
     switch (screen.k) {
       case "unrouted":
@@ -599,7 +604,7 @@ export function StageView() {
       case "empty":
         return <KioskEmpty state={state} screen={screen} />;
       case "view":
-        return renderView(screen, state, previewViewId, previewDraftSlots);
+        return renderView(screen, state, previewViewId, previewDraftSlots, own);
       default: {
         const _never: never = screen;
         void _never;
@@ -608,7 +613,15 @@ export function StageView() {
     }
   })();
 
-  return <StageErrorBoundary>{body}</StageErrorBoundary>;
+  // A stage-message alert draws over whatever this screen shows, whatever the
+  // layout or the kind. Drawn below the blackout return above, so a blacked-out
+  // screen stays black.
+  return (
+    <>
+      <StageErrorBoundary>{body}</StageErrorBoundary>
+      {own && <MessageAlertOverlay groups={own.groups} />}
+    </>
+  );
 }
 
 /**
@@ -624,6 +637,7 @@ function renderView(
   state: StageState,
   previewViewId: string | null,
   previewDraftSlots: Slot[] | null,
+  own: OwnScreen | null,
 ): ReactNode {
   const { kind, view: activeView, displayId, isPreview, outputMode, allowHls } = screen;
 
@@ -657,6 +671,9 @@ function renderView(
               interactive={capabilityLive(contextForOutput(outputMode, isPreview), "control")}
               surface={viewSurface(activeView)}
               allowHls={allowHls}
+              // Which screen this is and the message groups it is in; null on a
+              // preview, which is a picture of a screen and not one.
+              screen={own}
             />
           </div>
         </div>

@@ -16,7 +16,7 @@
 // useful time. Every query is coerced to a boolean or a string first.
 
 import { strict as assert } from "node:assert";
-import { after, afterEach, describe, test } from "node:test";
+import { after, afterEach, describe, mock, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
@@ -28,6 +28,7 @@ const React = await import("react");
 const { PeopleGraphInspector, PlanAttachmentConfig, RossTalkButtonConfig } = await import("./inspector.js");
 const { formatCommand } = await import("@main/services/rosstalk-commands.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
+const { toast } = await import("../components/ui/toast.js");
 const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
@@ -336,5 +337,56 @@ describe("the plan attachment's file picker", () => {
     } finally {
       f.restore();
     }
+  });
+});
+
+describe("the Plan file inspector's Fit box to file", () => {
+  const attachment = () =>
+    React.createElement(PlanAttachmentConfig, {
+      c: { type: "plan-attachment", match: "stage plot" } as Extract<LayoutObjectConfig, { type: "plan-attachment" }>,
+      onConfig: () => {},
+      o: { id: "o1", x: 0, y: 0, w: 0.5, h: 0.5 } as LayoutObject,
+      canvas: { width: 1920, height: 1080, background: null },
+      onGeom: () => {},
+    });
+  const click = async () => {
+    fireEvent.click(screen.getByRole("button", { name: /Fit box to file/ }));
+    await settle();
+    await settle();
+  };
+
+  async function fitWith(status: number) {
+    const asked: string[] = [];
+    const caches: Array<RequestCache | undefined> = [];
+    const errors: string[] = [];
+    mock.method(toast, "error", (m: string) => { errors.push(m); });
+    const f = stubFetchWithLog((url, init) => {
+      if (url.includes("/api/pco/attachment?")) { asked.push(url); caches.push(init?.cache); return reply(status, ""); }
+      if (url.includes("/api/pco/attachments")) return ok([]);
+      return url.includes("/api/state") ? ok({ pcoConfigured: true, planId: "p9" }) : ok({});
+    });
+    try {
+      await mount(attachment());
+      await click();
+    } finally {
+      f.restore();
+      mock.restoreAll();
+    }
+    return { asked, caches, errors };
+  }
+
+  test("a plan with no such file says so instead of doing nothing, and asks for the active plan, fresh", async () => {
+    const { asked, caches, errors } = await fitWith(404);
+    assert.equal(asked.length, 1);
+    assert.deepEqual(caches, ["reload"], "an operator asking now must not be answered from the HTTP cache");
+    assert.match(asked[0], /plan=p9/, "the active plan id was not sent as the cache-bust");
+    assert.equal(errors.length, 1, `expected a notice, got ${JSON.stringify(errors)}`);
+    assert.match(errors[0], /No file matching "stage plot"/);
+  });
+
+  test("a failed load says so instead of doing nothing", async () => {
+    const { errors } = await fitWith(502);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Couldn't load the file/);
   });
 });

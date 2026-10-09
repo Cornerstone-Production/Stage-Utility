@@ -297,6 +297,13 @@ function patch<T>(path: string, body?: unknown): Promise<T> {
   });
 }
 
+function put<T>(path: string, body?: unknown): Promise<T> {
+  return apiFetch<T>(path, {
+    method: "PUT",
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
 function del<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: "DELETE" });
 }
@@ -437,6 +444,12 @@ export type IpcChannel =
   | "layoutTemplates:list"
   | "layoutTemplates:save"
   | "layoutTemplates:update"
+  | "messages:clearAlert"
+  | "messages:get"
+  | "messages:reply"
+  | "messages:send"
+  | "messaging:get"
+  | "messaging:set"
   | "notes:set"
   | "obs:getStatus"
   | "osc:addTarget"
@@ -454,9 +467,11 @@ export type IpcChannel =
   | "outputs:rename"
   | "outputs:reorder"
   | "outputs:setAllowHls"
+  | "outputs:setGroups"
   | "outputs:setHideTopBar"
   | "outputs:setLocked"
   | "outputs:setMode"
+  | "outputs:setRole"
   | "outputs:setSlug"
   | "outputs:setTextSize"
   | "outputs:setView"
@@ -588,6 +603,7 @@ export type IpcChannel =
   | "views:setLayout"
   | "views:setServiceCueLayout"
   | "views:setSlots"
+  | "views:setShowInSidebar"
   | "views:setSlotsLayout"
   | "views:setSurface"
   | "window:closeSettings"
@@ -1142,6 +1158,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { serviceCueLayoutId: p.serviceCueLayoutId });
     }
 
+    case "views:setShowInSidebar": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { showInSidebar: p.showInSidebar });
+    }
+
     case "views:setHideChrome": {
       const id = p.id as string;
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { hideChrome: p.hideChrome });
@@ -1338,6 +1359,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "outputs:setAllowHls": {
       const id = p.id as string;
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { allowHls: p.allowHls });
+    }
+
+    case "outputs:setGroups": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { groups: p.groups });
     }
 
     case "history:editWindow":
@@ -1541,6 +1567,17 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "outputs:setMode":
       return patch<T>(`/api/outputs/${encodeURIComponent(String(p.id))}`, { mode: p.mode });
 
+    // Change a screen's role without changing any other screen: `copyView` makes a
+    // copy of its view for the new role, `viewId` points it at one that already
+    // fits. The server runs the writes in the order its own guards allow and puts
+    // back what landed if one fails.
+    case "outputs:setRole":
+      return post<T>(`/api/outputs/${encodeURIComponent(String(p.id))}/role`, {
+        mode: p.mode,
+        copyView: p.copyView,
+        viewId: p.viewId,
+      });
+
     case "barItems:set":
       return post<T>("/api/bar-items", p);
 
@@ -1549,6 +1586,25 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "notes:set":
       return post<T>("/api/notes", p);
+
+    case "messages:get":
+      // no-store, as the poll transport does: this read is also a clock sample (see
+      // useMessagesStatus), so it must come from the server now and not a cache.
+      return apiFetch<T>("/api/messages", { cache: "no-store" });
+    case "messages:send":
+      return post<T>("/api/messages", { to: p.to, text: p.text, alert: p.alert, from: p.from });
+    case "messages:clearAlert":
+      return post<T>(`/api/messages/${encodeURIComponent(String(p.id))}/clear-alert`, { from: p.from });
+    case "messages:reply":
+      return post<T>(`/api/messages/${encodeURIComponent(String(p.id))}/replies`, {
+        text: p.text,
+        objectId: p.objectId,
+        outputId: p.outputId,
+      });
+    case "messaging:get":
+      return apiFetch<T>("/api/messaging");
+    case "messaging:set":
+      return put<T>("/api/messaging", p);
 
     case "views:setSurface":
       return patch<T>(`/api/views/${encodeURIComponent(String(p.id))}`, { surface: p.surface });
@@ -2249,8 +2305,16 @@ if (typeof document !== "undefined") {
  */
 export function onNotification(
   channel: string,
-  cb: (payload: unknown, replayed: boolean) => void,
+  handler: (payload: unknown, replayed: boolean) => void,
 ): () => void {
+  // Every subscription is its own entry in the registries below, whatever
+  // function it was handed. They are Sets, and the React Compiler hoists a
+  // callback that captures nothing to module scope: every component using a
+  // hook like useDevices hands over the IDENTICAL `() => void refresh()`, the
+  // Set kept one entry for all of them, and the first component to unmount
+  // unsubscribed every other. Closing a Screen settings panel, or removing a
+  // screen card, stopped the Screens page hearing about devices until a reload.
+  const cb = (payload: unknown, replayed: boolean) => handler(payload, replayed);
   // Replay THIS process's own cached snapshot to the new callback, on either
   // transport. `lastPayload` is written by `fanOut`, which runs for every frame
   // this tab receives regardless of whether it arrived over the worker or the

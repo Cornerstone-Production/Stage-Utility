@@ -94,6 +94,23 @@ Center marks as post-service are left out. The time renders in the app's time zo
 and 12/24-hour setting ([Settings → Advanced](../ops/install-and-config.md#time-zone)),
 so a screen driven from a UTC server still reads the venue's clock.
 
+**Plan file** picks its file by name: the first file on the current plan whose
+name (or the item it hangs off) contains the **Match** text. It keeps checking
+until it has one. A plan with no matching file shows a notice and is asked
+again every two minutes, so a stage plot attached after the display loaded
+appears by itself. A load that fails (Planning Center unreachable, a download
+link that expired) is retried after 5, 15 and 45 seconds and then every two
+minutes. Once the file is up it is checked every five minutes. The server reads
+the plan's file list from Planning Center at most every three minutes (45 seconds
+around a service), so a revised file on the same plan replaces it within about
+eight minutes, and a page that has just loaded may show the browser's copy until its
+first check. A check that finds the same file does nothing, and the old picture
+stays until the new one is ready. A failed
+check never swaps a picture, or the notice on screen, for another one. Switching
+plans loads the new plan's file at once. A display that is still failing after
+its quick retries logs a `[plan-file]` line once, so `/log` says which page and
+which file, and one more when the file draws again.
+
 **Embedded view** and **Embedded screen** can be expanded: on an operator
 surface each tile carries a control in its bottom-right corner that grows it to
 fill the window, and Escape or the panel's close button brings it back. Nothing
@@ -465,12 +482,23 @@ nothing.
 | **RossTalk button** | Fires a RossTalk command | A Ross switcher |
 | **Action button** | Runs one of the app's own actions | This app |
 | **Cue button** | Fires a cue and shows its device's state: on, off, settling after a press, stale when Companion has lost the device, dimmed when the cue refuses | This app, via Companion |
-| **Notes** | A shared note anyone can type into | This app |
+| **Notes** | A note typed on a console and shown wherever the widget is | This app |
 | **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
+| **Message composer** | Where a producer sends [stage messages](../features/stage-messages.md): who it goes to, quick messages, the text, an alert switch, and the day's thread with its replies | This app |
+| **Messages** | The newest three [stage messages](../features/stage-messages.md) sent to this screen's groups, each with its sender, its age and the latest reply under it | This app |
 
-**Notes** and **Checklist** are shared, not per-screen: two people looking at them
-see the same text. See [OSC](../integrations/osc.md) and
-[RossTalk](../integrations/rosstalk.md).
+A **Notes** widget keeps its own text: everyone looking at that widget sees the
+same words, but a second Notes widget, or a copy made by duplicating the view,
+starts empty. It can be typed into on a console and is read-only on a wall
+display. To write on a console and show the note on a wall, put the Notes widget
+in a view of its own and add that view to both layouts with **Embedded view**:
+both embeds are the same widget, so an edit on the console reaches the wall
+within about a second.
+
+Every **Checklist** reading the plan's checklist shows the same rows and ticks,
+wherever it is placed.
+
+See [OSC](../integrations/osc.md) and [RossTalk](../integrations/rosstalk.md).
 
 **Action button** picks an **Action** from the same registry the
 [automation rules editor](../automation.md) offers — every action in
@@ -511,6 +539,35 @@ Two colour schemes, by what the switch means:
 The live scheme is carried by the OBS recording, OBS stream and REAPER recording
 built-ins. Everything else draws the ordinary way, and both draw an unreadable
 state as the amber dashed ring.
+
+**Message composer** has no options. It draws, top to bottom: a header with the
+name **Messages** and who a message from it is signed as, **To** (Everyone and
+each group; Everyone stands alone, several groups can be picked, and the choice is
+kept after a send), **Quick messages** (pressing one fills the box, it does not
+send), the text box, **Alert: takes over the screen** beside **Send** (red, and
+**Send alert**, while the alert switch is on), a line saying how many screens the
+message reaches, and **Today**: the thread, newest first, each reply under its
+message, with **Clear alert** on any alert still running. A message signs with the
+screen's name on a screen, the console's name on a console in the app, and **Home**
+on Home. A send that fails keeps the text and the choices and says why. Like every
+control it does nothing on a wall display.
+
+**Messages** shows the [stage messages](../features/stage-messages.md) that went
+to Everyone or to a group it follows: up to three, newest first and largest, with
+the sender and how long ago (against the server's clock) above each and the latest
+reply in green below. Which groups it follows is its **Groups** setting. **Follow
+screen**, the default, takes the groups of the screen drawing it, so one
+layout shown in two rooms follows each. **Own groups** is its own list and
+overrides the screen's; it is also the only way for a widget on a console in the
+app to have any, since a console is not a screen. In the layout editor a widget with no groups of its own says **Follows the screen it
+is on**; on a console in the app, which is no screen, it says **Choose groups for
+this widget**; on a Screens-card preview it draws only its heading.
+Before the server has answered it draws only its heading, never "No messages".
+
+On a panel or a console in the app, **Messages** also draws the quick replies as
+buttons under the newest message it shows, and the server checks the press against
+the widget's groups ([Replies](../features/stage-messages.md#replies-and-who-may-answer)).
+A wall display draws no buttons.
 
 ## Layout
 
@@ -568,6 +625,14 @@ tries WebRTC again every 5 minutes, beside the HLS picture rather than in its
 place, and moves over only once WebRTC is carrying frames — the picture never
 drops for the attempt.
 
+An HLS picture keeps itself near live. A stall in the source or the network
+resumes where it stopped, so the picture can fall behind. Slightly behind,
+with enough buffered, it plays a little fast (at most 1.25×) until it is back.
+More than 2 seconds past where it should sit, it jumps straight to live,
+holding for a moment while the new position loads. A jump is logged, and
+happens at most once every 10 seconds. iPhones and iPads before iOS 17.1 play
+HLS natively and do neither.
+
 A pull feed reading standby is connected to all the same: the relay dials a
 pull feed's source only once something asks to watch it, so the widget's own
 request is what brings it up.
@@ -576,7 +641,7 @@ request is what brings it up.
 feeds page while a layout still points at it, and while a feed that dropped
 waits for its next attempt. **Can't play here** is this screen's browser
 lacking WebRTC or HLS support for the feed's address, or this screen's own
-**Use HLS on this screen** switch (Screens page) turned off for a feed that
+**Use HLS** switch (its Screen settings, on Screens) turned off for a feed that
 needs HLS to play at all.
 
 ---

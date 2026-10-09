@@ -23,6 +23,8 @@ import "./checklist-ticks-store.js";
 import "./history-milestones-store.js";
 import "./layout-groups-store.js";
 import "./layout-templates-store.js";
+import "./messages-store.js";
+import "./messaging-store.js";
 import "./osc-store.js";
 import "./patch-store.js";
 import "./presets-store.js";

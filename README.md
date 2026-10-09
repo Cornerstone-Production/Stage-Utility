@@ -29,6 +29,7 @@ screens, the settings UI and a phone remote from one port.
 | [Display URLs](docs/display-urls.md) | addressing screens |
 | [Kiosk devices](docs/kiosk-devices.md) | the agent a screen runs, and claiming it |
 | [The context bar](docs/features/context-bar.md) | the live strip above every operator page |
+| [Stage messages](docs/features/stage-messages.md) | groups of screens, and messages sent to them |
 | [Slots](docs/slots.md) | matching people and devices to positions |
 | [Moving a view](docs/moving-a-view.md) | taking one layout to another install |
 | [Attendance and service history](docs/features/attendance-and-history.md) | what a service records, and reading it back |

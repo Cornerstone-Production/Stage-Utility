@@ -10,7 +10,7 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useServerClock } from "@renderer/lib/server-clock";
 import { invoke } from "../lib/api";
-import { logReadFailure } from "../lib/client-log";
+import { logReadFailure, logToServer } from "../lib/client-log";
 import { BrandLogo } from "../components/brand-logo";
 import { Readout } from "./readout";
 import { IDIOM_TYPES } from "@main/types/readout-types";
@@ -23,6 +23,11 @@ import { useResiStatus, useYouTubeStatus } from "./use-stream-state";
 import { obsRecordTimecode } from "@main/services/obs-record-clock";
 import { streamers, streamIndicator, STREAMER_FOR, type StreamerName } from "../app/recording-status";
 import { usePvpState } from "./use-pvp-state";
+import { useMessagesStatus } from "./use-messages-state";
+import { MessagesObject } from "./messages-object";
+import type { OwnScreen } from "./stage-screen";
+import { MessageComposerObject, senderName } from "./message-composer-object";
+import type { MessagesState } from "@main/types/messages";
 import { useReaperStatus } from "./use-reaper-state";
 import { useScoresStatus } from "./use-scores-state";
 import { ScoresObject } from "./scores-object";
@@ -94,6 +99,11 @@ export interface LayoutRenderCtx {
   pvp: PvpStatusDTO | null;
   scores: ScoresStatusDTO | null;
   scoresKnown: boolean;
+  /** The day's stage messages, the groups and the quick lists — for the Messages
+   *  and Message composer widgets. Whether it has answered is `messagesKnown`:
+   *  "No messages" is a claim only once it has. */
+  messages: MessagesState | null;
+  messagesKnown: boolean;
   resi: StreamStatusDTO | null;
   resiKnown: boolean;
   youtube: YouTubeStatusDTO | null;
@@ -141,6 +151,18 @@ export interface LayoutRenderCtx {
    *  a Screens-card preview and the layout editor's own canvas are never the
    *  real screen a B-frame feed would be refused on, so each sets this true. */
   allowHls: boolean;
+  /**
+   * The screen (output) this layout is being drawn ON: its id, and the message
+   * groups it is in. Null where the surface is not a screen — an in-app
+   * console, Home, the layout editor, and a Screens-card preview, which is a
+   * picture of another screen and not that screen.
+   *
+   * Required, like `allowHls` and for the same reason: a surface that forgot
+   * them would read as "not a screen" and a Messages widget on a real wall
+   * would silently follow no group. Embedded views inherit their parent's; a
+   * screen-embed tile carries the screen it shows (see ScreenEmbedObject).
+   */
+  screen: OwnScreen | null;
   /** Canvas height in design px — basis for fraction→px font/spacing sizing. */
   H: number;
   /** True only on a real display route. Interactive objects (live controls)
@@ -1619,6 +1641,39 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     }
     case "scores":
       return <ScoresObject config={c} scores={ctx.scores} known={ctx.scoresKnown} />;
+    case "message-composer":
+      return (
+        <MessageComposerObject
+          state={ctx.messages}
+          known={ctx.messagesKnown}
+          outputs={ctx.state.outputs ?? []}
+          from={senderName({
+            home: ctx.home,
+            outputId: ctx.screen?.outputId ?? null,
+            monitor: ctx.screen?.monitor === true,
+            embedChain: ctx.embedChain,
+            outputs: ctx.state.outputs ?? [],
+            views: ctx.state.views ?? [],
+          })}
+          interactive={ctx.interactive}
+          now={ctx.now}
+          ts={ts}
+        />
+      );
+    case "messages":
+      return (
+        <MessagesObject
+          objectId={o.id}
+          config={c}
+          state={ctx.messages}
+          known={ctx.messagesKnown}
+          screen={ctx.screen}
+          interactive={ctx.interactive}
+          editing={ctx.editing === true}
+          now={ctx.now}
+          ts={ts}
+        />
+      );
 
     default: {
       // Exhaustiveness guard: every LayoutObjectType must have a case above. Add
@@ -2545,31 +2600,80 @@ function recolorBackground(src: HTMLCanvasElement, mode: "black" | "transparent"
  * `cacheBust` (the active plan id) is appended to the URL so a plan change forces
  * a fresh fetch instead of serving the previous plan's file from the 5-min HTTP
  * cache. The server ignores it — it always resolves against the active plan.
+ * `recheck` bypasses the browser's HTTP cache, for asking again after "empty" or
+ * a failure.
  */
 export async function loadProcessedAttachment(
   match: string,
   opts: AttachmentProcessOpts,
   cacheBust?: string | null,
-): Promise<{ dataUrl: string; width: number; height: number } | "empty" | null> {
+  how: {
+    /** Ask again after "empty" or a failure: go around the browser's HTTP cache. */
+    recheck?: boolean;
+    /** Ask whether what is on screen is still current: `etag` is the ETag of the
+     *  file drawn. Answers "unchanged", without reading the body, if it is. */
+    revalidate?: { etag: string };
+  } = {},
+): Promise<{ dataUrl: string; width: number; height: number; etag: string | null } | "empty" | "unchanged" | null> {
   const bust = cacheBust ? `&plan=${encodeURIComponent(cacheBust)}` : "";
-  const resp = await fetch(`/api/pco/attachment?match=${encodeURIComponent(match)}${bust}`);
-  if (resp.status === 404) return "empty";
-  if (!resp.ok) return null;
-  const ct = resp.headers.get("content-type") ?? "";
-  const buf = await resp.arrayBuffer();
+  // A re-check follows a 404 or a failure, which is exactly the answer the
+  // browser must not reuse. A revalidation is a conditional request whatever the
+  // 200's max-age says ("no-cache" sends If-None-Match itself; the browser turns a
+  // 304 into the stored 200, which is why the ETag is compared below as well).
+  const cache: RequestCache | undefined = how.revalidate ? "no-cache" : how.recheck ? "reload" : undefined;
+  // An AbortController on setTimeout rather than AbortSignal.timeout, so a test with
+  // mocked timers can fire it. The timer runs until the body is in; rasterizing the
+  // file is local work and is not on it.
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), PLAN_ATTACHMENT_FETCH_TIMEOUT_MS);
+  let ct: string;
+  let buf: ArrayBuffer;
+  let etag: string | null;
+  try {
+    const resp = await fetch(`/api/pco/attachment?match=${encodeURIComponent(match)}${bust}`, {
+      signal: ctl.signal,
+      ...(cache ? { cache } : {}),
+    });
+    if (resp.status === 404) return "empty";
+    if (!resp.ok) return null;
+    etag = resp.headers.get("etag");
+    if (how.revalidate && etag !== null && etag === how.revalidate.etag) return "unchanged";
+    ct = resp.headers.get("content-type") ?? "";
+    buf = await resp.arrayBuffer();
+  } finally {
+    clearTimeout(timer);
+  }
   let canvas = ct.includes("pdf") ? await rasterizePdf(buf, opts.page) : await rasterizeImage(buf, ct);
   if (opts.crop && (opts.crop.top || opts.crop.right || opts.crop.bottom || opts.crop.left)) {
     canvas = cropCanvas(canvas, opts.crop);
   }
   if (opts.trim) canvas = trimCanvas(canvas);
   if (opts.background && opts.background !== "keep") recolorBackground(canvas, opts.background);
-  return { dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height };
+  return { dataUrl: canvas.toDataURL("image/png"), width: canvas.width, height: canvas.height, etag };
 }
 
-/** Gaps between retries of a failed plan-attachment load. Three tries over about
- *  a minute covers a signed link that expired mid-service and a first download
- *  the editor was still writing; after that the notice stands. */
+/** Gaps between the first retries of a failed plan-attachment load. Three tries
+ *  over about a minute covers a signed link that expired mid-service and a first
+ *  download the editor was still writing. */
 export const PLAN_ATTACHMENT_RETRY_MS: readonly number[] = [5_000, 15_000, 45_000];
+
+/** How often the widget asks again once there is nothing to show: after the file
+ *  is not on the plan ("empty"), and after the retries above are spent. A wall
+ *  nobody is standing at is never refreshed by hand, so the widget keeps
+ *  checking until the file turns up. Each check is one cached Planning Center
+ *  read on the server, so a slow cadence costs next to nothing. */
+export const PLAN_ATTACHMENT_RECHECK_MS = 2 * 60_000;
+
+/** How long one request for the file may take, headers and body, before it counts
+ *  as a failure. Without it a server that accepts the connection and never answers
+ *  parks the loop, which is the only thing that would ask again, for good. */
+export const PLAN_ATTACHMENT_FETCH_TIMEOUT_MS = 30_000;
+
+/** How often a display that is showing the file asks whether it is still the
+ *  current one, so a stage plot revised on the same plan replaces the old one
+ *  within about this long. A conditional request: when nothing changed the server
+ *  answers without a body and nothing is redrawn. */
+export const PLAN_ATTACHMENT_REVALIDATE_MS = 5 * 60_000;
 
 function PlanAttachment({
   match,
@@ -2579,11 +2683,6 @@ function PlanAttachment({
 }: AttachmentProcessOpts & { match: string; planId: string | null; H: number }) {
   const [src, setSrc] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "empty" | "error">("loading");
-  // Which try this is. A failed download used to be final: the object sat on
-  // "Couldn't load file" until somebody refreshed the display, which on a wall
-  // nobody is standing next to is never. One expired signed link, or a display
-  // racing the editor for the first download of a new plan's file, was enough.
-  const [attempt, setAttempt] = useState(0);
 
   // Stable dep for the options object (crop is nested).
   const optsKey = JSON.stringify(opts);
@@ -2593,45 +2692,100 @@ function PlanAttachment({
   useResyncOn([match, optsKey, planId], () => {
     setSrc(null);
     setStatus("loading");
-    setAttempt(0);
   });
 
-  // Retry a FAILED load, with a widening gap, a bounded number of times. Only
-  // "error": "empty" is an answer (no such file on this plan), and a plan
-  // change re-fetches on its own through `planId`.
-  useEffect(() => {
-    if (status !== "error" || attempt >= PLAN_ATTACHMENT_RETRY_MS.length) return;
-    const t = setTimeout(() => {
-      setStatus("loading");
-      setAttempt((a) => a + 1);
-    }, PLAN_ATTACHMENT_RETRY_MS[attempt]);
-    return () => clearTimeout(t);
-  }, [status, attempt]);
-
+  // One loop per target (file name, options, plan), started at once when the
+  // plan changes, and running until it is unmounted or the target changes:
+  //   - "error" (a failed load): after each gap of PLAN_ATTACHMENT_RETRY_MS, then
+  //     every PLAN_ATTACHMENT_RECHECK_MS.
+  //   - "empty" (no such file on the plan): every PLAN_ATTACHMENT_RECHECK_MS, so
+  //     a stage plot attached after the display first asked appears by itself.
+  //   - drawn: every PLAN_ATTACHMENT_REVALIDATE_MS, a conditional request, so a
+  //     file revised on the same plan replaces the one on screen.
+  // A failed load used to be final after three tries, and "empty" was final
+  // outright, so either left the wall on its notice until someone refreshed it.
+  //
+  // Only an answer changes what is on screen. The first failure shows "Couldn't
+  // load file" and a later one leaves whatever is there (a notice, never a flash
+  // of "Loading…"). Once a file is drawn nothing but a newer file replaces it: not
+  // a notice, not an error, not "empty", and the old picture stays up until the
+  // new one is ready.
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      });
     void (async () => {
-      try {
-        const result = await loadProcessedAttachment(match, JSON.parse(optsKey) as AttachmentProcessOpts, planId);
+      let shown: "loading" | "empty" | "error" = "loading";
+      let failures = 0; // consecutive failed loads
+      let logged = false;
+      let drawnEtag: string | null | undefined; // undefined: nothing drawn yet
+      for (let tries = 0; ; tries++) {
+        const revalidating = drawnEtag !== undefined;
+        let result: Awaited<ReturnType<typeof loadProcessedAttachment>>;
+        try {
+          result = await loadProcessedAttachment(
+            match,
+            JSON.parse(optsKey) as AttachmentProcessOpts,
+            planId,
+            revalidating ? { revalidate: { etag: drawnEtag! } } : { recheck: tries > 0 },
+          );
+        } catch {
+          result = null;
+        }
         if (cancelled) return;
-        if (result === "empty") {
-          setStatus("empty");
-        } else if (result) {
+        if (result && result !== "empty" && result !== "unchanged") {
           setSrc(result.dataUrl);
           setStatus("ready");
-        } else {
-          setStatus("error");
+          drawnEtag = result.etag;
+          if (logged) {
+            logged = false;
+            logToServer("plan-file", `"${match}" draws again on ${window.location.pathname}`);
+          }
+        } else if (!revalidating) {
+          if (result === "empty") {
+            failures = 0;
+            logged = false;
+            shown = "empty";
+            setStatus("empty");
+            await sleep(PLAN_ATTACHMENT_RECHECK_MS);
+          } else {
+            failures += 1;
+            if (shown === "loading") {
+              shown = "error";
+              setStatus("error");
+            }
+            if (failures > PLAN_ATTACHMENT_RETRY_MS.length && !logged) {
+              logged = true;
+              // The server cannot say which display this is, and a wall stuck on
+              // "Couldn't load file" is otherwise invisible on /log. Once per
+              // outage, not once per slow re-check, and a line when it recovers.
+              logToServer(
+                "plan-file",
+                `"${match}" still not loading on ${window.location.pathname} after ${failures} tries; checking again every ${PLAN_ATTACHMENT_RECHECK_MS / 60_000} min`,
+              );
+            }
+            await sleep(PLAN_ATTACHMENT_RETRY_MS[failures - 1] ?? PLAN_ATTACHMENT_RECHECK_MS);
+          }
+          if (cancelled) return;
+          continue;
         }
-      } catch {
-        if (!cancelled) setStatus("error");
+        // A file is on screen: just drawn, or kept through a re-validation that
+        // found it unchanged, empty or failed. One cadence for all three.
+        // Without an ETag there is nothing to ask "is it still current" against,
+        // and asking anyway would download and rasterize it every time.
+        if (drawnEtag === null) return;
+        await sleep(PLAN_ATTACHMENT_REVALIDATE_MS);
+        if (cancelled) return;
       }
     })();
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-    // Re-fetch when the plan changes — the matched file rolls over week to week —
-    // and on every retry.
-  }, [match, optsKey, planId, attempt]);
+  }, [match, optsKey, planId]);
 
   if (status === "ready" && src) {
     return <img src={src} alt="" className="w-full h-full object-contain" draggable={false} />;
@@ -2812,7 +2966,19 @@ function ScreenEmbedObject({
     return (
       <EmbeddedView
         view={view}
-        ctx={{ ...ctx, H: childH, insideEmbedTile: where === "tile" }}
+        // A tile of a screen carries that screen's own id and message groups, so a
+        // Messages widget in it follows the screen it shows and not the one the
+        // tile sits on. It is a MONITOR of that screen: controls in a tile stay live
+        // (that is what a producer wall is for), but a Messages widget there draws
+        // no reply buttons, because a reply would be signed as the screen it shows.
+        // Only the screen itself answers. Its alert banner is its own and is not
+        // drawn here.
+        ctx={{
+          ...ctx,
+          H: childH,
+          insideEmbedTile: where === "tile",
+          screen: { outputId: output.id, groups: output.groups ?? [], monitor: true },
+        }}
         displayId={output.id}
       />
     );
@@ -3190,6 +3356,9 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // Gated like every other integration hook: a clock-only wall screen must not
   // hold a poll open against ESPN.
   const scoresStatus = useScoresStatus(want(["scores", "home-scores"]));
+  // The stage messages: only a layout that holds a widget that draws them opens
+  // the channel. (The alert overlay is not a widget and has its own read.)
+  const messagesStatus = useMessagesStatus(want(["messages", "message-composer"]));
   // Both gated on the streaming objects (`streamWanted`, declared above the
   // recorder gates): a clock-only wall screen must not hold a poll open against
   // two cloud APIs, one of which has a daily quota.
@@ -3249,7 +3418,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // as wrong as the last time anyone set it.
   const now = useServerClock(pcoLive?.serverNow);
 
-  return { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
+  return { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
 }
 
 type LayoutData = ReturnType<typeof useLayoutData>;
@@ -3265,7 +3434,7 @@ type LayoutData = ReturnType<typeof useLayoutData>;
  * gate-render-parity.test.ts reads it to map each ctx field to its gate.
  */
 export function statusCtx(
-  d: Pick<LayoutData, "obsStatus" | "reaperStatus" | "resiStatus" | "youtubeStatus" | "scoresStatus" | "baptismStatus" | "cuesStatus" | "planItemsStatus" | "integrationsSnap" | "onlinePresence">,
+  d: Pick<LayoutData, "obsStatus" | "reaperStatus" | "resiStatus" | "youtubeStatus" | "scoresStatus" | "messagesStatus" | "baptismStatus" | "cuesStatus" | "planItemsStatus" | "integrationsSnap" | "onlinePresence">,
 ) {
   return {
     obs: d.obsStatus.value,
@@ -3278,6 +3447,8 @@ export function statusCtx(
     youtubeKnown: d.youtubeStatus.known,
     scores: d.scoresStatus.value,
     scoresKnown: d.scoresStatus.known,
+    messages: d.messagesStatus.value,
+    messagesKnown: d.messagesStatus.known,
     baptism: d.baptismStatus.value,
     baptismKnown: d.baptismStatus.known,
     cues: d.cuesStatus.value,
@@ -3302,6 +3473,7 @@ export function LayoutRenderer({
   ndiSource,
   interactive = false,
   allowHls,
+  screen,
   surface,
   viewId,
 }: {
@@ -3313,6 +3485,10 @@ export function LayoutRenderer({
    *  otherwise play HLS on a screen set to refuse it. Every caller that is not
    *  a real display passes true. */
   allowHls: boolean;
+  /** The screen this layout is drawn on, and the groups it is in — see
+   *  LayoutRenderCtx. Null/null for anything that is not a real screen; every
+   *  caller says which, as it does for `allowHls`. */
+  screen: OwnScreen | null;
   /** The View's surface, so a console can respond to the window while a display
    *  honours its design. Absent behaves as a display — the safe default. */
   surface?: "display" | "console";
@@ -3330,7 +3506,7 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
+  const { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -3412,7 +3588,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, messages: messagesStatus.value, messagesKnown: messagesStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, screen, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (

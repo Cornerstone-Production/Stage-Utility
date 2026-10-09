@@ -100,8 +100,9 @@ export function ShapePreview({
             interactive={false}
             surface={surface}
             // A preview is never the real screen a switched-off display would
-            // refuse HLS on.
+            // refuse HLS on, and never a screen in a message group.
             allowHls
+            screen={null}
           />
         </div>
       </div>

@@ -247,8 +247,24 @@ describe("a Services URL is written with pcoUrl", () => {
   });
 
   it("every id in a pcoUrl path went through pcoId", () => {
-    const raw = code.filter((l) => /pcoUrl`[^`]*\$\{(?!pcoId\(|pcoSegment\()/.test(l));
+    const raw = code.filter((l) => /pcoUrl`[^`]*\$\{(?!pcoId\(|pcoAttachmentId\(|pcoSegment\()/.test(l));
     assert.deepEqual(raw, []);
+  });
+
+  it("pcoAttachmentId is used where an attachment id goes, and nowhere else", () => {
+    // It accepts `84892470-stage`, which pcoId refuses. Allowed by the scan above
+    // in any position, it would let a suffixed value into a plan id or a service
+    // type id with everything green. So each use is listed, as the path text just
+    // before it, sorted, one per line: a new use is a line that changes here.
+    const uses: string[] = [];
+    for (const file of serviceSources()) {
+      if (file === "pco-path.ts") continue;
+      for (const line of linesOf(file)) {
+        if (isComment(line)) continue;
+        for (const m of line.matchAll(/(.{0,19})\bpcoAttachmentId\(/g)) uses.push(`${file}: ...${m[1]}pcoAttachmentId(`);
+      }
+    }
+    assert.deepEqual(uses.sort(), ["pco-service.ts: .../all_attachments/${pcoAttachmentId("]);
   });
 });
 
