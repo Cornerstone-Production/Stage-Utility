@@ -10,8 +10,9 @@
 //    server's own guards, in one direction or the other, so BOTH directions are
 //    run against the real guards, with two screens on the view.
 //  - A failure part-way leaving some screens changed and others not. Each
-//    failure here is a real write failing (a directory where settings.json or
-//    views.json goes, for the one call), and the files are read back off DISK:
+//    rollback failure here is a real write failing (a directory where
+//    settings.json or views.json goes, for the one call); the races below are
+//    injected by wrapping a controller method mid-call. Files are read back off DISK:
 //    the in-memory state is what the rollback fixes first and the file is what a
 //    restart reads.
 //  - A screen pointed at the view after the call started. Toward a console the

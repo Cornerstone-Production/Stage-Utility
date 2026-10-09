@@ -3081,7 +3081,7 @@ export class StageController {
     opts: { onlyShownBy?: string } = {},
   ): Promise<StageState> {
     const view = this.state.views.find((v) => v.id === id);
-    if (!view) throw new Error(`views:setSurface — view ${id} not found`);
+    if (!view) throw new Error(`setViewSurface — view ${id} not found`);
     if (opts.onlyShownBy !== undefined) {
       const others = this.state.outputs.filter((o) => o.viewId === id && o.id !== opts.onlyShownBy);
       if (others.length > 0) {
@@ -3707,7 +3707,7 @@ export class StageController {
      *  may have been pointed somewhere else since. */
     opts: { whileShowing?: string } = {},
   ): Promise<StageState> {
-    if (!this.state.outputs.find((o) => o.id === id)) throw new Error(`outputs:setMode — output ${id} not found`);
+    if (!this.state.outputs.find((o) => o.id === id)) throw new Error(`setOutputMode — output ${id} not found`);
     // Inside the write, against the view the screen shows then: see setOutputView.
     return this.commitOutputPatch(
       id,
