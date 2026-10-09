@@ -38,6 +38,14 @@ describe("the same-MAC hint", () => {
     assert.deepEqual(m, {}, "an output was flagged as a look-alike of its sibling");
   });
 
+  it("is not raised between outputs of two Macs that report the same MAC either", async () => {
+    // Intel Macs with a T2 chip share the iBridge's MAC. Excluding every set-up
+    // OUTPUT, rather than only the siblings by id, is what keeps one Mac's output
+    // from reading as the replacement for another Mac's.
+    const m = await matches([{ id: "mac-a.sdi-1", output: out("SDI 1") }], [{ id: "mac-b.sdi-1", output: out("SDI 1") }]);
+    assert.deepEqual(m, {}, "an output was flagged as a look-alike of another Mac's output");
+  });
+
   it("is still raised between plain devices", async () => {
     const m = await matches([{ id: "pi-old" }], [{ id: "pi-new" }]);
     assert.deepEqual(m, { "pi-new": ["pi-old"] });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { groupByMachine } from "./machine-groups.js";
+import { groupByMachine, machineIdOf } from "./machine-groups.js";
 import type { SeenDevice } from "@main/types/kiosk";
 import type { PublicDevice } from "@main/services/kiosk-devices-store";
 
@@ -72,10 +72,80 @@ describe("grouping what Screens has heard", () => {
     assert.equal(g.machines.length, 1);
   });
 
-  it("an output with no MAC at all cannot be placed, so it reads as a plain device", () => {
+  it("an output with no MAC is still placed by the Mac in its id", () => {
     const g = groupByMachine([seen("m.sdi-1", { output: out("SDI 1"), macs: [] })], []);
-    assert.deepEqual(g.plain.map((d) => d.id), ["m.sdi-1"]);
+    assert.deepEqual(g.plain, []);
+    assert.deepEqual(ids(g.machines[0].rows), ["m.sdi-1"]);
+  });
+
+  it("an output whose id names no Mac and which has no MAC cannot be placed, so it reads as a plain device", () => {
+    const g = groupByMachine([seen("sdi1", { output: out("SDI 1"), macs: [] })], []);
+    assert.deepEqual(g.plain.map((d) => d.id), ["sdi1"]);
     assert.deepEqual(g.machines, []);
+  });
+});
+
+describe("two Macs that report the same MAC", () => {
+  // An Intel Mac with a T2 chip reports the iBridge's MAC, the same on every one.
+  const T2 = "ac:de:48:00:11:22";
+
+  it("stay two machines, each with its own outputs", () => {
+    const g = groupByMachine(
+      [
+        seen("mac-a.sdi-1", { output: out("SDI 1"), macs: [T2], hostname: "booth-a" }),
+        seen("mac-b.sdi-1", { output: out("SDI 1"), macs: [T2], hostname: "booth-b" }),
+        seen("mac-b.sdi-2", { output: out("SDI 2"), macs: [T2], hostname: "booth-b" }),
+      ],
+      [],
+    );
+    assert.deepEqual(g.machines.map((m) => [m.key, m.hostname, ids(m.rows)]), [
+      ["mac-a", "booth-a", ["mac-a.sdi-1"]],
+      ["mac-b", "booth-b", ["mac-b.sdi-1", "mac-b.sdi-2"]],
+    ]);
+  });
+
+  it("do not borrow each other's set-up outputs", () => {
+    const g = groupByMachine(
+      [seen("mac-a.sdi-2", { output: out("SDI 2"), macs: [T2] })],
+      [bound("mac-b.sdi-1", { output: out("SDI 1"), macs: [T2] }), bound("mac-a.sdi-1", { output: out("SDI 1"), macs: [T2] })],
+    );
+    assert.deepEqual(ids(g.machines[0].rows), ["mac-a.sdi-1", "mac-a.sdi-2"]);
+  });
+
+  it("a Mac whose own id has a dot in it is still one machine", () => {
+    const g = groupByMachine(
+      [seen("studio.local.sdi-1", { output: out("SDI 1") }), seen("studio.local.sdi-2", { output: out("SDI 2") })],
+      [],
+    );
+    assert.deepEqual(g.machines.map((m) => [m.key, ids(m.rows)]), [["studio.local", ["studio.local.sdi-1", "studio.local.sdi-2"]]]);
+  });
+});
+
+describe("an output whose id names no Mac", () => {
+  // The fallback: grouped by MAC, as outputs always were.
+  it("joins the others that share its MAC, and a device that carries both MACs merges the two", () => {
+    const g = groupByMachine(
+      [
+        seen("one", { output: out("SDI 1"), macs: ["02:00:00:00:00:01"] }),
+        seen("two", { output: out("SDI 2"), macs: ["02:00:00:00:00:02"] }),
+        seen("three", { output: out("SDI 3"), macs: ["02:00:00:00:00:01", "02:00:00:00:00:02"] }),
+        seen("four", { output: out("SDI 4"), macs: ["02:00:00:00:00:09"] }),
+      ],
+      [],
+    );
+    assert.deepEqual(g.machines.map((m) => ids(m.rows).sort()), [["one", "three", "two"], ["four"]]);
+  });
+});
+
+describe("the Mac in a device id", () => {
+  it("is everything before the last dot", () => {
+    assert.equal(machineIdOf("mac.sdi-1"), "mac");
+    assert.equal(machineIdOf("studio.local.sdi-1"), "studio.local");
+  });
+
+  it("is nothing when there is no dot, or only a leading one", () => {
+    assert.equal(machineIdOf("sdi1"), undefined);
+    assert.equal(machineIdOf(".sdi-1"), undefined);
   });
 });
 

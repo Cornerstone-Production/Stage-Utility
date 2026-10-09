@@ -163,7 +163,9 @@ limit on external displays.
 Each output is a device of its own, with an id of the form
 `<the Mac's device id>.<output key>`. A binding is to an output, so moving a
 cable to another port moves which screen goes out where. All of a Mac's outputs
-share its MAC addresses and hostname.
+share its MAC addresses and hostname. Screens groups outputs by the Mac's id in
+that name, not by MAC address: Intel Macs with a T2 chip report the same MAC, and
+two of them stay two machines.
 
 The probe gains an `output` object, otherwise the probe described under
 [Discovery](#discovery):
