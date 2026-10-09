@@ -58,8 +58,14 @@ final class CardOutput: OutputSink {
   private let activity: NSObjectProtocol
   private let readsLatencyStamp: Bool
 
-  init(descriptor: OutputDescriptor, hardware: DeckLinkOutputPort.Hardware, settings: Settings = Settings()) {
+  /// - Parameter videoMode: the format to open in, as the screen last set it (kept in
+  ///   outputs.json); nil for the default.
+  init(
+    descriptor: OutputDescriptor, hardware: DeckLinkOutputPort.Hardware, videoMode: String? = nil,
+    settings: Settings = Settings()
+  ) {
     self.descriptor = descriptor
+    self.videoMode = VideoModes.normalised(videoMode)
     readsLatencyStamp = settings.readsLatencyStamp
     let label = descriptor.port
     activity = ProcessInfo.processInfo.beginActivity(
@@ -114,7 +120,7 @@ final class CardOutput: OutputSink {
         }
       }
     }
-    port.open(videoMode: nil)
+    port.open(videoMode: self.videoMode)
   }
 
   /// One Metal device, queue and pipeline for every card output.
@@ -148,8 +154,8 @@ final class CardOutput: OutputSink {
   /// The screen's `videoMode` (nil for the default, 1080p59.94): the port reopens
   /// in it, or refuses it, which the port logs and `problem` says.
   func setVideoMode(_ mode: String?) {
-    let asked = mode?.trimmingCharacters(in: .whitespaces).isEmpty == false ? mode : nil
-    guard let port, (asked ?? VideoModes.defaultMode) != (videoMode ?? VideoModes.defaultMode) else { return }
+    let asked = VideoModes.normalised(mode)
+    guard let port, VideoModes.effective(asked) != VideoModes.effective(videoMode) else { return }
     videoMode = asked
     // The page is laid out again when the port opens in it (`portOpened`), which for
     // a port that is lost is not now.
@@ -163,7 +169,7 @@ final class CardOutput: OutputSink {
     if let setupProblem { return setupProblem }
     guard let status = portStatus else { return nil }
     switch status.state {
-    case .refused(let why): return "Cannot play \(videoMode ?? VideoModes.defaultMode): \(why)"
+    case .refused(let why): return "Cannot play \(VideoModes.effective(videoMode)): \(why)"
     case .lost(let why): return "Port unavailable (\(why)). Retrying"
     case .running: return status.silence.map(StatusText.silenceLine)
     case .closed: return nil

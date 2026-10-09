@@ -16,12 +16,20 @@ public struct OutputRecord: Codable, Equatable {
   /// kiosk was bound to stays bound. Decided once, when the record is made (see
   /// `KioskMigration`), and never given to a second output. Absent for every other.
   public var kioskIdentity: Bool?
+  /// A card output's format, as its screen last set it (`VideoModes.normalised`);
+  /// absent for the default and for a display. Kept so the port opens in it at the
+  /// next start, rather than in the default and again in this once the screen has
+  /// been read.
+  public var videoMode: String?
 
-  public init(enabled: Bool, token: String, boundTo: String? = nil, kioskIdentity: Bool? = nil) {
+  public init(
+    enabled: Bool, token: String, boundTo: String? = nil, kioskIdentity: Bool? = nil, videoMode: String? = nil
+  ) {
     self.enabled = enabled
     self.token = token
     self.boundTo = boundTo
     self.kioskIdentity = kioskIdentity
+    self.videoMode = videoMode
   }
 
   /// The id this output announces itself and enrols under.
@@ -140,6 +148,15 @@ public final class OutputStateStore {
   public func setEnabled(_ enabled: Bool, key: String) throws {
     guard var r = records[key], r.enabled != enabled else { return }
     r.enabled = enabled
+    records[key] = r
+    try save()
+  }
+
+  /// The format a card output's screen set, normalised; nil for the default.
+  public func setVideoMode(_ mode: String?, key: String) throws {
+    let mode = VideoModes.normalised(mode)
+    guard var r = records[key], r.videoMode != mode else { return }
+    r.videoMode = mode
     records[key] = r
     try save()
   }

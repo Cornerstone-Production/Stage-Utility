@@ -162,6 +162,33 @@ func withTempDir<T>(_ body: (URL) throws -> T) rethrows -> T {
     }
   }
 
+  /// A card output's format, as its screen last set it, survives a restart so the
+  /// port opens in it; the default is no entry at all, and a file from before the
+  /// field reads as the default.
+  @Test func aCardOutputsFormatIsKeptAcrossARestart() throws {
+    try withTempDir { dir in
+      let store = OutputStateStore(directory: dir, makeToken: { "t" })
+      try store.ensure(key: "sdi", defaultEnabled: true)
+      try store.ensure(key: "other", defaultEnabled: true)
+      try store.setVideoMode(" 720p59.94\n", key: "sdi")
+      try store.setVideoMode("", key: "other")
+      let reopened = OutputStateStore(directory: dir, makeToken: { "must-not-be-used" })
+      #expect(reopened.record(for: "sdi")?.videoMode == "720p59.94")
+      #expect(reopened.record(for: "other")?.videoMode == nil)
+      let text = try String(contentsOf: dir.appendingPathComponent("outputs.json"), encoding: .utf8)
+      #expect(text.components(separatedBy: "videoMode").count == 2, "\(text)")  // the one set, only
+      try reopened.setVideoMode(nil, key: "sdi")
+      #expect(OutputStateStore(directory: dir).record(for: "sdi")?.videoMode == nil)
+    }
+    try withTempDir { dir in
+      try Data(#"{"outputs":{"sdi":{"enabled":true,"token":"t"}}}"#.utf8).write(
+        to: dir.appendingPathComponent("outputs.json"))
+      let old = OutputStateStore(directory: dir)
+      #expect(old.readProblem == nil)
+      #expect(old.record(for: "sdi") == OutputRecord(enabled: true, token: "t"))
+    }
+  }
+
   /// The token is the output's identity to the server once claimed; a new one on
   /// every sighting would lock the screen out.
   @Test func theTokenIsMadeOnceAndEnsureNeverChangesAChoice() throws {

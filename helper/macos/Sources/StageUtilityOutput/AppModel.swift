@@ -306,7 +306,10 @@ final class AppModel: ObservableObject {
     if let screen = rt.output.screen {
       sink = DisplaySink(descriptor: d, screen: screen)
     } else if let card = rt.output.card {
-      let output = CardOutput(descriptor: d, hardware: card, settings: cardSettings)
+      // In the format its screen last set, so it is not opened in the default first
+      // and again once the screen has been read.
+      rt.videoMode = store.record(for: key)?.videoMode
+      let output = CardOutput(descriptor: d, hardware: card, videoMode: rt.videoMode, settings: cardSettings)
       // The port's line changes as it opens, is lost, or its page goes silent: the
       // window says so then, not at the next health tick.
       output.onProblemChange = { [weak self] in self?.refresh() }
@@ -500,10 +503,18 @@ final class AppModel: ObservableObject {
       rt.screenReadProblem = nil
     }
     rt.boundScreenName = screen.name
-    if let card = sink as? CardOutput, (screen.videoMode ?? VideoModes.defaultMode) != (rt.videoMode ?? VideoModes.defaultMode) {
-      Log.notice(.output, "\(port): format \(rt.videoMode ?? VideoModes.defaultMode) -> \(screen.videoMode ?? VideoModes.defaultMode), from \(screen.name)")
-      rt.videoMode = screen.videoMode
-      card.setVideoMode(screen.videoMode)
+    let format = VideoModes.normalised(screen.videoMode)
+    if let card = sink as? CardOutput, VideoModes.effective(format) != VideoModes.effective(rt.videoMode) {
+      Log.notice(
+        .output,
+        "\(port): format \(VideoModes.effective(rt.videoMode)) -> \(VideoModes.effective(format)), from \(screen.name)")
+      rt.videoMode = format
+      do {
+        try store.setVideoMode(format, key: rt.descriptor.key)
+      } catch {
+        noteSaveFailure(error)
+      }
+      card.setVideoMode(format)
     }
     if screen.rotation != rt.rotation {
       Log.notice(.output, "\(port): rotation \(rt.rotation.rawValue) -> \(screen.rotation.rawValue) degrees, from \(screen.name)")

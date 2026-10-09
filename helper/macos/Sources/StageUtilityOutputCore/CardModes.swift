@@ -164,11 +164,22 @@ public enum VideoModes {
     return all.filter(names.contains)
   }
 
+  /// A screen's `videoMode` as the helper keeps it: surrounding whitespace dropped,
+  /// and nothing left (or nothing given) is nil, the default. Every place that reads
+  /// a format reads it through this, so " 720p59.94" from one and "720p59.94" from
+  /// another are one format, not a change.
+  public static func normalised(_ mode: String?) -> String? {
+    let trimmed = mode?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return trimmed.isEmpty ? nil : trimmed
+  }
+
+  /// The mode a screen's `videoMode` asks for: the default when it has none.
+  public static func effective(_ mode: String?) -> String { normalised(mode) ?? defaultMode }
+
   /// The port's mode for a screen's `videoMode`: the default when it has none, and
   /// a reason when the port cannot play it.
   public static func resolve(_ requested: String?, among modes: [CardMode]) -> Result<CardMode, ModeRefusal> {
-    let trimmed = requested?.trimmingCharacters(in: .whitespaces) ?? ""
-    let want = trimmed.isEmpty ? defaultMode : trimmed
+    let want = effective(requested)
     guard all.contains(want) else { return .failure(.unknown(want)) }
     let matching = modes.filter { name(of: $0) == want }
     if matching.isEmpty { return .failure(.notOnPort(want, offered: offered(by: modes))) }

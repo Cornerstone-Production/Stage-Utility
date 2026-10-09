@@ -118,7 +118,7 @@ next login with the real state.
 | What | Where |
 |---|---|
 | The Mac's device id, the optional `server` file, the installer's token, the `migrated-from-kiosk` marker | `/Library/Application Support/StageUtility/`, written by `install-macos.sh`. Read only. |
-| Per-output state: `outputs.json` (enabled, token, the server it is bound to, whether it holds the kiosk's identity) | `~/Library/Application Support/StageUtilityOutput/` |
+| Per-output state: `outputs.json` (enabled, token, the server it is bound to, whether it holds the kiosk's identity, a card output's format) | `~/Library/Application Support/StageUtilityOutput/` |
 | Chromium's profile (cookies, local storage, cache) and its own log, `chromium.log` | `Chromium/` and `chromium.log` in the same user folder |
 | A device id, when the installer never wrote one | `generated-device-id` in the same user folder. The window says so. |
 
@@ -306,7 +306,8 @@ locked.
   going. A port found once stays an output until the helper quits.
 - **Format.** The screen's `videoMode` (Screen settings > Device > Format on the
   server), 1080p59.94 when it has none, opens the port in that mode, at its frame
-  size; a change reopens it. The helper sends 8-bit YUV 4:2:2, Rec. 709. A mode the
+  size; a change reopens it. The format is kept in `outputs.json`, so the next start
+  opens the port in it at once rather than in the default first. The helper sends 8-bit YUV 4:2:2, Rec. 709. A mode the
   port does not have is refused: the output's line in the window says "Cannot play
   1080p25: the port has no 1080p25 (it offers ...)", the log says the same, and the
   port stays off until the format changes.

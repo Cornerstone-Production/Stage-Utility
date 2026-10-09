@@ -83,6 +83,21 @@ private let otherModes: [CardMode] = [
     #expect(try VideoModes.resolve("1080i50", among: port).get().code == fourCC("Hi50"))
   }
 
+  /// One reading of a screen's `videoMode` for every place that compares or opens
+  /// one: whitespace and newlines around it dropped, nothing left the default. Two
+  /// spellings of one format are not a change, so the port is not reopened for it.
+  @Test func aFormatIsReadOneWayEverywhere() throws {
+    #expect(VideoModes.normalised(" 720p59.94\n") == "720p59.94")
+    #expect(VideoModes.normalised("") == nil)
+    #expect(VideoModes.normalised(" \n") == nil)
+    #expect(VideoModes.normalised(nil) == nil)
+    #expect(VideoModes.effective(nil) == "1080p59.94")
+    #expect(VideoModes.effective("\t") == "1080p59.94")
+    #expect(VideoModes.effective(" 720p59.94\n") == VideoModes.effective("720p59.94"))
+    let mode = try VideoModes.resolve(" 720p59.94\n", among: VideoModes.standard).get()
+    #expect(VideoModes.name(of: mode) == "720p59.94")
+  }
+
   @Test func refusesAModeTheServerDoesNotList() {
     #expect(VideoModes.resolve("2160p59.94", among: sdkHDModes) == .failure(.unknown("2160p59.94")))
     #expect(VideoModes.resolve("1080p47.95", among: otherModes) == .failure(.unknown("1080p47.95")))
