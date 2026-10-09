@@ -402,18 +402,19 @@ let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a so
     #expect(port.takeHealthSample().dropped == 0)
   }
 
-  /// The server's line, per second: 3 repeats (5% of 59.94) or any drop is
-  /// falling behind; five clean seconds in a row is keeping up again. Two repeats
-  /// is jitter and says nothing.
+  /// The server's line, per second: 5% of the frames sent repeated (3 of 60 at
+  /// 59.94) or any drop is falling behind; five clean seconds in a row is keeping up
+  /// again. Two repeats is jitter and says nothing.
   @Test func fallingBehindIsLoggedWhenItStartsAndWhenItEnds() {
     let log = LogLines()
-    // The port fills slots 0 to 10 in the first second and ten a second after:
-    // 15 and 16 are two repeats in one second, 42 to 44 three.
-    let port = softwarePort(NumberedSource(missing: [15, 16, 42, 43, 44]), log: log)
+    // Sixty slots a poll, as a second at 59.94: the first poll covers slots 0 to 60,
+    // each one after the next sixty. 70 and 71 are two repeats in the second poll's
+    // second, 200 to 202 three in the fourth's.
+    let port = softwarePort(NumberedSource(missing: [70, 71, 200, 201, 202]), log: log)
     defer { port.close() }
     port.open(videoMode: nil)
     for _ in 0..<12 {
-      port.fakeTick(10)
+      port.fakeTick(60)
       port.pollForTest()
     }
     #expect(

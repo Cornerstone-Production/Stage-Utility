@@ -437,8 +437,8 @@ ignored, a state file that could not be read or saved. Chromium's own (category 
 whether it started, with its version and whether the sandbox is on, or why not; a page's
 renderer process ending, and the reload; the GPU process ending (Chromium starts
 another). The DeckLink layer's (category `decklink`): a port opened in a mode, refused
-one, lost or reopened, and a card output falling behind (a second with 3 or more
-repeated frames, 5%, the server's own line, or any dropped) and keeping up again after
+one, lost or reopened, and a card output falling behind (a second with 5% or more of
+its frames repeated, the server's own line, or any dropped) and keeping up again after
 5 good seconds, on the change only. A page that drew nothing new for 5 s being reloaded
 is under `output`. Trouble that
 continues (a probe socket that will not open, every probe failing to send) is logged

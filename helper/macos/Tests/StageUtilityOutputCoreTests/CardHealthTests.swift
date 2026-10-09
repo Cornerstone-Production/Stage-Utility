@@ -85,29 +85,38 @@ import Testing
 @Suite struct LagWatchTests {
   @Test func cleanSecondsSayNothing() {
     var w = LagWatch()
-    for _ in 0..<10 { #expect(w.second(repeated: 0, dropped: 0) == .none) }
+    for _ in 0..<10 { #expect(w.second(sent: 60, repeated: 0, dropped: 0) == .none) }
   }
 
-  /// The server's line: 5% of a second's frames repeated is late. Fewer is jitter.
-  @Test func aFewRepeatsAreJitterNotFallingBehind() {
-    var w = LagWatch()
-    for _ in 0..<10 { #expect(w.second(repeated: LagWatch.badRepeats - 1, dropped: 0) == .none) }
-    #expect(!w.isBehind)
+  /// The server's line, `repeated >= 5` percent (output-health.ts), at the rates a
+  /// screen may be set to: the fewest repeats in a second that are late at each.
+  /// Fewer is jitter. A count fixed at 3 for 59.94 let 2 in 24 frames (8%) through at
+  /// 23.98, where the server called the same window struggling.
+  @Test func lateIsTheServersFivePercentAtEveryRate() {
+    let fewestLate = [24: 2, 25: 2, 30: 2, 50: 3, 60: 3]
+    for (fps, repeats) in fewestLate.sorted(by: { $0.key < $1.key }) {
+      #expect(LagWatch.late(repeated: repeats, of: fps), "\(repeats) of \(fps)")
+      #expect(!LagWatch.late(repeated: repeats - 1, of: fps), "\(repeats - 1) of \(fps)")
+      var w = LagWatch()
+      #expect(w.second(sent: fps, repeated: repeats - 1, dropped: 0) == .none)
+      #expect(w.second(sent: fps, repeated: repeats, dropped: 0) == .fellBehind(repeated: repeats, dropped: 0))
+    }
+    #expect(!LagWatch.late(repeated: 0, of: 0))
   }
 
   @Test func theFirstBadSecondFallsBehindOnce() {
     var w = LagWatch()
-    #expect(w.second(repeated: 3, dropped: 0) == .fellBehind(repeated: 3, dropped: 0))
-    #expect(w.second(repeated: 9, dropped: 1) == .none)
+    #expect(w.second(sent: 60, repeated: 3, dropped: 0) == .fellBehind(repeated: 3, dropped: 0))
+    #expect(w.second(sent: 60, repeated: 9, dropped: 1) == .none)
     var d = LagWatch()
-    #expect(d.second(repeated: 0, dropped: 1) == .fellBehind(repeated: 0, dropped: 1))
+    #expect(d.second(sent: 60, repeated: 0, dropped: 1) == .fellBehind(repeated: 0, dropped: 1))
   }
 
   @Test func itCatchesUpAfterEnoughGoodSecondsInARow() {
     var w = LagWatch()
-    _ = w.second(repeated: 5, dropped: 0)
-    for _ in 1..<LagWatch.recoverySeconds { #expect(w.second(repeated: 1, dropped: 0) == .none) }
-    #expect(w.second(repeated: 0, dropped: 0) == .caughtUp(afterSeconds: LagWatch.recoverySeconds + 1))
+    _ = w.second(sent: 60, repeated: 5, dropped: 0)
+    for _ in 1..<LagWatch.recoverySeconds { #expect(w.second(sent: 60, repeated: 1, dropped: 0) == .none) }
+    #expect(w.second(sent: 60, repeated: 0, dropped: 0) == .caughtUp(afterSeconds: LagWatch.recoverySeconds + 1))
     #expect(!w.isBehind)
   }
 
@@ -115,10 +124,10 @@ import Testing
   /// second "fell behind" line.
   @Test func aStutterWhileBehindRestartsTheCleanCount() {
     var w = LagWatch()
-    _ = w.second(repeated: 4, dropped: 0)
-    for _ in 0..<(LagWatch.recoverySeconds - 1) { _ = w.second(repeated: 0, dropped: 0) }
-    #expect(w.second(repeated: 0, dropped: 1) == .none)
-    for _ in 0..<(LagWatch.recoverySeconds - 1) { #expect(w.second(repeated: 0, dropped: 0) == .none) }
-    #expect(w.second(repeated: 0, dropped: 0) == .caughtUp(afterSeconds: 2 * LagWatch.recoverySeconds + 1))
+    _ = w.second(sent: 60, repeated: 4, dropped: 0)
+    for _ in 0..<(LagWatch.recoverySeconds - 1) { _ = w.second(sent: 60, repeated: 0, dropped: 0) }
+    #expect(w.second(sent: 60, repeated: 0, dropped: 1) == .none)
+    for _ in 0..<(LagWatch.recoverySeconds - 1) { #expect(w.second(sent: 60, repeated: 0, dropped: 0) == .none) }
+    #expect(w.second(sent: 60, repeated: 0, dropped: 0) == .caughtUp(afterSeconds: 2 * LagWatch.recoverySeconds + 1))
   }
 }

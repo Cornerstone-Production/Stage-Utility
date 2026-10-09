@@ -312,7 +312,7 @@ log stream --level info --predicate 'subsystem == "com.stageutility.output" && c
 | `<port>: render to air 20.0 ms (p95 20.1, max 20.2) over 591 new pictures` | When a health window first measures it, and again when it moves by 4 ms or more: how far behind the page the card's output runs (see [Latency](#latency)). |
 | `<port>: refused 1080p59.94: <reason>` | The mode cannot be played on that port. |
 | `<port>: could not open (<reason>)` / `lost (<reason>)` | A port that will not open or went away; retried. A running port that sends nothing for two seconds is lost with "the card stopped taking frames". |
-| `<port>: falling behind: r repeated and d dropped in the last second` / `keeping up again after n s` | A second with 3 or more repeats (5% at 59.94, the server's line) or any slot missed, and five good seconds in a row after it (`CardWatch`). |
+| `<port>: falling behind: r repeated and d dropped in the last second` / `keeping up again after n s` | A second with 5% or more of its frames repeated (the server's line: 3 at 59.94, 2 at 23.98 to 30) or any slot missed, and five good seconds in a row after it (`CardWatch`). |
 
 Healthy frames are not logged.
 

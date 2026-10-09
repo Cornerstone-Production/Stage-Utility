@@ -24,13 +24,14 @@ extension HealthSample {
 /// Whether a card output is keeping up, decided once a second from that second's
 /// repeats and drops, and worth a log line only when it changes.
 ///
-/// A second is bad when it dropped any slot, or repeated `badRepeats` or more: 5% of
-/// 59.94, the server's own line between late and merely jittery
-/// (`REPEATED_BAD_PERCENT` in output-health.ts, "one frame in twenty is plain to the
-/// eye"). A single repeat when the main thread was busy for a moment is not falling
-/// behind. It falls behind on the first bad second, and is back once
-/// `recoverySeconds` seconds in a row have been good, so a page that stutters now
-/// and then is one pair of lines, not a line a second.
+/// A second is bad when it dropped any slot, or repeated `badRepeatPercent` (5%) or
+/// more of the frames it sent: the server's own line between late and merely
+/// jittery (`REPEATED_BAD_PERCENT` in output-health.ts, "one frame in twenty is
+/// plain to the eye"), so the log and the server agree at every rate, 3 repeats a
+/// second at 59.94 and 2 at 23.98. A single repeat when the main thread was busy for
+/// a moment is not falling behind. It falls behind on the first bad second, and is
+/// back once `recoverySeconds` seconds in a row have been good, so a page that
+/// stutters now and then is one pair of lines, not a line a second.
 public struct LagWatch: Equatable {
   public enum Event: Equatable {
     case none
@@ -41,7 +42,8 @@ public struct LagWatch: Equatable {
   }
 
   public static let recoverySeconds = 5
-  public static let badRepeats = 3
+  /// `REPEATED_BAD_PERCENT` in the server's output-health.ts.
+  public static let badRepeatPercent = 5.0
 
   public private(set) var isBehind = false
   private var cleanRun = 0
@@ -49,8 +51,13 @@ public struct LagWatch: Equatable {
 
   public init() {}
 
-  public mutating func second(repeated: Int, dropped: Int) -> Event {
-    let clean = repeated < LagWatch.badRepeats && dropped == 0
+  /// Whether `repeated` of `sent` frames is the server's "late".
+  public static func late(repeated: Int, of sent: Int) -> Bool {
+    sent > 0 && 100 * Double(repeated) >= badRepeatPercent * Double(sent)
+  }
+
+  public mutating func second(sent: Int, repeated: Int, dropped: Int) -> Event {
+    let clean = !LagWatch.late(repeated: repeated, of: sent) && dropped == 0
     if !isBehind {
       if clean { return .none }
       isBehind = true
@@ -106,7 +113,7 @@ public struct CardWatch: Equatable {
       return []
     }
     var events: [Event] = []
-    switch lag.second(repeated: repeated, dropped: dropped) {
+    switch lag.second(sent: sent, repeated: repeated, dropped: dropped) {
     case .none: break
     case .fellBehind(let r, let d): events.append(.fellBehind(repeated: r, dropped: d))
     case .caughtUp(let s): events.append(.caughtUp(afterSeconds: s))
