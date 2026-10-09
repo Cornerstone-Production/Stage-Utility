@@ -680,15 +680,18 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
         assert.equal(r.status, 0, r.out + r.err);
 
         const changes = shims.log().filter((l) => /^(launchctl (bootout|bootstrap)|chown root:wheel)/.test(l));
-        assert.ok(changes.length >= 4, changes.join("\n"));
         // Every launchd change to the helper happened with the marker already on disk.
         for (const line of changes) assert.match(line, /\| marker=yes$/, `the marker must exist before: ${line}`);
-        const names = strip(changes);
-        const helperStop = names.indexOf(`launchctl bootout gui/${uid}/com.stageutility.output`);
-        const helperStart = names.indexOf(`launchctl bootstrap gui/${uid} ${helperPlist()}`);
-        const kioskStop = names.indexOf(`launchctl bootout gui/${uid}/com.stageutility.kiosk`);
-        assert.ok(helperStop >= 0 && helperStart > helperStop, names.join("\n"));
-        assert.ok(kioskStop > helperStart, "the kiosk is stopped only after the helper is in: " + names.join("\n"));
+        assert.deepEqual(
+          strip(changes),
+          [
+            `launchctl bootout gui/${uid}/com.stageutility.output`,
+            `chown root:wheel ${helperPlist()}`,
+            `launchctl bootstrap gui/${uid} ${helperPlist()}`,
+            `launchctl bootout gui/${uid}/com.stageutility.kiosk`,
+          ],
+          "the helper is stopped, its agent file made root's, the helper started, and only then the kiosk stopped",
+        );
         assert.ok(fs.existsSync(marker()));
         assert.ok(!fs.existsSync(kioskPlist()));
       });
