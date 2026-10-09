@@ -14,14 +14,14 @@ if !argumentProblems.isEmpty { exit(2) }
 let paths = HelperPaths.resolve(environment: environment, home: FileManager.default.homeDirectoryForCurrentUser)
 
 if options.listOutputs {
-  // Needs the window server for NSScreen, but not a running app.
+  // Needs the window server for NSScreen, but not a running app. Reads only: a Mac
+  // that has no device id yet is told so, not given one.
   _ = NSApplication.shared
-  let identity = MacIdentity.load(paths: paths)
-  print("mac device id: \(identity.deviceId) (\(identity.source == .installer ? "installer" : "generated"))")
-  for d in DisplayEnumerator.current() {
-    let on = defaultEnabled(kind: d.descriptor.kind, isMain: d.descriptor.isMain)
-    print("\(d.descriptor.key)\t\(DeviceIdentity.deviceId(mac: identity.deviceId, key: d.descriptor.key))\t\(d.descriptor.name)\tdefault \(on ? "on" : "off")")
-  }
+  let store = OutputStateStore(directory: paths.userDir)
+  let lines = OutputListing.lines(
+    identity: MacIdentity.stored(paths: paths), displays: DisplayEnumerator.current().map(\.descriptor),
+    record: { store.record(for: $0) }, readProblem: store.readProblem)
+  for line in lines { print(line) }
   exit(0)
 }
 

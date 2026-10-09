@@ -89,9 +89,13 @@ final class AppModel: ObservableObject {
       setNote("server-file", "Ignoring \(problem).")
     }
     if let server = identity.server { Log.notice(.discovery, "server file names \(server); probes go to it alone, by unicast") }
-    if let aside = store.recoveredFrom {
-      Log.error(.state, "outputs.json was unreadable and was moved to \(aside.path)")
-      setNote("state-recovered", "The saved output settings could not be read. They were kept as \(aside.lastPathComponent).")
+    if let problem = store.readProblem {
+      Log.error(.state, "\(problem); it is left as it is and nothing is saved until it is fixed or removed and the helper restarted")
+      setNote("state-unreadable", "\(problem). Outputs keep working, but nothing is saved, and each launch makes new tokens, until it is fixed or removed and the helper restarted.")
+    }
+    if let problem = identity.readProblem {
+      Log.error(.state, "\(problem)")
+      setNote("identity-read", "\(problem). It is left as it is.")
     }
     launchAtLogin = SMAppService.mainApp.status == .enabled
   }
@@ -412,8 +416,10 @@ final class AppModel: ObservableObject {
   }
 
   private func noteSaveFailure(_ error: Error) {
-    Log.error(.state, "could not save outputs.json: \(error.localizedDescription)")
-    setNote("state-save", "Output settings could not be saved: \(error.localizedDescription)")
+    let text = "Output settings could not be saved: \(error.localizedDescription)"
+    // The same cause again (every display change retries) is not a new line.
+    if noteTable["state-save"] != text { Log.error(.state, "could not save outputs.json: \(error.localizedDescription)") }
+    setNote("state-save", text)
   }
 
   // MARK: Local Network

@@ -24,8 +24,15 @@ public final class OutputStateStore {
   public let file: URL
   private var records: [String: OutputRecord] = [:]
   private let makeToken: () -> String
-  /// Set when an unreadable file was moved aside at load.
-  public private(set) var recoveredFrom: URL?
+  /// Set when the file exists and could not be read or understood. Nothing is
+  /// written while it is set: the file holds tokens the server has pinned, and a
+  /// fresh set written over it would lock every claimed output out.
+  public private(set) var readProblem: String?
+
+  public struct Unreadable: Error, CustomStringConvertible {
+    public var why: String
+    public var description: String { "outputs.json was not read at launch, so nothing is saved over it: \(why)" }
+  }
 
   public init(directory: URL, makeToken: @escaping () -> String = OutputStateStore.randomToken) {
     self.file = directory.appendingPathComponent("outputs.json")
@@ -41,17 +48,21 @@ public final class OutputStateStore {
 
   public var hasFile: Bool { FileManager.default.fileExists(atPath: file.path) }
 
+  /// Missing is a first run. Present and unreadable, or not what it should be, is a
+  /// problem to show, and nothing is written until a person has dealt with it.
   private func load() {
-    guard let data = FileManager.default.contents(atPath: file.path) else { return }
-    if let decoded = try? JSONDecoder().decode(File.self, from: data) {
-      records = decoded.outputs
+    switch FileRead.read(file) {
+    case .missing:
       return
+    case .unreadable(let why):
+      readProblem = "outputs.json could not be read (\(why))"
+    case .data(let data):
+      do {
+        records = try JSONDecoder().decode(File.self, from: data).outputs
+      } catch {
+        readProblem = "outputs.json is not what the helper wrote (\(error.localizedDescription))"
+      }
     }
-    // Unreadable. Moved aside, not deleted: it holds tokens the server has pinned,
-    // and a person may be able to fix it.
-    let aside = file.deletingLastPathComponent().appendingPathComponent(
-      "outputs.json.unreadable-\(Int(Date().timeIntervalSince1970))")
-    if (try? FileManager.default.moveItem(at: file, to: aside)) != nil { recoveredFrom = aside }
   }
 
   public func record(for key: String) -> OutputRecord? { records[key] }
@@ -82,12 +93,11 @@ public final class OutputStateStore {
   }
 
   private func save() throws {
+    if let readProblem { throw Unreadable(why: readProblem) }
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
     let data = try encoder.encode(File(outputs: records))
-    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try data.write(to: file, options: .atomic)
-    // The tokens are secrets: the account that runs the helper, nobody else.
-    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    try PrivateFiles.makeDirectory(file.deletingLastPathComponent())
+    try PrivateFiles.write(data, to: file)
   }
 }

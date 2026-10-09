@@ -87,6 +87,50 @@ func withTempDir<T>(_ body: (URL) throws -> T) rethrows -> T {
     }
   }
 
+  /// An id that exists and cannot be read is not a missing one: a new id saved over it
+  /// would orphan every binding made under the old.
+  @Test func anUnreadableGeneratedIdIsNotReplaced() throws {
+    try withTempDir { dir in
+      let file = dir.appendingPathComponent(MacIdentity.generatedFileName)
+      try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+      let id = MacIdentity.load(paths: HelperPaths(systemDir: dir, userDir: dir), makeId: { "temporary" })
+      #expect(id.deviceId == "temporary")
+      #expect(id.saveError?.contains("could not be read") == true)
+      var isDirectory: ObjCBool = false
+      #expect(FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory) && isDirectory.boolValue)
+    }
+  }
+
+  /// `--list-outputs` reads. It must not make an id, a folder or a token.
+  @Test func readingTheStoredStateWritesNothing() throws {
+    try withTempDir { dir in
+      let paths = HelperPaths(systemDir: dir.appendingPathComponent("system"), userDir: dir.appendingPathComponent("user"))
+      #expect(MacIdentity.stored(paths: paths) == nil)
+      let store = OutputStateStore(directory: paths.userDir)
+      let lines = OutputListing.lines(
+        identity: nil, displays: [OutputDescriptor(kind: .display, key: "k", name: "Display 1", port: "Display 1", isMain: true)],
+        record: { store.record(for: $0) })
+      #expect(lines[0].contains("none yet"))
+      #expect(lines[1] == "k\t-\tDisplay 1\tdefault off (not stored yet)")
+      let names = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+      #expect(names == [])
+    }
+  }
+
+  @Test func listsWhatIsStoredBeforeWhatIsDefault() throws {
+    try withTempDir { dir in
+      let store = OutputStateStore(directory: dir)
+      try store.ensure(key: "k", defaultEnabled: true)
+      try store.setEnabled(false, key: "k")
+      let identity = MacIdentity(deviceId: "mac", source: .installer, server: nil, installerToken: nil)
+      let lines = OutputListing.lines(
+        identity: identity, displays: [OutputDescriptor(kind: .display, key: "k", name: "Display 2", port: "Display 2")],
+        record: { store.record(for: $0) })
+      #expect(lines[0] == "mac device id: mac (installer)")
+      #expect(lines[1] == "k\tmac.k\tDisplay 2\toff (stored)")
+    }
+  }
+
   @Test func reportsAGeneratedIdThatCouldNotBeSaved() {
     withTempDir { dir in
       let blocker = dir.appendingPathComponent("file")
@@ -161,17 +205,41 @@ func withTempDir<T>(_ body: (URL) throws -> T) rethrows -> T {
     }
   }
 
-  /// An unreadable file holds tokens the server has pinned: move it aside, say so,
-  /// never delete it.
-  @Test func anUnreadableFileIsMovedAsideNotDeleted() throws {
+  /// An unreadable file holds tokens the server has pinned. Fresh tokens saved over
+  /// it would lock every claimed output out, so it is left exactly as it is.
+  @Test func aFileThatIsNotWhatWeWroteIsNeverWrittenOver() throws {
     try withTempDir { dir in
       let file = dir.appendingPathComponent("outputs.json")
       try "{ not json".write(to: file, atomically: true, encoding: .utf8)
       let store = OutputStateStore(directory: dir)
-      let aside = try #require(store.recoveredFrom)
-      #expect(FileManager.default.fileExists(atPath: aside.path))
-      #expect(try String(contentsOf: aside, encoding: .utf8) == "{ not json")
-      #expect(store.record(for: "anything") == nil)
+      #expect(store.readProblem?.contains("is not what the helper wrote") == true)
+      #expect(throws: OutputStateStore.Unreadable.self) { try store.ensure(key: "k", defaultEnabled: true) }
+      #expect(throws: OutputStateStore.Unreadable.self) { try store.setEnabled(false, key: "k") }
+      #expect(try String(contentsOf: file, encoding: .utf8) == "{ not json")
+      // Nothing was moved aside either: the person who fixes it finds it where it was.
+      let names = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+      #expect(names == ["outputs.json"])
+    }
+  }
+
+  /// "Cannot be read" and "is not there" are different answers: the second is a first
+  /// run and is written; the first must never be.
+  @Test func aFileThatCannotBeReadIsNotAFirstRun() throws {
+    try withTempDir { dir in
+      // A directory where the file should be: present, and unreadable as a file.
+      try FileManager.default.createDirectory(at: dir.appendingPathComponent("outputs.json"), withIntermediateDirectories: false)
+      let store = OutputStateStore(directory: dir)
+      #expect(store.readProblem?.contains("could not be read") == true)
+      #expect(throws: OutputStateStore.Unreadable.self) { try store.ensure(key: "k", defaultEnabled: true) }
+    }
+  }
+
+  @Test func aMissingFileIsAFirstRunAndIsWritten() throws {
+    try withTempDir { dir in
+      let store = OutputStateStore(directory: dir)
+      #expect(store.readProblem == nil)
+      try store.ensure(key: "k", defaultEnabled: true)
+      #expect(FileManager.default.fileExists(atPath: store.file.path))
     }
   }
 
