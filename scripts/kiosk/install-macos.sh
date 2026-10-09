@@ -863,8 +863,11 @@ PLIST
   if [ -d "$APPS_DIR/$APP_NAME" ]; then
     echo
     echo "    Note: the Stage Utility Output helper is still installed on this Mac, and"
-    echo "    both would show on its display. To remove the helper:"
-    echo "      launchctl bootout gui/<uid>/$HELPER_LABEL; rm -rf \"/Applications/$APP_NAME\""
+    echo "    both would show on its display. To remove the helper, as root:"
+    echo "      launchctl bootout gui/<uid>/$HELPER_LABEL"
+    echo "      rm -f \"$HELPER_PLIST\""
+    echo "      rm -rf \"$APPS_DIR/$APP_NAME\""
+    echo "    The plist is what starts it at every login, so the helper comes back without it."
   fi
 
   echo

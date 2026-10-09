@@ -151,6 +151,21 @@ the screen the Chrome kiosk showed comes back by itself on that display. The Mac
 displays are new outputs under *Not set up yet*. Deleting the file stops the helper doing
 this. With nobody logged in the kiosk is replaced at the next login.
 
+**Removing the helper.** Quit it from its menu bar icon, then, as root:
+
+```sh
+launchctl bootout gui/<uid>/com.stageutility.output
+rm -f /Library/LaunchAgents/com.stageutility.output.plist
+rm -rf /Applications/StageUtilityOutput.app
+```
+
+The plist is what starts it at every login, so removing only the app leaves an agent
+trying to launch a missing one. The helper's own state folder,
+`~/Library/Application Support/StageUtilityOutput`, can go too if you do not want
+its settings back. The device id in `/Library/Application Support/StageUtility` stays,
+so installing again keeps the Mac's binding. `install-macos.sh --browser` on a Mac that
+has the helper prints these same commands rather than running them.
+
 **What a person still has to do, once, at the Mac.** macOS does not let a script:
 
 - turn on **automatic login** (System Settings → Users & Groups). The helper's browser

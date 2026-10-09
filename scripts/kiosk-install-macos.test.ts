@@ -657,6 +657,17 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
       });
     });
 
+    it("--browser on a Mac that has the helper tells how to remove all of it: the agent, its plist and the app", async () => {
+      fs.mkdirSync(app(), { recursive: true });
+      const r = await sh(`. "${SCRIPT}"; trap on_exit EXIT; install_browser`, baseEnv({ ...shims.env, SHIM_MARKER: marker(), STAGE_INSTALL_TEST_CONSOLE_USER: ME }));
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.match(r.out, /the Stage Utility Output helper is still installed/);
+      const lines = r.out.split("\n").map((l) => l.trim());
+      assert.ok(lines.includes("launchctl bootout gui/<uid>/com.stageutility.output"), r.out);
+      assert.ok(lines.includes(`rm -f "${helperPlist()}"`), `the system-wide agent file is removed, or the helper starts at the next login anyway: ${r.out}`);
+      assert.ok(lines.includes(`rm -rf "${app()}"`), r.out);
+    });
+
     describe("moving off the Chrome kiosk", () => {
       const strip = (l: string[]) => l.map((c) => c.replace(/ \| marker=.*/, ""));
 
