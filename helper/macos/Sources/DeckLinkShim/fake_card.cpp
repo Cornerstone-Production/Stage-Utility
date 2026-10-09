@@ -1,0 +1,237 @@
+// A card made of a software clock. It runs the same Output (the same scheduler,
+// the same counters) as a DeckLink port, so the timing can be tested, and the
+// helper run, without one.
+//
+// It models what the scheduler depends on:
+// - the clock moves one frame per tick, whether or not the host keeps up;
+// - a frame scheduled for a slot that has already begun is never shown, and
+//   completes as dropped;
+// - a slot with no frame of ours shows the card's last picture again;
+// - a frame completes once its slot is over;
+// - completions can be held back, as a host stuck elsewhere would hold them.
+
+#include "output.hpp"
+
+#include <chrono>
+#include <condition_variable>
+#include <cstring>
+#include <thread>
+#include <utility>
+
+namespace dlshim {
+
+namespace {
+
+class FakeCard final : public Card {
+ public:
+  FakeCard(int64_t frameDuration, int64_t timeScale, bool timer)
+      : frameDuration_(frameDuration), timeScale_(timeScale), timer_(timer) {}
+
+  ~FakeCard() override { stop(); }
+
+  bool isFake() const override { return true; }
+
+  bool schedule(PoolFrame *frame, int64_t displayTime, int64_t, int64_t) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (unplugged_ || stopped_) return false;
+    const int64_t index = floorDiv(displayTime, frameDuration_);
+    frame->AddRef();
+    pending_.push_back(Pending{frame, index, started_ && index <= onAir_});
+    return true;
+  }
+
+  bool streamTime(int64_t timeScale, int64_t *now) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const int64_t frames = started_ ? onAir_ : 0;
+    // The clock's own scale, converted to the one asked for.
+    *now = frames * frameDuration_ * timeScale / timeScale_;
+    return true;
+  }
+
+  bool start(int64_t at, int64_t) override {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      started_ = true;
+      onAir_ = floorDiv(at, frameDuration_);
+      showLocked();
+    }
+    if (timer_) thread_ = std::thread([this] { run(); });
+    return true;
+  }
+
+  void stop() override {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (stopped_) return;
+      stopped_ = true;
+    }
+    wake_.notify_all();
+    if (thread_.joinable()) thread_.join();
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto &p : pending_) p.frame->Release();
+    pending_.clear();
+    for (auto &d : held_) d.first->Release();
+    held_.clear();
+  }
+
+  void tick(int32_t frames) {
+    for (int32_t i = 0; i < frames; i++) tickOnce();
+  }
+
+  void hold(bool on) {
+    Done done;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      holding_ = on;
+      if (!on) done.swap(held_);
+    }
+    deliver(done);
+  }
+
+  void unplug() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      unplugged_ = true;
+    }
+    if (output_ != nullptr) output_->lose("the device was removed");
+  }
+
+  int32_t shown(int64_t *pictures, int32_t capacity) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto count = static_cast<int32_t>(shown_.size());
+    for (int32_t i = 0; i < count && i < capacity; i++) pictures[i] = shown_[i];
+    return count;
+  }
+
+ private:
+  struct Pending {
+    PoolFrame *frame;
+    int64_t index;
+    /// Scheduled after its slot began: never shown.
+    bool late;
+  };
+  using Done = std::vector<std::pair<PoolFrame *, Completion>>;
+
+  /// Keeps memory bounded on a fake left running for hours.
+  static constexpr size_t kShownCap = 1 << 16;
+
+  void tickOnce() {
+    Done done;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (!started_ || stopped_ || unplugged_) return;
+      onAir_++;
+      for (auto it = pending_.begin(); it != pending_.end();) {
+        if (it->index < onAir_) {
+          done.emplace_back(it->frame, it->late ? Completion::dropped : Completion::completed);
+          it = pending_.erase(it);
+        } else {
+          ++it;
+        }
+      }
+      showLocked();
+      if (holding_) {
+        held_.insert(held_.end(), done.begin(), done.end());
+        done.clear();
+      }
+    }
+    deliver(done);
+  }
+
+  /// Record what is on air for the slot that just began.
+  void showLocked() {
+    for (const auto &p : pending_) {
+      if (p.index == onAir_ && !p.late) {
+        std::memcpy(&lastShown_, p.frame->bytes(), sizeof lastShown_);
+        break;
+      }
+    }
+    if (shown_.size() < kShownCap) shown_.push_back(lastShown_);
+  }
+
+  void deliver(Done &done) {
+    for (auto &d : done) {
+      if (output_ != nullptr) output_->completed(d.first, d.second);
+      d.first->Release();
+    }
+  }
+
+  void run() {
+    using clock = std::chrono::steady_clock;
+    const auto period = std::chrono::duration_cast<clock::duration>(
+        std::chrono::duration<double>(static_cast<double>(frameDuration_) / static_cast<double>(timeScale_)));
+    auto next = clock::now() + period;
+    for (;;) {
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (wake_.wait_until(lock, next, [this] { return stopped_; })) return;
+      }
+      tickOnce();
+      next += period;
+    }
+  }
+
+  const int64_t frameDuration_;
+  const int64_t timeScale_;
+  const bool timer_;
+
+  std::mutex mutex_;
+  std::condition_variable wake_;
+  std::thread thread_;
+  std::vector<Pending> pending_;
+  Done held_;
+  std::vector<int64_t> shown_;
+  int64_t onAir_ = 0;
+  int64_t lastShown_ = -1;
+  bool started_ = false;
+  bool stopped_ = false;
+  bool holding_ = false;
+  bool unplugged_ = false;
+};
+
+FakeCard *fakeOf(const dl_output *output) {
+  if (output == nullptr || !output->card->isFake()) return nullptr;
+  return static_cast<FakeCard *>(output->card);
+}
+
+}  // namespace
+
+}  // namespace dlshim
+
+using namespace dlshim;
+
+extern "C" dl_output *dl_fake_output_open(int32_t width, int32_t height, int64_t frame_duration, int64_t time_scale,
+                                          bool timer, const dl_callbacks *callbacks, char *why, size_t why_len) {
+  if (callbacks == nullptr) {
+    copyReason("no callbacks", why, why_len);
+    return nullptr;
+  }
+  auto *card = new FakeCard(frame_duration, time_scale, timer);
+  auto *output = new Output(card, width, height, frame_duration, time_scale, *callbacks);
+  std::string reason;
+  if (!output->start(reason)) {
+    output->close();
+    delete output;
+    delete card;
+    copyReason(reason, why, why_len);
+    return nullptr;
+  }
+  return new dl_output{card, output};
+}
+
+extern "C" void dl_fake_tick(dl_output *output, int32_t frames) {
+  if (auto *fake = fakeOf(output)) fake->tick(frames);
+}
+
+extern "C" void dl_fake_hold_completions(dl_output *output, bool hold) {
+  if (auto *fake = fakeOf(output)) fake->hold(hold);
+}
+
+extern "C" void dl_fake_unplug(dl_output *output) {
+  if (auto *fake = fakeOf(output)) fake->unplug();
+}
+
+extern "C" int32_t dl_fake_shown(const dl_output *output, int64_t *pictures, int32_t capacity) {
+  if (auto *fake = fakeOf(output)) return fake->shown(pictures, capacity);
+  return 0;
+}
