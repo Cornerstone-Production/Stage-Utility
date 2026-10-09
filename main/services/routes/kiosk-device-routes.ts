@@ -6,7 +6,9 @@
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
-import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen } from "../kiosk-presence.js";
+import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, healthList, forgetHealth } from "../kiosk-presence.js";
+import { parseHealthReport } from "../output-health.js";
+import { headerValue } from "../http-origin.js";
 import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
 import { holdingScreen } from "../kiosk-holding-screen.js";
 import { stageController } from "../stage-controller.js";
@@ -126,6 +128,9 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // more, it lives in its own map. A field that had to be removed on the way
       // out was removed here and forgotten on the SSE broadcast.
       seen: seen.filter((s) => !bound.some((b) => b.id === s.id)),
+      // What each helper output last reported about itself, for the ones that
+      // are still reporting. Runtime: never stored, gone on restart.
+      health: healthList(),
       // For each unclaimed device, which bound devices share a MAC — the
       // "this looks like Left Mic Display" hint. A suggestion, never a binding.
       matches: Object.fromEntries(
@@ -135,6 +140,41 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
           .filter(([, ids]) => (ids as string[]).length > 0),
       ),
     });
+    return;
+  }
+
+  // ── An output helper's health, from the device itself ──────────────────
+  // Authenticated by the device's own secret, the one /enroll checks, not by the
+  // same-origin gate a browser is held to: the caller is a native app. The secret
+  // travels as `Authorization: Bearer <secret>` or as `?token=`, as it does to
+  // /enroll. An id this server holds no binding for is 404, a wrong or missing
+  // secret is 401, and neither says anything about the other.
+  const healthMatch = method === "POST" ? pathname.match(/^\/api\/devices\/([^/]+)\/health$/) : null;
+  if (healthMatch) {
+    let id: string;
+    try {
+      id = decodeURIComponent(healthMatch[1]);
+    } catch {
+      error(res, "the device id in the path is not valid", 400);
+      return;
+    }
+    const devices = await kioskDevicesStore.load();
+    if (!findById(devices, id)) {
+      error(res, "no device is set up with that id", 404);
+      return;
+    }
+    const bearer = /^Bearer\s+(\S+)$/i.exec(headerValue(req.headers, "authorization"))?.[1];
+    if (!authorise(devices, id, clean(bearer ?? null) ?? clean(url.searchParams.get("token")))) {
+      error(res, "the device secret is missing or wrong", 401);
+      return;
+    }
+    const parsed = parseHealthReport(await readBody(req));
+    if ("error" in parsed) {
+      error(res, parsed.error, 400);
+      return;
+    }
+    recordHealth(id, parsed.report);
+    json(res, { ok: true });
     return;
   }
 
@@ -241,6 +281,8 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // lingers in the unclaimed list for the whole TTL, which reads as the
       // claim not having worked.
       forgetSeen(id);
+      // What a displaced device reported was about the screen it no longer shows.
+      if (displacedId) forgetHealth(displacedId);
       if (seen?.output) {
         console.log(
           `[output-helper] claimed: ${scrub(id)} (${scrub(seen.output.kind)} "${scrub(seen.output.name)}") now shows screen ${scrub(outputId)}`
@@ -275,6 +317,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     try {
       const output = findById(await kioskDevicesStore.load(), id)?.output;
       await updateDevices((current) => release(current, id));
+      forgetHealth(id);
       if (output) {
         console.log(`[output-helper] released: ${scrub(id)} (${scrub(output.kind)} "${scrub(output.name)}") is not set up again`);
       }

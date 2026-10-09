@@ -187,6 +187,21 @@ server's Mac works.
 The stored binding keeps the `output`, so a bound screen still names its port
 while the output is off.
 
+**Format and rotation** are settings of the screen, not of the Mac: a DeckLink
+port's video mode (`videoMode`, `1080p59.94` unless changed) and a quarter-turn
+rotation for a monitor on its side (`rotation`, 0 unless changed). They are
+written through `PATCH /api/outputs/:id`, are in every backup, and the helper
+reads them from the stage state it already receives. See the
+[API](reference/api.md).
+
+**Health.** Each output reports every ten seconds, authenticated by the device's
+own secret, and the server keeps the latest in memory only. It is shown with the
+screen: frames per second, the percent of frames repeated because the page was
+late, and the frames the card has dropped. Three reports running with frames
+dropped or 5% or more repeated mark the output **struggling**, and three clean
+ones in a row clear it. A reading that stops being refreshed is dropped after 60
+seconds.
+
 ## Removing one
 
 *Release*, on the screen's card, unbinds it: the screen keeps its view and its

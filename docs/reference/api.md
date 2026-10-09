@@ -481,11 +481,12 @@ recorder is running. Pass `{override: true}` to go anyway.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/devices` | `{scanning, bound, seen, matches}`. Device secrets are stripped |
+| GET | `/api/devices` | `{scanning, bound, seen, matches, health}`. Device secrets are stripped. A device that is one output of a Mac output helper carries its `output` (`{kind, name, port, modes?}`) in `bound` and `seen`. `health` lists what each helper output last reported, `{deviceId, fps, repeated, dropped, at, receivedAt, struggling}`, for the ones still reporting; it is never stored |
 | POST | `/api/devices/scan` | Open or close the scan window |
 | POST | `/api/devices/claim` | Bind a device to an output. `{deviceId, outputId}` binds it to that screen. With no `outputId` it makes a new screen first, from the same fields as `POST /api/outputs` (`name`, or `newName`, else the device's hostname; `mode`, `viewId` or `newView`, `slug`, `showInSidebar`), validated before anything is written. Binding the device is the last step of making the screen, so a binding that fails puts back everything before it (the screen, a view made for it, a sidebar listing written on an existing view) and answers the same `500` as `POST /api/outputs`. Those fields with an `outputId` are `400`. A device already bound is not made a new screen: with no `outputId` it is `409` naming the screen it shows (moving it is a claim with that screen's `outputId`). Answers `{ok, displaced, outputId}` |
 | POST | `/api/devices/release` | Unbind it. The screen keeps its view and slug |
 | GET | `/api/devices/for-output/:outputId` | Which device drives this screen |
+| POST | `/api/devices/:id/health` | An output helper reports how one output is doing, every ten seconds: `{fps, repeated, dropped, at}`. `fps` is frames per second over the window (0 to 1000); `repeated` the percent of that window's frames that repeated the one before because the page was late (0 to 100); `dropped` the whole number of frames the card has dropped since the output opened (cumulative, so a lower number than last time means it was reopened); `at` the helper's own clock in ms since the epoch, which the server does not trust: a report is dated by when it arrives. Authenticated by the device's own secret, the one `/enroll` checks, sent as `Authorization: Bearer <secret>` or `?token=<secret>`, not by the same-origin rule a browser is held to. An id this server holds no binding for is `404`, a missing or wrong secret `401`, and a body that is not a report `400` naming the field. Answers `{ok}`. A reading older than 60 seconds is dropped |
 
 **Settings toggles** — one `POST` each, all returning the updated `StageState`:
 `/api/timezone`, `/api/hour-cycle`, `/api/public-url`, `/api/reconnect-schedule`,
@@ -633,7 +634,7 @@ something to change:
 `wireless:connections-changed` · `osc:targets-changed` ·
 `rosstalk:targets-changed` · `scores:favourites-changed` ·
 `rosstalk:simulated` · `automation:rules` · `cues` · `cues:all` ·
-`automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` ·
+`automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` (`{scanning, seen, health}`; the Screens page refetches `/api/devices` on each, and a steady output's health does not push one) ·
 `display:refresh` · `settings:allowedServiceTypeIds-changed` · `baptism:rebuilt`
 
 `baptism:rebuilt` fires once a baptism rebuild — the Baptisms tab's own, a

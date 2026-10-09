@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { describe, test, beforeEach } from "node:test";
+import { describe, test, beforeEach, mock } from "node:test";
 
 import {
   scanning, startScan, stopScan, recordSeen, seenDevices, forgetSeen,
   resetKioskPresence, rememberScreen, rememberSecret, SCAN_WINDOW_MS,
+  recordHealth, healthList, forgetHealth,
 } from "./kiosk-presence.js";
+import { HEALTH_TTL_MS } from "./output-health.js";
 import { addBroadcastListener } from "./broadcaster.js";
 
 // Devices heard on the network. The whole point of this module is that it does
@@ -228,5 +230,85 @@ describe("what is broadcast", () => {
     // Anything on the LAN can call it with any id.
     rememberSecret("never-probed", "x");
     assert.equal(seenDevices().some((d) => d.id === "never-probed"), false);
+  });
+});
+
+// What an output helper reports about itself. Runtime, like the rest of this
+// module: nothing is written, and a reading that stops being refreshed stops
+// being shown.
+describe("output health", () => {
+  const report = (over: Record<string, number> = {}) => ({ fps: 59.94, repeated: 0.2, dropped: 0, at: 1, ...over });
+  const lines: string[] = [];
+  const realLog = console.log;
+  beforeEach(() => {
+    lines.length = 0;
+    console.log = (...a: unknown[]) => {
+      lines.push(a.map(String).join(" "));
+    };
+  });
+  const quiet = () => {
+    console.log = realLog;
+  };
+
+  test("a healthy output reporting for a long time logs nothing", () => {
+    try {
+      for (let i = 0; i < 30; i++) recordHealth("mac1.sdi-1", report(), 1_000_000 + i * 10_000);
+    } finally {
+      quiet();
+    }
+    assert.deepEqual(lines, [], "every report was logged");
+  });
+
+  test("a sustained drop is logged once when it starts and once when it ends", () => {
+    const t0 = 1_000_000;
+    try {
+      let n = 0;
+      for (const dropped of [0, 4, 9, 15, 15, 15, 15]) recordHealth("mac1.sdi-1", report({ dropped }), t0 + n++ * 10_000);
+    } finally {
+      quiet();
+    }
+    assert.equal(lines.length, 2, lines.join("\n"));
+    assert.match(lines[0], /^\[output-helper\] mac1\.sdi-1 is struggling: 15 frames dropped so far/);
+    assert.match(lines[1], /^\[output-helper\] mac1\.sdi-1 has recovered/);
+  });
+
+  test("a reading is shown while it is fresh and not after", () => {
+    const t0 = 1_000_000;
+    recordHealth("mac1.sdi-1", report(), t0);
+    assert.deepEqual(healthList(t0 + HEALTH_TTL_MS - 1).map((h) => h.deviceId), ["mac1.sdi-1"]);
+    assert.deepEqual(healthList(t0 + HEALTH_TTL_MS + 1), [], "a reading that stopped being refreshed stayed on the page");
+  });
+
+  test("forgetting a device takes its reading away", () => {
+    recordHealth("mac1.sdi-1", report());
+    forgetHealth("mac1.sdi-1");
+    assert.deepEqual(healthList(), []);
+  });
+
+  test("readings come back in id order", () => {
+    for (const id of ["mac1.sdi-2", "mac1.hdmi-1", "mac1.sdi-1"]) recordHealth(id, report());
+    assert.deepEqual(healthList().map((h) => h.deviceId), ["mac1.hdmi-1", "mac1.sdi-1", "mac1.sdi-2"]);
+  });
+
+  test("an output that stops reporting is dropped by the sweep, said so, and Screens is told", () => {
+    mock.timers.enable({ apis: ["setInterval", "Date"], now: 1_000_000 });
+    const sentHere: unknown[] = [];
+    addBroadcastListener((channel, payload) => {
+      if (channel === "kiosk:devices") sentHere.push(payload);
+    });
+    try {
+      recordHealth("mac1.sdi-1", report());
+      const before = sentHere.length;
+      mock.timers.tick(HEALTH_TTL_MS + 30_000);
+      assert.equal(healthList().length, 0);
+      assert.ok(sentHere.length > before, "the page was never told the reading went");
+      assert.ok(
+        lines.some((l) => l === "[output-helper] mac1.sdi-1 stopped reporting health"),
+        `no line said it stopped: ${lines.join(" | ")}`,
+      );
+    } finally {
+      quiet();
+      mock.timers.reset();
+    }
   });
 });
