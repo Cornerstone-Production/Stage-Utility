@@ -123,6 +123,22 @@ same binding. The outputs follow a change in the displays only after it has held
 one second, so a display that vanishes for a moment on wake does not tear down every
 web view.
 
+## A Mac that was a Chrome kiosk
+
+A Mac set up as a kiosk before the helper is bound on the server under its bare device
+id, with the installer's `token` as its secret. When `install-macos.sh` replaces that
+kiosk with the helper it writes `/Library/Application Support/StageUtility/migrated-from-kiosk`.
+With the marker there, the main display's output takes the kiosk's identity: it goes by
+the bare `<mac device id>` with the installer's token, and starts **on**, so the screen
+the kiosk showed stays bound and keeps showing. Every other output is new, as usual.
+
+This is decided once, when the main display's record is first made in `outputs.json`
+(`"kioskIdentity": true`), and never moved: a restart with the menu bar on another
+display, or the holder unplugged, does not give it to a second output. It is given
+only with the marker, the installer's own device id and its token; an output that
+already has a record is never converted, because its own id may be what a screen is
+bound to. `--list-outputs` shows the id each output really goes by.
+
 ## Discovery, and what the server hears
 
 Each enabled output sends the existing UDP probe, with an `output` object added. With

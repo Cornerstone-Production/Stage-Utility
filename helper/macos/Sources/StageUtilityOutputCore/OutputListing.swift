@@ -15,7 +15,7 @@ public enum OutputListing {
     }
     if let readProblem { out.append("state: \(readProblem); nothing is saved until it is fixed") }
     for d in displays {
-      let id = identity.map { DeviceIdentity.deviceId(mac: $0.deviceId, key: d.key) } ?? "-"
+      let id = identity.map { mac in record(d.key)?.deviceId(mac: mac.deviceId, key: d.key) ?? DeviceIdentity.deviceId(mac: mac.deviceId, key: d.key) } ?? "-"
       let state: String
       if let r = record(d.key) {
         state = "\(r.enabled ? "on" : "off") (stored)"

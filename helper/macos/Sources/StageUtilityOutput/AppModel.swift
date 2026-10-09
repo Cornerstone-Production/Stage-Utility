@@ -176,7 +176,12 @@ final class AppModel: ObservableObject {
 
   private func ensureRecord(_ d: OutputDescriptor) -> OutputRecord {
     do {
-      return try store.ensure(key: d.key, defaultEnabled: defaultEnabled(kind: d.kind, isMain: d.isMain))
+      let fresh = store.record(for: d.key) == nil
+      let record = try store.ensure(d, mac: identity)
+      if fresh, record.kioskIdentity == true {
+        Log.notice(.state, "\(d.name) takes over this Mac's Chrome kiosk: device id \(identity.deviceId), the installer's token, on")
+      }
+      return record
     } catch {
       // The record exists in memory with its token; only the file is behind.
       noteSaveFailure(error)
@@ -266,7 +271,8 @@ final class AppModel: ObservableObject {
   }
 
   private func deviceId(_ rt: Runtime) -> String {
-    DeviceIdentity.deviceId(mac: identity.deviceId, key: rt.display.descriptor.key)
+    let key = rt.display.descriptor.key
+    return store.record(for: key)?.deviceId(mac: identity.deviceId, key: key) ?? DeviceIdentity.deviceId(mac: identity.deviceId, key: key)
   }
 
   // MARK: Server

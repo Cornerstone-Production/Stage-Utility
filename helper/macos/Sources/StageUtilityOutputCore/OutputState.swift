@@ -11,6 +11,44 @@ public struct OutputRecord: Codable, Equatable {
   public var token: String
   /// The server that last answered this output.
   public var boundTo: String?
+  /// This output took over the Chrome kiosk this Mac was before the helper: it goes
+  /// by the Mac's bare device id with the installer's token, so the screen the
+  /// kiosk was bound to stays bound. Decided once, when the record is made (see
+  /// `KioskMigration`), and never given to a second output. Absent for every other.
+  public var kioskIdentity: Bool?
+
+  public init(enabled: Bool, token: String, boundTo: String? = nil, kioskIdentity: Bool? = nil) {
+    self.enabled = enabled
+    self.token = token
+    self.boundTo = boundTo
+    self.kioskIdentity = kioskIdentity
+  }
+
+  /// The id this output announces itself and enrols under.
+  public func deviceId(mac: String, key: String) -> String {
+    kioskIdentity == true ? mac : DeviceIdentity.deviceId(mac: mac, key: key)
+  }
+}
+
+/// A Mac that was a Chrome kiosk keeps its screen when the installer replaces the
+/// kiosk with the helper.
+///
+/// The kiosk was bound on the server under the Mac's bare device id, with the
+/// installer's `token` pinned as its secret. The helper names each output
+/// `<mac id>.<output key>` with a token of its own, and leaves the main display off,
+/// so without this the upgraded Mac would come up as new, unclaimed outputs and its
+/// screen would go dark. The installer writes `migrated-from-kiosk`; the helper then
+/// gives the main display's output the kiosk's identity and turns it on.
+public enum KioskMigration {
+  public static let markerFileName = "migrated-from-kiosk"
+
+  /// Whether a record being made now for `output` takes the kiosk's identity. Only
+  /// the main display, only with the marker and the installer's own id and token
+  /// (the secret the server pinned), and only while no stored output holds it.
+  public static func takesKioskIdentity(_ output: OutputDescriptor, mac: MacIdentity, alreadyHeld: Bool) -> Bool {
+    mac.migratedFromKiosk && mac.source == .installer && mac.installerToken != nil && !alreadyHeld
+      && output.kind == .display && output.isMain
+  }
 }
 
 /// `outputs.json` in the helper's own directory, keyed by output key.
@@ -66,6 +104,27 @@ public final class OutputStateStore {
   }
 
   public func record(for key: String) -> OutputRecord? { records[key] }
+
+  /// Whether any output, present or not, holds the kiosk's identity.
+  public var kioskIdentityHeld: Bool { records.values.contains { $0.kioskIdentity == true } }
+
+  /// The record for `output`, made on first sight. That is the one moment the
+  /// kiosk's identity can be given (`KioskMigration`), so it is decided once and
+  /// stored, and a display change later never moves it. Throws when it cannot be
+  /// saved; the record is kept in memory regardless.
+  @discardableResult
+  public func ensure(_ output: OutputDescriptor, mac: MacIdentity) throws -> OutputRecord {
+    if let existing = records[output.key] { return existing }
+    guard KioskMigration.takesKioskIdentity(output, mac: mac, alreadyHeld: kioskIdentityHeld),
+      let token = mac.installerToken
+    else {
+      return try ensure(key: output.key, defaultEnabled: defaultEnabled(kind: output.kind, isMain: output.isMain))
+    }
+    let record = OutputRecord(enabled: true, token: token, boundTo: nil, kioskIdentity: true)
+    records[output.key] = record
+    try save()
+    return record
+  }
 
   /// The record for `key`, made on first sight with a new token and the default
   /// for the kind of output. Throws when it cannot be saved.

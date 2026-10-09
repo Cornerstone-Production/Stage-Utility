@@ -51,10 +51,13 @@ public struct MacIdentity: Equatable {
   /// Set when the `server` file named an address that cannot be used (it has a
   /// path): discovery then runs as if there were no file.
   public var serverProblem: String?
-  /// The installer's Mac-level token. Read and kept; each output uses its own, so
-  /// nothing sends this one yet. Step 4 uses it: a Mac already set up as a kiosk
-  /// keeps its identity, so its single display becomes an output with this binding.
+  /// The installer's Mac-level token: the secret a Chrome kiosk on this Mac was
+  /// bound with. Only an output that takes over that kiosk's identity sends it
+  /// (`KioskMigration`); every other output has its own.
   public var installerToken: String?
+  /// The installer replaced a Chrome kiosk on this Mac with the helper, and left
+  /// `migrated-from-kiosk` to say so.
+  public var migratedFromKiosk = false
   /// Set when a generated id could not be saved: the id works for this run, and a
   /// restart would mint another and orphan every binding.
   public var saveError: String?
@@ -122,6 +125,8 @@ public struct MacIdentity: Equatable {
     var base = MacIdentity(
       deviceId: "", source: .generated, server: server, serverProblem: serverProblem, installerToken: token, saveError: nil,
       readProblem: nil)
+    base.migratedFromKiosk = FileManager.default.fileExists(
+      atPath: paths.systemDir.appendingPathComponent(KioskMigration.markerFileName).path)
     if let id = text(paths.systemDir, "device-id", problem: &problem) {
       base.deviceId = id
       base.source = .installer
