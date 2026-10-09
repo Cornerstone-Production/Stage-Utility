@@ -192,4 +192,34 @@ describe("attachment cache", () => {
     assert.equal(file.path, path.join(cacheDir, "disk-1.pdf"));
     assert.deepEqual(await fs.readFile(file.path), payload);
   });
+
+  // Planning Center's stage-plot attachment id carries a suffix ("84892470-stage").
+  // The cache names the file after the id, so the suffix has to survive the name
+  // and the same id has to find the same file on the next request.
+  test("a suffixed id is stored under its own name and read back from disk", async (t) => {
+    t.after(() => {
+      globalThis.fetch = realFetch;
+    });
+    const payload = Buffer.from("%PDF-1.7 stage plot");
+    let fetches = 0;
+    globalThis.fetch = (async () => {
+      fetches += 1;
+      return resp(200, payload);
+    }) as typeof fetch;
+
+    const first = await getAttachmentFile("84892470-stage", "application/pdf", "2026.10.08 Stage Plot.pdf", async () => "https://example.invalid/signed");
+    assert.ok(first);
+    assert.equal(first.path, path.join(cacheDir, "84892470-stage.pdf"));
+    assert.deepEqual(await fs.readFile(first.path), payload);
+
+    const again = await getAttachmentFile("84892470-stage", "application/pdf", "2026.10.08 Stage Plot.pdf", async () => {
+      throw new Error("a cached attachment must not open a new link");
+    });
+    assert.equal(again?.path, first.path);
+    assert.equal(fetches, 1, "the second request must be served from disk");
+
+    // The digits-only id is a different file, not the same one with the suffix dropped.
+    const plain = await getAttachmentFile("84892470", "application/pdf", "other.pdf", async () => "https://example.invalid/signed");
+    assert.equal(plain?.path, path.join(cacheDir, "84892470.pdf"));
+  });
 });

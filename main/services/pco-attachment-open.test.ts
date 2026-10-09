@@ -6,15 +6,19 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, test } from "node:test";
 
+import { PcoUrlRefused } from "./pco-path.js";
 import { pcoService } from "./pco-service.js";
 
 let posts = 0;
+let urls: string[] = [];
 const realFetch = globalThis.fetch;
 
 beforeEach(() => {
   posts = 0;
+  urls = [];
   pcoService.clearCache();
-  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    urls.push(String(input));
     if (init?.method === "POST") posts += 1;
     const body = { data: { id: "a1", type: "Attachment", attributes: { attachment_url: `https://s3.invalid/link-${posts}` } } };
     return {
@@ -43,5 +47,37 @@ describe("openAttachment's signed-link cache", () => {
     const after = await pcoService.openAttachment("app", "secret", "11", "21", "31");
     assert.equal(posts, 2);
     assert.equal(after.url, fresh.url, "the fresh link was not cached for the next caller");
+  });
+});
+
+// Planning Center issues the plan's stage plot an all_attachments id with a word
+// on the end, "84892470-stage". v1.25.0 refused it, so the stage plot never opened.
+describe("openAttachment's attachment id", () => {
+  test("opens a suffixed stage-plot id at exactly that path", async () => {
+    await pcoService.openAttachment("app", "secret", "11", "21", "84892470-stage");
+    assert.deepEqual(urls, [
+      "https://api.planningcenteronline.com/services/v2/service_types/11/plans/21/all_attachments/84892470-stage/open",
+    ]);
+  });
+
+  test("still opens a plain numeric id", async () => {
+    await pcoService.openAttachment("app", "secret", "11", "21", "84892470");
+    assert.match(urls[0], /\/all_attachments\/84892470\/open$/);
+  });
+
+  test("refuses anything that could leave the path segment, and sends nothing", async () => {
+    const tooLong = `84892470-${"a".repeat(21)}`;
+    for (const bad of ["../x", "84892470-stage/../../x", "abc", "", tooLong, "84892470-stage?x=1"]) {
+      await assert.rejects(
+        pcoService.openAttachment("app", "secret", "11", "21", bad),
+        PcoUrlRefused,
+        `openAttachment accepted ${JSON.stringify(bad)}`,
+      );
+    }
+    assert.deepEqual(urls, [], "a refused id must not reach the network");
+  });
+
+  test("a suffixed id is not accepted where a plan id belongs", async () => {
+    await assert.rejects(pcoService.openAttachment("app", "secret", "11", "21-stage", "31"), PcoUrlRefused);
   });
 });

@@ -247,7 +247,7 @@ describe("a Services URL is written with pcoUrl", () => {
   });
 
   it("every id in a pcoUrl path went through pcoId", () => {
-    const raw = code.filter((l) => /pcoUrl`[^`]*\$\{(?!pcoId\(|pcoSegment\()/.test(l));
+    const raw = code.filter((l) => /pcoUrl`[^`]*\$\{(?!pcoId\(|pcoAttachmentId\(|pcoSegment\()/.test(l));
     assert.deepEqual(raw, []);
   });
 });

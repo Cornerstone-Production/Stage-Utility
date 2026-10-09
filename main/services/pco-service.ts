@@ -35,7 +35,7 @@ export class PcoAuthError extends Error {
   }
 }
 import { scrub } from "./scrub.js";
-import { PCO_BASE, PcoUrlRefused, isPcoId, pcoId, pcoSegment, pcoUrl, pcoUrlOf, type PcoUrl } from "./pco-path.js";
+import { PCO_BASE, PcoUrlRefused, isPcoId, pcoAttachmentId, pcoId, pcoSegment, pcoUrl, pcoUrlOf, type PcoUrl } from "./pco-path.js";
 
 /**
  * Every version Planning Center SERVICES publishes, newest first.
@@ -1137,7 +1137,7 @@ class PcoService {
 
     // `all_attachments/{id}/open` is the uniform open action for every attachable
     // type (plan file, service-type file, item/arrangement chart).
-    const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/all_attachments/${pcoId("attachmentId", attachmentId)}/open`;
+    const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/all_attachments/${pcoAttachmentId("attachmentId", attachmentId)}/open`;
     const json = await this.postJson(url, appId, secret);
     const node = (Array.isArray(json.data) ? json.data[0] : json.data) as PcoNode | undefined;
     const a = node?.attributes ?? {};
