@@ -51,7 +51,6 @@ final class AppModel: ObservableObject {
     /// Why the screens could not be read, while they cannot: logged once, not per try.
     var screenReadProblem: String?
     var fps: Double?
-    var spiProblems: [String] = []
     init(display: ConnectedDisplay) { self.display = display }
   }
   private var runtimes: [String: Runtime] = [:]
@@ -204,11 +203,9 @@ final class AppModel: ObservableObject {
     let d = rt.display.descriptor
     let sink = DisplaySink(descriptor: d, screen: rt.display.screen)
     rt.sink = sink
-    if !sink.keepPaintingProblems.isEmpty {
-      rt.spiProblems = sink.keepPaintingProblems
-      let list = sink.keepPaintingProblems.joined(separator: ", ")
-      Log.error(.webkit, "\(d.port): WebKit switches missing or not taking, so this output may freeze when the screen locks or the display sleeps: \(list)")
-      setNote("spi", "WebKit switches missing on this macOS: \(list). Outputs may freeze while the screen is locked or asleep.")
+    if !sink.surfaceProblems.isEmpty {
+      for problem in sink.surfaceProblems { Log.error(.output, "\(d.port): \(problem)") }
+      setNote("surface", sink.surfaceProblems.joined(separator: " "))
     }
     sink.surface.onLoadResult = { [weak self, weak rt] failures in
       guard let self, let rt else { return }
@@ -329,7 +326,7 @@ final class AppModel: ObservableObject {
       // Set up (again): the server may know this output now, so health posts resume.
       healthBoard.boundAgain(rt.display.descriptor.key)
     case .holding:
-      Log.notice(.output, "\(port): back on the holding screen")
+      Log.notice(.output, "\(port): showing the holding screen")
     case .other:
       Log.notice(.output, "\(port): showing a page that is neither the holding screen nor a screen")
     }

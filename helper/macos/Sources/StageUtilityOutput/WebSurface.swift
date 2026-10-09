@@ -1,87 +1,94 @@
 import AppKit
 import StageUtilityOutputCore
-import WebKit
 
-/// The part of an output that does not care where its pictures go: a web view that
-/// loads one URL, keeps trying when the server is away, and reports what committed.
+/// A page shown in a view, whatever renders it. Today that is WebKit
+/// (`WKWebSurface`); a Chromium surface, windowless for a card or windowed for a
+/// display, is the other this is shaped for. Nothing above this protocol (a
+/// destination, a sink, the model) names an engine.
 ///
-/// A display puts the view in a window. A DeckLink port will keep it off every
-/// display and read its frames for a card. Both want the same loading, the same
-/// backoff and the same WebKit switches, so those live here and the destination
-/// is a separate thing (`OutputDestination`).
+/// The engine reports what happened to a navigation; the retry, the backoff and the
+/// reading of a 5xx are `SurfaceLoader`, which every engine shares.
 @MainActor
-final class WebSurface: NSObject, WKNavigationDelegate {
-  let webView: WKWebView
-  /// The WebKit switches that were missing or did not take, set once at creation.
-  let keepPaintingProblems: [String]
-
+protocol WebSurface: AnyObject {
+  /// The view the page is drawn in, for a destination to place. For a surface that
+  /// draws off screen this is a view that is never shown.
+  var hostView: NSView { get }
+  /// What the engine could not set up, each worded for the log and the window. Empty
+  /// when everything took.
+  var problems: [String] { get }
   /// How a load ended. `failures` is the run of consecutive failures (0 on success).
+  var onLoadResult: (@MainActor (_ failures: Int) -> Void)? { get set }
+  /// A page committed: the URL now on the screen, after the server's redirect from
+  /// /enroll to the screen. Never for a 5xx page, a load still in flight or one that
+  /// failed.
+  var onCommitted: (@MainActor (URL) -> Void)? { get set }
+  /// Show this address. The same address again does nothing.
+  func load(_ url: URL)
+  /// Load the current address again now.
+  func reload()
+  /// What the surface is showing, as the page draws it: before any turn a window
+  /// gives it. Gets the picture, or why there is none.
+  func snapshot(completion: @escaping @MainActor (CGImage?, String?) -> Void)
+  func stop()
+}
+
+/// The part of loading that is the same in every engine: the address asked for, the
+/// run of failures, the reload after a wait, and what a 5xx means. The engine calls
+/// the events; this calls `navigate` and the callbacks.
+///
+/// An optional frame tap (a picture of the page on each display refresh, for a card)
+/// will sit beside this, on the surface; it is not built yet.
+@MainActor
+final class SurfaceLoader {
   var onLoadResult: (@MainActor (_ failures: Int) -> Void)?
-  /// A page committed: the URL the web view is now showing, after the server's
-  /// redirect from /enroll to the screen. Never called for a 5xx page, and never
-  /// for a load that is still in flight or failed: the web view's `url` reports
-  /// the address being loaded while it loads, which is not what is on the screen.
   var onCommitted: (@MainActor (URL) -> Void)?
 
   private let label: String
+  private let navigate: @MainActor (URL) -> Void
   private var tracker = PageLoadTracker()
   private var requested: URL?
   private var reloadWork: DispatchWorkItem?
 
-  init(label: String, size: CGSize) {
+  /// `navigate` starts the engine loading an address.
+  init(label: String, navigate: @escaping @MainActor (URL) -> Void) {
     self.label = label
-    let config = WKWebViewConfiguration()
-    var problems = KeepPainting.apply(to: config.preferences)
-    webView = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: config)
-    problems += KeepPainting.apply(to: webView)
-    keepPaintingProblems = problems
-    super.init()
-    webView.navigationDelegate = self
-    webView.autoresizingMask = [.width, .height]
-    // Black while a page loads or the server is away, not white.
-    webView.underPageBackgroundColor = .black
+    self.navigate = navigate
   }
 
-  func show(url: URL) {
+  func show(_ url: URL) {
     if requested == url { return }
     requested = url
     tracker.reset()
-    load()
+    reload()
+  }
+
+  func reload() {
+    guard let requested else { return }
+    reloadWork?.cancel()
+    tracker.loadStarted()
+    navigate(requested)
   }
 
   func stop() {
     reloadWork?.cancel()
     reloadWork = nil
-    webView.stopLoading()
-    webView.navigationDelegate = nil
     requested = nil
   }
 
-  /// What the web view is showing, as the page draws it: before any turn the
-  /// window gives it. `completion` gets the picture, or why there is none.
-  func snapshot(completion: @escaping @MainActor (CGImage?, String?) -> Void) {
-    let config = WKSnapshotConfiguration()
-    config.afterScreenUpdates = false
-    config.snapshotWidth = NSNumber(value: Double(webView.bounds.width))
-    webView.takeSnapshot(with: config) { image, error in
-      MainActor.assumeIsolated {
-        guard let image, let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-          completion(nil, "no snapshot: \(error?.localizedDescription ?? "web view returned nothing")")
-          return
-        }
-        completion(cg, nil)
-      }
-    }
+  // MARK: What the engine reports
+
+  func responded(status: Int) { apply(tracker.responded(status: status)) }
+
+  /// A page committed at `url`. A 5xx page is on the screen too, but its URL says
+  /// nothing about whether the output is set up, so it is not reported.
+  func committed(_ url: URL) {
+    guard !tracker.responseFailed else { return }
+    onCommitted?(url)
   }
 
-  // MARK: Loading
-
-  private func load() {
-    guard let requested else { return }
-    reloadWork?.cancel()
-    tracker.loadStarted()
-    webView.load(URLRequest(url: requested, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15))
-  }
+  func finished() { apply(tracker.finished()) }
+  func failed(_ error: NSError) { apply(tracker.navigationFailed(error)) }
+  func processEnded() { apply(tracker.processTerminated()) }
 
   private func apply(_ outcome: PageLoadTracker.Outcome) {
     switch outcome {
@@ -91,45 +98,12 @@ final class WebSurface: NSObject, WKNavigationDelegate {
       Log.error(.output, "\(label): page did not load (\(f.reason)); reload \(f.failures) in \(Int(f.delay)) s")
       onLoadResult?(f.failures)
       reloadWork?.cancel()
-      let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.load() } }
+      let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.reload() } }
       reloadWork = work
       DispatchQueue.main.asyncAfter(deadline: .now() + f.delay, execute: work)
     case .loaded(let afterFailures):
       if afterFailures > 0 { Log.notice(.output, "\(label): page loaded again after \(afterFailures) failures") }
       onLoadResult?(0)
     }
-  }
-
-  // MARK: WKNavigationDelegate
-
-  func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse) async -> WKNavigationResponsePolicy {
-    if navigationResponse.isForMainFrame, let http = navigationResponse.response as? HTTPURLResponse {
-      apply(tracker.responded(status: http.statusCode))
-    }
-    return .allow
-  }
-
-  func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-    // The committed URL: what is on the screen, after any redirect. A 5xx page is
-    // on the screen too, but its URL says nothing about whether the output is set up.
-    guard !tracker.responseFailed, let url = webView.url else { return }
-    onCommitted?(url)
-  }
-
-  func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-    apply(tracker.finished())
-  }
-
-  func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-    apply(tracker.navigationFailed(error as NSError))
-  }
-
-  func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-    apply(tracker.navigationFailed(error as NSError))
-  }
-
-  func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-    Log.error(.webkit, "\(label): the web content process ended; reloading")
-    apply(tracker.processTerminated())
   }
 }

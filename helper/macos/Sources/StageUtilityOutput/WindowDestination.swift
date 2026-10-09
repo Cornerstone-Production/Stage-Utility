@@ -1,7 +1,6 @@
 import AppKit
 import QuartzCore
 import StageUtilityOutputCore
-import WebKit
 
 /// Where a window goes: a rectangle, in screen coordinates, on one display.
 ///
@@ -17,13 +16,14 @@ struct WindowPlacement: Equatable {
   }
 }
 
-/// The window's content: a black field holding the web view, which it lays out at
-/// the size the turn needs and turns about its centre.
+/// The window's content: a black field holding the surface's host view, which it
+/// lays out at the size the turn needs and turns about its centre. Nothing here knows
+/// what draws inside the host view.
 ///
-/// The turn is the view's `frameCenterRotation`, not a transform on the web view's
-/// layer: AppKit then does the hit-testing in the turned view's own coordinates. The
-/// web view's `takeSnapshot` draws the page upright whatever the view's turn, so a
-/// snapshot is turned afterwards to match (see `SnapshotTurn`).
+/// The turn is the view's `frameCenterRotation`, not a transform on a layer inside
+/// it: AppKit then does the hit-testing in the turned view's own coordinates. A
+/// surface's snapshot draws the page upright whatever the view's turn, so a snapshot
+/// is turned afterwards to match (see `SnapshotTurn`).
 @MainActor
 private final class TurnedSurfaceView: NSView {
   var rotation: Rotation = .none {
@@ -53,7 +53,7 @@ private final class TurnedSurfaceView: NSView {
   }
 }
 
-/// A borderless window at a placement, with the web view as its content.
+/// A borderless window at a placement, with the surface's host view as its content.
 @MainActor
 final class WindowDestination: NSObject, OutputDestination {
   private var window: NSWindow?
@@ -69,7 +69,7 @@ final class WindowDestination: NSObject, OutputDestination {
     super.init()
   }
 
-  func attach(_ view: WKWebView) {
+  func attach(_ view: NSView) {
     let screen = placement.screen
     let win = NSWindow(contentRect: placement.frame, styleMask: .borderless, backing: .buffered, defer: false, screen: screen)
     win.isReleasedWhenClosed = false

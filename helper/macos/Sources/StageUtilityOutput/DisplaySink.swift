@@ -1,17 +1,16 @@
 import AppKit
 import StageUtilityOutputCore
-import WebKit
 
 /// Where an output's pictures go. A display output is a window over a whole
 /// display. Step 3 adds a DeckLink port, whose page is a visible window tiled on a
 /// canvas display, with a tap that snapshots it on that display's refresh for the
-/// card; a web view that is off screen or covered stops painting, so it is never
-/// either. The web view itself, and everything about loading it, is the
-/// `WebSurface`, which knows nothing of windows or screens.
+/// card; a page that is off screen or covered stops painting, so it is never
+/// either. The page itself, and everything about loading it, is the `WebSurface`,
+/// which knows nothing of windows or screens, nor which engine draws it.
 @MainActor
 protocol OutputDestination: AnyObject {
-  /// Put the web view where this destination shows it.
-  func attach(_ view: WKWebView)
+  /// Put the surface's host view where this destination shows it.
+  func attach(_ view: NSView)
   /// Counters since the last call, as the health post reports them.
   func takeHealthSample() -> HealthSample
   /// Turn the picture a quarter, half or three-quarter turn clockwise. A window
@@ -29,16 +28,17 @@ final class DisplaySink {
   let surface: WebSurface
   private let destination: WindowDestination
 
-  var keepPaintingProblems: [String] { surface.keepPaintingProblems }
+  /// What the engine could not set up, worded for the log and the window.
+  var surfaceProblems: [String] { surface.problems }
 
   init(descriptor: OutputDescriptor, screen: NSScreen) {
     self.descriptor = descriptor
-    surface = WebSurface(label: descriptor.port, size: screen.frame.size)
+    surface = WebSurfaces.make(label: descriptor.port, size: screen.frame.size)
     destination = WindowDestination(placement: .fullScreen(of: screen))
-    destination.attach(surface.webView)
+    destination.attach(surface.hostView)
   }
 
-  func show(url: URL) { surface.show(url: url) }
+  func show(url: URL) { surface.load(url) }
 
   func stop() {
     surface.stop()
