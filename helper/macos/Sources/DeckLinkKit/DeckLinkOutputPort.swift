@@ -516,6 +516,17 @@ public final class DeckLinkOutputPort: CardSink {
   func fakeHold(_ on: Bool) { queue.sync { if let handle { dl_fake_hold_completions(handle, on) } } }
   func fakeReportLate(_ frames: Int) { queue.sync { if let handle { dl_fake_report_late(handle, Int32(frames)) } } }
   func fakeUnplug() { queue.sync { if let handle { dl_fake_unplug(handle) } } }
+  /// The device unplugged and the port opened again within one turn of its queue, so
+  /// the loss, which the shim hands to the queue, arrives after the reopening, about
+  /// the output that was closed.
+  func fakeUnplugAndReopenInOneTurn() {
+    queue.sync {
+      if let handle { dl_fake_unplug(handle) }
+      stopTimers()
+      closeHandle()
+      openNow(retrying: false)
+    }
+  }
   func fakeClockReadError(us: Int64) { queue.sync { if let handle { dl_fake_clock_read_error(handle, us) } } }
   func fakeCompletionOffset(us: Int64, count: Int) {
     queue.sync { if let handle { dl_fake_completion_offset(handle, us, Int32(count)) } }

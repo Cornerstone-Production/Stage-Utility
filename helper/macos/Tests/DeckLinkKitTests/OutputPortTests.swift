@@ -269,6 +269,23 @@ let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a so
     #expect(opened.value == [PixelSize(width: 16, height: 4), PixelSize(width: 16, height: 4)])
   }
 
+  /// A loss is about the output that reported it. One that arrives after the port
+  /// has closed that output and opened another is old news, and must not close the
+  /// new one.
+  @Test func aLossFromAnOutputAlreadyReplacedIsIgnored() {
+    let log = LogLines()
+    let port = softwarePort(NumberedSource(), log: log)
+    defer { port.close() }
+    port.open(videoMode: nil)
+    port.fakeTick(5)
+    port.fakeUnplugAndReopenInOneTurn()
+    port.sync()
+    #expect(port.state == softwareMode)
+    port.fakeTick(5)
+    #expect(port.counters.scheduled == 6 + 2 + 4)  // 2 + 4 filled, a pre-roll of 2, 4 filled
+    #expect(!log.lines.contains { $0.contains("lost") }, "\(log.lines)")
+  }
+
   static let p50 = CardMode(
     code: 0x4870_3530, driverName: "1080p50", width: 1920, height: 1080, frameDuration: 1000, timeScale: 50000,
     field: .progressive, supportsYUV8: true)
