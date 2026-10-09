@@ -50,7 +50,8 @@ let devicesPayload: Record<string, unknown> = { scanning: false, seen: [], match
 
 const { render, screen, cleanup, fireEvent, act, within } = await import("@testing-library/react");
 const React = (await import("react")).default;
-const { ScreenSettingsPanel, sharedRoleConflict, viewsFittingRole } = await import("./screen-settings-panel.js");
+const { ScreenSettingsPanel, viewsFittingRole } = await import("./screen-settings-panel.js");
+const { roleChangeConflict } = await import("@main/types/views");
 type PanelProps = import("./screen-settings-panel.js").ScreenSettingsPanelProps;
 type Actions = import("./screen-settings-panel.js").ScreenPanelActions;
 const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
@@ -613,14 +614,53 @@ describe("changing the role of a view other screens also show", () => {
     assert.ok(prompt(), "the prompt closed on a change that did not land");
   });
 
-  describe("sharedRoleConflict", () => {
-    test("only when the view no longer fits AND another screen shows it", () => {
+  describe("roleChangeConflict", () => {
+    test("only when the view no longer fits AND another screen shows it, or it cannot take the role", () => {
       const outs = [PANEL_A, PANEL_B, MINE];
-      assert.ok(sharedRoleConflict(PANEL_A, outs, VIEWS, "display"), "a shared console cannot become a wall view");
-      assert.equal(sharedRoleConflict(PANEL_A, outs, VIEWS, "panel"), null, "the view already fits");
-      assert.equal(sharedRoleConflict(PANEL_A, [PANEL_A, MINE], VIEWS, "display"), null, "nobody else shows it");
-      assert.equal(sharedRoleConflict({ ...MINE, viewId: null }, outs, VIEWS, "panel"), null, "no view, nothing to share");
+      assert.ok(roleChangeConflict(PANEL_A, outs, VIEWS, "display"), "a shared console cannot become a wall view");
+      assert.equal(roleChangeConflict(PANEL_A, outs, VIEWS, "panel"), null, "the view already fits");
+      assert.equal(roleChangeConflict(PANEL_A, [PANEL_A, MINE], VIEWS, "display"), null, "nobody else shows it");
+      assert.equal(roleChangeConflict({ ...MINE, viewId: null }, outs, VIEWS, "panel"), null, "no view, nothing to share");
+      const cal: View = { id: "cal-a", name: "Week ahead", kind: "calendar", surface: "display", createdAt: NOW };
+      const alone = roleChangeConflict({ ...MINE, viewId: "cal-a" }, [MINE], [cal], "panel");
+      assert.deepEqual(alone && { others: alone.others, copyName: alone.copyName }, { others: [], copyName: null }, "a calendar view cannot be a console, nor can a copy");
     });
+  });
+});
+
+describe("a view that cannot be a control surface", () => {
+  // Only a custom view has a layout to put a control on. The server refuses a
+  // calendar view, or a copy of one, as a control surface; the panel must not
+  // offer what it would refuse.
+  const CAL: View = { id: "cal-a", name: "Week ahead", kind: "calendar", surface: "display", createdAt: NOW };
+  const CAL_CONSOLE: View = { id: "cal-c", name: "Old calendar console", kind: "calendar", surface: "console", createdAt: NOW };
+  const views = [...VIEWS, CAL, CAL_CONSOLE];
+  const prompt = () => screen.getByRole("group", { name: /This view/ });
+
+  test("a shared calendar view offers a different view, never a copy", async () => {
+    const { calls } = mount({ views, outputs: [{ ...MINE, viewId: "cal-a" }, { ...OTHER_WALL, viewId: "cal-a" }] });
+    await click(role("Control surface"));
+    assert.match(prompt().textContent ?? "", /"Week ahead" is also on Hallway TV/);
+    assert.match(prompt().textContent ?? "", /only a custom view/i);
+    assert.equal(screen.queryByRole("radio", { name: /Use a copy/ }) !== null, false, "a copy that the server would refuse is offered");
+    await choose(screen.getByLabelText("A different view"), "ctl-b");
+    await click(screen.getByRole("button", { name: "Apply" }));
+    await answerConfirm("Use as a control surface");
+    assert.deepEqual(calls, [["role", "display-1", "panel", { viewId: "ctl-b" }]]);
+  });
+
+  test("a calendar view only this screen shows is not flipped: it asks for a different view", async () => {
+    const { calls } = mount({ views, outputs: [{ ...MINE, viewId: "cal-a" }] });
+    await click(role("Control surface"));
+    assert.match(prompt().textContent ?? "", /"Week ahead"/);
+    assert.equal(screen.queryByRole("alertdialog") !== null, false, "it went straight to the confirm, and the server refuses the flip");
+    assert.deepEqual(calls, []);
+  });
+
+  test("the picker offers a control surface no non-custom console", () => {
+    mount({ views, outputs: [PANEL_A] });
+    const options = [...(screen.getByLabelText("View") as HTMLSelectElement).options].map((o) => o.textContent);
+    assert.equal(options.includes("Old calendar console"), false, `offered: ${options.join(", ")}`);
   });
 });
 

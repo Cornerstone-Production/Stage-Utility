@@ -24,7 +24,9 @@
 // silently strip the live controls from every other screen showing it) without
 // changing them, so when the role chosen no longer fits a shared view the panel
 // says which screens share it and offers a copy for this screen, or a different
-// view. See sharedRoleConflict().
+// view. A view that is not custom cannot be a control surface at all, nor can a
+// copy of it, so for one of those it offers only a different view. Both are
+// roleChangeConflict(), the function the server decides with.
 
 import { useEffect, useRef, useState, type ChangeEvent, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { XIcon } from "lucide-react";
@@ -32,7 +34,7 @@ import { XIcon } from "lucide-react";
 import { Button, Checkbox, ErrorNote, Input, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, confirm } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
-import { KIND_DRAWS_TOP_BAR, outputMode, viewShownInSidebar, viewSurface, type CreateScreenInput, type OutputMode } from "@main/types/views";
+import { KIND_DRAWS_TOP_BAR, outputMode, roleChangeConflict, viewFitsRole, viewShownInSidebar, type CreateScreenInput, type OutputMode } from "@main/types/views";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { useDevices } from "../../app/screens/use-devices";
 import type { MessageGroups } from "../../main/use-message-groups";
@@ -95,33 +97,12 @@ export const SCREEN_PANEL_ID = "screen-settings-panel";
 
 const ROLE_LABEL: Record<OutputMode, string> = { display: "wall display", panel: "control surface" };
 
-/** The views a screen of this role may show: control surfaces for a control
- *  surface, wall screens for a wall display. `current` is always kept so the
- *  picker never goes blank on a pairing the server has already accepted. */
+/** The views a screen of this role may show: custom control surfaces for a
+ *  control surface, wall screens for a wall display (viewFitsRole, the server's
+ *  own test). `current` is always kept so the picker never goes blank on a
+ *  pairing the server has already accepted. */
 export function viewsFittingRole(views: readonly View[], mode: OutputMode, current: string | null): View[] {
-  const wants = mode === "panel" ? "console" : "display";
-  return views.filter((v) => viewSurface(v) === wants || v.id === current);
-}
-
-/**
- * Is changing this screen to `mode` a change to another screen too?
- *
- * Only when the view it shows no longer fits the new role AND another screen
- * shows that view. A view only this screen shows changes with it; a view that
- * already fits the new role has nothing to change.
- */
-export function sharedRoleConflict(
-  output: Output,
-  outputs: readonly Output[],
-  views: readonly View[],
-  mode: OutputMode,
-): { view: View; others: Output[]; copyName: string } | null {
-  const view = output.viewId ? views.find((v) => v.id === output.viewId) : undefined;
-  if (!view) return null;
-  if (viewSurface(view) === (mode === "panel" ? "console" : "display")) return null;
-  const others = outputs.filter((o) => o.id !== output.id && o.viewId === view.id);
-  if (others.length === 0) return null;
-  return { view, others, copyName: `${view.name} (${mode === "panel" ? "control surface" : "wall"})` };
+  return views.filter((v) => viewFitsRole(v, mode) || v.id === current);
 }
 
 async function confirmRole(name: string, mode: OutputMode): Promise<boolean> {
@@ -383,7 +364,7 @@ function SharedViewPrompt({
   onApply,
   onCancel,
 }: {
-  conflict: NonNullable<ReturnType<typeof sharedRoleConflict>>;
+  conflict: NonNullable<ReturnType<typeof roleChangeConflict>>;
   mode: OutputMode;
   views: readonly View[];
   choice: "copy" | "pick";
@@ -400,31 +381,52 @@ function SharedViewPrompt({
   const stays = modes.size === 1 ? `, which ${others.length === 1 ? "stays" : "stay"} a ${ROLE_LABEL[[...modes][0]]}` : "";
   const fit = viewsFittingRole(views, mode, null).filter((v) => v.id !== view.id);
   return (
-    <div role="group" aria-label="This view is shared" className="mt-2.5 rounded-[9px] border border-warn-9/35 bg-warn-9/8 px-3 py-2.5 text-footnote">
+    <div
+      role="group"
+      aria-label={others.length > 0 ? "This view is shared" : "This view cannot be a control surface"}
+      className="mt-2.5 rounded-[9px] border border-warn-9/35 bg-warn-9/8 px-3 py-2.5 text-footnote"
+    >
       <p className="mb-2 text-fg-muted">
-        <b className="font-semibold text-fg">
-          "{view.name}" is also on {names}
-        </b>
-        {stays}. Changing this screen never changes another one.
+        {others.length > 0 && (
+          <>
+            <b className="font-semibold text-fg">
+              "{view.name}" is also on {names}
+            </b>
+            {stays}. Changing this screen never changes another one.{" "}
+          </>
+        )}
+        {/* No copy to offer: a copy of a view that is not custom is not custom
+            either, and the server refuses both. */}
+        {copyName === null && (
+          <>
+            {others.length === 0 && <b className="font-semibold text-fg">"{view.name}" </b>}
+            {others.length === 0 ? "cannot" : "It cannot"} be a control surface: only a custom view has a layout to put a
+            control on. Choose a control-surface view for this screen.
+          </>
+        )}
       </p>
-      <label className="flex cursor-pointer items-start gap-2 py-1">
-        <input type="radio" name="shared-view" checked={choice === "copy"} onChange={() => onChoice("copy")} className="mt-1 accent-[var(--su-accent)]" />
-        <span className="text-fg">
-          Use a copy on this screen
-          <small className="block text-caption1 text-fg-subtle">
-            "{copyName}", made as a {ROLE_LABEL[mode]}. {names} keeps the original.
-          </small>
-        </span>
-      </label>
-      <label className="flex cursor-pointer items-start gap-2 py-1">
-        <input type="radio" name="shared-view" checked={choice === "pick"} onChange={() => onChoice("pick")} className="mt-1 accent-[var(--su-accent)]" />
-        <span className="text-fg">
-          Choose a different view
-          <small className="block text-caption1 text-fg-subtle">
-            Only views that fit a {ROLE_LABEL[mode]} are offered.
-          </small>
-        </span>
-      </label>
+      {copyName !== null && (
+        <>
+          <label className="flex cursor-pointer items-start gap-2 py-1">
+            <input type="radio" name="shared-view" checked={choice === "copy"} onChange={() => onChoice("copy")} className="mt-1 accent-[var(--su-accent)]" />
+            <span className="text-fg">
+              Use a copy on this screen
+              <small className="block text-caption1 text-fg-subtle">
+                "{copyName}", made as a {ROLE_LABEL[mode]}. {names} keeps the original.
+              </small>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-2 py-1">
+            <input type="radio" name="shared-view" checked={choice === "pick"} onChange={() => onChoice("pick")} className="mt-1 accent-[var(--su-accent)]" />
+            <span className="text-fg">
+              Choose a different view
+              <small className="block text-caption1 text-fg-subtle">
+                Only views that fit a {ROLE_LABEL[mode]} are offered.
+              </small>
+            </span>
+          </label>
+        </>
+      )}
       {choice === "pick" && (
         <Select value={picked || NONE} onValueChange={(v: string) => onPick(v === NONE ? "" : v)}>
           <SelectTrigger aria-label="A different view" className="mt-1.5">
@@ -496,14 +498,17 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
   const [choice, setChoice] = useState<"copy" | "pick">("copy");
   const [picked, setPicked] = useState("");
   const [busy, setBusy] = useState(false);
-  const conflict = pending ? sharedRoleConflict(output, outputs, views, pending) : null;
+  const conflict = pending ? roleChangeConflict(output, outputs, views, pending) : null;
 
   async function chooseRole(next: OutputMode) {
     if (next === role && pending === null) return;
     if (next === role) { setPending(null); return; }
-    if (sharedRoleConflict(output, outputs, views, next)) {
+    const asks = roleChangeConflict(output, outputs, views, next);
+    if (asks) {
       setPending(next);
-      setChoice("copy");
+      // A copy when one can take the role, the default; otherwise a different
+      // view is the only way.
+      setChoice(asks.copyName === null ? "pick" : "copy");
       setPicked("");
       return;
     }
