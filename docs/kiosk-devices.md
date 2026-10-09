@@ -73,7 +73,7 @@ curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
    `/Library/Application Support/StageUtility/`, and makes them as the Chrome kiosk
    did if they are missing. Running the installer again never makes a new id.
 2. Downloads `StageUtilityOutput-arm64.zip` or `StageUtilityOutput-x86_64.zip`,
-   whichever this Mac is, and checks its SHA-256. The app is a few hundred MB
+   whichever this Mac is (an Apple silicon Mac gets the arm64 app even from a shell running under Rosetta), and checks its SHA-256. The app is a few hundred MB
    because it carries Chromium.
 3. Unpacks it beside `/Applications`, checks it is the helper, then swaps it in. The
    old copy is kept until the new one is in place and put back if anything fails,

@@ -178,6 +178,16 @@ on_exit() {
 # ── What this Mac is ───────────────────────────────────────────────────────
 detect_arch() {
   machine="${STAGE_INSTALL_TEST_UNAME_M:-$(uname -m)}"
+  # `uname -m` says x86_64 to a shell running under Rosetta 2 (an Intel Terminal on
+  # Apple silicon), which would install the Intel app on a Mac that can run the
+  # native one. hw.optional.arm64 is 1 on Apple silicon whatever the process is
+  # translated as, and does not exist on an Intel Mac, so it decides first and
+  # uname is the fallback. The variable is empty-but-set to mean "no such key".
+  hw_arm64="${STAGE_INSTALL_TEST_HW_ARM64-$(sysctl -n hw.optional.arm64 2>/dev/null || true)}"
+  if [ "$hw_arm64" = 1 ]; then
+    ARCH=arm64
+    return 0
+  fi
   case "$machine" in
     arm64) ARCH=arm64 ;;
     x86_64) ARCH=x86_64 ;;

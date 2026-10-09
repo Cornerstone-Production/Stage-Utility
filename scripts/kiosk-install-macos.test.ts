@@ -37,7 +37,10 @@ interface Result {
 /** Run `sh -c`, collecting both streams. Async: the fake servers live in this process. */
 function sh(code: string, env: Record<string, string> = {}, args: string[] = []): Promise<Result> {
   return new Promise((resolve, reject) => {
-    const child = spawn("sh", ["-c", code, "sh", ...args], { env: { PATH: process.env.PATH ?? "", ...env } });
+    // STAGE_INSTALL_TEST_HW_ARM64 empty means "sysctl has no hw.optional.arm64", so a
+    // test that names an architecture through uname gets exactly that one, on an
+    // Apple silicon machine too. Tests of the sysctl itself set it.
+    const child = spawn("sh", ["-c", code, "sh", ...args], { env: { PATH: process.env.PATH ?? "", STAGE_INSTALL_TEST_HW_ARM64: "", ...env } });
     let out = "";
     let err = "";
     child.stdout.on("data", (d: Buffer) => (out += d.toString()));
@@ -166,6 +169,34 @@ describe("--dry-run", () => {
     assert.match(r.out, /keep the device id 11111111-2222-3333-4444-555555555555/);
     assert.doesNotMatch(r.out, /create a device id/);
     assert.equal(fs.readFileSync(path.join(state, "device-id"), "utf8"), "11111111-2222-3333-4444-555555555555\n");
+  });
+
+  it("picks arm64 on Apple silicon, native or under Rosetta, and x86_64 on an Intel Mac", async () => {
+    // [what uname -m says, what sysctl hw.optional.arm64 prints, the architecture chosen]
+    const cases: [string, string, string, string][] = [
+      ["Apple silicon, native", "arm64", "1", "arm64"],
+      ["Apple silicon, a shell under Rosetta (uname lies)", "x86_64", "1", "arm64"],
+      ["Intel (the sysctl key does not exist)", "x86_64", "", "x86_64"],
+      ["Intel (the key answers 0)", "x86_64", "0", "x86_64"],
+      ["Apple silicon where the sysctl is missing, native uname", "arm64", "", "arm64"],
+    ];
+    for (const [label, uname, hw, want] of cases) {
+      const r = await dryRun(scratch, [], { ...server, STAGE_INSTALL_TEST_UNAME_M: uname, STAGE_INSTALL_TEST_HW_ARM64: hw });
+      assert.equal(r.status, 0, `${label}: ${r.err}`);
+      assert.match(r.out, new RegExp(`this Mac: ${want}\\n`), label);
+      assert.match(r.out, new RegExp(`StageUtilityOutput-${want}\\.zip and its`), label);
+    }
+  });
+
+  it("asks the real sysctl when the test hook is not set", async () => {
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), "su-sysctl-"));
+    shimDirs.push(bin);
+    const env = (script: string) => ({ ...server, STAGE_INSTALL_TEST_UNAME_M: "x86_64", STAGE_INSTALL_TEST_HW_ARM64: undefined as unknown as string, PATH: `${bin}:${process.env.PATH ?? ""}`, SYSCTL_SCRIPT: script });
+    fs.writeFileSync(path.join(bin, "sysctl"), '#!/bin/sh\n[ "$1 $2" = "-n hw.optional.arm64" ] || exit 2\neval "$SYSCTL_SCRIPT"\n', { mode: 0o755 });
+    const rosetta = await dryRun(scratch, [], env("echo 1"));
+    assert.match(rosetta.out, /this Mac: arm64\n/, rosetta.err);
+    const intel = await dryRun(scratch, [], env("echo \"sysctl: unknown oid 'hw.optional.arm64'\" >&2; exit 1"));
+    assert.match(intel.out, /this Mac: x86_64\n/, intel.err);
   });
 
   it("plans the migration only when the Chrome kiosk agent is there", async () => {
