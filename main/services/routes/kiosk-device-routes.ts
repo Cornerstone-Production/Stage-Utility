@@ -9,9 +9,9 @@ import { kioskDevicesStore, authorise, claim, release, findByOutput, matchByMac,
 import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen } from "../kiosk-presence.js";
 import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
 import { holdingScreen } from "../kiosk-holding-screen.js";
-import { stageController } from "../stage-controller.js";
+import { ScreenWriteError, stageController, type CreateScreenInput } from "../stage-controller.js";
+import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, readCreateScreenBody } from "./screen-write.js";
 import { errorMessage } from "../errors.js";
-import { scrub } from "../scrub.js";
 import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { APP_ROOT } from "../app-root.js";
@@ -162,18 +162,40 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     // Created inside the try, and removed again if the binding fails. Otherwise
     // an error banner leaves a brand new empty screen behind with nothing bound
     // to it — the exact phantom the paragraph above says this avoids.
-    let created: string | null = null;
+    //
+    // Through createScreen, the same path POST /api/outputs takes, so the guided
+    // setup can name a role, a view, a friendly link and the sidebar listing and
+    // have them validated before anything is written. What it made — the screen,
+    // and a view when one was asked for — is taken back as one if the binding
+    // then fails.
+    let created: { outputId: string; viewId: string | null } | null = null;
+    // Read BEFORE the try: a body that is wrong is refused with nothing created.
+    let input: CreateScreenInput | null = null;
+    if (!outputId) {
+      const read = readCreateScreenBody(body);
+      if ("error" in read) {
+        error(res, read.error);
+        return;
+      }
+      // `name` first, then `newName` the Screens page used to send, then the
+      // device's own hostname.
+      const named = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+      read.name = named(body.name) ?? named(body.newName) ?? seen?.hostname ?? "New screen";
+      input = read;
+    } else if (CREATE_SCREEN_FIELDS.some((f) => f in body)) {
+      // Naming a screen to take over AND describing a new one: one of the two is a
+      // mistake, and quietly ignoring the description would hide which.
+      error(res, `body.outputId names an existing screen, so ${CREATE_SCREEN_FIELDS.join(", ")} (which describe a new one) must not be sent`);
+      return;
+    }
     try {
-      if (!outputId) {
-        const name = typeof body.newName === "string" && body.newName.trim()
-          ? body.newName.trim()
-          : seen?.hostname || "New screen";
+      if (input) {
         // The created output, not the last one in the returned state: two
         // operators pressing this at once would otherwise both read the later
         // id and claim the same screen.
-        const { output } = await stageController.addOutput(name, null);
-        outputId = output.id;
-        created = output.id;
+        const made = await stageController.createScreen(input);
+        outputId = made.output.id;
+        created = { outputId: made.output.id, viewId: made.createdViewId };
       }
       let displacedId: string | null = null;
       await updateDevices((current) => {
@@ -199,24 +221,26 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       stageController.refreshDisplays("all");
       // claim()'s `token` is deliberately not read: the device already holds the
       // secret, and a response carrying it would put it in a browser and a log.
-      json(res, { ok: true, displaced: displacedId });
+      json(res, { ok: true, displaced: displacedId, outputId });
     } catch (err) {
-      let orphan: string | null = null;
+      if (err instanceof ScreenWriteError) {
+        // createScreen rolled itself back and says what it could not; nothing was
+        // bound, so there is nothing more to undo here.
+        answerScreenWriteFailure(res, err);
+        return;
+      }
+      let leftBehind: string[] = [];
       if (created) {
-        // Best-effort, and it SAYS SO when it fails. This used to only log, so a
-        // failed claim whose cleanup also failed left an empty screen the
-        // operator never asked for, with a response that mentioned only the
-        // original error -- exactly what the comment here promised not to do.
-        await stageController.removeOutput(created).catch((cleanup: unknown) => {
-          orphan = created;
-          console.warn(`[devices] could not remove the screen a failed claim created: ${scrub(String(cleanup))}`);
-        });
+        // Says so when it fails, and in the response. A failed claim whose cleanup
+        // also failed used to leave an empty screen the operator never asked for,
+        // with a response that mentioned only the original error.
+        leftBehind = await stageController.undoCreateScreen(created);
       }
       error(
         res,
-        orphan
-          ? `${errorMessage(err)} — and an empty screen was left behind that could not be removed. ` +
-            `Delete it on the Screens page.`
+        leftBehind.length > 0
+          ? `${errorMessage(err)} — and ${leftBehind.join(" and ")} could not be removed. ` +
+            `Delete ${leftBehind.length === 1 ? "it" : "them"} on the Screens page.`
           : errorMessage(err),
       );
     }

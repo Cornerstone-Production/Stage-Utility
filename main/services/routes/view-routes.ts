@@ -29,6 +29,7 @@ import { LayoutConflictError, SlotsNotFoundError, stageController } from "../sta
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
 import { datedExportFilename } from "../export-filename.js";
+import { answerScreenWriteFailure, readCreateScreenBody } from "./screen-write.js";
 
 /**
  * An untrusted body value that is a list of `{ id, name }` strings.
@@ -594,12 +595,53 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // POST /api/outputs — { name?, viewId? } is the original call and still is. The
+    // Screens page's guided creation adds mode ("display"|"panel"), newView (make
+    // a blank view for it), slug and showInSidebar. All of it goes through
+    // stageController.createScreen, which validates before it writes.
     if (method === "POST" && pathname === "/api/outputs") {
       const body = await readBody(req) as Record<string, unknown>;
-      const name = typeof body.name === "string" ? body.name : undefined;
-      const viewId = typeof body.viewId === "string" ? body.viewId : null;
-      const { state } = await stageController.addOutput(name, viewId);
-      json(res, state, 201);
+      const input = readCreateScreenBody(body);
+      if ("error" in input) {
+        error(res, input.error);
+        return;
+      }
+      try {
+        const { state } = await stageController.createScreen(input);
+        json(res, state, 201);
+      } catch (err) {
+        answerScreenWriteFailure(res, err);
+      }
+      return;
+    }
+
+    // POST /api/outputs/:id/role — { mode, copyView?, viewId? }. Change a screen
+    // between a wall display and a control surface without changing any other
+    // screen: see stageController.setOutputRole.
+    const outputRoleMatch = pathname.match(/^\/api\/outputs\/([^/]+)\/role$/);
+    if (method === "POST" && outputRoleMatch) {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (body.mode !== "display" && body.mode !== "panel") {
+        error(res, 'body.mode ("display"|"panel") required');
+        return;
+      }
+      if ("copyView" in body && typeof body.copyView !== "boolean") {
+        error(res, "body.copyView must be a boolean");
+        return;
+      }
+      if ("viewId" in body && typeof body.viewId !== "string") {
+        error(res, "body.viewId must be a string");
+        return;
+      }
+      try {
+        const { state } = await stageController.setOutputRole(outputRoleMatch[1], body.mode, {
+          copyView: body.copyView as boolean | undefined,
+          viewId: body.viewId as string | undefined,
+        });
+        json(res, state);
+      } catch (err) {
+        answerScreenWriteFailure(res, err);
+      }
       return;
     }
 

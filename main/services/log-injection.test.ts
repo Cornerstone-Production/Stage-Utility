@@ -157,6 +157,8 @@ const REQUEST_FACING = [
   "routes/proxy-routes.ts",
   "routes/rosstalk-routes.ts",
   "routes/route-harness.ts",
+  // Logs nothing: it reads a creation body and answers a failure.
+  "routes/screen-write.ts",
   "routes/servicecue-routes.ts",
   "routes/state-routes.ts",
   "routes/status-routes.ts",
