@@ -13,7 +13,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { captureConsole } from "./fixtures/capture-console.js";
-import { OutputHelperDownloads, parseChecksum, parseHelperPath, type HelperAsset } from "./output-helper-download.js";
+import { OutputHelperDownloads, parseChecksum, parseHelperPath, pruneOutputHelperCache, type HelperAsset } from "./output-helper-download.js";
 
 const VERSION = "1.2.3-beta.4";
 const ZIP = parseHelperPath("/kiosk/StageUtilityOutput-arm64.zip") as HelperAsset;
@@ -348,6 +348,50 @@ describe("fetching the helper from the release", () => {
     release.publish(ZIP.name, Buffer.from("current"));
     assert.ok((await make().resolve(ZIP)).ok);
     assert.deepEqual(await fs.readdir(path.join(dataDir, "cache", "output-helper")), [VERSION]);
+  });
+
+  it("removes older versions on the first request of the running one, though nothing is fetched", async (t) => {
+    const lines = captureConsole(t, "log", "warn");
+    release.publish(ZIP.name, Buffer.from("current"));
+    assert.ok((await make().resolve(ZIP)).ok); // fills the cache, and prunes: nothing old yet
+    const root = path.join(dataDir, "cache", "output-helper");
+    await fs.mkdir(path.join(root, "1.0.0"), { recursive: true });
+    await fs.writeFile(path.join(root, "1.0.0", ZIP.name), "old zip");
+    await fs.mkdir(path.join(root, "0.9.0"), { recursive: true });
+
+    // A new process (an update restarted the server), serving from the cache with no network.
+    release.offline = true;
+    const asked = release.requests.length;
+    const r = await make().resolve(SUM);
+    assert.ok(r.ok && r.source === "cache");
+    assert.equal(release.requests.length, asked, "nothing was fetched");
+    assert.deepEqual((await fs.readdir(root)).sort(), [VERSION], "the old versions are gone");
+    assert.ok(lines.some((l) => l === "[output-helper] removed older cached releases: 0.9.0, 1.0.0"), lines.join("\n"));
+  });
+
+  describe("pruneOutputHelperCache", () => {
+    it("is nothing to do when there is no cache yet", async (t) => {
+      const lines = captureConsole(t, "log", "warn");
+      assert.deepEqual(await pruneOutputHelperCache(dataDir, VERSION), { removed: [], failed: [] });
+      assert.deepEqual(lines, []);
+    });
+
+    it("names what it could not remove, and still removes the rest", { skip: process.getuid?.() === 0 && "root ignores a read-only directory" }, async (t) => {
+      const lines = captureConsole(t, "log", "warn");
+      const root = path.join(dataDir, "cache", "output-helper");
+      await fs.mkdir(path.join(root, "1.0.0", "inner"), { recursive: true });
+      await fs.mkdir(path.join(root, "2.0.0"), { recursive: true });
+      await fs.chmod(path.join(root, "1.0.0"), 0o555); // its contents cannot be removed
+      try {
+        const r = await pruneOutputHelperCache(dataDir, VERSION);
+        assert.deepEqual(r.removed, ["2.0.0"]);
+        assert.equal(r.failed.length, 1);
+        assert.match(r.failed[0], /^1\.0\.0: /);
+        assert.ok(lines.some((l) => l.startsWith("[output-helper] could not remove an older cached release: 1.0.0: ")), lines.join("\n"));
+      } finally {
+        await fs.chmod(path.join(root, "1.0.0"), 0o755);
+      }
+    });
   });
 
   it("does not put the data directory in the reply a LAN client reads", async (t) => {

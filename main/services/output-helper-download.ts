@@ -138,6 +138,8 @@ export class OutputHelperDownloads {
   private readonly zipTotalMs: number;
   private readonly sumTimeoutMs: number;
   private readonly base: () => string;
+  /** The version whose older siblings were last removed. */
+  private prunedFor: string | null = null;
 
   constructor(private readonly deps: DownloadDeps) {
     this.doFetch = deps.fetch ?? ((input, init) => fetch(input, init));
@@ -152,11 +154,22 @@ export class OutputHelperDownloads {
    *  The running version is read ONCE here (it is a synchronous read of
    *  package.json) and carried through everything this request does. */
   async resolve(asset: HelperAsset): Promise<Resolution> {
-    const r = await this.ensure(asset, this.deps.version());
+    const version = this.deps.version();
+    await this.pruneOnce(version);
+    const r = await this.ensure(asset, version);
     if (r.ok && r.source === "cache") {
       console.log(`[output-helper] serving ${scrub(asset.name)} from the cache (${scrub(r.size)} bytes)`);
     }
     return r;
+  }
+
+  /** Older versions are removed on the first request of a running version, so a
+   *  server that updated and never fetches (it is offline, or its Macs are done)
+   *  still gives the disk back; fetching is not what triggers it. */
+  private async pruneOnce(version: string): Promise<void> {
+    if (this.prunedFor === version) return;
+    this.prunedFor = version;
+    await pruneOutputHelperCache(this.deps.dataDir(), version);
   }
 
   private root(): string {
@@ -263,8 +276,6 @@ export class OutputHelperDownloads {
       watchdog.stop();
     }
     console.log(`[output-helper] fetched ${scrub(asset.name)} from the release and verified its SHA-256 (${scrub(size)} bytes)`);
-    const removed = await this.dropOtherVersions(version);
-    for (const failed of removed) console.warn(`[output-helper] could not remove an older cached release: ${scrub(failed)}`);
     return { ok: true, file, size, source: "release" };
   }
 
@@ -322,27 +333,38 @@ export class OutputHelperDownloads {
     }
     return size;
   }
+}
 
-  /** The cache holds the running version only; an older release's zip is
-   *  hundreds of MB nobody will ask for again. Returns what it could not remove. */
-  private async dropOtherVersions(version: string): Promise<string[]> {
-    const failed: string[] = [];
-    let entries: string[];
-    try {
-      entries = await fs.readdir(this.root());
-    } catch (err) {
-      return [errorMessage(err)];
-    }
-    for (const entry of entries) {
-      if (entry === version) continue;
-      try {
-        await fs.rm(path.join(this.root(), entry), { recursive: true, force: true });
-      } catch (err) {
-        failed.push(`${entry}: ${errorMessage(err)}`);
-      }
-    }
-    return failed;
+/**
+ * The cache holds the running version only; an older release's zips are about
+ * 290 MB a version and nobody will ask for them again. Removes every other version
+ * directory under cache/output-helper and says which it removed and which it could
+ * not, on tagged lines, and returns the same lists. Nothing is thrown: a cache that
+ * cannot be tidied is not a reason to refuse a download. No cache yet is nothing to
+ * remove.
+ */
+export async function pruneOutputHelperCache(dataDir: string, keepVersion: string): Promise<{ removed: string[]; failed: string[] }> {
+  const root = path.join(dataDir, "cache", "output-helper");
+  const removed: string[] = [];
+  const failed: string[] = [];
+  let entries: string[] = [];
+  try {
+    entries = await fs.readdir(root);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") failed.push(errorMessage(err));
   }
+  for (const entry of entries) {
+    if (entry === keepVersion) continue;
+    try {
+      await fs.rm(path.join(root, entry), { recursive: true, force: true });
+      removed.push(entry);
+    } catch (err) {
+      failed.push(`${entry}: ${errorMessage(err)}`);
+    }
+  }
+  if (removed.length > 0) console.log(`[output-helper] removed older cached releases: ${removed.map((r) => scrub(r)).join(", ")}`);
+  for (const f of failed) console.warn(`[output-helper] could not remove an older cached release: ${scrub(f)}`);
+  return { removed, failed };
 }
 
 async function statFile(file: string): Promise<number | null> {

@@ -117,6 +117,12 @@ given up on (one that keeps moving, however slowly, is not, up to two hours in a
 and a file over 1 GB is refused. A download that does not match
 its checksum is never stored and answers `502`.
 
+**Disk use.** Each architecture's zip is about 145 MB, so a version takes about 290 MB
+once Macs of both kinds have asked for it, and only an architecture someone has asked
+for is stored. On a Pi that serves from an SD card, that is real space. Older versions
+are removed when the server starts and on the first request after an update, so the
+cache never holds more than one.
+
 **With no internet on the server** and nothing cached, the route answers `404`
 with the reason. The installer then goes to GitHub from the Mac itself, so a Mac
 with internet still installs; a Mac with none cannot until the server has the file,
