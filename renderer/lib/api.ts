@@ -472,8 +472,10 @@ export type IpcChannel =
   | "outputs:setLocked"
   | "outputs:setMode"
   | "outputs:setRole"
+  | "outputs:setRotation"
   | "outputs:setSlug"
   | "outputs:setTextSize"
+  | "outputs:setVideoMode"
   | "outputs:setView"
   | "patch:get"
   | "patch:parseXlsx"
@@ -1354,6 +1356,16 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "outputs:setTextSize": {
       const id = p.id as string;
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { textSize: p.textSize });
+    }
+
+    case "outputs:setRotation": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { rotation: p.rotation });
+    }
+
+    case "outputs:setVideoMode": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { videoMode: p.videoMode });
     }
 
     case "outputs:setAllowHls": {

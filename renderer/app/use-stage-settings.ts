@@ -22,6 +22,7 @@
 
 import { useState, useEffect } from "react";
 import { outputMode, surfaceForMode, type CreateScreenInput } from "@main/types/views";
+import type { Rotation } from "@main/types/output-format";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
@@ -828,6 +829,18 @@ export function useStageSettings(pinnedViewId?: string) {
     await setOutputField("outputs:setTextSize", id, { textSize }, "Failed to change the display's text size");
   }
 
+  /** Turn what the Mac output helper sends for one screen. Optimistic, so the
+   *  segmented control follows the finger; the server refuses only a value the
+   *  control does not offer. */
+  async function handleSetOutputRotation(id: string, rotation: Rotation) {
+    await setOutputField("outputs:setRotation", id, { rotation }, "Failed to rotate the screen's output");
+  }
+
+  /** Choose the video mode a DeckLink port sends one screen in. */
+  async function handleSetOutputVideoMode(id: string, videoMode: string) {
+    await setOutputField("outputs:setVideoMode", id, { videoMode }, "Failed to change the screen's video mode");
+  }
+
   /**
    * Change what a View is for, and EVERY screen showing it: the view card's
    * deliberate "all of them" path. (One screen's role is handleSetOutputRole,
@@ -941,6 +954,8 @@ export function useStageSettings(pinnedViewId?: string) {
     handleSetOutputGroups,
     handleSetOutputRole,
     handleSetOutputTextSize,
+    handleSetOutputRotation,
+    handleSetOutputVideoMode,
     handleSetViewShowInSidebar,
     handleSetViewSurface,
     handleRemoveOutput,

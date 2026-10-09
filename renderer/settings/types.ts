@@ -4,6 +4,7 @@ import type { DragEndEvent } from "@dnd-kit/core";
 import type { useSensors } from "@dnd-kit/core";
 import type { DeviceChannel } from "@main/types/devices";
 import type { CreateScreenInput } from "@main/types/views";
+import type { Rotation } from "@main/types/output-format";
 
 /**
  * One bindable wireless channel, as `/api/integrations/wireless/channels`
@@ -113,6 +114,10 @@ export interface SectionHandlers {
     opts?: { copyView?: boolean; viewId?: string },
   ) => Promise<boolean>;
   handleSetOutputTextSize: (id: string, textSize: number) => Promise<void>;
+  /** Turn a Mac output helper screen's picture by quarter turns. */
+  handleSetOutputRotation: (id: string, rotation: Rotation) => Promise<void>;
+  /** Choose the video mode a DeckLink port sends this screen in. */
+  handleSetOutputVideoMode: (id: string, videoMode: string) => Promise<void>;
   handleSetViewShowInSidebar: (id: string, showInSidebar: boolean) => Promise<void>;
   handleSetViewSurface: (id: string, surface: "display" | "console") => Promise<void>;
   handleRemoveOutput: (id: string) => Promise<void>;

@@ -41,12 +41,17 @@ class StubEventSource {
 
 /** What /api/devices answers. Swapped per test; the panel's Device line reads it. */
 let devicesPayload: Record<string, unknown> = { scanning: false, seen: [], matches: {}, bound: [], error: null };
-(globalThis as unknown as { fetch: unknown }).fetch = async () => ({
+/** Every request the panel made, so a click can be shown to have reached the server. */
+const fetchCalls: { url: string; method: string; body: string }[] = [];
+(globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
+  fetchCalls.push({ url: String(input), method: init?.method ?? "GET", body: String(init?.body ?? "") });
+  return {
   ok: true,
   status: 200,
   json: async () => devicesPayload,
   text: async () => JSON.stringify(devicesPayload),
-});
+  };
+};
 
 const { render, screen, cleanup, fireEvent, act, within } = await import("@testing-library/react");
 const React = (await import("react")).default;
@@ -61,7 +66,8 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
 beforeEach(() => {
   cleanup();
-  devicesPayload = { scanning: false, seen: [], matches: {}, bound: [], error: null };
+  devicesPayload = { scanning: false, seen: [], matches: {}, bound: [], health: [], error: null };
+  fetchCalls.length = 0;
 });
 afterEach(async () => { cleanup(); await settle(); });
 
@@ -98,6 +104,8 @@ function recorder(over: Partial<Actions> = {}): { calls: Call[]; actions: Action
     onSetLocked: rec("locked"),
     onSetHideTopBar: rec("hideTopBar"),
     onSetTextSize: rec("textSize"),
+    onSetRotation: rec("rotation"),
+    onSetVideoMode: rec("videoMode"),
     onSetAllowHls: rec("allowHls"),
     onSetGroups: rec("groups"),
     onSetShowInSidebar: rec("sidebar"),
@@ -544,6 +552,139 @@ describe("the device", () => {
     // wait for this test's own (empty) answer before reading.
     await act(async () => { await settle(); await settle(); });
     assert.ok(screen.getByText("No device is set up for this screen."));
+  });
+});
+
+describe("the device of a Mac output helper", () => {
+  const SDI = { kind: "decklink", name: "SDI 1 · Card A", port: "SDI 1", modes: ["720p50", "1080p50", "1080p59.94", "2160p30"] };
+  const HDMI = { kind: "display", name: "HDMI 1 · Monitor", port: "HDMI 1" };
+  const device = (output: unknown) => ({
+    id: "mac1.out-1", outputId: "display-1", macs: ["02:aa:00:bb:11:cc"], hostname: "booth-mini", ip: "192.0.2.40", output,
+  });
+  const HEALTH = { deviceId: "mac1.out-1", fps: 59.94, repeated: 0.24, dropped: 3, at: 1, receivedAt: 2, struggling: false };
+
+  /** Mount a screen shown by `output`, and wait for the device list. */
+  async function open(output: unknown, over: { screen?: Partial<Output>; health?: unknown[]; online?: boolean } = {}) {
+    devicesPayload = { scanning: false, seen: [], matches: {}, bound: [device(output)], health: over.health ?? [], error: null };
+    const m = mount({ outputs: [{ ...MINE, ...over.screen }], online: over.online ?? true });
+    await act(async () => { await settle(); await settle(); });
+    return m;
+  }
+  const format = () => screen.getByRole("combobox", { name: "Format" }) as HTMLSelectElement;
+  const rotation = () => within(screen.getByRole("group", { name: "Rotation" }));
+
+  test("names the port and the card, and says whether the screen is online", async () => {
+    await open(SDI);
+    assert.ok(screen.getByText("booth-mini · SDI 1"));
+    assert.ok(screen.getByText("Card A · via the output helper on 192.0.2.40"));
+    assert.ok(screen.getByText("Online"));
+  });
+
+  test("says Offline when no page is connected", async () => {
+    await open(SDI, { online: false });
+    assert.ok(screen.getByText("Offline"));
+  });
+
+  test("offers Format for a DeckLink port, from the modes it reported, the house default first", async () => {
+    await open(SDI);
+    // 2160p30 is reported but not accepted by the server, so it is not offered.
+    assert.deepEqual([...format().options].map((o) => o.value), ["1080p59.94", "1080p50", "720p50"]);
+    assert.equal(format().value, "1080p59.94", "an unset screen shows the house mode");
+  });
+
+  test("a port that reported no modes is offered the whole accepted list", async () => {
+    await open({ ...SDI, modes: undefined });
+    const { VIDEO_MODES } = await import("@main/types/output-format");
+    assert.deepEqual([...format().options].map((o) => o.value).sort(), [...VIDEO_MODES]);
+  });
+
+  test("choosing a Format sends that mode for this screen", async () => {
+    const { calls } = await open(SDI);
+    await choose(format(), "1080p50");
+    assert.deepEqual(calls, [["videoMode", "display-1", "1080p50"]]);
+  });
+
+  test("shows the mode the screen already has, even one the port did not report", async () => {
+    await open(SDI, { screen: { videoMode: "1080i50" } });
+    assert.equal(format().value, "1080i50");
+  });
+
+  test("a display has no Format: it runs at what the Mac drives it at", async () => {
+    await open(HDMI);
+    assert.equal(screen.queryByRole("combobox", { name: "Format" }) !== null, false, "it is on screen");
+    assert.ok(rotation().getByRole("button", { name: "0°" }), "rotation is for every output");
+  });
+
+  test("Rotation shows the current turn and sends the one chosen", async () => {
+    const { calls } = await open(SDI, { screen: { rotation: 90 } });
+    const pressed = rotation().getAllByRole("button").filter((b) => b.getAttribute("aria-pressed") === "true");
+    assert.deepEqual(pressed.map((b) => b.textContent), ["90°"]);
+    await click(rotation().getByRole("button", { name: "270°" }));
+    assert.deepEqual(calls, [["rotation", "display-1", 270]]);
+  });
+
+  test("an unset rotation reads as 0°", async () => {
+    await open(SDI);
+    const pressed = rotation().getAllByRole("button").filter((b) => b.getAttribute("aria-pressed") === "true");
+    assert.deepEqual(pressed.map((b) => b.textContent), ["0°"]);
+  });
+
+  test("shows what the output last reported", async () => {
+    await open(SDI, { health: [HEALTH] });
+    const stats = within(screen.getByRole("group", { name: "Output health" }));
+    assert.ok(stats.getByText("59.94"));
+    assert.ok(stats.getByText("0.2%"));
+    assert.ok(stats.getByText("3"));
+    assert.equal(screen.queryByText("No report from the helper yet.") !== null, false, "it is on screen");
+  });
+
+  test("a display output at 0 fps shows a dash: its display link sleeps with the display", async () => {
+    await open(HDMI, { health: [{ ...HEALTH, fps: 0 }] });
+    const stats = within(screen.getByRole("group", { name: "Output health" }));
+    assert.equal(stats.queryByText("0.00") !== null, false, "it is on screen");
+    assert.equal(stats.getAllByText("—").length, 1);
+  });
+
+  test("a DeckLink output at 0 fps shows 0.00: the card clock does not sleep", async () => {
+    await open(SDI, { health: [{ ...HEALTH, fps: 0 }] });
+    assert.ok(within(screen.getByRole("group", { name: "Output health" })).getByText("0.00"));
+  });
+
+  test("says so, rather than showing zeros, when nothing has been reported", async () => {
+    await open(SDI);
+    const stats = within(screen.getByRole("group", { name: "Output health" }));
+    assert.equal(stats.getAllByText("—").length, 3);
+    assert.ok(screen.getByText("No report from the helper yet."));
+  });
+
+  test("a health report for another device is not shown here", async () => {
+    await open(SDI, { health: [{ ...HEALTH, deviceId: "mac1.out-2", fps: 12 }] });
+    assert.ok(screen.getByText("No report from the helper yet."));
+  });
+
+  test("says when the output is struggling", async () => {
+    await open(SDI, { health: [{ ...HEALTH, struggling: true }] });
+    assert.match(screen.getByRole("status").textContent ?? "", /dropping frames or running late/);
+  });
+
+  test("Release unbinds this device, and only this one", async () => {
+    await open(SDI);
+    await click(screen.getByRole("button", { name: "Release" }));
+    const release = fetchCalls.find((c) => c.url.endsWith("/api/devices/release"));
+    assert.ok(release, "Release never reached the server");
+    assert.deepEqual(JSON.parse(release.body), { deviceId: "mac1.out-1" });
+  });
+
+  test("a device that is not an output keeps today's section, with none of this", async () => {
+    devicesPayload = {
+      scanning: false, seen: [], matches: {}, health: [], error: null,
+      bound: [{ id: "kiosk-aaaa", outputId: "display-1", macs: [], hostname: "lobby-pi", ip: "192.0.2.10" }],
+    };
+    mount({ online: true });
+    await act(async () => { await settle(); await settle(); });
+    assert.ok(screen.getByText("lobby-pi · 192.0.2.10"));
+    assert.equal(screen.queryByRole("group", { name: "Rotation" }) !== null, false, "it is on screen");
+    assert.equal(screen.queryByRole("button", { name: "Release" }) !== null, false, "it is on screen");
   });
 });
 

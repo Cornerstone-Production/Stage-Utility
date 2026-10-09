@@ -640,7 +640,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
 
       {/* The machine showing this screen, when one is bound. Nothing when it is
           a browser tab somebody opened. */}
-      <ScreenDevice outputId={output.id} name={output.name} />
+      <ScreenDevice outputId={output.id} name={output.name} videoMode={output.videoMode} />
     </div>
   );
 }

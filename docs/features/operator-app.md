@@ -177,7 +177,7 @@ the panel covers the page instead.
 | **On the screen** | **Top bar** (the brand, plan and QR strip along the top), **Lock** (keeps the top bar but removes its links, so the screen cannot be navigated away from) and **Text size** (50 to 300 %, for ServiceCue and readouts). Top bar and Lock are offered only where the view draws a bar; a calendar or a script wall draws none |
 | **Messages** | the [message groups](stage-messages.md#putting-a-screen-in-groups) the screen is in |
 | **Video** | **Use HLS**. Off, the screen plays only WebRTC, and a feed that needs HLS says it can't play there |
-| **Device** | the machine bound to the screen, with its hostname and address, and whether the screen is online. Read-only; release it from the card |
+| **Device** | the machine bound to the screen, with its hostname and address, and whether the screen is online. Read-only; release it from the card. For a screen shown by an output of a [Mac output helper](../kiosk-devices.md#mac-output-helper) it also holds the port and card, **Format** (DeckLink ports), **Rotation**, the output's health and **Release** |
 
 **Changing one screen never changes another.** A view can be shown on several
 screens. When you change a screen's role and the view no longer fits it, and

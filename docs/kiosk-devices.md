@@ -187,6 +187,23 @@ server's Mac works.
 The stored binding keeps the `output`, so a bound screen still names its port
 while the output is off.
 
+**On Screens.** The outputs of one Mac are grouped under the Mac in *Not set up
+yet*: its hostname, OS and address once, then a row per output, displays first and
+SDI ports after, each with the two actions above. An output that already has a
+screen stays in the group, dimmed, saying which screen it is set up as and
+whether that screen is showing. A Mac whose outputs are all set up is not listed.
+Outputs of one Mac are not flagged *Looks like … same MAC address* against each
+other; a device that is not an output keeps that hint. An output set up as a new
+screen starts named for the output, not for the Mac.
+
+A screen's card says `<hostname> · <port> · <mode>`: the Mac, the port, and the
+video mode the port sends (a display shows the size it is driven at). Its
+[Screen settings](features/operator-app.md#adding-a-screen) Device section shows the port and
+card, whether the screen is online, **Format** (DeckLink ports only, from the
+modes the port reported that the server accepts, otherwise all of them),
+**Rotation**, the output's health and **Release**. Releasing returns the output
+to *Not set up yet*.
+
 **Format and rotation** are settings of the screen, not of the Mac: a DeckLink
 port's video mode (`videoMode`, `1080p59.94` unless changed) and a quarter-turn
 rotation for a monitor on its side (`rotation`, 0 unless changed). They are

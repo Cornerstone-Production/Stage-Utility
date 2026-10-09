@@ -25,7 +25,7 @@ import { Loader2Icon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { OutputsSection } from "../../settings/sections/outputs-section";
 import { ScreenPanelHost } from "./screen-panel-host";
-import type { PanelTarget } from "../../settings/sections/screen-settings-panel";
+import type { PanelDevice, PanelTarget } from "../../settings/sections/screen-settings-panel";
 import { useStageSettings } from "../use-stage-settings";
 import { UnclaimedScreens } from "./unclaimed-screens";
 
@@ -46,14 +46,16 @@ export function ScreensRoute() {
   }
 
   const outputs = s.stageState.outputs ?? [];
-  const newTarget = (device: { id: string; hostname?: string; ip?: string } | null): PanelTarget => ({
+  const newTarget = (device: PanelDevice | null): PanelTarget => ({
     kind: "new",
     device,
-    // A device is named for itself, as it always was. A screen from the Add tile
+    // A device is named for itself, as it always was; an output of a Mac output
+    // helper for the output, since all of a Mac's outputs share its hostname. A
+    // screen from the Add tile
     // is left unnamed, and the server names it "Display N" from the id it gets:
     // a count of the screens here repeats a name once one has been removed, and
     // an id is never reused.
-    defaultName: device ? device.hostname || "New screen" : "",
+    defaultName: device ? device.name || device.hostname || "New screen" : "",
   });
   // A screen removed while its panel was open leaves nothing to show, and the
   // panel's column has to go with it: the panel draws nothing for a screen that

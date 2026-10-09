@@ -45,3 +45,17 @@ export type VideoMode = (typeof VIDEO_MODES)[number];
 export function isVideoMode(v: unknown): v is VideoMode {
   return typeof v === "string" && (VIDEO_MODES as readonly string[]).includes(v);
 }
+
+/**
+ * The modes to offer for a port: the ones it reported that the server accepts,
+ * the house default first and the rest in list order. A port that reported
+ * nothing, or nothing the server accepts, is offered the whole accepted list,
+ * because an empty choice cannot be made. The mode the screen already has is
+ * always kept, so a select never goes blank on a value the server already took.
+ */
+export function modeChoices(reported: readonly string[] | undefined, current: string | undefined): string[] {
+  const offered = (reported ?? []).filter(isVideoMode);
+  const pool: readonly string[] = offered.length > 0 ? VIDEO_MODES.filter((m) => offered.includes(m)) : VIDEO_MODES;
+  const choices = [...pool].sort((a, b) => Number(b === DEFAULT_VIDEO_MODE) - Number(a === DEFAULT_VIDEO_MODE));
+  return current && !choices.includes(current) ? [current, ...choices] : choices;
+}

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { DEFAULT_VIDEO_MODE, isRotation, isVideoMode, ROTATIONS, VIDEO_MODES } from "./output-format.js";
+import { DEFAULT_VIDEO_MODE, isRotation, isVideoMode, modeChoices, ROTATIONS, VIDEO_MODES } from "./output-format.js";
 
 describe("the accepted video modes", () => {
   // Exactly this list, one name per line and sorted, so two branches adding a
@@ -50,5 +50,28 @@ describe("the accepted rotations", () => {
     for (const bad of [45, 360, -90, 90.5, "90", null, undefined, NaN]) {
       assert.equal(isRotation(bad), false, String(bad));
     }
+  });
+});
+
+describe("the modes to offer for a port", () => {
+  it("are the ones it reported that are accepted, the house default first", () => {
+    assert.deepEqual(modeChoices(["720p50", "1080p50", "1080p59.94", "2160p30"], undefined), ["1080p59.94", "1080p50", "720p50"]);
+  });
+
+  it("are the whole accepted list for a port that reported nothing", () => {
+    assert.deepEqual(modeChoices(undefined, undefined).sort(), [...VIDEO_MODES]);
+    assert.deepEqual(modeChoices([], undefined).sort(), [...VIDEO_MODES]);
+  });
+
+  it("are the whole accepted list when nothing it reported is accepted", () => {
+    assert.deepEqual(modeChoices(["2160p30"], undefined).sort(), [...VIDEO_MODES]);
+  });
+
+  it("keep the mode the screen has, first, even when the port did not report it", () => {
+    assert.deepEqual(modeChoices(["1080p60"], "720p50"), ["720p50", "1080p60"]);
+  });
+
+  it("do not list the current mode twice", () => {
+    assert.deepEqual(modeChoices(["1080p60", "720p50"], "720p50"), ["1080p60", "720p50"]);
   });
 });
