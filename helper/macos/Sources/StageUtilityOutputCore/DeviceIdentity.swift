@@ -10,6 +10,7 @@ public enum DeviceIdentity {
   /// The server refuses a device id longer than this (`clean()` in
   /// kiosk-device-routes.ts, and `MAX_STR` in kiosk-discovery.ts, which would
   /// slice a longer one and so change it between the probe and the enrolment).
+  /// Counted in UTF-16 code units, as JavaScript counts a string's length.
   public static let maxLength = 128
 
   /// The most of the id the output key may take; the Mac's id gets the rest.
@@ -37,17 +38,17 @@ public enum DeviceIdentity {
   /// id on every launch or the binding is orphaned.
   public static func deviceId(mac: String, key: String) -> String {
     let joined = "\(mac).\(key)"
-    if joined.count <= maxLength { return joined }
+    if joined.utf16.count <= maxLength { return joined }
     let keyPart = shorten(key, to: maxKeyLength)
-    let macPart = shorten(mac, to: maxLength - 1 - keyPart.count)
+    let macPart = shorten(mac, to: maxLength - 1 - keyPart.utf16.count)
     return "\(macPart).\(keyPart)"
   }
 
   /// `part` itself when it fits, else `<prefix>~<16 hex of sha256(part)>`.
   static func shorten(_ part: String, to limit: Int) -> String {
-    if part.count <= limit { return part }
+    if part.utf16.count <= limit { return part }
     let digest = SHA256.hash(data: Data(part.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
     let keep = max(0, limit - digest.count - 1)
-    return "\(part.prefix(keep))~\(digest)"
+    return "\(part.clippedUTF16(to: keep))~\(digest)"
   }
 }

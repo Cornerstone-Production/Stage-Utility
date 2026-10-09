@@ -36,7 +36,8 @@ public struct DiscoveryReply: Equatable {
 
   private static func nonEmpty(_ v: Any?, max: Int, truncate: Bool = true) -> String? {
     guard let s = v as? String, !s.isEmpty else { return nil }
-    if s.count > max { return truncate ? String(s.prefix(max)) : nil }
+    // UTF-16 units, as the server's JavaScript counts them.
+    if s.utf16.count > max { return truncate ? s.clippedUTF16(to: max) : nil }
     return s
   }
 }

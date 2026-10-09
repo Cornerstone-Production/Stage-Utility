@@ -31,6 +31,21 @@ import Testing
     #expect(id.count <= DeviceIdentity.maxLength)
   }
 
+  /// The cap is the server's JavaScript string length: UTF-16 code units. An emoji is
+  /// two, so 100 of them is 200 even though Swift counts 100.
+  @Test func theCapCountsUtf16UnitsNotCharacters() {
+    let emoji = String(repeating: "\u{1F600}", count: 100)
+    #expect(emoji.count == 100)
+    let id = DeviceIdentity.deviceId(mac: emoji, key: "k")
+    #expect(id.utf16.count <= DeviceIdentity.maxLength, "gave \(id.utf16.count) units")
+    // A device id of 60 emoji (120 units) and a key fits: 120 + 1 + 1.
+    let fits = String(repeating: "\u{1F600}", count: 60)
+    #expect(DeviceIdentity.deviceId(mac: fits, key: "k") == "\(fits).k")
+    // 64 of them is 128 units before the key: over.
+    let over = String(repeating: "\u{1F600}", count: 64)
+    #expect(DeviceIdentity.deviceId(mac: over, key: "k") != "\(over).k")
+  }
+
   @Test func anIdThatFitsIsLeftAlone() {
     let key = String(repeating: "k", count: 64)
     let m = String(repeating: "m", count: 63)

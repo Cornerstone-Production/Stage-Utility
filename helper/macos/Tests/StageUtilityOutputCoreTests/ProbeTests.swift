@@ -55,6 +55,71 @@ import Testing
     #expect(p.encoded().count < Probe.maxDatagram)
   }
 
+  /// The server slices strings at 128 UTF-16 units. Cutting a string of emoji at 128
+  /// characters would send 256 units and the server would cut it again, differently.
+  @Test func clipsInUtf16UnitsAsTheServerCounts() throws {
+    var p = probe
+    p.hostname = String(repeating: "\u{1F600}", count: 100)
+    let o = try #require(try JSONSerialization.jsonObject(with: p.encoded()) as? [String: Any])
+    let host = try #require(o["hostname"] as? String)
+    #expect(host.utf16.count == 128)
+    #expect(host.count == 64)
+    // Never half of a pair.
+    #expect(String(decoding: host.utf8, as: UTF8.self) == host)
+  }
+
+  @Test func clipNeverSplitsASurrogatePair() {
+    // 127 units then a pair: the pair does not fit, so 127 units remain.
+    let s = String(repeating: "a", count: 127) + "\u{1F600}"
+    #expect(s.clippedUTF16(to: 128).utf16.count == 127)
+    #expect("abc".clippedUTF16(to: 128) == "abc")
+    #expect("abcdef".clippedUTF16(to: 3) == "abc")
+  }
+
+  @Test func modesAreCutLikeTheServerCutsThem() throws {
+    var p = probe
+    p.output.modes = (0..<40).map { _ in String(repeating: "m", count: 50) }
+    let o = try #require(try JSONSerialization.jsonObject(with: p.encoded()) as? [String: Any])
+    let modes = try #require((o["output"] as? [String: Any])?["modes"] as? [String])
+    #expect(modes.count == Probe.maxModes)
+    #expect(modes.allSatisfy { $0.utf16.count == Probe.maxModeLength })
+  }
+
+  /// A probe over 2048 BYTES is not read at all, so the output would never appear.
+  /// Multi-byte names are what get there: 3 bytes a unit, 128 units, in nine places.
+  @Test func neverExceedsTheDatagramCapInBytes() {
+    var p = probe
+    let wide = String(repeating: "\u{20AC}", count: 128)  // 128 units, 384 bytes
+    p.hostname = wide
+    p.os = wide
+    p.macs = (0..<8).map { _ in wide }
+    p.output = .init(kind: .decklink, name: wide, port: wide, modes: (0..<24).map { _ in String(repeating: "\u{20AC}", count: 32) })
+    #expect(String(decoding: p.encoded(), as: UTF8.self).utf8.count <= Probe.maxDatagram)
+    #expect(p.encoded().count <= Probe.maxDatagram)
+  }
+
+  /// What goes first is the long name; the id and the binding never go.
+  @Test func dropsTheNameDetailBeforeAnythingElse() throws {
+    var p = probe
+    p.id = "mac-id.display-key"
+    p.boundTo = "server-1"
+    p.output = .init(kind: .display, name: String(repeating: "\u{20AC}", count: 128), port: "HDMI")
+    p.hostname = String(repeating: "\u{20AC}", count: 128)
+    p.os = String(repeating: "\u{20AC}", count: 128)
+    p.macs = (0..<8).map { _ in String(repeating: "\u{20AC}", count: 128) }
+    let o = try #require(try JSONSerialization.jsonObject(with: p.encoded()) as? [String: Any])
+    #expect(p.encoded().count <= Probe.maxDatagram)
+    #expect(o["id"] as? String == "mac-id.display-key")
+    #expect(o["boundTo"] as? String == "server-1")
+    #expect((o["output"] as? [String: Any])?["port"] as? String == "HDMI")
+    // The name fell back to the port rather than the datagram being dropped.
+    #expect((o["output"] as? [String: Any])?["name"] as? String == "HDMI")
+  }
+
+  @Test func aProbeThatFitsIsNotTouched() {
+    #expect(String(decoding: probe.encoded(), as: UTF8.self).contains("HDMI · LG 27UL"))
+  }
+
   @Test func buildsFromADescriptor() {
     let d = OutputDescriptor(kind: .display, key: "k", name: "Display 2 · LG", port: "Display 2")
     let p = Probe(id: "m.k", macs: [], hostname: "h", boundTo: nil, descriptor: d)
@@ -101,6 +166,13 @@ import Testing
   @Test func refusesAUrlWithAPath() {
     #expect(DiscoveryReply.parse(data(#"{"stageUtility":"server","v":1,"serverId":"s","url":"http://h:1/su"}"#)) == nil)
     #expect(DiscoveryReply.parse(data(#"{"stageUtility":"server","v":1,"serverId":"s","url":"http://h:1/"}"#)) != nil)
+  }
+
+  @Test func replyLengthsCountUtf16Units() {
+    // 130 emoji is 260 units: over the 128 cap on a name, so cut at 128 units.
+    let name = String(repeating: "\u{1F600}", count: 130)
+    let r = DiscoveryReply.parse(data(#"{"stageUtility":"server","v":1,"serverId":"s","name":"\#(name)","url":"http://h:1"}"#))
+    #expect(r?.name.utf16.count == 128)
   }
 
   @Test func refusesAnOversizedDatagramOrUrl() {
