@@ -15,7 +15,11 @@ import StageUtilityOutputCore
 ///
 /// Three buffers are kept, so a picture can be converted while the card is copying
 /// another and a third is the newest: no lock is held while the GPU works.
-public final class SurfaceFrameSource: CardFrameSource {
+///
+/// Sendable by hand: its state is behind `lock`, which is never held while the GPU
+/// works; `present` is called from one thread, and `onBeginFrame` is set before the
+/// port that calls it opens.
+public final class SurfaceFrameSource: CardFrameSource, @unchecked Sendable {
   private struct Staged {
     var buffer: MTLBuffer
     var picture = CardPicture.untimed

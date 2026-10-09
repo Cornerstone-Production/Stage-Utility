@@ -178,8 +178,9 @@ func cString<T>(_ tuple: inout T, fallback: String) -> String {
   return s.isEmpty ? fallback : s
 }
 
-/// The one device-change handler the shim's C callback reaches.
-private final class DeviceListener {
+/// The one device-change handler the shim's C callback reaches. Sendable by hand:
+/// the handler is behind `lock`.
+private final class DeviceListener: @unchecked Sendable {
   static let shared = DeviceListener()
   private let lock = NSLock()
   private var _handler: (() -> Void)?
@@ -202,7 +203,10 @@ private final class DeviceListener {
 /// until a scan finds it can play; an output a scan finds set as an input goes back
 /// to the list. Desktop Video Setup sends no device notification for either, so the
 /// helper scans again now and then (`AppModel`).
-public final class DeckLinkInventory {
+///
+/// Sendable by hand: what scans leave behind is behind `lock`; `read` and `log` are
+/// set at init and called from whichever thread scans (one at a time, in the app).
+public final class DeckLinkInventory: @unchecked Sendable {
   public typealias Reader = () -> (DeckLinkDriver.Status, [DeckLinkPort])
 
   private let read: Reader

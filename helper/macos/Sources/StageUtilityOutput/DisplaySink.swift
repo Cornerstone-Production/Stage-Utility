@@ -16,7 +16,7 @@ protocol OutputSink: AnyObject {
   func setRotation(_ rotation: Rotation)
   /// Write what the output is showing to `file` as a PNG, turned the way it goes
   /// out. `completion` gets nil on success, else why not.
-  func writeSnapshot(to file: URL, completion: @escaping (FrameDumpOutcome) -> Void)
+  func writeSnapshot(to file: URL, completion: @escaping @MainActor (FrameDumpOutcome) -> Void)
 }
 
 extension OutputSink {
@@ -69,7 +69,7 @@ final class DisplaySink: OutputSink {
 
   func setRotation(_ rotation: Rotation) { destination.setRotation(rotation) }
 
-  func writeSnapshot(to file: URL, completion: @escaping (FrameDumpOutcome) -> Void) {
+  func writeSnapshot(to file: URL, completion: @escaping @MainActor (FrameDumpOutcome) -> Void) {
     SnapshotTurn.write(surface, turnedBy: destination.rotation, to: file) { why in
       completion(why.map(FrameDumpOutcome.failed) ?? .written)
     }
@@ -85,13 +85,17 @@ enum SnapshotTurn {
   /// there held them up long enough to repeat a frame. `completion` runs on the main
   /// thread.
   @MainActor
-  static func write(_ surface: WebSurface, turnedBy rotation: Rotation, to file: URL, completion: @escaping (String?) -> Void) {
+  static func write(
+    _ surface: WebSurface, turnedBy rotation: Rotation, to file: URL, completion: @escaping @MainActor (String?) -> Void
+  ) {
     surface.snapshot { image, problem in
       guard let image else {
         completion(problem)
         return
       }
-      let done: @Sendable (String?) -> Void = { why in DispatchQueue.main.async { completion(why) } }
+      let done: @Sendable (String?) -> Void = { why in
+        DispatchQueue.main.async { MainActor.assumeIsolated { completion(why) } }
+      }
       DispatchQueue.global(qos: .utility).async {
         guard let turned = turned(image, by: rotation),
           let png = NSBitmapImageRep(cgImage: turned).representation(using: .png, properties: [:])

@@ -18,7 +18,11 @@ import StageUtilityOutputCore
 ///
 /// The same port runs on a software clock (`Hardware.softwareClock`): the same
 /// scheduler and counters, ticking by itself or by hand, with no card.
-public final class DeckLinkOutputPort: CardSink {
+///
+/// Sendable by hand: everything it keeps is touched only on its own serial `queue`,
+/// which every public member hops onto (`sync`, or `async` for `retry`); the shim's
+/// callbacks reach it only through that queue (`CallbackBox`).
+public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
   public enum Hardware {
     case port(DeckLinkPort)
     /// The scheduler on a software clock instead of a card. With
@@ -343,7 +347,7 @@ public final class DeckLinkOutputPort: CardSink {
     let opened = why.withUnsafeMutableBufferPointer { buffer in
       plan.open(&callbacks, buffer.baseAddress!, buffer.count)
     }
-    guard let opened else { return .failed(String(cString: why)) }
+    guard let opened else { return .failed(String(nulTerminated: why)) }
     handle = opened
     self.box = box
     openSize = PixelSize(width: plan.width, height: plan.height)
@@ -560,7 +564,10 @@ public final class DeckLinkOutputPort: CardSink {
 /// The port is reached only on its own queue. Taking a strong reference to it on
 /// the card's thread could make that thread the one that frees it, and the port's
 /// deinit closes the output: from inside a completion that waits on itself.
-final class CallbackBox {
+///
+/// Sendable by hand: it is set up before the output opens and not changed after;
+/// `port` is read only on `queue`.
+final class CallbackBox: @unchecked Sendable {
   let source: CardFrameSource
   let timeScale: Int64
   let queue: DispatchQueue

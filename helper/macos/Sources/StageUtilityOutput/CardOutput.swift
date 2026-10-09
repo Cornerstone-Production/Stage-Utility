@@ -183,12 +183,14 @@ final class CardOutput: OutputSink {
   /// shows the Metal conversion, the turn and the scaling, not the page before
   /// them. Copied as the page hands it over, on the main thread (once per dump);
   /// decoded, encoded and written off it, since the pictures arrive there.
-  func writeSnapshot(to file: URL, completion: @escaping (FrameDumpOutcome) -> Void) {
+  func writeSnapshot(to file: URL, completion: @escaping @MainActor (FrameDumpOutcome) -> Void) {
     guard let source else {
       completion(.failed("no frames: the output is not running"))
       return
     }
-    let done: @Sendable (FrameDumpOutcome) -> Void = { outcome in DispatchQueue.main.async { completion(outcome) } }
+    let done: @Sendable (FrameDumpOutcome) -> Void = { outcome in
+      DispatchQueue.main.async { MainActor.assumeIsolated { completion(outcome) } }
+    }
     source.captureNextFrame { frame in
       guard let frame else {
         done(.noNewFrame)

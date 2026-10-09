@@ -1,7 +1,7 @@
 import Foundation
 
 /// How a card mode's frames are made of fields.
-public enum FieldOrder: Equatable {
+public enum FieldOrder: Equatable, Sendable {
   case progressive
   case upperFirst
   case lowerFirst
@@ -13,7 +13,7 @@ public enum FieldOrder: Equatable {
 }
 
 /// A display mode as a card's port reports it.
-public struct CardMode: Equatable {
+public struct CardMode: Equatable, Sendable {
   /// The driver's code for it (a DeckLink `BMDDisplayMode`, 'Hp59').
   public var code: UInt32
   /// The driver's own name for it, for the log.

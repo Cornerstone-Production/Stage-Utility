@@ -49,7 +49,7 @@ enum CEFEngine {
       return fail("the browser host is not in the app (\(hostPath)); build the app with build-app.sh")
     }
     guard let api = su_cef_load(hostPath, &error, error.count) else {
-      return fail("the browser host could not be opened (\(String(cString: error)))")
+      return fail("the browser host could not be opened (\(String(nulTerminated: error)))")
     }
     let className = String(cString: api.pointee.application_class_name!()!)
     guard let appClass = NSClassFromString(className) as? NSApplication.Type else {
@@ -73,7 +73,7 @@ enum CEFEngine {
       }
     }
     guard ok else {
-      _ = fail("Chromium did not start: \(String(cString: error))")
+      _ = fail("Chromium did not start: \(String(nulTerminated: error))")
       return app
     }
     state = .ready(api)

@@ -27,8 +27,9 @@ import Foundation
 import IOSurface
 import StageUtilityOutputCore
 
-/// Draws the bars into an IOSurface and moves a white line across them.
-final class BarsPainter {
+/// Draws the bars into an IOSurface and moves a white line across them. Sendable by
+/// hand: it draws on one serial render queue only (`feed`).
+final class BarsPainter: @unchecked Sendable {
   let width: Int
   let height: Int
   let surface: IOSurfaceRef

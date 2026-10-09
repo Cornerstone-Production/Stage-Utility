@@ -22,3 +22,10 @@ extension String {
     return String(out)
   }
 }
+
+extension String {
+  /// The text a C call wrote into `buffer`, up to its first NUL, as UTF-8.
+  public init(nulTerminated buffer: [CChar]) {
+    self = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+  }
+}

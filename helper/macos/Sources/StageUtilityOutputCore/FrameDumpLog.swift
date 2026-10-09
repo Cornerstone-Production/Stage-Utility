@@ -1,7 +1,7 @@
 import Foundation
 
 /// What became of one output's `--dump-frames` picture.
-public enum FrameDumpOutcome: Equatable {
+public enum FrameDumpOutcome: Equatable, Sendable {
   case written
   /// A card output whose page has drawn nothing new since the last dump: a still
   /// page, which is not a fault. Its frame is dumped again when the page draws.

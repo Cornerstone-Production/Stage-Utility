@@ -2,7 +2,7 @@ import Foundation
 import StageUtilityOutputCore
 
 /// Which frame a card wants, on its own clock.
-public struct CardFrameRequest: Equatable {
+public struct CardFrameRequest: Equatable, Sendable {
   /// Frames since playback started. A schedule that fell behind the card jumps
   /// forward, so this can skip.
   public var index: Int64
