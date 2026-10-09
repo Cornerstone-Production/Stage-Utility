@@ -412,6 +412,26 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // POST /api/views/:id/surface — { surface: "display" | "console" }. Change what
+    // a view is for AND every screen showing it, together, as one write that is
+    // undone if it fails part-way: see stageController.setViewRole. PATCH
+    // /api/views/:id with { surface } is the other call and still REFUSES a view
+    // that screens are showing, naming them. The checks here are the body's shape.
+    const viewSurfaceMatch = pathname.match(/^\/api\/views\/([^/]+)\/surface$/);
+    if (method === "POST" && viewSurfaceMatch) {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (body.surface !== "display" && body.surface !== "console") {
+        error(res, 'body.surface ("display"|"console") required');
+        return;
+      }
+      try {
+        json(res, await stageController.setViewRole(viewSurfaceMatch[1], body.surface));
+      } catch (err) {
+        answerScreenWriteFailure(res, err);
+      }
+      return;
+    }
+
     // PATCH /api/views/:id — { name? } and/or { kind? } and/or { ndiSource? } and/or { layout? }
     const viewPatchMatch = pathname.match(/^\/api\/views\/([^/]+)$/);
     if (method === "PATCH" && viewPatchMatch) {
