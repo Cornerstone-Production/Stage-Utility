@@ -69,6 +69,12 @@ HELPER_LABEL=com.stageutility.output
 HELPER_PLIST="$AGENT_DIR/$HELPER_LABEL.plist"
 GITHUB_BASE="${STAGE_INSTALL_GITHUB_BASE:-https://github.com/Cornerstone-Production/Stage-Utility/releases/download}"
 
+# The ceiling on one zip download, seconds. The server's own fetch of the zip from
+# GitHub may take up to two hours (its watchdog's ceiling, in
+# main/services/output-helper-download.ts), during which it sends this script
+# nothing, and then it sends the zip. Ten minutes of margin on top of the two hours.
+ZIP_CEILING=7800
+
 MODE=helper
 DRY=0
 ARCH=""
@@ -360,12 +366,19 @@ fetch_to() {
   dest="$2"
   max="$3"
   progress="$4"
+  idle="${5:-0}"
   HTTP_CODE=""
   rc=0
+  # IDLE seconds below 1 KB/s ends the transfer, when IDLE is not 0; MAX is the
+  # ceiling on the whole of it either way.
+  speed=""
+  if [ "$idle" -gt 0 ]; then speed="--speed-time $idle --speed-limit 1024"; fi
   if [ "$progress" -eq 1 ]; then
-    HTTP_CODE="$(curl -# -L --connect-timeout 10 --max-time "$max" -o "$dest" -w '%{http_code}' "$url")" || rc=$?
+    # shellcheck disable=SC2086 # $speed is two flags and their values, meant to split
+    HTTP_CODE="$(curl -# -L --connect-timeout 10 --max-time "$max" $speed -o "$dest" -w '%{http_code}' "$url")" || rc=$?
   else
-    HTTP_CODE="$(curl -sS -L --connect-timeout 10 --max-time "$max" -o "$dest" -w '%{http_code}' "$url")" || rc=$?
+    # shellcheck disable=SC2086
+    HTTP_CODE="$(curl -sS -L --connect-timeout 10 --max-time "$max" $speed -o "$dest" -w '%{http_code}' "$url")" || rc=$?
   fi
   if [ "$rc" -ne 0 ]; then
     WHY="could not reach it (curl exit $rc)"
@@ -385,6 +398,7 @@ try_source() {
   label="$1"
   zip_url="$2"
   sum_url="$3"
+  zip_idle="$4"
   WHY=""
   rm -f "$WORK/$ZIP_NAME" "$WORK/$ZIP_NAME.sha256"
   if ! fetch_to "$sum_url" "$WORK/$ZIP_NAME.sha256" 60 0; then
@@ -399,7 +413,7 @@ try_source() {
   fi
   say "    downloading $ZIP_NAME from $label"
   say "    (a server that has not fetched it yet downloads it from GitHub first; that can take a few minutes)"
-  if ! fetch_to "$zip_url" "$WORK/$ZIP_NAME" 1800 1; then
+  if ! fetch_to "$zip_url" "$WORK/$ZIP_NAME" "$ZIP_CEILING" 1 "$zip_idle"; then
     WHY="$label: the download $WHY"
     return 1
   fi
@@ -425,7 +439,9 @@ fetch_helper() {
   [ -n "$origin" ] || no_server_address
   origin="${origin%/}"
   ZIP_NAME="StageUtilityOutput-$ARCH.zip"
-  if try_source "this server ($origin)" "$origin/kiosk/$ZIP_NAME" "$origin/kiosk/$ZIP_NAME.sha256"; then
+  # No idle limit on the server: a server that has not fetched the zip yet sends
+  # nothing until it has all of it from GitHub, which curl would count as idle.
+  if try_source "this server ($origin)" "$origin/kiosk/$ZIP_NAME" "$origin/kiosk/$ZIP_NAME.sha256" 0; then
     return 0
   fi
   say "    $WHY"
@@ -434,7 +450,7 @@ fetch_helper() {
   if [ -z "$version" ]; then
     die "could not get the helper. $first. This server's version could not be read from $origin/api/update/status either, so the GitHub release was not tried."
   fi
-  if try_source "the GitHub release v$version" "$GITHUB_BASE/v$version/$ZIP_NAME" "$GITHUB_BASE/v$version/$ZIP_NAME.sha256"; then
+  if try_source "the GitHub release v$version" "$GITHUB_BASE/v$version/$ZIP_NAME" "$GITHUB_BASE/v$version/$ZIP_NAME.sha256" 60; then
     return 0
   fi
   die "could not get the helper. $first. $WHY."

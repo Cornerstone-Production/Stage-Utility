@@ -436,6 +436,41 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
     assert.ok(github.hits.some((h) => h.endsWith("/v9.9.9/StageUtilityOutput-arm64.zip")));
   });
 
+  describe("how long a zip download may take", () => {
+    /** A `curl` that records its arguments, one call a line, and then runs the real one. */
+    const spyOnCurl = () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "su-curl-"));
+      shimDirs.push(dir);
+      const real = spawnSync("sh", ["-c", "command -v curl"], { encoding: "utf8" }).stdout.trim();
+      const log = path.join(dir, "curl.log");
+      fs.writeFileSync(log, "");
+      fs.writeFileSync(path.join(dir, "curl"), `#!/bin/sh\nprintf '%s\\n' "$*" >>"${log}"\nexec "${real}" "$@"\n`, { mode: 0o755 });
+      return { env: { PATH: `${dir}:${process.env.PATH ?? ""}` }, zipCalls: () => fs.readFileSync(log, "utf8").split("\n").filter((l) => /\.zip(\s|$)/.test(l)) };
+    };
+
+    it("the server's zip has a ceiling of 2 h 10 m and no idle limit, since a cold server sends nothing while it fetches", async () => {
+      publish(stageServer, "/kiosk", zipA);
+      const spy = spyOnCurl();
+      const r = await install(`${FLOW}; FINISHED=1`, spy.env);
+      assert.equal(r.status, 0, r.out + r.err);
+      const calls = spy.zipCalls();
+      assert.equal(calls.length, 1, calls.join("\n"));
+      assert.match(calls[0], /--max-time 7800 /);
+      assert.doesNotMatch(calls[0], /--speed-/, "an idle limit would cut off a server still fetching the zip from GitHub");
+    });
+
+    it("the GitHub zip gives up after a minute under 1 KB/s, with the same ceiling", async () => {
+      stageServer.routes.set("/api/update/status", { body: '{"version":"9.9.9"}' });
+      publish(github, "/releases/v9.9.9", zipB);
+      const spy = spyOnCurl();
+      const r = await install(`${FLOW}; FINISHED=1`, spy.env);
+      assert.equal(r.status, 0, r.out + r.err);
+      const calls = spy.zipCalls().filter((c) => c.includes(github.base));
+      assert.equal(calls.length, 1, spy.zipCalls().join("\n"));
+      assert.match(calls[0], /--max-time 7800 --speed-time 60 --speed-limit 1024 /);
+    });
+  });
+
   it("names both reasons when neither source works", async () => {
     stageServer.routes.set("/api/update/status", { body: '{"version":"9.9.9"}' });
     const r = await install(FLOW);
