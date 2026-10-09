@@ -65,11 +65,13 @@ export function startKioskResponder(opts: ResponderOptions): void {
     const bound = !!findById(devices, probe.id);
     const decision = decideProbe(probe, opts.serverId, { scanning: scanning(), bound });
 
-    // A device bound HERE is not a candidate: recording it would list it, announce
-    // it and log "output seen" on every minute it runs, only to forget it again
-    // below. Only a device somebody could claim, or one that cannot reach its
-    // server, is shown.
-    if (decision.list === "unclaimed" || decision.list === "elsewhere") {
+    // A device bound HERE is not a candidate, whatever its probe says: recording it
+    // would list it, announce it and log "output seen" for an output that has a
+    // screen. That includes the probe that was already on the wire when it was
+    // claimed, which does not carry its binding yet and is still answered below so
+    // it learns it. Only a device somebody could claim, or one that cannot reach
+    // its server, is shown.
+    if (decision.list === "elsewhere" || (decision.list === "unclaimed" && !bound)) {
       recordSeen({
         id: probe.id,
         macs: probe.macs,

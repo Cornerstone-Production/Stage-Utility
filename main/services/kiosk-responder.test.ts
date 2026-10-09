@@ -166,6 +166,17 @@ describe("a helper output bound to this server", () => {
     assert.match(seenLines()[0], /^\[output-helper\] output seen: other-mac\.sdi-1 \(decklink "SDI 1 · Card A"\) on booth-mini$/);
   });
 
+  test("is answered but not listed or logged by a probe that does not carry its binding yet", async () => {
+    // The probe already on the wire when it was claimed, or one from a helper that
+    // has not heard the answer: no boundTo, while a scan is open. It is ours, so it
+    // is answered (that is how it learns the binding) and it is not a candidate.
+    await bind();
+    startScan("long", 30 * 60_000);
+    await probe({ ...bound, boundTo: undefined });
+    assert.deepEqual(seenLines(), [], "a bound output was logged as newly seen");
+    assert.deepEqual(seenDevices().map((d) => d.id), [], "a bound output was listed as a candidate to claim");
+  });
+
   test("a probe keeps the stored output current", async () => {
     // A card reporting new modes, or an output renamed, must reach the binding the
     // Screen settings read it from: the responder hands the probe's output to
