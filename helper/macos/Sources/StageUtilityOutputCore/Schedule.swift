@@ -13,6 +13,10 @@ public enum Backoff {
   /// Consecutive failures that mean the address may have changed and discovery
   /// should run again.
   public static let rediscoverAfterFailures = 3
+
+  /// Whether the `n`th failure in a row is the one that crosses the line. Exactly
+  /// that one, not every one after it: discovery restarts once, not once per retry.
+  public static func shouldRediscover(afterFailureNumber n: Int) -> Bool { n == rediscoverAfterFailures }
 }
 
 public enum ProbeSchedule {

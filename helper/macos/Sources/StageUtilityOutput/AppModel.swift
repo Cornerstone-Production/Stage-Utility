@@ -41,8 +41,6 @@ final class AppModel: ObservableObject {
     var showingBound = false
     var boundScreenName: String?
     var fps: Double?
-    var healthFailing = false
-    var healthMisses = 0
     var spiProblems: [String] = []
     init(display: ConnectedDisplay) { self.display = display }
   }
@@ -51,7 +49,8 @@ final class AppModel: ObservableObject {
 
   // One note per cause, so a repeated cause does not stack.
   private var noteTable: [String: String] = [:]
-  private var healthSupported = true
+  /// What each output's health posts have been told, by output key.
+  private var healthBoard = HealthBoard()
   private var healthTimer: Timer?
   private var dumpTimer: Timer?
   private var dumpSequence = 0
@@ -200,6 +199,7 @@ final class AppModel: ObservableObject {
     rt.showingBound = false
     rt.boundScreenName = nil
     rt.fps = nil
+    healthBoard.forget(key)
     // A server from discovery is looked for again on the next turn-on; one from the
     // server file stays.
     if identity.server == nil { rt.serverURL = nil }
@@ -270,6 +270,8 @@ final class AppModel: ObservableObject {
     if bound != rt.showingBound {
       Log.notice(.output, "\(rt.display.descriptor.port): \(bound ? "claimed, showing \(first!)" : "back on the holding screen")")
     }
+    // Set up (again): the server may know this output now, so health posts resume.
+    if bound, !rt.showingBound { healthBoard.boundAgain(rt.display.descriptor.key) }
     rt.showingBound = bound
     if !bound { rt.boundScreenName = nil }
     refresh()
@@ -288,49 +290,47 @@ final class AppModel: ObservableObject {
   // MARK: Health
 
   private func healthTick() {
+    let now = Date()
     for key in order {
       guard let rt = runtimes[key], let sink = rt.sink else { continue }
       let sample = sink.takeHealthSample()
       rt.fps = sample.fps
-      guard healthSupported, rt.showingBound, let server = rt.serverURL,
+      guard rt.showingBound, healthBoard.isDue(key, at: now), let server = rt.serverURL,
         let token = store.record(for: key)?.token,
         let request = HealthPost.request(
-          server: server, deviceId: deviceId(rt), token: token, body: HealthPost.body(sample, at: Date()))
+          server: server, deviceId: deviceId(rt), token: token, body: HealthPost.body(sample, at: now))
       else { continue }
       Task { @MainActor in
         let outcome = await HealthReporter.post(request)
-        self.healthResult(rt, outcome)
+        self.healthResult(key, rt, outcome)
       }
     }
     refresh()
   }
 
-  private func healthResult(_ rt: Runtime, _ outcome: HealthOutcome) {
+  private func healthResult(_ key: String, _ rt: Runtime, _ outcome: HealthOutcome) {
     let port = rt.display.descriptor.port
-    switch outcome {
-    case .accepted:
-      if rt.healthFailing { Log.notice(.health, "\(port): health posts are accepted again") }
-      rt.healthFailing = false
-      rt.healthMisses = 0
-    case .unsupported:
-      if healthSupported {
-        healthSupported = false
-        Log.notice(.health, "the server has no health route (404); health posts are off for this run")
-      }
-    case .rejected(let status):
-      if !rt.healthFailing { Log.error(.health, "\(port): the server refused a health post (HTTP \(status))") }
-      rt.healthFailing = true
-    case .unreachable(let error):
-      if !rt.healthFailing { Log.error(.health, "\(port): health post failed: \(error.localizedDescription)") }
-      rt.healthFailing = true
-      rt.healthMisses += 1
-      if LocalNetworkAccess.looksLikeDenial(error) { suspectLocalNetwork() }
+    switch healthBoard.record(outcome, for: key, at: Date()) {
+    case .none:
+      break
+    case .recovered:
+      Log.notice(.health, "\(port): health posts are accepted again")
+    case .paused(let pause, let retryIn):
+      let why =
+        pause == .unknownDevice
+        ? "the server has no screen set up for this output (HTTP 404), as after a release in Screens"
+        : "the server refused this output's token (HTTP 401)"
+      Log.notice(.health, "\(port): \(why); health posts for this output are paused, retried in \(Int(retryIn)) s or when it is set up again")
+    case .failing(let why):
+      Log.error(.health, "\(port): \(why)")
+    case .rediscover(let misses):
       // The server stopped answering: find it again, unless a file says where it is.
-      if rt.healthMisses == Backoff.rediscoverAfterFailures, identity.server == nil {
-        Log.notice(.discovery, "\(port): \(rt.healthMisses) health posts failed in a row; searching for the server again")
+      if identity.server == nil {
+        Log.notice(.discovery, "\(port): \(misses) health posts failed in a row; searching for the server again")
         rt.discovery?.restart()
       }
     }
+    refresh()
   }
 
   private func noteSaveFailure(_ error: Error) {
@@ -374,7 +374,7 @@ final class AppModel: ObservableObject {
         .init(
           enabled: record.enabled, isMain: d.isMain, serverKnown: rt.serverURL != nil,
           unreachable: rt.unreachable, boundScreenName: rt.boundScreenName, showingBound: rt.showingBound,
-          fps: rt.fps))
+          fps: rt.fps, healthPause: healthBoard.pause(for: key)))
       return OutputRow(id: key, title: d.isMain ? "\(d.name) (main)" : d.name, enabled: record.enabled, status: status)
     }
     let active = order.compactMap { runtimes[$0] }.filter { $0.sink != nil }

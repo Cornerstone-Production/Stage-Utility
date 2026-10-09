@@ -1,30 +1,16 @@
 import Foundation
 import StageUtilityOutputCore
 
-/// Posts one health sample. The decisions about what a result means are the
-/// caller's; this only says what happened.
-enum HealthOutcome {
-  case accepted
-  /// 404: the server has no health route. Stop posting for this run.
-  case unsupported
-  /// Any other HTTP status.
-  case rejected(Int)
-  /// The request never got an answer.
-  case unreachable(NSError)
-}
-
 enum HealthReporter {
+  /// Post one sample and say what came back. What an answer means is
+  /// `HealthOutcome.from(status:)`, decided in the core library.
   static func post(_ request: URLRequest) async -> HealthOutcome {
     do {
       let (_, response) = try await URLSession.shared.data(for: request)
       guard let http = response as? HTTPURLResponse else { return .rejected(0) }
-      switch http.statusCode {
-      case 200..<300: return .accepted
-      case 404: return .unsupported
-      default: return .rejected(http.statusCode)
-      }
+      return HealthOutcome.from(status: http.statusCode)
     } catch {
-      return .unreachable(error as NSError)
+      return .unreachable(error.localizedDescription)
     }
   }
 
