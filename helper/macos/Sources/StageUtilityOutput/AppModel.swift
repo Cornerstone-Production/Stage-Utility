@@ -272,7 +272,10 @@ final class AppModel: ObservableObject {
   }
 
   private func pageMoved(_ rt: Runtime, to url: URL?) {
-    let first = url?.path.split(separator: "/").first.map(String.init)
+    // A failed load clears the URL for a moment; that is not the screen being
+    // released, and the load failure has its own line.
+    guard let url else { return }
+    let first = url.path.split(separator: "/").first.map(String.init)
     let bound = first != nil && first != "enroll"
     if bound != rt.showingBound {
       Log.notice(.output, "\(rt.display.descriptor.port): \(bound ? "claimed, showing \(first!)" : "back on the holding screen")")
