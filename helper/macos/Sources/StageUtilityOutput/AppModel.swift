@@ -90,13 +90,13 @@ final class AppModel: ObservableObject {
     NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
     ) { [weak self] _ in
-      Task { @MainActor in
+      MainActor.assumeIsolated {
         Log.notice(.output, "the display arrangement changed")
         self?.reconcile()
       }
     }
     healthTimer = Timer.scheduledTimer(withTimeInterval: HealthPost.interval, repeats: true) { [weak self] _ in
-      Task { @MainActor in self?.healthTick() }
+      MainActor.assumeIsolated { self?.healthTick() }
     }
     if options.dumpFramesDir != nil { startDumping() }
   }
@@ -135,8 +135,7 @@ final class AppModel: ObservableObject {
       return try store.ensure(key: d.key, defaultEnabled: defaultEnabled(kind: d.kind, isMain: d.isMain))
     } catch {
       // The record exists in memory with its token; only the file is behind.
-      Log.error(.state, "could not save outputs.json: \(error.localizedDescription)")
-      setNote("state-save", "Output settings could not be saved: \(error.localizedDescription)")
+      noteSaveFailure(error)
       return store.record(for: d.key)!
     }
   }
@@ -146,8 +145,7 @@ final class AppModel: ObservableObject {
     do {
       try store.setEnabled(on, key: key)
     } catch {
-      Log.error(.state, "could not save outputs.json: \(error.localizedDescription)")
-      setNote("state-save", "Output settings could not be saved: \(error.localizedDescription)")
+      noteSaveFailure(error)
     }
     Log.notice(.output, "\(runtimes[key]!.display.descriptor.name): turned \(on ? "on" : "off") in the window")
     if on { activate(key) } else { deactivate(key) }
@@ -165,16 +163,13 @@ final class AppModel: ObservableObject {
       Log.error(.webkit, "\(d.port): WebKit switches missing or not taking, so this output may freeze when the screen locks or the display sleeps: \(list)")
       setNote("spi", "WebKit switches missing on this macOS: \(list). Outputs may freeze while the screen is locked or asleep.")
     }
-    sink.onLoadResult = { [weak self, weak rt] failures, _ in
+    sink.surface.onLoadResult = { [weak self, weak rt] failures in
       guard let self, let rt else { return }
-      Task { @MainActor in self.loadResult(key, rt, failures: failures) }
+      self.loadResult(key, rt, failures: failures)
     }
-    sink.onURLChange = { [weak self, weak rt] url in
+    sink.surface.onCommitted = { [weak self, weak rt] url in
       guard let self, let rt else { return }
-      Task { @MainActor in self.pageMoved(rt, to: url) }
-    }
-    sink.onLocalNetworkSuspected = { [weak self] in
-      Task { @MainActor in self?.suspectLocalNetwork() }
+      self.pageMoved(rt, to: url)
     }
 
     if let server = identity.server {
@@ -182,15 +177,13 @@ final class AppModel: ObservableObject {
       navigate(rt)
     } else {
       let discovery = OutputDiscovery(label: d.port, port: options.discoveryPort) { [weak self, weak rt] in
-        MainActor.assumeIsolated { self?.probe(for: rt) ?? Data() }
+        self?.probe(for: rt) ?? Data()
       }
       discovery.onReply = { [weak self, weak rt] reply in
         guard let self, let rt else { return }
         self.heard(key, rt, reply)
       }
-      discovery.onLocalNetworkSuspected = { [weak self] in
-        Task { @MainActor in self?.suspectLocalNetwork() }
-      }
+      discovery.onLocalNetworkSuspected = { [weak self] in self?.suspectLocalNetwork() }
       rt.discovery = discovery
       discovery.start()
     }
@@ -215,10 +208,8 @@ final class AppModel: ObservableObject {
   private func probe(for rt: Runtime?) -> Data {
     guard let rt else { return Data() }
     let d = rt.display.descriptor
-    let key = d.key
     return Probe(
-      id: DeviceIdentity.deviceId(mac: identity.deviceId, key: key), macs: macs, hostname: hostname,
-      boundTo: store.record(for: key)?.boundTo, descriptor: d
+      id: deviceId(rt), macs: macs, hostname: hostname, boundTo: store.record(for: d.key)?.boundTo, descriptor: d
     ).encoded()
   }
 
@@ -239,8 +230,7 @@ final class AppModel: ObservableObject {
     do {
       try store.setBoundTo(reply.serverId, key: key)
     } catch {
-      Log.error(.state, "could not save outputs.json: \(error.localizedDescription)")
-      setNote("state-save", "Output settings could not be saved: \(error.localizedDescription)")
+      noteSaveFailure(error)
     }
     refresh()
   }
@@ -343,6 +333,11 @@ final class AppModel: ObservableObject {
     }
   }
 
+  private func noteSaveFailure(_ error: Error) {
+    Log.error(.state, "could not save outputs.json: \(error.localizedDescription)")
+    setNote("state-save", "Output settings could not be saved: \(error.localizedDescription)")
+  }
+
   // MARK: Local Network
 
   private func suspectLocalNetwork() {
@@ -422,12 +417,11 @@ final class AppModel: ObservableObject {
       return
     }
     Log.notice(.app, "writing a frame of every output to \(dir.path) every \(Int(Options.dumpInterval)) s")
-    let first = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in
-      Task { @MainActor in self?.dumpFrames(to: dir) }
+    Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in
+      MainActor.assumeIsolated { self?.dumpFrames(to: dir) }
     }
-    _ = first
     dumpTimer = Timer.scheduledTimer(withTimeInterval: Options.dumpInterval, repeats: true) { [weak self] _ in
-      Task { @MainActor in self?.dumpFrames(to: dir) }
+      MainActor.assumeIsolated { self?.dumpFrames(to: dir) }
     }
   }
 

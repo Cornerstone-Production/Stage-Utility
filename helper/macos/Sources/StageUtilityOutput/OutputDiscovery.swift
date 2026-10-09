@@ -3,6 +3,7 @@ import StageUtilityOutputCore
 
 /// Finds the server for ONE output: probes until answered, then keeps probing slowly
 /// so the server goes on listing it.
+@MainActor
 final class OutputDiscovery {
   private let label: String
   private let port: UInt16

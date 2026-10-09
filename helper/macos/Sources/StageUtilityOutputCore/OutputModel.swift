@@ -1,7 +1,7 @@
 import Foundation
 
-/// What an output is. "decklink" is step 3; it is here so the wire format and the
-/// sink protocol do not change when it lands.
+/// What an output is. "decklink" is step 3; it is here so the wire format does not
+/// change when it lands.
 public enum OutputKind: String, Codable, Equatable {
   case display
   case decklink
@@ -67,20 +67,4 @@ public struct HealthSample: Equatable {
     self.repeated = repeated
     self.dropped = dropped
   }
-}
-
-/// Where an output's pictures go. A display is a full-screen window; step 3 adds a
-/// DeckLink port, which is a web view off every display whose frames are written
-/// to a card. Nothing above this protocol knows which it is talking to.
-public protocol OutputSink: AnyObject {
-  var descriptor: OutputDescriptor { get }
-  /// Load, or reload, the screen at this URL.
-  func show(url: URL)
-  /// Stop drawing and release whatever the output holds.
-  func stop()
-  /// Counters since the last call, as the health post reports them.
-  func takeHealthSample() -> HealthSample
-  /// Write what the output is showing to `file` as a PNG. `completion` gets nil on
-  /// success, else why not.
-  func writeSnapshot(to file: URL, completion: @escaping (String?) -> Void)
 }

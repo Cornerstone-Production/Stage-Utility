@@ -49,8 +49,8 @@ public struct MacIdentity: Equatable {
   /// From the `server` file. When present, discovery is skipped.
   public var server: String?
   /// The installer's Mac-level token. Read and kept; each output uses its own, so
-  /// nothing sends this one yet. A kiosk Mac moving to the helper (step 4) is what
-  /// will.
+  /// nothing sends this one yet. Step 4 uses it: a Mac already set up as a kiosk
+  /// keeps its identity, so its single display becomes an output with this binding.
   public var installerToken: String?
   /// Set when a generated id could not be saved: the id works for this run, and a
   /// restart would mint another and orphan every binding.

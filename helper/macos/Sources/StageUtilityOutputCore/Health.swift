@@ -21,12 +21,6 @@ public enum HealthPost {
     return try! encoder.encode(wire)
   }
 
-  /// How the per-output token travels. ONE line, because the server's health
-  /// route decides this and may settle on something else.
-  static func authenticate(_ request: inout URLRequest, token: String) {
-    request.setValue(token, forHTTPHeaderField: "x-device-token")
-  }
-
   public static func request(server: String, deviceId: String, token: String, body: Data) -> URLRequest? {
     guard let base = EnrollURL.normalise(server: server),
       let url = URL(string: "\(base)/api/devices/\(EnrollURL.encode(deviceId))/health")
@@ -34,7 +28,7 @@ public enum HealthPost {
     var request = URLRequest(url: url, timeoutInterval: 5)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "content-type")
-    authenticate(&request, token: token)
+    request.setValue(token, forHTTPHeaderField: "x-device-token")
     request.httpBody = body
     return request
   }
