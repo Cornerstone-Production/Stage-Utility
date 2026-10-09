@@ -499,8 +499,11 @@ jobs:
   # gets copied in. Five archives take about twenty seconds.
   artifacts:
     # `helper` is a need so its zips can go into the release in the one create
-    # call. It never blocks the release: the `always()` below runs this job
-    # whether the helper was skipped, failed or passed.
+    # call. It cannot stop the release, since the `always()` below runs this job
+    # whether the helper was skipped, failed, cancelled or passed, but it can
+    # delay it: the archives wait for the helper job to finish, up to its 60
+    # minute timeout plus any wait for a macOS runner. A failed or cancelled
+    # helper is announced by the error step below.
     needs: [release, helper]
     # `always()`, not the default success(): once the tag is pushed the
     # archives must follow whatever happens to the release job afterwards — a
@@ -548,11 +551,11 @@ jobs:
         # The tag is already pushed, so the release is still created, without the
         # helper. This only makes the gap visible in the run instead of leaving a
         # green job that shipped a release Macs cannot install the helper from.
-        if: ${{ needs.helper.result == 'failure' }}
+        if: ${{ needs.helper.result == 'failure' || needs.helper.result == 'cancelled' }}
         env:
           V: ${{ needs.release.outputs.version }}
         run: |
-          echo "::error title=Mac output helper::the helper build failed, so v$V is released without StageUtilityOutput-<arch>.zip. Macs whose server runs this version cannot install the helper until the server updates to a release that has it."
+          echo "::error title=Mac output helper::the helper build failed or was cancelled, so v$V is released without StageUtilityOutput-<arch>.zip. Macs whose server runs this version cannot install the helper until the server updates to a release that has it."
 
       - name: Smoke-test the Linux archive
         # An archive that unpacks is not the same as one that runs. This starts the

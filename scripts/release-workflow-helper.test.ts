@@ -47,11 +47,10 @@ type Ctx = { published: string; present: string; helperResult?: string };
 
 /** Evaluate the subset of the expression language these `if`s use: always(),
  *  needs.<job>.outputs.<name> == '<literal>', needs.helper.result == '<literal>',
- *  and &&. Anything else throws, so a new shape is noticed rather than read as true. */
+ *  &&, and ||. Anything else throws, so a new shape is noticed rather than read as true. */
 function evaluate(expr: string, ctx: Ctx): boolean {
   const body = expr.replace(/^\$\{\{\s*/, "").replace(/\s*\}\}$/, "");
-  return body.split("&&").every((raw) => {
-    const clause = raw.trim();
+  const clauseHolds = (clause: string): boolean => {
     if (clause === "always()") return true;
     const result = /^needs\.helper\.result == '([^']*)'$/.exec(clause);
     if (result) {
@@ -64,7 +63,9 @@ function evaluate(expr: string, ctx: Ctx): boolean {
     const value = job === "release" && name === "published" ? ctx.published : job === "helper-gate" && name === "present" ? ctx.present : undefined;
     if (value === undefined) throw new Error(`unknown output needs.${job}.outputs.${name}`);
     return value === literal;
-  });
+  };
+  // || binds looser than && in Actions' expression language too, so split on it first.
+  return body.split("||").some((alt) => alt.split("&&").every((raw) => clauseHolds(raw.trim())));
 }
 
 describe("the helper job is gated on the build script being in the tree", () => {
@@ -223,13 +224,13 @@ describe("the helper's download reaches the release", () => {
     assert.deepEqual(r.attached, TARBALLS);
   });
 
-  it("says so, with an error annotation, only when the helper build failed", () => {
+  it("says so, with an error annotation, only when the helper build failed or was cancelled", () => {
     const say = artifacts.steps?.find((st) => st.run?.includes("::error") && st.if?.includes("needs.helper.result"));
     assert.ok(say, "no step annotates a failed helper build");
-    for (const [result, want] of [["failure", true], ["success", false], ["skipped", false], ["cancelled", false]] as const) {
+    for (const [result, want] of [["failure", true], ["cancelled", true], ["success", false], ["skipped", false]] as const) {
       assert.equal(evaluate(say.if as string, { published: "true", present: "true", helperResult: result }), want, `helper ${result}`);
     }
-    assert.match(say.run as string, /::error title=Mac output helper::.*released without StageUtilityOutput/);
+    assert.match(say.run as string, /::error title=Mac output helper::.*failed or was cancelled.*released without StageUtilityOutput/);
     // The release is still created, and not behind that condition.
     assert.equal(create?.if, undefined, "the create step must not be conditional on the helper");
     assert.ok((artifacts.steps ?? []).indexOf(say) < (artifacts.steps ?? []).indexOf(create as Step), "the annotation comes before the release is created");

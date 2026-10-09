@@ -74,8 +74,9 @@ StageUtilityOutput-x86_64.zip    StageUtilityOutput-x86_64.zip.sha256
 Each zip holds `StageUtilityOutput.app` (about 145 MB zipped and 330 MB unpacked, nearly all of it Chromium) and
 each `.sha256` is one `shasum -a 256` line. They are for the Mac installer, which a
 server serves from its own cache; the updater never reads them. A tree without the
-build script skips the job and releases as before, and a macOS build that fails
-releases without the zips rather than holding the release; the run then carries an
+build script skips the job and releases as before, and a macOS build that fails or is
+cancelled releases without the zips rather than stopping the release (the archives do
+wait for that job, up to its 60-minute timeout); the run then carries an
 error annotation, and Macs whose server runs that version cannot install the helper
 until the server updates. The assets are made before
 the release is created, because a published release cannot be added to.
