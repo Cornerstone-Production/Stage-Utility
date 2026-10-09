@@ -38,7 +38,8 @@ displays are capped at three, and DeckLink ports are limited only by the cards.
 |---|---|---|
 | Output helper | A menu bar app. It finds the server, announces one device per output, and draws each output's screen | `helper/macos/`, Swift package |
 | Display output | A borderless full-screen window on one of the Mac's displays, holding a web view of the screen's URL | Helper |
-| DeckLink output | An off-screen web view whose frames are sent to one DeckLink port on the card's clock | Helper, plus a C++ shim over the vendored SDK headers |
+| DeckLink output | A web view on a canvas display (normally a dummy HDMI plug) whose frames are sent to one DeckLink port on the card's clock | Helper, plus a C++ shim over the vendored SDK headers |
+| Canvas display | A display the helper tiles DeckLink pages across, visible and uncovered, so WebKit paints them every refresh | Helper; chosen in its window |
 | Output devices on Screens | A Mac's outputs, grouped under the Mac in *Not set up yet*, each set up on its own | Screens page |
 | Device section | For a helper output: which port, the format, rotation, and health | Screen settings panel |
 
@@ -81,53 +82,69 @@ therefore works as it does in Safari, with no second renderer to keep in step.
   booth Mac keeps its desktop. A headless Mac can turn it on.
 
 **DeckLink outputs.**
-- The web view lives in a window placed off every display.
-- On each frame of the card's clock, the helper takes `WKWebView.takeSnapshot`
-  (`afterScreenUpdates = false`) and copies its pixels out.
-- Metal converts BGRA to 8-bit YUV 4:2:2 and applies rotation.
-- The frame is written into the DeckLink frame the card has just finished with.
+- Each DeckLink port's page is a visible, uncovered 1080p window on a canvas
+  display: a display nobody watches, normally a 4K dummy HDMI plug.
+  - One plug holds four outputs; two hold eight.
+  - Each plug uses one of the Mac's three display slots.
+  - The canvas runs at 59.94 Hz where the plug offers it.
+- On every refresh of the canvas (a `CADisplayLink` tick), the helper takes
+  `WKWebView.takeSnapshot` (`afterScreenUpdates = false`) of each page.
+  - It stamps the picture with that refresh's timestamp.
+  - It keeps the last few pictures.
+  - The pixel copy and the Metal conversion to 8-bit YUV 4:2:2 (with rotation)
+    run off the main thread.
+- The card asks for frame n of its schedule, due at stream time n × 1001/60000 s.
+  The helper fills it with the newest picture stamped at least one frame (about
+  17 ms) before that due time.
+  - The choice depends only on the schedule and the stamps, never on when a
+    callback happens to run, so it cannot flicker between two pictures.
+  - That costs one frame of delay.
 
-The capture choices come from measurement, not preference:
+Why a visible canvas and not off-screen windows, and what was measured, on an
+M4 Mac mini (16 GB), with the screen unlocked and no WebKit SPI:
 
 - **No ScreenCaptureKit.** It needs the Screen Recording permission, and since
   macOS Sequoia a monthly "Continue to allow" prompt. An unattended output box
   must not raise a dialog. `takeSnapshot` needs no permission.
-- **WebKit stops painting a window it considers hidden.** That means a locked
-  screen, an asleep display, or a window off every display, and a DeckLink web
-  view is always off every display. The helper turns that off through WebKit SPI:
+- **Capture keeps up.** A visible web view snapshotted on each refresh gave a
+  new picture every refresh: about 1230 in 20.5 s at 60 Hz, none missed, also
+  with four views at once. Snapshot plus copy takes 2–4 ms per 1080p frame.
+- **A covered or hidden page freezes.**
+  - WebKit stops painting a window it considers hidden: covered by another
+    window, on a locked screen, or off every display.
+  - A covered view gave 1 new picture in 1200. That is why the pages sit
+    visible on a canvas.
+- **Choosing frames by schedule works; choosing by "latest" does not.**
+  - **The result.** Picking against the ideal schedule, four 960×540 outputs
+    each gave 1200 new frames out of 1200 in every run. Each run had one skip,
+    because the test display runs at 60.00 Hz against the output's 59.94. A
+    full-size 1080p output gave 1196–1200, with the few repeats matching runs
+    where the test, copying pixels on its main thread, missed a capture.
+  - **What does not work.** Picking whatever arrived last, or picking against
+    the moment a timer happened to fire, flickered between two pictures for
+    seconds at a time. That cost 2–4% of frames whenever the two clocks drifted
+    into phase.
+  - **What stays.** On a 59.94 Hz canvas the steady skip disappears, leaving a
+    slip every few minutes as the plug's and card's crystals drift. Every
+    unsynchronised source feeding SDI has that.
+- **WebKit SPI as a safety net only.** Four WebKit switches keep a hidden page
+  painting:
   - `-[WKWebView _setWindowOcclusionDetectionEnabled:NO]`;
   - on `WKPreferences`: `_setHiddenPageDOMTimerThrottlingEnabled:NO`,
     `_setHiddenPageDOMTimerThrottlingAutoIncreases:NO` and
     `_setPageVisibilityBasedProcessSuppressionEnabled:NO`.
 
-  Each is checked with `respondsToSelector:` at launch. A missing one is logged
-  and shown in the helper, because it would freeze DeckLink outputs. SPI can
-  change in any macOS release, which is the main maintenance risk here.
-- **Measured on an M4 Mac mini (16 GB), 1080p, 59.94 Hz sampling:**
-  - Snapshot plus pixel copy takes 2–4 ms per frame.
-  - Four outputs at once cost about one CPU core and about 630 MB in total.
-  - With the display awake, 599 of 600 frames were new.
-  - With the screen locked and the display asleep, an off-screen web view
-    without the switches produced 1 new frame in 600. With them (each read back
-    as off) it produced 587 of 600, and an on-screen one 533: WebKit falls back
-    to a timer when no display is driving it.
-  - The switches take a real `BOOL`. `perform(_:with: false)` passes an object
-    pointer, which reads as YES, so the helper calls each setter's
-    implementation directly and reads the value back.
-  - A Mac with at least one awake display, a used built-in output or a dummy
-    HDMI plug, gets the clean cadence. The test page was simple, and real
-    displays will cost more.
-
-**Timing.** The card's clock drives output, not the renderer:
-- Scheduled playback. In `ScheduledFrameCompleted`, the latest finished
-  picture is copied into the frame just returned and scheduled two frames ahead.
-- A late page repeats the previous picture rather than letting the card run dry.
-- If the schedule falls behind the card's own stream time, it resyncs forward
-  instead of building delay.
-
-This is the approach MxU Slides takes. MxU's code is licensed PolyForm Shield,
-which is source-available, not open source, so this project takes the idea and
-none of the code.
+  With them, a page on a locked screen gave 587 new frames in 600 instead of
+  freezing. The helper sets them so a locked screen degrades rather than
+  freezes, but nothing depends on them.
+  - They take a real `BOOL`: `perform(_:with: false)` passes an object
+    pointer, which reads as YES.
+  - Each is checked with `respondsToSelector:` and read back. A missing one is
+    logged and shown.
+- **The output Mac must not lock.** The test Mac locked itself twice even with
+  its screen-lock setting off; a screen-sharing session ending is suspected.
+  The installer turns off every lock and display-sleep setting it can, and the
+  helper warns in its window and on the server when the session is locked.
 
 **Bandwidth.** Eight 1080p59.94 BGRA streams are about 4 GB/s, more than a
 Thunderbolt PCIe enclosure carries. 8-bit 4:2:2 halves that. Whether a DeckLink
