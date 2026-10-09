@@ -49,11 +49,15 @@ export function ScreensRoute() {
   const newTarget = (device: { id: string; hostname?: string; ip?: string } | null): PanelTarget => ({
     kind: "new",
     device,
-    // A device is named for itself, as it always was; a screen from the Add tile
-    // gets the next number.
-    defaultName: device ? device.hostname || "New screen" : `Display ${outputs.length + 1}`,
+    // A device is named for itself, as it always was. A screen from the Add tile
+    // is left unnamed, and the server names it "Display N" from the id it gets:
+    // a count of the screens here repeats a name once one has been removed, and
+    // an id is never reused.
+    defaultName: device ? device.hostname || "New screen" : "",
   });
-  // A screen removed while its panel was open leaves nothing to show.
+  // A screen removed while its panel was open leaves nothing to show, and the
+  // panel's column has to go with it: the panel draws nothing for a screen that
+  // is gone, but its host would still hold a 400 px strip beside the cards.
   const open = panel?.kind === "edit" && !outputs.some((o) => o.id === panel.outputId) ? null : panel;
 
   return (

@@ -10,7 +10,7 @@ import { useState } from "react";
 import { screensListViews } from "@main/services/home-view";
 import { errorMessage } from "@main/services/errors";
 
-import { ScreenSettingsPanel, type PanelDevice, type PanelTarget, type ScreenPanelActions } from "../../settings/sections/screen-settings-panel";
+import { SCREEN_PANEL_ID, ScreenSettingsPanel, type PanelDevice, type PanelTarget, type ScreenPanelActions } from "../../settings/sections/screen-settings-panel";
 import { NewViewDialog } from "../../settings/sections/new-view-dialog";
 import type { SectionHandlers } from "../../settings/types";
 import { toast } from "../../components/ui";
@@ -44,7 +44,7 @@ export function ScreenPanelHost({
   async function create(input: Parameters<ScreenPanelActions["onCreate"]>[0], device: PanelDevice | null): Promise<string | null> {
     if (!device) {
       const refused = await handlers.handleCreateScreen(input);
-      if (!refused) toast.success(`Created "${input.name || "the screen"}". Point a monitor at its address.`);
+      if (!refused) toast.success(`Created ${input.name ? `"${input.name}"` : "the screen"}. Point a monitor at its address.`);
       return refused;
     }
     // Created and claimed as one call: the server makes the screen, binds the
@@ -59,7 +59,7 @@ export function ScreenPanelHost({
     // list is stale.
     const failed = await refreshDevices();
     if (failed) toast.error(`Set up, but the list did not reload: ${failed.message}`);
-    else toast.success(`Set up "${input.name || "the screen"}". The device now shows it.`);
+    else toast.success(`Set up ${input.name ? `"${input.name}"` : "the screen"}. The device now shows it.`);
     return null;
   }
 
@@ -82,7 +82,7 @@ export function ScreenPanelHost({
   };
 
   return (
-    <div className="lg:sticky lg:top-3 lg:flex lg:max-h-[calc(100dvh-6.5rem)] lg:w-[400px] lg:shrink-0 lg:flex-col">
+    <div id={`${SCREEN_PANEL_ID}-host`} className="lg:sticky lg:top-3 lg:flex lg:max-h-[calc(100dvh-6.5rem)] lg:w-[400px] lg:shrink-0 lg:flex-col">
       <ScreenSettingsPanel
         target={target}
         outputs={outputs}

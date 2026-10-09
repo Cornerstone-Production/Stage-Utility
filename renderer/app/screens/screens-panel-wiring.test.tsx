@@ -73,6 +73,8 @@ let seenDevices: unknown[];
 /** Every write the page made, in order. */
 let writes: { method: string; url: string; body: unknown }[];
 let claimFails: string | null;
+/** The page's query client, so a test can land a stage-state broadcast. */
+let client: InstanceType<typeof QueryClient>;
 
 beforeEach(() => {
   outputs = [
@@ -121,7 +123,7 @@ async function mountScreens() {
     routeTree: root.addChildren([screens, messages]),
     history: createMemoryHistory({ initialEntries: ["/screens"] }),
   });
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   render(
     React.createElement(
       QueryClientProvider,
@@ -203,6 +205,18 @@ describe("opening the panel", () => {
     await act(async () => { await settle(); await settle(); });
     const aside = screen.getByRole("complementary", { name: "Screen settings" });
     assert.equal(aside.contains(document.activeElement), true, `focus is on ${document.activeElement?.tagName} "${document.activeElement?.getAttribute("aria-label")}"`);
+  });
+
+  test("a screen removed while its panel is open takes the panel's column with it", async () => {
+    // Removed here or from another browser: the broadcast state no longer has it.
+    // The panel draws nothing for a screen that is gone, so the column it sits
+    // in has to go too, or the page keeps an empty 400 px strip beside the cards.
+    await mountScreens();
+    await openSettings("Lobby TV");
+    assert.ok(document.getElementById("screen-settings-panel-host"), "the panel's column is not there to begin with");
+    outputs = outputs.filter((o) => o.id !== "display-3");
+    await act(async () => { client.setQueryData(["stage:getState"], state()); await settle(); await settle(); });
+    assert.equal(document.getElementById("screen-settings-panel-host") !== null, false, "an empty panel column was left on the page");
   });
 
   test("closing it leaves the page as it was and sends nothing", async () => {
@@ -387,11 +401,21 @@ describe("Add a screen", () => {
     assert.equal(screen.queryByRole("complementary", { name: "Screen settings" }) !== null, false, "the panel stayed open after the screen was made");
   });
 
-  test("Create screen on step 1 makes a numbered wall display with no view", async () => {
+  test("Create screen on step 1 makes a wall display with no view, named by the server", async () => {
+    // The name was "Display <count + 1>", which repeats a name once any screen
+    // has been removed: two screens, one deleted, and the next is a second
+    // "Display 2". Sent without a name, the server names it from its id, which
+    // is never reused.
+    outputs = [outputs[0], { id: "display-3", name: "Display 2", viewId: "wall-a" }];
     await mountScreens();
     await click(screen.getByRole("button", { name: /Add a screen/ }));
+    await click(panel().getByRole("button", { name: "Next" }));
+    await click(panel().getByRole("button", { name: "Next" }));
+    const name = panel().getByLabelText("Name") as HTMLInputElement;
+    assert.equal(name.value, "", "the name field holds a guess at the number");
+    assert.match(name.placeholder, /number/);
     await click(panel().getByRole("button", { name: "Create screen" }));
-    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { name: "Display 4", mode: "display" } }]);
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { mode: "display" } }]);
   });
 });
 

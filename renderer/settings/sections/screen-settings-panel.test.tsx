@@ -733,7 +733,8 @@ describe("a view that cannot be a control surface", () => {
 // ── Guided creation ──────────────────────────────────────────────────────
 
 describe("guided creation", () => {
-  const NEW_TARGET: PanelProps["target"] = { kind: "new", device: null, defaultName: "Display 4" };
+  // As the Add tile opens it: no name, so the server names the screen from its id.
+  const NEW_TARGET: PanelProps["target"] = { kind: "new", device: null, defaultName: "" };
   const create = () => screen.getByRole("button", { name: "Create screen" }) as HTMLButtonElement;
 
   test("opens on step 1 of 3 with the screen's own questions", () => {
@@ -764,10 +765,10 @@ describe("guided creation", () => {
     }
   });
 
-  test("creating on step 1 uses every default: a wall display, no view, a numbered name", async () => {
+  test("creating on step 1 uses every default: a wall display, no view, no name (the server numbers it)", async () => {
     const { calls } = mount({ target: NEW_TARGET, outputs: [MINE] });
     await click(create());
-    assert.deepEqual(calls, [["create", { name: "Display 4", mode: "display" }, null], ["close"]]);
+    assert.deepEqual(calls, [["create", { mode: "display" }, null], ["close"]]);
   });
 
   test("closing creates nothing", async () => {
@@ -797,7 +798,7 @@ describe("guided creation", () => {
     await click(screen.getByRole("button", { name: "Next" }));
     await choose(screen.getByLabelText("View"), "ctl-b");
     await click(create());
-    assert.deepEqual(calls[0], ["create", { name: "Display 4", mode: "panel", viewId: "ctl-b" }, null],
+    assert.deepEqual(calls[0], ["create", { mode: "panel", viewId: "ctl-b" }, null],
       "an existing console that is hidden must not be re-listed by a screen made for it");
   });
 
@@ -829,7 +830,7 @@ describe("guided creation", () => {
     await click(screen.getByRole("button", { name: "Back" }));
     await click(role("Wall display"));
     await click(create());
-    assert.deepEqual(calls[0], ["create", { name: "Display 4", mode: "display" }, null], "a console view was sent for a wall display");
+    assert.deepEqual(calls[0], ["create", { mode: "display" }, null], "a console view was sent for a wall display");
   });
 
   test("a refusal stays on screen with its reason, and creates nothing more", async () => {

@@ -47,7 +47,9 @@ const NEW_VIEW = "__new__";
 /** What the panel is open on. */
 export type PanelTarget =
   | { kind: "edit"; outputId: string }
-  /** A new screen. `device` is the unclaimed machine it is being set up for. */
+  /** A new screen. `device` is the unclaimed machine it is being set up for.
+   *  `defaultName` is what the name field starts with; empty sends no name, and
+   *  the server names the screen from its id. */
   | { kind: "new"; device: PanelDevice | null; defaultName: string };
 
 /** An unclaimed device, as the guided panel needs to name it. */
@@ -753,7 +755,8 @@ function GuidedBody({ target, outputs, views, baseUrl, step, setStep, actions, o
     setError(null);
     try {
       const input: CreateScreenInput = {
-        name: name.trim() || undefined,
+        // Omitted when empty, so the server names the screen from its id.
+        ...(name.trim() ? { name: name.trim() } : {}),
         mode: role,
         ...(effectiveChoice === NEW_VIEW ? { newView: true } : effectiveChoice !== NONE ? { viewId: effectiveChoice } : {}),
         ...(slug.trim() ? { slug: slug.trim() } : {}),
@@ -807,6 +810,8 @@ function GuidedBody({ target, outputs, views, baseUrl, step, setStep, actions, o
               id="new-screen-name"
               value={name}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+              // Left empty, the server names it from the id it is given.
+              placeholder="Left empty: Display and its number"
               className="h-8 w-full"
             />
             <FieldLabel htmlFor="new-screen-slug">Friendly link — optional</FieldLabel>
