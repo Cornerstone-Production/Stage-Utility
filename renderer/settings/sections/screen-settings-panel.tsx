@@ -442,14 +442,20 @@ function SharedViewPrompt({
           </SelectContent>
         </Select>
       )}
-      <div className="mt-2.5 flex justify-end gap-2">
-        <Button type="button" variant="transparent" size="small" onClick={onCancel} disabled={busy}>
-          Cancel
-        </Button>
-        <Button type="button" variant="accent" size="small" onClick={onApply} disabled={busy || (choice === "pick" && !picked)}>
-          Apply
-        </Button>
-      </div>
+      <PromptButtons busy={busy} disabled={choice === "pick" && !picked} onApply={onApply} onCancel={onCancel} />
+    </div>
+  );
+}
+
+function PromptButtons({ busy, disabled, onApply, onCancel }: { busy: boolean; disabled?: boolean; onApply: () => void; onCancel: () => void }) {
+  return (
+    <div className="mt-2.5 flex justify-end gap-2">
+      <Button type="button" variant="transparent" size="small" onClick={onCancel} disabled={busy}>
+        Cancel
+      </Button>
+      <Button type="button" variant="accent" size="small" onClick={onApply} disabled={busy || disabled}>
+        Apply
+      </Button>
     </div>
   );
 }
@@ -493,12 +499,18 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
   const [draftSize, setDraftSize] = useState<number | null>(null);
 
   // A role chosen that would change another screen, waiting for the operator to
-  // say how. `null` when nothing is waiting.
+  // say how. `null` when nothing is waiting. `waiting` is the same, unless the
+  // screen has meanwhile become that role (another browser made the change).
   const [pending, setPending] = useState<OutputMode | null>(null);
   const [choice, setChoice] = useState<"copy" | "pick">("copy");
   const [picked, setPicked] = useState("");
   const [busy, setBusy] = useState(false);
-  const conflict = pending ? roleChangeConflict(output, outputs, views, pending) : null;
+  const waiting = pending !== null && pending !== role ? pending : null;
+  // Recomputed from the props on every render, so it follows the other screens.
+  // It can go away while the operator is deciding (the screens sharing the view
+  // move off it); the choice they made still stands, and Apply then makes the
+  // plain change, which now changes nobody else.
+  const conflict = waiting ? roleChangeConflict(output, outputs, views, waiting) : null;
 
   async function chooseRole(next: OutputMode) {
     if (next === role && pending === null) return;
@@ -517,13 +529,13 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
     await actions.onSetRole(output.id, next, {});
   }
 
-  async function applyShared() {
-    if (!pending || !conflict) return;
-    if (!(await confirmRole(output.name, pending))) return;
+  async function applyPending() {
+    if (!waiting) return;
+    if (!(await confirmRole(output.name, waiting))) return;
     setBusy(true);
     try {
-      const ok = await actions.onSetRole(output.id, pending, choice === "copy" ? { copyView: true } : { viewId: picked });
-      if (ok) setPending(null);
+      const opts = !conflict ? {} : choice === "copy" ? { copyView: true } : { viewId: picked };
+      if (await actions.onSetRole(output.id, waiting, opts)) setPending(null);
     } finally {
       setBusy(false);
     }
@@ -536,32 +548,40 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
   }
 
   const permanent = `${baseUrl}/${encodeURIComponent(output.id)}`;
-  const shownRole = pending ?? role;
+  const shownRole = waiting ?? role;
 
   return (
     <>
       <Section title="What this screen is">
         <RoleCards role={shownRole} onChoose={(m) => void chooseRole(m)} />
-        {role === "panel" && pending === null && (
+        {role === "panel" && waiting === null && (
           <SidebarRow
             checked={shown ? viewShownInSidebar(shown) : true}
             disabled={!shown}
             onChange={(on) => shown && actions.onSetShowInSidebar(shown.id, on)}
           />
         )}
-        {conflict && pending && (
+        {waiting && conflict && (
           <SharedViewPrompt
             conflict={conflict}
-            mode={pending}
+            mode={waiting}
             views={views}
             choice={choice}
             picked={picked}
             busy={busy}
             onChoice={setChoice}
             onPick={setPicked}
-            onApply={() => void applyShared()}
+            onApply={() => void applyPending()}
             onCancel={() => setPending(null)}
           />
+        )}
+        {waiting && !conflict && (
+          <div role="group" aria-label="Change the role" className="mt-2.5 rounded-[9px] border border-line px-3 py-2.5 text-footnote text-fg-muted">
+            <p>
+              {shown ? `No other screen shows "${shown.name}" now, so it changes with this screen.` : "No other screen is affected now."}
+            </p>
+            <PromptButtons busy={busy} onApply={() => void applyPending()} onCancel={() => setPending(null)} />
+          </div>
         )}
       </Section>
 

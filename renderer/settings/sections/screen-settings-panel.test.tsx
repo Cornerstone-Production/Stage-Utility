@@ -124,15 +124,19 @@ function mount(over: Partial<PanelProps> & { actions?: Actions }) {
     onClose,
     ...over,
   };
-  render(
+  const tree = (p: PanelProps) =>
     React.createElement(
       TooltipProvider,
       null,
-      React.createElement(ScreenSettingsPanel, props),
+      React.createElement(ScreenSettingsPanel, p),
       React.createElement(ConfirmHost),
-    ),
-  );
-  return rec;
+    );
+  const r = render(tree(props));
+  /** Re-render with new props, as a stage-state broadcast does. */
+  const rerender = async (next: Partial<PanelProps>) => {
+    await act(async () => { r.rerender(tree({ ...props, ...next })); await settle(); });
+  };
+  return { ...rec, rerender };
 }
 
 /** Mount the panel on a screen routed to a view of this kind (null = unrouted). */
@@ -603,6 +607,22 @@ describe("changing the role of a view other screens also show", () => {
     await answerConfirm(null);
     assert.deepEqual(calls, []);
     assert.ok(prompt());
+  });
+
+  test("when the other screen stops sharing the view, the chosen role stays and Apply makes the plain change", async () => {
+    // The prompt is about other screens. If they move off the view while it is
+    // open, there is nothing left to ask, but the operator's choice still stands:
+    // it must not sit there shown as chosen with nothing written and no way on.
+    const { calls, rerender } = mount({ outputs: [PANEL_A, PANEL_B] });
+    await click(role("Wall display"));
+    assert.ok(prompt());
+    await rerender({ outputs: [PANEL_A, { ...PANEL_B, viewId: "ctl-b" }] });
+    assert.equal(screen.queryByRole("group", { name: "This view is shared" }) !== null, false, "the shared prompt outlived the sharing");
+    assert.equal(role("Wall display").getAttribute("aria-pressed"), "true", "the operator's choice was dropped");
+    assert.match(screen.getByRole("group", { name: "Change the role" }).textContent ?? "", /No other screen shows "Booth controls" now/);
+    await click(screen.getByRole("button", { name: "Apply" }));
+    await answerConfirm("Make it a display");
+    assert.deepEqual(calls, [["role", "display-3", "display", {}]]);
   });
 
   test("a refused change leaves the prompt open to try again", async () => {
