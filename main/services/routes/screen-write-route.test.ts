@@ -245,6 +245,31 @@ describe("POST /api/views/:id/surface", () => {
     assert.deepEqual(outputs().filter((o) => o.viewId === "wall-a").map((o) => o.mode ?? "display"), ["display", "display"]);
   });
 
+  it("answers 409 with the screens as they are now when the list the operator was shown is stale, and writes nothing", async () => {
+    const before = JSON.stringify({ views: views(), outputs: outputs() });
+    const r = await post("/api/views/wall-a/surface", { surface: "console", screens: ["display-1"] });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    const j = r.json as { error: string; code: string; screens: { id: string; name: string }[] };
+    assert.equal(j.code, "screens-changed");
+    assert.deepEqual(j.screens, [{ id: "display-1", name: "Lobby TV" }, { id: "display-2", name: "Hallway TV" }]);
+    assert.match(j.error, /"Lobby TV", "Hallway TV"/);
+    assert.equal(JSON.stringify({ views: views(), outputs: outputs() }), before);
+  });
+
+  it("goes ahead when the list matches", async () => {
+    const r = await post("/api/views/wall-a/surface", { surface: "console", screens: ["display-2", "display-1"] });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(outputs().filter((o) => o.viewId === "wall-a").map((o) => o.mode), ["panel", "panel"]);
+  });
+
+  it("refuses a screens field that is not a list of ids", async () => {
+    for (const screens of ["display-1", [1], null, { id: "display-1" }]) {
+      const r = await post("/api/views/wall-a/surface", { surface: "console", screens });
+      assert.equal(r.status, 400, JSON.stringify(screens));
+    }
+    assert.deepEqual(outputs().map((o) => o.mode ?? "display"), ["display", "display", "panel", "panel"]);
+  });
+
   it("leaves PATCH /api/views/:id { surface } as it was: it refuses a view that screens are showing", async () => {
     const r = await patch("/api/views/wall-a", { surface: "console" });
     assert.equal(r.status, 400);

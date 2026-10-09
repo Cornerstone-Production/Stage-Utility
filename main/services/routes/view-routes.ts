@@ -25,7 +25,7 @@ import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
-import { LayoutConflictError, SlotsNotFoundError, stageController } from "../stage-controller.js";
+import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
 import { datedExportFilename } from "../export-filename.js";
@@ -412,9 +412,12 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    // POST /api/views/:id/surface — { surface: "display" | "console" }. Change what
-    // a view is for AND every screen showing it, together, as one write that is
-    // undone if it fails part-way: see stageController.setViewRole. PATCH
+    // POST /api/views/:id/surface — { surface: "display" | "console", screens?:
+    // string[] }. Change what a view is for AND every screen showing it,
+    // together, as one call that is undone if it fails part-way: see
+    // stageController.setViewRole. `screens` is the screen ids the operator was
+    // shown; when they are no longer the screens it would change, a 409 carries
+    // the list as it is now, the way a stale layoutRev does. PATCH
     // /api/views/:id with { surface } is the other call and still REFUSES a view
     // that screens are showing, naming them. The checks here are the body's shape.
     const viewSurfaceMatch = pathname.match(/^\/api\/views\/([^/]+)\/surface$/);
@@ -424,9 +427,18 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, 'body.surface ("display"|"console") required');
         return;
       }
+      const { screens } = body;
+      if (screens !== undefined && !(Array.isArray(screens) && screens.every((s) => typeof s === "string"))) {
+        error(res, "body.screens must be an array of screen ids");
+        return;
+      }
       try {
-        json(res, await stageController.setViewRole(viewSurfaceMatch[1], body.surface));
+        json(res, await stageController.setViewRole(viewSurfaceMatch[1], body.surface, { screens: screens as string[] | undefined }));
       } catch (err) {
+        if (err instanceof ViewScreensChangedError) {
+          json(res, { error: err.message, code: err.code, screens: err.screens }, 409);
+          return;
+        }
         answerScreenWriteFailure(res, err);
       }
       return;

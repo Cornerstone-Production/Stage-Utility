@@ -280,6 +280,29 @@ export interface CreateScreenResult {
   createdViewId: string | null;
 }
 
+/**
+ * setViewRole was told which screens the operator was shown before they agreed,
+ * and they are not the screens it would change now: another operator or a
+ * Companion recall pointed a screen at the view, or away from it, while the
+ * question was open. Nothing is written. `screens` is the list as it is now, so
+ * the caller can ask again with it.
+ */
+export class ViewScreensChangedError extends Error {
+  readonly code = "screens-changed";
+  constructor(
+    readonly viewId: string,
+    readonly screens: { id: string; name: string }[],
+  ) {
+    super(
+      `The screens showing this view changed while you were deciding. ` +
+        (screens.length === 0
+          ? "No screen would change now."
+          : `It would now change ${screens.map((s) => `"${s.name}"`).join(", ")}.`),
+    );
+    this.name = "ViewScreensChangedError";
+  }
+}
+
 export class LayoutConflictError extends Error {
   readonly code = "layout-conflict";
   constructor(
@@ -4042,10 +4065,16 @@ export class StageController {
    *                  asked, so changing it here would change a screen they were
    *                  never shown. No sweep at the end, for that reason.
    *
+   * `screens` is the ids of the screens the operator was shown before agreeing
+   * (`[]` when they were asked nothing). When it is not, as a set, the screens
+   * this would change now, nothing is written and ViewScreensChangedError
+   * carries the list as it is. Absent, whatever screens show the view are
+   * changed: the call a script makes.
+   *
    * A view already as asked, with every screen already matching, is not an error
    * and writes nothing. Only a custom view may become a console.
    */
-  async setViewRole(id: string, surface: ViewSurface): Promise<StageState> {
+  async setViewRole(id: string, surface: ViewSurface, opts: { screens?: string[] } = {}): Promise<StageState> {
     if (surface !== "display" && surface !== "console") throw new Error('views:setRole — surface must be "display" or "console"');
     const mode: OutputMode = surface === "console" ? "panel" : "display";
     const view = this.requireViewCanTakeRole(id, mode);
@@ -4056,6 +4085,20 @@ export class StageController {
     const changing = this.state.outputs.filter((o) => o.viewId === id && outputMode(o) !== mode);
     const viewChanges = viewSurface(view) !== surface;
     if (!viewChanges && changing.length === 0) return this.state;
+
+    // The screens the operator agreed to, against the screens this would change.
+    // Any difference, either way, and they are asked again: a screen they were
+    // never shown is the one the question exists to protect.
+    if (opts.screens !== undefined) {
+      const shown = new Set(opts.screens);
+      if (shown.size !== changing.length || changing.some((o) => !shown.has(o.id))) {
+        console.log(
+          `[stage-controller] setViewRole view=${scrub(id)} → ${scrub(surface)} not made: the screens changed since the operator was asked ` +
+            `(asked about: ${scrub([...shown].join(", ") || "none")}; now: ${scrub(changing.map((o) => o.id).join(", ") || "none")})`,
+        );
+        throw new ViewScreensChangedError(id, changing.map((o) => ({ id: o.id, name: o.name || o.id })));
+      }
+    }
 
     const viewStep = this.viewSurfaceStep(`make the view a ${surface === "console" ? "control surface" : "wall-screen view"}`, view, surface);
     const screenSteps: ScreenStep[] = changing.map((o) => {

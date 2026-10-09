@@ -18,6 +18,9 @@
 //    view's guard refuses, and everything before it is undone.
 //  - A screen pointed AWAY from the view after the call started. Its own step
 //    refuses, rather than changing a screen that is no longer the view's.
+//  - The screens the operator was shown no longer being the screens it would
+//    change, because one was pointed at the view while the question was open.
+//    Refused, writing nothing, with the list as it is now.
 //  - Only a custom view being made a console.
 //
 // Every id and name is invented.
@@ -32,7 +35,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-view-role-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { stageController, ScreenWriteError } = await import("./stage-controller.js");
+const { stageController, ScreenWriteError, ViewScreensChangedError } = await import("./stage-controller.js");
 const { viewSurface, outputMode } = await import("../types/views.js");
 
 type Mutable = {
@@ -242,6 +245,14 @@ describe("setViewRole — what it logs", () => {
   it("says which view, which way and which screens, in one line", async () => {
     const lines = await logged(() => stageController.setViewRole("wall-a", "console"));
     assert.deepEqual(lines, ['[stage-controller] setViewRole view=wall-a → console, screens: "Lobby TV", "Hallway TV"']);
+  });
+
+  it("says so when the screens the operator was shown are stale, and which", async () => {
+    const lines = await logged(() => stageController.setViewRole("wall-a", "console", { screens: ["display-1"] }).then(() => assert.fail("expected a refusal"), () => undefined));
+    assert.deepEqual(lines, [
+      "[stage-controller] setViewRole view=wall-a → console not made: the screens changed since the operator was asked " +
+        "(asked about: display-1; now: display-1, display-2)",
+    ]);
   });
 
   it("says nothing when there was nothing to decide", async () => {
@@ -475,5 +486,62 @@ describe("setViewRole — a screen pointed AWAY from the view after it started",
     assert.deepEqual(modes("display-3"), ["panel"]);
     assert.equal(viewSurface(view("ctl-a")), "console");
     assert.deepEqual(forbiddenPairings(), []);
+  });
+});
+
+/** The ids of the screens setViewRole would change, as a client computes them
+ *  for the question it asks. */
+const askedAbout = (viewId: string, mode: "panel" | "display") =>
+  outputs().filter((o) => o.viewId === viewId && outputMode(o) !== mode).map((o) => o.id);
+
+describe("setViewRole — the screens the operator was shown", () => {
+  it("THE RACE: a screen pointed at the view while the question was open is refused, naming the screens now, and nothing is written", async () => {
+    const shown = askedAbout("wall-a", "panel");
+    assert.deepEqual(shown, ["display-1", "display-2"]);
+    // Somebody else points Spare at the view while the dialog is open.
+    await stageController.setOutputView("display-5", "wall-a");
+    const before = everything();
+    await assert.rejects(
+      () => stageController.setViewRole("wall-a", "console", { screens: shown }),
+      (err: unknown) => {
+        assert.ok(err instanceof ViewScreensChangedError, String(err));
+        assert.equal(err.code, "screens-changed");
+        assert.deepEqual(err.screens, [
+          { id: "display-1", name: "Lobby TV" },
+          { id: "display-2", name: "Hallway TV" },
+          { id: "display-5", name: "Spare" },
+        ]);
+        return true;
+      },
+    );
+    assert.equal(everything(), before, "a screen the operator was never shown was changed");
+  });
+
+  it("refuses a call that asked about no screens when there is one now", async () => {
+    const before = everything();
+    await assert.rejects(
+      () => stageController.setViewRole("wall-a", "console", { screens: [] }),
+      (err: unknown) => err instanceof ViewScreensChangedError && err.screens.length === 2,
+    );
+    assert.equal(everything(), before);
+  });
+
+  it("refuses a list naming a screen that has left the view", async () => {
+    await assert.rejects(
+      () => stageController.setViewRole("wall-a", "console", { screens: ["display-1", "display-2", "display-5"] }),
+      ViewScreensChangedError,
+    );
+  });
+
+  it("goes ahead when the list matches, in any order", async () => {
+    await stageController.setViewRole("wall-a", "console", { screens: ["display-2", "display-1"] });
+    assert.deepEqual(modes("display-1", "display-2"), ["panel", "panel"]);
+    assert.equal(viewSurface(view("wall-a")), "console");
+  });
+
+  it("with no list at all, changes whatever screens show the view: the call a script makes", async () => {
+    await stageController.setOutputView("display-5", "wall-a");
+    await stageController.setViewRole("wall-a", "console");
+    assert.deepEqual(modes("display-1", "display-2", "display-5"), ["panel", "panel", "panel"]);
   });
 });
