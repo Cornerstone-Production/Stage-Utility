@@ -14,8 +14,10 @@
 //    views.json goes, for the one call), and the files are read back off DISK:
 //    the in-memory state is what the rollback fixes first and the file is what a
 //    restart reads.
-//  - A screen pointed at the view after the call started. The guard inside the
-//    write that would strand it refuses, and everything before it is undone.
+//  - A screen pointed at the view after the call started. Toward a console the
+//    view's guard refuses, and everything before it is undone.
+//  - A screen pointed AWAY from the view after the call started. Its own step
+//    refuses, rather than changing a screen that is no longer the view's.
 //  - Only a custom view being made a console.
 //
 // Every id and name is invented.
@@ -420,6 +422,58 @@ describe("setViewRole — a screen pointed at the view after it started", () => 
     }
     assert.equal(viewSurface(view("ctl-a")), "console");
     assert.deepEqual(modes("display-3", "display-4"), ["panel", "panel"]);
+    assert.deepEqual(forbiddenPairings(), []);
+  });
+});
+
+describe("setViewRole — a screen pointed AWAY from the view after it started", () => {
+  it("to a control surface: the screen that left is not changed, and the rest is undone", async () => {
+    // Hallway TV is recalled to another view once Lobby TV has been changed.
+    // Changing it anyway would make a control surface out of a screen that no
+    // longer shows the view.
+    const restore = afterCall("setOutputMode", 1, async () => {
+      await stageController.setOutputView("display-2", "wall-b");
+    });
+    try {
+      await assert.rejects(
+        () => stageController.setViewRole("wall-a", "console"),
+        (err: unknown) => {
+          assert.ok(err instanceof ScreenWriteError, String(err));
+          assert.match(err.failed, /"Hallway TV"/);
+          assert.match(err.reason, /another view meanwhile/);
+          assert.deepEqual(err.notRolledBack, []);
+          return true;
+        },
+      );
+    } finally {
+      restore();
+    }
+    assert.deepEqual({ viewId: out("display-2").viewId, mode: outputMode(out("display-2")) }, { viewId: "wall-b", mode: "display" });
+    assert.deepEqual(modes("display-1"), ["display"]);
+    assert.equal(viewSurface(view("wall-a")), "display");
+    assert.deepEqual(forbiddenPairings(), []);
+  });
+
+  it("to a wall display: the same, after the view has already changed", async () => {
+    const restore = afterCall("setOutputMode", 1, async () => {
+      await stageController.setOutputView("display-4", "wall-b");
+    });
+    try {
+      await assert.rejects(
+        () => stageController.setViewRole("ctl-a", "display"),
+        (err: unknown) => {
+          assert.ok(err instanceof ScreenWriteError, String(err));
+          assert.match(err.failed, /"Stage panel"/);
+          assert.deepEqual(err.notRolledBack, []);
+          return true;
+        },
+      );
+    } finally {
+      restore();
+    }
+    assert.deepEqual({ viewId: out("display-4").viewId, mode: outputMode(out("display-4")) }, { viewId: "wall-b", mode: "panel" });
+    assert.deepEqual(modes("display-3"), ["panel"]);
+    assert.equal(viewSurface(view("ctl-a")), "console");
     assert.deepEqual(forbiddenPairings(), []);
   });
 });

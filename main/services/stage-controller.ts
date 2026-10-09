@@ -3675,7 +3675,15 @@ export class StageController {
    * silently unbinding it: the operator would be left with a screen showing
    * nothing and no indication why.
    */
-  async setOutputMode(id: string, mode: OutputMode): Promise<StageState> {
+  async setOutputMode(
+    id: string,
+    mode: OutputMode,
+    /** Refuse unless the screen still shows this view. For a change made to every
+     *  screen showing a view: the list is decided before the first write, and
+     *  checked again here, in the same turn as the assignment, because the screen
+     *  may have been pointed somewhere else since. */
+    opts: { whileShowing?: string } = {},
+  ): Promise<StageState> {
     if (!this.state.outputs.find((o) => o.id === id)) throw new Error(`outputs:setMode — output ${id} not found`);
     // Inside the write, against the view the screen shows then: see setOutputView.
     return this.commitOutputPatch(
@@ -3683,6 +3691,11 @@ export class StageController {
       { mode },
       `[stage-controller] setOutputMode output=${scrub(id)} → ${scrub(mode)}`,
       (output) => {
+        if (opts.whileShowing !== undefined && output.viewId !== opts.whileShowing) {
+          throw new Error(
+            `"${output.name || output.id}" was pointed at another view meanwhile, so it is no longer one of this view's screens.`,
+          );
+        }
         const view = mode === "display" && output.viewId ? this.state.views.find((v) => v.id === output.viewId) : undefined;
         if (view && viewSurface(view) === "console") {
           throw new Error(
@@ -4014,9 +4027,20 @@ export class StageController {
    *
    * Every screen is a step with its own undo, so one that fails part-way puts
    * back the ones that landed, newest first, and the failure says what was and
-   * was not put back. A screen pointed at the view after this started is caught
-   * by the guard inside the write that would strand it, not by a check made here
-   * and gone stale: the write is refused and everything before it is undone.
+   * was not put back.
+   *
+   * A screen that changes view while this runs is checked inside the writes, not
+   * here, where the check would be stale by the first await:
+   *
+   *   pointed AWAY   its own step refuses (setOutputMode's whileShowing), and
+   *                  everything before it is undone, in either direction
+   *   pointed AT     toward a console, the view's own guard refuses to leave it a
+   *                  wall display under a console, and everything is undone.
+   *                  Toward a wall display it is left as it is: a control surface
+   *                  showing a wall-screen view is a pairing the server allows,
+   *                  and somebody else pointed it there after the operator was
+   *                  asked, so changing it here would change a screen they were
+   *                  never shown. No sweep at the end, for that reason.
    *
    * A view already as asked, with every screen already matching, is not an error
    * and writes nothing. Only a custom view may become a console.
@@ -4027,7 +4051,8 @@ export class StageController {
     const view = this.requireViewCanTakeRole(id, mode);
 
     // The screens that will change. Decided here, before the first write; the
-    // guards inside each write are what hold if this turns out to be stale.
+    // checks inside each write are what hold if this turns out to be stale (see
+    // above for which way each one covers).
     const changing = this.state.outputs.filter((o) => o.viewId === id && outputMode(o) !== mode);
     const viewChanges = viewSurface(view) !== surface;
     if (!viewChanges && changing.length === 0) return this.state;
@@ -4037,7 +4062,7 @@ export class StageController {
       const was = o.mode;
       return {
         label: `make "${o.name || o.id}" ${mode === "panel" ? "a control surface" : "a wall display"}`,
-        run: () => this.setOutputMode(o.id, mode),
+        run: () => this.setOutputMode(o.id, mode, { whileShowing: id }),
         // Puts the exact value back, so not setOutputMode (an absent mode stays
         // absent).
         undo: async () => {
