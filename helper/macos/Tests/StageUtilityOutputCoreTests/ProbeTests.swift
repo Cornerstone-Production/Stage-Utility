@@ -86,6 +86,12 @@ import Testing
     }
   }
 
+  /// The helper refuses a prefixed server, so a reply naming one is not used.
+  @Test func refusesAUrlWithAPath() {
+    #expect(DiscoveryReply.parse(data(#"{"stageUtility":"server","v":1,"serverId":"s","url":"http://h:1/su"}"#)) == nil)
+    #expect(DiscoveryReply.parse(data(#"{"stageUtility":"server","v":1,"serverId":"s","url":"http://h:1/"}"#)) != nil)
+  }
+
   @Test func refusesAnOversizedDatagramOrUrl() {
     let long = "http://h/" + String(repeating: "a", count: 600)
     #expect(DiscoveryReply.parse(data(#"{"stageUtility":"server","v":1,"serverId":"s","url":"\#(long)"}"#)) == nil)

@@ -45,6 +45,19 @@ func withTempDir<T>(_ body: (URL) throws -> T) rethrows -> T {
     }
   }
 
+  /// A prefixed server file would load a page that half works. It is ignored, so
+  /// discovery runs, and the reason is kept for the window.
+  @Test func aServerFileWithAPathIsIgnoredAndSaysWhy() {
+    withTempDir { dir in
+      try! "mac-id-1".write(to: dir.appendingPathComponent("device-id"), atomically: true, encoding: .utf8)
+      try! "192.0.2.10:8788/su".write(to: dir.appendingPathComponent("server"), atomically: true, encoding: .utf8)
+      let id = MacIdentity.load(paths: HelperPaths(systemDir: dir, userDir: dir))
+      #expect(id.server == nil)
+      #expect(id.serverProblem?.contains("has a path") == true)
+      #expect(id.serverProblem?.contains(#"use "http://192.0.2.10:8788""#) == true)
+    }
+  }
+
   @Test func generatesAndKeepsAnIdWhenTheInstallerNeverRan() {
     withTempDir { dir in
       let system = dir.appendingPathComponent("system")

@@ -35,4 +35,27 @@ import Testing
     #expect(EnrollURL.displayAddress("http://192.0.2.10:8788/") == "192.0.2.10:8788")
     #expect(EnrollURL.displayAddress("https://su.example") == "su.example")
   }
+
+  /// The server redirects /enroll to "/<screen>" and its pages load "/assets/...":
+  /// all root-relative, so under a prefix they leave it. Refused, with what to use.
+  @Test func refusesAServerAddressWithAPath() {
+    #expect(EnrollURL.normalise(server: "http://192.0.2.10:8788/su") == nil)
+    #expect(EnrollURL.make(server: "192.0.2.10:8788/su/", deviceId: "d", token: "t") == nil)
+    #expect(EnrollURL.normalise(server: "http://192.0.2.10:8788/?x=1") == nil)
+    guard case .failure(let refusal) = EnrollURL.check(server: "http://192.0.2.10:8788/su") else {
+      Issue.record("accepted a prefixed address")
+      return
+    }
+    #expect(refusal == .notAtTheRoot(given: "http://192.0.2.10:8788/su", use: "http://192.0.2.10:8788"))
+    #expect(refusal.description.contains(#"use "http://192.0.2.10:8788""#))
+  }
+
+  @Test func aBareSlashIsNotAPath() {
+    #expect(EnrollURL.normalise(server: "http://192.0.2.10:8788/") == "http://192.0.2.10:8788")
+  }
+
+  @Test func saysWhyAnAddressIsRefused() {
+    #expect(EnrollURL.check(server: "  ") == .failure(.empty))
+    #expect(EnrollURL.check(server: "http://") == .failure(.noHost("http://")))
+  }
 }

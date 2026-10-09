@@ -38,7 +38,9 @@ final class AppModel: ObservableObject {
     var serverName: String?
     var loaded = false
     var unreachable = false
-    var showingBound = false
+    /// What the committed page is. Not what is being loaded: see `ScreenPage`.
+    var page: ScreenPage = .other
+    var showingBound: Bool { page.isBound }
     var boundScreenName: String?
     var fps: Double?
     var spiProblems: [String] = []
@@ -73,6 +75,10 @@ final class AppModel: ObservableObject {
     if let e = identity.saveError {
       Log.error(.state, e)
       setNote("identity-save", "A new device id could not be saved, so a restart would orphan every setup. \(e)")
+    }
+    if let problem = identity.serverProblem {
+      Log.error(.discovery, "\(problem); it is ignored and the server is looked for on the network")
+      setNote("server-file", "Ignoring \(problem).")
     }
     if let server = identity.server { Log.notice(.discovery, "server file names \(server); discovery is skipped") }
     if let aside = store.recoveredFrom {
@@ -196,7 +202,7 @@ final class AppModel: ObservableObject {
     rt.sink = nil
     rt.loaded = false
     rt.unreachable = false
-    rt.showingBound = false
+    rt.page = .other
     rt.boundScreenName = nil
     rt.fps = nil
     healthBoard.forget(key)
@@ -261,27 +267,32 @@ final class AppModel: ObservableObject {
     refresh()
   }
 
-  private func pageMoved(_ rt: Runtime, to url: URL?) {
-    // A failed load clears the URL for a moment; that is not the screen being
-    // released, and the load failure has its own line.
-    guard let url else { return }
-    let first = url.path.split(separator: "/").first.map(String.init)
-    let bound = first != nil && first != "enroll"
-    if bound != rt.showingBound {
-      Log.notice(.output, "\(rt.display.descriptor.port): \(bound ? "claimed, showing \(first!)" : "back on the holding screen")")
+  /// A page committed in this output's web view.
+  private func pageMoved(_ rt: Runtime, to url: URL) {
+    guard let server = rt.serverURL else { return }
+    let port = rt.display.descriptor.port
+    let page = ScreenPage.classify(committed: url, server: server)
+    guard page != rt.page else { return }
+    switch page {
+    case .bound(let ref):
+      Log.notice(.output, "\(port): claimed, showing \(ref)")
+      // Set up (again): the server may know this output now, so health posts resume.
+      healthBoard.boundAgain(rt.display.descriptor.key)
+    case .holding:
+      Log.notice(.output, "\(port): back on the holding screen")
+    case .other:
+      Log.notice(.output, "\(port): showing a page that is neither the holding screen nor a screen")
     }
-    // Set up (again): the server may know this output now, so health posts resume.
-    if bound, !rt.showingBound { healthBoard.boundAgain(rt.display.descriptor.key) }
-    rt.showingBound = bound
-    if !bound { rt.boundScreenName = nil }
+    rt.page = page
+    if !page.isBound { rt.boundScreenName = nil }
     refresh()
-    guard bound, let first, let server = rt.serverURL else { return }
+    guard case .bound(let ref) = page else { return }
     Task { @MainActor in
       do {
-        let name = try await HealthReporter.screenName(server: server, outputRef: first)
-        if rt.showingBound { rt.boundScreenName = name }
+        let name = try await HealthReporter.screenName(server: server, outputRef: ref)
+        if rt.page == page { rt.boundScreenName = name }
       } catch {
-        Log.error(.output, "\(rt.display.descriptor.port): could not read the screen's name: \(error.localizedDescription)")
+        Log.error(.output, "\(port): could not read the screen's name: \(error.localizedDescription)")
       }
       self.refresh()
     }

@@ -4,16 +4,49 @@ import Foundation
 /// The server redirects it to the screen's display once claimed and shows the
 /// holding screen until then.
 public enum EnrollURL {
+  /// Why an address cannot be used.
+  public enum Refusal: Error, Equatable, CustomStringConvertible {
+    case empty
+    case noHost(String)
+    /// The address has a path, a query or a fragment. Stage Utility is served from
+    /// the root of its address: the redirect from /enroll to a screen, and every
+    /// asset a screen loads, start with "/", so under a prefix they leave it. The
+    /// helper therefore refuses a prefix rather than load a page that half works.
+    case notAtTheRoot(given: String, use: String)
+
+    public var description: String {
+      switch self {
+      case .empty: return "the server address is empty"
+      case .noHost(let given): return "\"\(given)\" has no host"
+      case .notAtTheRoot(let given, let use):
+        return "\"\(given)\" has a path. Stage Utility has to be served from the root of its address, because its "
+          + "redirects and assets start at \"/\"; use \"\(use)\""
+      }
+    }
+  }
+
   /// A server address as typed into the `server` file or heard in a reply:
   /// surrounding whitespace dropped, "http://" assumed when there is no scheme,
-  /// trailing slashes removed. Nil when nothing usable is left.
-  public static func normalise(server: String) -> String? {
-    var s = server.trimmingCharacters(in: .whitespacesAndNewlines)
-    if s.isEmpty { return nil }
+  /// trailing slashes removed. Refused, with the reason, when nothing usable is
+  /// left or it carries a path.
+  public static func check(server: String) -> Result<String, Refusal> {
+    let given = server.trimmingCharacters(in: .whitespacesAndNewlines)
+    if given.isEmpty { return .failure(.empty) }
+    var s = given
     if !s.contains("://") { s = "http://" + s }
     while s.hasSuffix("/") { s.removeLast() }
-    guard let url = URL(string: s), let host = url.host, !host.isEmpty else { return nil }
-    return s
+    guard let url = URL(string: s), let host = url.host, !host.isEmpty else { return .failure(.noHost(given)) }
+    if !url.path.isEmpty || url.query != nil || url.fragment != nil {
+      let port = url.port.map { ":\($0)" } ?? ""
+      return .failure(.notAtTheRoot(given: given, use: "\(url.scheme ?? "http")://\(host)\(port)"))
+    }
+    return .success(s)
+  }
+
+  /// `check`, without the reason: nil when the address cannot be used.
+  public static func normalise(server: String) -> String? {
+    if case .success(let s) = check(server: server) { return s }
+    return nil
   }
 
   public static func make(server: String, deviceId: String, token: String) -> URL? {

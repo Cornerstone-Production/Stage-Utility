@@ -48,6 +48,9 @@ public struct MacIdentity: Equatable {
   public var source: Source
   /// From the `server` file. When present, discovery is skipped.
   public var server: String?
+  /// Set when the `server` file named an address that cannot be used (it has a
+  /// path): discovery then runs as if there were no file.
+  public var serverProblem: String?
   /// The installer's Mac-level token. Read and kept; each output uses its own, so
   /// nothing sends this one yet. Step 4 uses it: a Mac already set up as a kiosk
   /// keeps its identity, so its single display becomes an output with this binding.
@@ -64,14 +67,21 @@ public struct MacIdentity: Equatable {
       else { return nil }
       return s
     }
-    let server = read(paths.systemDir, "server").flatMap { EnrollURL.normalise(server: $0) }
+    var server: String?
+    var serverProblem: String?
+    if let text = read(paths.systemDir, "server") {
+      switch EnrollURL.check(server: text) {
+      case .success(let address): server = address
+      case .failure(let refusal): serverProblem = "the server file: \(refusal)"
+      }
+    }
     let token = read(paths.systemDir, "token")
     if let id = read(paths.systemDir, "device-id") {
-      return MacIdentity(deviceId: id, source: .installer, server: server, installerToken: token, saveError: nil)
+      return MacIdentity(deviceId: id, source: .installer, server: server, serverProblem: serverProblem, installerToken: token, saveError: nil)
     }
     // Not from the installer. A previous run may already have made one.
     if let id = read(paths.userDir, MacIdentity.generatedFileName) {
-      return MacIdentity(deviceId: id, source: .generated, server: server, installerToken: token, saveError: nil)
+      return MacIdentity(deviceId: id, source: .generated, server: server, serverProblem: serverProblem, installerToken: token, saveError: nil)
     }
     let id = makeId()
     var failure: String?
@@ -81,6 +91,6 @@ public struct MacIdentity: Equatable {
     } catch {
       failure = "could not save a new device id to \(paths.userDir.path): \(error.localizedDescription)"
     }
-    return MacIdentity(deviceId: id, source: .generated, server: server, installerToken: token, saveError: failure)
+    return MacIdentity(deviceId: id, source: .generated, server: server, serverProblem: serverProblem, installerToken: token, saveError: failure)
   }
 }

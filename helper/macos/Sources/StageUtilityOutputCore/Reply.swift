@@ -16,8 +16,8 @@ public struct DiscoveryReply: Equatable {
   /// Parse a datagram, or nil when it is not a reply we can use. Never throws:
   /// anything on the LAN can send to the port a probe came from.
   ///
-  /// The url must be http or https with a host, because it is loaded in a web
-  /// view. One longer than the server's 512 is refused rather than cut, since a
+  /// The url must be http or https with a host and no path, because it is loaded in
+  /// a web view (see `EnrollURL.Refusal.notAtTheRoot`). One longer than the server's 512 is refused rather than cut, since a
   /// cut address is a different address.
   public static func parse(_ data: Data) -> DiscoveryReply? {
     if data.count > Probe.maxDatagram { return nil }
@@ -28,7 +28,8 @@ public struct DiscoveryReply: Equatable {
       let serverId = nonEmpty(obj["serverId"], max: Probe.maxString),
       let url = nonEmpty(obj["url"], max: 512, truncate: false),
       let parsed = URL(string: url), let scheme = parsed.scheme?.lowercased(),
-      scheme == "http" || scheme == "https", let host = parsed.host, !host.isEmpty
+      scheme == "http" || scheme == "https", let host = parsed.host, !host.isEmpty,
+      EnrollURL.normalise(server: url) != nil
     else { return nil }
     return DiscoveryReply(serverId: serverId, name: nonEmpty(obj["name"], max: Probe.maxString) ?? serverId, url: url)
   }
