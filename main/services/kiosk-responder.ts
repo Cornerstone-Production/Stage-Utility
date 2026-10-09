@@ -10,7 +10,7 @@
 import * as dgram from "node:dgram";
 import { networkInterfaces } from "node:os";
 
-import { decodeProbe, encodeReply, decideProbe, isFromThisMachine } from "./kiosk-discovery.js";
+import { decodeProbe, encodeReply, decideProbe, listedBoundTo, isFromThisMachine } from "./kiosk-discovery.js";
 import { recordSeen, scanning, forgetSeen } from "./kiosk-presence.js";
 import { kioskDevicesStore, findById, touch, updateDevices } from "./kiosk-devices-store.js";
 import { DEFAULT_DISCOVERY_PORT } from "../types/kiosk.js";
@@ -65,24 +65,16 @@ export function startKioskResponder(opts: ResponderOptions): void {
     const bound = !!findById(devices, probe.id);
     const decision = decideProbe(probe, opts.serverId, { scanning: scanning(), bound });
 
-    // A device bound HERE is not a candidate, whatever its probe says: recording it
-    // would list it, announce it and log "output seen" for an output that has a
-    // screen. That includes the probe that was already on the wire when it was
-    // claimed, which does not carry its binding yet and is still answered below so
-    // it learns it. Only a device somebody could claim, or one that cannot reach
-    // its server, is shown.
-    if (decision.list === "elsewhere" || (decision.list === "unclaimed" && !bound)) {
+    // Listed means somebody could set it up, or it cannot reach its own server.
+    // Which is which is decideProbe's call; this only records it.
+    if (decision.list === "unclaimed" || decision.list === "elsewhere") {
       recordSeen({
         id: probe.id,
         macs: probe.macs,
         hostname: probe.hostname,
         os: probe.os,
         ip: rinfo.address,
-        // Only a binding to ANOTHER server is worth showing. A device that names this
-        // server but is not bound here (released, or claimed on a previous install)
-        // is simply unclaimed; keeping its boundTo drew "Set up on another server,
-        // which it cannot reach" under a device that can reach this one fine.
-        boundTo: probe.boundTo === opts.serverId ? undefined : probe.boundTo,
+        boundTo: listedBoundTo(probe, opts.serverId),
         unreachable: probe.unreachable,
         screen: probe.mode ? { w: 0, h: 0, mode: probe.mode } : undefined,
         output: probe.output,

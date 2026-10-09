@@ -151,36 +151,47 @@ export interface ProbeDecision {
 /**
  * The whole policy, in one place.
  *
- * Three rules, and the first one is the one that is easy to get wrong:
+ * Four rules, and the first two are the ones that are easy to get wrong:
  *
- *  1. **A device bound to US is always answered**, scanning or not. That is how a
- *     display re-finds its server after an IP change with nobody present.
- *     Gating it behind a scan would leave a screen dark until somebody opened
- *     settings, which is the opposite of what discovery is for.
- *  2. **A device bound to somebody else is ignored.** This is what makes "claim it
+ *  1. **A device bound to somebody else is ignored.** This is what makes "claim it
  *     on one server and it disappears from the others" work without the servers
  *     ever talking: the device carries its own binding and every other server
- *     leaves it alone.
- *  3. **An unclaimed device is answered and listed only while SCANNING.** Nothing
- *     new appears unless someone is looking.
- *
- * The exception to (2): a device that cannot reach the server that owns it is
- * shown — never answered — so it can be recovered from a decommissioned server
- * without SSH. Showing it is not claiming it; that stays an explicit act.
+ *     leaves it alone. The exception: one that cannot reach the server that owns
+ *     it is shown, never answered, so it can be recovered from a decommissioned
+ *     server without SSH. Showing it is not claiming it.
+ *  2. **A device bound HERE is always answered, and never listed**, scanning or
+ *     not, whatever its probe says about where it belongs. Answering is how a
+ *     display re-finds its server after an IP change with nobody present. Not
+ *     listing it covers the probe already on the wire when it was claimed, which
+ *     does not carry the binding yet: listing that would offer a screen that is
+ *     already set up, and announce it as newly seen.
+ *  3. **A device that names us but is not bound here is unclaimed, and answered**:
+ *     released, a restored config, or claimed on an install since wiped. It must
+ *     stay answerable so it can be set up again rather than going dark.
+ *  4. **Anything else is answered and listed only while SCANNING.** Nothing new
+ *     appears unless someone is looking.
  */
 export function decideProbe(
   probe: DiscoveryProbe,
   serverId: string,
   opts: { scanning: boolean; bound: boolean },
 ): ProbeDecision {
-  if (probe.boundTo && probe.boundTo === serverId) {
-    // Ours. Answer even when the binding is unknown to us (a restored config, a
-    // device claimed on a previous install) — the enrolment check decides what it
-    // is actually allowed to see; discovery only tells it where we are.
-    return { answer: true, list: opts.bound ? "mine" : "unclaimed" };
-  }
-  if (probe.boundTo) {
+  if (probe.boundTo && probe.boundTo !== serverId) {
     return probe.unreachable ? { answer: false, list: "elsewhere" } : { answer: false, list: "none" };
   }
+  if (opts.bound) return { answer: true, list: "mine" };
+  if (probe.boundTo === serverId) return { answer: true, list: "unclaimed" };
   return opts.scanning ? { answer: true, list: "unclaimed" } : { answer: false, list: "none" };
+}
+
+/**
+ * The binding a listed device is shown with: only one to ANOTHER server.
+ *
+ * Agents remember whichever server answered them, so a released device, or one
+ * that was only ever heard by this server, still names it. Shown as bound, it read
+ * "Set up on another server, which it cannot reach" under a device that can reach
+ * this one fine.
+ */
+export function listedBoundTo(probe: Pick<DiscoveryProbe, "boundTo">, serverId: string): string | undefined {
+  return probe.boundTo === serverId ? undefined : probe.boundTo;
 }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
-  encodeProbe, decodeProbe, encodeReply, decodeReply, decideProbe, isFromThisMachine, MAX_DATAGRAM,
+  encodeProbe, decodeProbe, encodeReply, decodeReply, decideProbe, listedBoundTo, isFromThisMachine, MAX_DATAGRAM,
 } from "./kiosk-discovery.js";
 
 // The discovery exchange. Two things are worth testing here and they are not the
@@ -133,6 +133,28 @@ describe("what this server shows", () => {
   test("our own bound device is not offered as something to claim", () => {
     const d = decideProbe(probe({ boundTo: ME }), ME, { scanning: true, bound: true });
     assert.equal(d.list, "mine");
+  });
+
+  test("a device bound here is answered and never listed, whatever its probe says", () => {
+    // Includes the probe already on the wire when it was claimed, which does not
+    // carry the binding yet: listing it would offer a screen that is set up.
+    for (const scanning of [false, true]) {
+      for (const boundTo of [undefined, ME]) {
+        const d = decideProbe(probe({ boundTo }), ME, { scanning, bound: true });
+        assert.deepEqual(d, { answer: true, list: "mine" }, `scanning=${scanning} boundTo=${boundTo}`);
+      }
+    }
+  });
+
+  test("a device bound here but now carrying another server's binding is that server's", () => {
+    const d = decideProbe(probe({ boundTo: "srv-other" }), ME, { scanning: true, bound: true });
+    assert.deepEqual(d, { answer: false, list: "none" }, "two servers would fight over one screen");
+  });
+
+  test("a listed device shows only a binding to ANOTHER server", () => {
+    assert.equal(listedBoundTo({ boundTo: ME }, ME), undefined, "a device naming this server read as set up elsewhere");
+    assert.equal(listedBoundTo({ boundTo: "srv-other" }, ME), "srv-other");
+    assert.equal(listedBoundTo({}, ME), undefined);
   });
 
   test("a device claiming us that we have no record of reads as unclaimed", () => {
