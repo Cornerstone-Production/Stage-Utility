@@ -208,7 +208,9 @@ to *Not set up yet*.
 port's video mode (`videoMode`, `1080p59.94` unless changed) and a quarter-turn
 rotation for a monitor on its side (`rotation`, 0 unless changed). They are
 written through `PATCH /api/outputs/:id`, are in every backup, and the helper
-reads them from the stage state it already receives. See the
+reads its output's record from `GET /api/outputs`. The helper applies rotation to
+display outputs, and DeckLink outputs apply Format; the helper does not drive
+DeckLink ports yet, so Format is saved but nothing sends it. See the
 [API](reference/api.md).
 
 **Health.** Each output reports every ten seconds, authenticated by the device's

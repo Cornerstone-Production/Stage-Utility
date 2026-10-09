@@ -204,8 +204,9 @@ every config export and backup with the rest of `settings.json`:
 | `rotation` | `0`, `90`, `180` or `270`: quarter turns the helper applies before the picture leaves, for a monitor mounted on its side | `0` |
 | `videoMode` | A mode name from the list in `main/types/output-format.ts` (`1080p59.94`, `1080i50`, `720p60` and the like), what a DeckLink port sends | `1080p59.94` |
 
-A browser showing the screen ignores both. The helper reads them from the outputs
-in the stage state it already receives.
+A browser showing the screen ignores both. The helper reads its output's record
+from `GET /api/outputs`, and applies `rotation` to display outputs and `videoMode`
+to DeckLink outputs, which it does not drive yet.
 
 A **preview** — the live thumbnail on a Screens card, at `/preview-<viewId>` —
 renders the previewed view directly, regardless of what is actually routed to
