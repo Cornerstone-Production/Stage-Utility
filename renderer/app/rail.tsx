@@ -33,7 +33,7 @@ import { useTheme } from "../lib/use-theme";
 import { buildLabel } from "../lib/build-label";
 import { withViewTransition } from "../lib/view-transition";
 import { resetCurrentRoute } from "./route-reset";
-import { consolePageFor, consoleViewList, resolvePage } from "./active-page";
+import { consolePageFor, resolvePage, sidebarConsoleList } from "./active-page";
 import { useStageState } from "../main/use-stage-state";
 import { errorMessage } from "@main/services/errors";
 import { isUpdateAvailable } from "@main/services/update/availability";
@@ -90,14 +90,16 @@ export function Rail({
   const versionError = updateError ? errorMessage(updateError) : null;
   const updateAvailable = isUpdateAvailable(updateStatus);
 
-  // A rail entry per console View, from the same helper the shell titles a
-  // console with. The rail row and the page title cannot disagree about a
-  // console's name if only one place decides what it is called.
+  // A rail entry per console View the operator has not hidden from the sidebar.
+  // A hidden console is still a page — the shell titles it from the full list —
+  // so only the LIST is narrower here. The page builder is the one the shell
+  // titles a console with, so the rail row and the page title cannot disagree
+  // about a console's name if only one place decides what it is called.
   // Each console's page, built ONCE and used for both jobs below: the candidate
   // list the matcher runs over, and the row itself. It used to be built twice
   // per console per render, and the second copy's path was then re-spelled by
   // hand a third time to decide whether the row was selected.
-  const consoleEntries = consoleViewList(state?.views).map((view) => ({
+  const consoleEntries = sidebarConsoleList(state?.views).map((view) => ({
     view,
     page: consolePageFor(view),
   }));
