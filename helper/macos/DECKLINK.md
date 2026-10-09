@@ -179,27 +179,19 @@ it, on another thread, as a browser's begin frame would be.
 | Type | Role |
 |---|---|
 | `CardFrameSource` | Answers "the picture for frame *n*", on the card's thread. Return false for a repeat. |
-| `CardSink` | Pulls from a source on its own clock and counts: `counters` (`scheduled`, `rendered`, `repeated`, `dropped`, `resyncs`) and `takeHealthSample()`. |
-| `DeckLinkOutputPort` | The `CardSink` for a port. `.port(DeckLinkPort)` for a card; `.softwareClock(…, ticksByItself: true)` runs the same scheduler on a timer, with no card. |
-| `SurfaceFrameSource` | A `CardFrameSource` an engine presents IOSurfaces to, with the `rotation` and the Metal conversion. |
-| `DeckLinkInventory`, `DeckLinkDriver.watchDevices` | The ports to announce, and when to look again. |
+| `CardSink` | Pulls from a source on its own clock and counts: `counters` (`scheduled`, `rendered`, `repeated`, `dropped`, `resyncs`, `skipped`) and `takeHealthSample()`, in the server's units. |
+| `DeckLinkOutputPort` | The `CardSink` for a port. `.port(DeckLinkPort)` for a card; `.virtual` for a `--virtual-sdi` output, the scheduler on a software clock at the size and rate of whichever server mode it is opened in; `.softwareClock(…)`, a fixed size, for tests and the bench tool. Once a second it logs falling behind and catching up, and calls `onSourceStalled` when the source has had nothing new for 5 s. |
+| `SurfaceFrameSource` | A `CardFrameSource` an engine presents IOSurfaces to, with the `rotation`, the Metal conversion, and `captureNextFrame` for a dump of what the card was sent. |
+| `DeckLinkInventory`, `DeckLinkDriver.watchDevices` | The ports to announce (`seen`: every port found since launch), and when to look again. |
 
-For a windowless CEF browser per port:
-
-1. Make a `SurfaceFrameSource` and a `DeckLinkOutputPort(.port(port), source:)`, and
-   `open(videoMode:)` with the screen's `videoMode`.
-2. In `OnAcceleratedPaint`, call `source.present(surface)`. It copies the surface on
-   the GPU before returning, since the surface is valid only inside the callback.
-3. Set `source.onFrameTaken` (before opening) to send that browser's
-   `SendExternalBeginFrame()`, on CEF's UI thread. It is called on the card's thread
-   each time a frame is taken, so the page renders once per output frame, ahead of
-   the frame that will carry it.
-4. Set `source.rotation` from the screen's `rotation`. The browser lays out at the
-   turned size (1080 x 1920 for a quarter turn), as a display output's does.
-5. Post `port.takeHealthSample()` every ten seconds.
-
-A `--virtual-sdi` output is the same with `.virtual` for the port: the software
-clock, at the size and rate of the mode it is opened in.
+In the helper, each card output (`CardOutput`) is a windowless CEF browser at the
+port's frame size, a `SurfaceFrameSource` and a `DeckLinkOutputPort`. The browser's
+`OnAcceleratedPaint` presents into the source, which copies the surface before the
+callback returns; the source's `onFrameTaken` sends the browser its next begin frame
+(CEF runs `SendExternalBeginFrame` on its UI thread), so the page renders once per
+output frame, ahead of the frame that will carry it; the screen's `rotation` is the
+source's, with the browser laid out at the turned size; its `videoMode` opens the
+port. The helper's [README](README.md#chromium) has the rest.
 
 The scheduling follows the general approach MxU Slides describes (scheduled playback
 clocked by the completion callback, the latest picture copied into the returned
@@ -222,7 +214,11 @@ Proven on a Mac with no DeckLink hardware and no driver:
   every frame it made;
 - the Metal conversion on this Mac's GPU, against exact UYVY bytes for white,
   black, the 75% bars and turned patterns;
-- eight 1080p59.94 outputs on the software clock through the whole path.
+- eight 1080p59.94 outputs on the software clock through the whole path;
+- in the helper, four `--virtual-sdi` outputs through Chromium, the Metal conversion
+  and the scheduler, claimed on a server, one turned a quarter and one reopened in
+  720p59.94, at 59.94 fps with no repeats or drops once settled (the frames checked
+  by `--dump-frames`, which decodes what the card was sent).
 
 Only a card can prove:
 

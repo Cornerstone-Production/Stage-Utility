@@ -167,19 +167,33 @@ and the Command Line Tools are enough). That downloads the pinned Chromium Embed
 Framework, checks its checksums, and writes `StageUtilityOutput.app` for that
 architecture, about 325 MB, signed ad hoc. It renders every screen in Chromium, as the
 Raspberry Pi kiosks do. Open it: the menu bar icon opens its window, where each of the
-Mac's displays has a switch and a status line. Launching it again brings the window
-back.
+Mac's displays and DeckLink ports has a switch and a status line. Launching it again
+brings the window back. Installed by `install-macos.sh`, it starts at every login from
+the installer's LaunchAgent, and the window says "Starts at login (installed)".
+
+**DeckLink outputs.** Each output port of a Blackmagic DeckLink or UltraStudio card
+appears under *Not set up yet* as its own output, named as Blackmagic's driver names
+it ("DeckLink Duo 2 (3)"), with the formats the port can play, and is set up like a
+display. It needs Blackmagic's **Desktop Video** driver, 12.0 or later, installed on
+the Mac; without it there are no DeckLink outputs and the helper's window says so.
+**Restart the helper after installing or updating Desktop Video**: it looks for the
+driver only when it starts. The screen's **Format** (1080p59.94 unless changed) is the
+mode the port is opened in; a change reopens it, and a format the port does not have
+is refused, with the reason on that output's line in the helper's window. Rotation
+applies as it does on a display. A card unplugged keeps its screen and comes back by
+itself when plugged in again.
 
 Flags, for a Mac nobody is looking at: `--show-window`, `--list-outputs` (reads the
 stored state and exits), `--dump-frames <dir>` (a PNG of every output and of the window
 every 5 s, with no Screen Recording permission), `--discovery-port <n>`, `--log-stderr`,
-and, for development, `--virtual-sdi <n>` (n SDI outputs with no card behind them, so
-the card path runs on any Mac). The log is the unified log, subsystem
+and, for development, `--virtual-sdi <n>` (n SDI outputs with no card behind them,
+offering every format, so the whole card path runs on any Mac). The log is the unified log, subsystem
 `com.stageutility.output`.
 
 A Mac that was a Chrome kiosk keeps its screen when the installer replaces the kiosk with
 the helper: its main display takes over the kiosk's device id and secret.
 
-Everything else about it (state files, discovery, health, rotation, Chromium and its
-sandbox, card outputs, the Local Network permission, recovering an output from a server
-that is gone) is in [helper/macos/README.md](../helper/macos/README.md).
+Everything else about it (state files, discovery, health, rotation, DeckLink outputs,
+Chromium and its sandbox, the Local Network permission, recovering an output from a
+server that is gone) is in [helper/macos/README.md](../helper/macos/README.md), and the
+DeckLink layer itself in [helper/macos/DECKLINK.md](../helper/macos/DECKLINK.md).

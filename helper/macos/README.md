@@ -270,6 +270,44 @@ change reopens its port in that mode, and the page lays out at the mode's size; 
 the port does not have is refused, said in the log and on the output's line in the
 window, and the port stays off until the mode changes.
 
+## DeckLink outputs
+
+Each output port of a Blackmagic DeckLink or UltraStudio card is an output, as a
+display is, and its own device on the server. A port is not a display: macOS never
+sees it, the helper sends frames to it through Blackmagic's Desktop Video SDK, and so
+DeckLink outputs are not limited by the Mac's display count. They render with no
+window, so nothing on the Mac can cover them and they keep going with the screen
+locked.
+
+- **Desktop Video 12.0 or later** is needed, Blackmagic's driver, installed by the
+  user. The helper ships only the SDK's headers. Without it there are no DeckLink
+  outputs; the window and the log say so once ("Desktop Video is not installed, so
+  there are no DeckLink outputs; install it and restart the helper"), and the
+  displays work as before. A driver older than 12.0, or one that will not load, is
+  said the same way.
+- **Installing or updating Desktop Video takes a restart of the helper**: the SDK
+  looks for the driver once per process.
+- **What appears.** One output per port that can play out, named as the driver names
+  it ("DeckLink Quad 2 (3)"), keyed `decklink-<persistent id>-<sub-device>` (see [How
+  outputs map to devices](#how-outputs-map-to-devices)), with the modes it can play.
+  The helper scans at launch and whenever the driver reports a device arriving or
+  going. A port found once stays an output until the helper quits.
+- **Format.** The screen's `videoMode` (Screen settings > Device > Format on the
+  server), 1080p59.94 when it has none, opens the port in that mode, at its frame
+  size; a change reopens it. The helper sends 8-bit YUV 4:2:2, Rec. 709. A mode the
+  port does not have is refused: the output's line in the window says "Cannot play
+  1080p25: the port has no 1080p25 (it offers ...)", the log says the same, and the
+  port stays off until the format changes.
+- **Unplugged or failed.** The port's output closes, its line reads "Port unavailable
+  (...). Retrying", it tries again every 2 s and at once when a device arrives, and
+  it reopens with the same binding and counts.
+- **Health** is the scheduler's own count, as for every card output (see
+  [Health](#health)); falling behind is logged at the server's line.
+
+[DECKLINK.md](DECKLINK.md) covers the rest: the SDK and its vendored headers, the
+scheduler's timing, the helper's and the card's frames, bandwidth, the log lines, the
+bench tool (`swift run DeckLinkProbe list`), and what only a real card can prove.
+
 ## Chromium
 
 **The host.** `CEFHost/` is a small C++ and Objective-C++ layer over CEF with a C API
@@ -338,11 +376,14 @@ and size of the mode it is opened in, and sends the frames nowhere. They are lis
 claimed, rotated, set to a format and report health like a real port. Without the flag
 they do not exist.
 
-**Measured** on an M4 Mac mini with the screen locked, a display output and four
-virtual card outputs, all claimed and showing a static screen, over 2 minutes: health
-59.91 to 60.02 fps, 0% repeated, 0 dropped; the app and all its Chromium processes used
-0.14 of a core and 630 MB (phys footprint), against 0.001 core and 113 MB with no
-output on. A static screen is a floor; animated layouts cost more GPU and renderer time.
+**Measured** on an M4 Mac mini, a display output and four virtual card outputs (one
+turned a quarter, one in 720p59.94), all claimed and showing a static screen, over 2
+minutes, without `--dump-frames`: health 59.9 to 60.0 fps (a 10 s window of a 59.94
+clock holds 599 or 600 frames), 0% repeated, 0 dropped; the app and all its Chromium
+processes used 0.30 of a core and 710 MB (phys footprint, 764 at most), against 0.003
+core and 124 MB with no output on. That includes each card frame's copy and Metal
+conversion to UYVY. A static screen is a floor; animated layouts cost more GPU and
+renderer time.
 
 **Updating Chromium is part of every release.** CEF follows Chrome's release train, about
 every four weeks, and a browser's security fixes matter. To move to a new CEF: find the
