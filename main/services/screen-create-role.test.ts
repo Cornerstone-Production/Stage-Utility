@@ -336,6 +336,113 @@ describe("a write that fails on disk leaves nothing behind in memory either", ()
   });
 });
 
+/** Every screen that is not a control surface but shows a console: the pairing
+ *  the server exists to refuse. Empty is the only right answer. */
+const forbiddenPairings = () =>
+  outputs()
+    .filter((o) => outputMode(o) !== "panel" && o.viewId && viewSurface(view(o.viewId)) === "console")
+    .map((o) => `${o.id} (${o.mode ?? "display"}) on ${o.viewId}`);
+
+describe("checks hold against a write that lands while they wait", () => {
+  // Every check below used to run BEFORE the call joined the output write
+  // queue, so two calls could both pass it and both write. Each test starts
+  // both calls in the same turn and lets them race.
+  it("two screens asking for the same friendly link: one gets it", async () => {
+    const results = await Promise.allSettled([
+      stageController.createScreen({ name: "Wing A", slug: "wing" }),
+      stageController.createScreen({ name: "Wing B", slug: "wing" }),
+    ]);
+    assert.equal(outputs().filter((o) => o.slug === "wing").length, 1, "two screens hold /wing");
+    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+  });
+
+  it("a friendly link set on one screen while another is made with it", async () => {
+    // The screen is made first, so it is setOutputSlug's check that must see it.
+    await Promise.allSettled([
+      stageController.createScreen({ name: "Wing", slug: "wing" }),
+      stageController.setOutputSlug("display-5", "wing"),
+    ]);
+    assert.equal(outputs().filter((o) => o.slug === "wing").length, 1, "two screens hold /wing");
+  });
+
+  it("a wall display made on a view that is turned into a console meanwhile", async () => {
+    await Promise.allSettled([
+      stageController.createScreen({ name: "Atrium", mode: "display", viewId: "wall-b" }),
+      stageController.setViewSurface("wall-b", "console"),
+    ]);
+    assert.deepEqual(forbiddenPairings(), []);
+  });
+
+  it("a role change flipping a view while another screen is made on it", async () => {
+    await stageController.setOutputView("display-5", "wall-b");
+    await Promise.allSettled([
+      stageController.setOutputRole("display-5", "panel"),
+      stageController.createScreen({ name: "Atrium", mode: "display", viewId: "wall-b" }),
+    ]);
+    assert.deepEqual(forbiddenPairings(), []);
+  });
+
+  it("a screen's mode and its view changed at once", async () => {
+    // A control surface showing a wall view: each change is fine alone, and
+    // together they make a wall display showing a console.
+    // Both orders: whichever lands second is the one whose check has to see
+    // the first.
+    for (const viewFirst of [false, true]) {
+      await stageController.setOutputMode("display-5", "panel");
+      await stageController.setOutputView("display-5", "wall-b");
+      const toDisplay = () => stageController.setOutputMode("display-5", "display");
+      const toConsole = () => stageController.setOutputView("display-5", "ctl-b");
+      await Promise.allSettled(viewFirst ? [toConsole(), toDisplay()] : [toDisplay(), toConsole()]);
+      assert.deepEqual(forbiddenPairings(), [], viewFirst ? "the view landed first" : "the mode landed first");
+    }
+  });
+
+  it("a view only this screen showed is not flipped once another screen shows it", async () => {
+    // display-5 alone shows wall-b, so becoming a control surface flips it. A
+    // control surface pointed at wall-b meanwhile is a pairing the guards allow,
+    // and the flip would turn the view under it into a console it never chose.
+    await stageController.setOutputView("display-5", "wall-b");
+    await Promise.allSettled([
+      stageController.setOutputRole("display-5", "panel"),
+      stageController.setOutputView("display-3", "wall-b"),
+    ]);
+    if (out("display-3").viewId === "wall-b") {
+      assert.equal(viewSurface(view("wall-b")), "display", "another screen's view was changed under it");
+    }
+  });
+
+  it("putting a screen back never makes a pairing the guards refuse", async () => {
+    // display-5 is a wall display on a view only it shows, becoming a control
+    // surface: the screen leads, then the view's kind. The kind lands in memory
+    // and fails, and putting the kind back fails too, so the view is left a
+    // console. Putting the screen back as it was would be a wall display on it.
+    await stageController.setOutputView("display-5", "wall-b");
+    const proto = Object.getPrototypeOf(stageController) as Record<string, (...a: unknown[]) => Promise<unknown>>;
+    let calls = 0;
+    (stageController as unknown as Record<string, unknown>).setViewSurface = async (id: string, surface: string) => {
+      calls += 1;
+      if (calls === 1) {
+        await proto.setViewSurface.call(stageController, id, surface);
+        throw new Error("late failure");
+      }
+      throw new Error("still failing");
+    };
+    try {
+      await assert.rejects(
+        () => stageController.setOutputRole("display-5", "panel"),
+        (err: unknown) => {
+          assert.ok(err instanceof ScreenWriteError, String(err));
+          assert.equal(err.notRolledBack.length, 2, `not rolled back: ${err.notRolledBack.join("; ")}`);
+          return true;
+        },
+      );
+    } finally {
+      delete (stageController as unknown as Record<string, unknown>).setViewSurface;
+    }
+    assert.deepEqual(forbiddenPairings(), []);
+  });
+});
+
 describe("undoCreateScreen", () => {
   it("removes the screen and the view, even when that view is the only one", async () => {
     const { output, createdViewId } = await stageController.createScreen({ name: "Temp", mode: "display", newView: true });

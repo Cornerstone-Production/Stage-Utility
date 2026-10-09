@@ -3025,9 +3025,26 @@ export class StageController {
    * drives, rather than silently unbinding them. Silently unbinding is how an
    * operator discovers on Sunday morning that a screen went blank on Thursday.
    */
-  async setViewSurface(id: string, surface: ViewSurface): Promise<StageState> {
+  async setViewSurface(
+    id: string,
+    surface: ViewSurface,
+    /** Refuse unless this screen is the only one showing the view. For a role
+     *  change that flips a view because only its own screen showed it: decided
+     *  before its first write, and checked again here, in the same turn as the
+     *  assignment, because another screen may have been pointed at it since. */
+    opts: { onlyShownBy?: string } = {},
+  ): Promise<StageState> {
     const view = this.state.views.find((v) => v.id === id);
     if (!view) throw new Error(`views:setSurface — view ${id} not found`);
+    if (opts.onlyShownBy !== undefined) {
+      const others = this.state.outputs.filter((o) => o.viewId === id && o.id !== opts.onlyShownBy);
+      if (others.length > 0) {
+        throw new Error(
+          `"${view.name}" is now also shown on ${others.map((o) => `"${o.name}"`).join(", ")}, so changing it would change ` +
+            `${others.length === 1 ? "that screen" : "those screens"} too.`,
+        );
+      }
+    }
 
     if (surface === "console") {
       // Every display-mode screen showing this View would become an invalid
@@ -3450,9 +3467,18 @@ export class StageController {
           const num = parseInt(id.replace("display-", ""), 10);
           // Thrown before `this.state` is touched, so nothing has been assigned
           // or written when it fires.
-          if (slug && slug.toLowerCase() === id.toLowerCase()) {
-            throw new Error(`"/${slug}" is already used by another display.`);
+          // Every check that depends on other screens or views is made HERE, in
+          // the same synchronous turn as the assignment below: createScreen
+          // checks the same things first so a refusal costs nothing, but by the
+          // time this runs another write may have taken the slug or turned the
+          // view into something else. See commitOutputPatch's `check`.
+          if (slug) {
+            const verdict = validateSlug(slug, [...this.takenSlugs(), id]);
+            if (!verdict.ok) throw new Error(verdict.reason);
           }
+          // A stated role is checked against the view; no role is the original
+          // call, which took the view id as given.
+          if (mode !== undefined && viewId) this.requireViewForRole(viewId, mode);
           const created: Output = {
             id,
             name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
@@ -3516,14 +3542,28 @@ export class StageController {
    * `recomputeResolved` is not optional and not a caller's choice: an Output
    * field the kiosk reads lives on ResolvedOutput too, so skipping it leaves
    * every display rendering the previous value.
+   *
+   * `check` is where a caller that refuses some values refuses them. It runs
+   * inside the write queue, against the state as it is at that moment, in the
+   * same synchronous turn as the assignment, and throws to refuse. A check run
+   * before the call joined the queue is a check on a state that may be gone by
+   * the time the write lands: two screens both found /wing free and both took
+   * it, and a mode and a view each fine alone landed together as a wall display
+   * showing a console.
    */
   private async commitOutputPatch(
     id: string,
     patch: Partial<Output>,
     logLine: string,
+    check?: (output: Output) => void,
   ): Promise<StageState> {
-    console.log(scrub(logLine, 400));
     await this.outputWrites.enqueue(async () => {
+      if (check) {
+        const current = this.state.outputs.find((o) => o.id === id);
+        if (!current) throw new Error(`output ${id} not found`);
+        check(current);
+      }
+      console.log(scrub(logLine, 400));
       const outputs = this.state.outputs.map((o) => (o.id === id ? { ...o, ...patch } : o));
       this.state = { ...this.state, outputs };
       await settingsStore.patch({ outputs });
@@ -3547,13 +3587,14 @@ export class StageController {
       throw new Error(`outputs:slug — output ${id} not found`);
     }
     const trimmed = slug.trim().toLowerCase();
-    const verdict = validateSlug(trimmed, this.takenSlugs(id));
-    if (!verdict.ok) throw new Error(verdict.reason);
-
     return this.commitOutputPatch(
       id,
       { slug: trimmed === "" ? undefined : trimmed },
       `[stage-controller] setOutputSlug id=${scrub(id)} slug="${scrub(trimmed)}"`,
+      () => {
+        const verdict = validateSlug(trimmed, this.takenSlugs(id));
+        if (!verdict.ok) throw new Error(verdict.reason);
+      },
     );
   }
 
@@ -3584,21 +3625,23 @@ export class StageController {
     // dropdown: a dropdown that only offers bindable views makes the mistake
     // hard to reach, but an API call, a Companion button or a restored config
     // can still ask for it. A wall screen must not be able to render a live
-    // control at all.
-    if (viewId !== null) {
-      const view = this.state.views.find((v) => v.id === viewId)!;
-      const output = this.state.outputs.find((o) => o.id === id)!;
-      if (viewSurface(view) === "console" && outputMode(output) !== "panel") {
-        throw new Error(
-          `"${view.name}" has live controls, so it can only go on a control surface. ` +
-            `"${output.name}" is a wall screen — open its menu and choose "Use as a control surface" first.`,
-        );
-      }
-    }
+    // control at all. Checked inside the write, against the screen's mode as it
+    // is then, so a mode change landing first cannot slip past it.
     return this.commitOutputPatch(
       id,
       { viewId },
       `[stage-controller] setOutputView output=${scrub(id)} → view=${scrub(viewId ?? "(none)")}`,
+      (output) => {
+        if (viewId === null) return;
+        const view = this.state.views.find((v) => v.id === viewId);
+        if (!view) throw new Error(`outputs:setView — view ${viewId} not found`);
+        if (viewSurface(view) === "console" && outputMode(output) !== "panel") {
+          throw new Error(
+            `"${view.name}" has live controls, so it can only go on a control surface. ` +
+              `"${output.name}" is a wall screen — open its menu and choose "Use as a control surface" first.`,
+          );
+        }
+      },
     );
   }
 
@@ -3610,23 +3653,21 @@ export class StageController {
    * nothing and no indication why.
    */
   async setOutputMode(id: string, mode: OutputMode): Promise<StageState> {
-    const output = this.state.outputs.find((o) => o.id === id);
-    if (!output) throw new Error(`outputs:setMode — output ${id} not found`);
-
-    if (mode === "display" && output.viewId) {
-      const view = this.state.views.find((v) => v.id === output.viewId);
-      if (view && viewSurface(view) === "console") {
-        throw new Error(
-          `"${output.name}" is showing the control surface "${view.name}". ` +
-            `Point it at a wall-screen view first, or it would be left showing nothing.`,
-        );
-      }
-    }
-
+    if (!this.state.outputs.find((o) => o.id === id)) throw new Error(`outputs:setMode — output ${id} not found`);
+    // Inside the write, against the view the screen shows then: see setOutputView.
     return this.commitOutputPatch(
       id,
       { mode },
       `[stage-controller] setOutputMode output=${scrub(id)} → ${scrub(mode)}`,
+      (output) => {
+        const view = mode === "display" && output.viewId ? this.state.views.find((v) => v.id === output.viewId) : undefined;
+        if (view && viewSurface(view) === "console") {
+          throw new Error(
+            `"${output.name}" is showing the control surface "${view.name}". ` +
+              `Point it at a wall-screen view first, or it would be left showing nothing.`,
+          );
+        }
+      },
     );
   }
 
@@ -3850,6 +3891,12 @@ export class StageController {
     const before = { mode: output.mode, viewId: output.viewId ?? null };
     // Idempotent, because the undos run for every step including the one that
     // failed: it writes only when the screen is not already as it was.
+    //
+    // Both fields in one write, not through setOutputMode and setOutputView, whose
+    // checks each wait for the other. Not unchecked either: when an earlier undo
+    // could not put the view's kind back, the screen as it was would be a wall
+    // display on a console, so that is refused and reported as not put back,
+    // leaving the screen a control surface on it.
     const restore = async () => {
       const now = this.state.outputs.find((o) => o.id === id);
       if (!now || (now.mode === before.mode && (now.viewId ?? null) === before.viewId)) return false;
@@ -3857,6 +3904,12 @@ export class StageController {
         id,
         { mode: before.mode, viewId: before.viewId },
         `[stage-controller] setOutputRole output=${scrub(id)} restored mode=${scrub(before.mode ?? "(display)")} view=${scrub(before.viewId ?? "(none)")}`,
+        () => {
+          const was = before.viewId ? this.state.views.find((v) => v.id === before.viewId) : undefined;
+          if (was && viewSurface(was) === "console" && outputMode(before) !== "panel") {
+            throw new Error(`"${was.name}" is still a control surface, and a wall display cannot show it`);
+          }
+        },
       );
     };
     const setMode: ScreenStep = { label: "set the screen's role", run: () => this.setOutputMode(id, mode), undo: restore };
@@ -3889,7 +3942,7 @@ export class StageController {
       const was = viewSurface(view);
       steps.push(...inGuardOrder({
         label: "change the view's kind",
-        run: () => this.setViewSurface(view.id, wants),
+        run: () => this.setViewSurface(view.id, wants, { onlyShownBy: id }),
         undo: async () => {
           const now = this.state.views.find((v) => v.id === view.id);
           if (!now || viewSurface(now) === was) return false;
