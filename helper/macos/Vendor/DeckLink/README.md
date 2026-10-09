@@ -15,7 +15,7 @@ driver is in this repository.
 
 A driver newer than the SDK answers the 12.0 interfaces, so these headers work with
 Desktop Video 12.0 and later. An older driver does not offer them, and the helper
-reports it as too old rather than listing no ports.
+says the driver is too old.
 
 ## License
 

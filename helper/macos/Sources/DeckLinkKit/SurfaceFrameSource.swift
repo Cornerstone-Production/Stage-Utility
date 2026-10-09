@@ -44,7 +44,7 @@ public final class SurfaceFrameSource: CardFrameSource {
   public var failure: String? { lock.withLock { _failure } }
 
   /// A new picture: a 32-bit BGRA IOSurface, upright, at the size the page laid out
-  /// at. Copied before this returns.
+  /// at. Copied before this returns. Call it from one thread.
   public func present(_ surface: IOSurfaceRef) throws {
     guard let texture = converter.texture(for: surface) else {
       throw UYVYConverter.Failure.gpu("could not read the surface as BGRA")
