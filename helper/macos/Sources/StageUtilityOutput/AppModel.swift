@@ -20,7 +20,9 @@ final class AppModel: ObservableObject {
   @Published private(set) var connection: StatusText.Connection = .noOutputs
   /// Things that are wrong or worth knowing, shown under the connection line.
   @Published private(set) var notes: [String] = []
-  @Published private(set) var launchAtLogin = false
+  /// What "Open at login" offers: the switch, or that the installer's agent
+  /// starts the helper (`LoginItem`).
+  @Published private(set) var loginOffer: LoginItem.Offer = .userSwitch(on: false)
   @Published private(set) var launchAtLoginError: String?
   let version: String
   /// Called when a change in the displays leaves the menu bar covered by an output
@@ -28,6 +30,7 @@ final class AppModel: ObservableObject {
   var onMenuBarCovered: (() -> Void)?
 
   private let options: Options
+  private let paths: HelperPaths
   private let identity: MacIdentity
   private let store: OutputStateStore
   private let macs: [String]
@@ -76,6 +79,7 @@ final class AppModel: ObservableObject {
 
   init(options: Options, paths: HelperPaths) {
     self.options = options
+    self.paths = paths
     self.version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     self.identity = MacIdentity.load(paths: paths)
     self.store = OutputStateStore(directory: paths.userDir)
@@ -107,7 +111,7 @@ final class AppModel: ObservableObject {
       setNote("identity-read", "\(problem). It is left as it is.")
     }
     if let why = CEFEngine.failure { setNote("cef", WebSurfaces.unavailable(why)) }
-    launchAtLogin = SMAppService.mainApp.status == .enabled
+    decideLoginItem()
   }
 
   // MARK: Start
@@ -560,7 +564,25 @@ final class AppModel: ObservableObject {
 
   // MARK: Open at login
 
+  /// The installer's agent, when it exists, starts the helper at every login: the
+  /// window says so, and a per-user item beside it is removed. Otherwise the switch.
+  private func decideLoginItem() {
+    let agentInstalled = FileManager.default.fileExists(atPath: paths.launchAgent.path)
+    let decision = LoginItem.decide(agentInstalled: agentInstalled, userItemEnabled: SMAppService.mainApp.status == .enabled)
+    if decision.removeUserItem {
+      do {
+        try SMAppService.mainApp.unregister()
+        Log.notice(.app, "open at login: removed this app's own login item; \(paths.launchAgent.path) already starts it at every login")
+      } catch {
+        Log.error(.app, "could not remove this app's own login item beside \(paths.launchAgent.path), so two copies may start at login: \(error.localizedDescription)")
+        launchAtLoginError = "This app's own login item could not be removed: \(error.localizedDescription)"
+      }
+    }
+    loginOffer = decision.offer
+  }
+
   func setLaunchAtLogin(_ on: Bool) {
+    guard case .userSwitch = loginOffer else { return }
     do {
       if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
       launchAtLoginError = nil
@@ -569,7 +591,7 @@ final class AppModel: ObservableObject {
       launchAtLoginError = error.localizedDescription
       Log.error(.app, "could not turn open at login \(on ? "on" : "off"): \(error.localizedDescription)")
     }
-    launchAtLogin = SMAppService.mainApp.status == .enabled
+    loginOffer = .userSwitch(on: SMAppService.mainApp.status == .enabled)
   }
 
   // MARK: Debug: --dump-frames

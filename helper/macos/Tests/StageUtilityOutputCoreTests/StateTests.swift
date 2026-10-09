@@ -17,12 +17,14 @@ func withTempDir<T>(_ body: (URL) throws -> T) rethrows -> T {
     let p = HelperPaths.resolve(environment: [:], home: home)
     #expect(p.systemDir.path == "/Library/Application Support/StageUtility")
     #expect(p.userDir.path == "/Users/someone/Library/Application Support/StageUtilityOutput")
+    #expect(p.launchAgent.path == "/Library/LaunchAgents/com.stageutility.output.plist")
   }
 
   @Test func theOverrideReplacesBoth() {
     let p = HelperPaths.resolve(environment: ["STAGE_UTILITY_OUTPUT_STATE_DIR": "/tmp/x"], home: home)
     #expect(p.systemDir.path == "/tmp/x")
     #expect(p.userDir.path == "/tmp/x")
+    #expect(p.launchAgent.path == "/tmp/x/LaunchAgents/com.stageutility.output.plist")
   }
 
   @Test func anEmptyOverrideIsIgnored() {

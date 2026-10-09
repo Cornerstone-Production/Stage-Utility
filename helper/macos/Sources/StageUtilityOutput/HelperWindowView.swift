@@ -114,11 +114,17 @@ struct HelperWindowView: View {
   private var footer: some View {
     VStack(alignment: .leading, spacing: 4) {
       HStack(spacing: 8) {
-        Toggle("Open at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
-          .toggleStyle(PillSwitch())
-          .labelsHidden()
-          .accessibilityLabel("Open at login")
-        Text("Open at login").font(.system(size: 12)).foregroundColor(Palette.subtle)
+        switch model.loginOffer {
+        case .installed:
+          // The installer's LaunchAgent starts it; a switch here would add a second.
+          Text("Starts at login (installed)").font(.system(size: 12)).foregroundColor(Palette.subtle)
+        case .userSwitch(let on):
+          Toggle("Open at login", isOn: Binding(get: { on }, set: { model.setLaunchAtLogin($0) }))
+            .toggleStyle(PillSwitch())
+            .labelsHidden()
+            .accessibilityLabel("Open at login")
+          Text("Open at login").font(.system(size: 12)).foregroundColor(Palette.subtle)
+        }
         Spacer(minLength: 8)
         Text("v\(model.version)").font(.system(size: 12)).foregroundColor(Palette.subtle)
       }

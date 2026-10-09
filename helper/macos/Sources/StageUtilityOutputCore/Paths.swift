@@ -8,21 +8,32 @@ public struct HelperPaths: Equatable {
   /// The helper's own: `outputs.json`, and a `generated-device-id` it made when the
   /// installer never wrote one.
   public var userDir: URL
+  /// The LaunchAgent `install-macos.sh` writes, system-wide, to start the helper at
+  /// every login. Only whether it exists is read (`LoginItem`).
+  public var launchAgent: URL
 
   public static let overrideVariable = "STAGE_UTILITY_OUTPUT_STATE_DIR"
+  /// The installer's agent: `HELPER_PLIST` in scripts/kiosk/install-macos.sh.
+  public static let launchAgentName = "com.stageutility.output.plist"
 
-  public init(systemDir: URL, userDir: URL) {
+  public init(
+    systemDir: URL, userDir: URL,
+    launchAgent: URL = URL(fileURLWithPath: "/Library/LaunchAgents").appendingPathComponent(HelperPaths.launchAgentName)
+  ) {
     self.systemDir = systemDir
     self.userDir = userDir
+    self.launchAgent = launchAgent
   }
 
   /// `STAGE_UTILITY_OUTPUT_STATE_DIR`, when set and not empty, replaces BOTH
-  /// directories, for tests and development: nothing then reads or writes the
-  /// real ones.
+  /// directories, and the agent is looked for in its `LaunchAgents/`, for tests and
+  /// development: nothing then reads or writes the real ones.
   public static func resolve(environment: [String: String], home: URL) -> HelperPaths {
     if let override = environment[overrideVariable], !override.isEmpty {
       let dir = URL(fileURLWithPath: override, isDirectory: true)
-      return HelperPaths(systemDir: dir, userDir: dir)
+      return HelperPaths(
+        systemDir: dir, userDir: dir,
+        launchAgent: dir.appendingPathComponent("LaunchAgents").appendingPathComponent(launchAgentName))
     }
     return HelperPaths(
       systemDir: URL(fileURLWithPath: "/Library/Application Support/StageUtility", isDirectory: true),

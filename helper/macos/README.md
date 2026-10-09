@@ -87,6 +87,14 @@ An output window sits above the menu bar, so one over the Mac's main display cov
 the icon. The window therefore opens by itself at launch whenever an output covers the
 main display, and again when a change in the displays newly covers it.
 
+**Starting at login.** `install-macos.sh` starts the helper at every login with a
+system-wide LaunchAgent, `/Library/LaunchAgents/com.stageutility.output.plist`. Where
+that file exists, the window's footer reads **Starts at login (installed)** and has no
+switch, since a per-user login item beside it would start a second copy; one made
+before the installer ran is removed at launch, and the log says so. A copy run by hand
+on a Mac the installer never ran on has the **Open at login** switch instead, a
+per-user login item (`SMAppService`).
+
 ## Flags
 
 | Flag | What it does |
@@ -107,7 +115,7 @@ main display, and again when a change in the displays newly covers it.
 | Chromium's profile (cookies, local storage, cache) and its own log, `chromium.log` | `Chromium/` and `chromium.log` in the same user folder |
 | A device id, when the installer never wrote one | `generated-device-id` in the same user folder. The window says so. |
 
-`STAGE_UTILITY_OUTPUT_STATE_DIR` replaces both folders, for tests and development.
+`STAGE_UTILITY_OUTPUT_STATE_DIR` replaces both folders, for tests and development, and the installer's LaunchAgent is then looked for in its `LaunchAgents/`.
 Nothing then reads or writes the real ones.
 
 `outputs.json` holds each output's secret token. The folder is created `0700` and the
