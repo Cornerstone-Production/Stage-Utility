@@ -279,6 +279,29 @@ describe("attachment cache logging", () => {
     assert.equal(out.warns.length, 1, `five requests on a dead link wrote ${out.warns.length} re-open warnings`);
   });
 
+  test("an attachment id with a newline cannot forge a second line either", async (t) => {
+    const out = capture(t);
+    globalThis.fetch = (async () => resp(403)) as typeof fetch;
+    await getAttachmentFile("log-id\n[pco] forged", "application/pdf", "plot.pdf", async () => "https://example.invalid/signed");
+    assert.equal(out.errors.length, 1);
+    assert.equal(out.warns.length, 1);
+    for (const line of [...out.errors, ...out.warns]) {
+      assert.ok(!line.includes("\n"), `the attachment id reached the log unescaped: ${JSON.stringify(line)}`);
+    }
+  });
+
+  test("two attachments failing are two outages, each said once", async (t) => {
+    const out = capture(t);
+    const refuse = async () => { throw new Error("same reason for both"); };
+    for (let i = 0; i < 4; i++) {
+      await getAttachmentFile("log-iso-a", "application/pdf", "a.pdf", refuse);
+      await getAttachmentFile("log-iso-b", "application/pdf", "b.pdf", refuse);
+    }
+    assert.equal(out.errors.length, 2, `expected one line per attachment, got:\n${out.errors.join("\n")}`);
+    assert.ok(out.errors.some((l) => l.includes("log-iso-a") && l.includes('"a.pdf"')));
+    assert.ok(out.errors.some((l) => l.includes("log-iso-b") && l.includes('"b.pdf"')));
+  });
+
   test("a file name with a newline cannot forge a second line", async (t) => {
     const out = capture(t);
     await getAttachmentFile("log-forge", "application/pdf", "a\n[pco] forged.pdf", async () => { throw new Error("nope"); });
