@@ -85,7 +85,7 @@ final class AppModel: ObservableObject {
       Log.error(.discovery, "\(problem); it is ignored and the server is looked for on the network")
       setNote("server-file", "Ignoring \(problem).")
     }
-    if let server = identity.server { Log.notice(.discovery, "server file names \(server); discovery is skipped") }
+    if let server = identity.server { Log.notice(.discovery, "server file names \(server); probes go to it alone, by unicast") }
     if let aside = store.recoveredFrom {
       Log.error(.state, "outputs.json was unreadable and was moved to \(aside.path)")
       setNote("state-recovered", "The saved output settings could not be read. They were kept as \(aside.lastPathComponent).")
@@ -182,21 +182,25 @@ final class AppModel: ObservableObject {
       self.pageMoved(rt, to: url)
     }
 
+    // With a `server` file the page loads from it at once and the probes go to that
+    // server alone, so the output still shows up under "Not set up yet".
+    var mode = OutputDiscovery.Mode.broadcast
     if let server = identity.server {
       rt.serverURL = server
       navigate(rt)
-    } else {
-      let discovery = OutputDiscovery(label: d.port, port: options.discoveryPort) { [weak self, weak rt] in
-        self?.probe(for: rt) ?? Data()
-      }
-      discovery.onReply = { [weak self, weak rt] reply in
-        guard let self, let rt else { return }
-        self.heard(key, rt, reply)
-      }
-      discovery.onLocalNetworkSuspected = { [weak self] in self?.suspectLocalNetwork() }
-      rt.discovery = discovery
-      discovery.start()
+      if let host = EnrollURL.host(of: server) { mode = .unicast(host: host) }
     }
+    let discovery = OutputDiscovery(
+      label: d.port, port: options.discoveryPort, mode: mode,
+      boundTo: { [weak self] in self?.store.record(for: key)?.boundTo },
+      makeProbe: { [weak self, weak rt] unreachable in self?.probe(for: rt, unreachable: unreachable) ?? Data() })
+    discovery.onReply = { [weak self, weak rt] reply in
+      guard let self, let rt else { return }
+      self.heard(key, rt, reply)
+    }
+    discovery.onLocalNetworkSuspected = { [weak self] in self?.suspectLocalNetwork() }
+    rt.discovery = discovery
+    discovery.start()
   }
 
   private func deactivate(_ key: String) {
@@ -218,11 +222,12 @@ final class AppModel: ObservableObject {
     if identity.server == nil { rt.serverURL = nil }
   }
 
-  private func probe(for rt: Runtime?) -> Data {
+  private func probe(for rt: Runtime?, unreachable: Bool) -> Data {
     guard let rt else { return Data() }
     let d = rt.display.descriptor
     return Probe(
-      id: deviceId(rt), macs: macs, hostname: hostname, boundTo: store.record(for: d.key)?.boundTo, descriptor: d
+      id: deviceId(rt), macs: macs, hostname: hostname, boundTo: store.record(for: d.key)?.boundTo,
+      unreachable: unreachable, descriptor: d
     ).encoded()
   }
 
@@ -235,7 +240,8 @@ final class AppModel: ObservableObject {
   private func heard(_ key: String, _ rt: Runtime, _ reply: DiscoveryReply) {
     rt.serverName = reply.name
     clearLocalNetworkSuspicion()
-    if rt.serverURL != reply.url {
+    // A server file names the server; an answer from it only says it is there.
+    if identity.server == nil, rt.serverURL != reply.url {
       Log.notice(.discovery, "\(rt.display.descriptor.port): server is \"\(reply.name)\" at \(reply.url)")
       rt.serverURL = reply.url
       navigate(rt)

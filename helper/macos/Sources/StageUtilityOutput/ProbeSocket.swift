@@ -1,20 +1,23 @@
 import Darwin
 import Foundation
+import StageUtilityOutputCore
 
 /// One UDP socket for one output's probes: send to every interface's broadcast
-/// address, hear the server's unicast answer on the same socket.
+/// address (or to one server), hear the server's unicast answer on the same socket.
 ///
 /// BSD sockets rather than Network.framework, which has no clean way to send a
 /// directed broadcast. One socket per output, because the reply carries no id: the
 /// socket it arrives on is how an answer is matched to the output that asked.
+@MainActor
 final class ProbeSocket {
-  private var fd: Int32 = -1
-  private var source: DispatchSourceRead?
+  private let fd: Int32
+  private let source: DispatchSourceRead
+  private var closed = false
   /// Called on the main queue with each datagram that arrives.
-  var onDatagram: ((Data) -> Void)?
+  var onDatagram: (@MainActor (Data) -> Void)?
 
   init() throws {
-    fd = socket(AF_INET, SOCK_DGRAM, 0)
+    let fd = socket(AF_INET, SOCK_DGRAM, 0)
     guard fd >= 0 else { throw ProbeSocketError.system("socket", errno) }
     var on: Int32 = 1
     guard setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &on, socklen_t(MemoryLayout<Int32>.size)) == 0 else {
@@ -36,26 +39,27 @@ final class ProbeSocket {
       throw ProbeSocketError.system("bind", e)
     }
     _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+    self.fd = fd
     let s = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
-    s.setEventHandler { [weak self] in self?.drain() }
-    s.resume()
+    // The descriptor is closed HERE, once the source has stopped reading it. Closing
+    // it right after cancel() races a read the source has already started, and a
+    // descriptor number reused by something else in between would be read from.
+    s.setCancelHandler { Darwin.close(fd) }
     source = s
+    s.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.drain() } }
+    s.resume()
   }
 
-  deinit { close() }
+  deinit { source.cancel() }
 
   func close() {
-    source?.cancel()
-    source = nil
-    if fd >= 0 {
-      Darwin.close(fd)
-      fd = -1
-    }
+    closed = true
+    source.cancel()
   }
 
   private func drain() {
     var buffer = [UInt8](repeating: 0, count: 4096)
-    while fd >= 0 {
+    while !closed {
       let n = recv(fd, &buffer, buffer.count, 0)
       if n <= 0 { return }
       onDatagram?(Data(buffer[0..<n]))
@@ -63,9 +67,9 @@ final class ProbeSocket {
   }
 
   /// Send `data` to each target; returns the targets that failed, with errno.
-  @discardableResult
-  func send(_ data: Data, to targets: [BroadcastTarget], port: UInt16) -> [(target: String, errno: Int32)] {
-    var failures: [(target: String, errno: Int32)] = []
+  func send(_ data: Data, to targets: [ProbeTarget], port: UInt16) -> [SendFailure] {
+    guard !closed else { return targets.map { SendFailure(target: $0.label, errno: EBADF) } }
+    var failures: [SendFailure] = []
     for target in targets {
       var addr = sockaddr_in()
       addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
@@ -79,7 +83,7 @@ final class ProbeSocket {
           }
         }
       }
-      if sent < 0 { failures.append((target.label, errno)) }
+      if sent < 0 { failures.append(SendFailure(target: target.label, errno: errno)) }
     }
     return failures
   }
@@ -94,22 +98,22 @@ enum ProbeSocketError: Error, CustomStringConvertible {
   }
 }
 
-/// Somewhere to broadcast to.
-struct BroadcastTarget: Equatable {
+/// Somewhere to send a probe: an interface's broadcast address, or one server.
+struct ProbeTarget: Equatable, Sendable {
   var address: in_addr
   var label: String
 
-  static func == (a: BroadcastTarget, b: BroadcastTarget) -> Bool { a.address.s_addr == b.address.s_addr }
+  static func == (a: ProbeTarget, b: ProbeTarget) -> Bool { a.address.s_addr == b.address.s_addr }
 
   /// Each up, non-loopback interface's own broadcast address: what actually leaves a
   /// Mac through the interface it names, and what covers a Mac on wired plus
   /// wifi. With none found (no network at all) the limited broadcast and loopback,
   /// so a server on this same Mac still hears the probe.
-  static func current() -> [BroadcastTarget] {
+  static func broadcasts() -> [ProbeTarget] {
     var list: UnsafeMutablePointer<ifaddrs>?
     guard getifaddrs(&list) == 0, let first = list else { return fallback }
     defer { freeifaddrs(list) }
-    var found: [BroadcastTarget] = []
+    var found: [ProbeTarget] = []
     var cursor: UnsafeMutablePointer<ifaddrs>? = first
     while let ifa = cursor {
       defer { cursor = ifa.pointee.ifa_next }
@@ -118,16 +122,38 @@ struct BroadcastTarget: Equatable {
         let dst = ifa.pointee.ifa_dstaddr, dst.pointee.sa_family == sa_family_t(AF_INET)
       else { continue }
       let sin = dst.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
-      let target = BroadcastTarget(address: sin.sin_addr, label: "\(String(cString: ifa.pointee.ifa_name)) \(text(sin.sin_addr))")
+      let target = ProbeTarget(address: sin.sin_addr, label: "\(String(cString: ifa.pointee.ifa_name)) \(text(sin.sin_addr))")
       if !found.contains(target) { found.append(target) }
     }
     return found.isEmpty ? fallback : found
   }
 
-  private static var fallback: [BroadcastTarget] {
+  /// The IPv4 address of `host`, looked up off the main thread: a name that has to be
+  /// resolved (mDNS, a slow resolver) must not stall the window. `completion` is
+  /// called ON the main queue; nil when it does not resolve.
+  static func resolve(host: String, completion: @escaping @Sendable (ProbeTarget?) -> Void) {
+    DispatchQueue.global(qos: .utility).async {
+      let target = lookup(host)
+      DispatchQueue.main.async { completion(target) }
+    }
+  }
+
+  private static func lookup(_ host: String) -> ProbeTarget? {
+    var hints = addrinfo()
+    hints.ai_family = AF_INET
+    hints.ai_socktype = SOCK_DGRAM
+    var result: UnsafeMutablePointer<addrinfo>?
+    guard getaddrinfo(host, nil, &hints, &result) == 0, let first = result else { return nil }
+    defer { freeaddrinfo(result) }
+    guard let sa = first.pointee.ai_addr, sa.pointee.sa_family == sa_family_t(AF_INET) else { return nil }
+    let sin = sa.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
+    return ProbeTarget(address: sin.sin_addr, label: "\(host) \(text(sin.sin_addr))")
+  }
+
+  private static var fallback: [ProbeTarget] {
     [
-      BroadcastTarget(address: in_addr(s_addr: INADDR_BROADCAST.bigEndian), label: "255.255.255.255"),
-      BroadcastTarget(address: in_addr(s_addr: INADDR_LOOPBACK.bigEndian), label: "127.0.0.1"),
+      ProbeTarget(address: in_addr(s_addr: INADDR_BROADCAST.bigEndian), label: "255.255.255.255"),
+      ProbeTarget(address: in_addr(s_addr: INADDR_LOOPBACK.bigEndian), label: "127.0.0.1"),
     ]
   }
 
@@ -135,7 +161,7 @@ struct BroadcastTarget: Equatable {
     var a = a
     var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
     inet_ntop(AF_INET, &a, &buf, socklen_t(INET_ADDRSTRLEN))
-    return String(cString: buf)
+    return String(decoding: buf.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
   }
 }
 

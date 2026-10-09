@@ -14,6 +14,10 @@ public struct Probe: Equatable {
   public var os: String
   /// The server that answered us last, if any.
   public var boundTo: String?
+  /// The server this output is bound to has not answered for a while. It lets
+  /// another server list the output as "bound elsewhere" (`decideProbe` in
+  /// kiosk-discovery.ts), as the Linux agent's probe does. Absent unless true.
+  public var unreachable: Bool
   public var output: Output
 
   public struct Output: Equatable {
@@ -30,18 +34,25 @@ public struct Probe: Equatable {
     }
   }
 
-  public init(id: String, macs: [String], hostname: String, os: String = "macOS", boundTo: String? = nil, output: Output) {
+  public init(
+    id: String, macs: [String], hostname: String, os: String = "macOS", boundTo: String? = nil,
+    unreachable: Bool = false, output: Output
+  ) {
     self.id = id
     self.macs = macs
     self.hostname = hostname
     self.os = os
     self.boundTo = boundTo
+    self.unreachable = unreachable
     self.output = output
   }
 
-  public init(id: String, macs: [String], hostname: String, boundTo: String?, descriptor: OutputDescriptor) {
+  public init(
+    id: String, macs: [String], hostname: String, boundTo: String?, unreachable: Bool = false,
+    descriptor: OutputDescriptor
+  ) {
     self.init(
-      id: id, macs: macs, hostname: hostname, boundTo: boundTo,
+      id: id, macs: macs, hostname: hostname, boundTo: boundTo, unreachable: unreachable,
       output: Output(kind: descriptor.kind, name: descriptor.name, port: descriptor.port, modes: descriptor.modes))
   }
 
@@ -59,6 +70,7 @@ public struct Probe: Equatable {
       macs: macs.prefix(Probe.maxMacs).map { Probe.clip($0) },
       hostname: Probe.clip(hostname), os: Probe.clip(os),
       boundTo: boundTo.map { Probe.clip($0) },
+      unreachable: unreachable ? true : nil,
       output: Wire.Out(
         kind: output.kind.rawValue, name: Probe.clip(output.name), port: Probe.clip(output.port),
         modes: output.modes.map { $0.map { Probe.clip($0) } }))
@@ -78,6 +90,7 @@ public struct Probe: Equatable {
     var hostname: String
     var os: String
     var boundTo: String?
+    var unreachable: Bool?
     var output: Out
 
     struct Out: Encodable {

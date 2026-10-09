@@ -69,6 +69,11 @@ public enum EnrollURL {
     return out
   }
 
+  /// The host of a usable server address, for sending it a probe.
+  public static func host(of server: String) -> String? {
+    normalise(server: server).flatMap { URL(string: $0)?.host }
+  }
+
   /// The server's address as a person reads it: `host:port`, no scheme.
   public static func displayAddress(_ server: String) -> String {
     guard let base = normalise(server: server), let url = URL(string: base), let host = url.host else { return server }

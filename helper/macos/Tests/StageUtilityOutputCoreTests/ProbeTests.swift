@@ -24,6 +24,17 @@ import Testing
     #expect(!text.contains("null"))
   }
 
+  /// The Linux agent's field, so another server can list this output as bound
+  /// elsewhere. Absent unless true, like the Linux agent's.
+  @Test func carriesUnreachableOnlyWhenTrue() {
+    var p = probe
+    #expect(!String(decoding: p.encoded(), as: UTF8.self).contains("unreachable"))
+    p.unreachable = true
+    let text = String(decoding: p.encoded(), as: UTF8.self)
+    #expect(text.contains(#""unreachable":true"#))
+    #expect(!text.contains("false"))
+  }
+
   @Test func carriesModesForAPortThatHasThem() {
     var p = probe
     p.output = .init(kind: .decklink, name: "SDI 1 · DeckLink Duo 2", port: "SDI 1", modes: ["1080p59.94", "1080i59.94"])

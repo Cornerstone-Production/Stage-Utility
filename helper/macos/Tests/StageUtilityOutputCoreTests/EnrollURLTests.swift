@@ -31,6 +31,12 @@ import Testing
     #expect(EnrollURL.normalise(server: "") == nil)
   }
 
+  @Test func hostIsWhatAProbeIsSentTo() {
+    #expect(EnrollURL.host(of: "booth.local:8788") == "booth.local")
+    #expect(EnrollURL.host(of: "http://192.0.2.10:8788/") == "192.0.2.10")
+    #expect(EnrollURL.host(of: "http://192.0.2.10:8788/su") == nil)
+  }
+
   @Test func displayAddressIsHostAndPort() {
     #expect(EnrollURL.displayAddress("http://192.0.2.10:8788/") == "192.0.2.10:8788")
     #expect(EnrollURL.displayAddress("https://su.example") == "su.example")
