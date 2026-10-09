@@ -485,7 +485,8 @@ describe("name and address", () => {
     assert.ok(screen.getByText("http://display.invalid/display-1"));
     cleanup();
     mount({ outputs: [{ ...MINE, slug: "lobby" }] });
-    assert.ok(screen.getByText("http://display.invalid/lobby · also /display-1"));
+    // One paragraph, whatever elements it is split into for wrapping.
+    assert.ok(screen.getByText((_, el) => el?.tagName === "P" && el.textContent === "http://display.invalid/lobby · also /display-1"));
   });
 
   test("copies the permanent address over plain HTTP, where navigator.clipboard does not exist", async () => {

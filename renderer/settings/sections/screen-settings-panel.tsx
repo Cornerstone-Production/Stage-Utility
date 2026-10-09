@@ -668,8 +668,14 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
         <NameInput id="screen-name" value={name} onChange={setName} onCommit={commitName} />
         <SlugField slug={output.slug ?? ""} baseUrl={baseUrl} onSave={(s) => actions.onSetSlug(output.id, s)} />
         <div className="mt-1.5 flex items-start gap-1.5">
-          <p className="min-w-0 flex-1 break-all font-mono text-caption1 text-fg-muted">
-            {output.slug ? `${baseUrl}/${output.slug} · also /${output.id}` : permanent}
+          {/* overflow-wrap:anywhere, not break-all: a long URL may still break,
+              but only where it has to, and "also /display-2" stays whole. */}
+          <p className="min-w-0 flex-1 font-mono text-caption1 text-fg-muted [overflow-wrap:anywhere]">
+            {output.slug ? (
+              <>
+                {`${baseUrl}/${output.slug}`} <span className="whitespace-nowrap">· also /{output.id}</span>
+              </>
+            ) : permanent}
           </p>
           {/* The permanent one, as the old URL dialog and the card's Copy URL
               copy: it is what a Pi or a printed QR is pointed at. copyText
