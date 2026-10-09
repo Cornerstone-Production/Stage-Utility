@@ -62,6 +62,18 @@ func withTempDir<T>(_ body: (URL) throws -> T) rethrows -> T {
     }
   }
 
+  /// With the state-dir override both folders are one, and a generated id must not
+  /// read as the installer's on the next launch.
+  @Test func aGeneratedIdStaysGeneratedWhenBothFoldersAreOne() {
+    withTempDir { dir in
+      let paths = HelperPaths(systemDir: dir, userDir: dir)
+      _ = MacIdentity.load(paths: paths, makeId: { "g1" })
+      let again = MacIdentity.load(paths: paths, makeId: { "g2" })
+      #expect(again.deviceId == "g1")
+      #expect(again.source == .generated)
+    }
+  }
+
   @Test func reportsAGeneratedIdThatCouldNotBeSaved() {
     withTempDir { dir in
       let blocker = dir.appendingPathComponent("file")

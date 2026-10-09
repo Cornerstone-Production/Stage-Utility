@@ -5,7 +5,7 @@ public struct HelperPaths: Equatable {
   /// The installer's directory: `device-id`, `server`, `token`. Read, never written
   /// (the helper has no right to write there).
   public var systemDir: URL
-  /// The helper's own: `outputs.json`, and a `device-id` it generated when the
+  /// The helper's own: `outputs.json`, and a `generated-device-id` it made when the
   /// installer never wrote one.
   public var userDir: URL
 
@@ -39,6 +39,11 @@ public struct MacIdentity: Equatable {
     case generated
   }
 
+  /// The helper's own file, named differently from the installer's `device-id` so
+  /// the two stay distinguishable when one folder holds both (the state-dir
+  /// override).
+  public static let generatedFileName = "generated-device-id"
+
   public var deviceId: String
   public var source: Source
   /// From the `server` file. When present, discovery is skipped.
@@ -65,14 +70,14 @@ public struct MacIdentity: Equatable {
       return MacIdentity(deviceId: id, source: .installer, server: server, installerToken: token, saveError: nil)
     }
     // Not from the installer. A previous run may already have made one.
-    if let id = read(paths.userDir, "device-id") {
+    if let id = read(paths.userDir, MacIdentity.generatedFileName) {
       return MacIdentity(deviceId: id, source: .generated, server: server, installerToken: token, saveError: nil)
     }
     let id = makeId()
     var failure: String?
     do {
       try fm.createDirectory(at: paths.userDir, withIntermediateDirectories: true)
-      try Data(id.utf8).write(to: paths.userDir.appendingPathComponent("device-id"), options: .atomic)
+      try Data(id.utf8).write(to: paths.userDir.appendingPathComponent(MacIdentity.generatedFileName), options: .atomic)
     } catch {
       failure = "could not save a new device id to \(paths.userDir.path): \(error.localizedDescription)"
     }

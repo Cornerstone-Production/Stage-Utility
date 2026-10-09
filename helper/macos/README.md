@@ -53,7 +53,7 @@ STAGE_UTILITY_OUTPUT_STATE_DIR=/tmp/suo \
 |---|---|
 | The Mac's device id, the optional `server` file, the installer's token | `/Library/Application Support/StageUtility/`, written by `install-macos.sh`. Read only. |
 | Per-output state: `outputs.json` (enabled, token, the server it is bound to) | `~/Library/Application Support/StageUtilityOutput/` |
-| A device id, when the installer never wrote one | `device-id` in the same user folder. The window says so. |
+| A device id, when the installer never wrote one | `generated-device-id` in the same user folder. The window says so. |
 
 `STAGE_UTILITY_OUTPUT_STATE_DIR` replaces both folders, for tests and development.
 Nothing then reads or writes the real ones.
