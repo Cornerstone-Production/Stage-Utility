@@ -107,10 +107,7 @@ final class AppModel: ObservableObject {
     NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
     ) { [weak self] _ in
-      MainActor.assumeIsolated {
-        Log.notice(.output, "the display arrangement changed")
-        self?.reconcile()
-      }
+      MainActor.assumeIsolated { self?.displaysChanged() }
     }
     healthTimer = Timer.scheduledTimer(withTimeInterval: HealthPost.interval, repeats: true) { [weak self] _ in
       MainActor.assumeIsolated { self?.healthTick() }
@@ -119,6 +116,25 @@ final class AppModel: ObservableObject {
   }
 
   // MARK: Outputs
+
+  /// How long the displays must stay as they are before the outputs follow them. A
+  /// display can vanish for a moment on wake or when a hub renegotiates, and tearing
+  /// down a window and its web view for that, then building them again, drops the
+  /// page and reloads it.
+  static let displayChangeSettle: TimeInterval = 1
+  private var displayChange: DispatchWorkItem?
+
+  private func displaysChanged() {
+    displayChange?.cancel()
+    let work = DispatchWorkItem { [weak self] in
+      MainActor.assumeIsolated {
+        Log.notice(.output, "the display arrangement changed")
+        self?.reconcile()
+      }
+    }
+    displayChange = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + AppModel.displayChangeSettle, execute: work)
+  }
 
   /// Make the runtimes match the displays macOS lists now.
   private func reconcile() {
