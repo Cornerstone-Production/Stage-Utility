@@ -118,7 +118,12 @@ version taken from the file's `updated_at` (its size when that is missing). A fi
 replaced under the same id is a new version: it is downloaded again and the older
 copies are removed. `/api/pco/attachment` sends the version as an `ETag`, and a
 display that already has it is answered `304` without a download; the Plan file
-widget asks every five minutes. A link that expires early is re-opened once. A
+widget asks every five minutes, and the file list it is answered from is read from
+Planning Center at most every three minutes (45 seconds around a service). A
+replacement is noticed only if the version changes: when Planning Center reports
+neither `updated_at` nor a size, the id alone names the file and a replacement under
+the same id is not noticed, and when only the size is known, a replacement of the
+same size is not. A link that expires early is re-opened once. A
 file that will not download is logged once per outage with its name and the
 reason, and one line says when it downloads again
 ([Plan file](../reference/widgets.md#pco--service)).

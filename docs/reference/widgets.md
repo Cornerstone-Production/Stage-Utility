@@ -100,9 +100,12 @@ until it has one. A plan with no matching file shows a notice and is asked
 again every two minutes, so a stage plot attached after the display loaded
 appears by itself. A load that fails (Planning Center unreachable, a download
 link that expired) is retried after 5, 15 and 45 seconds and then every two
-minutes. Once the file is up it is checked every five minutes, so a revised file
-on the same plan replaces it within about that long; a check that finds the same
-file does nothing, and the old picture stays until the new one is ready. A failed
+minutes. Once the file is up it is checked every five minutes. The server reads
+the plan's file list from Planning Center at most every three minutes (45 seconds
+around a service), so a revised file on the same plan replaces it within about
+eight minutes, and a page that has just loaded may show the browser's copy until its
+first check. A check that finds the same file does nothing, and the old picture
+stays until the new one is ready. A failed
 check never swaps a picture, or the notice on screen, for another one. Switching
 plans loads the new plan's file at once. A display that is still failing after
 its quick retries logs a `[plan-file]` line once, so `/log` says which page and
