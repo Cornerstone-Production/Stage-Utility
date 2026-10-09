@@ -43,10 +43,11 @@ These are the operator's own work, so they are carried by every backup.
 
 ### Putting a screen in groups
 
-On the **Screens** page, open a screen's menu (the vertical dots) and choose **Groups**. Each
-group is a checkbox, and the menu stays open so several can be set in one visit.
-The groups a screen is in show as small chips under its name. With no groups made
-yet the submenu says so and links to Settings → Messages.
+On the **Screens** page, open a screen's menu (the vertical dots), choose **Screen
+settings…** and tick the screen's groups under **Messages**. Each group is a
+checkbox, so several can be set in one visit. The groups a screen is in show as
+small chips under its name on its card. With no groups made yet the section says
+so and links to Settings → Messages.
 
 A screen's groups are stored with the screen (`Output.groups`), so they follow it
 across a restart and are carried in backups with the rest of the screen's

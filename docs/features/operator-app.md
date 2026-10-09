@@ -143,6 +143,68 @@ A widget you remove stays removed, across restarts and across updates. A build
 that adds a widget gives it to installs that have never edited Home, and leaves
 an edited Home alone.
 
+## Screens
+
+**Screens** has a card for every physical screen, with a live preview of what it
+shows. The card keeps what an operator changes while working: its name, the view
+it shows, the colour and icon, the message groups it is in, and the way into its
+layout. Its menu (the vertical dots) is actions only:
+
+| Item | |
+|---|---|
+| **Open display** | opens the screen's address in its own tab |
+| **Rename view** | renames the view the screen shows, everywhere it is used. Only while a view is assigned |
+| **Copy URL** | copies the screen's permanent address |
+| **Refresh display** | reloads that screen |
+| **Screen settings…** | opens the panel below |
+| **Remove display** | removes the screen. Refused for the last one |
+
+A view that no screen shows has its own card under **Views not on a screen**,
+with *Make it a wall screen* or *Make it a control surface*, *Duplicate view*,
+*Delete view* and, for a console, **Show in the sidebar**.
+
+### Screen settings
+
+**Screen settings…** opens a panel beside the cards, so the card and its preview
+stay in view while a setting changes. Changes save as they are made. On a phone
+the panel covers the page instead.
+
+| Section | |
+|---|---|
+| **What this screen is** | **Wall display** (read from across the room; buttons draw but do nothing) or **Control surface** (a touch screen whose buttons work for anyone at it). Choosing a control surface asks first. For a control surface, **List in the sidebar** keeps the console it shows in the sidebar's list, or out of it: see [Consoles](#consoles) |
+| **What it shows** | the view, from the views that fit the role: control-surface views for a control surface, wall-screen views for a wall display |
+| **Name and address** | the name; the **friendly link** (an alias such as `lobby`, saved with **Save** so a refusal stays on screen: see [Friendly URLs](../display-urls.md#friendly-urls)); and the permanent address, which never changes |
+| **On the screen** | **Top bar** (the brand, plan and QR strip along the top), **Lock** (keeps the top bar but removes its links, so the screen cannot be navigated away from) and **Text size** (50 to 300 %, for ServiceCue and readouts). Top bar and Lock are offered only where the view draws a bar; a calendar or a script wall draws none |
+| **Messages** | the [message groups](stage-messages.md#putting-a-screen-in-groups) the screen is in |
+| **Video** | **Use HLS**. Off, the screen plays only WebRTC, and a feed that needs HLS says it can't play there |
+| **Device** | the machine bound to the screen, with its hostname and address, and whether the screen is online. Read-only; release it from the card |
+
+**Changing one screen never changes another.** A view can be shown on several
+screens. When you change a screen's role and the view no longer fits it, and
+another screen shows that view, the panel names those screens and offers two
+ways forward. **Use a copy on this screen** (the default) duplicates the view,
+gives the copy the new role and points only this screen at it; the copy is named
+`<view> (control surface)` or `<view> (wall)`, and every other screen keeps the
+original. **Choose a different view** offers only views that fit. A view only
+this screen shows changes with it.
+
+### Adding a screen
+
+**Add a screen**, and a waiting device's **Set up as a new screen** (see
+[Kiosk devices](../kiosk-devices.md)), open the same panel in three steps:
+
+1. **What is this screen?** A wall display or a control surface, and for a control
+   surface whether to list it in the sidebar.
+2. **What should it show?** A view that fits the role, none yet, or **New blank
+   view**, which makes an empty view of the right kind named after the screen.
+3. **Name it.** The name and an optional friendly link.
+
+**Nothing is created until Create screen**, which is available on every step
+because every step has a default: a wall display, no view, a numbered name.
+Closing the panel creates nothing. A refusal (a link another screen holds, say)
+leaves the panel open with the reason. A device is claimed by the same step that
+creates its screen, and if that fails the screen made for it is taken back.
+
 ## Consoles
 
 A **console** is a custom view built for someone to touch rather than to watch.
@@ -166,9 +228,11 @@ end up rendering a live button by accident.
 
 **Keeping one out of the sidebar.** A console can be kept out of the sidebar's
 list. That suits a console that lives on a stage display as a control surface and
-has no business being a place the operator works from. It is a setting on the
-view, `showInSidebar`, and a console with none is listed — so every console you
-had before it existed still is. Only the *list* changes. A console kept out of it
+has no business being a place the operator works from. Turn off **List in the
+sidebar** in the [Screen settings](#screen-settings) of a screen showing it, or
+**Show in the sidebar** in the menu of a console no screen shows. It is a setting
+on the view, `showInSidebar`, and a console with none is listed — so every
+console you had before it existed still is. Only the *list* changes. A console kept out of it
 keeps its live controls on every screen showing it, still opens at
 `/consoles/<view id>` with its name in the header, and the **Open** link on the
 Screens card of a screen showing it still opens that screen.
@@ -226,8 +290,9 @@ phone its own [context bar](context-bar.md#a-phone-can-have-its-own-set) item
 set and trim it to the two readings you actually want. That keeps the bar and
 loses the clutter.
 
-This is a different setting from a screen's **Hide top bar**, which is set per
-screen and hides the *display's* bar on a wall, in a different page entirely.
+This is a different setting from a screen's **Top bar** switch, which is set per
+screen in its [Screen settings](#screen-settings) and hides the *display's* bar on
+a wall, in a different page entirely.
 
 ## Branding
 
