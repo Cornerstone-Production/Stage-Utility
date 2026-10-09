@@ -707,9 +707,10 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
         publish(stageServer, "/kiosk", zipB);
         const r = await whole(ME, { SHIM_PRINT_RC: "0" });
         assert.equal(r.status, 1, r.out + r.err);
-        assert.match(r.err, /could not write .*migrated-from-kiosk; nothing was changed/);
+        assert.match(r.err, /could not write .*migrated-from-kiosk; nothing else was changed, and the Chrome kiosk is as it was\. The device id and token already written are kept\./);
 
         assert.equal(marker2(), "build-a", "the installed app is untouched");
+        assert.ok(fs.existsSync(path.join(stateDir(), "device-id")) && fs.existsSync(path.join(stateDir(), "token")), "the identity files are kept, which is what the message says");
         assert.deepEqual(leftovers(), []);
         assert.equal(fs.readFileSync(helperPlist(), "utf8"), plistBefore);
         assert.ok(fs.existsSync(kioskPlist()), "the Chrome kiosk is still there");

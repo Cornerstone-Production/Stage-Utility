@@ -470,7 +470,7 @@ swap_app() {
   OLD_APP="$APPS_DIR/.$APP_NAME.old.$$"
   rm -rf "$OLD_APP"
   if [ -d "$APPS_DIR/$APP_NAME" ]; then
-    mv "$APPS_DIR/$APP_NAME" "$OLD_APP" || die "could not move the existing $APP_NAME aside; nothing was changed."
+    mv "$APPS_DIR/$APP_NAME" "$OLD_APP" || die "could not move the existing $APP_NAME aside; nothing else was changed. The device id and token already written are kept."
   else
     OLD_APP=""
   fi
@@ -592,13 +592,13 @@ write_kiosk_marker() {
   kiosk_present || return 0
   say "==> Marking this Mac as coming from the Chrome kiosk"
   MIGRATED=1
-  mkdir -p "$STATE_DIR" || die "could not create $STATE_DIR; nothing was changed."
+  mkdir -p "$STATE_DIR" || die "could not create $STATE_DIR; nothing else was changed. The device id and token already written are kept."
   if [ -f "$MARKER" ] && [ ! -L "$MARKER" ]; then
     say "    $MARKER is already there"
     return 0
   fi
   MARKER_CREATED=1
-  date -u +%Y-%m-%dT%H:%M:%SZ | put_file "$MARKER" 644 || die "could not write $MARKER; nothing was changed, and the Chrome kiosk is as it was."
+  date -u +%Y-%m-%dT%H:%M:%SZ | put_file "$MARKER" 644 || die "could not write $MARKER; nothing else was changed, and the Chrome kiosk is as it was. The device id and token already written are kept."
 }
 
 # Step two, after the helper's agent is in. Only the kiosk's agent goes here.
@@ -724,8 +724,9 @@ install_helper() {
   WORK="$(mktemp -d "${TMPDIR:-/tmp}/stage-utility-output.XXXXXX")"
   fetch_helper
   stage_app
-  # Everything above has changed nothing on this Mac. The marker is the first
-  # change, and it comes before the helper can possibly launch; see the note on
+  # Apart from the device id and token write_state kept or made (a failed install
+  # must not cost a Mac its id, so those stay), everything above has changed
+  # nothing on this Mac. The marker is the first other change, and it comes before the helper can possibly launch; see the note on
   # the Chrome kiosk below.
   write_kiosk_marker
   stop_helper_agent
