@@ -428,6 +428,13 @@ describe("the sidebar listing", () => {
     assert.deepEqual(calls, [["sidebar", "ctl-a", true]]);
   });
 
+  test("is not offered for a control surface showing a wall view: the sidebar lists consoles", () => {
+    // A panel may show a display view. The sidebar never lists one, so a switch
+    // here would write a flag nothing reads.
+    mount({ outputs: [{ ...PANEL_A, viewId: "wall-a" }] });
+    assert.equal(screen.queryByRole("switch", { name: "List in the sidebar" }) !== null, false, "it is on screen");
+  });
+
   test("cannot be set before a view is chosen: the listing belongs to the view", () => {
     mount({ outputs: [{ ...PANEL_A, viewId: null }] });
     assert.equal((sw("List in the sidebar") as HTMLButtonElement).disabled, true);

@@ -34,7 +34,7 @@ import { XIcon } from "lucide-react";
 import { Button, Checkbox, ErrorNote, Input, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, confirm } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
-import { KIND_DRAWS_TOP_BAR, outputMode, roleChangeConflict, viewFitsRole, viewShownInSidebar, type CreateScreenInput, type OutputMode } from "@main/types/views";
+import { KIND_DRAWS_TOP_BAR, outputMode, roleChangeConflict, viewFitsRole, viewShownInSidebar, viewSurface, type CreateScreenInput, type OutputMode } from "@main/types/views";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { useDevices } from "../../app/screens/use-devices";
 import type { MessageGroups } from "../../main/use-message-groups";
@@ -554,7 +554,10 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
     <>
       <Section title="What this screen is">
         <RoleCards role={shownRole} onChoose={(m) => void chooseRole(m)} />
-        {role === "panel" && waiting === null && (
+        {/* Only for a console, or for no view yet (the switch then says to
+            choose one). A panel can show a wall view, and the sidebar never
+            lists one. */}
+        {role === "panel" && waiting === null && (!shown || viewSurface(shown) === "console") && (
           <SidebarRow
             checked={shown ? viewShownInSidebar(shown) : true}
             disabled={!shown}
