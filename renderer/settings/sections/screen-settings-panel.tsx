@@ -108,16 +108,24 @@ export function viewsFittingRole(views: readonly View[], mode: OutputMode, curre
   return views.filter((v) => viewFitsRole(v, mode) || v.id === current);
 }
 
-async function confirmRole(name: string, mode: OutputMode): Promise<boolean> {
+/**
+ * Ask before changing a screen's role. The one confirm for it, here and on the
+ * screen card (whose view picker offers it when a console is chosen), so the
+ * title and the button are written once.
+ *
+ * Confirmed, and the confirm says what actually changes. Turning a screen into
+ * a control surface makes its controls live to anyone standing at it, which is
+ * not something to do by misclick. `why` leads the message when the change is
+ * a consequence of something else the operator chose.
+ */
+export async function confirmRole(name: string, mode: OutputMode, why?: string): Promise<boolean> {
   const toPanel = mode === "panel";
-  // Confirmed, and the confirm says what actually changes. Turning a screen into
-  // a control surface makes its controls live to anyone standing at it, which is
-  // not something to do by misclick.
+  const what = toPanel
+    ? "Buttons on this screen will work. Anyone standing at it can press them."
+    : "This screen becomes read-only. Its buttons will render but do nothing.";
   return confirm({
     title: toPanel ? `Use "${name}" as a control surface?` : `Make "${name}" a display again?`,
-    message: toPanel
-      ? "Buttons on this screen will work. Anyone standing at it can press them."
-      : "This screen becomes read-only. Its buttons will render but do nothing.",
+    message: why ? `${why} ${what}` : what,
     confirmLabel: toPanel ? "Use as a control surface" : "Make it a display",
   });
 }

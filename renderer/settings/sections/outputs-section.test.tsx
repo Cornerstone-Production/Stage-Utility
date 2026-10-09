@@ -92,7 +92,6 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 }) as typeof fetch;
 
-const NOOP_ASYNC = async () => {};
 
 function renderRow(struggles: Parameters<typeof OutputRow>[0]["struggles"], lags: Parameters<typeof OutputRow>[0]["lags"] = []) {
   return render(
@@ -112,7 +111,7 @@ function renderRow(struggles: Parameters<typeof OutputRow>[0]["struggles"], lags
         onRenameView: () => {},
         onSetView: () => {},
         messageGroups: { groups: [], known: true, failed: false },
-        onSetMode: NOOP_ASYNC,
+        onSetRole: async () => true,
         onOpenSettings: () => {},
         onRefresh: () => {},
         onRemove: () => {},

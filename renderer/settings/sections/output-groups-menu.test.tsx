@@ -44,7 +44,6 @@ beforeEach(() => { cleanup(); });
 afterEach(async () => { cleanup(); await settle(); });
 
 const noop = () => {};
-const asyncNoop = async () => {};
 
 const GREEN = { id: "g-11111111", name: "Green room" };
 const STAGE = { id: "g-22222222", name: "Stage" };
@@ -68,7 +67,7 @@ function card(over: {
     onSetView: noop,
     onRenameView: noop,
     messageGroups: over.messageGroups ?? { groups: ALL, known: true, failed: false },
-    onSetMode: asyncNoop,
+    onSetRole: async () => true,
     onOpenSettings: noop,
     onRefresh: noop,
     onRemove: noop,

@@ -48,7 +48,6 @@ beforeEach(() => { cleanup(); });
 afterEach(async () => { cleanup(); await settle(); });
 
 const noop = () => {};
-const asyncNoop = async () => {};
 
 const VIEW: View = { id: "v1", name: "The view", kind: "custom", createdAt: "2026-01-01T00:00:00.000Z" };
 
@@ -66,7 +65,7 @@ function card(over: Partial<OutputRowProps> = {}, routed = true) {
     onSetView: noop,
     onRenameView: noop,
     messageGroups: { groups: [], known: true, failed: false },
-    onSetMode: asyncNoop,
+    onSetRole: async () => true,
     onOpenSettings: noop,
     onRefresh: noop,
     onRemove: noop,

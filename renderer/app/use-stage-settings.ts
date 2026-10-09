@@ -21,7 +21,7 @@
 //     Settings is routes inside the app rather than its own window
 
 import { useState, useEffect } from "react";
-import { viewSurface, type CreateScreenInput } from "@main/types/views";
+import type { CreateScreenInput } from "@main/types/views";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
@@ -807,57 +807,15 @@ export function useStageSettings(pinnedViewId?: string) {
   }
 
   /**
-   * Make a screen a read-only display or an interactive control surface.
-   *
-   * NOT optimistic. The server refuses some of these — demoting a panel that is
-   * showing a console, for one — and an optimistic flip would show the operator
-   * the change happening and then silently undo it. The refusal is the useful
-   * part; it says what to do instead.
-   */
-  /**
-   * A screen's mode and its view's surface move together, and the ORDER is not
-   * a detail.
-   *
-   * Two guards on the server refuse in opposite directions, each waiting for the
-   * other side to move first:
-   *
-   *   setOutputMode(display)   refuses while the view it shows is a console
-   *   setViewSurface(console)  refuses while a screen showing it is not a panel
-   *
-   * So there is one rule: whichever side is being made MORE permissive goes
-   * first. Becoming a control surface, the screen leads; becoming a wall screen,
-   * the view does. Doing it the other way round is a deadlock — "Use as a
-   * display" was refused outright, with the server correctly explaining that the
-   * screen was still showing a control surface, and no order of clicking could
-   * get out of it.
-   */
-  async function handleSetOutputMode(id: string, mode: "display" | "panel") {
-    const shown = stateNow()?.outputs.find((o) => o.id === id)?.viewId ?? null;
-    const wantSurface = mode === "panel" ? "console" : "display";
-    const viewNeedsIt = (() => {
-      const v = stateNow()?.views.find((x) => x.id === shown);
-      return v ? viewSurface(v) !== wantSurface : false;
-    })();
-
-    if (mode === "display" && shown && viewNeedsIt) {
-      // The view first: the screen cannot become a display while it is on one.
-      if (!(await writeState("views:setSurface", { id: shown, surface: "display" }))) return;
-      await writeState("outputs:setMode", { id, mode });
-      return;
-    }
-
-    if (!(await writeState("outputs:setMode", { id, mode }))) return;
-    if (shown && viewNeedsIt) {
-      await writeState("views:setSurface", { id: shown, surface: wantSurface });
-    }
-  }
-
-  /**
    * Change one screen between a wall display and a control surface WITHOUT
-   * changing any other screen. Unlike handleSetOutputMode this is one server call:
-   * the copy of a shared view, the role and the pointing are four ordered writes,
-   * and the server puts back what landed if one fails. NOT optimistic, for the
-   * reason handleSetOutputMode is not: the refusal is the useful part.
+   * changing any other screen. One server call: the copy of a shared view, the
+   * role, the view's kind and the pointing are up to four writes, which the
+   * server orders for its guards and puts back if one fails.
+   *
+   * NOT optimistic. The server refuses some of these (a shared view with neither
+   * a copy nor another view, a view that cannot be a control surface), and an
+   * optimistic flip would show the change happening and then silently undo it.
+   * The refusal is the useful part; it says what to do instead.
    */
   async function handleSetOutputRole(
     id: string,
@@ -890,8 +848,21 @@ export function useStageSettings(pinnedViewId?: string) {
     );
   }
 
-  /** Change what a View is for, and the screens showing it, in the order the
-   *  guards allow. See handleSetOutputMode. */
+  /**
+   * Change what a View is for, and EVERY screen showing it: the view card's
+   * deliberate "all of them" path. (One screen's role is handleSetOutputRole,
+   * which never changes another screen.)
+   *
+   * The order is not a detail. Two guards on the server refuse in opposite
+   * directions, each waiting for the other side to move first:
+   *
+   *   setOutputMode(display)   refuses while the view it shows is a console
+   *   setViewSurface(console)  refuses while a screen showing it is not a panel
+   *
+   * So whichever side is being made MORE permissive goes first: becoming a
+   * control surface, the screens lead; becoming a wall screen, the view does.
+   * The other way round is a deadlock no order of clicking gets out of.
+   */
   async function handleSetViewSurface(id: string, surface: "display" | "console") {
     const wantMode = surface === "console" ? "panel" : "display";
     const showing = (stateNow()?.outputs ?? []).filter(
@@ -989,7 +960,6 @@ export function useStageSettings(pinnedViewId?: string) {
     handleSetOutputHideTopBar,
     handleSetOutputAllowHls,
     handleSetOutputGroups,
-    handleSetOutputMode,
     handleSetOutputRole,
     handleSetOutputTextSize,
     handleSetViewShowInSidebar,

@@ -26,7 +26,7 @@ import { IconTint } from "../../components/icon-tint";
 import { iconEntryAt } from "../../components/editable-icon";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { ImportLayout } from "./import-layout";
-import { SCREEN_PANEL_ID } from "./screen-settings-panel";
+import { SCREEN_PANEL_ID, confirmRole } from "./screen-settings-panel";
 import { viewSurface, viewShownInSidebar, outputMode } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
@@ -166,9 +166,9 @@ export interface OutputRowProps {
    *  draws the ones this screen is in as chips under its name; choosing them is
    *  the Screen settings panel's job. */
   messageGroups: MessageGroups;
-  /** Awaited: switching a screen to a panel must LAND before a console view
-   *  is assigned to it, because the server refuses the pair in the wrong order. */
-  onSetMode: (mode: "display" | "panel") => Promise<void>;
+  /** Change this screen's role, through the role route. True when it landed;
+   *  a refusal is already on screen. */
+  onSetRole: (mode: "display" | "panel", opts: { viewId?: string }) => Promise<boolean>;
   /** Open the Screen settings panel on this screen. */
   onOpenSettings: () => void;
   /** This screen's panel is open: the card says which one it is for. */
@@ -250,7 +250,7 @@ function MenuCheckboxItem({
   );
 }
 
-export function OutputRow({ output, views, baseUrl, online, struggles, lags, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, onSetMode, onOpenSettings, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+export function OutputRow({ output, views, baseUrl, online, struggles, lags, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, onSetRole, onOpenSettings, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   const [renamingView, setRenamingView] = useState(false);
@@ -278,24 +278,20 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, can
    * find the second switch in a different menu, before the view they wanted
    * even appeared in the list.
    *
-   * So the offer comes FIRST and the mode change is awaited. Decline it and
-   * nothing is assigned, because the server would refuse that binding anyway —
-   * an assignment that silently failed would be worse than one that did not
-   * happen.
+   * So the offer comes FIRST. Decline it and nothing is assigned, because the
+   * server would refuse that binding anyway — an assignment that silently failed
+   * would be worse than one that did not happen. Accept it and the role and the
+   * view go in ONE call, the role route with the view named: the screen's own
+   * role change would also have tried to turn the view it is LEAVING into a
+   * console, which changes every other screen showing it.
    */
   async function assignView(viewId: string | null): Promise<void> {
     if (!viewId) { onSetView(null); return; }
     const picked = views.find((v) => v.id === viewId);
-    const needsPanel = picked && viewSurface(picked) === "console" && outputMode(output) !== "panel";
-    if (needsPanel) {
-      const ok = await confirm({
-        title: `Use "${output.name}" as a control surface?`,
-        message: `"${picked.name}" has live controls, so it can only go on a control surface. Its buttons will work for anyone standing at this screen.`,
-        confirmLabel: "Use as a control surface",
-        cancelLabel: "Cancel",
-      });
-      if (!ok) return;
-      await onSetMode("panel");
+    if (picked && viewSurface(picked) === "console" && outputMode(output) !== "panel") {
+      if (!(await confirmRole(output.name, "panel", `"${picked.name}" has live controls, so it can only go on a control surface.`))) return;
+      await onSetRole("panel", { viewId });
+      return;
     }
     onSetView(viewId);
   }
@@ -903,7 +899,7 @@ export function OutputsSection({
                 onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 messageGroups={messageGroups}
-                onSetMode={(mode) => handlers.handleSetOutputMode(output.id, mode)}
+                onSetRole={(mode, opts) => handlers.handleSetOutputRole(output.id, mode, opts)}
                 onOpenSettings={() => onOpenSettings(output.id)}
                 selected={selectedOutputId === output.id}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}

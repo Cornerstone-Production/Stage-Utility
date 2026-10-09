@@ -331,6 +331,36 @@ describe("changing the role of a shared view", () => {
   });
 });
 
+describe("the card's own view picker", () => {
+  /** The view picker on this screen's card: the nearest select above its menu. */
+  function cardPicker(screenName: string): HTMLSelectElement {
+    let el: HTMLElement | null = screen.getByLabelText(`More actions for ${screenName}`);
+    while (el && !el.querySelector("select")) el = el.parentElement;
+    return el!.querySelector("select")!;
+  }
+
+  test("choosing a console for a wall display makes it a control surface on that view, in one call", async () => {
+    // Lobby TV shares its wall view with another screen. Going through the
+    // screen's old role change, the card made it a panel and then tried to turn
+    // the wall view it was LEAVING into a console, which the server refuses for
+    // a shared view and which would have changed the other screen anyway. The
+    // role route with the view named does it in one validated write.
+    outputs = [...outputs, { id: "display-4", name: "Hallway TV", viewId: "wall-a" }];
+    await mountScreens();
+    await choose(cardPicker("Lobby TV"), "ctl-a");
+    await answerConfirm("Use as a control surface");
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs/display-3/role", body: { mode: "panel", viewId: "ctl-a" } }]);
+  });
+
+  test("declining the confirm assigns nothing", async () => {
+    await mountScreens();
+    await choose(cardPicker("Lobby TV"), "ctl-a");
+    const dialog = await screen.findByRole("alertdialog");
+    await click(within(dialog).getByRole("button", { name: "Cancel" }));
+    assert.deepEqual(writes, []);
+  });
+});
+
 describe("a console on no screen", () => {
   test("its card's menu has Show in the sidebar, and it PATCHes the view", async () => {
     outputs = [{ id: "display-1", name: "Lobby TV", viewId: "wall-a" }];

@@ -8,8 +8,13 @@
 // operator had just made never appeared until they set it a second time in the
 // editor. Reported as having to click it in both places.
 //
-// Source text, because both handlers are closures over a query client inside a
-// hook, and what has to hold is that each one writes BOTH fields.
+// Source text, because the handler is a closure over a query client inside a
+// hook, and what has to hold is that it writes BOTH fields.
+//
+// One screen's role is the role route now, and the server writes the view's kind
+// with it: see "turns a screen into a control surface and its view with it" in
+// main/services/screen-create-role.test.ts. The view card's handler below still
+// writes both halves itself.
 
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
@@ -17,25 +22,6 @@ import { describe, test } from "node:test";
 // The cut is shared with surface-swap-order.test.ts — see the module for why one
 // rule rather than the two that had drifted apart.
 import { handlerBody, handlerBodyRaw } from "./settings-handler-source.js";
-
-describe("setting a screen to a control surface", () => {
-  const src = handlerBody("handleSetOutputMode");
-
-  test("also sets the view it shows, or the rail never lists it", () => {
-    assert.match(src, /views:setSurface/, "the view's surface is never written");
-  });
-
-  test("picks the surface from the mode rather than hard-coding one", () => {
-    // Both directions: panel -> console, and back to a wall screen again.
-    assert.match(src, /"panel"[\s\S]*?"console"[\s\S]*?"display"/);
-  });
-
-  test("does nothing further when the first write was refused", () => {
-    // writeState answers false on failure. Carrying on would change one half of
-    // the pair for a change the server had already rejected.
-    assert.match(src, /if \(!\(await writeState\(/);
-  });
-});
 
 describe("setting a view to a control surface", () => {
   const src = handlerBody("handleSetViewSurface");
@@ -71,18 +57,20 @@ describe("the cut these assertions run over", () => {
     //
     // The RAW cut for the boundary, because the blanked one has no comment left
     // to find and the question here is where the cut LANDS.
-    const raw = handlerBodyRaw("handleSetOutputMode");
+    // handleSetOutputRole is followed by a handler with a JSDoc, which is the
+    // boundary this checks.
+    const raw = handlerBodyRaw("handleSetOutputRole");
     assert.ok(
       !raw.includes("/**"),
       "the cut swallowed a block comment, so a sentence can satisfy an assertion about code",
     );
     assert.ok(
-      !raw.includes("async function handleSetViewSurface"),
+      !raw.includes("async function handleSetViewShowInSidebar"),
       "the cut ran into the next handler entirely",
     );
-    const src = handlerBody("handleSetOutputMode");
+    const src = handlerBody("handleSetOutputRole");
     assert.doesNotMatch(src, /\/\/|\/\*/, "a comment survived into the text the assertions read");
     // And it did not cut so early that there is nothing left to assert on.
-    assert.match(src, /outputs:setMode/);
+    assert.match(src, /outputs:setRole/);
   });
 });
