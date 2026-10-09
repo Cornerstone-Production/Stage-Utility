@@ -72,23 +72,18 @@ enum CEFTermination {
   }
 }
 
-/// A display output's page: a CEF browser drawing in a view, inside the output's
-/// window. Chromium takes clicks, touches, scrolling and typing itself, so a display
-/// output can be a control surface.
-///
-/// The browser is made on the first load, when the view is already in its window:
-/// a windowed CEF browser is a child of a view that has one.
+/// What every CEF page shares, windowed or not: the browser, its callbacks routed
+/// to a `SurfaceLoader`, and the loader's events passed on. A subclass makes the
+/// browser and says how to send it to an address (`navigate`).
 @MainActor
-final class CEFWindowedSurface: WebSurface {
-  private let api: UnsafePointer<su_cef_api>
-  private let container: NSView
-  private let loader: SurfaceLoader
-  private let events = BrowserEvents()
-  private let label: String
-  private var browser: OpaquePointer?
+class CEFPage {
+  let api: UnsafePointer<su_cef_api>
+  let label: String
+  let loader: SurfaceLoader
+  let events = BrowserEvents()
+  /// The browser, once made; freed in `stop`.
+  var browser: OpaquePointer?
 
-  var hostView: NSView { container }
-  var problems: [String] { [] }
   var onLoadResult: (@MainActor (Int) -> Void)? {
     get { loader.onLoadResult }
     set { loader.onLoadResult = newValue }
@@ -102,23 +97,56 @@ final class CEFWindowedSurface: WebSurface {
     set { loader.onProcessGone = newValue }
   }
 
-  init(api: UnsafePointer<su_cef_api>, label: String, size: CGSize) {
+  init(api: UnsafePointer<su_cef_api>, label: String) {
     self.api = api
     self.label = label
+    var forward: ((URL) -> Void)?
+    loader = SurfaceLoader(label: label) { url in forward?(url) }
+    events.drive(loader, label: label)
+    forward = { [weak self] url in self?.navigate(url) }
+  }
+
+  /// Send the browser to `url`. The loader calls this for every load and reload.
+  func navigate(_ url: URL) {
+    guard let browser else { return }
+    api.pointee.load!(browser, url.absoluteString)
+  }
+
+  func load(_ url: URL) { loader.show(url) }
+  func reload() { loader.reload() }
+
+  func stop() {
+    loader.stop()
+    if let browser { api.pointee.close!(browser) }
+    browser = nil
+  }
+}
+
+/// A display output's page: a CEF browser drawing in a view, inside the output's
+/// window. Chromium takes clicks, touches, scrolling and typing itself, so a display
+/// output can be a control surface.
+///
+/// The browser is made on the first load, when the view is already in its window:
+/// a windowed CEF browser is a child of a view that has one.
+@MainActor
+final class CEFWindowedSurface: CEFPage, WebSurface {
+  private let container: NSView
+
+  var hostView: NSView { container }
+  var problems: [String] { [] }
+
+  init(api: UnsafePointer<su_cef_api>, label: String, size: CGSize) {
     container = NSView(frame: NSRect(origin: .zero, size: size))
     container.wantsLayer = true
     // Black while a page loads or the server is away, not white.
     container.layer?.backgroundColor = NSColor.black.cgColor
     container.autoresizingMask = [.width, .height]
-    var navigate: ((URL) -> Void)?
-    loader = SurfaceLoader(label: label) { url in navigate?(url) }
-    events.drive(loader, label: label)
-    navigate = { [weak self] url in self?.navigate(url) }
+    super.init(api: api, label: label)
   }
 
-  private func navigate(_ url: URL) {
-    if let browser {
-      api.pointee.load!(browser, url.absoluteString)
+  override func navigate(_ url: URL) {
+    if browser != nil {
+      super.navigate(url)
       return
     }
     var table = events.table
@@ -133,15 +161,6 @@ final class CEFWindowedSurface: WebSurface {
       view.frame = container.bounds
       view.autoresizingMask = [.width, .height]
     }
-  }
-
-  func load(_ url: URL) { loader.show(url) }
-  func reload() { loader.reload() }
-
-  func stop() {
-    loader.stop()
-    if let browser { api.pointee.close!(browser) }
-    browser = nil
   }
 
   /// Through DevTools (Page.captureScreenshot), which draws the page as the
