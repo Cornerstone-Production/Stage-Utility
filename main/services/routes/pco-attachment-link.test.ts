@@ -21,6 +21,7 @@ const { proxyRoutes } = await import("./proxy-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { stageController } = await import("../stage-controller.js");
 const { pcoService } = await import("../pco-service.js");
+const { attachmentEtag, attachmentVersion } = await import("../pco-attachment-cache.js");
 
 after(() => {
   fs.rmSync(DIR, { recursive: true, force: true });
@@ -163,5 +164,16 @@ describe("/api/pco/attachment and a file that changes", () => {
     assert.equal(r.body, "second upload", "the replaced file was served from the old bytes or the old link");
     assert.notEqual(r.headers["ETag"], oldTag);
     assert.equal(seen.opens, 2, "a replaced file reused the old file's signed link");
+  });
+
+  test("a 304 is answered before anything is downloaded, with nothing on disk", async (t) => {
+    // The test above warms the disk first, so it cannot tell a 304 sent before the
+    // download from one sent after it. Here the id and version have never been fetched.
+    const { att, seen } = setup(t, "84892472-stage");
+    const etag = attachmentEtag(att.id, attachmentVersion(att.updatedAt, att.fileSizeBytes));
+    const r = await get(etag);
+    assert.equal(r.status, 304);
+    assert.equal(seen.downloads, 0, "a 304 downloaded the file first");
+    assert.equal(seen.opens, 0, "a 304 opened a signed link first");
   });
 });
