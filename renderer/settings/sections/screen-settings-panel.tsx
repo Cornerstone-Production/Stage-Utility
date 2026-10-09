@@ -638,6 +638,9 @@ function OutputDeviceSection({ output, device, online, health, reported, actions
         <Stat value={health ? `${health.repeated.toFixed(1)}%` : "—"} label="repeated" />
         <Stat value={health ? String(health.dropped) : "—"} label="dropped by the card" />
       </div>
+      {device.output.kind === "decklink" && health?.latencyMs !== undefined && (
+        <p className="mt-2 text-caption1 text-fg-muted">Latency {Math.round(health.latencyMs)} ms (render to air)</p>
+      )}
       {health?.struggling && (
         <p role="status" className="mt-2 text-caption1 text-warn-11">
           This output is dropping frames or running late.

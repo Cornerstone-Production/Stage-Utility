@@ -16,6 +16,11 @@ export interface OutputHealthReport {
    *  clock. Shown nowhere and trusted for nothing: the server dates a report by
    *  when it arrived. */
   at: number;
+  /** Milliseconds from the page being drawn to the picture leaving the card, as
+   *  the helper measured it. Absent until the helper has a measurement; a DeckLink
+   *  output's only. Not part of the struggle rule: a long latency is a fact about
+   *  the card and its mode, not a fault. */
+  latencyMs?: number;
 }
 
 /** What Screens is shown for one output. */

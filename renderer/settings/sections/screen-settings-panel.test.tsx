@@ -640,6 +640,26 @@ describe("the device of a Mac output helper", () => {
     assert.equal(screen.queryByText("No report from the helper yet.") !== null, false, "it is on screen");
   });
 
+  test("shows a DeckLink output's latency, to the millisecond, with what it measures", async () => {
+    await open(SDI, { health: [{ ...HEALTH, latencyMs: 20.4 }] });
+    assert.ok(screen.getByText("Latency 20 ms (render to air)"));
+  });
+
+  test("shows no latency line when the report carried none", async () => {
+    await open(SDI, { health: [HEALTH] });
+    assert.equal(screen.queryByText(/Latency/) !== null, false, "a latency line is on screen with no latency");
+  });
+
+  test("shows no latency line when nothing has been reported", async () => {
+    await open(SDI);
+    assert.equal(screen.queryByText(/Latency/) !== null, false, "a latency line is on screen with no report");
+  });
+
+  test("a display output shows no latency, whatever it reports", async () => {
+    await open(HDMI, { health: [{ ...HEALTH, latencyMs: 20 }] });
+    assert.equal(screen.queryByText(/Latency/) !== null, false, "a display shows a DeckLink figure");
+  });
+
   test("a display output at 0 fps shows a dash: its display link sleeps with the display", async () => {
     await open(HDMI, { health: [{ ...HEALTH, fps: 0 }] });
     const stats = within(screen.getByRole("group", { name: "Output health" }));

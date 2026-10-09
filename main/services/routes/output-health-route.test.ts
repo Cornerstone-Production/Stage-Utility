@@ -101,9 +101,52 @@ describe("what it refuses to record", () => {
     assert.deepEqual(healthList(), []);
   });
 
+  it("a latencyMs that is not a number from 0 to 10000: 400 naming it, and nothing is recorded", async () => {
+    for (const latencyMs of [-5, 10_001, "20", true]) {
+      const r = await post(ID, { ...REPORT, latencyMs }, { token: SECRET });
+      assert.equal(r.status, 400, JSON.stringify(latencyMs));
+      assert.match(((r.json as { error?: string }) ?? {}).error ?? "", /latencyMs/);
+    }
+    assert.deepEqual(healthList(), [], "a report with a bad latency was recorded");
+  });
+
   it("a path whose id is not valid percent-encoding: 400, not a crash", async () => {
     const r = await callRoute(kioskDeviceRoutes, "/api/devices/%E0%A4%A/health", { method: "POST", body: REPORT });
     assert.equal(r.status, 400);
+  });
+});
+
+describe("latencyMs", () => {
+  it("is stored with the reading, and listed by GET /api/devices", async () => {
+    const r = await post(ID, { ...REPORT, latencyMs: 20.5 }, { token: SECRET });
+    assert.equal(r.status, 200);
+    assert.deepEqual(healthList().map((h) => h.latencyMs), [20.5]);
+    const listed = (await callRoute(kioskDeviceRoutes, "/api/devices")).json as { health: { latencyMs?: number }[] };
+    assert.deepEqual(listed.health.map((h) => h.latencyMs), [20.5]);
+  });
+
+  it("stays absent when the report carries none, or null", async () => {
+    for (const body of [REPORT, { ...REPORT, latencyMs: null }]) {
+      resetKioskPresence();
+      const r = await post(ID, body, { token: SECRET });
+      assert.equal(r.status, 200);
+      assert.equal("latencyMs" in healthList()[0], false, "an unmeasured latency appeared on the reading");
+    }
+  });
+
+  it("a latency that moves a whole millisecond is broadcast, a steady one is not", async () => {
+    await post(ID, { ...REPORT, latencyMs: 20 }, { token: SECRET });
+    assert.equal(sent.length, 1);
+    await post(ID, { ...REPORT, latencyMs: 20.3, at: REPORT.at + 10_000 }, { token: SECRET });
+    assert.equal(sent.length, 1, "a steady latency broadcast on every report");
+    await post(ID, { ...REPORT, latencyMs: 25, at: REPORT.at + 20_000 }, { token: SECRET });
+    assert.equal(sent.length, 2, "a changed latency never reached Screens");
+    assert.deepEqual(sent[1].payload.health?.map((h) => (h as { latencyMs?: number }).latencyMs), [25]);
+  });
+
+  it("does not make an output struggle, however long", async () => {
+    for (let i = 0; i < 6; i++) await post(ID, { ...REPORT, latencyMs: 9_000, at: REPORT.at + i }, { token: SECRET });
+    assert.deepEqual(healthList().map((h) => h.struggling), [false]);
   });
 });
 

@@ -23,6 +23,8 @@ export const REPEATED_BAD_PERCENT = 5;
 export const STREAK = 3;
 
 const MAX_FPS = 1_000;
+/** Ten seconds is far past any real render-to-air figure; past it, the helper is wrong. */
+const MAX_LATENCY_MS = 10_000;
 const MAX_DROPPED = 1_000_000_000_000;
 
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -43,7 +45,15 @@ export function parseHealthReport(body: unknown): { report: OutputHealthReport }
     return { error: "dropped must be a whole number of frames, 0 or more" };
   }
   if (!finite(o.at) || o.at < 0) return { error: "at must be a time in ms since the epoch" };
-  return { report: { fps: o.fps, repeated: o.repeated, dropped: o.dropped, at: o.at } };
+  const report: OutputHealthReport = { fps: o.fps, repeated: o.repeated, dropped: o.dropped, at: o.at };
+  // Optional, and null reads as absent: the helper sends null until it has measured one.
+  if (o.latencyMs !== undefined && o.latencyMs !== null) {
+    if (!finite(o.latencyMs) || o.latencyMs < 0 || o.latencyMs > MAX_LATENCY_MS) {
+      return { error: `latencyMs must be a number of milliseconds from 0 to ${MAX_LATENCY_MS}` };
+    }
+    report.latencyMs = o.latencyMs;
+  }
+  return { report };
 }
 
 /** What is remembered between two reports to judge the second. */
@@ -93,6 +103,8 @@ export function judge(trend: HealthTrend, report: OutputHealthReport, kind: Devi
 /** The figures a person sees, to the precision they see them at. Two reports that
  *  round to the same thing are the same news: a healthy 59.94 that reads 59.93
  *  next time must not wake every open Screens page. */
-export function displaySignature(h: { fps: number; repeated: number; dropped: number; struggling: boolean }): string {
-  return JSON.stringify([Math.round(h.fps * 10) / 10, Math.round(h.repeated * 10) / 10, h.dropped, h.struggling]);
+export function displaySignature(h: { fps: number; repeated: number; dropped: number; struggling: boolean; latencyMs?: number }): string {
+  // Latency is shown in whole milliseconds, null when absent.
+  const latency = h.latencyMs === undefined ? null : Math.round(h.latencyMs);
+  return JSON.stringify([Math.round(h.fps * 10) / 10, Math.round(h.repeated * 10) / 10, h.dropped, h.struggling, latency]);
 }

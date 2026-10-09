@@ -15,6 +15,28 @@ describe("a health report off the wire", () => {
     assert.deepEqual(parseHealthReport(ok()), { report: ok() });
   });
 
+  it("takes latencyMs when it is a number of milliseconds from 0 to 10000", () => {
+    for (const latencyMs of [0, 20.4, 10_000]) {
+      assert.deepEqual(parseHealthReport(ok({ latencyMs })), { report: ok({ latencyMs }) }, String(latencyMs));
+    }
+  });
+
+  it("leaves latencyMs absent when the helper sent none, or null", () => {
+    for (const body of [ok(), { ...ok(), latencyMs: null }, { ...ok(), latencyMs: undefined }]) {
+      const r = parseHealthReport(body);
+      assert.ok("report" in r);
+      assert.equal("latencyMs" in r.report, false, "an unmeasured latency was stored as a key");
+    }
+  });
+
+  it("refuses a latencyMs that is not a number from 0 to 10000, naming the field", () => {
+    for (const latencyMs of [-1, 10_001, Infinity, NaN, "20", true, [20], {}]) {
+      const r = parseHealthReport({ ...ok(), latencyMs });
+      assert.ok("error" in r, JSON.stringify(latencyMs));
+      assert.match(r.error, /latencyMs/);
+    }
+  });
+
   it("is refused when any one field is not what it says", () => {
     const bad: [string, unknown][] = [
       ["not an object", "59.94"],
@@ -130,9 +152,14 @@ describe("what a person reads of a report", () => {
     assert.equal(displaySignature(h()), displaySignature(h({ fps: 59.93, repeated: 0.21 })));
   });
 
+  it("does not change for a latency that rounds to the same millisecond, and does when it moves one", () => {
+    assert.equal(displaySignature(h({ latencyMs: 20.2 })), displaySignature(h({ latencyMs: 19.9 })));
+    assert.notEqual(displaySignature(h({ latencyMs: 20 })), displaySignature(h({ latencyMs: 22 })));
+  });
+
   it("changes for each figure that is shown", () => {
     const base = displaySignature(h());
-    for (const over of [{ fps: 30 }, { repeated: 4 }, { dropped: 1 }, { struggling: true }]) {
+    for (const over of [{ fps: 30 }, { repeated: 4 }, { dropped: 1 }, { struggling: true }, { latencyMs: 20 }]) {
       assert.notEqual(displaySignature(h(over)), base, JSON.stringify(over));
     }
   });

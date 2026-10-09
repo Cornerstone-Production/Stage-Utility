@@ -220,9 +220,11 @@ DeckLink ports yet, so Format is saved but nothing sends it. See the
 **Health.** Each output reports every ten seconds, authenticated by the device's
 own secret, and the server keeps the latest in memory only. It is shown with the
 screen: frames per second, the percent of frames repeated because the page was
-late, and the frames the card has dropped. Three reports running with frames
-dropped or 5% or more repeated mark a DeckLink output **struggling**, and three
-clean ones in a row clear it. A display output is never marked: its rate comes
+late, and the frames the card has dropped. A DeckLink output that has measured it
+also shows its **latency**, in milliseconds from render to air; the line is absent
+until the helper reports one. Latency is information only and does not count
+towards *struggling*. Three reports running with frames dropped or 5% or more
+repeated mark a DeckLink output **struggling**, and three clean ones in a row clear it. A display output is never marked: its rate comes
 from the display link, which stops while the display sleeps or the screen is
 locked, so it can report 0 fps while healthy, and Screens shows that as a dash. A
 struggling output also puts a warning on its screen's card, under the preview: the
