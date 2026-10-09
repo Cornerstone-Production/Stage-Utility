@@ -5,7 +5,7 @@
 // SD card holds no display number and the server decides what a screen shows.
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
-import { kioskDevicesStore, authorise, claim, release, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
+import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
 import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen } from "../kiosk-presence.js";
 import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
 import { holdingScreen } from "../kiosk-holding-screen.js";
@@ -147,6 +147,10 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/devices/claim") {
+    const alreadyBound = (on: string) => {
+      const screen = stageController.getOutputs().find((o) => o.id === on);
+      return `This device was set up as "${screen?.name ?? on}" meanwhile, so it is not made a new screen. Release it from that screen first.`;
+    };
     const body = (await readBody(req)) as Record<string, unknown>;
     const id = typeof body.deviceId === "string" ? body.deviceId : "";
     let outputId = typeof body.outputId === "string" ? body.outputId : "";
@@ -172,6 +176,17 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     // nothing created.
     let input: CreateScreenInput | null = null;
     if (!outputId) {
+      // A device that is already bound is not waiting, so it is not set up as a
+      // new screen: the panel offering that was opened on a device another
+      // operator has bound since, and a new screen would silently take it from
+      // the screen it shows. Moving it is the operator naming the screen
+      // (`outputId`), which stays allowed. Nothing else sends a claim without
+      // one: the Screens page lists only devices that are not bound here.
+      const already = findById(await kioskDevicesStore.load(), id);
+      if (already) {
+        error(res, alreadyBound(already.outputId), 409);
+        return;
+      }
       const read = readCreateScreenBody(body);
       if ("error" in read) {
         error(res, read.error);
@@ -192,6 +207,11 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     let displacedId: string | null = null;
     const bind = (target: string) =>
       updateDevices((current) => {
+        // Checked again inside the write, for a binding that landed while the
+        // screen was being made. Throwing here fails createScreen's last step,
+        // which takes the new screen back.
+        const bound = input ? findById(current, id) : undefined;
+        if (bound) throw new Error(alreadyBound(bound.outputId));
         const { devices, displaced } = claim(current, id, target, {
           secret: secretFor(id),
           macs: seen?.macs, hostname: seen?.hostname, os: seen?.os, ip: seen?.ip,

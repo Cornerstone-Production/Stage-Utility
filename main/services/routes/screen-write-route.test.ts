@@ -240,6 +240,34 @@ describe("POST /api/devices/claim — a new screen", () => {
     assert.equal((await kioskDevicesStore.load()).length, 0);
   });
 
+  it("refuses a device that is already bound, rather than moving it to a new screen", async () => {
+    // Set up as a new screen is offered for a device that is waiting. If another
+    // operator bound it meanwhile, a new screen must not silently take it away.
+    recordSeen(device);
+    assert.equal((await claim({ outputId: "display-1" })).status, 200);
+    const count = outputs().length;
+    const r = await claim({ name: "Wing" });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    assert.match((r.json as { error: string }).error, /Lobby TV/, "must name the screen it is on");
+    assert.equal(outputs().length, count, "a screen was made");
+    assert.equal((await kioskDevicesStore.load()).find((d) => d.id === device.id)?.outputId, "display-1", "the device was moved");
+  });
+
+  it("two operators setting the same device up at once make one screen, not two", async () => {
+    recordSeen(device);
+    const count = outputs().length;
+    const answers = await Promise.all([claim({ name: "Wing A" }), claim({ name: "Wing B" })]);
+    assert.deepEqual(answers.map((r) => r.status).sort(), [200, 500], JSON.stringify(answers.map((r) => r.json)));
+    assert.equal(outputs().length, count + 1, "the losing claim left an empty screen behind");
+  });
+
+  it("still moves a bound device when the operator names the screen", async () => {
+    recordSeen(device);
+    await claim({ outputId: "display-1" });
+    assert.equal((await claim({ outputId: "display-2" })).status, 200);
+    assert.equal((await kioskDevicesStore.load()).find((d) => d.id === device.id)?.outputId, "display-2");
+  });
+
   it("refuses creation fields alongside an existing screen to take over", async () => {
     recordSeen(device);
     const r = await claim({ outputId: "display-1", mode: "panel" });
