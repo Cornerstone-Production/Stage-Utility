@@ -32,6 +32,16 @@ dotted integers, so it is the part before any `-` (`1.26.0` for `1.26.0-beta.4`)
 bundle id is `com.stageutility.output`, and it is an agent app (`LSUIElement`): a menu
 bar icon, no Dock icon.
 
+### The CEF download
+
+The helper renders with Chromium through the Chromium Embedded Framework (CEF). The
+CEF version is pinned in `cef.json`, with the download URL, size, SHA-1 (from CEF's
+index) and SHA-256 for each architecture. `./fetch-cef.sh [arm64|x86_64]` downloads the
+"minimal" distribution (about 135 MB) into `.cef/downloads/`, checks both checksums,
+and unpacks it beside them (about 800 MB). A mismatch deletes the download and fails;
+an archive already in the cache is checked again before it is unpacked. `.cef/` is
+gitignored, and no CEF binary is ever committed.
+
 To try it without touching the real settings, point both state directories at a
 scratch folder and open the window:
 
