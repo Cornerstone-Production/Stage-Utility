@@ -158,10 +158,20 @@ Ross Ultritouch panel has its own presets and a starter; see
 
 **Reaching one.** Every console gets its own row in the sidebar, at
 `/consoles/<view id>`, and the console's own name heads the page. Renaming the
-view in Screens renames both. That row is absent until a console exists. A console can
+view in Screens renames both. That row is absent until a console exists, and for a console
+kept out of the sidebar (below). A console can
 also drive a physical screen, but only one whose mode is set to **panel**; the
 server refuses a console view on a screen left in display mode, so a wall cannot
 end up rendering a live button by accident.
+
+**Keeping one out of the sidebar.** A console can be kept out of the sidebar's
+list. That suits a console that lives on a stage display as a control surface and
+has no business being a place the operator works from. It is a setting on the
+view, `showInSidebar`, and a console with none is listed — so every console you
+had before it existed still is. Only the *list* changes. A console kept out of it
+keeps its live controls on every screen showing it, still opens at
+`/consoles/<view id>` with its name in the header, and the **Open** link on the
+Screens card of a screen showing it still opens that screen.
 
 **Its icon.** Right-click the glyph in that sidebar row — or tap and hold it — to
 pick another one, or focus the row and press **Shift+F10** (or the ContextMenu

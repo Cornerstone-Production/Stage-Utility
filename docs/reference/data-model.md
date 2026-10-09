@@ -56,6 +56,12 @@ opens it, and it is carried by a duplicate and by an exported view bundle. It is
 a different thing from a screen's **Hide top bar**, which is per screen and hides
 the *display's* bar in a different page altogether.
 
+A console can also be kept out of the operator app's sidebar. The flag is
+`showInSidebar`, absent meaning listed, and it changes only the list: the console
+keeps its live controls, its page at `/consoles/<view id>` and its title, and the
+**Open** link on a screen's card still opens that screen. It is stored on the view and travels the
+same way the chrome flag does, in a duplicate and in an exported view bundle.
+
 ### Home
 
 Home is a view too, but a deliberately odd one. It stores which widgets the front
