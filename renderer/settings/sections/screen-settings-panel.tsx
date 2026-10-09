@@ -149,14 +149,27 @@ function FieldLabel({ htmlFor, children }: { htmlFor: string; children: ReactNod
   );
 }
 
-/** A setting that is a switch: its name and what it does, and the switch. */
-function SwitchRow({
-  label,
-  help,
-  checked,
-  onChange,
-  disabled,
-}: {
+/** One setting: its name and what it does, and the control beside them.
+ *  `htmlFor` makes the name the label of a control carrying that id; a control
+ *  with no id (a Switch, the NumberInput) names itself with aria-label. */
+function SettingRow({ label, help, htmlFor, children }: { label: string; help: string; htmlFor?: string; children: ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3 py-1.5">
+      <div className="min-w-0">
+        {htmlFor ? (
+          <label htmlFor={htmlFor} className="block text-footnote font-medium text-fg">{label}</label>
+        ) : (
+          <div className="text-footnote font-medium text-fg">{label}</div>
+        )}
+        <div className="mt-px text-caption1 text-fg-subtle">{help}</div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** A setting that is a switch. */
+function SwitchRow({ label, help, checked, onChange, disabled }: {
   label: string;
   help: string;
   checked: boolean;
@@ -164,13 +177,62 @@ function SwitchRow({
   disabled?: boolean;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 py-1.5">
-      <div className="min-w-0">
-        <div className="text-footnote font-medium text-fg">{label}</div>
-        <div className="mt-px text-caption1 text-fg-subtle">{help}</div>
-      </div>
+    <SettingRow label={label} help={help}>
       <Switch checked={checked} onCheckedChange={onChange} disabled={disabled} aria-label={label} className="mt-0.5" />
-    </div>
+    </SettingRow>
+  );
+}
+
+/** The screen's name, as both modes draw it. `onCommit`, when given, runs as the
+ *  field is left, and Enter leaves it. */
+function NameInput({ id, value, onChange, onCommit, placeholder }: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  onCommit?: () => void;
+  placeholder?: string;
+}) {
+  return (
+    <>
+      <FieldLabel htmlFor={id}>Name</FieldLabel>
+      <Input
+        id={id}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+        onBlur={onCommit}
+        onKeyDown={onCommit ? (e) => { if (e.key === "Enter") e.currentTarget.blur(); } : undefined}
+        className="h-8 w-full"
+      />
+    </>
+  );
+}
+
+/** The friendly-link field, as both modes draw it: the base address over the
+ *  field. When it is saved is the caller's; `children` sits beside the field. */
+function SlugInput({ id, baseUrl, value, onChange, children }: {
+  id: string;
+  baseUrl: string;
+  value: string;
+  onChange: (v: string) => void;
+  children?: ReactNode;
+}) {
+  return (
+    <>
+      <FieldLabel htmlFor={id}>Friendly link — optional</FieldLabel>
+      <span className="mb-1 block truncate font-mono text-caption2 text-fg-faint">{baseUrl}/</span>
+      <div className="flex gap-2">
+        <Input
+          id={id}
+          value={value}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+          placeholder="optional"
+          autoComplete="off"
+          className="h-8 min-w-0 flex-1 font-mono text-caption1"
+        />
+        {children}
+      </div>
+    </>
   );
 }
 
@@ -297,23 +359,13 @@ function SlugField({
 
   return (
     <form onSubmit={(e) => void save(e)}>
-      <FieldLabel htmlFor="screen-slug">Friendly link — optional</FieldLabel>
-      <span className="mb-1 block truncate font-mono text-caption2 text-fg-faint">{baseUrl}/</span>
-      <div className="flex gap-2">
-        <Input
-          id="screen-slug"
-          value={value}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setValue(e.target.value)}
-          placeholder="optional"
-          autoComplete="off"
-          className="h-8 min-w-0 flex-1 font-mono text-caption1"
-        />
+      <SlugInput id="screen-slug" baseUrl={baseUrl} value={value} onChange={setValue}>
         {next !== slug && (
           <Button type="submit" variant="accent" size="small" disabled={busy} className="h-8">
             Save
           </Button>
         )}
-      </div>
+      </SlugInput>
       {error && <ErrorNote className="mt-2">{error}</ErrorNote>}
     </form>
   );
@@ -524,20 +576,19 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
   const conflict = waiting ? roleChangeConflict(output, outputs, views, waiting) : null;
 
   async function chooseRole(next: OutputMode) {
-    if (next === role && pending === null) return;
-    if (next === role) { setPending(null); return; }
+    // Whatever was waiting is replaced by this choice, or dropped by choosing
+    // the role the screen already has.
+    setPending(null);
+    if (next === role) return;
     const asks = roleChangeConflict(output, outputs, views, next);
     if (asks) {
+      // A copy when one can take the role (the default), else a different view.
       setPending(next);
-      // A copy when one can take the role, the default; otherwise a different
-      // view is the only way.
       setChoice(asks.copyName === null ? "pick" : "copy");
       setPicked("");
       return;
     }
-    setPending(null);
-    if (!(await confirmRole(output.name, next))) return;
-    await actions.onSetRole(output.id, next, {});
+    if (await confirmRole(output.name, next)) await actions.onSetRole(output.id, next, {});
   }
 
   async function applyPending() {
@@ -614,15 +665,7 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
       </Section>
 
       <Section title="Name and address">
-        <FieldLabel htmlFor="screen-name">Name</FieldLabel>
-        <Input
-          id="screen-name"
-          value={name}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-          onBlur={commitName}
-          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-          className="h-8 w-full"
-        />
+        <NameInput id="screen-name" value={name} onChange={setName} onCommit={commitName} />
         <SlugField slug={output.slug ?? ""} baseUrl={baseUrl} onSave={(s) => actions.onSetSlug(output.id, s)} />
         <div className="mt-1.5 flex items-start gap-1.5">
           <p className="min-w-0 flex-1 break-all font-mono text-caption1 text-fg-muted">
@@ -653,26 +696,22 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
             the QR and leaves the rest. Neither is offered on a screen with no bar
             — "Lock display" once shipped as a no-op on a calendar wall. */}
         {drawsTopBar && (
-          <SwitchRow
-            label="Top bar"
-            help="The brand, plan and QR strip along the top."
-            checked={!output.hideTopBar}
-            onChange={(on) => actions.onSetHideTopBar(output.id, !on)}
-          />
+          <>
+            <SwitchRow
+              label="Top bar"
+              help="The brand, plan and QR strip along the top."
+              checked={!output.hideTopBar}
+              onChange={(on) => actions.onSetHideTopBar(output.id, !on)}
+            />
+            <SwitchRow
+              label="Lock"
+              help="Keeps the top bar but removes its links, so the screen cannot be navigated away from."
+              checked={output.locked ?? false}
+              onChange={(on) => actions.onSetLocked(output.id, on)}
+            />
+          </>
         )}
-        {drawsTopBar && (
-          <SwitchRow
-            label="Lock"
-            help="Keeps the top bar but removes its links, so the screen cannot be navigated away from."
-            checked={output.locked ?? false}
-            onChange={(on) => actions.onSetLocked(output.id, on)}
-          />
-        )}
-        <div className="flex items-start justify-between gap-3 py-1.5">
-          <div className="min-w-0">
-            <label htmlFor="screen-text-size" className="block text-footnote font-medium text-fg">Text size</label>
-            <div className="mt-px text-caption1 text-fg-subtle">For ServiceCue and readouts on this screen.</div>
-          </div>
+        <SettingRow label="Text size" help="For ServiceCue and readouts on this screen.">
           {/* Held in a draft and written when settled (a blur or a stepper press),
               not on every keystroke: typing 150 passes through 1 and 15, which
               clamp to 50, and each would be sent to a live wall. */}
@@ -690,7 +729,7 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
               actions.onSetTextSize(output.id, v);
             }}
           />
-        </div>
+        </SettingRow>
       </Section>
 
       <Section title="Messages">
@@ -813,25 +852,10 @@ function GuidedBody({ target, outputs, views, baseUrl, step, setStep, actions, o
         )}
         {step === 3 && (
           <Section title="Name and address">
-            <FieldLabel htmlFor="new-screen-name">Name</FieldLabel>
-            <Input
-              id="new-screen-name"
-              value={name}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-              // Left empty, the server names it from the id it is given.
-              placeholder="Left empty: Display and its number"
-              className="h-8 w-full"
-            />
-            <FieldLabel htmlFor="new-screen-slug">Friendly link — optional</FieldLabel>
-            <span className="mb-1 block truncate font-mono text-caption2 text-fg-faint">{baseUrl}/</span>
-            <Input
-              id="new-screen-slug"
-              value={slug}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setSlug(e.target.value)}
-              placeholder="optional"
-              autoComplete="off"
-              className="h-8 w-full font-mono text-caption1"
-            />
+            {/* Left empty, the server names it from the id it is given. */}
+            <NameInput id="new-screen-name" value={name} onChange={setName} placeholder="Left empty: Display and its number" />
+            {/* Sent with Create screen, so it has no Save of its own. */}
+            <SlugInput id="new-screen-slug" baseUrl={baseUrl} value={slug} onChange={setSlug} />
           </Section>
         )}
         {takenBy !== null && (
