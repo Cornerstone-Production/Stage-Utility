@@ -1,7 +1,13 @@
 // Caches PCO plan attachments to disk under userData/cache/attachments/, keyed by
-// the attachment id (immutable per upload). PCO only hands out short-lived S3
-// links, so we download once on first request and reuse the file for every kiosk
-// display — and for every week the same plan is loaded.
+// the attachment id AND the file's version (see attachmentVersion). PCO only hands
+// out short-lived S3 links, so we download once on first request and reuse the
+// file for every kiosk display — and for every week the same plan is loaded.
+//
+// The version is there because it is not known that Planning Center gives a
+// re-uploaded file a new id. Keyed by id alone, a stage plot replaced on the same
+// plan would be served from the old bytes for as long as the file stayed on disk.
+// With the version in the name a replaced file is a different file, downloaded
+// fresh, and the older versions of that id are removed once it is written.
 //
 // Two things a cache miss has to survive, both measured on a live server:
 //   * The signed link dies before we expect it to. Measured 2026-09-03 against a
@@ -20,6 +26,7 @@ import * as path from "path";
 import { getUserDataPath } from "./app-paths.js";
 import { pruneCacheDir } from "./cache-prune.js";
 import { errorMessage } from "./errors.js";
+import { plural } from "./plural.js";
 import { OutageLog } from "./repeat-log.js";
 import { scrub } from "./scrub.js";
 import { atomicWrite } from "./write-queue.js";
@@ -75,6 +82,41 @@ export function mimeForExt(ext: string): string {
 type CachedFile = { path: string; ext: string };
 
 /**
+ * What says a file under one attachment id has changed: Planning Center's
+ * `updated_at` as milliseconds, else the file size, else "" (nothing to tell
+ * versions apart by, so the id alone names the file). Only `[a-z0-9]`, so it is
+ * safe in a file name and in an ETag.
+ */
+export function attachmentVersion(updatedAt: string | null, fileSizeBytes: number | null): string {
+  if (updatedAt) {
+    const ms = Date.parse(updatedAt);
+    if (Number.isFinite(ms)) return `t${Math.trunc(ms)}`;
+  }
+  if (typeof fileSizeBytes === "number" && Number.isFinite(fileSizeBytes)) return `s${Math.trunc(fileSizeBytes)}`;
+  return "";
+}
+
+/** The ETag of one attachment at one version. Strong: the bytes for a given id
+ *  and version never change. */
+export function attachmentEtag(id: string, version: string): string {
+  return `"${safeName(id)}${version ? `.${safeName(version)}` : ""}"`;
+}
+
+/** Does an If-None-Match header name `etag`? Weak validators and `*` count. */
+export function etagMatches(header: string | string[] | undefined, etag: string): boolean {
+  if (header === undefined) return false;
+  const list = (Array.isArray(header) ? header.join(",") : header).split(",");
+  return list.some((t) => {
+    const v = t.trim();
+    return v === "*" || v.replace(/^W\//, "") === etag;
+  });
+}
+
+function safeName(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_-]/g, "");
+}
+
+/**
  * Attachments that will not download, said once per outage. A display asks again
  * for a file it could not get, so one refused or failing attachment used to write a
  * line, and for a thrown error a stack, for every request from every display.
@@ -99,12 +141,32 @@ function reportRecovered(id: string, filename: string): void {
 /** Downloads in flight, keyed by cache file path, so concurrent misses share one. */
 const inFlight = new Map<string, Promise<CachedFile | null>>();
 
+/** Delete every other cached version of one attachment id (`<safe>.…`), now that
+ *  the current one is complete. Returns how many it could not delete: they are
+ *  only disk space, and the age sweep takes them in the end. */
+async function removeOtherVersions(dir: string, safe: string, keep: string): Promise<number> {
+  if (!safe) return 0; // no id to prefix by: the prefix would be "." and match scratch files
+  let failed = 0;
+  for (const name of await fs.readdir(dir)) {
+    const full = path.join(dir, name);
+    if (full === keep || !name.startsWith(`${safe}.`)) continue;
+    try {
+      await fs.rm(full, { force: true });
+    } catch {
+      failed += 1;
+    }
+  }
+  return failed;
+}
+
 /** Write bytes to a private temp file, then rename onto `filePath` — readers only
  *  ever see a complete file, and two racing writers cannot interleave. */
 async function download(
   id: string,
   filename: string,
   filePath: string,
+  dir: string,
+  safe: string,
   ext: string,
   openUrl: (opts?: { fresh?: boolean }) => Promise<string>,
 ): Promise<CachedFile | null> {
@@ -122,13 +184,17 @@ async function download(
     return null;
   }
   await atomicWrite(filePath, Buffer.from(await resp.arrayBuffer()));
+  const failed = await removeOtherVersions(dir, safe, filePath);
+  if (failed > 0) {
+    console.warn(`[attachment-cache] could not remove ${plural(failed, "older copy", "older copies")} of "${scrub(filename)}"; the age sweep will`);
+  }
   reportRecovered(id, filename);
   return { path: filePath, ext };
 }
 
 /**
- * Return the cached file path + extension for an attachment, downloading it from
- * a freshly-opened PCO link on first request. `openUrl` is a thunk so we only pay
+ * Return the cached file path + extension for an attachment at `version`,
+ * downloading it from a freshly-opened PCO link on first request. `openUrl` is a thunk so we only pay
  * the `open` round-trip on a cache miss; called with `{ fresh: true }` it must
  * bypass any caller-side link cache. Returns null on download failure.
  */
@@ -137,12 +203,13 @@ export async function getAttachmentFile(
   contentType: string | null,
   filename: string,
   openUrl: (opts?: { fresh?: boolean }) => Promise<string>,
+  version = "",
 ): Promise<CachedFile | null> {
   try {
     const dir = await getCacheDir();
     const ext = extFor(contentType, filename);
-    const safe = id.replace(/[^a-zA-Z0-9_-]/g, "");
-    const filePath = path.join(dir, `${safe}.${ext}`);
+    const safe = safeName(id);
+    const filePath = path.join(dir, `${safe}${version ? `.${safeName(version)}` : ""}.${ext}`);
 
     try {
       await fs.access(filePath);
@@ -158,7 +225,7 @@ export async function getAttachmentFile(
     const existing = inFlight.get(filePath);
     if (existing) return await existing;
 
-    const job = download(id, filename, filePath, ext, openUrl).finally(() => inFlight.delete(filePath));
+    const job = download(id, filename, filePath, dir, safe, ext, openUrl).finally(() => inFlight.delete(filePath));
     inFlight.set(filePath, job);
     return await job;
   } catch (err) {

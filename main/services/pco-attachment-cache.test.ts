@@ -16,7 +16,7 @@ const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "attach-cache-"));
 process.env.STAGE_UTILITY_DATA = dataDir;
 
 // Imported only after the data dir is set — getUserDataPath() memoises on first call.
-const { getAttachmentFile } = await import("./pco-attachment-cache.js");
+const { attachmentEtag, attachmentVersion, etagMatches, getAttachmentFile } = await import("./pco-attachment-cache.js");
 
 const cacheDir = path.join(dataDir, "cache", "attachments");
 const realFetch = globalThis.fetch;
@@ -334,5 +334,76 @@ describe("attachment cache logging", () => {
     const said = out.logs.filter((l) => l.includes("downloading again"));
     assert.equal(said.length, 1, `expected one recovery line, got ${said.length}`);
     assert.match(said[0], /"plot\.pdf" \(attachment log-recover\) is downloading again/);
+  });
+});
+
+// Not known: whether Planning Center keeps an attachment's id when a stage plot is
+// re-uploaded. The cache is keyed by id AND version so that, if it does, the
+// replaced file is downloaded rather than served from the old bytes.
+describe("attachment cache and a replaced file", () => {
+  const open = async () => "https://example.invalid/signed";
+  const serve = (bytes: Buffer) => {
+    let fetches = 0;
+    globalThis.fetch = (async () => { fetches += 1; return resp(200, bytes); }) as typeof fetch;
+    return () => fetches;
+  };
+  const files = async (prefix: string) => (await fs.readdir(cacheDir)).filter((n) => n.startsWith(prefix)).sort();
+
+  test("the same id at a newer version is downloaded fresh, and the old version is removed", async (t) => {
+    t.after(() => { globalThis.fetch = realFetch; });
+    const v1 = attachmentVersion("2026-10-08T14:00:00Z", 10);
+    const v2 = attachmentVersion("2026-10-08T15:30:00Z", 12);
+    assert.notEqual(v1, v2);
+
+    const fetches = serve(Buffer.from("old plot"));
+    const first = await getAttachmentFile("rep-1", "application/pdf", "plot.pdf", open, v1);
+    assert.deepEqual(await fs.readFile(first!.path), Buffer.from("old plot"));
+    await getAttachmentFile("rep-1", "application/pdf", "plot.pdf", open, v1);
+    assert.equal(fetches(), 1, "the same version must be served from disk");
+
+    serve(Buffer.from("new plot"));
+    const second = await getAttachmentFile("rep-1", "application/pdf", "plot.pdf", open, v2);
+    assert.notEqual(second!.path, first!.path);
+    assert.deepEqual(await fs.readFile(second!.path), Buffer.from("new plot"), "a replaced file was served from the old bytes");
+    assert.deepEqual(await files("rep-1"), [path.basename(second!.path)], "the old version was left on disk");
+  });
+
+  test("removing old versions leaves other ids alone, including one that shares a prefix", async (t) => {
+    t.after(() => { globalThis.fetch = realFetch; });
+    serve(Buffer.from("x"));
+    await getAttachmentFile("pre-1", "application/pdf", "a.pdf", open, "t1");
+    await getAttachmentFile("pre-1-stage", "application/pdf", "b.pdf", open, "t1");
+    await getAttachmentFile("pre-12", "application/pdf", "c.pdf", open, "t1");
+    await getAttachmentFile("pre-1", "application/pdf", "a.pdf", open, "t2");
+    assert.deepEqual(await files("pre-1"), ["pre-1-stage.t1.pdf", "pre-1.t2.pdf", "pre-12.t1.pdf"]);
+  });
+
+  test("a version cannot put anything but a name in the file name", async (t) => {
+    t.after(() => { globalThis.fetch = realFetch; });
+    serve(Buffer.from("x"));
+    const file = await getAttachmentFile("safe-1", "application/pdf", "a.pdf", open, "../../x/..");
+    assert.equal(path.dirname(file!.path), cacheDir);
+  });
+
+  test("version: updated_at, else size, else nothing; only [a-z0-9]", () => {
+    assert.equal(attachmentVersion("2026-10-08T14:00:00Z", 10), `t${Date.parse("2026-10-08T14:00:00Z")}`);
+    assert.equal(attachmentVersion(null, 10), "s10");
+    assert.equal(attachmentVersion("not a date", 10), "s10");
+    assert.equal(attachmentVersion(null, null), "");
+    assert.match(attachmentVersion("2026-10-08T14:00:00.123Z", null), /^[a-z0-9]+$/);
+  });
+
+  test("etag names the id and version; If-None-Match matches it, a weak copy of it and *", () => {
+    const e = attachmentEtag("84892470-stage", "t1");
+    assert.equal(e, '"84892470-stage.t1"');
+    assert.equal(attachmentEtag("1", ""), '"1"');
+    assert.notEqual(attachmentEtag("1", "t1"), attachmentEtag("1", "t2"));
+    assert.equal(etagMatches(e, e), true);
+    assert.equal(etagMatches(`W/${e}`, e), true);
+    assert.equal(etagMatches(`"other", ${e}`, e), true);
+    assert.equal(etagMatches("*", e), true);
+    assert.equal(etagMatches('"84892470-stage.t0"', e), false);
+    assert.equal(etagMatches(undefined, e), false);
+    assert.equal(etagMatches("", e), false);
   });
 });

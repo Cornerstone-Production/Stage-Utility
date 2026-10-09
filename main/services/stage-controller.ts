@@ -1650,7 +1650,7 @@ export class StageController {
   /** Temporary download link for one of the active plan's attachments. */
   async openPlanAttachment(
     attachmentId: string,
-    opts?: { fresh?: boolean },
+    opts?: { fresh?: boolean; version?: string },
   ): Promise<{ url: string; contentType: string | null }> {
     if (!this.pcoAppId || !this.pcoSecret) throw new Error("Planning Center not configured");
     if (!this.state.serviceTypeId || !this.state.planId) throw new Error("No plan selected");

@@ -101,3 +101,67 @@ describe("/api/pco/attachment for the plan's stage plot", () => {
     );
   });
 });
+
+// A stage plot replaced on the same plan. The display revalidates what it is showing
+// with If-None-Match; an unchanged file is a 304 with no download, a changed one is
+// fetched fresh even though the attachment id is the same.
+describe("/api/pco/attachment and a file that changes", () => {
+  function setup(t: { after: (fn: () => void) => void }, id: string) {
+    const att = { id, filename: "Revisit Stage Plot.pdf", contentType: "application/pdf", sourceLabel: "Plan file", fileSizeBytes: 20, updatedAt: "2026-10-08T14:00:00Z" };
+    mock.method(stageController, "listPlanAttachments", async () => [att]);
+    mock.method(stageController, "openPlanAttachment", (id: string, opts?: { fresh?: boolean; version?: string }) =>
+      pcoService.openAttachment("app", "secret", "11", "21", id, opts),
+    );
+    pcoService.clearCache();
+    const seen = { opens: 0, downloads: 0, bytes: Buffer.from("first upload") };
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input).includes("/open")) {
+        seen.opens += 1;
+        const body = { data: { id: "x", type: "Attachment", attributes: { attachment_url: `https://s3.invalid/link-${seen.opens}` } } };
+        return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      seen.downloads += 1;
+      return new Response(seen.bytes, { status: 200 });
+    }) as typeof fetch;
+    t.after(() => {
+      globalThis.fetch = realFetch;
+      pcoService.clearCache();
+      mock.restoreAll();
+    });
+    return { att, seen };
+  }
+  // The disk cache outlives a test, so each test names its own attachment.
+  const get = (inm?: string) => callRoute(proxyRoutes, "/api/pco/attachment?match=revisit", inm ? { headers: { "if-none-match": inm } } : {});
+
+  test("a 200 carries an ETag, and If-None-Match with it is a 304 with no download", async (t) => {
+    const { seen } = setup(t, "84892470-stage");
+    const first = await get();
+    assert.equal(first.status, 200);
+    const etag = first.headers["ETag"];
+    assert.match(etag, /^"84892470-stage\.t\d+"$/);
+    assert.match(first.headers["Cache-Control"], /max-age=300/);
+    assert.equal(seen.downloads, 1);
+
+    const again = await get(etag);
+    assert.equal(again.status, 304, "an unchanged file was sent again");
+    assert.equal(again.body, "");
+    assert.equal(again.headers["ETag"], etag);
+    assert.equal(seen.downloads, 1, "a 304 must not download");
+    assert.equal(seen.opens, 1, "a 304 must not open a new link");
+  });
+
+  test("the same id with a newer updated_at is downloaded fresh and served, under a new ETag", async (t) => {
+    const { att, seen } = setup(t, "84892471-stage");
+    const first = await get();
+    const oldTag = first.headers["ETag"];
+    assert.equal(first.body, "first upload");
+
+    att.updatedAt = "2026-10-08T15:30:00Z";
+    seen.bytes = Buffer.from("second upload");
+    const r = await get(oldTag);
+    assert.equal(r.status, 200, "the old ETag answered 304 for a replaced file");
+    assert.equal(r.body, "second upload", "the replaced file was served from the old bytes or the old link");
+    assert.notEqual(r.headers["ETag"], oldTag);
+    assert.equal(seen.opens, 2, "a replaced file reused the old file's signed link");
+  });
+});

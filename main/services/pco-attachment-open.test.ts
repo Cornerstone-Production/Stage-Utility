@@ -81,3 +81,42 @@ describe("openAttachment's attachment id", () => {
     await assert.rejects(pcoService.openAttachment("app", "secret", "11", "21-stage", "31"), PcoUrlRefused);
   });
 });
+
+// The signed link is cached per attachment id AND version. Keyed by id alone, a file
+// replaced under the same id was answered with the OLD file's link for the TTL, and
+// the disk cache then stored the old bytes under the new version's name.
+describe("openAttachment's signed-link cache and a replaced file", () => {
+  test("a new version of the same id gets its own link; the same version is cached", async () => {
+    const v1 = await pcoService.openAttachment("app", "secret", "11", "21", "84892470-stage", { version: "t1000" });
+    const again = await pcoService.openAttachment("app", "secret", "11", "21", "84892470-stage", { version: "t1000" });
+    assert.equal(posts, 1);
+    assert.equal(again.url, v1.url);
+
+    const v2 = await pcoService.openAttachment("app", "secret", "11", "21", "84892470-stage", { version: "t2000" });
+    assert.equal(posts, 2, "a replaced file was answered from the old file's cached link");
+    assert.notEqual(v2.url, v1.url);
+  });
+});
+
+describe("listPlanAttachments carries updated_at", () => {
+  test("updatedAt is Planning Center's updated_at, or null when it is absent", async () => {
+    globalThis.fetch = (async () => {
+      const body = {
+        data: [
+          { id: "1", type: "Attachment", attributes: { filename: "a.pdf", file_size: 10, updated_at: "2026-10-08T14:00:00Z" } },
+          { id: "2-stage", type: "Attachment", attributes: { filename: "b.pdf" } },
+        ],
+        links: {},
+      };
+      return {
+        ok: true, status: 200, statusText: "OK", headers: new Headers(),
+        json: async () => body, text: async () => JSON.stringify(body),
+      } as unknown as Response;
+    }) as typeof fetch;
+    const list = await pcoService.listPlanAttachments("app", "secret", "11", "21");
+    assert.deepEqual(list.map((a) => [a.id, a.updatedAt, a.fileSizeBytes]), [
+      ["1", "2026-10-08T14:00:00Z", 10],
+      ["2-stage", null, null],
+    ]);
+  });
+});

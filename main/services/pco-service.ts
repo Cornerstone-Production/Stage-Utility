@@ -1060,6 +1060,7 @@ class PcoService {
       filename: String(a.filename ?? a.name ?? "file"),
       contentType: a.content_type != null && String(a.content_type) !== "" ? String(a.content_type) : null,
       fileSizeBytes: typeof a.file_size === "number" ? a.file_size : null,
+      updatedAt: typeof a.updated_at === "string" && a.updated_at !== "" ? a.updated_at : null,
       thumbnailUrl: a.thumbnail_url != null && String(a.thumbnail_url) !== "" ? String(a.thumbnail_url) : null,
       pageOrder:
         typeof pageOrderRaw === "number"
@@ -1115,8 +1116,11 @@ class PcoService {
   /**
    * Request a temporary download link for a plan attachment. PCO hands out
    * short-lived S3 URLs via the `open` action, so callers should download promptly
-   * (we cache the bytes by attachment id, which is immutable). Pass
-   * `{ fresh: true }` to bypass the signed-URL cache after a link is rejected.
+   * (we cache the bytes by attachment id and version, see pco-attachment-cache).
+   * Pass `{ fresh: true }` to bypass the signed-URL cache after a link is rejected.
+   * `version` is the file's version (see attachmentVersion): the signed link is
+   * cached per id AND version, so a file replaced under the same id is not
+   * answered with the old file's link.
    */
   async openAttachment(
     appId: string,
@@ -1124,12 +1128,12 @@ class PcoService {
     serviceTypeId: string,
     planId: string,
     attachmentId: string,
-    opts?: { fresh?: boolean },
+    opts?: { fresh?: boolean; version?: string },
   ): Promise<{ url: string; contentType: string | null }> {
     // Cache the signed URL briefly so N kiosks showing the same plan file don't
     // each POST an `open`. A caller that just saw the link rejected asks for a
     // fresh one, which must not be answered from that cache.
-    const cacheKey = `attach-open:${attachmentId}`;
+    const cacheKey = `attach-open:${attachmentId}:${opts?.version ?? ""}`;
     if (!opts?.fresh) {
       const cached = this.cacheGet<{ url: string; contentType: string | null }>(cacheKey);
       if (cached) return cached;

@@ -54,7 +54,7 @@ function fetchThumbnail(host: string, port: number, path: string): Promise<Thumb
 }
 
 export async function proxyRoutes(c: RouteCtx): Promise<void> {
-  const { res, pathname, url, method } = c;
+  const { req, res, pathname, url, method } = c;
     // ── PCO plan-attachment proxy (e.g. the stage plot) ──────────────────────
     // Streams the current plan's attachment matching ?match=<filename substring>,
     // proxied + cached so kiosk displays get a stable URL that always tracks the
@@ -69,12 +69,24 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
           res.end("No matching attachment on the current plan");
           return;
         }
-        const { getAttachmentFile, mimeForExt } = await import("../pco-attachment-cache.js");
+        const { attachmentEtag, attachmentVersion, etagMatches, getAttachmentFile, mimeForExt } = await import("../pco-attachment-cache.js");
+        // The version is what tells a file REPLACED under the same id (a stage
+        // plot re-uploaded) from the one already cached and already on a display.
+        const version = attachmentVersion(att.updatedAt, att.fileSizeBytes);
+        const etag = attachmentEtag(att.id, version);
+        const cacheControl = "private, max-age=300";
+        if (etagMatches(req.headers["if-none-match"], etag)) {
+          // The display already has these bytes: no download, no body.
+          res.writeHead(304, { ETag: etag, "Cache-Control": cacheControl });
+          res.end();
+          return;
+        }
         const file = await getAttachmentFile(
           att.id,
           att.contentType,
           att.filename,
-          async (opts) => (await stageController.openPlanAttachment(att.id, opts)).url,
+          async (opts) => (await stageController.openPlanAttachment(att.id, version ? { ...opts, version } : opts)).url,
+          version,
         );
         if (!file) {
           res.writeHead(502, { "Content-Type": "text/plain" });
@@ -84,9 +96,15 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
         const data = await fs.readFile(file.path);
         res.writeHead(200, {
           "Content-Type": mimeForExt(file.ext),
-          // Bytes are immutable per attachment id; cache briefly so a fresh plan
-          // (new id, new URL) is picked up within a few minutes on the displays.
-          "Cache-Control": "private, max-age=300",
+          // The bytes are immutable per attachment id and version, so the ETag
+          // names that pair. `max-age=300` lets a page load reuse the file for five
+          // minutes without asking; a display that is already showing it asks with
+          // `cache: "no-cache"` (the Plan file widget does, every five minutes),
+          // which sends If-None-Match whatever max-age says, so max-age does not
+          // have to be dropped for a replaced file to be noticed. A new plan is a
+          // new URL (the widget adds ?plan=).
+          ETag: etag,
+          "Cache-Control": cacheControl,
         });
         res.end(data);
       } catch (err) {
