@@ -167,29 +167,31 @@ final class CEFWindowedSurface: WebSurface {
       let box = Unmanaged<CaptureBox>.fromOpaque(ctx!).takeRetainedValue()
       let data = json.map { Data(bytes: $0, count: length) }
       let why = error.map { String(cString: $0) }
-      MainActor.assumeIsolated { box.finish(data: data, error: why) }
+      box.finish(data: data, error: why)
     }
   }
 }
 
-/// One DevTools screenshot in flight.
-private final class CaptureBox {
+/// One DevTools screenshot in flight. The answer is a few megabytes of base64 PNG;
+/// it is decoded off the main thread, where card outputs get their frames.
+private final class CaptureBox: @unchecked Sendable {
   let completion: @MainActor (CGImage?, String?) -> Void
   init(_ completion: @escaping @MainActor (CGImage?, String?) -> Void) { self.completion = completion }
 
-  @MainActor func finish(data: Data?, error: String?) {
-    guard let data else {
-      completion(nil, "no snapshot: \(error ?? "DevTools returned nothing")")
-      return
+  func finish(data: Data?, error: String?) {
+    DispatchQueue.global(qos: .utility).async {
+      let (image, why) = CaptureBox.decode(data: data, error: error)
+      DispatchQueue.main.async { MainActor.assumeIsolated { self.completion(image, why) } }
     }
+  }
+
+  private static func decode(data: Data?, error: String?) -> (CGImage?, String?) {
+    guard let data else { return (nil, "no snapshot: \(error ?? "DevTools returned nothing")") }
     guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
       let base64 = object["data"] as? String, let png = Data(base64Encoded: base64),
       let source = CGImageSourceCreateWithData(png as CFData, nil),
       let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-    else {
-      completion(nil, "no snapshot: DevTools did not return a PNG")
-      return
-    }
-    completion(image, nil)
+    else { return (nil, "no snapshot: DevTools did not return a PNG") }
+    return (image, nil)
   }
 }

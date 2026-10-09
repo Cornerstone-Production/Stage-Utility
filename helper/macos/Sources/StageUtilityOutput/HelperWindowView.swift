@@ -141,21 +141,27 @@ struct HelperWindowView: View {
 
 /// `--dump-frames` also writes the window itself, rendered off screen: a locked
 /// screen cannot be photographed, and this needs no Screen Recording permission.
+/// Only the render is on the main thread; encoding the PNG there held card outputs'
+/// frames up for long enough to repeat some.
 @MainActor
 enum WindowSnapshot {
   static func write(model: AppModel, to file: URL) {
     let renderer = ImageRenderer(content: HelperWindowView(model: model))
     renderer.scale = 2
-    guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,
-      let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
-    else {
+    guard let image = renderer.cgImage else {
       Log.error(.app, "could not render the window to an image")
       return
     }
-    do {
-      try png.write(to: file, options: .atomic)
-    } catch {
-      Log.error(.app, "could not write \(file.path): \(error.localizedDescription)")
+    DispatchQueue.global(qos: .utility).async {
+      guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+        Log.error(.app, "could not encode the window as a PNG")
+        return
+      }
+      do {
+        try png.write(to: file, options: .atomic)
+      } catch {
+        Log.error(.app, "could not write \(file.path): \(error.localizedDescription)")
+      }
     }
   }
 }
