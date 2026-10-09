@@ -470,7 +470,6 @@ export type IpcChannel =
   | "outputs:setGroups"
   | "outputs:setHideTopBar"
   | "outputs:setLocked"
-  | "outputs:setMode"
   | "outputs:setRole"
   | "outputs:setSlug"
   | "outputs:setTextSize"
@@ -605,7 +604,7 @@ export type IpcChannel =
   | "views:setSlots"
   | "views:setShowInSidebar"
   | "views:setSlotsLayout"
-  | "views:setSurface"
+  | "views:setRole"
   | "window:closeSettings"
   | "wireless:addConnection"
   | "wireless:channelStatuses"
@@ -1564,9 +1563,6 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "action:invoke":
       return post<T>("/api/action/invoke", p);
 
-    case "outputs:setMode":
-      return patch<T>(`/api/outputs/${encodeURIComponent(String(p.id))}`, { mode: p.mode });
-
     // Change a screen's role without changing any other screen: `copyView` makes a
     // copy of its view for the new role, `viewId` points it at one that already
     // fits. The server runs the writes in the order its own guards allow and puts
@@ -1606,8 +1602,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "messaging:set":
       return put<T>("/api/messaging", p);
 
-    case "views:setSurface":
-      return patch<T>(`/api/views/${encodeURIComponent(String(p.id))}`, { surface: p.surface });
+    // Changes the view AND every screen showing it, in one call the server undoes
+    // if it fails part-way. PATCH /api/views/:id { surface } is the other route,
+    // and refuses a view that screens are showing.
+    case "views:setRole":
+      return post<T>(`/api/views/${encodeURIComponent(String(p.id))}/surface`, { surface: p.surface });
 
     case "osc:getFeedback":
       return apiFetch<T>("/api/osc/feedback");

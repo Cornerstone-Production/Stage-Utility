@@ -21,7 +21,7 @@
 //     Settings is routes inside the app rather than its own window
 
 import { useState, useEffect } from "react";
-import { outputMode, surfaceForMode, type CreateScreenInput } from "@main/types/views";
+import type { CreateScreenInput } from "@main/types/views";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
@@ -30,6 +30,7 @@ import { errorMessage } from "@main/services/errors";
 import { writeOptimistic } from "../lib/optimistic";
 import { toast, confirm } from "../components/ui";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { changeViewRole } from "../settings/view-role-change";
 import { confirmDiscardSlotEdits, useSlotsTarget } from "../settings/sections/slots-target-pill";
 import { registerTargetGuard } from "../settings/sections/editing-target";
 import { useSlotsPreview } from "../settings/sections/slots-preview-target";
@@ -833,35 +834,22 @@ export function useStageSettings(pinnedViewId?: string) {
    * deliberate "all of them" path. (One screen's role is handleSetOutputRole,
    * which never changes another screen.)
    *
-   * The order is not a detail. Two guards on the server refuse in opposite
-   * directions, each waiting for the other side to move first:
+   * ONE server call. The server makes the view and each screen the matching role
+   * in the order its own guards allow and puts back what landed if one fails, so
+   * nothing here orders writes or loops over screens. What is left is the
+   * question: when screens would change, they are named first, and declining
+   * sends nothing.
    *
-   *   setOutputMode(display)   refuses while the view it shows is a console
-   *   setViewSurface(console)  refuses while a screen showing it is not a panel
-   *
-   * So whichever side is being made MORE permissive goes first: becoming a
-   * control surface, the screens lead; becoming a wall screen, the view does.
-   * The other way round is a deadlock no order of clicking gets out of.
+   * Not optimistic, for the reason handleSetOutputRole gives.
    */
   async function handleSetViewSurface(id: string, surface: "display" | "console") {
-    const showing = (stateNow()?.outputs ?? []).filter(
-      (o) => o.viewId === id && surfaceForMode(outputMode(o)) !== surface,
-    );
-
-    if (surface === "console") {
-      // The screens first: the view cannot become a console while a screen
-      // showing it is still a plain display.
-      for (const o of showing) {
-        if (!(await writeState("outputs:setMode", { id: o.id, mode: "panel" }))) return;
-      }
-      await writeState("views:setSurface", { id, surface });
-      return;
-    }
-
-    if (!(await writeState("views:setSurface", { id, surface }))) return;
-    for (const o of showing) {
-      await writeState("outputs:setMode", { id: o.id, mode: "display" });
-    }
+    await changeViewRole({
+      state: stateNow(),
+      viewId: id,
+      surface,
+      ask: confirm,
+      send: () => writeState("views:setRole", { id, surface }, { fail: "Failed to change what the view is for" }),
+    });
   }
 
   async function handleRemoveOutput(id: string) {

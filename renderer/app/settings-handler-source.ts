@@ -1,16 +1,15 @@
 // One handler's source text, cut out of use-stage-settings.ts.
 //
 // Read as text rather than called, because the handlers this serves are closures
-// over a query client inside a hook: what has to hold about them is the ORDER of
-// two writes and the fact that both are made at all, and neither survives being
-// mocked apart from the hook.
+// over a query client inside a hook: what has to hold about them is which write
+// they make, and that does not survive being mocked apart from the hook.
 //
 // ONE cut rule, in one place. There were two, in two test files, and they
-// disagreed: surface-pairing stopped only at the next `async function`, so it
-// swallowed the following handler's JSDoc, while surface-swap-order stopped at
-// that OR the next block comment. The looser cut is how a source-text assertion
-// comes to be satisfied by PROSE — the exact failure CLAUDE.md lists — and today
-// it holds only because the trailing comment happens to name no IPC channels.
+// disagreed: one stopped only at the next `async function`, so it swallowed the
+// following handler's JSDoc, while the other stopped at that OR the next block
+// comment. The looser cut is how a source-text assertion comes to be satisfied
+// by PROSE — the exact failure CLAUDE.md lists — and it held only because the
+// trailing comment happened to name no IPC channels.
 //
 // "Today it holds only because" was the whole problem. Cutting at the right
 // boundary is not the same as removing comments, and this helper removed none:
