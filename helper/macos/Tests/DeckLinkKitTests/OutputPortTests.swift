@@ -95,6 +95,54 @@ func softwarePort(
     #expect(Array(shown[22...50]) == Array(22...50))
   }
 
+  /// The host is held up for exactly the frames in flight, so the next frame would
+  /// go out in the very slot on air: too late, and moved like any later one.
+  @Test func aScheduleThatWouldLandOnTheFrameOnAirResyncs() {
+    let port = softwarePort(NumberedSource())
+    defer { port.close() }
+    port.open(videoMode: nil)
+    port.fakeTick(5)
+    port.fakeHold(true)
+    port.fakeTick(3)
+    port.fakeHold(false)
+    port.fakeTick(10)
+    #expect(port.counters.resyncs == 1)
+    #expect(port.counters.dropped == 0)
+  }
+
+  /// Frames the card reports displayed late are counted as dropped.
+  @Test func framesTheCardReportsLateAreCountedDropped() {
+    let port = softwarePort(NumberedSource())
+    defer { port.close() }
+    port.open(videoMode: nil)
+    port.fakeReportLate(2)
+    port.fakeTick(10)
+    #expect(port.counters.dropped == 2)
+    #expect(port.counters.repeated == 0)
+  }
+
+  /// A card that stops asking for frames without reporting anything is treated as
+  /// lost after two quiet polls, so it is logged and reopened rather than left
+  /// frozen and silent.
+  @Test func aPortThatStopsTakingFramesIsLost() {
+    let log = LogLines()
+    let port = softwarePort(NumberedSource(), log: log)
+    defer { port.close() }
+    port.open(videoMode: nil)
+    port.fakeTick(3)
+    port.pollForTest()
+    port.pollForTest()  // nothing sent since the last poll: one quiet poll
+    #expect(port.state == .running(mode: "16x4 at 59.94 on a software clock"))
+    port.pollForTest()
+    #expect(port.state == .lost("the card stopped taking frames"))
+    #expect(log.lines.last == "SDI test: lost (the card stopped taking frames); trying again every 3600 s")
+  }
+
+  // Not unit-tested: that a loss reported on the card's thread never takes a strong
+  // reference to the port there (CallbackBox). The failure is a race between the
+  // owner dropping the port and a loss arriving, which no test here can line up
+  // deterministically; the thunk only enqueues onto the port's queue, by reading.
+
   @Test func anUnpluggedPortIsLostAndReopens() {
     let log = LogLines()
     let port = softwarePort(NumberedSource(), log: log)

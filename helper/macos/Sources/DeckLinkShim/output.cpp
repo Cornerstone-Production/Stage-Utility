@@ -96,7 +96,7 @@ Output::Output(Card *card, int32_t width, int32_t height, int64_t frameDuration,
       timeScale_(timeScale),
       callbacks_(callbacks) {
   if (callbacks_.depth == 0) callbacks_.depth = 3;
-  card_->attach(this);
+  attached_ = card_->attach(this);
 }
 
 Output::~Output() {
@@ -111,6 +111,10 @@ bool Output::start(std::string &why) {
   }
   if (frameDuration_ <= 0 || timeScale_ <= 0) {
     why = "the mode has no frame rate";
+    return false;
+  }
+  if (!attached_) {
+    why = "the card would not take the completion callback";
     return false;
   }
   if (callbacks_.depth < 2) {

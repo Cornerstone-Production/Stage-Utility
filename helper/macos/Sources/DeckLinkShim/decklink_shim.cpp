@@ -182,11 +182,12 @@ class DeckLinkCard final : public Card {
   }
 
   const dl_port_id &portId() const { return id_; }
+  IDeckLink *device() const { return device_; }
 
-  void attach(Output *output) override {
+  bool attach(Output *output) override {
     Card::attach(output);
     sink_->setOutput(output);
-    out_->SetScheduledFrameCompletionCallback(sink_);
+    return out_->SetScheduledFrameCompletionCallback(sink_) == S_OK;
   }
 
   bool schedule(PoolFrame *frame, int64_t displayTime, int64_t duration, int64_t timeScale) override {
@@ -240,8 +241,11 @@ class DeviceWatch final : public IDeckLinkDeviceNotificationCallback {
   }
 
   /// Install the notifications once. False without a driver.
+  ///
+  /// Its own lock: a driver that reports the devices already present from inside
+  /// InstallDeviceNotifications calls notify() on this thread, which takes mutex_.
   bool ensure() {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(installMutex_);
     if (discovery_ != nullptr) return true;
     discovery_ = CreateDeckLinkDiscoveryInstance();
     if (discovery_ == nullptr) return false;
@@ -278,13 +282,17 @@ class DeviceWatch final : public IDeckLinkDeviceNotificationCallback {
   }
 
   HRESULT DeckLinkDeviceRemoved(IDeckLink *device) override {
+    // The device is going, so its attributes may no longer answer: match the
+    // object an output was opened on first, and the port id only as a fallback.
     dl_port_id id;
     bool plays = false;
-    if (device != nullptr && readPortId(device, &id, &plays)) {
+    const bool hasId = device != nullptr && readPortId(device, &id, &plays);
+    {
       std::lock_guard<std::mutex> lock(gOpenMutex);
       for (dl_output *open : gOpen) {
         if (open->card->isFake()) continue;
-        if (samePort(static_cast<DeckLinkCard *>(open->card)->portId(), id)) {
+        auto *card = static_cast<DeckLinkCard *>(open->card);
+        if (card->device() == device || (hasId && samePort(card->portId(), id))) {
           open->output->lose("the device was removed");
         }
       }
@@ -305,8 +313,10 @@ class DeviceWatch final : public IDeckLinkDeviceNotificationCallback {
     if (fn != nullptr) fn(ctx);
   }
 
-  std::mutex mutex_;
+  std::mutex installMutex_;
   IDeckLinkDiscovery *discovery_ = nullptr;
+  /// Guards the listener only.
+  std::mutex mutex_;
   dl_devices_changed_fn listener_ = nullptr;
   void *ctx_ = nullptr;
 };

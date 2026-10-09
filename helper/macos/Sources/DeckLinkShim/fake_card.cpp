@@ -88,6 +88,11 @@ class FakeCard final : public Card {
     deliver(done);
   }
 
+  void reportLate(int32_t frames) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    lateReports_ += frames;
+  }
+
   void unplug() {
     {
       std::lock_guard<std::mutex> lock(mutex_);
@@ -123,7 +128,12 @@ class FakeCard final : public Card {
       onAir_++;
       for (auto it = pending_.begin(); it != pending_.end();) {
         if (it->index < onAir_) {
-          done.emplace_back(it->frame, it->late ? Completion::dropped : Completion::completed);
+          Completion result = it->late ? Completion::dropped : Completion::completed;
+          if (result == Completion::completed && lateReports_ > 0) {
+            lateReports_--;
+            result = Completion::late;
+          }
+          done.emplace_back(it->frame, result);
           it = pending_.erase(it);
         } else {
           ++it;
@@ -187,6 +197,9 @@ class FakeCard final : public Card {
   bool stopped_ = false;
   bool holding_ = false;
   bool unplugged_ = false;
+  /// Completions still to be reported late although they were shown on time, as a
+  /// card under load reports them.
+  int32_t lateReports_ = 0;
 };
 
 FakeCard *fakeOf(const dl_output *output) {
@@ -225,6 +238,10 @@ extern "C" void dl_fake_tick(dl_output *output, int32_t frames) {
 
 extern "C" void dl_fake_hold_completions(dl_output *output, bool hold) {
   if (auto *fake = fakeOf(output)) fake->hold(hold);
+}
+
+extern "C" void dl_fake_report_late(dl_output *output, int32_t frames) {
+  if (auto *fake = fakeOf(output)) fake->reportLate(frames);
 }
 
 extern "C" void dl_fake_unplug(dl_output *output) {

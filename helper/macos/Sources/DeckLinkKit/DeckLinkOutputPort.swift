@@ -52,6 +52,9 @@ public final class DeckLinkOutputPort: CardSink {
   private var current: State = .closed
   private var videoMode: String?
   private var trouble = CardTrouble()
+  /// Polls in a row in which a running port sent nothing.
+  private var stalledPolls = 0
+  private var lastPolledScheduled: UInt64 = 0
   private var pollTimer: DispatchSourceTimer?
   private var retryTimer: DispatchSourceTimer?
   private var lastSample: (at: TimeInterval, counters: CardCounters)
@@ -160,13 +163,13 @@ public final class DeckLinkOutputPort: CardSink {
       case .success(let m): mode = m
       }
       modeName = VideoModes.name(of: mode) ?? mode.driverName
-      box = CallbackBox(source: source, timeScale: mode.timeScale, port: self)
+      box = CallbackBox(source: source, timeScale: mode.timeScale, port: self, queue: queue)
       var id = port.id.shim
       var callbacks = box.callbacks(depth: depth)
       opened = dl_output_open(&id, mode.code, &callbacks, &why, why.count)
     case .softwareClock(let width, let height, let duration, let scale, let ticks):
       modeName = "\(width)x\(height) at \(VideoModes.rateText(Double(scale) / Double(duration))) on a software clock"
-      box = CallbackBox(source: source, timeScale: scale, port: self)
+      box = CallbackBox(source: source, timeScale: scale, port: self, queue: queue)
       var callbacks = box.callbacks(depth: depth)
       opened = dl_fake_output_open(Int32(width), Int32(height), duration, scale, ticks, &callbacks, &why, why.count)
     }
@@ -174,10 +177,11 @@ public final class DeckLinkOutputPort: CardSink {
     handle = opened
     self.box = box
     // The pre-roll is filled before any page can have drawn, so its repeats are the
-    // baseline, not trouble.
-    trouble = CardTrouble()
+    // baseline, not trouble. An episode that was running goes on across a reopening.
     let counts = countsNow()
-    _ = trouble.observe(repeated: counts.repeated, dropped: counts.dropped)
+    trouble.rebase(repeated: counts.repeated, dropped: counts.dropped)
+    lastPolledScheduled = counts.scheduled
+    stalledPolls = 0
     return .opened(modeName)
   }
 
@@ -199,15 +203,15 @@ public final class DeckLinkOutputPort: CardSink {
     }
   }
 
-  fileprivate func lost(_ reason: String, from: CallbackBox) {
-    queue.async { [weak self] in
-      guard let self, from === self.box else { return }
-      self.stopTimers()
-      self.closeHandle()
-      self.current = .lost(reason)
-      self.log(.error, "\(self.label): lost (\(reason)); trying again every \(Int(self.retryInterval)) s")
-      self.startRetrying()
-    }
+  /// On the queue. `from` is the output the news is about: a loss reported by an
+  /// output already closed and replaced is old news.
+  fileprivate func handleLost(_ reason: String, from: CallbackBox?) {
+    guard from == nil || from === box, handle != nil else { return }
+    stopTimers()
+    closeHandle()
+    current = .lost(reason)
+    log(.error, "\(label): lost (\(reason)); trying again every \(Int(retryInterval)) s")
+    startRetrying()
   }
 
   private func countsNow() -> CardCounters {
@@ -249,10 +253,21 @@ public final class DeckLinkOutputPort: CardSink {
     retryTimer = nil
   }
 
-  /// Log repeats and drops when they start and when they stop.
+  /// Polls with nothing sent before a running port counts as lost.
+  static let stallPolls = 2
+
+  /// Log repeats and drops when they start and when they stop, and treat a port
+  /// that has stopped taking frames as lost: a card that goes silent without
+  /// reporting anything would otherwise sit frozen with no line in the log.
   private func pollNow() {
     guard handle != nil else { return }
     let counts = countsNow()
+    stalledPolls = counts.scheduled == lastPolledScheduled ? stalledPolls + 1 : 0
+    lastPolledScheduled = counts.scheduled
+    if stalledPolls >= Self.stallPolls {
+      handleLost("the card stopped taking frames", from: nil)
+      return
+    }
     for event in trouble.observe(repeated: counts.repeated, dropped: counts.dropped) {
       switch event {
       case .started(let kind, let count):
@@ -269,6 +284,7 @@ public final class DeckLinkOutputPort: CardSink {
   func pollForTest() { queue.sync { pollNow() } }
   func fakeTick(_ frames: Int) { queue.sync { if let handle { dl_fake_tick(handle, Int32(frames)) } } }
   func fakeHold(_ on: Bool) { queue.sync { if let handle { dl_fake_hold_completions(handle, on) } } }
+  func fakeReportLate(_ frames: Int) { queue.sync { if let handle { dl_fake_report_late(handle, Int32(frames)) } } }
   func fakeUnplug() { queue.sync { if let handle { dl_fake_unplug(handle) } } }
   func fakeShown() -> [Int64] {
     queue.sync {
@@ -284,15 +300,21 @@ public final class DeckLinkOutputPort: CardSink {
 /// What the shim's callbacks get as their context: the source to ask, and the port
 /// to tell. Kept alive by the port for as long as its output is open; the shim
 /// calls nothing after `dl_output_close` returns.
+///
+/// The port is reached only on its own queue. Taking a strong reference to it on
+/// the card's thread could make that thread the one that frees it, and the port's
+/// deinit closes the output: from inside a completion that waits on itself.
 final class CallbackBox {
   let source: CardFrameSource
   let timeScale: Int64
+  let queue: DispatchQueue
   weak var port: DeckLinkOutputPort?
 
-  init(source: CardFrameSource, timeScale: Int64, port: DeckLinkOutputPort) {
+  init(source: CardFrameSource, timeScale: Int64, port: DeckLinkOutputPort, queue: DispatchQueue) {
     self.source = source
     self.timeScale = timeScale
     self.port = port
+    self.queue = queue
   }
 
   func callbacks(depth: Int) -> dl_callbacks {
@@ -315,5 +337,6 @@ private let fillThunk: dl_fill_fn = { ctx, index, streamTime, target in
 private let lostThunk: dl_lost_fn = { ctx, reason in
   guard let ctx else { return }
   let box = Unmanaged<CallbackBox>.fromOpaque(ctx).takeUnretainedValue()
-  box.port?.lost(reason.map { String(cString: $0) } ?? "no reason given", from: box)
+  let text = reason.map { String(cString: $0) } ?? "no reason given"
+  box.queue.async { [box] in box.port?.handleLost(text, from: box) }
 }

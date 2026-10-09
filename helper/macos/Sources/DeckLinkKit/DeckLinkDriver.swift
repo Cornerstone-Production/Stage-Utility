@@ -23,11 +23,11 @@ public enum DeckLinkDriver {
       case .installed:
         return nil
       case .notInstalled:
-        return "Desktop Video is not installed, so there are no DeckLink outputs"
+        return "Desktop Video is not installed, so there are no DeckLink outputs; install it and restart the helper"
       case .tooOld(let version):
-        return "Desktop Video \(version) is older than 12.0, so there are no DeckLink outputs; update it from Blackmagic"
+        return "Desktop Video \(version) is older than 12.0, so there are no DeckLink outputs; update it and restart the helper"
       case .unusable:
-        return "Desktop Video is installed but its API would not load, so there are no DeckLink outputs; reinstall it"
+        return "Desktop Video is installed but its API would not load, so there are no DeckLink outputs; reinstall it and restart the helper"
       }
     }
   }

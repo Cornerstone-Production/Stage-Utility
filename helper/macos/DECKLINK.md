@@ -17,9 +17,12 @@ Chromium (CEF) surface provides. [How it plugs in](#how-it-plugs-in) says how.
   [`Vendor/DeckLink/`](Vendor/DeckLink/README.md) (SDK 12.0); nothing of the driver
   ships with the helper.
 - Without the driver there are no DeckLink outputs and the log says so once:
-  "Desktop Video is not installed, so there are no DeckLink outputs". A driver older
-  than 12.0, or one whose API will not load, is reported the same way with what to
-  do. Display outputs are unaffected.
+  "Desktop Video is not installed, so there are no DeckLink outputs; install it and
+  restart the helper". A driver older than 12.0, or one whose API will not load, is
+  reported the same way with what to do. Display outputs are unaffected.
+- **Installing or updating Desktop Video takes a restart of the helper.** The SDK's
+  dispatch looks for the framework once per process, so a driver installed while
+  the helper runs is not seen until it starts again.
 
 ## Ports and devices
 
@@ -99,8 +102,9 @@ an M4 Mac mini, measured with eight outputs at 59.94 (`DeckLinkProbe null 5 8`).
 
 ## Unplugged and failed ports
 
-A device removed, a frame the driver refuses, or playback stopping by itself closes
-that port's output and logs it. The port tries to open again every 2 s, and at once
+A device removed, a frame the driver refuses, playback stopping by itself, or a
+running port that has sent nothing for two seconds closes that port's output and
+logs it. The port tries to open again every 2 s, and at once
 on `retry()`, which its owner calls when `DeckLinkDriver.watchDevices` reports a
 device arriving. It logs when it is back, and its counts run on across the gap.
 
@@ -114,11 +118,11 @@ log stream --level info --predicate 'subsystem == "com.stageutility.output" && c
 
 | Line | When |
 |---|---|
-| `Desktop Video is not installed, so there are no DeckLink outputs` | At the first scan, and again only if that changes. Likewise too old or not loading. |
+| `Desktop Video is not installed, so there are no DeckLink outputs; install it and restart the helper` | At the first scan, and again only if that changes. Likewise too old or not loading. |
 | `Desktop Video 14.2: 2 output ports: …` | The driver found, or its ports changed. |
 | `<port>: opened in 1080p59.94` / `reopened in …` | A port started, or came back. |
 | `<port>: refused 1080p59.94: <reason>` | The mode cannot be played on that port. |
-| `<port>: could not open (<reason>)` / `lost (<reason>)` | A port that will not open or went away; retried. |
+| `<port>: could not open (<reason>)` / `lost (<reason>)` | A port that will not open or went away; retried. A running port that sends nothing for two seconds is lost with "the card stopped taking frames". |
 | `<port>: repeating frames (n in the last 1 s)` / `stopped repeating frames (n in all)` | Repeats start, and stop after five quiet seconds. Likewise `dropping frames`. |
 
 Healthy frames are not logged.

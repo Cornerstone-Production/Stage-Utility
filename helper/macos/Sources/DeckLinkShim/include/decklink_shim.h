@@ -190,6 +190,9 @@ void dl_fake_tick(dl_output *output, int32_t frames);
 /// Hold completions back as a busy host would: the clock moves, the callbacks do
 /// not run. Releasing delivers everything held, in order.
 void dl_fake_hold_completions(dl_output *output, bool hold);
+/// Report the next `frames` completions as displayed late, as a card under load
+/// does, although the software clock showed them on time.
+void dl_fake_report_late(dl_output *output, int32_t frames);
 /// As if the device were unplugged.
 void dl_fake_unplug(dl_output *output);
 /// What went out, one entry per frame of the clock: the first eight bytes of the

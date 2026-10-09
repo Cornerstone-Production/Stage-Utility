@@ -17,7 +17,7 @@ import Testing
       if case .installed = status {} else { Issue.record("the framework is installed but the driver reads \(status)") }
     } else {
       #expect(status == .notInstalled)
-      #expect(status.problem == "Desktop Video is not installed, so there are no DeckLink outputs")
+      #expect(status.problem == "Desktop Video is not installed, so there are no DeckLink outputs; install it and restart the helper")
       #expect(DeckLinkDriver.ports().isEmpty)
     }
   }
@@ -80,7 +80,7 @@ import Testing
     _ = inventory.scan()
     #expect(
       log.lines == [
-        "Desktop Video is not installed, so there are no DeckLink outputs",
+        "Desktop Video is not installed, so there are no DeckLink outputs; install it and restart the helper",
         "Desktop Video 14.2: 1 output port: DeckLink Duo (1) (decklink-7-0)",
         "Desktop Video 14.2: 0 output ports",
       ])
@@ -93,6 +93,6 @@ import Testing
     let inventory = DeckLinkInventory(log: log.write)
     #expect(inventory.scan().ports.isEmpty)
     _ = inventory.scan()
-    #expect(log.lines == ["Desktop Video is not installed, so there are no DeckLink outputs"])
+    #expect(log.lines == ["Desktop Video is not installed, so there are no DeckLink outputs; install it and restart the helper"])
   }
 }

@@ -65,8 +65,12 @@ class Output;
 class Card {
  public:
   virtual ~Card() = default;
-  /// Called once, before anything is scheduled.
-  virtual void attach(Output *output) { output_ = output; }
+  /// Called once, before anything is scheduled. False when the card will not
+  /// report completions, which would leave it showing the pre-roll for good.
+  virtual bool attach(Output *output) {
+    output_ = output;
+    return true;
+  }
   virtual bool schedule(PoolFrame *frame, int64_t displayTime, int64_t duration, int64_t timeScale) = 0;
   /// The card's playback position, in the mode's time scale.
   virtual bool streamTime(int64_t timeScale, int64_t *now) = 0;
@@ -117,6 +121,7 @@ class Output {
   int64_t timeScale_;
   dl_callbacks callbacks_;
   std::vector<PoolFrame *> frames_;
+  bool attached_ = false;
 
   /// Held for the whole of a completion, so close() can wait one out.
   std::mutex mutex_;

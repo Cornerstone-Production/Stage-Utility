@@ -49,4 +49,15 @@ import Testing
     #expect(t.observe(repeated: 3, dropped: 0) == [])
     #expect(t.observe(repeated: 4, dropped: 0) == [.started(.repeats, count: 1)])
   }
+
+  /// A port reopened mid-episode starts from new counts but the episode goes on,
+  /// so its "stopped" line still comes.
+  @Test func aRebaseKeepsTheEpisode() {
+    var t = CardTrouble(quietPolls: 2)
+    _ = t.observe(repeated: 0, dropped: 0)
+    #expect(t.observe(repeated: 3, dropped: 0) == [.started(.repeats, count: 3)])
+    t.rebase(repeated: 6, dropped: 0)
+    #expect(t.observe(repeated: 6, dropped: 0) == [])
+    #expect(t.observe(repeated: 6, dropped: 0) == [.stopped(.repeats, total: 3)])
+  }
 }

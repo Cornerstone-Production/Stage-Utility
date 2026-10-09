@@ -134,6 +134,14 @@ final class FrameMemory {
     #expect(frame.pairs == [[212, 28, 120, 28], [109, 51, 212, 51]])
   }
 
+  /// A pair of two colours shares the average of their chroma: red beside blue is
+  /// neither red's Cb/Cr (109, 212) nor blue's (212, 120).
+  @Test func aPairSharesTheAverageOfItsChroma() throws {
+    let frame = FrameMemory(width: 2, height: 1)
+    try convert(2, 1, [RGB(r: 191, g: 0, b: 0), RGB(r: 0, g: 0, b: 191)], into: frame)
+    #expect(frame.pairs == [[160, 51, 166, 28]])
+  }
+
   @Test func aPictureOfAnotherSizeIsScaledToFit() throws {
     // 8 x 2 onto 4 x 2: every other pixel.
     let greys: [UInt8] = [10, 0, 60, 0, 110, 0, 160, 0, 30, 0, 80, 0, 130, 0, 180, 0]

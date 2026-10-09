@@ -37,6 +37,13 @@ public struct CardTrouble {
     self.quietPolls = quietPolls
   }
 
+  /// Take `repeated` and `dropped` as the new baseline without reporting anything,
+  /// and without ending an episode that is running.
+  public mutating func rebase(repeated: UInt64, dropped: UInt64) {
+    repeats.last = repeated
+    drops.last = dropped
+  }
+
   /// The output's counts now. Counts that go down (a new output) start afresh.
   public mutating func observe(repeated: UInt64, dropped: UInt64) -> [Event] {
     var events: [Event] = []
