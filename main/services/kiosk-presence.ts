@@ -143,15 +143,15 @@ export function recordHealth(
   kind: DeviceOutputKind | undefined,
   now = Date.now(),
 ): OutputHealth {
-  const trend = judge(health.get(deviceId)?.trend ?? FRESH_TREND, report, kind);
+  const before = health.get(deviceId);
+  const trend = judge(before?.trend ?? FRESH_TREND, report, kind);
   const latest: OutputHealth = { ...report, deviceId, receivedAt: now, struggling: trend.struggling };
-  const was = health.get(deviceId)?.trend.struggling ?? false;
   health.set(deviceId, { latest, trend });
-  if (trend.struggling !== was) {
+  if (trend.struggling !== (before?.trend.struggling ?? false)) {
+    // The word is chosen first so there is one template to scrub, not two.
+    const verdict = trend.struggling ? "is struggling" : "has recovered";
     console.log(
-      trend.struggling
-        ? `[output-helper] ${scrub(deviceId)} is struggling: ${scrub(report.dropped)} frames dropped so far, ${scrub(report.repeated)}% repeated, ${scrub(report.fps)} fps`
-        : `[output-helper] ${scrub(deviceId)} has recovered: ${scrub(report.dropped)} frames dropped so far, ${scrub(report.repeated)}% repeated, ${scrub(report.fps)} fps`,
+      `[output-helper] ${scrub(deviceId)} ${scrub(verdict)}: ${scrub(report.dropped)} frames dropped so far, ${scrub(report.repeated)}% repeated, ${scrub(report.fps)} fps`,
     );
   }
   ensureSweep();

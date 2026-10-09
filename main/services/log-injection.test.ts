@@ -106,6 +106,10 @@ const REQUEST_FACING = [
   // into an HTTP body.
   "home-assistant-yaml.ts",
   "integration-manager.ts",
+  // Its lines name a device id and the figures of a health report, both taken from
+  // POST /api/devices/:id/health (the path and the body), and an output name and
+  // hostname taken from a UDP probe.
+  "kiosk-presence.ts",
   // Its sent line names the groups, the sender and the TEXT of a message, all
   // typed into POST /api/messages; its refusal line carries the reason, which
   // can name an id off the wire.
@@ -270,7 +274,6 @@ const NOT_SCANNED = new Map<string, string>([
   ["device-manager.ts", DEVICE],
   ["encryption.ts", UNAUDITED],
   ["keyed-record-store.ts", UNAUDITED],
-  ["kiosk-presence.ts", DEVICE],
   ["kiosk-responder.ts", DEVICE],
   ["layout-image-store.ts", UNAUDITED],
   ["layout-library.ts", UNAUDITED],
@@ -420,6 +423,11 @@ function requestFacingFiles(): string[] {
     // then foldConfigEntries warns with the rejected KEY. That key is an
     // attacker's string, verbatim, and this file was missing from the list.
     path.join(HERE, "integration-manager.ts"),
+    // The device id on its health lines is the path of POST /api/devices/:id/health
+    // (checked against the stored bindings first, but only after authorise), and its
+    // figures come out of that request body; the output seen line names what a UDP
+    // probe said. All scrubbed at the logger.
+    path.join(HERE, "kiosk-presence.ts"),
     // Its sent line names the groups, the sender and the TEXT of a message, all
     // typed into POST /api/messages; its refusal line carries the reason, which
     // can name an id off the wire.
