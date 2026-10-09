@@ -405,14 +405,16 @@ port 1:
 - completion timestamps on the host clock, the playback position, the card's need of
   2.5 to 3 ms, a skipped slot held by the card with nothing reported late;
 - the stage view and the latency page through Chromium at 59.94 fps, 20 ms render
-  to air, the counts above.
+  to air, the counts above;
+- `E_ACCESSDENIED` while another application holds the port ("the port is in use by
+  another application"), and the retry that opens it once that application lets go,
+  the page's pictures going out from then;
+- a quit Apple event answered without a refusal, the port free for another
+  application a second later.
 
 Still only a card can prove:
 
-- unplug and re-plug notifications, and `E_ACCESSDENIED` when another app holds the
-  port;
-- unplug and re-plug notifications, and `E_ACCESSDENIED` when another app holds the
-  port;
+- unplug and re-plug notifications;
 - the colour on a scope, interlaced output, and the bandwidth of eight ports.
 
 ## Layout

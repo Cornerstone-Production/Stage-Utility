@@ -48,8 +48,9 @@ x86_64, almost all of it the framework.
 
 There is one app per architecture, not a universal one: CEF ships a separate
 framework for each, and a universal app would carry both, about 650 MB, to every Mac.
-The installer is to pick by `uname -m` (`arm64` or `x86_64`); the release job calls
-`build-app.sh --arch` once for each.
+The installer picks by `sysctl hw.optional.arm64`, which says arm64 on Apple silicon
+even from a shell running under Rosetta; the release workflow (added with the
+installer) calls `build-app.sh --arch` once for each.
 
 The version is the repository's `package.json` version, kept whole in
 `CFBundleShortVersionString`; `CFBundleVersion` has to be dotted integers, so it is the
