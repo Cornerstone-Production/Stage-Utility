@@ -237,7 +237,9 @@ describe("fetching the helper from the release", () => {
     assert.deepEqual(await listCache(), [SUM.name], "no zip and no partial file");
   });
 
-  it("gives up on a transfer that stalls, and tries again on the next request", async (t) => {
+  // An explicit timeout: a regression that ignores the abort signal would otherwise
+  // leave this awaiting a fetch that never settles, and hang the run instead of failing it.
+  it("gives up on a transfer that stalls, and tries again on the next request", { timeout: 5000 }, async (t) => {
     captureConsole(t, "warn");
     release.publish(ZIP.name, Buffer.from("zip"));
     const real = release.fetch;
