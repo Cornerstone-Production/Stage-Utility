@@ -302,7 +302,7 @@ bool Output::fillAndSchedule(Slot &slot, int64_t index, uint64_t now, uint64_t a
   const size_t length = slot.staging != nullptr ? slot.staging->length()
                                                 : static_cast<size_t>(slot.rowBytes()) * static_cast<size_t>(height_);
   dl_frame_target target{slot.bytes(), length, slot.rowBytes(), width_, height_,
-                         static_cast<int32_t>(&slot - slots_.data()), 0, 0, 0};
+                         static_cast<int32_t>(&slot - slots_.data()), 0, 0, 0, 0};
   const bool fresh = callbacks_.fill != nullptr && callbacks_.fill(callbacks_.ctx, index, at, &target);
   dl_frame_timing timing{};
   timing.index = index;
@@ -313,6 +313,7 @@ bool Output::fillAndSchedule(Slot &slot, int64_t index, uint64_t now, uint64_t a
     timing.content_ns = target.content_ns;
     timing.paint_ns = target.paint_ns;
     timing.ready_ns = target.ready_ns;
+    timing.returned_ns = target.returned_ns;
   } else {
     // No new picture: this frame's memory still holds whatever it carried frames
     // ago, so the previous picture is copied in, with its times. Sending the stale
@@ -324,6 +325,7 @@ bool Output::fillAndSchedule(Slot &slot, int64_t index, uint64_t now, uint64_t a
       timing.content_ns = last_->timing.content_ns;
       timing.paint_ns = last_->timing.paint_ns;
       timing.ready_ns = last_->timing.ready_ns;
+      timing.returned_ns = last_->timing.returned_ns;
     }
   }
   timing.copied_ns = started_ ? card_->now() : 0;

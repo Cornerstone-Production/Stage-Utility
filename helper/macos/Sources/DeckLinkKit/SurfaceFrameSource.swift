@@ -6,39 +6,55 @@ import StageUtilityOutputCore
 /// A `CardFrameSource` that sends the latest picture an engine has handed it.
 ///
 /// A windowless browser hands its picture over as an IOSurface that is valid only
-/// inside the paint callback, so `present` converts it there, on the GPU, straight
-/// to UYVY at the card's frame size and turned by the screen's rotation, into a
-/// buffer of its own. When the card's slot is filled, the newest converted picture
-/// is copied into the frame: a copy of a few megabytes, so the fill is quick and
-/// sure, and the conversion is never on the card's deadline. If nothing new has
-/// been presented since the last fill, the card repeats the previous picture.
+/// inside the paint callback. `present` copies it there, on the GPU, into a texture
+/// of its own, and returns once the copy is done; the conversion to UYVY, at the
+/// card's frame size and turned by the screen's rotation, runs after it, into a
+/// buffer of its own, and the picture is the newest once that is done. So the
+/// thread that paints (for CEF, the main thread, which draws every output) waits
+/// for a copy, not for a conversion. When the card's slot is filled, the newest
+/// converted picture is copied into the frame: a copy of a few megabytes, so the
+/// fill is quick and sure, and the conversion is never on the card's deadline. If
+/// nothing new is ready since the last fill, the card repeats the previous picture.
 ///
-/// Three buffers are kept, so a picture can be converted while the card is copying
-/// another and a third is the newest: no lock is held while the GPU works.
+/// Four buffers are kept, so a picture can be converting while another is the
+/// newest and the card copies a third: no lock is held while the GPU works. A
+/// picture that finds all four busy is dropped, and the next is taken.
 ///
 /// Sendable by hand: its state is behind `lock`, which is never held while the GPU
-/// works; `present` is called from one thread, and `onBeginFrame` is set before the
-/// port that calls it opens.
+/// works; `present` is called from one thread, the conversions finish on Metal's,
+/// and `onBeginFrame` is set before the port that calls it opens.
 public final class SurfaceFrameSource: CardFrameSource, @unchecked Sendable {
   private struct Staged {
     var buffer: MTLBuffer
+    /// The picture copied out of the engine's surface, the size of that surface.
+    var copy: MTLTexture?
     var picture = CardPicture.untimed
   }
+
+  private static let buffers = 4
 
   private let converter: UYVYConverter
   private let lock = NSLock()
   private var staged: [Staged] = []
   private var stagedSize: (width: Int, height: Int)?
+  /// Bumped when the buffers are made again: a conversion into the old ones is
+  /// dropped when it finishes.
+  private var generation = 0
   private var newest: Int?
   private var reading: Int?
+  private var converting: Set<Int> = []
   private var fresh = false
   private var _rotation: Rotation = .none
   private var _frameSize: (width: Int, height: Int)?
   private var _failure: String?
+  /// Why the last conversion that finished after `present` returned failed: said by
+  /// the next `present`.
+  private var lateFailure: UYVYConverter.Failure?
   private var capture: ((CardFrameCopy?) -> Void)?
   /// The begin frame asked for that no picture has answered yet, host ns.
   private var unanswered: UInt64?
-  private let now: () -> UInt64
+  private let conversions = DispatchGroup()
+  private let now: @Sendable () -> UInt64
 
   /// Called on the output's clock thread each time a slot's picture is to be
   /// started: an engine that renders on command sends its begin frame from here.
@@ -46,7 +62,9 @@ public final class SurfaceFrameSource: CardFrameSource, @unchecked Sendable {
   public var onBeginFrame: ((CardFrameRequest) -> Void)?
 
   /// - Parameter now: the host clock in nanoseconds, the same as the card's.
-  public init(converter: UYVYConverter, now: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }) {
+  public init(
+    converter: UYVYConverter, now: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
+  ) {
     self.converter = converter
     self.now = now
   }
@@ -71,9 +89,9 @@ public final class SurfaceFrameSource: CardFrameSource, @unchecked Sendable {
   public var failure: String? { lock.withLock { _failure } }
 
   /// The next new picture exactly as the card is sent it (converted, turned,
-  /// scaled), handed to `done` on the thread that presented it, as soon as it is
-  /// converted: what `--dump-frames` writes. Taken there, not at the fill, because a
-  /// 4 MB copy on the clock thread made a frame late. A capture still waiting when
+  /// scaled), handed to `done` on a thread of Metal's as soon as it is converted:
+  /// what `--dump-frames` writes. Taken there, not at the fill, because a 4 MB copy
+  /// on the clock thread made a frame late. A capture still waiting when
   /// another is asked for gets nil, so a page that has stopped drawing does not pile
   /// them up.
   public func captureNextFrame(_ done: @escaping (CardFrameCopy?) -> Void) {
@@ -104,7 +122,8 @@ public final class SurfaceFrameSource: CardFrameSource, @unchecked Sendable {
   }
 
   /// A new picture: a 32-bit BGRA IOSurface, upright, at the size the page laid out
-  /// at. Converted before this returns. Call it from one thread.
+  /// at. Copied before this returns, and converted after (`waitForConversions`).
+  /// Call it from one thread.
   ///
   /// - Parameter contentNs: when the picture's content was drawn, if the caller
   ///   knows (the latency page says, in its stamp). Otherwise it is the begin frame
@@ -118,8 +137,22 @@ public final class SurfaceFrameSource: CardFrameSource, @unchecked Sendable {
 
   public func present(_ texture: MTLTexture, contentNs: UInt64? = nil) throws {
     let paintNs = now()
-    typealias Chosen = (slot: Int, buffer: MTLBuffer, rotation: Rotation, size: (width: Int, height: Int), content: UInt64)
+    // Sendable by hand: it carries Metal resources to the conversion's completion,
+    // which reads the buffer only after the GPU has written it.
+    struct Chosen: @unchecked Sendable {
+      var slot: Int
+      var generation: Int
+      var buffer: MTLBuffer
+      var copy: MTLTexture?
+      var rotation: Rotation
+      var size: (width: Int, height: Int)
+      var content: UInt64
+    }
     let chosen: Chosen? = try lock.withLock {
+      if let failure = lateFailure {
+        lateFailure = nil
+        throw failure
+      }
       // Answered, whether or not the picture can be used. A begin asked for after
       // the picture was handed over is not what it answers.
       var answered: UInt64 = 0
@@ -130,45 +163,89 @@ public final class SurfaceFrameSource: CardFrameSource, @unchecked Sendable {
       guard let size = _frameSize else { return nil }
       if stagedSize.map({ $0.width != size.width || $0.height != size.height }) ?? true {
         guard reading == nil else { throw UYVYConverter.Failure.gpu("the frame changed size mid-frame") }
-        staged = try (0..<3).map { _ in
+        staged = try (0..<Self.buffers).map { _ in
           Staged(buffer: try converter.makeFrameBuffer(rowBytes: size.width * 2, height: size.height))
         }
         stagedSize = size
+        generation += 1
+        converting = []
         newest = nil
         fresh = false
       }
-      let slot = (0..<3).first { $0 != newest && $0 != reading }!
-      let content = contentNs ?? answered
-      return (slot, staged[slot].buffer, _rotation, size, content)
+      guard let slot = (0..<Self.buffers).first(where: { $0 != newest && $0 != reading && !converting.contains($0) })
+      else { return nil }
+      converting.insert(slot)
+      return Chosen(
+        slot: slot, generation: generation, buffer: staged[slot].buffer, copy: staged[slot].copy, rotation: _rotation,
+        size: size, content: contentNs ?? answered)
     }
     guard let chosen else { return }
+    conversions.enter()
     do {
+      // The copy, at the surface's own size, made again when that changes.
+      var copy = chosen.copy
+      if copy.map({ $0.width != texture.width || $0.height != texture.height }) ?? true {
+        copy = try converter.makeCopyTexture(width: texture.width, height: texture.height)
+        let made = copy
+        lock.withLock { if generation == chosen.generation { staged[chosen.slot].copy = made } }
+      }
+      guard let copy else { throw UYVYConverter.Failure.gpu("no texture to copy the picture into") }
+      try converter.copy(texture, into: copy)
+      let returnedNs = now()
+      let picture = CardPicture(contentNs: chosen.content, paintNs: paintNs, returnedNs: returnedNs)
       try converter.convert(
-        texture, rotation: chosen.rotation, into: chosen.buffer, width: chosen.size.width,
-        height: chosen.size.height, rowBytes: chosen.size.width * 2)
+        copy, rotation: chosen.rotation, into: chosen.buffer, width: chosen.size.width, height: chosen.size.height,
+        rowBytes: chosen.size.width * 2
+      ) { [weak self] failure in
+        self?.converted(
+          chosen.slot, generation: chosen.generation, buffer: chosen.buffer, size: chosen.size, picture, failure)
+      }
     } catch {
-      lock.withLock { _failure = "\(error)" }
+      lock.withLock {
+        if generation == chosen.generation { converting.remove(chosen.slot) }
+        _failure = "\(error)"
+      }
+      conversions.leave()
       throw error
     }
-    let readyNs = now()
-    let done: ((CardFrameCopy?) -> Void)? = lock.withLock {
-      // A size change while this one converted has replaced the buffers.
-      guard staged.indices.contains(chosen.slot), staged[chosen.slot].buffer === chosen.buffer else { return nil }
-      staged[chosen.slot].picture = CardPicture(contentNs: chosen.content, paintNs: paintNs, readyNs: readyNs)
-      newest = chosen.slot
+  }
+
+  /// A conversion finished, on a thread of Metal's: its picture is the newest, unless
+  /// the buffers were made again meanwhile.
+  private func converted(
+    _ slot: Int, generation done: Int, buffer: MTLBuffer, size: (width: Int, height: Int), _ picture: CardPicture,
+    _ failure: UYVYConverter.Failure?
+  ) {
+    defer { conversions.leave() }
+    var picture = picture
+    picture.readyNs = now()
+    let ready: ((CardFrameCopy?) -> Void)? = lock.withLock {
+      guard done == generation else { return nil }
+      converting.remove(slot)
+      if let failure {
+        _failure = "\(failure)"
+        lateFailure = failure
+        return nil
+      }
+      staged[slot].picture = picture
+      newest = slot
       fresh = true
       _failure = nil
       defer { capture = nil }
       return capture
     }
-    if let done {
-      let row = chosen.size.width * 2
-      done(
+    if let ready {
+      let row = size.width * 2
+      ready(
         CardFrameCopy(
-          bytes: Array(UnsafeRawBufferPointer(start: chosen.buffer.contents(), count: row * chosen.size.height)),
-          width: chosen.size.width, height: chosen.size.height, rowBytes: row))
+          bytes: Array(UnsafeRawBufferPointer(start: buffer.contents(), count: row * size.height)),
+          width: size.width, height: size.height, rowBytes: row))
     }
   }
+
+  /// Wait until every picture presented so far has been converted: for tests and the
+  /// bench tool, which present and then look.
+  public func waitForConversions() { conversions.wait() }
 
   public func fill(_ request: CardFrameRequest, into target: CardFrameTarget) -> CardPicture? {
     let taken: (buffer: MTLBuffer, picture: CardPicture)? = lock.withLock {

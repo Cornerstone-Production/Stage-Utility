@@ -53,9 +53,9 @@ import Testing
   @Test func theCSVLineFollowsTheHeader() {
     let t = FrameTiming(
       index: 7, fresh: false, skipped: false, result: 1, contentNs: 1, paintNs: 2, readyNs: 3, fillNs: 4,
-      copiedNs: 5, scheduledNs: 6, airNs: 8, completedNs: 9)
+      copiedNs: 5, scheduledNs: 6, airNs: 8, completedNs: 9, returnedNs: 10)
     let line = FrameTimingCSV.line(output: "SDI 1", t)
-    #expect(line == "SDI 1,7,0,0,1,1,2,3,4,5,6,8,9")
+    #expect(line == "SDI 1,7,0,0,1,1,2,3,4,5,6,8,9,10")
     #expect(line.split(separator: ",").count == FrameTimingCSV.header.split(separator: ",").count)
   }
 }

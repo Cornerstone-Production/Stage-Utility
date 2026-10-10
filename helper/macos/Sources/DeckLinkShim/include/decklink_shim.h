@@ -116,11 +116,13 @@ typedef struct {
   int32_t height;
   int32_t slot;
   /// Written by the source with a new picture: when the picture's content was
-  /// drawn (the page's begin frame), when the page handed it over, and when it was
-  /// ready to copy. Host time in nanoseconds (mach_absolute_time), 0 when unknown.
+  /// drawn (the page's begin frame), when the page handed it over, when the page's
+  /// own copy could be let go (the paint callback returned), and when it was ready
+  /// to copy. Host time in nanoseconds (mach_absolute_time), 0 when unknown.
   uint64_t content_ns;
   uint64_t paint_ns;
   uint64_t ready_ns;
+  uint64_t returned_ns;
 } dl_frame_target;
 
 /// Write the newest picture for frame `frame_index` (shown at `stream_time`, in the
@@ -285,6 +287,8 @@ typedef struct {
   uint64_t content_ns;
   uint64_t paint_ns;
   uint64_t ready_ns;
+  /// When the paint callback that handed the picture over returned.
+  uint64_t returned_ns;
   /// When the fill began (the fill lead before air), when the picture was in the
   /// frame, and when the card had taken it (ScheduleVideoFrame returned).
   uint64_t fill_ns;

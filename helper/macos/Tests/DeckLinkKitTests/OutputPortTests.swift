@@ -556,6 +556,24 @@ let softwareMode = DeckLinkOutputPort.State.running(mode: "16x4 at 59.94 on a so
       ])
   }
 
+  /// An owner on the main thread asks for the open and does not wait for it: it
+  /// happens on the port's queue, and the owner hears of it from onOpened and
+  /// onStatus. Asked while the queue is busy, the request returns at once.
+  @Test func anOpenCanBeAskedForWithoutWaiting() {
+    let port = softwarePort(NumberedSource())
+    defer { port.close() }
+    let opened = Locked<[PixelSize]>([])
+    port.onOpened = { opened.value.append($0) }
+    let release = DispatchSemaphore(value: 0)
+    port.queueForTest.async { release.wait() }  // the queue busy, as with a card opening
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { release.signal() }
+    port.requestOpen(videoMode: nil)
+    #expect(opened.value.isEmpty)
+    port.sync()
+    #expect(port.state == softwareMode)
+    #expect(opened.value == [PixelSize(width: 16, height: 4)])
+  }
+
   /// A port tells its owner each time its status changes, so the window says so
   /// then, without asking the port's queue: opened, lost, opened again, and its page
   /// silent and drawing again. Nothing is said twice.

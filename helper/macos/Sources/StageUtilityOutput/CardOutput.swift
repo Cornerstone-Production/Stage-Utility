@@ -120,7 +120,8 @@ final class CardOutput: OutputSink {
         }
       }
     }
-    port.open(videoMode: self.videoMode)
+    // Off the main thread, where every output's pictures arrive.
+    port.requestOpen(videoMode: self.videoMode)
   }
 
   /// One Metal device, queue and pipeline for every card output.
@@ -159,7 +160,7 @@ final class CardOutput: OutputSink {
     videoMode = asked
     // The page is laid out again when the port opens in it (`portOpened`), which for
     // a port that is lost is not now.
-    port.open(videoMode: asked)
+    port.requestOpen(videoMode: asked)
   }
 
   /// What keeps this output from sending the page, for its line in the window: a

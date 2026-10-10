@@ -44,11 +44,14 @@ public struct CardPicture: Equatable, Sendable {
   public var paintNs: UInt64
   /// When it was converted and ready to go into a frame.
   public var readyNs: UInt64
+  /// When the page's own copy could be let go: the paint callback returned.
+  public var returnedNs: UInt64
 
-  public init(contentNs: UInt64 = 0, paintNs: UInt64 = 0, readyNs: UInt64 = 0) {
+  public init(contentNs: UInt64 = 0, paintNs: UInt64 = 0, readyNs: UInt64 = 0, returnedNs: UInt64 = 0) {
     self.contentNs = contentNs
     self.paintNs = paintNs
     self.readyNs = readyNs
+    self.returnedNs = returnedNs
   }
 
   /// A picture whose times nobody kept.

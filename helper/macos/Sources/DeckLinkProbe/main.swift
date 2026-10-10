@@ -149,6 +149,7 @@ func printBreakdown(_ label: String, _ timings: [FrameTiming]) {
   print(describe("drawn to air", b.renderToAir))
   print(describe("drawn to handed over", b.contentToPaint))
   print(describe("handed over to ready", b.paintToReady))
+  print(describe("paint callback held", b.paintToReturned))
   print(describe("ready to filled", b.readyToFill))
   print(describe("filled to copied", b.fillToCopied))
   print(describe("copied to card", b.copiedToScheduled))

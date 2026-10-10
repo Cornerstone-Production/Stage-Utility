@@ -26,12 +26,14 @@ public struct FrameTiming: Equatable, Sendable {
   public var airNs: UInt64
   /// When the card said it had finished with the frame: the end of its slot.
   public var completedNs: UInt64
+  /// When the paint callback that handed the picture over returned: from `paintNs`
+  /// to this, the page's thread (the main thread) was held.
+  public var returnedNs: UInt64
 
   public init(
     index: Int64, fresh: Bool = true, skipped: Bool = false, result: Int = 0, contentNs: UInt64 = 0,
     paintNs: UInt64 = 0, readyNs: UInt64 = 0, fillNs: UInt64 = 0, copiedNs: UInt64 = 0, scheduledNs: UInt64 = 0,
-    airNs: UInt64 = 0,
-    completedNs: UInt64 = 0
+    airNs: UInt64 = 0, completedNs: UInt64 = 0, returnedNs: UInt64 = 0
   ) {
     self.index = index
     self.fresh = fresh
@@ -45,6 +47,7 @@ public struct FrameTiming: Equatable, Sendable {
     self.scheduledNs = scheduledNs
     self.airNs = airNs
     self.completedNs = completedNs
+    self.returnedNs = returnedNs
   }
 
   /// From the picture's content being drawn to the slot going out of the card:
@@ -92,6 +95,9 @@ public struct LatencyBreakdown: Equatable, Sendable {
   public var contentToPaint: Distribution?
   /// The conversion to UYVY, from the picture handed over to ready.
   public var paintToReady: Distribution?
+  /// The paint callback held: from the picture handed over to the callback
+  /// returning, its copy taken.
+  public var paintToReturned: Distribution?
   /// Waiting for the slot's fill: ready to filled.
   public var readyToFill: Distribution?
   /// The copy into the frame.
@@ -112,7 +118,8 @@ public struct LatencyBreakdown: Equatable, Sendable {
     }
     return LatencyBreakdown(
       renderToAir: d(\.contentNs, \.airNs), contentToPaint: d(\.contentNs, \.paintNs),
-      paintToReady: d(\.paintNs, \.readyNs), readyToFill: d(\.readyNs, \.fillNs),
+      paintToReady: d(\.paintNs, \.readyNs), paintToReturned: d(\.paintNs, \.returnedNs),
+      readyToFill: d(\.readyNs, \.fillNs),
       fillToCopied: d(\.fillNs, \.copiedNs), copiedToScheduled: d(\.copiedNs, \.scheduledNs),
       scheduledToAir: d(\.scheduledNs, \.airNs),
       airToCompleted: d(\.airNs, \.completedNs))
@@ -138,12 +145,13 @@ public enum LatencyLog {
 /// budget away from the Mac.
 public enum FrameTimingCSV {
   public static let header =
-    "output,index,fresh,skipped,result,content_ns,paint_ns,ready_ns,fill_ns,copied_ns,scheduled_ns,air_ns,completed_ns"
+    "output,index,fresh,skipped,result,content_ns,paint_ns,ready_ns,fill_ns,copied_ns,scheduled_ns,air_ns,completed_ns,returned_ns"
 
   public static func line(output: String, _ t: FrameTiming) -> String {
     let fields: [String] = [
       output, "\(t.index)", t.fresh ? "1" : "0", t.skipped ? "1" : "0", "\(t.result)", "\(t.contentNs)", "\(t.paintNs)",
       "\(t.readyNs)", "\(t.fillNs)", "\(t.copiedNs)", "\(t.scheduledNs)", "\(t.airNs)", "\(t.completedNs)",
+      "\(t.returnedNs)",
     ]
     return fields.joined(separator: ",")
   }

@@ -14,7 +14,10 @@ import StageUtilityOutputCore
 /// pixel; at the matching size every output pixel is exactly one input pixel.
 ///
 /// Each pair of pixels shares its Cb and Cr, taken from the average of the two.
-public final class UYVYConverter {
+///
+/// Sendable by hand: its device, queue and pipeline are made once and Metal's are safe
+/// to use from any thread.
+public final class UYVYConverter: @unchecked Sendable {
   public enum Failure: Error, Equatable {
     case noGPU
     case shader(String)
@@ -59,8 +62,54 @@ public final class UYVYConverter {
   public func convert(
     _ source: MTLTexture, rotation: Rotation, into buffer: MTLBuffer, width: Int, height: Int, rowBytes: Int
   ) throws {
-    try check(width: width, height: height, rowBytes: rowBytes, length: buffer.length)
-    try encode(source, rotation: rotation, into: buffer, width: width, height: height, rowBytes: rowBytes)
+    let commands = try conversion(source, rotation: rotation, into: buffer, width: width, height: height, rowBytes: rowBytes)
+    commands.commit()
+    commands.waitUntilCompleted()
+    if let error = commands.error { throw Failure.gpu(error.localizedDescription) }
+  }
+
+  /// The same, without waiting: `done` gets nil, or why not, once the GPU has written
+  /// it, on a thread of Metal's. Throws only what stops it being started.
+  public func convert(
+    _ source: MTLTexture, rotation: Rotation, into buffer: MTLBuffer, width: Int, height: Int, rowBytes: Int,
+    done: @escaping @Sendable (Failure?) -> Void
+  ) throws {
+    let commands = try conversion(source, rotation: rotation, into: buffer, width: width, height: height, rowBytes: rowBytes)
+    commands.addCompletedHandler { finished in done(finished.error.map { Failure.gpu($0.localizedDescription) }) }
+    commands.commit()
+  }
+
+  /// A texture of the GPU's own, `width` x `height` BGRA, to copy a picture into
+  /// (`copy`): the conversion reads it after the picture itself has been let go.
+  public func makeCopyTexture(width: Int, height: Int) throws -> MTLTexture {
+    let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+      pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+    descriptor.usage = [.shaderRead]
+    descriptor.storageMode = .private
+    guard let texture = device.makeTexture(descriptor: descriptor) else {
+      throw Failure.gpu("could not make a texture to copy the picture into")
+    }
+    return texture
+  }
+
+  /// Copy `source` into `copy`, a texture of the same size (`makeCopyTexture`).
+  /// Returns once the GPU has copied it, so `source` may be let go: a picture that
+  /// is valid only inside a callback is held for the copy, not for the conversion.
+  public func copy(_ source: MTLTexture, into copy: MTLTexture) throws {
+    guard copy.width == source.width, copy.height == source.height, copy.pixelFormat == source.pixelFormat else {
+      throw Failure.gpu("the copy is not the picture's size")
+    }
+    guard let commands = queue.makeCommandBuffer(), let blit = commands.makeBlitCommandEncoder() else {
+      throw Failure.gpu("could not make a command buffer")
+    }
+    blit.copy(
+      from: source, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+      sourceSize: MTLSize(width: source.width, height: source.height, depth: 1), to: copy, destinationSlice: 0,
+      destinationLevel: 0, destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+    blit.endEncoding()
+    commands.commit()
+    commands.waitUntilCompleted()
+    if let error = commands.error { throw Failure.gpu(error.localizedDescription) }
   }
 
   /// A buffer for `convert(_:rotation:into:width:height:rowBytes:)` that the CPU can
@@ -77,9 +126,11 @@ public final class UYVYConverter {
     guard rowBytes >= width * 2, rowBytes % 4 == 0, length >= rowBytes * height else { throw Failure.targetTooSmall }
   }
 
-  private func encode(
+  /// The conversion, encoded and not yet committed.
+  private func conversion(
     _ source: MTLTexture, rotation: Rotation, into buffer: MTLBuffer, width: Int, height: Int, rowBytes: Int
-  ) throws {
+  ) throws -> MTLCommandBuffer {
+    try check(width: width, height: height, rowBytes: rowBytes, length: buffer.length)
     guard let commands = queue.makeCommandBuffer(), let encoder = commands.makeComputeCommandEncoder() else {
       throw Failure.gpu("could not make a command buffer")
     }
@@ -95,9 +146,7 @@ public final class UYVYConverter {
     encoder.dispatchThreads(
       MTLSize(width: width / 2, height: height, depth: 1), threadsPerThreadgroup: MTLSize(width: w, height: h, depth: 1))
     encoder.endEncoding()
-    commands.commit()
-    commands.waitUntilCompleted()
-    if let error = commands.error { throw Failure.gpu(error.localizedDescription) }
+    return commands
   }
 
   struct Params {

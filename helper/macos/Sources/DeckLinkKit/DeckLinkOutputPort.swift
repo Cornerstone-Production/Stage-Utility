@@ -193,6 +193,20 @@ public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
     }
   }
 
+  /// `open`, on the port's queue, without waiting for it: for an owner on the main
+  /// thread, which draws every output's pictures, while opening a card (finding the
+  /// device, enabling its output, the pre-roll) takes tens of milliseconds. The
+  /// owner hears how it went from `onOpened` and `onStatus`.
+  public func requestOpen(videoMode: String?) {
+    queue.async { [weak self] in
+      guard let self else { return }
+      stopTimers()
+      closeHandle()
+      self.videoMode = videoMode
+      openNow(retrying: false)
+    }
+  }
+
   /// Try a lost port again now: a device arrived.
   public func retry() {
     queue.async { [weak self] in self?.retryNow() }
@@ -514,6 +528,7 @@ public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
   // MARK: Software clock controls, for tests
 
   func sync() { queue.sync {} }
+  var queueForTest: DispatchQueue { queue }
   func fakeRefuseOpens(_ why: String?) { queue.sync { refusingOpens = why } }
   func pollForTest() { queue.sync { pollNow() } }
   func fakeTick(_ frames: Int) { queue.sync { if let handle { dl_fake_tick(handle, Int32(frames)) } } }
@@ -602,6 +617,7 @@ private let fillThunk: dl_fill_fn = { ctx, index, streamTime, target in
   target.pointee.content_ns = picture.contentNs
   target.pointee.paint_ns = picture.paintNs
   target.pointee.ready_ns = picture.readyNs
+  target.pointee.returned_ns = picture.returnedNs
   return true
 }
 
@@ -638,8 +654,7 @@ extension FrameTiming {
     self.init(
       index: t.index, fresh: t.fresh, skipped: t.skipped, result: Int(t.result), contentNs: t.content_ns,
       paintNs: t.paint_ns, readyNs: t.ready_ns, fillNs: t.fill_ns, copiedNs: t.copied_ns, scheduledNs: t.scheduled_ns,
-      airNs: t.air_ns,
-      completedNs: t.completed_ns)
+      airNs: t.air_ns, completedNs: t.completed_ns, returnedNs: t.returned_ns)
   }
 }
 

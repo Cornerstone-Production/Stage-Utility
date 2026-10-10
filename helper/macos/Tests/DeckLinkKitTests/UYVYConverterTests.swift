@@ -184,12 +184,14 @@ extension SurfaceFrameSource {
     #expect(source.fill(request, into: frame.target) == nil)  // nothing presented yet
     source.begin(CardFrameRequest(index: 7, streamTime: 0, timeScale: 60000))
     try source.present(bgraSurface(width: 4, height: 1, Array(repeating: .grey(255), count: 4)))
+    source.waitForConversions()
     #expect(source.fill(request, into: frame.target) != nil)
     #expect(frame.pairs == [[128, 235, 128, 235], [128, 235, 128, 235]])
     #expect(source.fill(request, into: frame.target) == nil)  // the same picture: a repeat
 
     source.rotation = .clockwise180
     try source.present(bgraSurface(width: 4, height: 1, [.grey(0), .grey(0), .grey(255), .grey(255)]))
+    source.waitForConversions()
     #expect(source.fill(request, into: frame.target) != nil)
     #expect(frame.pairs == [[128, 235, 128, 235], [128, 16, 128, 16]])
     #expect(begun == [7])
@@ -205,10 +207,12 @@ extension SurfaceFrameSource {
     let frame = FrameMemory(width: 2, height: 1)
     let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
     try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
+    source.waitForConversions()
     #expect(source.frameSize == nil)
     #expect(source.fill(request, into: frame.target) == nil)
     #expect(source.frameSize.map { [$0.width, $0.height] } == [2, 1])
     try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
+    source.waitForConversions()
     #expect(source.fill(request, into: frame.target) != nil)
   }
 
@@ -219,6 +223,7 @@ extension SurfaceFrameSource {
     let source = SurfaceFrameSource(converter: converter)
     source.learnSize(width: 2, height: 1)
     try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
+    source.waitForConversions()
     let bigger = FrameMemory(width: 4, height: 2)
     #expect(source.fill(CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000), into: bigger.target) == nil)
   }
@@ -237,6 +242,7 @@ extension SurfaceFrameSource {
     source.begin(request)  // at 1000
     clock.value = 2_000
     try source.present(white)
+    source.waitForConversions()
     let picture = try #require(source.fill(request, into: frame.target))
     #expect(picture.contentNs == 1_000)
     #expect(picture.paintNs == 2_000)
@@ -244,9 +250,11 @@ extension SurfaceFrameSource {
 
     clock.value = 3_000
     try source.present(white, contentNs: 2_750)
+    source.waitForConversions()
     #expect(source.fill(request, into: frame.target)?.contentNs == 2_750)
     // Handed over with no begin frame to answer: when it was drawn is unknown.
     try source.present(white)
+    source.waitForConversions()
     #expect(source.fill(request, into: frame.target)?.contentNs == 0)
   }
 
@@ -267,12 +275,14 @@ extension SurfaceFrameSource {
     source.begin(request)  // a frame later, while the first is still being drawn
     clock.value = 21_000_000
     try source.present(white)
+    source.waitForConversions()
     #expect(source.fill(request, into: frame.target)?.contentNs == 1_000_000)
 
     clock.value = 34_366_667
     source.begin(request)
     clock.value = 35_000_000
     try source.present(white)
+    source.waitForConversions()
     #expect(source.fill(request, into: frame.target)?.contentNs == 34_366_667)
   }
 
@@ -289,9 +299,11 @@ extension SurfaceFrameSource {
     source.begin(request)  // stamped at 5 ms
     clock.value = 4_000_000  // the picture's time, taken before it
     try source.present(white)
+    source.waitForConversions()
     #expect(source.fill(request, into: frame.target)?.contentNs == 0)
     clock.value = 6_000_000
     try source.present(white)
+    source.waitForConversions()
     #expect(source.fill(request, into: frame.target)?.contentNs == 5_000_000)
   }
 
@@ -309,7 +321,32 @@ extension SurfaceFrameSource {
     source.begin(request)
     clock.value += 2_000_000
     try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
+    source.waitForConversions()
     #expect(source.fill(request, into: frame.target)?.contentNs == later)
+  }
+
+  /// The engine's surface is valid only inside its paint callback; CEF reuses it once
+  /// the callback returns. `present` returns once the picture has been copied out,
+  /// so a surface drawn over straight after does not reach the card: here the
+  /// surface is turned black the moment `present` returns, and the frame is white.
+  /// Not timed: that `present` then returns before the conversion is done, holding
+  /// the main thread for the copy alone, is a matter of how busy the GPU is, and was
+  /// measured on the card (DECKLINK.md, "How many outputs").
+  @Test func theSurfaceMayBeReusedOnceThePictureIsHandedOver() throws {
+    let source = SurfaceFrameSource(converter: converter)
+    source.learnSize(width: 1920, height: 1080)
+    let surface = bgraSurface(width: 1920, height: 1080, Array(repeating: .grey(255), count: 1920 * 1080))
+    try source.present(surface)
+    IOSurfaceLock(surface, [], nil)
+    memset(IOSurfaceGetBaseAddress(surface), 0, IOSurfaceGetBytesPerRow(surface) * 1080)
+    IOSurfaceUnlock(surface, [], nil)
+    source.waitForConversions()
+    let frame = FrameMemory(width: 1920, height: 1080)
+    let picture = try #require(source.fill(CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000), into: frame.target))
+    let bytes = frame.target.bytes.assumingMemoryBound(to: UInt8.self)
+    #expect(Array(UnsafeBufferPointer(start: bytes, count: 4)) == [128, 235, 128, 235])
+    #expect(Array(UnsafeBufferPointer(start: bytes + 1079 * 3840 + 3836, count: 4)) == [128, 235, 128, 235])
+    #expect(picture.paintNs <= picture.returnedNs && picture.returnedNs <= picture.readyNs)
   }
 
   /// Two pictures before the card takes a frame: the newer goes out, once, and the
@@ -320,7 +357,9 @@ extension SurfaceFrameSource {
     let request = CardFrameRequest(index: 0, streamTime: 0, timeScale: 60000)
     source.learnSize(width: 2, height: 1)
     try source.present(bgraSurface(width: 2, height: 1, [.grey(255), .grey(255)]))
+    source.waitForConversions()
     try source.present(bgraSurface(width: 2, height: 1, [.grey(0), .grey(0)]))
+    source.waitForConversions()
     #expect(source.fill(request, into: frame.target) != nil)
     #expect(frame.pairs == [[128, 16, 128, 16]])
     #expect(source.fill(request, into: frame.target) == nil)
