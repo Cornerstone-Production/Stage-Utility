@@ -224,8 +224,8 @@ standard leads, the medians measured above.
 | ms before air | Stage view (a still page) | Latency page (a new picture every frame) |
 |---|---|---|
 | 20.0 | Begin frame sent; Chromium runs the page's animation frame on this time | The same |
-| 19.0 | Picture handed over (Chromium's capture of the page as it is) | |
-| 17.6 | Converted to UYVY, ready | |
+| 19.0 | Picture handed over (Chromium's capture of the page as it is); copied out of Chromium's surface and the paint callback returns, about 0.6 ms later | |
+| 17.6 | Converted to UYVY, ready (on the GPU, after the callback has returned) | |
 | 12.0 | | Picture handed over, the page drawn |
 | 10.7 | | Converted, ready |
 | 5.0 | Fill: the newest picture copied into one of the card's frames (0.5 ms) | The same |
@@ -253,6 +253,35 @@ turned on in the helper's window (or in that folder's `outputs.json`). It then c
 the main display, menu bar included, and the helper's window opens over it: move
 the window off the clock, and quit from it when done. A shutter of 1/250 s or faster keeps the milliseconds legible; the moving
 bar and its tick marks give the same reading where they blur.
+
+## How many outputs
+
+Each card output's page paints on the main thread (CEF's UI thread, which also
+sends every output's begin frames), and its picture has to be copied out of
+Chromium's surface before the paint callback returns. That copy is done on the GPU,
+and the callback waits for it; the conversion to UYVY runs after the callback has
+returned. The wait is mostly the GPU getting to the copy, not the copy itself, so it
+is about the same per output however many there are, and the main thread's share
+grows with the number of outputs. `--frame-timings` gives it per picture
+(`returned_ns`; the bench tool prints it as "paint callback held").
+
+Measured on an M4 Mac mini, port 1 of a DeckLink 8K Pro and `--virtual-sdi` outputs,
+every output on the stage view at 1080p59.94, two minutes per row:
+
+| Outputs | Conversion | Main thread held, per second | Repeats, skips, late | Render to air | CPU (helper, one core), memory (all) |
+|---|---|---|---|---|---|
+| 9 (8 virtual, 1 card) | in the paint callback | 452 ms (p95 464) | 145 slots in one 2 s burst after a 224 ms GPU stall, none otherwise | 20.0 ms | 67%, 2.3 GB |
+| 9 (8 virtual, 1 card) | after the callback, the surface copied on the GPU | 410 ms (p95 426) | 0 | 20.0 ms | 58%, 2.3 GB |
+| 9 (8 virtual, 1 card) | after the callback, the surface copied on the CPU | 465 ms (p95 479) | 0 | 20.0 ms | 73%, 2.5 GB |
+| 17 (16 virtual, 1 card) | after the callback, copied on the GPU | 519 ms (p95 531) | 4 repeats in total | 20.0 ms | 68%, 4.0 GB |
+
+The helper copies on the GPU: the CPU copy held the main thread longer, the
+surface's lock costing more than the copy saved. Seventeen outputs (one of them on
+the holding screen) held at 1080p59.94 with four repeats in two minutes between them,
+and the helper makes no more than sixteen virtual ones, so **the measured ceiling is
+seventeen outputs at 1080p59.94 on an M4 Mac mini**, with about half the main
+thread spare. A page that draws more than the stage view, or a slower Mac, lowers
+it; the card's bus is the other limit ([Bandwidth](#bandwidth)).
 
 ## Helper frames and card frames
 
