@@ -67,6 +67,7 @@ import { WriteQueue } from "./write-queue.js";
 import { serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
 import { clampTextSize, isStorableTextSize, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "../types/text-size.js";
+import { DEFAULT_VIDEO_MODE, isRotation, isVideoMode, ROTATIONS, VIDEO_MODES } from "../types/output-format.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
 
@@ -4168,6 +4169,49 @@ export class StageController {
       id,
       { textSize: size },
       `[stage-controller] setOutputTextSize output=${scrub(id)} → ${scrub(size)}%`,
+    );
+  }
+
+  /**
+   * Set how far the Mac output helper turns this screen's picture. Refuses
+   * anything but 0, 90, 180 or 270 (the caller turns that into a 400), and
+   * writes nothing when the screen is already turned that far, 0 counting for
+   * absent.
+   */
+  async setOutputRotation(id: string, rotation: unknown): Promise<StageState> {
+    const current = this.state.outputs.find((o) => o.id === id);
+    if (!current) {
+      throw new Error(`outputs:setRotation — output ${id} not found`);
+    }
+    if (!isRotation(rotation)) {
+      throw new Error(`outputs:setRotation — rotation must be one of ${ROTATIONS.join(", ")}`);
+    }
+    if ((current.rotation ?? 0) === rotation) return this.state;
+    return this.commitOutputPatch(
+      id,
+      { rotation },
+      `[stage-controller] setOutputRotation output=${scrub(id)} → ${scrub(rotation)}`,
+    );
+  }
+
+  /**
+   * Set the video mode a DeckLink port sends this screen in. Refuses a name that
+   * is not in VIDEO_MODES (the caller turns that into a 400), and writes nothing
+   * when the screen already has that mode, the default counting for absent.
+   */
+  async setOutputVideoMode(id: string, videoMode: unknown): Promise<StageState> {
+    const current = this.state.outputs.find((o) => o.id === id);
+    if (!current) {
+      throw new Error(`outputs:setVideoMode — output ${id} not found`);
+    }
+    if (!isVideoMode(videoMode)) {
+      throw new Error(`outputs:setVideoMode — videoMode must be one of ${VIDEO_MODES.join(", ")}`);
+    }
+    if ((current.videoMode ?? DEFAULT_VIDEO_MODE) === videoMode) return this.state;
+    return this.commitOutputPatch(
+      id,
+      { videoMode },
+      `[stage-controller] setOutputVideoMode output=${scrub(id)} → ${scrub(videoMode)}`,
     );
   }
 
