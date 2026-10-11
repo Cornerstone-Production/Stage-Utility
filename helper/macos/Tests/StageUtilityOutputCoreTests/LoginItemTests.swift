@@ -3,7 +3,7 @@ import Testing
 @testable import StageUtilityOutputCore
 
 @Suite struct LoginItemTests {
-  /// The installer's agent starts the helper: no switch, so no second, per-user
+  /// The LaunchAgent starts the helper: no switch, so no second, per-user
   /// login item can be made.
   @Test func anInstalledAgentIsShownNotOffered() {
     #expect(LoginItem.decide(agentInstalled: true, userItemEnabled: false) == .init(offer: .installed, removeUserItem: false))
@@ -41,7 +41,7 @@ final class RecordingLoginItem: LoginItemService {
 }
 
 @Suite struct LoginItemSwitchTests {
-  /// Folders where the installer's agent is, or is not: this test file stands in
+  /// Folders where the LaunchAgent is, or is not: this test file stands in
   /// for an agent that exists.
   func paths(overridden: Bool, agent: Bool) -> HelperPaths {
     let dir = URL(fileURLWithPath: "/nonexistent-state", isDirectory: true)
@@ -81,7 +81,7 @@ final class RecordingLoginItem: LoginItemService {
     #expect(item.calls == ["status", "register", "status"])
   }
 
-  /// Beside the installer's agent a user item left from before is removed, and the
+  /// Beside the LaunchAgent a user item registered earlier is removed, and the
   /// switch is not offered.
   @Test func besideTheAgentAUserItemIsRemoved() {
     let item = RecordingLoginItem(enabled: true)

@@ -6,13 +6,11 @@
 #   helper/macos/build-app.sh --arch x86_64
 #   helper/macos/build-app.sh                         -> this Mac's architecture
 #
-# OUT defaults to helper/macos/dist/<arch>. This is the interface the release
-# workflow (added with the installer) calls, once per architecture.
+# OUT defaults to helper/macos/dist/<arch>.
 #
 # One app per architecture, not a universal one: CEF ships a separate framework for
-# each, about 320 MB apiece, and a universal app would carry both to every Mac. The
-# installer picks by `sysctl hw.optional.arm64`, arm64 on Apple silicon even under
-# Rosetta.
+# each, about 320 MB apiece, and a universal app would carry both to every Mac.
+# `sysctl hw.optional.arm64` says arm64 on Apple silicon even under Rosetta.
 #
 # Layout (CEF's, as its cefsimple sample makes it):
 #   Contents/MacOS/StageUtilityOutput                       the Swift app

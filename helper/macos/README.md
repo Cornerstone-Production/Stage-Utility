@@ -53,9 +53,8 @@ x86_64, almost all of it the framework.
 
 There is one app per architecture, not a universal one: CEF ships a separate
 framework for each, and a universal app would carry both, about 650 MB, to every Mac.
-The installer picks by `sysctl hw.optional.arm64`, which says arm64 on Apple silicon
-even from a shell running under Rosetta; the release workflow (added with the
-installer) calls `build-app.sh --arch` once for each.
+To tell which one a Mac needs, ask `sysctl hw.optional.arm64`: it says arm64 on Apple
+silicon even from a shell running under Rosetta. `build-app.sh --arch` builds one.
 
 The version is the repository's `package.json` version, kept whole in
 `CFBundleShortVersionString`; `CFBundleVersion` has to be dotted integers, so it is the
@@ -94,13 +93,12 @@ An output window sits above the menu bar, so one over the Mac's main display cov
 the icon. The window therefore opens by itself at launch whenever an output covers the
 main display, and again when a change in the displays newly covers it.
 
-**Starting at login.** `install-macos.sh` starts the helper at every login with a
-system-wide LaunchAgent, `/Library/LaunchAgents/com.stageutility.output.plist`. Where
-that file exists, the window's footer reads **Starts at login (installed)** and has no
-switch, since a per-user login item beside it would start a second copy; one made
-before the installer ran is removed at launch, and the log says so. A copy run by hand
-on a Mac the installer never ran on has the **Open at login** switch instead, a
-per-user login item (`SMAppService`). A copy run with `STAGE_UTILITY_OUTPUT_STATE_DIR`
+**Starting at login.** Where the system-wide LaunchAgent
+`/Library/LaunchAgents/com.stageutility.output.plist` exists, the window's footer reads
+**Starts at login (installed)** and has no switch, since a per-user login item beside it
+would start a second copy; one already registered is removed at launch, and the log says
+so. Where that file does not exist, the window has the **Open at login** switch instead,
+a per-user login item (`SMAppService`). A copy run with `STAGE_UTILITY_OUTPUT_STATE_DIR`
 never touches the login item, neither reading nor changing it, and its footer says
 Open at login is not available: the item belongs to the user and the app, not the
 state folder, so one a test made would outlive the test and start the helper at the
@@ -124,12 +122,12 @@ next login with the real state.
 
 | What | Where |
 |---|---|
-| The Mac's device id, the optional `server` file, the installer's token, the `migrated-from-kiosk` marker | `/Library/Application Support/StageUtility/`, written by `install-macos.sh`. Read only. |
+| The Mac's device id, the optional `server` file, the Mac's token, the `migrated-from-kiosk` marker | `/Library/Application Support/StageUtility/`. Read only. |
 | Per-output state: `outputs.json` (enabled, token, the server it is bound to, whether it holds the kiosk's identity, a card output's format) | `~/Library/Application Support/StageUtilityOutput/` |
 | Chromium's profile (cookies, local storage, cache) and its own log, `chromium.log` | `Chromium/` and `chromium.log` in the same user folder |
-| A device id, when the installer never wrote one | `generated-device-id` in the same user folder. The window says so. |
+| A device id, when `device-id` is missing from the folder above | `generated-device-id` in the same user folder. The window says so. |
 
-`STAGE_UTILITY_OUTPUT_STATE_DIR` replaces both folders, for tests and development, and the installer's LaunchAgent is then looked for in its `LaunchAgents/`.
+`STAGE_UTILITY_OUTPUT_STATE_DIR` replaces both folders, for tests and development, and the LaunchAgent is then looked for in its `LaunchAgents/`.
 Nothing then reads or writes the real ones, nor the per-user login item.
 
 `outputs.json` holds each output's secret token. The folder is created `0700` and the
@@ -185,16 +183,16 @@ page.
 ## A Mac that was a Chrome kiosk
 
 A Mac set up as a kiosk before the helper is bound on the server under its bare device
-id, with the installer's `token` as its secret. When `install-macos.sh` replaces that
-kiosk with the helper it writes `/Library/Application Support/StageUtility/migrated-from-kiosk`.
-With the marker there, the main display's output takes the kiosk's identity: it goes by
-the bare `<mac device id>` with the installer's token, and starts **on**, so the screen
+id, with the Mac's `token` as its secret. Where
+`/Library/Application Support/StageUtility/migrated-from-kiosk` exists, the main
+display's output takes the kiosk's identity: it goes by the bare `<mac device id>` with
+the Mac's token, and starts **on**, so the screen
 the kiosk showed stays bound and keeps showing. Every other output is new, as usual.
 
 This is decided once, when the main display's record is first made in `outputs.json`
 (`"kioskIdentity": true`), and never moved: a restart with the menu bar on another
 display, or the holder unplugged, does not give it to a second output. It is given
-only with the marker, the installer's own device id and its token; an output that
+only with the marker, the Mac's own device id and its token; an output that
 already has a record is never converted, because its own id may be what a screen is
 bound to. `--list-outputs` shows the id each output really goes by.
 
