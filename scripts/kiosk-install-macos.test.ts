@@ -947,3 +947,52 @@ describe("the migration marker", () => {
     assert.equal(fs.readFileSync(marker(), "utf8"), "earlier\n");
   });
 });
+
+// Names the installer and the helper must agree on. The installer writes the
+// LaunchAgent and the migration marker; the helper looks for both by name, and
+// launchd runs the app by the bundle id build-app.sh gave it. A name that differs
+// in one of them is a helper that never starts at login, or a Mac that was a kiosk
+// and comes up dark, with nothing failing anywhere. The shell side is the script's
+// own variables, read by sourcing it (which defines them and runs nothing); the
+// Swift side is read from the line that declares each value, so a comment that
+// quotes one satisfies nothing.
+describe("the names the installer and the helper share", () => {
+  const SOURCES = path.join(HERE, "..", "helper", "macos", "Sources");
+  const swift = (file: string) => fs.readFileSync(path.join(SOURCES, file), "utf8");
+  /** The one string assigned or passed on a line that is code, not a `//` or `#` comment. */
+  const declared = (source: string, pattern: string): string => {
+    const found = [...source.matchAll(new RegExp(`^(?![ \\t]*(?://|#))[^\\n]*${pattern}`, "gm"))];
+    assert.equal(found.length, 1, `exactly one line declaring ${pattern}, found ${found.length}`);
+    return found[0][1];
+  };
+
+  it("are the same in install-macos.sh, build-app.sh and the Swift", async () => {
+    const r = await sh(
+      `. "${SCRIPT}"; printf 'label=%s\\nplist=%s\\nstate=%s\\nmarker=%s\\n' "$HELPER_LABEL" "$HELPER_PLIST" "$STATE_DIR" "$MARKER"`,
+      { STAGE_INSTALL_SOURCED: "1", STAGE_INSTALL_TEST_ROOT: scratch },
+    );
+    assert.equal(r.status, 0, r.err);
+    const shell: Record<string, string> = {};
+    for (const line of r.out.split("\n").filter(Boolean)) {
+      const eq = line.indexOf("=");
+      shell[line.slice(0, eq)] = line.slice(eq + 1).replace(scratch, "");
+    }
+
+    const paths = swift("StageUtilityOutputCore/Paths.swift");
+    const agentName = declared(paths, 'public static let launchAgentName = "([^"]+)"');
+    const agentDir = declared(paths, 'launchAgent: URL = URL\\(fileURLWithPath: "([^"]+)"\\)');
+    const systemDir = declared(paths, 'systemDir: URL\\(fileURLWithPath: "([^"]+)"');
+    const marker = declared(swift("StageUtilityOutputCore/OutputState.swift"), 'public static let markerFileName = "([^"]+)"');
+    const subsystem = declared(swift("StageUtilityOutput/Log.swift"), 'Logger\\(subsystem: "([^"]+)"');
+    const bundleId = declared(fs.readFileSync(path.join(HERE, "..", "helper", "macos", "build-app.sh"), "utf8"), "BUNDLE_ID=(\\S+)");
+
+    assert.equal(agentName, path.basename(shell.plist), "the LaunchAgent's file name");
+    assert.equal(agentDir, path.dirname(shell.plist), "the LaunchAgent's folder");
+    assert.equal(systemDir, shell.state, "the folder holding device-id, token and the marker");
+    assert.equal(marker, path.basename(shell.marker), "the migration marker's name");
+    assert.equal(path.dirname(shell.marker), shell.state, "the marker lives beside device-id");
+    assert.equal(`${shell.label}.plist`, agentName, "the label names the plist");
+    assert.equal(bundleId, shell.label, "the bundle id is the launchd label");
+    assert.equal(subsystem, shell.label, "the log subsystem is the label, as the docs tell an operator");
+  });
+});
