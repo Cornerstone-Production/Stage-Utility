@@ -273,8 +273,8 @@ dark on a Sunday:
   `--browser` the installer sets up one Chrome kiosk.
 
 The installers set what they can and print what is left. On macOS, automatic
-login and the screen saver are not scriptable; on Windows, automatic login is set
-in `netplwiz`.
+login is not scriptable and the screen saver may not be; the helper installer sets
+what it can. On Windows, automatic login is set in `netplwiz`.
 
 ## The prebuilt Pi image
 
@@ -385,7 +385,8 @@ Raspberry Pi kiosks do. Open it: the menu bar icon opens its window, where each 
 Mac's displays and DeckLink ports has a switch and a status line. Launching it again
 brings the window back. Where `/Library/LaunchAgents/com.stageutility.output.plist`
 exists, it starts at every login from that LaunchAgent, and the window says "Starts at
-login (installed)".
+login (installed)"; the installer writes the file, see
+[Installing the Mac output helper](#installing-the-mac-output-helper).
 
 **DeckLink outputs.** Each output port of a Blackmagic DeckLink or UltraStudio card
 appears under *Not set up yet* as its own output, named as Blackmagic's driver names
@@ -414,7 +415,8 @@ latency` (a clock on every output, to photograph two side by side), `--frame-tim
 
 Where `/Library/Application Support/StageUtility/migrated-from-kiosk` exists, the Mac
 was a Chrome kiosk and keeps its screen: its main display takes over the kiosk's device
-id and secret.
+id and secret. The installer writes the marker, see
+[Installing the Mac output helper](#installing-the-mac-output-helper).
 
 Everything else about it (state files, discovery, health, rotation, DeckLink outputs,
 Chromium and its sandbox, the Local Network permission, recovering an output from a
