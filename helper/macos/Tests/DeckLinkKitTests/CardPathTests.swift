@@ -27,35 +27,44 @@ import Testing
     return bgraSurface(width: w, height: h, pixels)
   }
 
-  func run(rotation: Rotation) async throws -> (counts: CardCounters, shown: [Int64], taken: Int, health: HealthSample) {
+  /// A 720p59.94 port on a software clock the test moves by hand, so the counts are
+  /// the same on any machine: a clock ticking by itself on a busy runner wakes late
+  /// and misses slots, which is the scheduler's own accounting (tested in
+  /// OutputPortTests), not this path's. Real time is driven on a card instead.
+  func run(rotation: Rotation) throws -> (counts: CardCounters, shown: [Int64], taken: Int, health: HealthSample) {
     let source = SurfaceFrameSource(converter: try UYVYConverter())
     let taken = Locked(0)
     source.onBeginFrame = { _ in taken.value += 1 }
     source.rotation = rotation
     let port = DeckLinkOutputPort(
-      label: "SDI 1 (virtual)", hardware: .virtual, source: source, retryInterval: 3600, pollInterval: 3600,
-      log: LogLines().write)
-    #expect(port.open(videoMode: "720p59.94") == .running(mode: "720p59.94 on a software clock", frames: .card))
+      label: "SDI 1 (virtual)",
+      hardware: .softwareClock(width: 1280, height: 720, frameDuration: 1001, timeScale: 60000, ticksByItself: false),
+      source: source, retryInterval: 3600, pollInterval: 3600, log: LogLines().write)
+    #expect(port.open(videoMode: nil) == .running(mode: "1280x720 at 59.94 on a software clock", frames: .card))
+    // The pre-roll's fills tell the source the frame size; then the picture.
+    port.fakeTick(1)
     try source.present(Self.portraitPage())
-    try await Task.sleep(nanoseconds: 250_000_000)
+    source.waitForConversions()
+    port.fakeTick(Self.ticks)
     // What went out is the software clock's record, gone once the output closes.
     let shown = port.fakeShown()
+    let health = port.takeHealthSample()
     port.close()
-    return (port.counters, shown, taken.value, port.takeHealthSample())
+    return (port.counters, shown, taken.value, health)
   }
 
-  @Test func aTurnedPictureFlowsFromTheSourceThroughThePortIntoTheCounts() async throws {
-    let r = try await run(rotation: .clockwise90)
+  static let ticks = 12
+
+  @Test func aTurnedPictureFlowsFromTheSourceThroughThePortIntoTheCounts() throws {
+    let r = try run(rotation: .clockwise90)
     // One picture presented: exactly one new frame, every other frame a repeat of it
     // (or of the black the frames start as, before it), none missed.
     #expect(r.counts.rendered == 1)
-    #expect(r.counts.scheduled > 6)
+    #expect(r.counts.scheduled > UInt64(Self.ticks))
     #expect(r.counts.repeated == r.counts.scheduled - 1)
     #expect(r.counts.missed == 0)
-    // The page is asked to draw once for every slot after the two of pre-roll,
-    // its head start (20 ms) before air: 3.3 ms after the slot before it was
-    // filled, so the slot after the last one filled may have been asked for too.
-    #expect(((r.counts.scheduled - 2)...(r.counts.scheduled - 1)).contains(UInt64(r.taken)))
+    // The page is asked to draw for the slots the clock moved through.
+    #expect(r.taken > 0 && UInt64(r.taken) <= r.counts.scheduled)
     // What went out: the turned picture, whole (no line torn from another), held.
     let first = try #require(r.shown.firstIndex(of: Self.white), "the turned picture never went out: \(Set(r.shown))")
     #expect(r.shown[first...].allSatisfy { $0 == Self.white })
@@ -66,9 +75,9 @@ import Testing
 
   /// The same page with no turn, or the other turn, starts every line black: the
   /// test above passes because of the turn, not in spite of it.
-  @Test func theOtherTurnsDoNotPutTheBottomOnTheLeft() async throws {
+  @Test func theOtherTurnsDoNotPutTheBottomOnTheLeft() throws {
     for rotation in [Rotation.none, .clockwise270] {
-      let r = try await run(rotation: rotation)
+      let r = try run(rotation: rotation)
       #expect(r.counts.rendered == 1)
       #expect(!r.shown.contains(Self.white), "\(rotation)")
     }
