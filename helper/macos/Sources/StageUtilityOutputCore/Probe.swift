@@ -1,6 +1,6 @@
 import Foundation
 
-/// The UDP probe, as `install-macos.sh` sends it plus the `output` object.
+/// The UDP probe a Mac's Chrome kiosk sends, plus the `output` object.
 ///
 /// The server decodes it in kiosk-discovery.ts (`decodeProbe`): every string is
 /// cut to 128 UTF-16 code units there (JavaScript's `.slice`, which counts units,

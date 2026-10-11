@@ -7,7 +7,7 @@
 #   helper/macos/build-app.sh                         -> this Mac's architecture
 #
 # OUT defaults to helper/macos/dist/<arch>. This is the interface the release
-# workflow (added with the installer) calls, once per architecture.
+# workflow calls, once per architecture.
 #
 # One app per architecture, not a universal one: CEF ships a separate framework for
 # each, about 320 MB apiece, and a universal app would carry both to every Mac. The

@@ -383,8 +383,9 @@ Framework, checks its checksums, and writes `StageUtilityOutput.app` for that
 architecture, about 325 MB, signed ad hoc. It renders every screen in Chromium, as the
 Raspberry Pi kiosks do. Open it: the menu bar icon opens its window, where each of the
 Mac's displays and DeckLink ports has a switch and a status line. Launching it again
-brings the window back. Installed by `install-macos.sh`, it starts at every login from
-the installer's LaunchAgent, and the window says "Starts at login (installed)".
+brings the window back. Where `/Library/LaunchAgents/com.stageutility.output.plist`
+exists, it starts at every login from that LaunchAgent, and the window says "Starts at
+login (installed)".
 
 **DeckLink outputs.** Each output port of a Blackmagic DeckLink or UltraStudio card
 appears under *Not set up yet* as its own output, named as Blackmagic's driver names
@@ -411,8 +412,9 @@ latency` (a clock on every output, to photograph two side by side), `--frame-tim
 <file>` and `--head-start`/`--fill-lead <ms>`. The log is the unified log, subsystem
 `com.stageutility.output`.
 
-A Mac that was a Chrome kiosk keeps its screen when the installer replaces the kiosk with
-the helper: its main display takes over the kiosk's device id and secret.
+Where `/Library/Application Support/StageUtility/migrated-from-kiosk` exists, the Mac
+was a Chrome kiosk and keeps its screen: its main display takes over the kiosk's device
+id and secret.
 
 Everything else about it (state files, discovery, health, rotation, DeckLink outputs,
 Chromium and its sandbox, the Local Network permission, recovering an output from a

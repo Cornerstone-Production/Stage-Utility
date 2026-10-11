@@ -118,7 +118,7 @@ struct HelperWindowView: View {
       HStack(spacing: 8) {
         switch model.loginOffer {
         case .installed:
-          // The installer's LaunchAgent starts it; a switch here would add a second.
+          // The LaunchAgent starts it; a switch here would add a second.
           Text("Starts at login (installed)").font(.system(size: 12)).foregroundColor(Palette.subtle)
         case .unavailable:
           Text("Open at login is not available with STAGE_UTILITY_OUTPUT_STATE_DIR")

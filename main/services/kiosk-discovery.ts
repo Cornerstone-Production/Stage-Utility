@@ -20,13 +20,13 @@ const VERSION = 1;
 
 /** Bounds on untrusted input. A device that sends more than this is malformed,
  *  and truncating beats letting a broadcast decide how much memory we keep. */
-const MAX_STR = 128;
-const MAX_MACS = 8;
+export const MAX_STR = 128;
+export const MAX_MACS = 8;
 /** A DeckLink port reports a few dozen modes at most, and the datagram cap above
  *  would refuse a probe long before this many fit. Bounded anyway: the Map this
  *  lands in lives for as long as the device is heard. */
-const MAX_MODES = 24;
-const MAX_MODE_LEN = 32;
+export const MAX_MODES = 24;
+export const MAX_MODE_LEN = 32;
 /** A datagram larger than this is not ours. Keeps a flood cheap to reject. */
 export const MAX_DATAGRAM = 2048;
 

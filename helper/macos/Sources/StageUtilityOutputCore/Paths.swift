@@ -16,7 +16,7 @@ public struct HelperPaths: Equatable {
   public var isOverridden = false
 
   public static let overrideVariable = "STAGE_UTILITY_OUTPUT_STATE_DIR"
-  /// The installer's agent: `HELPER_PLIST` in scripts/kiosk/install-macos.sh.
+  /// The agent's file name: `HELPER_PLIST` in scripts/kiosk/install-macos.sh.
   public static let launchAgentName = "com.stageutility.output.plist"
 
   public init(
@@ -51,7 +51,7 @@ public struct MacIdentity: Equatable {
   public enum Source: Equatable {
     /// Read from the installer's `device-id`.
     case installer
-    /// Made by the helper because the installer never ran.
+    /// Made by the helper because there is no `device-id` in the system folder.
     case generated
   }
 
@@ -71,8 +71,8 @@ public struct MacIdentity: Equatable {
   /// bound with. Only an output that takes over that kiosk's identity sends it
   /// (`KioskMigration`); every other output has its own.
   public var installerToken: String?
-  /// The installer replaced a Chrome kiosk on this Mac with the helper, and left
-  /// `migrated-from-kiosk` to say so.
+  /// `migrated-from-kiosk` exists in the system folder: `install-macos.sh` replaced a
+  /// Chrome kiosk on this Mac with the helper, and left it to say so.
   public var migratedFromKiosk = false
   /// Set when a generated id could not be saved: the id works for this run, and a
   /// restart would mint another and orphan every binding.

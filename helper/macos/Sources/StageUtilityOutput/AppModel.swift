@@ -22,7 +22,7 @@ final class AppModel: ObservableObject {
   @Published private(set) var connection: StatusText.Connection = .noOutputs
   /// Things that are wrong or worth knowing, shown under the connection line.
   @Published private(set) var notes: [String] = []
-  /// What "Open at login" offers: the switch, or that the installer's agent
+  /// What "Open at login" offers: the switch, or that the LaunchAgent
   /// starts the helper (`LoginItem`).
   @Published private(set) var loginOffer: LoginItem.Offer = .userSwitch(on: false)
   @Published private(set) var launchAtLoginError: String?
