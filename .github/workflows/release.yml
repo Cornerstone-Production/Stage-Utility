@@ -441,6 +441,10 @@ jobs:
         with:
           ref: v${{ needs.release.outputs.version }} # the tagged tree, not the branch
 
+      # The helper is Swift 6, so it is built with the Xcode helper-macos.yml tests
+      # with, not the runner image's default.
+      - uses: ./.github/actions/select-xcode
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
@@ -456,9 +460,8 @@ jobs:
             OUT="$out" helper/macos/build-app.sh --arch "$arch"
             app="$out/StageUtilityOutput.app"
 
-            # What was built is what the installer and the helper's own version
-            # check will expect: the right architecture, this release's version,
-            # and a signature that holds.
+            # What was built is checked before it ships: the right architecture,
+            # this release's version, and a signature that holds.
             test "$(lipo -archs "$app/Contents/MacOS/StageUtilityOutput")" = "$arch" \
               || { echo "::error::$arch build is not $arch"; exit 1; }
             got=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")

@@ -247,7 +247,8 @@ The build and tests skip a PR that touches only `docs/` and Markdown;
 dependency review runs only when `package.json` or the lockfile changes; the
 updater survival matrix runs only for the updater, the installers and its own
 scripts; and the Mac output helper's Swift build and tests (`helper-macos.yml`, on a
-macOS runner) run only when `helper/` changes. A push to `beta` or `main` runs the gate once, in the release workflow,
+macOS runner) run only when `helper/` changes, or the Xcode selection
+(`.github/actions/select-xcode`) that the release workflow's helper build shares. A push to `beta` or `main` runs the gate once, in the release workflow,
 before it tags, and writes the result to the commit as a `build` status, red or
 green. The release PR from `beta` to `main` therefore shows no CI job of its own:
 its `build` is that status on the `beta` head.

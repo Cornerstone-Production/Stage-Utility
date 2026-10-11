@@ -5,6 +5,11 @@
 // parsed, not searched, and its steps' own shell is run on a temporary tree with
 // `swift`, `sudo` and `xcode-select` stood in for, so a step that no longer builds,
 // no longer stops on a failed build, or picks an Xcode too old goes red.
+//
+// The Xcode choice is a local composite action, .github/actions/select-xcode, used
+// by this workflow and by the release workflow's helper build, so the binary that
+// ships is built with the toolchain this CI tests. The action's own shell is what
+// is run here, and both workflows are checked to use it, before their build.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -18,6 +23,9 @@ import { parse } from "yaml";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOW = path.join(HERE, "..", ".github", "workflows", "helper-macos.yml");
+const RELEASE = path.join(HERE, "..", ".github", "workflows", "release.yml");
+const SELECT_XCODE = "./.github/actions/select-xcode";
+const SELECT_XCODE_FILE = path.join(HERE, "..", ".github", "actions", "select-xcode", "action.yml");
 
 interface Step {
   name?: string;
@@ -30,6 +38,9 @@ interface Job {
   "timeout-minutes"?: number;
   steps?: Step[];
 }
+interface Action {
+  runs: { using?: string; steps?: (Step & { shell?: string })[] };
+}
 interface Workflow {
   on: Record<string, { paths?: string[] } | null>;
   permissions?: Record<string, string>;
@@ -37,6 +48,8 @@ interface Workflow {
 }
 const doc = parse(fs.readFileSync(WORKFLOW, "utf8")) as Workflow;
 const job = doc.jobs["swift"];
+const action = parse(fs.readFileSync(SELECT_XCODE_FILE, "utf8")) as Action;
+const releaseHelper = (parse(fs.readFileSync(RELEASE, "utf8")) as Workflow).jobs["helper"];
 
 /** Run `script` with bash in `cwd`, `bin` first on the PATH. */
 function run(script: string, cwd: string, bin: string, env: Record<string, string> = {}) {
@@ -59,7 +72,7 @@ function stubs(log: string, commands: Record<string, string>): string {
 describe("the helper's CI workflow runs for every pull request that touches the helper", () => {
   it("is triggered by pull requests on the helper or this workflow, and by hand, nothing else", () => {
     assert.deepEqual(Object.keys(doc.on).sort(), ["pull_request", "workflow_dispatch"]);
-    assert.deepEqual(doc.on.pull_request?.paths, ["helper/**", ".github/workflows/helper-macos.yml"]);
+    assert.deepEqual(doc.on.pull_request?.paths, ["helper/**", ".github/workflows/helper-macos.yml", ".github/actions/select-xcode/**"]);
   });
 
   it("reads the repository and nothing else", () => {
@@ -74,8 +87,8 @@ describe("the helper's CI workflow runs for every pull request that touches the 
     assert.ok(typeof job["timeout-minutes"] === "number" && job["timeout-minutes"] <= 60, "an unbounded macOS job");
   });
 
-  it("pins every action to a commit", () => {
-    const uses = (job.steps ?? []).flatMap((s) => (s.uses ? [s.uses] : []));
+  it("pins every action to a commit, the one in this repository excepted", () => {
+    const uses = (job.steps ?? []).flatMap((s) => (s.uses && s.uses !== SELECT_XCODE ? [s.uses] : []));
     assert.ok(uses.length > 0);
     for (const u of uses) assert.match(u, /@[0-9a-f]{40}$/, u);
   });
@@ -118,13 +131,13 @@ describe("the build step builds the package and then runs its tests, in helper/m
 
   it("comes after the Xcode is chosen", () => {
     const steps = job.steps ?? [];
-    const select = steps.findIndex((s) => s.run?.includes("xcode-select"));
+    const select = steps.findIndex((s) => s.uses === SELECT_XCODE);
     assert.ok(select >= 0 && select < steps.indexOf(build as Step));
   });
 });
 
 describe("the Xcode step picks the newest Xcode 16 or later, or fails saying why", () => {
-  const select = (job.steps ?? []).find((s) => s.run?.includes("xcode-select"));
+  const select = action.runs.steps?.find((s) => s.run?.includes("xcode-select"));
 
   function runSelect(xcodes: string[]): { status: number | null; out: string; log: string[] } {
     assert.ok(select?.run, "no step selects an Xcode");
@@ -157,5 +170,29 @@ describe("the Xcode step picks the newest Xcode 16 or later, or fails saying why
     assert.notEqual(r.status, 0);
     assert.match(r.out, /::error title=Mac output helper::no Xcode 16 or later/);
     assert.deepEqual(r.log, []);
+  });
+});
+
+describe("the release build selects the Xcode the CI selects", () => {
+  it("is a composite action whose only step is the selection", () => {
+    assert.equal(action.runs.using, "composite");
+    assert.equal(action.runs.steps?.length, 1);
+    assert.equal(action.runs.steps?.[0].shell, "bash");
+  });
+
+  it("is the same step, in the same place, in both workflows: after checkout, before the build", () => {
+    for (const [name, steps, build] of [
+      ["helper-macos.yml", job.steps ?? [], "./test.sh"],
+      ["release.yml", releaseHelper.steps ?? [], "build-app.sh"],
+    ] as const) {
+      const uses = steps.map((s) => s.uses ?? "");
+      const checkout = uses.findIndex((u) => u.startsWith("actions/checkout@"));
+      const select = uses.indexOf(SELECT_XCODE);
+      const built = steps.findIndex((s) => s.run?.includes(build));
+      assert.ok(checkout >= 0, `${name} checks out`);
+      assert.ok(select > checkout, `${name} selects the Xcode after checkout`);
+      assert.ok(built > select, `${name} builds after it selects the Xcode`);
+      assert.equal(uses.filter((u) => u === SELECT_XCODE).length, 1, `${name} selects it once`);
+    }
   });
 });
