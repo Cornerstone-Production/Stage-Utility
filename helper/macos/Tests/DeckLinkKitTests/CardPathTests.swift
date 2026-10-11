@@ -83,6 +83,13 @@ import Testing
     }
   }
 
+  /// Waits for something a self-ticking clock makes happen, up to a deadline long
+  /// enough for a busy CI runner, instead of sleeping a fixed time and hoping.
+  func eventually(within seconds: Double = 5, _ done: () -> Bool) async throws {
+    let deadline = Date().addingTimeInterval(seconds)
+    while !done() && Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
+  }
+
   /// `--dump-frames` writes the frame as the card was sent it: decoded, the
   /// turned picture comes back, white down the left edge.
   @Test func theDumpIsTheTurnedFrame() async throws {
@@ -95,7 +102,7 @@ import Testing
       log: LogLines().write)
     port.open(videoMode: "720p59.94")
     try source.present(Self.portraitPage())
-    try await Task.sleep(nanoseconds: 150_000_000)
+    try await eventually { got.value != nil }
     port.close()
     let frame = try #require(got.value)
     #expect(frame.width == 1280 && frame.height == 720)
@@ -135,7 +142,7 @@ import Testing
     #expect(port.state == .running(mode: "720p59.94 on a software clock", frames: .card))
     #expect(opened.value == [PixelSize(width: 1280, height: 720)])
     try source.present(Self.whitePage())
-    try await Task.sleep(nanoseconds: 150_000_000)
+    try await eventually { port.fakeShown().contains(Self.white) }
     let shown = port.fakeShown()
     port.close()
     #expect(shown.contains(Self.white), "the page's picture never went out: \(Set(shown))")
@@ -151,7 +158,7 @@ import Testing
     defer { port.close() }
     #expect(port.open(videoMode: "720p59.94") == .running(mode: "720p59.94 on a software clock", frames: .card))
     try source.present(Self.whitePage())
-    try await Task.sleep(nanoseconds: 100_000_000)
+    try await eventually { port.fakeShown().contains(Self.white) }
     #expect(port.fakeShown().contains(Self.white))
 
     port.fakeRefuseOpens("the port is not connected")
@@ -164,7 +171,7 @@ import Testing
     #expect(port.state == .running(mode: "1080p59.94 on a software clock", frames: .card))
     #expect(opened.value == [PixelSize(width: 1280, height: 720), PixelSize(width: 1920, height: 1080)])
     try source.present(Self.whitePage())
-    try await Task.sleep(nanoseconds: 150_000_000)
+    try await eventually { port.fakeShown().contains(Self.white) }
     let shown = port.fakeShown()
     #expect(shown.contains(Self.white), "no picture went out at the new size: \(Set(shown))")
   }
