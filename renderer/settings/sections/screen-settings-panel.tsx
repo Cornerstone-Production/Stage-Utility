@@ -38,6 +38,11 @@ import { errorMessage } from "@main/services/errors";
 import { KIND_DRAWS_TOP_BAR, outputMode, roleChangeConflict, viewFitsRole, viewShownInSidebar, viewSurface, type CreateScreenInput, type OutputMode } from "@main/types/views";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { useDevices } from "../../app/screens/use-devices";
+import { releaseDevice } from "../../app/screens/screen-device";
+import { cardOf, outputModeLine } from "../../app/screens/output-helpers";
+import { modeChoices, ROTATIONS, type Rotation } from "@main/types/output-format";
+import type { DeviceOutput } from "@main/types/kiosk";
+import type { OutputHealth } from "@main/types/output-health";
 import type { MessageGroups } from "../../main/use-message-groups";
 
 /** Select sentinels. Never stored: one clears the view, one asks for a new one. */
@@ -57,6 +62,9 @@ export interface PanelDevice {
   id: string;
   hostname?: string;
   ip?: string;
+  /** What to call the screen when it differs from the hostname: an output of a
+   *  Mac output helper is named for the output. */
+  name?: string;
 }
 
 /** Everything the panel does to the outside world, as callbacks, so the panel
@@ -71,6 +79,8 @@ export interface ScreenPanelActions {
   onSetLocked: (id: string, locked: boolean) => void;
   onSetHideTopBar: (id: string, hideTopBar: boolean) => void;
   onSetTextSize: (id: string, size: number) => void;
+  onSetRotation: (id: string, rotation: Rotation) => void;
+  onSetVideoMode: (id: string, videoMode: string) => void;
   onSetAllowHls: (id: string, allowHls: boolean) => void;
   onSetGroups: (id: string, groups: string[]) => void;
   onSetShowInSidebar: (viewId: string, show: boolean) => void;
@@ -525,11 +535,171 @@ function PromptButtons({ busy, disabled, onApply, onCancel }: { busy: boolean; d
 
 // ── Edit mode ────────────────────────────────────────────────────────────
 
-function DeviceSection({ outputId, online }: { outputId: string; online: boolean }) {
-  const { bound } = useDevices();
+/** One of the three figures under Rotation. */
+function Stat({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="rounded-lg border border-line bg-fill px-2.5 py-1.5">
+      <b className="block text-callout font-semibold tabular-nums text-fg">{value}</b>
+      <span className="text-caption2 text-fg-subtle">{label}</span>
+    </div>
+  );
+}
+
+/**
+ * The Device section for a screen shown by one output of a Mac output helper:
+ * which port, what it sends, how far it is turned, and how it is doing.
+ *
+ * Format is DeckLink only: a display runs at whatever the Mac drives it at.
+ */
+function OutputDeviceSection({ output, device, online, health, reported, actions }: {
+  output: Output;
+  device: { id: string; hostname?: string; ip?: string; label?: string; output: DeviceOutput };
+  online: boolean;
+  health: OutputHealth | undefined;
+  /** Whether it has reported at any time since the page loaded. */
+  reported: boolean;
+  actions: ScreenPanelActions;
+}) {
+  const [busy, setBusy] = useState(false);
+  const rotation = output.rotation ?? 0;
+  const sideways = rotation === 90 || rotation === 270;
+  const mode = outputModeLine(device.output, output.videoMode, undefined);
+  const who = [device.hostname || device.label || "Set up on a device", device.output.port].join(" · ");
+  const via = [cardOf(device.output), device.ip ? `via the output helper on ${device.ip}` : "via the output helper"].join(" · ");
+
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-3 py-1.5">
+        <div className="min-w-0">
+          <div className="truncate text-footnote font-medium text-fg">{who}</div>
+          <div className="mt-px text-caption1 text-fg-subtle">{via}</div>
+        </div>
+        <span className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted">
+          <span className={cn("size-2 rounded-full", online ? "bg-ok-9" : "bg-fg-faint")} />
+          {online ? "Online" : "Offline"}
+        </span>
+      </div>
+
+      {device.output.kind === "decklink" && (
+        <SettingRow label="Format" help="What the port sends. The house standard is the default.">
+          <Select value={mode} onValueChange={(v: string) => actions.onSetVideoMode(output.id, v)}>
+            <SelectTrigger aria-label="Format" className="w-36">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {modeChoices(device.output.modes, mode).map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
+      )}
+
+      <SettingRow label="Rotation" help="For a monitor mounted on its side.">
+        <div role="group" aria-label="Rotation" className="inline-flex shrink-0 overflow-hidden rounded-[7px] border border-line-strong">
+          {ROTATIONS.map((r) => (
+            <button
+              key={r}
+              type="button"
+              aria-pressed={rotation === r}
+              onClick={() => actions.onSetRotation(output.id, r)}
+              className={cn(
+                "border-l border-line-strong px-2.5 py-1 text-caption1 first:border-l-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus",
+                rotation === r ? "bg-accent/12 text-fg" : "bg-fill text-fg-muted hover:bg-fill-hover",
+              )}
+            >
+              {r}°
+            </button>
+          ))}
+        </div>
+      </SettingRow>
+      {/* Tall enough to hold the picture turned on its side. Smaller than the
+          mockup's 160 x 90: turned, that is 160 high, which ran over the figures
+          under it. */}
+      <div aria-hidden="true" className="grid h-[144px] place-items-center">
+        <i
+          style={{ transform: `rotate(${rotation}deg)` }}
+          className="grid h-[72px] w-[128px] place-items-center rounded border border-line-strong bg-bg text-caption2 not-italic text-fg-subtle transition-transform duration-(--motion-settled) ease-(--motion-ease) motion-reduce:transition-none"
+        >
+          {sideways ? "1080 × 1920" : "1920 × 1080"}
+        </i>
+      </div>
+
+      <div role="group" aria-label="Output health" className="grid grid-cols-3 gap-2">
+        {/* A display's rate comes from its display link, which does not tick
+            while the display sleeps or the screen is locked: 0 there is a
+            sleeping display, not a measurement. */}
+        <Stat
+          value={health && !(device.output.kind === "display" && health.fps === 0) ? health.fps.toFixed(2) : "—"}
+          label="frames / s"
+        />
+        <Stat value={health ? `${health.repeated.toFixed(1)}%` : "—"} label="repeated" />
+        <Stat value={health ? String(health.dropped) : "—"} label="dropped by the card" />
+      </div>
+      {device.output.kind === "decklink" && health?.latencyMs !== undefined && (
+        <p className="mt-2 text-caption1 text-fg-muted">Latency {Math.round(health.latencyMs)} ms (render to air)</p>
+      )}
+      {health?.struggling && (
+        <p role="status" className="mt-2 text-caption1 text-warn-11">
+          This output is dropping frames or running late.
+        </p>
+      )}
+      {!health && (
+        <p className="mt-2 text-caption1 text-fg-subtle">
+          {!online
+            ? "Offline, so nothing is being reported."
+            : reported
+              ? "The helper stopped reporting."
+              : "No report from the helper yet."}
+        </p>
+      )}
+
+      <div className="mt-1.5 flex items-start justify-between gap-3 py-1.5">
+        <p className="min-w-0 text-caption1 text-fg-subtle">
+          Repeated frames are a late page, shown twice rather than skipped. Dropped means the card ran out of frames.
+        </p>
+        <Button
+          type="button"
+          variant="transparent"
+          size="small"
+          className="border border-line-strong font-medium text-fg"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await releaseDevice(device.id, output.name);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Release
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function DeviceSection({ output, online, actions }: { output: Output; online: boolean; actions: ScreenPanelActions }) {
+  const outputId = output.id;
+  const { bound, health, reported } = useDevices();
   const device = bound.find((d) => d.outputId === outputId);
   if (!device) {
     return <p className="text-caption1 text-fg-subtle">No device is set up for this screen.</p>;
+  }
+  if (device.output) {
+    return (
+      <OutputDeviceSection
+        output={output}
+        device={{ ...device, output: device.output }}
+        online={online}
+        health={health.find((h) => h.deviceId === device.id)}
+        reported={reported.includes(device.id)}
+        actions={actions}
+      />
+    );
   }
   const who = [device.label || device.hostname || "Set up on a device", device.ip].filter(Boolean).join(" · ");
   return (
@@ -757,7 +927,7 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
       </Section>
 
       <Section title="Device">
-        <DeviceSection outputId={output.id} online={online} />
+        <DeviceSection output={output} online={online} actions={actions} />
       </Section>
     </>
   );

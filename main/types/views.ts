@@ -10,6 +10,7 @@
 
 import type { CalendarSelection } from "./calendar.js";
 import { externKeyed } from "./extern-keyed.js";
+import type { Rotation } from "./output-format.js";
 
 export type ViewKind =
   | "slots"
@@ -1287,6 +1288,16 @@ export interface Output {
    *  replacement device inherits it. Set from the display's own `?text=` link, or
    *  adopted once from the size that device remembered. */
   textSize?: number;
+  /** Quarter turns the Mac output helper applies before the picture leaves for
+   *  this screen's display or SDI port, for a monitor mounted on its side. Absent
+   *  means 0. Only that helper reads it: a browser showing the screen is turned
+   *  by its own device. */
+  rotation?: Rotation;
+  /** The video mode a DeckLink port sends this screen in, one of VIDEO_MODES in
+   *  output-format.ts. Absent means DEFAULT_VIDEO_MODE. Meaningful only for a
+   *  screen bound to a DeckLink output of the Mac output helper, which reads it
+   *  from `GET /api/outputs`. */
+  videoMode?: string;
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */

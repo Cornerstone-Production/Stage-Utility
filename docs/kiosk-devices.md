@@ -56,7 +56,7 @@ identical Pis apart.
 On macOS 14 or later, on Apple silicon or Intel, `install-macos.sh` installs the
 **Stage Utility Output** helper, a menu bar app that turns the Mac's displays and
 DeckLink SDI ports into screen devices. What the helper does once it runs is
-under *Mac output helper*; this is how it gets there.
+under [Mac output helper](#mac-output-helper); this is how it gets there.
 
 ```sh
 curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
@@ -292,6 +292,132 @@ SSID, password, hostname and SSH keys, and its customisation applies to this
 image like any other Raspberry Pi OS one — so they go in at flash time, on the
 machine doing the flashing. This repository is public; a released image must
 never carry a credential or a site's server address.
+
+## Mac output helper
+
+A Mac running the **output helper** (a menu bar app) is not one screen but
+several: each of its own displays and each port of a Blackmagic DeckLink or
+UltraStudio card is a separate output. The helper announces one device per
+output and the server sets each up like any other. A screen can therefore go out
+over SDI from a Mac mini, and the SDI ports are not counted against the Mac's
+limit on external displays.
+
+Each output is a device of its own, with an id of the form
+`<the Mac's device id>.<output key>`. A binding is to an output, so moving a
+cable to another port moves which screen goes out where. All of a Mac's outputs
+share its MAC addresses and hostname. Screens groups outputs by the Mac's id in
+that name, not by MAC address: Intel Macs with a T2 chip report the same MAC, and
+two of them stay two machines.
+
+The probe gains an `output` object, otherwise the probe described under
+[Discovery](#discovery):
+
+| Field | |
+|---|---|
+| `kind` | `display` or `decklink`. A probe with any other kind is treated as a plain device |
+| `name` | What the row calls it, for example `SDI 1 · Card A` |
+| `port` | The physical port, for example `SDI 1` |
+| `modes` | Optional. The video modes a DeckLink port reported, for example `1080p59.94` |
+
+A probe without `output` behaves exactly as it always has. Every field is
+bounded like the rest of the probe: names and ports at 128 characters, at most
+24 modes of 32 characters each.
+
+**On the server's own Mac.** The responder ignores a probe that carries one of
+the server's own MAC addresses, because a kiosk agent on the server's machine was
+never a wall screen. A probe with an `output` is let through, so the helper on the
+server's Mac works.
+
+The stored binding keeps the `output`, so a bound screen still names its port
+while the output is off.
+
+**On Screens.** The outputs of one Mac are grouped under the Mac in *Not set up
+yet*: its hostname, OS, address and the DeckLink card its SDI ports are on once,
+then a row per output, displays first and SDI ports after, each with the two
+actions above and what it is: a display reads `Built-in display · 1920 × 1080`
+and the refresh rate when the Mac reports one. An output that already has a
+screen stays in the group, dimmed, saying which screen it is set up as and
+whether that screen is showing. A Mac whose outputs are all set up is not
+listed. Outputs of one Mac are not flagged *Looks like … same MAC address*
+against each other; a device that is not an output keeps that hint. An output
+set up as a new screen starts named for the output, not for the Mac.
+
+A screen's card says `<hostname> · <port> · <mode>`: the Mac, the port, and the
+video mode the port sends (a display shows the size it is driven at). Its
+[Screen settings](features/operator-app.md#adding-a-screen) Device section shows the port and
+card, whether the screen is online, **Format** (DeckLink ports only, from the
+modes the port reported that the server accepts, otherwise all of them),
+**Rotation**, the output's health and **Release**. Releasing returns the output
+to *Not set up yet*.
+
+**Format and rotation** are settings of the screen, not of the Mac: a DeckLink
+port's video mode (`videoMode`, `1080p59.94` unless changed) and a quarter-turn
+rotation for a monitor on its side (`rotation`, 0 unless changed). They are
+written through `PATCH /api/outputs/:id`, are in every backup, and the helper
+reads its output's record from `GET /api/outputs`. The helper applies rotation to
+every output and opens each DeckLink port in its Format; see
+[Running the helper](#running-the-helper-beta) and the [API](reference/api.md).
+
+**Health.** Each output reports every ten seconds, authenticated by the device's
+own secret, and the server keeps the latest in memory only. It is shown with the
+screen: frames per second, the percent of frames repeated because the page was
+late, and the frames the card has dropped. A DeckLink output that has measured it
+also shows its **latency**, in milliseconds from render to air; the line is absent
+until the helper reports one. Latency is information only and does not count
+towards *struggling*. Three reports running with frames dropped or 5% or more
+repeated mark a DeckLink output **struggling**, and three clean ones in a row clear it. A display output is never marked: its rate comes
+from the display link, which stops while the display sleeps or the screen is
+locked, so it can report 0 fps while healthy, and Screens shows that as a dash. A
+struggling output also puts a warning on its screen's card, under the preview: the
+port, what the report shows (the percent of frames repeated, the frames the card
+dropped) and what to check. A reading that stops being refreshed is dropped after
+60 seconds. Until one arrives, the Device section says the helper has not reported
+yet; after one was dropped, that it stopped reporting; and for a screen no page is
+showing, that it is offline.
+
+### Running the helper (beta)
+
+Build it with `helper/macos/build-app.sh --arch arm64` (or `x86_64`; macOS 14 or later,
+and the Command Line Tools are enough). That downloads the pinned Chromium Embedded
+Framework, checks its checksums, and writes `StageUtilityOutput.app` for that
+architecture, about 325 MB, signed ad hoc. It renders every screen in Chromium, as the
+Raspberry Pi kiosks do. Open it: the menu bar icon opens its window, where each of the
+Mac's displays and DeckLink ports has a switch and a status line. Launching it again
+brings the window back. Installed by `install-macos.sh`, it starts at every login from
+the installer's LaunchAgent, and the window says "Starts at login (installed)".
+
+**DeckLink outputs.** Each output port of a Blackmagic DeckLink or UltraStudio card
+appears under *Not set up yet* as its own output, named as Blackmagic's driver names
+it ("DeckLink Duo 2 (3)"), with the formats the port can play, and is set up like a
+display. It needs Blackmagic's **Desktop Video** driver, 12.0 or later, installed on
+the Mac; without it there are no DeckLink outputs and the helper's window says so.
+**Restart the helper after installing or updating Desktop Video**: it looks for the
+driver only when it starts. The screen's **Format** (1080p59.94 unless changed) is the
+mode the port is opened in; a change reopens it, and a format the port does not have
+is refused, with the reason on that output's line in the helper's window. Rotation
+applies as it does on a display. A card unplugged keeps its screen and comes back by
+itself when plugged in again. A connector set as an input in Desktop Video Setup is
+not an output: the window lists it as "Set as an input in Desktop Video Setup", and it
+appears under *Not set up yet* within about 10 s of being set as an output. A DeckLink
+output runs 20 ms behind its page at 1080p59.94, and its line in the window says how
+far behind it is.
+
+Flags, for a Mac nobody is looking at: `--show-window`, `--list-outputs` (reads the
+stored state and exits), `--dump-frames <dir>` (a PNG of every output and of the window
+every 5 s, with no Screen Recording permission), `--discovery-port <n>`, `--log-stderr`,
+and, for development, `--virtual-sdi <n>` (n SDI outputs with no card behind them,
+offering every format, so the whole card path runs on any Mac), `--test-pattern
+latency` (a clock on every output, to photograph two side by side), `--frame-timings
+<file>` and `--head-start`/`--fill-lead <ms>`. The log is the unified log, subsystem
+`com.stageutility.output`.
+
+A Mac that was a Chrome kiosk keeps its screen when the installer replaces the kiosk with
+the helper: its main display takes over the kiosk's device id and secret.
+
+Everything else about it (state files, discovery, health, rotation, DeckLink outputs,
+Chromium and its sandbox, the Local Network permission, recovering an output from a
+server that is gone) is in [helper/macos/README.md](../helper/macos/README.md), and the
+DeckLink layer itself in [helper/macos/DECKLINK.md](../helper/macos/DECKLINK.md).
 
 ## Removing one
 
