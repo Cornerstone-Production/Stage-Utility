@@ -57,5 +57,8 @@ let package = Package(
       dependencies: ["DeckLinkKit", "DeckLinkShim", "StageUtilityOutputCore"]
     ),
   ],
-  swiftLanguageVersions: [.v5]
+  swiftLanguageVersions: [.v5],
+  // Stated, not left to the toolchain: Xcode 16.2's default compiled the shim as
+  // C++98, where its constexpr, brace initialisers and fixed-width types fail.
+  cxxLanguageStandard: .cxx17
 )
