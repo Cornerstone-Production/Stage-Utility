@@ -14,8 +14,6 @@ import { scrub, scrubError } from "./scrub.js";
 // Photos are small; keep ~90 days of them, capped at 250 MB.
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_BYTES = 250 * 1024 * 1024;
-/** Kept here for the callers and tests that named it here; it lives in capped-download.ts. */
-export { readCapped };
 
 /** A single photo is an avatar, not a payload. Refuse anything absurd. */
 const MAX_PHOTO_BYTES = 12 * 1024 * 1024;

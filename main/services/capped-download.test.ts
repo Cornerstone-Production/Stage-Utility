@@ -45,10 +45,30 @@ describe("readCapped", () => {
     assert.equal(buf?.byteLength, 20);
   });
 
+  // The cap used to be checked against content-length only. A chunked response
+  // has none, Number(null) is 0, and the guard passed, so the whole body was
+  // materialised in a Pi's heap before its size was ever looked at.
   it("returns null past the cap, and stops the transfer", async () => {
     const b = body([bytes(60), bytes(60), bytes(60)]);
-    assert.equal(await readCapped(new Response(b.stream), 100), null);
+    const res = new Response(b.stream);
+    assert.equal(res.headers.get("content-length"), null, "fixture must not declare a length");
+    assert.equal(await readCapped(res, 100), null);
     assert.ok(b.cancelled(), "the rest of the body is not left running");
+  });
+
+  it("stops pulling rather than draining the whole body", async () => {
+    let produced = 0;
+    const res = new Response(
+      new ReadableStream({
+        pull(c) {
+          produced += 1;
+          if (produced > 50) return c.close();
+          c.enqueue(new Uint8Array(32));
+        },
+      }),
+    );
+    assert.equal(await readCapped(res, 64), null);
+    assert.ok(produced < 10, `kept pulling after the cap: ${produced} chunks`);
   });
 
   it("counts the bytes that arrive, at the boundary exactly", async () => {
