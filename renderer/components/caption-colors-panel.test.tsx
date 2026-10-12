@@ -9,7 +9,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -134,6 +134,8 @@ async function openPanel() {
     screen.getByText("Transcription colors").click();
   });
   await settle();
+  // The channels come from a read behind the disclosure's own render.
+  await eventually(() => assert.ok(screen.queryByText(CHANNELS[0].name!), "the panel never listed its channels"));
 }
 
 describe("every ProdCom channel is listed", () => {
@@ -165,9 +167,11 @@ describe("the follow-ProdCom switch", () => {
       toggle.click();
     });
     await settle();
-    assert.ok(
-      swatchStyle("Lead TB").includes(toRgb("#00f900")),
-      `the panel did not pick up ProdCom's color: ${swatchStyle("Lead TB")}`,
+    await eventually(() =>
+      assert.ok(
+        swatchStyle("Lead TB").includes(toRgb("#00f900")),
+        `the panel did not pick up ProdCom's color: ${swatchStyle("Lead TB")}`,
+      ),
     );
   });
 
@@ -195,13 +199,16 @@ describe("the follow-ProdCom switch", () => {
   test("a custom pick is unaffected by the switch, in either position", async () => {
     state.captionChannelColors = { "Lead TB": "#123456" };
     await openPanel();
-    assert.ok(swatchStyle("Lead TB").includes(toRgb("#123456")));
+    await eventually(() => assert.ok(swatchStyle("Lead TB").includes(toRgb("#123456"))));
 
     const toggle = screen.getByRole("switch");
     await act(async () => {
       toggle.click();
     });
     await settle();
+    // The switch having taken effect is what makes "the pick survived it" worth
+    // reading: before the answer lands, nothing has had a chance to override it.
+    await eventually(() => assert.equal(screen.getByRole("switch").getAttribute("aria-checked"), "true"));
     assert.ok(
       swatchStyle("Lead TB").includes(toRgb("#123456")),
       "a custom pick was overridden by the switch",
@@ -212,7 +219,7 @@ describe("the follow-ProdCom switch", () => {
     state.captionChannelColors = { "Lead TB": "#123456" };
     state.followProdcomColors = true;
     await openPanel();
-    assert.ok(swatchStyle("Lead TB").includes(toRgb("#123456")));
+    await eventually(() => assert.ok(swatchStyle("Lead TB").includes(toRgb("#123456"))));
 
     const reset = screen.getByLabelText("Reset Lead TB to automatic color");
     await act(async () => {
@@ -220,9 +227,11 @@ describe("the follow-ProdCom switch", () => {
     });
     await settle();
     // followProdcomColors is still true, so the active default is ProdCom's own.
-    assert.ok(
-      swatchStyle("Lead TB").includes(toRgb("#00f900")),
-      `reset did not fall through to ProdCom's color: ${swatchStyle("Lead TB")}`,
+    await eventually(() =>
+      assert.ok(
+        swatchStyle("Lead TB").includes(toRgb("#00f900")),
+        `reset did not fall through to ProdCom's color: ${swatchStyle("Lead TB")}`,
+      ),
     );
   });
 });
