@@ -62,7 +62,7 @@ describe("a boot that finds no screen to change", () => {
     // Written through the stores, which hold the files in memory by now.
     await viewsStore.save([...(await viewsStore.load()), pad as never]);
     const settings = await settingsStore.get();
-    await settingsStore.patch({ outputs: [...settings.outputs, { id: "display-2", name: "Booth panel", viewId: "ctl-a" } as never] });
+    await settingsStore.patch({ outputs: [...(settings.outputs ?? []), { id: "display-2", name: "Booth panel", viewId: "ctl-a" } as never] });
     await stageController.init();
 
     const { outputs, views } = stageController.getState();
