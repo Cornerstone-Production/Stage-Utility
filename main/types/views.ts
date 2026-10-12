@@ -1206,11 +1206,6 @@ export function viewCanBeControlSurface(view: Pick<View, "kind">): boolean {
   return view.kind === "custom";
 }
 
-/** What the copy of a view made for one screen is called. */
-export function copyViewName(view: Pick<View, "name">, surface: ViewSurface): string {
-  return `${view.name} (${surface === "console" ? "control surface" : "wall"})`;
-}
-
 /** A physical screen at a URL slug, routed to exactly one View (or none). */
 export interface Output {
   /** Permanent. Never rewritten after creation — slots.json and every other store

@@ -2,8 +2,8 @@
 // older build stored on the screen out of the data, without changing what any
 // screen does.
 //
-// Until now a screen carried `mode: "display" | "panel"` and a view carried
-// `surface: "display" | "console"`, and the server forced the two to agree. The
+// An older build stored `mode: "display" | "panel"` on a screen and `surface:
+// "display" | "console"` on a view, and the server forced the two to agree. The
 // screen's copy was redundant, and is gone. What is stored on an install is not
 // always in agreement, though (a restored backup, a hand edit, an API call that
 // took a view id as given), and the one pairing that must never change on the
@@ -23,12 +23,19 @@
 // A screen with no stored role was a read-only display. That is what the old
 // readers assumed, so on the FIRST pass (`absentIsDisplay`) it is treated the
 // same: a console shown by a screen that never said so is copied, not woken up.
+// The exception is a screen the surface migration just made live, which arrives
+// as `liveScreenIds`: it never had a stored role, and its buttons worked.
 //
 // Pure: no I/O, no logging. It decides; the controller makes the copies (a
-// copy takes new ids and a slots board) and reports. Idempotent, because the
-// output carries no stored role for a second pass to find.
+// copy takes new ids and a slots board) and reports. A second pass over its own
+// output finds nothing, because that output carries no stored role.
 
-import { copyViewName, viewCanBeControlSurface, viewSurface, type ViewSurface } from "../types/views.js";
+import { viewCanBeControlSurface, viewSurface, type ViewSurface } from "../types/views.js";
+
+/** What the copy of a view made for one screen is called. */
+function copyViewName(view: Pick<View, "name">, surface: ViewSurface): string {
+  return `${view.name} (${surface === "console" ? "control surface" : "wall"})`;
+}
 
 /** A copy of a view the controller must make, and the screens that will show it. */
 export interface PlannedViewCopy {
@@ -50,6 +57,9 @@ export interface ScreenRolePlan {
   notes: string[];
   /** Screens looked at. */
   checked: number;
+  /** Screens that carried a stored role, or were made live by the surface
+   *  migration: 0 means this load had nothing of the kind to take out. */
+  carried: number;
   /** Screens that needed more than the stored role dropped. */
   changed: number;
 }
@@ -58,9 +68,6 @@ export interface ScreenRolePlan {
  *  Output no longer has the field, so nothing else can read it by accident. */
 export type StoredOutput = Output & { mode?: unknown };
 
-/** A screen's stored role as the old readers saw it: only an explicit "panel"
- *  was live, and anything else, including nothing, was read-only. */
-const wasPanel = (o: StoredOutput): boolean => o.mode === "panel";
 
 /** The same screen with no stored role. The screen itself when it had none, so a
  *  list with nothing to remove is not rebuilt (and not written). */
@@ -70,27 +77,27 @@ function withoutMode(o: StoredOutput): Output {
   return rest;
 }
 
-/** Mark a screen as having been live, for the pass that reads it. The surface
- *  migration uses this when it turns a view with buttons into a console: the
- *  screens showing it were working control surfaces before there was a field. */
-export function markedLive(o: Output): StoredOutput {
-  return { ...o, mode: "panel" };
-}
-
-/** Does any screen still carry a stored role? */
-export function carriesStoredRole(outputs: readonly StoredOutput[]): boolean {
-  return outputs.some((o) => "mode" in o);
-}
-
 export function planScreenRoles(
   views: readonly View[],
   outputs: readonly StoredOutput[],
-  opts: { absentIsDisplay: boolean },
+  opts: {
+    absentIsDisplay: boolean;
+    /** Screens the surface migration made live in this same load: a view with
+     *  buttons that had no surface yet became a console, so the screens showing
+     *  it were working control surfaces. They carry no stored role to say so. */
+    liveScreenIds?: ReadonlySet<string>;
+  },
 ): ScreenRolePlan {
   const consoleViewIds = new Set<string>();
   const copies = new Map<string, PlannedViewCopy>();
   const notes: string[] = [];
   let changed = 0;
+  let carried = 0;
+  const liveIds = opts.liveScreenIds ?? new Set<string>();
+  /** A screen's role as the old readers saw it: only an explicit "panel" (or a
+   *  screen just made live) was live, and anything else, including nothing, was
+   *  read-only. */
+  const wasPanel = (o: StoredOutput): boolean => o.mode === "panel" || liveIds.has(o.id);
   const label = (o: Output) => `"${o.name || o.id}"`;
 
   const copyFor = (view: View, surface: ViewSurface, screen: Output): void => {
@@ -101,7 +108,8 @@ export function planScreenRoles(
   };
 
   for (const o of outputs) {
-    const carries = "mode" in o;
+    const carries = "mode" in o || liveIds.has(o.id);
+    if (carries) carried += 1;
     if (!carries && !opts.absentIsDisplay) continue;
     const view = o.viewId ? views.find((v) => v.id === o.viewId) : undefined;
     if (!view) continue;
@@ -122,17 +130,16 @@ export function planScreenRoles(
       // turning into a console. "Live" is what the old readers saw, so a screen
       // with no stored role counts as read-only here too.
       const showing = outputs.filter((x) => x.viewId === view.id);
+      changed += 1;
       if (showing.every(wasPanel)) {
         if (!consoleViewIds.has(view.id)) {
           consoleViewIds.add(view.id);
-          changed += 1;
           notes.push(
             `"${view.name}" is now a control surface: ${showing.map(label).join(", ")} had live buttons on it as a wall view`,
           );
-        } else changed += 1;
+        }
       } else {
         copyFor(view, "console", o);
-        changed += 1;
         notes.push(
           `${label(o)} had live buttons on the wall view "${view.name}", which other read-only screens also show; ` +
             `it now shows a control-surface copy, "${copyViewName(view, "console")}"`,
@@ -147,6 +154,7 @@ export function planScreenRoles(
     copies: [...copies.values()],
     notes,
     checked: outputs.length,
+    carried,
     changed,
   };
 }

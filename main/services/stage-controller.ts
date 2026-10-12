@@ -3,7 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
-import { carriesStoredRole, planScreenRoles } from "./screen-role-migration.js";
+import { planScreenRoles } from "./screen-role-migration.js";
 import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
 import { getUserDataPath } from "./app-paths.js";
 import { adoptLegacyStoreFiles } from "./store-file-adoption.js";
@@ -786,7 +786,7 @@ export class StageController {
     // After the surfaces are decided and before anything is written: the role an
     // older build stored on each screen leaves the data here, on every path that
     // loads it (a restored backup is loaded like any other).
-    const roles = await this.applyScreenRoles(surfaced.views, surfaced.outputs, !rolesAlreadyFromView);
+    const roles = await this.applyScreenRoles(surfaced.views, surfaced.outputs, !rolesAlreadyFromView, surfaced.liveScreenIds);
     const result = { ...surfaced, views: roles.views, outputs: roles.outputs };
     // A stored slug is only ever checked on the way IN, so a path the app claims
     // for itself later silently shadows the screen holding it. Re-checked here,
@@ -840,14 +840,14 @@ export class StageController {
     views: View[],
     outputs: Output[],
     first: boolean,
+    liveScreenIds: ReadonlySet<string>,
   ): Promise<{ views: View[]; outputs: Output[]; log: string[] }> {
-    if (!first && !carriesStoredRole(outputs)) return { views, outputs, log: [] };
-    const plan = planScreenRoles(views, outputs, { absentIsDisplay: first });
+    const plan = planScreenRoles(views, outputs, { absentIsDisplay: first, liveScreenIds });
     let nextViews = views.map((v) => (plan.consoleViewIds.includes(v.id) ? { ...v, surface: "console" as const } : v));
     let nextOutputs = plan.outputs;
     for (const c of plan.copies) {
       const src = views.find((v) => v.id === c.sourceViewId);
-      if (!src) continue; // the plan was made from this list
+      if (!src) throw new Error(`screen roles: the plan copies view ${c.sourceViewId}, which is not in the list it was made from`);
       const { copy, cloned } = this.cloneViewRecord(src, await this.allocateViewId(nextViews), c.name);
       await this.copyViewSlotConfig(src, copy, cloned);
       nextViews = [...nextViews, { ...copy, surface: c.surface }];
@@ -855,7 +855,7 @@ export class StageController {
     }
     // Quiet when nothing was stored: a fresh install, or every later boot.
     const log =
-      plan.checked === 0 || (!carriesStoredRole(outputs) && plan.changed === 0)
+      plan.carried === 0 && plan.changed === 0
         ? []
         : [
             ...plan.notes,

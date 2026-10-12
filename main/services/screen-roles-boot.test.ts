@@ -51,6 +51,11 @@ const STORED_VIEWS = [
   custom("ctl-a", "Booth controls", "console"),
   { id: "cal", name: "Week ahead", kind: "calendar", surface: "display", createdAt: NOW },
   { id: "home", name: "Home", kind: "custom", surface: "console", createdAt: NOW, layout: layout("home") },
+  // Older than the surface field: a button on it, and no surface decided yet.
+  {
+    id: "old-pad", name: "Old pad", kind: "custom", createdAt: NOW,
+    layout: { ...layout("old-pad"), objects: [{ id: "old-pad-btn", x: 0, y: 0, w: 10, h: 10, z: 0, config: { type: "osc-button" } }] },
+  },
 ];
 
 // `live` is what the screen did before: only an explicit "panel" had working buttons.
@@ -67,6 +72,9 @@ const STORED_SCREENS: { id: string; viewId: string | null; mode?: string; live: 
   { id: "display-10", viewId: null, mode: "panel", live: true, expect: false },
   { id: "display-11", viewId: "cal", mode: "panel", live: true, expect: false },
   { id: "display-12", viewId: "gone", mode: "display", live: false, expect: false },
+  // Never stored a role, and showed a view the surface migration makes a console:
+  // its buttons worked, because that migration marked it live.
+  { id: "display-13", viewId: "old-pad", live: true, expect: true },
 ];
 
 const lines: string[] = [];
@@ -178,13 +186,13 @@ describe("the first boot after the upgrade", () => {
   it("says what it did: a line for each screen it had to do something for, and one summary", () => {
     const screens = lines.filter((l) => l.startsWith("[screens] "));
     const summary = screens.filter((l) => /role from view:/.test(l));
-    assert.deepEqual(summary, ["[screens] role from view: 12 screens checked, 6 changed (1 view made a control surface, 3 copies made)"]);
+    assert.deepEqual(summary, ["[screens] role from view: 13 screens checked, 6 changed (1 view made a control surface, 3 copies made)"]);
     const named = (id: string) => screens.some((l) => !/role from view:/.test(l) && l.includes(`"Screen ${id}"`));
     for (const id of ["display-1", "display-2", "display-3", "display-4", "display-7", "display-8"]) {
       assert.equal(named(id), true, `${id} was changed and is not in the log`);
     }
     // A screen that only lost the stored role changed nothing, and is not named.
-    for (const id of ["display-5", "display-6", "display-9", "display-10", "display-11", "display-12"]) {
+    for (const id of ["display-5", "display-6", "display-9", "display-10", "display-11", "display-12", "display-13"]) {
       assert.equal(named(id), false, `${id} was not changed and is in the log`);
     }
   });

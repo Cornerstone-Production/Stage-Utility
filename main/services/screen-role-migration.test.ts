@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { carriesStoredRole, planScreenRoles, type StoredOutput } from "./screen-role-migration.js";
+import { planScreenRoles, type StoredOutput } from "./screen-role-migration.js";
 import { screenIsControlSurface, viewSurface } from "../types/views.js";
 
 // A screen's role now comes from its view. This takes the role an older build
@@ -88,6 +88,29 @@ describe("a read-only screen on a console", () => {
   });
 });
 
+describe("a screen the surface migration made live", () => {
+  const views = [view("ctl", { name: "Booth controls", surface: "console" })];
+
+  test("has no stored role and was live: it stays on the console, with no copy", () => {
+    const outputs = [screen("a", "ctl")];
+    const plan = planScreenRoles(views, outputs, { absentIsDisplay: true, liveScreenIds: new Set(["a"]) });
+    assert.deepEqual([plan.copies, plan.changed, plan.carried], [[], 0, 1]);
+  });
+
+  test("only the screens named are live: a neighbour with no role is still read-only", () => {
+    const outputs = [screen("a", "ctl"), screen("b", "ctl")];
+    const plan = planScreenRoles(views, outputs, { absentIsDisplay: true, liveScreenIds: new Set(["a"]) });
+    assert.deepEqual(plan.copies.map((c) => c.screenIds), [["b"]]);
+  });
+
+  test("is looked at on a later pass too, because it was just made live", () => {
+    const outputs = [screen("a", "ctl"), screen("b", "ctl", "display")];
+    const plan = planScreenRoles(views, outputs, { absentIsDisplay: false, liveScreenIds: new Set(["a"]) });
+    assert.deepEqual(plan.copies.map((c) => [c.surface, c.screenIds]), [["display", ["b"]]]);
+    assert.equal(plan.carried, 2);
+  });
+});
+
 describe("a live screen on a wall view", () => {
   test("the view becomes a console when only live screens show it, and no copy is made", () => {
     const views = [view("wall", { name: "Lobby loop" })];
@@ -143,7 +166,7 @@ describe("the principle, over every combination", () => {
               if (!before) assert.equal(live, false, `a read-only screen went live: ${label}`);
               if (before && k.kind === "custom") assert.equal(live, true, `a live screen lost its buttons: ${label}`);
             }
-            assert.equal(carriesStoredRole(plan.outputs), false, "a role was left in the data");
+            assert.equal(plan.outputs.some((o) => "mode" in o), false, "a role was left in the data");
           }
         }
       }
