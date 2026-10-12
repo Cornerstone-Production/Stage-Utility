@@ -33,7 +33,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -276,7 +276,17 @@ let happening = true;
  * objects) agree on which one is up.
  */
 let activePvpLive: PvpStatusDTO = PVP_LIVE;
+/** Reads begun, and reads whose answer a caller has taken. A card is only worth
+ *  comparing once every one of its reads has been received. */
+let readsBegun = 0;
+let readsTaken = 0;
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
+  readsBegun += 1;
+  let taken = false;
+  const take = () => {
+    if (!taken) readsTaken += 1;
+    taken = true;
+  };
   const url = String(input);
   const pick = <T,>(live: T, idle: T): T => (happening ? live : idle);
   const body =
@@ -290,7 +300,12 @@ let activePvpLive: PvpStatusDTO = PVP_LIVE;
     : url.includes("/api/spl/summary") ? SPL_SUMMARY
     : url.includes("/api/service-timeline") ? []
     : {};
-  return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+  return {
+    ok: true,
+    status: 200,
+    json: async () => (take(), body),
+    text: async () => (take(), JSON.stringify(body)),
+  };
 };
 
 const { render, cleanup, act } = await import("@testing-library/react");
@@ -399,6 +414,15 @@ async function draw(type: string, key: string, value: unknown, home: boolean, li
     ));
     await settle();
   });
+  // A Home card reads its own data, and a card compared before the answer lands
+  // looks the same on and off. Waited for by what the cards asked, not by turns.
+  const reads = () => assert.equal(readsTaken, readsBegun, "a card's read was never answered");
+  await eventually(reads);
+  await act(async () => {
+    await settle();
+    await settle();
+  });
+  await eventually(reads);
   // React's useId values are NOT evidence of anything. They increment per render
   // tree, so two renders of the same card carry different ids by construction —
   // and any card whose markup contains one differs from itself no matter what the

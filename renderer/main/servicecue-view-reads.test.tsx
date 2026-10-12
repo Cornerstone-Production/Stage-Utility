@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -82,8 +82,8 @@ test("layouts that never loaded say the display fell back to all columns", async
   const f = stubFetch(["layouts"]);
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the column layouts, so all columns are shown/i);
-    assert.ok(logged(f.logs, /column layouts/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`);
+    await eventually(() => assert.match(alerts(), /Couldn't load the column layouts, so all columns are shown/i));
+    await eventually(() => assert.ok(logged(f.logs, /column layouts/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -93,8 +93,8 @@ test("roles that never loaded say the note columns are missing", async () => {
   const f = stubFetch(["roles"]);
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the category roles, so no note columns are shown/i);
-    assert.ok(logged(f.logs, /category roles/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`);
+    await eventually(() => assert.match(alerts(), /Couldn't load the category roles, so no note columns are shown/i));
+    await eventually(() => assert.ok(logged(f.logs, /category roles/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -125,6 +125,9 @@ test("once a list has loaded, a failed retry keeps it and changes nothing on scr
       await settle();
       await settle();
     }
+    // The failures reach /log once the retries have been answered; "once" is
+    // read after that, since it is about what the second tick did NOT add.
+    await eventually(() => assert.ok(lines(f.logs, /column layouts/i) > 0 && lines(f.logs, /category roles/i) > 0, "the failures never reached /log"));
     assert.equal(alerts(), "", "the last good lists are still the right ones");
     assert.equal(lines(f.logs, /column layouts/i), 1, "the layouts failure is on /log, once");
     assert.equal(lines(f.logs, /category roles/i), 1, "the roles failure is on /log, once");
@@ -137,7 +140,7 @@ test("a rundown that cannot be read reaches the log", async () => {
   const f = stubFetch(["rundown"]);
   try {
     await mount();
-    assert.ok(logged(f.logs, /could not read the rundown for a ServiceCue view/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`);
+    await eventually(() => assert.ok(logged(f.logs, /could not read the rundown for a ServiceCue view/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -147,7 +150,7 @@ test("Planning Center not connected: the display says so quietly and asks for no
   const f = stubFetch([], { ...CONNECTED, pcoConfigured: false });
   try {
     await mount();
-    assert.equal(document.body.textContent?.includes("Planning Center isn't connected, so this display can't find its plan."), true);
+    await eventually(() => assert.equal(document.body.textContent?.includes("Planning Center isn't connected, so this display can't find its plan."), true));
     assert.equal(alerts(), "", "not connected is a state, not a failure");
     assert.equal(f.asked.some((u) => u.includes("/api/servicecue/rundown")), false, "without credentials the plan can only come back empty");
     assert.deepEqual(f.logs, []);
@@ -160,7 +163,7 @@ test("no service type selected: the display says so quietly, not that Planning C
   const f = stubFetch([], { ...CONNECTED, serviceTypeId: null, planId: null });
   try {
     await mount();
-    assert.equal(document.body.textContent?.includes("No service type is selected, so this display has no plan to follow."), true);
+    await eventually(() => assert.equal(document.body.textContent?.includes("No service type is selected, so this display has no plan to follow."), true));
     assert.equal(document.body.textContent?.includes("not configured"), false, "Planning Center is connected");
     assert.equal(alerts(), "");
   } finally {

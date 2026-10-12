@@ -22,7 +22,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../test-dom.js";
+import { eventually, installRenderDom } from "../test-dom.js";
 
 const BOX_PX = 240;
 const teardown = installRenderDom({ clientHeight: BOX_PX });
@@ -99,23 +99,51 @@ let overrides: Record<string, unknown> = {};
  *  read of the integration fails; cleared between tests. */
 let failing = new Set<string>();
 
+/** Reads begun, and reads whose answer a caller has taken. The difference, less
+ *  the reads a test is holding on purpose, is what is still on its way. */
+let readsBegun = 0;
+let readsTaken = 0;
+let readsHeld = 0;
+const readsOnTheirWay = () => readsBegun - readsTaken - readsHeld;
+
+/** A response whose body counts as taken the first time a caller reads it. */
+function respond<T extends { json: () => Promise<unknown>; text: () => Promise<string> }>(res: T): T {
+  let taken = false;
+  const take = () => {
+    if (!taken) readsTaken += 1;
+    taken = true;
+  };
+  const { json, text } = res;
+  return { ...res, json: async () => (take(), json()), text: async () => (take(), text()) };
+}
+
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
+  readsBegun += 1;
   const path = String(url).split("?")[0];
   if (path === "/api/state") {
-    return { ok: true, status: 200, json: async () => STATE, text: async () => JSON.stringify(STATE) };
+    return respond({ ok: true, status: 200, json: async () => STATE, text: async () => JSON.stringify(STATE) });
   }
   // Decided when the request is made, as a server would: a read released late
   // still carries the answer for the moment it asked.
   const fails = failing.has(path);
   const body = path in overrides ? overrides[path] : (ANSWERS[path] ?? null);
   await new Promise<void>((resolve) => {
-    held.set(path, [...(held.get(path) ?? []), resolve]);
+    readsHeld += 1;
+    let released = false;
+    // Releasable more than once (a test may release one read by hand and the
+    // rest through answer()), counted as held only until the first.
+    const go = () => {
+      if (!released) readsHeld -= 1;
+      released = true;
+      resolve();
+    };
+    held.set(path, [...(held.get(path) ?? []), go]);
   });
   if (fails) {
     const err = { error: "upstream read failed" };
-    return { ok: false, status: 502, statusText: "Bad Gateway", json: async () => err, text: async () => JSON.stringify(err) };
+    return respond({ ok: false, status: 502, statusText: "Bad Gateway", json: async () => err, text: async () => JSON.stringify(err) });
   }
-  return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+  return respond({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
 };
 
 const { render, cleanup } = await import("@testing-library/react");
@@ -130,8 +158,21 @@ const { ObsLiveLabel, ReaperLiveLabel } = await import("../editor/inspector.js")
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
-/** A fetch, its json() and the hook's then() are three turns apart. */
-const drain = async () => { for (let i = 0; i < 5; i++) await settle(); };
+/**
+ * Let everything that is on its way land: every read begun and not held has been
+ * received, and React has drawn what it caused. Done twice, because the widgets
+ * mount, and so begin their own reads, only once the stage state has arrived.
+ * This used to be five settles, a guess at how many turns "a fetch, its json()
+ * and the hook's then()" take; how many they take is the machine's business.
+ */
+const drain = async () => {
+  for (let pass = 0; pass < 2; pass++) {
+    await settle();
+    await eventually(() => assert.equal(readsOnTheirWay(), 0, "a read that was not held never arrived"));
+    await settle();
+    await settle();
+  }
+};
 
 function release(...paths: string[]): void {
   for (const [path, waiting] of [...held]) {
@@ -196,20 +237,25 @@ const YOUTUBE = "/api/youtube/status";
 async function quietThenClaims(config: Record<string, unknown>, claim: RegExp, own: string[]): Promise<void> {
   const el = await wall(config);
   for (const path of own) {
-    assert.ok(held.has(path), `${String(config.type)}: ${path} was not held — the fixture is not exercising the unknown window`);
+    await eventually(() =>
+      assert.ok(held.has(path), `${String(config.type)}: ${path} was not held — the fixture is not exercising the unknown window`),
+    );
   }
+  // The unknown window is only worth reading once the widget has drawn into it.
+  await eventually(() => assert.match(text(el), /—/, `${String(config.type)} drew no quiet placeholder while unknown: "${text(el)}"`));
   assert.doesNotMatch(
     text(el),
     claim,
     `${String(config.type)} claimed ${claim} before any read had answered: "${text(el)}"`,
   );
-  assert.match(text(el), /—/, `${String(config.type)} drew no quiet placeholder while unknown: "${text(el)}"`);
 
   await answer(...own);
-  assert.match(
-    text(el),
-    claim,
-    `${String(config.type)} never made its claim once ${own.join(" + ")} said it was true: "${text(el)}"`,
+  await eventually(() =>
+    assert.match(
+      text(el),
+      claim,
+      `${String(config.type)} never made its claim once ${own.join(" + ")} said it was true: "${text(el)}"`,
+    ),
   );
 }
 
@@ -285,7 +331,7 @@ describe("a wall widget with no answer yet makes no negative claim", () => {
     const el = await wall({ type: "service-order" });
     assert.doesNotMatch(text(el), /No service plan|Couldn't load/, `claimed before the read answered: "${text(el)}"`);
     await answer(PLAN);
-    assert.match(text(el), /Couldn't load the plan/, `a failed read did not say so: "${text(el)}"`);
+    await eventually(() => assert.match(text(el), /Couldn't load the plan/, `a failed read did not say so: "${text(el)}"`));
     assert.doesNotMatch(text(el), /No service plan/, "a failed read was drawn as an empty plan");
   });
 
@@ -293,11 +339,11 @@ describe("a wall widget with no answer yet makes no negative claim", () => {
     const el = await wall({ type: "screen-embed", outputId: "out-1", showLabel: true, showStatus: true });
     const label = () =>
       el.querySelector("[aria-label='Not connected'], [aria-label='Connected']")?.getAttribute("aria-label") ?? null;
-    assert.match(text(el), /Left Display/, "the tile did not draw its label bar — the dot has nowhere to be");
+    await eventually(() => assert.match(text(el), /Left Display/, "the tile did not draw its label bar — the dot has nowhere to be"));
     assert.equal(label(), null, "the dot claimed a connection state before presence had answered");
 
     await answer("/api/displays/presence");
-    assert.equal(label(), "Not connected", "the dot never said so once presence answered with nothing");
+    await eventually(() => assert.equal(label(), "Not connected", "the dot never said so once presence answered with nothing"));
   });
 });
 
@@ -318,7 +364,7 @@ describe("a widget watching more than one source waits for all of them", () => {
     const el = await wall({ type: "record-status", source: "any" });
     await answer(OBS);
     assert.ok(held.has(REAPER), "REAPER's read was not held — the fixture proves nothing");
-    assert.match(text(el), /RECORDING/i, `a recorder that IS recording waited on the other: "${text(el)}"`);
+    await eventually(() => assert.match(text(el), /RECORDING/i, `a recorder that IS recording waited on the other: "${text(el)}"`));
   });
 
   test("stream-status (any) says nothing while one platform is still unknown", async () => {
@@ -344,7 +390,7 @@ describe("the stage and dashboard displays make no negative claim before they kn
         assert.doesNotMatch(text(el), claim, `${name} claimed ${claim} before ${what} had answered`);
 
         await answer(path);
-        assert.match(text(el), claim, `${name} never claimed ${claim} once ${what} answered that it was true`);
+        await eventually(() => assert.match(text(el), claim, `${name} never claimed ${claim} once ${what} answered that it was true`));
       });
     }
   }
@@ -357,14 +403,14 @@ describe("the SPL rundown display says why it has no items, and only once it kno
     assert.doesNotMatch(text(el), /not configured|No items/, `claimed before the rundown answered: "${text(el)}"`);
     await answer(PLAN);
     // STATE.pcoConfigured is false, and the server answered with its empty rundown.
-    assert.match(text(el), /Planning Center not configured/);
+    await eventually(() => assert.match(text(el), /Planning Center not configured/));
   });
 
   test("a failed read says so, rather than calling Planning Center unconfigured", async () => {
     failing = new Set([PLAN]);
     const el = await draw(React.createElement(SplRundownView, { displayId: "out-1" }));
     await answer(PLAN);
-    assert.match(text(el), /Couldn't load the plan/, `a failed read did not say so: "${text(el)}"`);
+    await eventually(() => assert.match(text(el), /Couldn't load the plan/, `a failed read did not say so: "${text(el)}"`));
     assert.doesNotMatch(text(el), /not configured/, "a failed read was drawn as an unconfigured Planning Center");
   });
 });
@@ -378,9 +424,9 @@ describe("the editor inspector's live line makes no claim before its recorder an
       const box = await draw(el());
       assert.ok(held.has(path), `${path} was not held — the fixture proves nothing`);
       assert.doesNotMatch(text(box), /Not connected/, `the ${name} row said "Not connected" before ${name} answered`);
-      assert.match(text(box), /—/);
+      await eventually(() => assert.match(text(box), /—/));
       await answer(path);
-      assert.match(text(box), /Not connected/, `the ${name} row never said so once ${name} answered disconnected`);
+      await eventually(() => assert.match(text(box), /Not connected/, `the ${name} row never said so once ${name} answered disconnected`));
     });
   }
 });
@@ -406,7 +452,7 @@ describe("a plan change never shows the old plan's rundown as the new one's", ()
       const el = await mount();
       await onPlan("plan-a");
       await answer(PLAN);
-      assert.match(text(el), /Welcome \(plan A\)/, "fixture: plan A's rundown never drew");
+      await eventually(() => assert.match(text(el), /Welcome \(plan A\)/, "fixture: plan A's rundown never drew"));
 
       failing = new Set([PLAN]);
       await onPlan("plan-b");
@@ -414,7 +460,7 @@ describe("a plan change never shows the old plan's rundown as the new one's", ()
       assert.doesNotMatch(text(el), /plan A/, `plan A's rundown stayed up while plan B's read was in flight: "${text(el)}"`);
       await answer(PLAN);
       assert.doesNotMatch(text(el), /plan A/, `plan A's rundown stayed up after plan B's read failed: "${text(el)}"`);
-      assert.match(text(el), /Couldn't load the plan/, `a failed read for plan B did not say so: "${text(el)}"`);
+      await eventually(() => assert.match(text(el), /Couldn't load the plan/, `a failed read for plan B did not say so: "${text(el)}"`));
     });
   }
 });
@@ -431,7 +477,7 @@ test("a slow answer for the plan just left does not overwrite the live plan's", 
   const waiting = held.get(PLAN) ?? [];
   assert.ok(waiting.length >= 2, `expected plan A's and plan B's reads in flight, found ${waiting.length}`);
   await act(async () => { waiting.at(-1)!(); await drain(); });
-  assert.match(text(el), /Welcome \(plan B\)/, `plan B's own answer did not draw: "${text(el)}"`);
+  await eventually(() => assert.match(text(el), /Welcome \(plan B\)/, `plan B's own answer did not draw: "${text(el)}"`));
   await answer(PLAN);
   assert.doesNotMatch(text(el), /plan A/, `plan A's late answer overwrote plan B's rundown: "${text(el)}"`);
 });

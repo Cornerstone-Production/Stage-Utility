@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installDom } from "../test-dom.js";
 import { KIND_DRAWS_TOP_BAR, everyViewKind, type ViewKind } from "@main/types/views";
 
 const teardown = installDom();
@@ -181,6 +181,11 @@ async function showScreen(
     ).container;
     await settle();
   });
+  // The state is a read behind the first paint; every answer but "still in
+  // flight" replaces the loading screen, however many turns that takes.
+  if (mode !== "pending") {
+    await eventually(() => assert.ok(!(container.textContent ?? "").includes("Loading stage"), "the stage never left its loading screen"));
+  }
   return container;
 }
 

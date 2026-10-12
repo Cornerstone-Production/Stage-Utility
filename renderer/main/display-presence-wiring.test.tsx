@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -204,8 +204,8 @@ describe("useDisplayPresenceStatus", () => {
     // something. This is the read that makes the first paint true.
     presence = { connected: ["out-1", "out-9"], rev: 3 };
     const container = await draw(React.createElement(Probe, { enabled: true, onIds: () => {} }));
-    assert.equal(container.textContent, "out-1,out-9");
-    assert.equal(presenceReads.length, 1, "the hook did not read presence on mount");
+    await eventually(() => assert.equal(container.textContent, "out-1,out-9"));
+    await eventually(() => assert.equal(presenceReads.length, 1, "the hook did not read presence on mount"));
   });
 
   test("disabled, it subscribes to nothing and reports nothing", async () => {
@@ -251,7 +251,7 @@ describe("useDisplayPresenceStatus stays live after the first read", () => {
     const container = await draw(React.createElement(Probe, { enabled: true, onIds: () => {} }));
     assert.equal(container.textContent, "", "the mount read should have reported nothing");
     await act(async () => { pushPresence(["out-1"], 6); await settle(); });
-    assert.equal(container.textContent, "out-1", "a pushed connection never reached the hook");
+    await eventually(() => assert.equal(container.textContent, "out-1", "a pushed connection never reached the hook"));
   });
 
   test("a screen that DISAPPEARS from a pushed set goes dark — the closed tab", async () => {
@@ -259,9 +259,9 @@ describe("useDisplayPresenceStatus stays live after the first read", () => {
     // about the screen's configuration changed, only whether a browser is on it.
     presence = { connected: ["out-1", "out-2"], rev: 10 };
     const container = await draw(React.createElement(Probe, { enabled: true, onIds: () => {} }));
-    assert.equal(container.textContent, "out-1,out-2");
+    await eventually(() => assert.equal(container.textContent, "out-1,out-2"));
     await act(async () => { pushPresence(["out-1"], 11); await settle(); });
-    assert.equal(container.textContent, "out-1", "the closed screen stayed lit");
+    await eventually(() => assert.equal(container.textContent, "out-1", "the closed screen stayed lit"));
     await act(async () => { pushPresence([], 12); await settle(); });
     assert.equal(container.textContent, "", "the last screen closing left the hook lit");
   });
@@ -276,7 +276,7 @@ describe("useDisplayPresenceStatus stays live after the first read", () => {
     presence = { connected: ["out-1", "out-2"], rev: 20 };
     const container = await draw(React.createElement(Probe, { enabled: true, onIds: () => {} }));
     await act(async () => { pushPresence(["out-1"], 21); await settle(); });
-    assert.equal(container.textContent, "out-1");
+    await eventually(() => assert.equal(container.textContent, "out-1"));
     await act(async () => { release(); await settle(); });
     assert.equal(container.textContent, "out-1", "the in-flight read overwrote a newer broadcast");
   });
@@ -290,7 +290,7 @@ describe("useDisplayPresenceStatus stays live after the first read", () => {
     const probe = (enabled: boolean) =>
       React.createElement(TooltipProvider as never, null, React.createElement(Probe, { enabled, onIds: () => {} }));
     await act(async () => { result = render(probe(true)) as never; await settle(); });
-    assert.equal(result.container.textContent, "out-1");
+    await eventually(() => assert.equal(result.container.textContent, "out-1"));
 
     await act(async () => { result.rerender(probe(false)); await settle(); });
 

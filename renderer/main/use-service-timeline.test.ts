@@ -9,7 +9,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
@@ -65,7 +65,7 @@ test("a History edit of a different, already-ended service does not replace the 
       await settle();
       await settle();
     });
-    assert.equal(result.current?.serviceKey, "svc-live", "sanity: the live record hydrated");
+    await eventually(() => assert.equal(result.current?.serviceKey, "svc-live", "sanity: the live record hydrated"));
 
     // Someone corrects an item time on LAST week's service, in History.
     await act(async () => {
@@ -97,7 +97,7 @@ test("the SAME service's own push (an item change, or it ending for real) still 
       await settle();
       await settle();
     });
-    assert.equal(result.current?.items[0]?.title, "Song");
+    await eventually(() => assert.equal(result.current?.items[0]?.title, "Song"));
 
     const nextItem: ServiceTimeline = {
       ...LIVE,
@@ -111,14 +111,14 @@ test("the SAME service's own push (an item change, or it ending for real) still 
       await settle();
       await settle();
     });
-    assert.equal(result.current?.items.length, 2, "the same service's own item change must still reach this hook");
+    await eventually(() => assert.equal(result.current?.items.length, 2, "the same service's own item change must still reach this hook"));
 
     await act(async () => {
       FakeEventSource.last!.push("service-timeline:history", { ...nextItem, endedAt: "2026-09-27T16:00:00.000Z" });
       await settle();
       await settle();
     });
-    assert.equal(result.current?.endedAt, "2026-09-27T16:00:00.000Z", "the live service ending for real must still reach this hook");
+    await eventually(() => assert.equal(result.current?.endedAt, "2026-09-27T16:00:00.000Z", "the live service ending for real must still reach this hook"));
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -138,7 +138,7 @@ test("once this hook's own service has ended, a later push (any other service) i
       await settle();
       await settle();
     });
-    assert.equal(result.current?.endedAt, "2026-09-27T16:00:00.000Z", "sanity: this hook's own record has already ended");
+    await eventually(() => assert.equal(result.current?.endedAt, "2026-09-27T16:00:00.000Z", "sanity: this hook's own record has already ended"));
 
     const NEXT_SERVICE: ServiceTimeline = { ...LIVE, serviceKey: "svc-next", startedAt: "2026-09-27T18:00:00.000Z" };
     await act(async () => {
@@ -146,7 +146,7 @@ test("once this hook's own service has ended, a later push (any other service) i
       await settle();
       await settle();
     });
-    assert.equal(result.current?.serviceKey, "svc-next", "nothing live left to protect, so the next service's own push must go through");
+    await eventually(() => assert.equal(result.current?.serviceKey, "svc-next", "nothing live left to protect, so the next service's own push must go through"));
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -175,7 +175,7 @@ test("a LATER service's ended record replaces a stale open one this hook was han
       await settle();
       await settle();
     });
-    assert.equal(result.current?.serviceKey, "svc-live", "sanity: holding the open record");
+    await eventually(() => assert.equal(result.current?.serviceKey, "svc-live", "sanity: holding the open record"));
 
     await act(async () => {
       FakeEventSource.last!.push("service-timeline:history", LATER_ENDED);

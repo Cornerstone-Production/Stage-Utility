@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { baptismState } from "../test-fixtures/baptism-state.js";
 
 const teardown = installRenderDom();
@@ -63,7 +63,9 @@ async function mount(state: BaptismState = ARMED_STATE): Promise<void> {
   try {
     render(React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
     await settle();
-    await settle();
+    // The panel is "Loading…" until the state read lands. Waited for before the
+    // stub comes off, and before any test asserts that something is NOT drawn.
+    await eventually(() => assert.ok(!(document.body.textContent ?? "").includes("Loading…"), "the panel never left Loading…"));
   } finally {
     globalThis.fetch = realFetch;
   }

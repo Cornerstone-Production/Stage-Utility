@@ -14,7 +14,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -102,6 +102,8 @@ async function leadTeam(config: Record<string, unknown>): Promise<string | null>
     ));
     await settle();
   });
+  // The card draws once the status read has landed; waited for, not assumed.
+  await eventually(() => assert.ok(container.querySelector(".home-scores-name"), "the card drew no team"));
   return container.querySelector(".home-scores-name")?.textContent ?? null;
 }
 
