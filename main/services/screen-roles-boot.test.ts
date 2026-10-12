@@ -23,6 +23,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { stageController } = await import("./stage-controller.js");
 const { screenIsControlSurface, viewSurface } = await import("../types/views.js");
+const { slotsStore } = await import("./slots-store.js");
 
 const ctl = stageController as unknown as {
   broadcast: () => void;
@@ -44,11 +45,22 @@ const custom = (id: string, name: string, surface: "display" | "console", fit?: 
   layout: fit ? { ...layout(id), canvas: { ...layout(id).canvas, fit } } : layout(id),
 });
 
+const GRID_ID = "wall-mixed-grid";
+const withGrid = (view: ReturnType<typeof custom>) => ({
+  ...view,
+  layout: {
+    ...view.layout,
+    objects: [...view.layout.objects, { id: GRID_ID, x: 0, y: 0, w: 10, h: 10, z: 1, config: { type: "slots-grid", source: "inline" } }],
+  },
+});
+
 // What the stored files looked like when a screen had a role of its own.
 const STORED_VIEWS = [
   custom("wall-solo", "Lobby loop", "display"),
   custom("wall-shared", "Hallway loop", "display"),
-  custom("wall-mixed", "Atrium loop", "display", "responsive"),
+  // Carries an inline mic-slots grid with a stored board: the control-surface copy
+  // made for display-4 must come with its own copy of that board.
+  withGrid(custom("wall-mixed", "Atrium loop", "display", "responsive")),
   custom("ctl-a", "Booth controls", "console"),
   { id: "cal", name: "Week ahead", kind: "calendar", surface: "display", createdAt: NOW },
   { id: "mics", name: "Mic board", kind: "slots", surface: "display", createdAt: NOW },
@@ -102,6 +114,9 @@ describe("the first boot after the upgrade", () => {
       "utf8",
     );
     await fs.writeFile(path.join(TMP, "views.json"), JSON.stringify(STORED_VIEWS), "utf8");
+    await slotsStore.setDefault(GRID_ID, "st-1", [
+      { id: "row-1", channel: "1", order: 0, link: { kind: "static", label: "Drums", color: "#2E6691" } } as never,
+    ]);
     console.log = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
     try {
       await stageController.init();
@@ -173,6 +188,15 @@ describe("the first boot after the upgrade", () => {
 
   const fitOf = (view: { layout?: unknown }) => (view.layout as { canvas: { fit?: string } } | null | undefined)?.canvas.fit;
   const named = (name: string) => state().views.find((v) => v.name === name)!;
+
+  it("a control-surface copy takes its source's inline mic-slots board, under the copy's new object ids", async () => {
+    const copy = named("Atrium loop (control surface)");
+    const grid = (copy.layout as { objects: { id: string; config: { type: string } }[] }).objects.find((o) => o.config.type === "slots-grid")!;
+    assert.notEqual(grid.id, GRID_ID, "the copy shares the grid's object id with its source");
+    const labels = (rows: { link?: unknown }[]) => rows.map((r) => (r.link as { label: string }).label);
+    assert.deepEqual(labels(await slotsStore.getDefault(grid.id, "st-1")), ["Drums"], "the copy's board was not copied under its new id");
+    assert.deepEqual(labels(await slotsStore.getDefault(GRID_ID, "st-1")), ["Drums"], "the source's own board is gone");
+  });
 
   it("a panel keeps its shape: a view made a console, or copied into one, gets the fit it had as a wall view unless its layout chose one", () => {
     assert.equal(fitOf(state().views.find((v) => v.id === "wall-shared")!), "contain", "a converted view would reflow on its fixed-aspect panel");
