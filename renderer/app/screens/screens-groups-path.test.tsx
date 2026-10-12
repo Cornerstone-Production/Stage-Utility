@@ -20,7 +20,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom } from "../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -134,14 +134,20 @@ async function mountScreens() {
 
 /** The overflow menu of the screen with this name (cards are in the outputs' order), then its Screen settings panel. */
 async function openGroups(screenName: string): Promise<void> {
-  const triggers = screen.getAllByLabelText(/more actions/i);
+  // The cards draw once the screens have been read; waited for, not assumed
+  // after a fixed number of ticks.
+  const triggers = await eventually(() => {
+    const found = screen.getAllByLabelText(/more actions/i);
+    assert.equal(found.length, outputs.length, "the screen cards did not all draw");
+    return found;
+  });
   const index = outputs.findIndex((o) => o.name === screenName);
   await act(async () => {
     fireEvent.pointerDown(triggers[index], { button: 0, ctrlKey: false });
     fireEvent.click(triggers[index]);
     await settle();
   });
-  const item = screen.getByRole("menuitem", { name: "Screen settings…" });
+  const item = await eventually(() => screen.getByRole("menuitem", { name: "Screen settings…" }));
   await act(async () => {
     fireEvent.pointerDown(item, { button: 0, ctrlKey: false });
     fireEvent.pointerUp(item, { button: 0, ctrlKey: false });
@@ -154,18 +160,22 @@ describe("ticking a group in a screen's settings panel", () => {
   test("PATCHes THAT screen with the whole new list, and the chip appears", async () => {
     await mountScreens();
     await openGroups("Booth");
+    const stage = await eventually(() => screen.getByRole("checkbox", { name: "Stage" }));
     await act(async () => {
-      fireEvent.click(screen.getByRole("checkbox", { name: "Stage" }));
-      await settle();
+      fireEvent.click(stage);
       await settle();
     });
-    assert.deepEqual(
-      patches,
-      [{ url: "/api/outputs/display-2", body: { groups: [STAGE.id] } }],
-      "the tick did not reach the server as a PATCH of the screen it was made on",
+    await eventually(() =>
+      assert.deepEqual(
+        patches,
+        [{ url: "/api/outputs/display-2", body: { groups: [STAGE.id] } }],
+        "the tick did not reach the server as a PATCH of the screen it was made on",
+      ),
     );
-    const chips = [...document.querySelectorAll('[data-testid="screen-groups"] li')].map((li) => li.textContent);
-    assert.deepEqual(chips, ["Stage"]);
+    await eventually(() => {
+      const chips = [...document.querySelectorAll('[data-testid="screen-groups"] li')].map((li) => li.textContent);
+      assert.deepEqual(chips, ["Stage"]);
+    });
   });
 
   test("a second tick before the first is answered is built on the first: the whole list, both groups", async () => {
@@ -173,18 +183,22 @@ describe("ticking a group in a screen's settings panel", () => {
     patchGate = new Promise<void>((r) => (release = r));
     await mountScreens();
     await openGroups("Booth");
+    const green = await eventually(() => screen.getByRole("checkbox", { name: "Green room" }));
     await act(async () => {
-      fireEvent.click(screen.getByRole("checkbox", { name: "Green room" }));
+      fireEvent.click(green);
       await settle();
     });
+    await eventually(() => assert.equal(patches.length, 1, "the first tick sent no PATCH"));
     await act(async () => {
       fireEvent.click(screen.getByRole("checkbox", { name: "Stage" }));
       await settle();
     });
-    assert.deepEqual(
-      patches.map((p) => p.body),
-      [{ groups: [GREEN.id] }, { groups: [GREEN.id, STAGE.id] }],
-      "the second tick was built from the screen as the server last said it, and undid the first",
+    await eventually(() =>
+      assert.deepEqual(
+        patches.map((p) => p.body),
+        [{ groups: [GREEN.id] }, { groups: [GREEN.id, STAGE.id] }],
+        "the second tick was built from the screen as the server last said it, and undid the first",
+      ),
     );
     await act(async () => {
       release();
@@ -197,23 +211,26 @@ describe("ticking a group in a screen's settings panel", () => {
     messageGroups = [{ id: "g-44444444", name: "Lobby crew" }];
     await mountScreens();
     await openGroups("Stage left");
-    const boxes = screen.getAllByRole("checkbox").map((b) => b.closest("label")?.textContent);
-    assert.deepEqual(boxes.filter((t) => t === "Lobby crew" || t === "Green room" || t === "Stage"), ["Lobby crew"]);
+    await eventually(() => {
+      const boxes = screen.getAllByRole("checkbox").map((b) => b.closest("label")?.textContent);
+      assert.deepEqual(boxes.filter((t) => t === "Lobby crew" || t === "Green room" || t === "Stage"), ["Lobby crew"]);
+    });
   });
 
   test("a tick the server refuses is undone and says so", async () => {
     patchFails = true;
     await mountScreens();
     await openGroups("Booth");
+    const green = await eventually(() => screen.getByRole("checkbox", { name: "Green room" }));
     await act(async () => {
-      fireEvent.click(screen.getByRole("checkbox", { name: "Green room" }));
-      await settle();
-      await settle();
+      fireEvent.click(green);
       await settle();
     });
+    // The toast is the refusal having been handled, so wait for it before
+    // asserting what the refusal undid: an absence read earlier proves nothing.
+    await eventually(() => assert.match(document.body.textContent ?? "", /Failed to update the screen's groups/));
     assert.equal(patches.length, 1, "no PATCH was sent");
     assert.equal(document.querySelector('[data-testid="screen-groups"]'), null, "the chip stayed after the server refused");
-    assert.match(document.body.textContent ?? "", /Failed to update the screen's groups/);
   });
 });
 
@@ -222,12 +239,12 @@ describe("a screen with no groups to choose from", () => {
     messageGroups = [];
     const router = await mountScreens();
     await openGroups("Stage left");
+    const link = await eventually(() => screen.getByText(/No groups yet/));
     await act(async () => {
-      fireEvent.click(screen.getByText(/No groups yet/));
-      await settle();
+      fireEvent.click(link);
       await settle();
     });
-    assert.equal(router.state.location.pathname, "/settings/messages");
+    await eventually(() => assert.equal(router.state.location.pathname, "/settings/messages"));
   });
 
   test("/settings/messages is a page the app really has", () => {
