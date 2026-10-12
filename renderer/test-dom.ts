@@ -238,6 +238,57 @@ export async function settle(): Promise<void> {
   });
 }
 
+/** How long a test waits for something asynchronous to appear, in ms. */
+export const WAIT_TIMEOUT_MS = 5000;
+
+/**
+ * Wait until `check` stops throwing, then return what it returned.
+ *
+ * For asserting that something PRESENT arrived after a fetch, a server answer or
+ * a re-render. A fixed number of `settle()` calls is a guess about how many
+ * macrotask turns that chain takes; on a laptop the guess holds and on a CI
+ * runner it does not, and the assertion then reads a half-built page. This waits
+ * for the thing itself:
+ *
+ *   await eventually(() => assert.ok(screen.getByText("Saved")));
+ *   const button = await eventually(() => screen.getByRole("button", { name: "Add" }));
+ *
+ * It is Testing Library's waitFor with a generous timeout. The timeout costs
+ * nothing when the thing arrives, since the check runs at once and again on every
+ * DOM change; it only bounds how long a real failure takes to report.
+ *
+ * Not for absence. "Nothing was written" or "no dialog opened" cannot be waited
+ * into being true: the wait passes at the first instant it is, and proves
+ * nothing about a moment later. Those keep a `settle()` and then assert.
+ *
+ * The import is inside the function because Testing Library binds to `document`
+ * when it loads, so a file must import it after installDom, and this module is
+ * imported before.
+ */
+export async function eventually<T>(check: () => T, timeout: number = WAIT_TIMEOUT_MS): Promise<T> {
+  const { waitFor } = await import("@testing-library/react");
+  return waitFor(check, { timeout });
+}
+
+/**
+ * Whether a request is the live-update stream's own traffic rather than
+ * something the component under test did.
+ *
+ * api.ts reports a client's channel set with `POST /api/events/subscribe`, on a
+ * 200 ms debounce that fires after every subscribe AND unsubscribe, so one lands
+ * whenever a component mounts, unmounts or a previous test's cleanup runs. On a
+ * laptop that is usually between tests; on a slow runner it lands mid-test. A
+ * fetch stub that records "every request that is not a GET" as the component's
+ * writes then counts it, and one that hands out scripted replies in write order
+ * gives it a reply meant for the real write.
+ *
+ * Answer these apart (200 `{}`), never record them as writes, never let them take
+ * a scripted reply:
+ *
+ *   if (isPlumbing(url)) return ok({});
+ */
+export const isPlumbing = (url: string): boolean => url.startsWith("/api/events");
+
 /**
  * The whole body of a component test file's final `after()` hook.
  *
