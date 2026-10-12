@@ -21,7 +21,6 @@ import {
   SelectValue,
   Separator,
   UnsavedBanner,
-  confirm,
   toast,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
@@ -34,6 +33,7 @@ import { SlotsPreviewNote } from "./slots-preview-target";
 import { KIND_LABELS, KIND_ORDER } from "./new-view-dialog";
 import { CalendarSources } from "./calendar-sources";
 import { viewSurface } from "@main/types/views";
+import { confirmDeleteView } from "./screen-confirms";
 
 const PREVIEW_ASPECTS = [
   { id: "16:9", label: "16:9 · landscape", ratio: 16 / 9 },
@@ -225,21 +225,9 @@ export function ViewDetail({
           size="small"
           iconOnly
           onClick={async () => {
-            // Name the outputs that would lose their content. Deleting a view is
-            // not recoverable, and a custom view can be a lot of layout work.
-            const usedBy = (stageState.outputs ?? [])
-              .filter((o) => o.viewId === view.id)
-              .map((o) => o.name || o.id);
-            const inUse =
-              usedBy.length > 0
-                ? ` It is currently shown on ${usedBy.join(", ")}, which will have no view assigned.`
-                : "";
-            const ok = await confirm({
-              title: `Delete "${view.name}"?`,
-              message: `This cannot be undone.${inUse}`,
-              confirmLabel: "Delete view",
-              destructive: true,
-            });
+            // Names the screens that would lose their content: deleting a view
+            // is not recoverable, and a custom view can be a lot of layout work.
+            const ok = await confirmDeleteView(view, (stageState.outputs ?? []).filter((o) => o.viewId === view.id));
             if (ok) await handlers.handleRemoveView(view.id);
           }}
           disabled={!canDelete}

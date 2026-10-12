@@ -68,6 +68,8 @@ function card(over: {
     onRenameView: noop,
     messageGroups: over.messageGroups ?? { groups: ALL, known: true, failed: false },
     onOpenSettings: noop,
+    panelOpen: false,
+    onSelect: noop,
     onRefresh: noop,
     onRemove: noop,
     onRequestNewView: noop,

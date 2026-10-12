@@ -1,5 +1,5 @@
-// The Screen settings panel, from the click to the server, through the real
-// Screens route.
+// The Screens page's side panel and its cards, from the click to the server,
+// through the real Screens route.
 //
 // screen-settings-panel.test.tsx drives the panel with injected callbacks, so it
 // cannot see how each callback is WIRED: which request a switch sends, to which
@@ -14,8 +14,9 @@
 // Every id and name below is INVENTED. This is a public repository.
 //
 // NOT covered here, driven in a browser instead: the panel's width and position
-// beside the cards, the selected card's border, and a real kiosk device
-// announcing itself. jsdom loads no stylesheet.
+// beside the cards, the selected card's border, the corner expand button's
+// hover reveal, a header drag reordering, and a real kiosk device announcing
+// itself. jsdom loads no stylesheet and measures nothing.
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
@@ -44,6 +45,8 @@ const { TooltipProvider, Toaster, ConfirmHost } = await import("../../components
 const { DEFAULT_STAGE_STATE } = await import("../../main/test-render-ctx.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { ScreensRoute } = await import("./screens-route.js");
+const { PageActionsProvider, PageActionsSlot } = await import("../page-actions.js");
+const { PANEL_OPEN_KEY } = await import("./use-panel-open.js");
 
 type Output = import("@main/types/views").Output;
 type View = import("@main/types/views").View;
@@ -73,6 +76,8 @@ let seenDevices: unknown[];
 /** Every write the page made, in order. */
 let writes: { method: string; url: string; body: unknown }[];
 let claimFails: string | null;
+/** Answer DELETE /api/views/:id with a refusal, to show the second half of a removal failing. */
+let viewDeleteFails: boolean;
 /** The page's query client, so a test can land a stage-state broadcast. */
 let client: InstanceType<typeof QueryClient>;
 
@@ -86,6 +91,10 @@ beforeEach(() => {
   seenDevices = [];
   writes = [];
   claimFails = null;
+  viewDeleteFails = false;
+  // The panel's open state is remembered per browser, so one test's close must not
+  // be the next test's starting point.
+  localStorage.clear();
   fetchStub = stubFetchWithLog((url, init) => {
     const method = init?.method ?? "GET";
     if (method !== "GET") {
@@ -95,6 +104,22 @@ beforeEach(() => {
       // it is open, and neither is a change to anything.
       if (/^\/api\/(outputs|views|devices\/claim)/.test(url)) writes.push({ method, url, body });
       if (url === "/api/devices/claim" && claimFails) return reply(400, { error: claimFails });
+      // The writes that change what the page lists, answered the way the server does.
+      if (method === "POST" && url === "/api/outputs") makeScreen(body as CreateBody);
+      if (method === "POST" && url === "/api/devices/claim" && (body as { outputId?: string | null }).outputId === null) {
+        return ok({ ok: true, displaced: null, outputId: makeScreen(body as CreateBody) });
+      }
+      if (method === "POST" && url === "/api/views") {
+        const b = body as { name: string; kind: View["kind"]; surface?: View["surface"] };
+        views = [...views, { id: `view-new-${views.length}`, name: b.name, kind: b.kind, surface: b.surface ?? "display", createdAt: NOW }];
+      }
+      if (method === "DELETE" && url.startsWith("/api/outputs/")) outputs = outputs.filter((o) => o.id !== url.split("/").pop());
+      if (method === "DELETE" && url.startsWith("/api/views/")) {
+        if (viewDeleteFails) return reply(500, { error: "the view is locked" });
+        const gone = url.split("/").pop();
+        views = views.filter((v) => v.id !== gone);
+        outputs = outputs.map((o) => (o.viewId === gone ? { ...o, viewId: null } : o));
+      }
       // Answer with the state as it stands: what these tests assert is the
       // REQUEST. The optimistic handlers reconcile to whatever comes back.
       return ok(state());
@@ -111,16 +136,31 @@ beforeEach(() => {
 
 const state = () => ({ ...DEFAULT_STAGE_STATE, outputs, views });
 
+type CreateBody = { name?: string; viewId?: string; newView?: "wall" | "control" };
+/** What POST /api/outputs and a claim of a new screen do to the lists; returns the new id. */
+function makeScreen(body: CreateBody): string {
+  const id = `display-${outputs.length + 10}`;
+  const name = body.name ?? `Display ${outputs.length + 10}`;
+  let viewId: string | null = body.viewId ?? null;
+  if (body.newView) {
+    viewId = `view-made-${id}`;
+    views = [...views, { id: viewId, name, kind: "custom", surface: body.newView === "control" ? "console" : "display", createdAt: NOW }];
+  }
+  outputs = [...outputs, { id, name, viewId }];
+  return id;
+}
+
 async function mountScreens() {
   const root = createRootRoute({ component: () => React.createElement(Outlet) });
   const screens = createRoute({ getParentRoute: () => root, path: "/screens", component: ScreensRoute });
+  const editor = createRoute({ getParentRoute: () => root, path: "/screens/$viewId/edit", component: () => React.createElement("p", null, "The layout editor") });
   const messages = createRoute({
     getParentRoute: () => root,
     path: "/settings/messages",
     component: () => React.createElement("p", null, "Messages settings"),
   });
   const router = createRouter({
-    routeTree: root.addChildren([screens, messages]),
+    routeTree: root.addChildren([screens, editor, messages]),
     history: createMemoryHistory({ initialEntries: ["/screens"] }),
   });
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
@@ -128,7 +168,14 @@ async function mountScreens() {
     React.createElement(
       QueryClientProvider,
       { client },
-      React.createElement(TooltipProvider, null, React.createElement(RouterProvider, { router }), React.createElement(Toaster), React.createElement(ConfirmHost)),
+      React.createElement(
+        TooltipProvider,
+        null,
+        // The shell's slot, where the page puts its Settings button.
+        React.createElement(PageActionsProvider, null, React.createElement(PageActionsSlot), React.createElement(RouterProvider, { router })),
+        React.createElement(Toaster),
+        React.createElement(ConfirmHost),
+      ),
     ),
   );
   await act(async () => {
@@ -182,19 +229,87 @@ async function openSettings(screenName: string): Promise<void> {
   await pressMenuItem("Screen settings…");
 }
 
-const panel = () => within(screen.getByRole("complementary", { name: "Screen settings" }));
+const panel = () => within(screen.getByRole("complementary", { name: "Settings" }));
+const panelIsOpen = () => screen.queryByRole("complementary", { name: "Settings" }) !== null;
+/** The Add a screen tile among the cards (the panel's empty state has its own button of the same name). */
+const addTile = () => screen.getAllByRole("button", { name: /Add a screen/ }).find((b) => !b.closest("aside"))!;
+const toggle = () => screen.getByRole("button", { name: "Settings" });
 const sw = (name: string) => panel().getByRole("switch", { name });
 const answerConfirm = async (label: string) => {
   const dialog = await screen.findByRole("alertdialog");
   await click(within(dialog).getByRole("button", { name: label }));
 };
 
-describe("opening the panel", () => {
-  test("Screen settings… in a card's menu opens THAT screen's panel", async () => {
+describe("the panel and its Settings button", () => {
+  test("is open on arrival with nothing selected, and says so", async () => {
     await mountScreens();
-    assert.equal(screen.queryByRole("complementary", { name: "Screen settings" }) !== null, false, "the panel is open before anything asked for it");
+    assert.ok(panel().getByText("Nothing selected"));
+    assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }));
+    assert.ok(panel().getByText("Click any card on the left to see its settings here."));
+    assert.equal(toggle().getAttribute("aria-pressed"), "true");
+  });
+
+  test("Settings closes it and opens it again, and the choice is kept for the next visit", async () => {
+    await mountScreens();
+    await click(toggle());
+    assert.equal(panelIsOpen(), false, "the panel is still there");
+    assert.equal(toggle().getAttribute("aria-pressed"), "false");
+    assert.equal(localStorage.getItem(PANEL_OPEN_KEY), "0");
+    cleanup();
+    await mountScreens();
+    assert.equal(panelIsOpen(), false, "a closed panel opened on the next visit");
+    await click(toggle());
+    assert.equal(localStorage.getItem(PANEL_OPEN_KEY), "1");
+    cleanup();
+    await mountScreens();
+    assert.ok(panelIsOpen(), "an open panel was closed on the next visit");
+  });
+
+  test("storage that throws does not stop the page: the panel is open, and still toggles", async () => {
+    const real = Storage.prototype.getItem;
+    const realSet = Storage.prototype.setItem;
+    Storage.prototype.getItem = () => { throw new Error("storage is off"); };
+    Storage.prototype.setItem = () => { throw new Error("storage is off"); };
+    try {
+      await mountScreens();
+      assert.ok(panelIsOpen());
+      await click(toggle());
+      assert.equal(panelIsOpen(), false);
+    } finally {
+      Storage.prototype.getItem = real;
+      Storage.prototype.setItem = realSet;
+    }
+  });
+
+  test("on a viewport too narrow to dock it, nothing stored means closed; what the operator chose wins", async () => {
+    const win = window as unknown as { matchMedia?: unknown };
+    const had = win.matchMedia;
+    win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} });
+    try {
+      await mountScreens();
+      assert.equal(panelIsOpen(), false, "an overlay panel covered a phone on arrival");
+      cleanup();
+      localStorage.setItem(PANEL_OPEN_KEY, "1");
+      await mountScreens();
+      assert.ok(panelIsOpen(), "a stored choice to keep it open was ignored");
+    } finally {
+      win.matchMedia = had;
+    }
+  });
+
+  test("Screen settings… in a card's menu opens THAT screen's settings", async () => {
+    await mountScreens();
+    await openSettings("Lobby TV");
+    assert.ok(panel().getByText("Screen settings"));
+    assert.ok(panel().getByRole("heading", { name: "Lobby TV" }));
+  });
+
+  test("Screen settings… opens a closed panel", async () => {
+    await mountScreens();
+    await click(toggle());
     await openSettings("Lobby TV");
     assert.ok(panel().getByRole("heading", { name: "Lobby TV" }));
+    assert.equal(toggle().getAttribute("aria-pressed"), "true");
   });
 
   test("focus ends up in the panel, not back on the card's menu button", async () => {
@@ -203,28 +318,150 @@ describe("opening the panel", () => {
     await mountScreens();
     await openSettings("Lobby TV");
     await act(async () => { await settle(); await settle(); });
-    const aside = screen.getByRole("complementary", { name: "Screen settings" });
+    const aside = screen.getByRole("complementary", { name: "Settings" });
     assert.equal(aside.contains(document.activeElement), true, `focus is on ${document.activeElement?.tagName} "${document.activeElement?.getAttribute("aria-label")}"`);
   });
 
-  test("a screen removed while its panel is open takes the panel's column with it", async () => {
+  test("a screen removed while its settings are open leaves the empty state, with the panel still open", async () => {
     // Removed here or from another browser: the broadcast state no longer has it.
-    // The panel draws nothing for a screen that is gone, so the column it sits
-    // in has to go too, or the page keeps an empty 400 px strip beside the cards.
     await mountScreens();
     await openSettings("Lobby TV");
-    assert.ok(document.getElementById("screen-settings-panel-host"), "the panel's column is not there to begin with");
     outputs = outputs.filter((o) => o.id !== "display-3");
     await act(async () => { client.setQueryData(["stage:getState"], state()); await settle(); await settle(); });
-    assert.equal(document.getElementById("screen-settings-panel-host") !== null, false, "an empty panel column was left on the page");
+    assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }), "the panel kept a form for a screen that is gone");
   });
 
-  test("closing it leaves the page as it was and sends nothing", async () => {
+  test("the X closes it and sends nothing", async () => {
     await mountScreens();
     await openSettings("Lobby TV");
     await click(panel().getByRole("button", { name: "Close" }));
-    assert.equal(screen.queryByRole("complementary", { name: "Screen settings" }) !== null, false, "it is on screen");
+    assert.equal(panelIsOpen(), false, "it is on screen");
     assert.deepEqual(writes, []);
+  });
+});
+
+describe("the panel follows the click, only while it is open", () => {
+  /** A card, by the screen's name: the element carrying its own controls. */
+  const card = (name: string) => screen.getByLabelText(`More actions for ${name}`).closest("div.flex.flex-col") as HTMLElement;
+
+  test("a click on a card moves the panel to that screen", async () => {
+    await mountScreens();
+    await click(card("Lobby TV"));
+    assert.ok(panel().getByRole("heading", { name: "Lobby TV" }));
+    await click(card("Booth panel"));
+    assert.ok(panel().getByRole("heading", { name: "Booth panel" }));
+  });
+
+  test("a click on the name focuses it for renaming AND moves the panel", async () => {
+    await mountScreens();
+    const name = within(card("Lobby TV")).getByLabelText("Display name");
+    await act(async () => { (name as HTMLElement).focus(); fireEvent.click(name); await settle(); });
+    assert.ok(panel().getByRole("heading", { name: "Lobby TV" }));
+    assert.equal(document.activeElement, name, "the click moved focus off the name field");
+  });
+
+  test("a click on the card's own controls does not: the view picker, Open, the menu", async () => {
+    await mountScreens();
+    const lobby = card("Lobby TV");
+    await click(within(lobby).getByRole("link", { name: /Open/ }));
+    await click(within(lobby).getByLabelText("View on Lobby TV"));
+    await click(within(lobby).getByLabelText("More actions for Lobby TV"));
+    assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }), "a control moved the panel");
+  });
+
+  test("a card's picker change does not move it either", async () => {
+    await mountScreens();
+    await choose(within(card("Lobby TV")).getByLabelText("View on Lobby TV"), "wall-a");
+    assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }));
+  });
+
+  test("with the panel closed a click on a card does nothing: it stays closed and nothing retargets", async () => {
+    await mountScreens();
+    await click(toggle());
+    await click(card("Lobby TV"));
+    assert.equal(panelIsOpen(), false, "a click opened the closed panel");
+    // Opening it now shows nothing selected: the click selected nothing.
+    await click(toggle());
+    assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }), "a closed panel was retargeted by a click");
+  });
+
+  test("a view card under Views not on a screen moves the panel to its View settings", async () => {
+    views = [...views, { id: "spare", name: "Spare loop", kind: "custom", surface: "display", createdAt: NOW }];
+    await mountScreens();
+    const spare = screen.getByLabelText("More actions for Spare loop").closest("div.flex.flex-col") as HTMLElement;
+    await click(spare);
+    assert.ok(panel().getByText("View settings"));
+    assert.ok(panel().getByRole("heading", { name: "Spare loop" }));
+  });
+
+  test("a view card's name field still renames, and the click moves the panel too", async () => {
+    views = [...views, { id: "spare", name: "Spare loop", kind: "custom", surface: "display", createdAt: NOW }];
+    await mountScreens();
+    const name = screen.getByLabelText("View name") as HTMLInputElement;
+    await act(async () => { name.focus(); fireEvent.click(name); await settle(); });
+    assert.ok(panel().getByRole("heading", { name: "Spare loop" }));
+    await type(name, "Spare loop 2");
+    await act(async () => { fireEvent.blur(name); await settle(); await settle(); });
+    assert.deepEqual(writes.filter((w) => w.method === "PATCH"), [{ method: "PATCH", url: "/api/views/spare", body: { name: "Spare loop 2" } }]);
+  });
+
+  test("the selected card says so, and only while the panel is open", async () => {
+    await mountScreens();
+    await click(card("Lobby TV"));
+    assert.match(card("Lobby TV").className, /border-accent/);
+    assert.doesNotMatch(card("Booth panel").className, /border-accent/);
+    await click(toggle());
+    assert.doesNotMatch(card("Lobby TV").className, /border-accent/, "a closed panel still marks a card");
+  });
+});
+
+describe("the preview", () => {
+  const previewOf = (name: string) => screen.getByLabelText(`More actions for ${name}`).closest("div.flex.flex-col") as HTMLElement;
+  let opened: [string | undefined, string | undefined][];
+  const realOpen = window.open;
+  beforeEach(() => {
+    opened = [];
+    window.open = ((url?: string | URL, target?: string) => { opened.push([String(url), target]); return null; }) as typeof window.open;
+  });
+  afterEach(() => { window.open = realOpen; });
+  const here = () => (document.body.textContent ?? "").includes("The layout editor");
+
+  test("panel closed: the preview goes to the layout editor, as it always did", async () => {
+    await mountScreens();
+    await click(toggle());
+    await click(await within(previewOf("Lobby TV")).findByRole("button", { name: "Edit what Lobby TV shows" }));
+    assert.equal(here(), true, "the preview did not open the editor");
+  });
+
+  test("panel open: a plain click moves the panel and does not leave the page", async () => {
+    await mountScreens();
+    await click(await within(previewOf("Lobby TV")).findByRole("button", { name: "Show settings for Lobby TV" }));
+    assert.ok(panel().getByRole("heading", { name: "Lobby TV" }));
+    assert.equal(here(), false, "a plain click on the preview left for the editor");
+    assert.deepEqual(opened, [], "a plain click on the preview opened the display");
+  });
+
+  for (const mod of ["ctrlKey", "metaKey", "shiftKey"] as const) {
+    test(`panel open: a ${mod} click opens the display and does not move the panel`, async () => {
+      await mountScreens();
+      const preview = await within(previewOf("Lobby TV")).findByRole("button", { name: "Show settings for Lobby TV" });
+      await act(async () => { fireEvent.click(preview, { [mod]: true }); await settle(); });
+      assert.deepEqual(opened, [[`${window.location.origin}/display-3`, "display-display-3"]]);
+      assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }), "a modified click also moved the panel");
+    });
+  }
+
+  test("panel open: a middle click opens the display too", async () => {
+    await mountScreens();
+    const preview = await within(previewOf("Lobby TV")).findByRole("button", { name: "Show settings for Lobby TV" });
+    await act(async () => { fireEvent(preview, new window.MouseEvent("auxclick", { bubbles: true, button: 1 })); await settle(); });
+    assert.deepEqual(opened, [[`${window.location.origin}/display-3`, "display-display-3"]]);
+  });
+
+  test("panel open: the preview's own expand button still goes to the editor, and does not move the panel", async () => {
+    await mountScreens();
+    await click(await within(previewOf("Lobby TV")).findByRole("button", { name: "Edit what Lobby TV shows" }));
+    assert.equal(here(), true, "the expand button did not open the editor");
   });
 });
 
@@ -398,51 +635,380 @@ describe("a console on no screen", () => {
 });
 
 describe("Add a screen", () => {
-  test("opens the panel in guided mode and creates NOTHING", async () => {
+  const nextStep = () => click(panel().getByRole("button", { name: "Next" }));
+
+  test("opens the panel on step 1 of 2 and creates NOTHING", async () => {
     await mountScreens();
-    await click(screen.getByRole("button", { name: /Add a screen/ }));
-    assert.ok(panel().getByText("New screen · step 1 of 3"));
+    await click(addTile());
+    assert.ok(panel().getByText("New screen · step 1 of 2"));
     assert.deepEqual(writes, [], "a screen was created by opening the panel");
   });
 
-  test("closing it midway leaves no screen", async () => {
+  test("the panel's own + Add a screen starts it too, and opens a closed panel", async () => {
     await mountScreens();
-    await click(screen.getByRole("button", { name: /Add a screen/ }));
-    await click(panel().getByRole("button", { name: /^Control surface/ }));
-    await click(panel().getByRole("button", { name: "Next" }));
+    await click(panel().getByRole("button", { name: "+ Add a screen" }));
+    assert.ok(panel().getByText("New screen · step 1 of 2"));
     await click(panel().getByRole("button", { name: "Close" }));
-    assert.equal(screen.queryByRole("complementary", { name: "Screen settings" }) !== null, false, "it is on screen");
+    await click(addTile());
+    assert.ok(panel().getByText("New screen · step 1 of 2"), "the tile did not open a closed panel");
+  });
+
+  test("closing it midway leaves no screen, and opening it again does not bring the half-made one back", async () => {
+    await mountScreens();
+    await click(addTile());
+    await nextStep();
+    await click(panel().getByRole("button", { name: /^A new control surface/ }));
+    await click(panel().getByRole("button", { name: "Close" }));
+    assert.equal(panelIsOpen(), false, "it is on screen");
+    assert.deepEqual(writes, []);
+    await click(toggle());
+    assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }), "a half-made screen came back");
+  });
+
+  test("Create screen is on step 2 only; the default sends newView: wall, and the panel STAYS on the new screen", async () => {
+    await mountScreens();
+    await click(addTile());
+    assert.equal(panel().queryByRole("button", { name: "Create screen" }) !== null, false, "Create screen is on step 1");
+    await type(panel().getByLabelText("Name"), "Wing");
+    await nextStep();
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { name: "Wing", newView: "wall" } }]);
+    assert.ok(panelIsOpen(), "the panel closed after the screen was made");
+    assert.ok(panel().getByText("Screen settings"), "the panel did not move to the new screen");
+    assert.ok(panel().getByRole("heading", { name: "Wing" }));
+    const note = panel().getByRole("status");
+    assert.match(note.textContent ?? "", /Created "Wing" and its view\. The view is blank until you lay it out\./);
+    // Edit layout in the note goes to the new view's editor.
+    await click(within(note).getByRole("button", { name: "Edit layout" }));
+    assert.ok((document.body.textContent ?? "").includes("The layout editor"), "Edit layout did not open the editor");
+  });
+
+  test("a new control surface POSTs newView: control", async () => {
+    await mountScreens();
+    await click(addTile());
+    await nextStep();
+    await click(panel().getByRole("button", { name: /^A new control surface/ }));
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { newView: "control" } }]);
+  });
+
+  test("a view you already have POSTs its id, and the note has no Edit layout of its own: no view was made", async () => {
+    await mountScreens();
+    await click(addTile());
+    await nextStep();
+    await click(panel().getByRole("button", { name: /^A view you already have/ }));
+    await choose(panel().getByLabelText("Existing view"), "wall-a");
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { viewId: "wall-a" } }]);
+    const note = panel().getByRole("status");
+    assert.doesNotMatch(note.textContent ?? "", /and its view/);
+    assert.equal(within(note).queryByRole("button", { name: "Edit layout" }) !== null, false, "it is on screen");
+  });
+
+  test("Nothing yet POSTs no view at all", async () => {
+    await mountScreens();
+    await click(addTile());
+    await nextStep();
+    await click(panel().getByRole("button", { name: /^Nothing yet/ }));
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: {} }]);
+  });
+
+  test("the note is gone once the operator points the panel somewhere else", async () => {
+    await mountScreens();
+    await click(addTile());
+    await nextStep();
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    assert.ok(panel().getByRole("status"));
+    await click(screen.getByLabelText("More actions for Lobby TV").closest("div.flex.flex-col") as HTMLElement);
+    await click(panel().getByRole("button", { name: "View settings →" }));
+    await click(panel().getByRole("button", { name: /^Lobby TV$/ }));
+    assert.equal(panel().queryByRole("status") !== null, false, "the note outlived the selection");
+  });
+});
+
+/** Open a card's menu and press Remove display…. */
+async function removeFromMenu(screenName: string): Promise<void> {
+  const trigger = screen.getByLabelText(`More actions for ${screenName}`);
+  await act(async () => {
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    await settle();
+  });
+  await pressMenuItem("Remove display…");
+}
+const dialog = async () => within(await screen.findByRole("alertdialog"));
+
+describe("removing a screen", () => {
+  test("from the card's menu: asks first, and the dialog is centred and names the screen", async () => {
+    await mountScreens();
+    await removeFromMenu("Lobby TV");
+    assert.deepEqual(writes, [], "the screen was removed before the operator said yes");
+    const d = await dialog();
+    assert.ok(d.getByText('Remove "Lobby TV"?'));
+    assert.ok(d.getByText("Its address and settings go away. This cannot be undone."));
+    assert.ok(d.getByRole("button", { name: "Remove screen" }));
+  });
+
+  test("a screen alone on its view offers 'Also delete its view', UNTICKED, with its sub-line", async () => {
+    await mountScreens();
+    await removeFromMenu("Lobby TV");
+    const d = await dialog();
+    const box = d.getByRole("checkbox");
+    assert.equal(box.getAttribute("aria-checked"), "false", "the view is deleted by default");
+    assert.ok(d.getByText('Also delete its view, "Lobby loop"'));
+    assert.ok(d.getByText("Nothing else shows it. Left unticked, it moves to Views not on a screen."));
+  });
+
+  test("left unticked it removes the screen and only the screen", async () => {
+    await mountScreens();
+    await removeFromMenu("Lobby TV");
+    await answerConfirm("Remove screen");
+    assert.deepEqual(writes, [{ method: "DELETE", url: "/api/outputs/display-3", body: undefined }]);
+  });
+
+  test("ticked it says so on the button, and removes the screen THEN deletes the view", async () => {
+    await mountScreens();
+    await removeFromMenu("Lobby TV");
+    const d = await dialog();
+    await click(d.getByRole("checkbox"));
+    assert.ok(d.getByRole("button", { name: "Remove screen and view" }));
+    assert.equal(d.queryByRole("button", { name: "Remove screen" }) !== null, false, "the button still reads as the screen alone");
+    await click(d.getByRole("button", { name: "Remove screen and view" }));
+    assert.deepEqual(writes, [
+      { method: "DELETE", url: "/api/outputs/display-3", body: undefined },
+      { method: "DELETE", url: "/api/views/wall-a", body: undefined },
+    ]);
+  });
+
+  test("a screen whose view another screen shows has no checkbox, and names who keeps it", async () => {
+    await mountScreens();
+    await removeFromMenu("Booth panel");
+    const d = await dialog();
+    assert.equal(d.queryByRole("checkbox") !== null, false, "the view of a shared screen was offered for deletion");
+    assert.ok(d.getByText('Its view, "Booth controls", stays: "Stage panel" also shows it.'));
+    await click(d.getByRole("button", { name: "Remove screen" }));
+    assert.deepEqual(writes, [{ method: "DELETE", url: "/api/outputs/display-1", body: undefined }]);
+  });
+
+  test("three or more other screens are listed, comma-separated", async () => {
+    outputs = [...outputs, { id: "display-4", name: "Wing panel", viewId: "ctl-a" }, { id: "display-5", name: "Back panel", viewId: "ctl-a" }];
+    await mountScreens();
+    await removeFromMenu("Booth panel");
+    const d = await dialog();
+    assert.ok(d.getByText('Its view, "Booth controls", stays: "Stage panel", "Wing panel", "Back panel" also show it.'));
+  });
+
+  test("Cancel removes nothing", async () => {
+    await mountScreens();
+    await removeFromMenu("Lobby TV");
+    await answerConfirm("Cancel");
     assert.deepEqual(writes, []);
   });
 
-  test("Create screen POSTs /api/outputs with the answers, and the panel closes", async () => {
+  test("the panel's footer asks the same question", async () => {
     await mountScreens();
-    await click(screen.getByRole("button", { name: /Add a screen/ }));
-    await click(panel().getByRole("button", { name: /^Control surface/ }));
-    await click(panel().getByRole("button", { name: "Next" }));
-    await choose(panel().getByLabelText("View"), "__new__");
-    await click(panel().getByRole("button", { name: "Next" }));
-    await type(panel().getByLabelText("Name"), "Wing");
-    await click(panel().getByRole("button", { name: "Create screen" }));
-    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { name: "Wing", newView: "control" } }]);
-    assert.equal(screen.queryByRole("complementary", { name: "Screen settings" }) !== null, false, "the panel stayed open after the screen was made");
+    await openSettings("Lobby TV");
+    await click(panel().getByRole("button", { name: "Remove screen…" }));
+    const d = await dialog();
+    assert.ok(d.getByText('Remove "Lobby TV"?'));
+    assert.ok(d.getByRole("checkbox"));
+    await click(d.getByRole("checkbox"));
+    await click(d.getByRole("button", { name: "Remove screen and view" }));
+    assert.deepEqual(writes.map((w) => `${w.method} ${w.url}`), ["DELETE /api/outputs/display-3", "DELETE /api/views/wall-a"]);
+    // The screen is gone, so the panel has nothing to show.
+    assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }));
   });
 
-  test("Create screen on step 1 makes a wall display with no view, named by the server", async () => {
-    // The name was "Display <count + 1>", which repeats a name once any screen
-    // has been removed: two screens, one deleted, and the next is a second
-    // "Display 2". Sent without a name, the server names it from its id, which
-    // is never reused.
-    outputs = [outputs[0], { id: "display-3", name: "Display 2", viewId: "wall-a" }];
+  test("the last screen cannot be removed from the footer", async () => {
+    outputs = [outputs[2]];
     await mountScreens();
-    await click(screen.getByRole("button", { name: /Add a screen/ }));
-    await click(panel().getByRole("button", { name: "Next" }));
-    await click(panel().getByRole("button", { name: "Next" }));
-    const name = panel().getByLabelText("Name") as HTMLInputElement;
-    assert.equal(name.value, "", "the name field holds a guess at the number");
-    assert.match(name.placeholder, /number/);
-    await click(panel().getByRole("button", { name: "Create screen" }));
-    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: {} }]);
+    await openSettings("Lobby TV");
+    assert.equal((panel().getByRole("button", { name: "Remove screen…" }) as HTMLButtonElement).disabled, true);
+  });
+
+  test("when deleting the view fails the operator is told the screen is gone and the view is not", async () => {
+    viewDeleteFails = true;
+    await mountScreens();
+    await removeFromMenu("Lobby TV");
+    const d = await dialog();
+    await click(d.getByRole("checkbox"));
+    await click(d.getByRole("button", { name: "Remove screen and view" }));
+    await act(async () => { await settle(); await settle(); });
+    const toasts = document.body.textContent ?? "";
+    assert.match(toasts, /Removed "Lobby TV", but its view "Lobby loop" was not deleted\./);
+    assert.match(toasts, /Failed to remove view/, "the server's own reason was swallowed");
+    assert.deepEqual(writes.map((w) => `${w.method} ${w.url}`), ["DELETE /api/outputs/display-3", "DELETE /api/views/wall-a"]);
+  });
+
+  test("a view another screen picked up while the dialog was open is NOT deleted, and the operator is told", async () => {
+    await mountScreens();
+    await removeFromMenu("Lobby TV");
+    const d = await dialog();
+    await click(d.getByRole("checkbox"));
+    // Somebody else points the Booth panel at the view meanwhile.
+    outputs = outputs.map((o) => (o.id === "display-1" ? { ...o, viewId: "wall-a" } : o));
+    await act(async () => { client.setQueryData(["stage:getState"], state()); await settle(); await settle(); });
+    await click(d.getByRole("button", { name: "Remove screen and view" }));
+    await act(async () => { await settle(); await settle(); });
+    assert.deepEqual(writes.map((w) => `${w.method} ${w.url}`), ["DELETE /api/outputs/display-3"], "a view another screen shows was deleted");
+    assert.match(document.body.textContent ?? "", /Its view "Lobby loop" was kept: "Booth panel" now shows it\./);
+  });
+});
+
+describe("View settings", () => {
+  const card = (name: string) => screen.getByLabelText(`More actions for ${name}`).closest("div.flex.flex-col") as HTMLElement;
+
+  test("a screen's View settings → opens its view's settings, and a chip jumps back to a screen", async () => {
+    await mountScreens();
+    await openSettings("Booth panel");
+    await click(panel().getByRole("button", { name: "View settings →" }));
+    assert.ok(panel().getByText("View settings"));
+    assert.ok(panel().getByRole("heading", { name: "Booth controls" }));
+    // Both screens that show it.
+    await click(panel().getByRole("button", { name: "Stage panel" }));
+    assert.ok(panel().getByText("Screen settings"));
+    assert.ok(panel().getByRole("heading", { name: "Stage panel" }));
+  });
+
+  test("renaming the view PATCHes it", async () => {
+    await mountScreens();
+    await openSettings("Lobby TV");
+    await click(panel().getByRole("button", { name: "View settings →" }));
+    const name = panel().getByLabelText("View name");
+    await type(name, "Lobby wall");
+    await act(async () => { fireEvent.blur(name); await settle(); await settle(); });
+    assert.deepEqual(writes, [{ method: "PATCH", url: "/api/views/wall-a", body: { name: "Lobby wall" } }]);
+  });
+
+  test("a view that screens show goes through the confirm that names them before its kind changes", async () => {
+    await mountScreens();
+    await openSettings("Booth panel");
+    await click(panel().getByRole("button", { name: "View settings →" }));
+    await click(panel().getByRole("button", { name: /^Wall view/ }));
+    const d = await dialog();
+    assert.match(String(document.querySelector('[role="alertdialog"]')?.textContent), /Booth panel and Stage panel will become wall displays/);
+    assert.deepEqual(writes.map((w) => w.url), [], "the kind changed before the operator said yes");
+    await click(d.getByRole("button", { name: /^Make (it|them)/ }));
+    assert.deepEqual(writes.map((w) => w.url), ["/api/views/ctl-a/surface"]);
+  });
+
+  test("Duplicate makes a copy and the panel moves to it", async () => {
+    await mountScreens();
+    await openSettings("Lobby TV");
+    await click(panel().getByRole("button", { name: "View settings →" }));
+    // The server answers a duplicate with the state including the copy.
+    const dup = async () => { views = [...views, { ...WALL, id: "wall-copy", name: "Lobby loop copy" }]; };
+    const stub = globalThis.fetch;
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      if (String(input).includes("/duplicate")) await dup();
+      return stub(input as RequestInfo, init);
+    }) as typeof fetch;
+    try {
+      await click(panel().getByRole("button", { name: "Duplicate" }));
+    } finally {
+      globalThis.fetch = stub;
+    }
+    assert.ok(panel().getByRole("heading", { name: "Lobby loop copy" }), "the panel stayed on the original");
+  });
+
+  test("Delete view… names every screen showing it, then deletes it", async () => {
+    await mountScreens();
+    await openSettings("Booth panel");
+    await click(panel().getByRole("button", { name: "View settings →" }));
+    await click(panel().getByRole("button", { name: "Delete view…" }));
+    const d = await dialog();
+    assert.ok(d.getByText('Delete view "Booth controls"?'));
+    assert.ok(d.getByText("Its layout goes with it. This cannot be undone."));
+    assert.ok(d.getByText('"Booth panel" and "Stage panel" show it, and will show nothing until you pick another view.'));
+    assert.deepEqual(writes, []);
+    await click(d.getByRole("button", { name: "Delete view" }));
+    assert.deepEqual(writes, [{ method: "DELETE", url: "/api/views/ctl-a", body: undefined }]);
+    // The view is gone, so the panel has nothing to show.
+    assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }));
+  });
+
+  test("Delete view… on a view no screen shows says nothing about screens", async () => {
+    views = [...views, { id: "spare", name: "Spare loop", kind: "custom", surface: "display", createdAt: NOW }];
+    await mountScreens();
+    await click(card("Spare loop"));
+    await click(panel().getByRole("button", { name: "Delete view…" }));
+    const d = await dialog();
+    assert.ok(d.getByText('Delete view "Spare loop"?'));
+    assert.equal(/will show nothing/.test(document.body.textContent ?? ""), false, "a note about screens was shown for a view no screen shows");
+  });
+
+  test("Cancel deletes nothing", async () => {
+    await mountScreens();
+    await openSettings("Booth panel");
+    await click(panel().getByRole("button", { name: "View settings →" }));
+    await click(panel().getByRole("button", { name: "Delete view…" }));
+    await answerConfirm("Cancel");
+    assert.deepEqual(writes, []);
+  });
+
+  test("a view card's menu has View settings…, and it opens them", async () => {
+    views = [...views, { id: "spare", name: "Spare loop", kind: "custom", surface: "display", createdAt: NOW }];
+    await mountScreens();
+    await click(toggle());
+    const trigger = screen.getByLabelText("More actions for Spare loop");
+    await act(async () => { fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false }); fireEvent.click(trigger); await settle(); });
+    await pressMenuItem("View settings…");
+    assert.ok(panel().getByRole("heading", { name: "Spare loop" }));
+  });
+});
+
+describe("a new view from a card's picker", () => {
+  const cardPicker = (screenName: string) => {
+    let el: HTMLElement | null = screen.getByLabelText(`More actions for ${screenName}`);
+    while (el && !el.querySelector("select")) el = el.parentElement;
+    return el!.querySelector("select")!;
+  };
+
+  test("groups its views as wall views and control surfaces and ends with both ways to make one", async () => {
+    await mountScreens();
+    const picker = cardPicker("Lobby TV");
+    assert.deepEqual([...picker.querySelectorAll("optgroup")].map((g) => g.label), ["Wall views", "Control surfaces"]);
+    assert.deepEqual([...picker.options].slice(-2).map((o) => o.textContent), ["+ New wall view…", "+ New control surface…"]);
+  });
+
+  /** Fill the new-view dialog a picker entry opened, and create. */
+  async function createViewNamed(name: string) {
+    const dlg = await screen.findByRole("dialog");
+    await type(within(dlg).getByPlaceholderText(/View name/), name);
+    await click(within(dlg).getByRole("button", { name: "Create" }));
+  }
+
+  test("+ New control surface… on a wall screen creates one, then ASKS before pointing the screen at it", async () => {
+    await mountScreens();
+    await choose(cardPicker("Lobby TV"), "__new_control__");
+    await createViewNamed("Lobby desk");
+    const create = writes.find((w) => w.method === "POST" && w.url === "/api/views");
+    assert.deepEqual(create?.body, { name: "Lobby desk", kind: "custom", surface: "console" });
+    const d = await dialog();
+    assert.ok(d.getByText('Make "Lobby TV" a control surface?'));
+    assert.equal(writes.some((w) => w.method === "PATCH"), false, "the screen was pointed at the view before the operator said yes");
+    await click(d.getByRole("button", { name: "Make it a control surface" }));
+    const patch = writes.find((w) => w.method === "PATCH");
+    assert.equal(patch?.url, "/api/outputs/display-3");
+    assert.match(String((patch?.body as { viewId: string }).viewId), /^view-new-/);
+  });
+
+  test("declining leaves the view made and the screen where it was", async () => {
+    await mountScreens();
+    await choose(cardPicker("Lobby TV"), "__new_control__");
+    await createViewNamed("Lobby desk");
+    await answerConfirm("Cancel");
+    assert.equal(writes.some((w) => w.method === "PATCH"), false);
+  });
+
+  test("+ New wall view… on a wall screen points it at the view straight away: nothing changes kind", async () => {
+    await mountScreens();
+    await choose(cardPicker("Lobby TV"), "__new_wall__");
+    await createViewNamed("Lobby two");
+    assert.equal(screen.queryByRole("alertdialog") !== null, false, "a confirm was asked for a change that changes nothing");
+    const patch = writes.find((w) => w.method === "PATCH");
+    assert.equal(patch?.url, "/api/outputs/display-3");
   });
 });
 
@@ -454,9 +1020,20 @@ describe("a device waiting to be set up", () => {
   test("Set up as a new screen opens the panel for it and claims NOTHING yet", async () => {
     await mountScreens();
     await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
-    assert.ok(panel().getByText("New screen · step 1 of 3"));
-    assert.ok(panel().getByText("Nothing is created until you finish. The device then shows this screen."));
+    assert.ok(panel().getByText("New screen · step 1 of 2"));
+    assert.ok(panel().getByText("Nothing is created until the last step. The device then shows this screen."));
     assert.deepEqual(writes.filter((w) => w.url === "/api/devices/claim"), [], "the device was claimed by opening the panel");
+  });
+
+  test("after the claim the panel stays on the screen that was made for the device", async () => {
+    await mountScreens();
+    await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
+    await click(panel().getByRole("button", { name: "Next" }));
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    await act(async () => { await settle(); await settle(); });
+    assert.ok(panel().getByText("Screen settings"));
+    assert.ok(panel().getByRole("heading", { name: "lobby-pi" }));
+    assert.match(panel().getByRole("status").textContent ?? "", /Created "lobby-pi" and its view/);
   });
 
   test("closing it midway leaves no screen and no claim", async () => {
@@ -470,25 +1047,27 @@ describe("a device waiting to be set up", () => {
   test("Create screen claims it with the answers, named for the device by default", async () => {
     await mountScreens();
     await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
-    await click(panel().getByRole("button", { name: /^Control surface/ }));
+    await click(panel().getByRole("button", { name: "Next" }));
+    await click(panel().getByRole("button", { name: /^A new control surface/ }));
     await click(panel().getByRole("button", { name: "Create screen" }));
     const claims = writes.filter((w) => w.url === "/api/devices/claim");
     assert.deepEqual(claims, [{
       method: "POST",
       url: "/api/devices/claim",
-      body: { deviceId: "kiosk-aaaa", outputId: null, name: "lobby-pi" },
+      body: { deviceId: "kiosk-aaaa", outputId: null, name: "lobby-pi", newView: "control" },
     }]);
     assert.equal(writes.filter((w) => w.url === "/api/outputs").length, 0, "the screen was made through the add route, not the claim");
-    assert.equal(screen.queryByRole("complementary", { name: "Screen settings" }) !== null, false, "it is on screen");
+    assert.ok(panelIsOpen(), "the panel closed after the device was set up");
   });
 
   test("a claim the server refuses keeps the panel open with the reason", async () => {
     claimFails = '"/history" is a built-in page.';
     await mountScreens();
     await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
+    await click(panel().getByRole("button", { name: "Next" }));
     await click(panel().getByRole("button", { name: "Create screen" }));
     assert.match(panel().getByRole("alert").textContent ?? "", /built-in page/);
-    assert.ok(screen.getByRole("complementary", { name: "Screen settings" }));
+    assert.ok(screen.getByRole("complementary", { name: "Settings" }));
   });
 
   test("Use for an existing screen is unchanged: it claims straight onto that screen", async () => {

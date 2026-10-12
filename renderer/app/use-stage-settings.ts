@@ -35,7 +35,7 @@ import { changeViewRole } from "../settings/view-role-change";
 import { confirmDiscardSlotEdits, useSlotsTarget } from "../settings/sections/slots-target-pill";
 import { registerTargetGuard } from "../settings/sections/editing-target";
 import { useSlotsPreview } from "../settings/sections/slots-preview-target";
-import type { SectionHandlers } from "../settings/types";
+import type { CreateScreenOutcome, SectionHandlers } from "../settings/types";
 import {
   useStageStateQuery,
   useServiceTypes,
@@ -534,20 +534,25 @@ export function useStageSettings(pinnedViewId?: string) {
     await writeState("views:rename", { id, name }, { fail: "Failed to rename view" });
   }
 
-  async function handleDuplicateView(id: string) {
+  /** Resolves the copy's id, or null when it could not be made (already toasted). */
+  async function handleDuplicateView(id: string): Promise<string | null> {
     try {
       const next = await ipc<StageState>("views:duplicate", { id });
       queryClient.setQueryData(["stage:getState"], next);
       const created = next.views?.[next.views.length - 1];
       if (created) setSelectedViewId(created.id);
       toast.success("View duplicated.");
+      return created?.id ?? null;
     } catch (err) {
       toast.error(`Failed to duplicate view: ${errorMessage(err)}`);
+      return null;
     }
   }
 
-  async function handleRemoveView(id: string) {
-    await writeState("views:remove", { id }, { fail: "Failed to remove view" });
+  /** Resolves whether the view is gone. The failure is toasted here; the answer
+   *  is for a caller that does more after it (removing a screen AND its view). */
+  async function handleRemoveView(id: string): Promise<boolean> {
+    return writeState("views:remove", { id }, { fail: "Failed to remove view" });
   }
 
   async function handleSetViewKind(id: string, kind: ViewKind) {
@@ -738,13 +743,18 @@ export function useStageSettings(pinnedViewId?: string) {
    * the server validates before it writes and puts back what it made if a later
    * step fails.
    */
-  async function handleCreateScreen(input: CreateScreenInput): Promise<string | null> {
+  async function handleCreateScreen(input: CreateScreenInput): Promise<CreateScreenOutcome> {
+    const before = new Set((stateNow()?.outputs ?? []).map((o) => o.id));
     try {
       const next = await ipc<StageState>("outputs:add", { ...input });
       queryClient.setQueryData(["stage:getState"], next);
-      return null;
+      // The route answers with the state, not the screen: it is the one id that was
+      // not there a moment ago. Two operators adding at once could make that two;
+      // the last is taken, and the panel then opens on a screen that does exist.
+      const made = (next.outputs ?? []).filter((o) => !before.has(o.id)).at(-1);
+      return { refused: null, outputId: made?.id ?? null };
     } catch (err) {
-      return errorMessage(err);
+      return { refused: errorMessage(err), outputId: null };
     }
   }
 
@@ -852,8 +862,9 @@ export function useStageSettings(pinnedViewId?: string) {
     }
   }
 
-  async function handleRemoveOutput(id: string) {
-    await writeState("outputs:remove", { id }, { fail: "Failed to remove display" });
+  /** Resolves whether the screen is gone, for the same reason handleRemoveView does. */
+  async function handleRemoveOutput(id: string): Promise<boolean> {
+    return writeState("outputs:remove", { id }, { fail: "Failed to remove display" });
   }
 
   async function handleReorderOutputs(ids: string[]) {

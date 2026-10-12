@@ -17,6 +17,13 @@ import type { Rotation } from "@main/types/output-format";
  */
 export type WirelessChannel = DeviceChannel;
 
+/** How making a screen went: why it was refused, or null, and the id of the
+ *  screen that now exists (null when it was refused). */
+export interface CreateScreenOutcome {
+  refused: string | null;
+  outputId: string | null;
+}
+
 // Action callbacks owned by SettingsView and threaded into each section.
 export interface SectionHandlers {
   handleServiceTypeChange: (id: string) => Promise<void>;
@@ -70,8 +77,10 @@ export interface SectionHandlers {
   // Views (content)
   handleAddView: (name: string, kind: ViewKind, surface?: "display" | "console") => Promise<string | null>;
   handleRenameView: (id: string, name: string) => Promise<void>;
-  handleDuplicateView: (id: string) => Promise<void>;
-  handleRemoveView: (id: string) => Promise<void>;
+  /** Resolves the copy's id, or null when it could not be made. */
+  handleDuplicateView: (id: string) => Promise<string | null>;
+  /** Resolves whether it is gone; the failure is already toasted. */
+  handleRemoveView: (id: string) => Promise<boolean>;
   handleSetViewKind: (id: string, kind: ViewKind) => Promise<void>;
   /**
    * `layoutRev` is the revision the editor opened; omit to overwrite regardless.
@@ -97,9 +106,8 @@ export interface SectionHandlers {
   handleRenamePreset: (id: string, name: string) => Promise<void>;
   handleOverwritePreset: (id: string) => Promise<void>;
   // Outputs (physical screens + routing)
-  /** Make a screen from the Screen settings panel's answers. Resolves with the
-   *  reason it was refused, or null when it was made. */
-  handleCreateScreen: (input: CreateScreenInput) => Promise<string | null>;
+  /** Make a screen from the Screen settings panel's answers. */
+  handleCreateScreen: (input: CreateScreenInput) => Promise<CreateScreenOutcome>;
   handleRenameOutput: (id: string, name: string) => Promise<void>;
   handleSetOutputView: (id: string, viewId: string | null) => Promise<void>;
   handleSetOutputLocked: (id: string, locked: boolean) => Promise<void>;
@@ -113,7 +121,8 @@ export interface SectionHandlers {
   handleSetOutputVideoMode: (id: string, videoMode: string) => Promise<void>;
   handleSetViewShowInSidebar: (id: string, showInSidebar: boolean) => Promise<void>;
   handleSetViewSurface: (id: string, surface: "display" | "console") => Promise<void>;
-  handleRemoveOutput: (id: string) => Promise<void>;
+  /** Resolves whether it is gone; the failure is already toasted. */
+  handleRemoveOutput: (id: string) => Promise<boolean>;
   handleReorderOutputs: (ids: string[]) => Promise<void>;
   /** Remotely reload kiosk pages. Pass an output id, or null for all displays. */
   handleRefreshDisplay: (id: string | null) => Promise<void>;
