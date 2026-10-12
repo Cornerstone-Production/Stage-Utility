@@ -161,9 +161,10 @@ export function ViewDetail({
             ))}
           </SelectContent>
         </Select>
-        {/* What it is FOR, beside what it IS. Offered only for a custom layout:
-            the built-in kinds have no editable layout, so a console among them
-            would have nowhere to put a control — and the server refuses it too.
+        {/* What it is FOR, beside what it IS. Offered only for a custom layout, the
+            kind with controls to place. A calendar view is made a console from
+            "Make it a control surface" on its card's menu in Screens, and the
+            server refuses a kind with nothing to operate.
 
             Changing this changes every screen showing the view too, after a
             confirm that names them; with none showing it there is nothing to

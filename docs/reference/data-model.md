@@ -159,8 +159,12 @@ a wall display but showed a console now shows a wall copy of it, named `<view>
 (wall)`. A screen whose buttons worked keeps them: the view it showed (a custom view or a
 calendar) becomes a console when only such screens showed it, and otherwise those
 screens share a control-surface copy, `<view> (control surface)`. A view of any
-other kind has no controls to keep, so only the role is dropped. Each is a `[screens]` line in
-the log.
+other kind has no controls to keep, so only the role is dropped. A view the
+upgrade makes a console, and each control-surface copy it makes, is kept out of
+the [operator app's sidebar](../features/operator-app.md#consoles) (`showInSidebar:
+false`; **Show in the sidebar** puts it back), and a layout with no fit of its
+own gets `canvas.fit: "contain"`, the fit it had on a wall screen, so the panel
+does not change shape. Each is a `[screens]` line in the log, saying so.
 
 ## What a display shows
 

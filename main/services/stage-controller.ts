@@ -3151,18 +3151,9 @@ export class StageController {
     if (!view) throw new Error(`setViewSurface — view ${id} not found`);
     if (surface === "console" && viewSurface(view) !== "console") this.assertCanBeControlSurface(view);
 
-    const shownOn = screensShowing(id, this.state.outputs);
-    if (!opts.screensConfirmed && viewSurface(view) !== surface && shownOn.length > 0) {
-      const names = shownOn.map((o) => `"${o.name || o.id}"`).join(", ");
-      const them = shownOn.length === 1 ? "that screen" : "those screens";
-      const consequence =
-        surface === "console"
-          ? `making it a control surface would make ${them} one too: its buttons would go live. `
-          : `making it a wall view would make ${them} read-only: its buttons would stop working. `;
-      throw new Error(
-        `"${view.name}" is showing on ${names}, so ${consequence}` +
-          `Point ${shownOn.length === 1 ? "it" : "them"} at a different view first, or use POST /api/views/:id/surface, which asks.`,
-      );
+    if (!opts.screensConfirmed) {
+      const refusal = this.surfaceChangeRefusal(view, surface);
+      if (refusal) throw new Error(refusal);
     }
 
     const views = this.state.views.map((v) => (v.id === id ? { ...v, surface } : v));
@@ -3182,6 +3173,23 @@ export class StageController {
     this.recomputeResolved();
     this.broadcast();
     return this.state;
+  }
+
+  /** Why a view with screens on it may not change to `surface` without the
+   *  operator being asked, or null. The view's role is every screen's role. */
+  private surfaceChangeRefusal(view: View, surface: ViewSurface): string | null {
+    const shownOn = screensShowing(view.id, this.state.outputs);
+    if (viewSurface(view) === surface || shownOn.length === 0) return null;
+    const names = shownOn.map((o) => `"${o.name || o.id}"`).join(", ");
+    const them = shownOn.length === 1 ? "that screen" : "those screens";
+    const consequence =
+      surface === "console"
+        ? `making it a control surface would make ${them} one too: its buttons would go live. `
+        : `making it a wall view would make ${them} read-only: its buttons would stop working. `;
+    return (
+      `"${view.name}" is showing on ${names}, so ${consequence}` +
+      `Point ${shownOn.length === 1 ? "it" : "them"} at a different view first, or use POST /api/views/:id/surface, which asks.`
+    );
   }
 
   async setViewKind(id: string, kind: ViewKind): Promise<StageState> {
@@ -3532,11 +3540,15 @@ export class StageController {
     // output pointing at a view that is gone — which renders a placeholder —
     // rather than a view nothing routes to that comes back on the next boot.
     await this.outputWrites.enqueue(async () => {
+      // A control surface that loses its view stops working: say which screens,
+      // as every other write that flips a screen's role does.
+      const stopped = viewIsConsole(removed) ? screensShowing(id, this.state.outputs) : [];
       const outputs = this.state.outputs.map((o) =>
         o.viewId === id ? { ...o, viewId: null } : o,
       );
       this.state = { ...this.state, outputs };
       await settingsStore.patch({ outputs });
+      for (const o of stopped) this.logRoleFlip(o.name || o.id, false, undefined);
     });
     await slotsStore.removeDisplay(id);
     this.rawSlotsByView.delete(id);
@@ -3920,7 +3932,7 @@ export class StageController {
         ? [{
             label: "make the view",
             run: async () => {
-              // Custom, because only a custom view has a layout to put anything on.
+              // Custom: the guided creation makes a layout, which can be either kind of screen.
               await this.createViewRecord(name, "custom", newView === "control" ? "console" : "display", (view) => {
                 createdViewId = view.id;
                 viewId = view.id;
@@ -3982,18 +3994,24 @@ export class StageController {
   }
 
   /**
-   * Why `setViewKind(id, kind)` would be refused once the view has `surface`, or
-   * null. For a route that must refuse before it writes anything else.
+   * Why `setViewKind` and `setViewSurface`, applied in that body's order, would
+   * refuse a PATCH carrying `kind` and/or `surface`, or null. For a route that
+   * must refuse before it writes anything else in the body: the view is judged as
+   * it will be once the whole body is applied (a console may take any kind in the
+   * same body that makes it a wall view), so a refusal here is the only one the
+   * two writes can raise, and neither runs when it is returned.
    */
-  viewKindRefusal(id: string, kind: ViewKind, surface?: ViewSurface): string | null {
+  viewPatchRefusal(id: string, change: { kind?: ViewKind; surface?: ViewSurface }): string | null {
     const view = this.state.views.find((v) => v.id === id);
-    if (!view || (surface ?? viewSurface(view)) !== "console") return null;
+    if (!view || (change.kind === undefined && change.surface === undefined)) return null;
+    const final: View = { ...view, kind: change.kind ?? view.kind };
+    const surface = change.surface ?? viewSurface(view);
     try {
-      this.assertCanBeControlSurface({ ...view, kind });
-      return null;
+      if (surface === "console") this.assertCanBeControlSurface(final);
     } catch (err) {
       return errorMessage(err);
     }
+    return change.surface === undefined ? null : this.surfaceChangeRefusal(view, change.surface);
   }
 
   /** Refuse, with the reason, a view whose kind has nothing to operate. */

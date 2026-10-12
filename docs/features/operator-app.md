@@ -283,9 +283,11 @@ Its buttons fire; the same layout on a wall display draws them and does nothing.
 
 **Building one.** Screens → **New view** → *Custom Layout*, then pick **A
 control surface you operate** rather than *A wall screen anyone can see*. A
-calendar can be a console too, and pages through months on it; every other
-built-in kind has nothing to operate. A **cue button** on one fires a cue and shows what its device is
-doing; see [Widgets](../reference/widgets.md#control). A console meant for a
+calendar can be a console too, and pages through months on it: the dialog does not
+offer that, so make the calendar view first and choose *Make it a control surface*
+in its card's menu (the card of a view no screen shows). Every other built-in kind
+has nothing to operate. A **cue button** on one fires a cue and shows what its
+device is doing; see [Widgets](../reference/widgets.md#control). A console meant for a
 Ross Ultritouch panel has its own presets and a starter; see
 [Ultritouch](../integrations/ultritouch.md).
 

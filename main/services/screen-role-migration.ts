@@ -17,8 +17,9 @@
 //   was "panel", on a wall    its buttons were live, so they stay live: the view
 //   view                      becomes a console when every screen showing it was
 //                             a panel; otherwise those screens share a control-
-//                             surface copy. A view that is not a custom view has
-//                             no buttons to keep, so only the role is dropped.
+//                             surface copy. A view with nothing to operate (not
+//                             a custom view or a calendar) has no buttons to
+//                             keep, so only the role is dropped.
 //
 // A screen with no stored role was a read-only display. That is what the old
 // readers assumed, so on the FIRST pass (`absentIsDisplay`) it is treated the
@@ -52,6 +53,16 @@ export function asMigratedConsole(view: View): View {
     ? { ...view.layout, canvas: { ...view.layout.canvas, fit: "contain" as const } }
     : view.layout;
   return { ...view, surface: "console", showInSidebar: false, ...(layout === undefined ? {} : { layout }) };
+}
+
+/**
+ * What `asMigratedConsole` does to `source`, in the words of the `[screens]` line
+ * for it: an operator whose view left the sidebar after an upgrade finds why here.
+ * Names the fit only when it was set, which is when the layout chose none.
+ */
+function migratedConsoleEffects(source: View): string {
+  const fit = source.layout && source.layout.canvas.fit === undefined ? ` and its canvas fit set to "contain", the fit it had as a wall view` : "";
+  return `kept out of the sidebar (Show in the sidebar puts it back)${fit}`;
 }
 
 /** What a view draws, for comparing a copy to its source: object ids differ in a
@@ -182,14 +193,15 @@ export function planScreenRoles(
         if (!consoleViewIds.has(view.id)) {
           consoleViewIds.add(view.id);
           notes.push(
-            `"${view.name}" is now a control surface: ${showing.map(label).join(", ")} had live buttons on it as a wall view`,
+            `"${view.name}" is now a control surface: ${showing.map(label).join(", ")} had live buttons on it as a wall view; ` +
+              migratedConsoleEffects(view),
           );
         }
       } else {
         copyFor(view, "console", o);
         notes.push(
           `${label(o)} had live buttons on the wall view "${view.name}", which other read-only screens also show; ` +
-            `it now shows a control-surface copy, "${copyViewName(view, "console")}"`,
+            `it now shows a control-surface copy, "${copyViewName(view, "console")}", ${migratedConsoleEffects(view)}`,
         );
       }
     }

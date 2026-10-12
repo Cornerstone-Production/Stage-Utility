@@ -209,6 +209,30 @@ describe("what it reports", () => {
   });
 });
 
+describe("what it says about a view it makes a control surface", () => {
+  const layout = (fit?: "contain") =>
+    ({ version: 1, canvas: { width: 1920, height: 1080, background: null, ...(fit ? { fit } : {}) }, objects: [] }) as unknown as View["layout"];
+
+  test("names the sidebar and the fit, for a view it converts and for a copy it makes", () => {
+    const converted = planScreenRoles([view("w", { name: "Lobby loop", layout: layout() })], [screen("a", "w", "panel")], { absentIsDisplay: false });
+    assert.match(converted.notes[0], /"Lobby loop" is now a control surface.*kept out of the sidebar.*fit set to "contain"/);
+    const copied = planScreenRoles(
+      [view("w", { name: "Lobby loop", layout: layout() })],
+      [screen("a", "w", "panel"), screen("b", "w", "display")],
+      { absentIsDisplay: false },
+    );
+    assert.match(copied.notes[0], /control-surface copy, "Lobby loop \(control surface\)", kept out of the sidebar.*fit set to "contain"/);
+  });
+
+  test("does not claim a fit it did not set: a layout that chose one, or a view with no layout", () => {
+    const chose = planScreenRoles([view("w", { name: "Lobby loop", layout: layout("contain") })], [screen("a", "w", "panel")], { absentIsDisplay: false });
+    assert.match(chose.notes[0], /kept out of the sidebar/);
+    assert.doesNotMatch(chose.notes[0], /fit/);
+    const cal = planScreenRoles([view("c", { name: "Week", kind: "calendar" })], [screen("a", "c", "panel")], { absentIsDisplay: false });
+    assert.doesNotMatch(cal.notes[0], /fit/);
+  });
+});
+
 describe("a view the migration makes a control surface", () => {
   const layout = (fit?: "contain" | "fill" | "responsive") =>
     ({ version: 1, canvas: { width: 1920, height: 1080, background: null, ...(fit ? { fit } : {}) }, objects: [] }) as unknown as View["layout"];

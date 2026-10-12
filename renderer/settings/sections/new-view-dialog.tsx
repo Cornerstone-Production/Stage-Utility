@@ -80,8 +80,9 @@ export function NewViewDialog({
   /**
    * What the view is FOR, already decided by the caller: a screen's panel asks
    * for "a new control surface" or "a new wall view", and offering the choice
-   * again would let a control surface be given a view it cannot show. A console
-   * can only be a custom layout, so "console" fixes the kind as well.
+   * again would let a control surface be given a view it cannot show. This
+   * dialog makes a control surface as a custom layout, so "console" fixes the
+   * kind as well.
    */
   fixedSurface?: ViewSurface;
 }) {
@@ -90,7 +91,9 @@ export function NewViewDialog({
   const [startFrom, setStartFrom] = useState<StartFrom>("blank");
   const [chosenSurface, setSurface] = useState<ViewSurface>("display");
   const surface = fixedSurface ?? chosenSurface;
-  // A console can only be a custom layout: nothing else has anywhere to put a control.
+  // This dialog makes a console only as a custom layout, the kind with a layout to
+  // put controls on. A calendar can be a console too (its month chevrons), but it
+  // is made one afterwards, from "Make it a control surface" on its card's menu.
   const effectiveKind: ViewKind = fixedSurface === "console" ? "custom" : kind;
 
   return (
@@ -103,8 +106,8 @@ export function NewViewDialog({
       confirmLabel="Create"
       confirmDisabled={false}
       onConfirm={async () => {
-        // Only a custom View has a layout to put a control on, so only a custom
-        // View can be a console. The server enforces this too.
+        // A new view is a console only as a custom layout, whatever else can be one
+        // (see effectiveKind): any other kind is created as a wall view.
         const made = name.trim();
         const id = await handlers.handleAddView(made, effectiveKind, effectiveKind === "custom" ? surface : "display");
         if (id && effectiveKind === "custom" && startFrom !== "blank") {
@@ -146,8 +149,8 @@ export function NewViewDialog({
           </Select>
         )}
         {/* What it is FOR, in the operator's words rather than the schema's.
-            Offered only for a custom layout: the built-in kinds have no editable
-            layout, so a console among them could not carry a control. */}
+            Offered only for a custom layout, the one kind this dialog makes a
+            console of. A calendar becomes one later, from its card's menu. */}
         {effectiveKind === "custom" && !fixedSurface && (
           <fieldset className="flex flex-col gap-1.5 border-0 p-0 m-0">
             <legend className="text-caption2 text-fg-subtle p-0">What is it for</legend>
