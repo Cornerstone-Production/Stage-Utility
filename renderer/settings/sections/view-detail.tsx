@@ -165,8 +165,11 @@ export function ViewDetail({
             the built-in kinds have no editable layout, so a console among them
             would have nowhere to put a control — and the server refuses it too.
 
-            Changing this is refused, with the reason, when screens are showing
-            the view; the toast carries that message rather than the console. */}
+            Changing this changes every screen showing the view too, after a
+            confirm that names them; with none showing it there is nothing to
+            ask. One screen's role is set in its own Screen settings. The server
+            refuses, with the reason, a view that cannot be a control surface,
+            and the toast carries that message. */}
         {view.kind === "custom" && (
           <Select
             value={viewSurface(view)}
