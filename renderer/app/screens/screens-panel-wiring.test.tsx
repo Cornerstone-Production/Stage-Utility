@@ -310,18 +310,29 @@ describe("the panel and its Settings button", () => {
   });
 
   test("storage that throws does not stop the page: the panel is open, and still toggles", async () => {
-    const real = Storage.prototype.getItem;
-    const realSet = Storage.prototype.setItem;
-    Storage.prototype.getItem = () => { throw new Error("storage is off"); };
-    Storage.prototype.setItem = () => { throw new Error("storage is off"); };
+    // The prototype of the storage the page actually reads (the harness's
+    // jsdom one). A global `Storage` is Node's own class on newer Nodes and
+    // absent on older ones; patching it would test nothing, or throw.
+    const proto = Object.getPrototypeOf(localStorage) as Storage;
+    const real = proto.getItem;
+    const realSet = proto.setItem;
+    proto.getItem = () => { throw new Error("storage is off"); };
+    proto.setItem = () => { throw new Error("storage is off"); };
+    // A throw inside the click handler would not stop the toggle, so it is
+    // caught where the browser reports it: an uncaught error on the window.
+    const uncaught: string[] = [];
+    const onError = (e: ErrorEvent) => { uncaught.push(String(e.error ?? e.message)); };
+    window.addEventListener("error", onError);
     try {
       await mountScreens();
       assert.ok(panelIsOpen());
       await click(toggle());
       assert.equal(panelIsOpen(), false);
+      assert.deepEqual(uncaught, [], "a storage failure escaped the toggle");
     } finally {
-      Storage.prototype.getItem = real;
-      Storage.prototype.setItem = realSet;
+      window.removeEventListener("error", onError);
+      proto.getItem = real;
+      proto.setItem = realSet;
     }
   });
 
