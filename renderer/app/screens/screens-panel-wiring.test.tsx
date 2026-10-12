@@ -193,6 +193,13 @@ async function openSettings(screenName: string): Promise<void> {
   await eventually(() => screen.getByRole("complementary", { name: "Screen settings" }));
 }
 
+/** The writes the page made: waited for, then EXACTLY these. A wait that passed
+ *  on the first match could not see a second, stray write behind it. */
+const wrote = async (expected: typeof writes) => {
+  await eventually(() => assert.ok(writes.length >= expected.length, `expected ${expected.length} write(s), saw ${writes.length}`));
+  assert.deepEqual(writes, expected);
+};
+
 const panel = () => within(screen.getByRole("complementary", { name: "Screen settings" }));
 const sw = (name: string) => panel().getByRole("switch", { name });
 const answerConfirm = async (label: string) => {
@@ -246,28 +253,28 @@ describe("each setting reaches the server", () => {
     await mountScreens();
     await openSettings("Lobby TV");
     await click(() => sw("Top bar"));
-    await eventually(() => assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { hideTopBar: true } }]));
+    await wrote([{ method: "PATCH", url: "/api/outputs/display-3", body: { hideTopBar: true } }]);
   });
 
   test("the lock switch PATCHes locked", async () => {
     await mountScreens();
     await openSettings("Lobby TV");
     await click(() => sw("Lock"));
-    await eventually(() => assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { locked: true } }]));
+    await wrote([{ method: "PATCH", url: "/api/outputs/display-3", body: { locked: true } }]);
   });
 
   test("the HLS switch PATCHes allowHls", async () => {
     await mountScreens();
     await openSettings("Lobby TV");
     await click(() => sw("Use HLS"));
-    await eventually(() => assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { allowHls: false } }]));
+    await wrote([{ method: "PATCH", url: "/api/outputs/display-3", body: { allowHls: false } }]);
   });
 
   test("a message group tick PATCHes the whole list", async () => {
     await mountScreens();
     await openSettings("Lobby TV");
     await click(() => panel().getByRole("checkbox", { name: "Stage" }));
-    await eventually(() => assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { groups: [STAGE_GROUP.id] } }]));
+    await wrote([{ method: "PATCH", url: "/api/outputs/display-3", body: { groups: [STAGE_GROUP.id] } }]);
   });
 
   test("text size PATCHes the same field the display itself writes, once, when it settles", async () => {
@@ -278,7 +285,7 @@ describe("each setting reaches the server", () => {
     await type(field, "130");
     assert.deepEqual(writes, [], "a keystroke was written");
     await act(async () => { fireEvent.blur(field); await settle(); await settle(); });
-    await eventually(() => assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { textSize: 130 } }]));
+    await wrote([{ method: "PATCH", url: "/api/outputs/display-3", body: { textSize: 130 } }]);
   });
 
   test("the friendly link PATCHes slug", async () => {
@@ -286,7 +293,7 @@ describe("each setting reaches the server", () => {
     await openSettings("Lobby TV");
     await type(() => panel().getByLabelText(/Friendly link/), "Lobby");
     await click(() => panel().getByRole("button", { name: "Save" }));
-    await eventually(() => assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { slug: "lobby" } }]));
+    await wrote([{ method: "PATCH", url: "/api/outputs/display-3", body: { slug: "lobby" } }]);
   });
 
   test("the name PATCHes the screen on blur", async () => {
@@ -295,21 +302,21 @@ describe("each setting reaches the server", () => {
     const name = await eventually(() => panel().getByLabelText("Name"));
     await type(name, "Atrium TV");
     await act(async () => { fireEvent.blur(name); await settle(); await settle(); });
-    await eventually(() => assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { name: "Atrium TV" } }]));
+    await wrote([{ method: "PATCH", url: "/api/outputs/display-3", body: { name: "Atrium TV" } }]);
   });
 
   test("choosing a view PATCHes viewId", async () => {
     await mountScreens();
     await openSettings("Lobby TV");
     await choose(() => panel().getByLabelText("View"), "__none__");
-    await eventually(() => assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { viewId: null } }]));
+    await wrote([{ method: "PATCH", url: "/api/outputs/display-3", body: { viewId: null } }]);
   });
 
   test("the sidebar switch PATCHes showInSidebar on the VIEW, not the screen", async () => {
     await mountScreens();
     await openSettings("Booth panel");
     await click(() => sw("List in the sidebar"));
-    await eventually(() => assert.deepEqual(writes, [{ method: "PATCH", url: "/api/views/ctl-a", body: { showInSidebar: false } }]));
+    await wrote([{ method: "PATCH", url: "/api/views/ctl-a", body: { showInSidebar: false } }]);
   });
 });
 
@@ -321,7 +328,7 @@ describe("changing the role of a shared view", () => {
     assert.deepEqual(writes, [], "the role went out before the operator chose how");
     await click(() => panel().getByRole("button", { name: "Apply" }));
     await answerConfirm("Make it a display");
-    await eventually(() => assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs/display-1/role", body: { mode: "display", copyView: true } }]));
+    await wrote([{ method: "POST", url: "/api/outputs/display-1/role", body: { mode: "display", copyView: true } }]);
   });
 
   test("Choose a different view POSTs the role route with that view", async () => {
@@ -332,7 +339,7 @@ describe("changing the role of a shared view", () => {
     await choose(() => panel().getByLabelText("A different view"), "wall-a");
     await click(() => panel().getByRole("button", { name: "Apply" }));
     await answerConfirm("Make it a display");
-    await eventually(() => assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs/display-1/role", body: { mode: "display", viewId: "wall-a" } }]));
+    await wrote([{ method: "POST", url: "/api/outputs/display-1/role", body: { mode: "display", viewId: "wall-a" } }]);
   });
 
   test("a view only this screen shows is changed with it, in one call and no copy", async () => {
@@ -340,7 +347,7 @@ describe("changing the role of a shared view", () => {
     await openSettings("Lobby TV");
     await click(() => panel().getByRole("button", { name: /^Control surface/ }));
     await answerConfirm("Use as a control surface");
-    await eventually(() => assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs/display-3/role", body: { mode: "panel" } }]));
+    await wrote([{ method: "POST", url: "/api/outputs/display-3/role", body: { mode: "panel" } }]);
   });
 });
 
@@ -362,7 +369,7 @@ describe("the card's own view picker", () => {
     await mountScreens();
     await choose(() => cardPicker("Lobby TV"), "ctl-a");
     await answerConfirm("Use as a control surface");
-    await eventually(() => assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs/display-3/role", body: { mode: "panel", viewId: "ctl-a" } }]));
+    await wrote([{ method: "POST", url: "/api/outputs/display-3/role", body: { mode: "panel", viewId: "ctl-a" } }]);
   });
 
   test("declining the confirm assigns nothing", async () => {
@@ -394,7 +401,7 @@ describe("a console on no screen", () => {
       await settle();
       await settle();
     });
-    await eventually(() => assert.deepEqual(writes, [{ method: "PATCH", url: "/api/views/ctl-free", body: { showInSidebar: false } }]));
+    await wrote([{ method: "PATCH", url: "/api/views/ctl-free", body: { showInSidebar: false } }]);
   });
 
   test("a wall view's menu has no such item", async () => {
@@ -440,7 +447,7 @@ describe("Add a screen", () => {
     await click(() => panel().getByRole("button", { name: "Next" }));
     await type(() => panel().getByLabelText("Name"), "Wing");
     await click(() => panel().getByRole("button", { name: "Create screen" }));
-    await eventually(() => assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { name: "Wing", mode: "panel", newView: true } }]));
+    await wrote([{ method: "POST", url: "/api/outputs", body: { name: "Wing", mode: "panel", newView: true } }]);
     await eventually(() => assert.equal(screen.queryByRole("complementary", { name: "Screen settings" }) !== null, false, "the panel stayed open after the screen was made"));
   });
 
@@ -458,7 +465,7 @@ describe("Add a screen", () => {
     assert.equal(name.value, "", "the name field holds a guess at the number");
     assert.match(name.placeholder, /number/);
     await click(() => panel().getByRole("button", { name: "Create screen" }));
-    await eventually(() => assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { mode: "display" } }]));
+    await wrote([{ method: "POST", url: "/api/outputs", body: { mode: "display" } }]);
   });
 });
 

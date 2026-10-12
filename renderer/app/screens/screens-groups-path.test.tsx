@@ -165,12 +165,11 @@ describe("ticking a group in a screen's settings panel", () => {
       fireEvent.click(stage);
       await settle();
     });
-    await eventually(() =>
-      assert.deepEqual(
-        patches,
-        [{ url: "/api/outputs/display-2", body: { groups: [STAGE.id] } }],
-        "the tick did not reach the server as a PATCH of the screen it was made on",
-      ),
+    await eventually(() => assert.ok(patches.length > 0, "the tick sent no PATCH"));
+    assert.deepEqual(
+      patches,
+      [{ url: "/api/outputs/display-2", body: { groups: [STAGE.id] } }],
+      "the tick did not reach the server as a PATCH of the screen it was made on",
     );
     await eventually(() => {
       const chips = [...document.querySelectorAll('[data-testid="screen-groups"] li')].map((li) => li.textContent);
@@ -193,12 +192,11 @@ describe("ticking a group in a screen's settings panel", () => {
       fireEvent.click(screen.getByRole("checkbox", { name: "Stage" }));
       await settle();
     });
-    await eventually(() =>
-      assert.deepEqual(
-        patches.map((p) => p.body),
-        [{ groups: [GREEN.id] }, { groups: [GREEN.id, STAGE.id] }],
-        "the second tick was built from the screen as the server last said it, and undid the first",
-      ),
+    await eventually(() => assert.ok(patches.length > 1, "the second tick sent no PATCH"));
+    assert.deepEqual(
+      patches.map((p) => p.body),
+      [{ groups: [GREEN.id] }, { groups: [GREEN.id, STAGE.id] }],
+      "the second tick was built from the screen as the server last said it, and undid the first",
     );
     await act(async () => {
       release();
