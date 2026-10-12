@@ -15,14 +15,24 @@ import { stageController } from "../stage-controller.js";
 import type { CreateScreenInput } from "../../types/views.js";
 import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, readCreateScreenBody } from "./screen-write.js";
 import { errorMessage } from "../errors.js";
-import { scrub } from "../scrub.js";
+import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import * as path from "node:path";
 import { APP_ROOT } from "../app-root.js";
+import { getUserDataPath } from "../app-paths.js";
+import { OutputHelperDownloads, parseHelperPath } from "../output-helper-download.js";
+import { pkgVersion } from "../updater.js";
+import { scrub } from "../scrub.js";
+import { originFromHost, stampOrigin } from "../kiosk-installer-origin.js";
 
 /** Exactly what may be served from scripts/kiosk. An allowlist rather than a
  *  path join, because this reads a file from disk on request. */
 const KIOSK_INSTALLERS = new Set(["install-linux.sh", "install-macos.sh", "install-windows.ps1"]);
+
+/** The Mac output helper's zips, fetched from the release on first request and
+ *  kept in the data directory. See output-helper-download.ts. */
+const helperDownloads = new OutputHelperDownloads({ dataDir: getUserDataPath, version: pkgVersion });
 
 /** A device id from a query string is untrusted. Bound like the datagram is. */
 const clean = (v: string | null): string | undefined =>
@@ -97,17 +107,65 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       error(res, "unknown installer", 404);
       return;
     }
+    let body: string;
     try {
       // APP_ROOT, not a path relative to this module. `import.meta.url` is
       // main/services/routes/ in a checkout but the bundled server.mjs at the
       // install root, where "../../../scripts" resolves to file:///scripts and
       // 404s. app-root.ts exists for exactly this and is used in five other
       // places; this was the copy that drifted.
-      const body = await readFile(path.join(APP_ROOT, "scripts", "kiosk", name), "utf8");
-      res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-      res.end(body);
+      body = await readFile(path.join(APP_ROOT, "scripts", "kiosk", name), "utf8");
     } catch {
       error(res, "installer not found in this build", 404);
+      return;
+    }
+    // The Mac installer downloads the output helper from the server it came
+    // from, and is told which that is here. The others carry no address. A
+    // missing marker throws, and is the server's fault, not a missing file.
+    if (name === "install-macos.sh") {
+      const secure = "encrypted" in req.socket && req.socket.encrypted === true;
+      try {
+        body = stampOrigin(body, originFromHost(req.headers.host, secure));
+      } catch (err) {
+        console.error(`[output-helper] could not prepare ${scrub(name)}: ${scrub(err)}`);
+        error(res, "installer could not be prepared", 500);
+        return;
+      }
+    }
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+    res.end(body);
+    return;
+  }
+
+  // ── The Mac output helper, and the checksum its installer verifies ──────
+  // A Mac on a network with no internet gets the app from here. The first
+  // request fetches it from the release this server is running; see
+  // output-helper-download.ts for what is bounded and why.
+  if (method === "GET" && pathname.startsWith("/kiosk/StageUtilityOutput-")) {
+    const asset = parseHelperPath(pathname);
+    if (!asset) {
+      error(res, "unknown download", 404);
+      return;
+    }
+    const got = await helperDownloads.resolve(asset);
+    if (!got.ok) {
+      error(res, got.message, got.status);
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": asset.kind === "zip" ? "application/zip" : "text/plain; charset=utf-8",
+      "content-length": String(got.size),
+      "content-disposition": `attachment; filename="${asset.name}"`,
+      "cache-control": "no-store",
+    });
+    try {
+      await pipeline(createReadStream(got.file), res);
+    } catch (err) {
+      // Headers are out, so there is no status left to send: closing the socket
+      // is what tells the client the file is short, and curl then fails the
+      // transfer. The line is for whoever asks why the install stopped.
+      console.warn(`[output-helper] transfer of ${scrub(asset.name)} did not finish: ${scrub(err)}`);
+      res.destroy();
     }
     return;
   }

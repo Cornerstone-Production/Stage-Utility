@@ -61,7 +61,7 @@ const TRACKS = ["main", "beta"];
  * packaged server reports 0.0.0 — which the UI shows, and which makes every
  * release look older than the one before it.
  */
-function pkgVersion(): string {
+export function pkgVersion(): string {
   try {
     const v = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version;
     if (v) return v;

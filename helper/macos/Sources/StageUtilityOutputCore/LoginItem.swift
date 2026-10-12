@@ -2,12 +2,12 @@ import Foundation
 
 /// What the window's "Open at login" offers.
 ///
-/// A system-wide LaunchAgent (`HelperPaths.launchAgent`) starts the helper at every
-/// login. Where that file exists, a per-user login item (`SMAppService.mainApp`)
-/// would start a second copy at login, which hands over to the first and brings its
-/// window forward. So the window shows that the helper starts at login, read-only,
-/// and a per-user item registered beside the agent is removed. Where the file does
-/// not exist, the window keeps the switch.
+/// `install-macos.sh` starts the helper at every login with a system-wide
+/// LaunchAgent (`HelperPaths.launchAgent`). Where that file exists, a per-user login
+/// item (`SMAppService.mainApp`) would start a second copy at login, which hands
+/// over to the first and brings its window forward. So the window shows that the
+/// helper starts at login, read-only, and a per-user item registered beside the
+/// agent is removed. Where the file does not exist, the window keeps the switch.
 ///
 /// A copy run with `STAGE_UTILITY_OUTPUT_STATE_DIR` (tests and development) never
 /// touches the login item at all: the item is per user and per app, not per state

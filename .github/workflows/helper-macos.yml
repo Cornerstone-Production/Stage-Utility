@@ -8,7 +8,8 @@
 # without it). A runner with no Metal device skips the GPU conversion tests with
 # that reason, rather than failing them.
 #
-# Tested by scripts/helper-macos-workflow.test.ts, which runs these steps' own shell.
+# Tested by scripts/helper-macos-workflow.test.ts, which runs these steps' own shell
+# (the Xcode choice is in .github/actions/select-xcode).
 
 name: Mac output helper
 
@@ -17,6 +18,7 @@ on:
     paths:
       - "helper/**"
       - ".github/workflows/helper-macos.yml"
+      - ".github/actions/select-xcode/**"
   # Lets a specific commit be verified on demand.
   workflow_dispatch:
 
@@ -33,20 +35,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # swift-testing comes with Swift 6, which is Xcode 16; the image's default
-      # Xcode may be older. The newest Xcode 16 or later on the image is used, or the
-      # job fails saying there is none.
-      - name: Select Xcode 16 or later
-        run: |
-          set -euo pipefail
-          apps="${XCODE_APPS:-/Applications}"
-          xcode=$(ls -d "$apps"/Xcode_*.app 2>/dev/null | grep -E '/Xcode_(1[6-9]|[2-9][0-9])(\.[0-9]+)*\.app$' | sort -V | tail -n 1 || true)
-          if [ -z "$xcode" ]; then
-            echo "::error title=Mac output helper::no Xcode 16 or later on this runner; the helper's tests need Swift 6's swift-testing"
-            exit 1
-          fi
-          sudo xcode-select -s "$xcode"
-          echo "using $xcode"
-          swift --version
+      # Xcode may be older. The release workflow's helper build selects it the same way.
+      - uses: ./.github/actions/select-xcode
 
       - name: Build and test the helper
         run: cd helper/macos && swift build && ./test.sh

@@ -1,0 +1,29 @@
+# Chooses the newest Xcode 16 or later on a macOS runner.
+#
+# The Mac output helper is Swift 6 (swift-testing, strict concurrency), which is
+# Xcode 16; the runner image's default Xcode may be older. Both the helper's CI
+# (helper-macos.yml) and the release workflow's helper build use this step, so what
+# ships is built with the toolchain CI tests. It fails, saying so, when the image
+# has no Xcode 16 or later.
+#
+# Tested by scripts/helper-macos-workflow.test.ts, which runs this step's own shell.
+
+name: Select Xcode 16 or later
+description: Selects the newest Xcode 16 or later on the runner, or fails saying there is none.
+
+runs:
+  using: composite
+  steps:
+    - name: Select Xcode 16 or later
+      shell: bash
+      run: |
+        set -euo pipefail
+        apps="${XCODE_APPS:-/Applications}"
+        xcode=$(ls -d "$apps"/Xcode_*.app 2>/dev/null | grep -E '/Xcode_(1[6-9]|[2-9][0-9])(\.[0-9]+)*\.app$' | sort -V | tail -n 1 || true)
+        if [ -z "$xcode" ]; then
+          echo "::error title=Mac output helper::no Xcode 16 or later on this runner; the helper's tests need Swift 6's swift-testing"
+          exit 1
+        fi
+        sudo xcode-select -s "$xcode"
+        echo "using $xcode"
+        swift --version

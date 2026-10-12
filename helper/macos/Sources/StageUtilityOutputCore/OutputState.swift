@@ -44,8 +44,9 @@ public struct OutputRecord: Codable, Equatable {
 /// `token` pinned as its secret. The helper names each output
 /// `<mac id>.<output key>` with a token of its own, and leaves the main display off,
 /// so without this the upgraded Mac would come up as new, unclaimed outputs and its
-/// screen would go dark. Where `migrated-from-kiosk` exists in the system folder, the
-/// helper gives the main display's output the kiosk's identity and turns it on.
+/// screen would go dark. `install-macos.sh` writes `migrated-from-kiosk` when it
+/// replaces the kiosk with the helper; the helper then gives the main display's
+/// output the kiosk's identity and turns it on.
 public enum KioskMigration {
   public static let markerFileName = "migrated-from-kiosk"
 

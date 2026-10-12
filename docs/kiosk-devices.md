@@ -29,6 +29,10 @@ address already in it, is under *Setting up a screen* on the same card — click
 | macOS | `curl -fsSL http://<server>/kiosk/install-macos.sh \| sudo sh` |
 | Windows (elevated) | `irm http://<server>/kiosk/install-windows.ps1 \| iex` |
 
+On a Mac the same command installs the [Mac output helper](#installing-the-mac-output-helper)
+instead of a browser. The Chrome kiosk is still there for a Mac the helper cannot
+run on: add `-s -- --browser` after `sh`.
+
 **3. Set it up.** Open **Screens** and look under *Not set up yet* — being on
 that page is itself the scan. The new device offers two things:
 
@@ -46,6 +50,140 @@ would not stick while it kept announcing itself.
 A screen that is not set up yet shows its own device id, address, hostname, MAC
 and size, large enough to read from across a room. That is how you tell four
 identical Pis apart.
+
+## Installing the Mac output helper
+
+On macOS 14 or later, on Apple silicon or Intel, `install-macos.sh` installs the
+**Stage Utility Output** helper, a menu bar app that turns the Mac's displays and
+DeckLink SDI ports into screen devices. What the helper does once it runs is
+under [Mac output helper](#mac-output-helper); this is how it gets there.
+
+```sh
+curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
+```
+
+| Option, after `sudo sh -s --` | |
+|---|---|
+| `--dry-run` | Prints every step and changes nothing. Needs no `sudo` |
+| `--browser` | The Chrome kiosk instead, one full-screen browser with the same identity files. For a Mac the helper cannot run on, such as one older than macOS 14 |
+
+**What it does:**
+
+1. Keeps the Mac's `device-id`, `token` and `server` file in
+   `/Library/Application Support/StageUtility/`, and makes them as the Chrome kiosk
+   did if they are missing. Running the installer again never makes a new id.
+2. Downloads `StageUtilityOutput-arm64.zip` or `StageUtilityOutput-x86_64.zip`,
+   whichever this Mac is (an Apple silicon Mac gets the arm64 app even from a shell running under Rosetta), and checks its SHA-256. The app is a few hundred MB
+   because it carries Chromium.
+3. Unpacks it beside `/Applications`, checks it is the helper, then swaps it in. The
+   old copy is kept until the new one is in place and put back if anything fails,
+   so a Mac is never left without the app.
+4. Writes `/Library/LaunchAgents/com.stageutility.output.plist`, root-owned, the same
+   place the Chrome kiosk's agent lived, so the helper starts at every GUI login of
+   any account, is restarted if it crashes, and stays closed if someone quits it. If
+   someone is logged in it is started for them now; if nobody is, it starts at the next
+   login, and the installer says so. The helper's own *Open at login* switch adds a
+   second way to start it, which does no harm: a second copy hands over to the first.
+5. Turns off display sleep and system sleep (`pmset`), and sets the console user's
+   screen saver to never and the password after it to off, where macOS accepts it. With
+   nobody logged in the screen saver is left alone, since it is a per-account setting,
+   and the token is readable by administrators until an account owns it: if the first
+   account to log in is not one, run the installer again after it has.
+
+Running it again upgrades in place.
+
+**Where the app comes from.** The installer asks the server first: the address in
+`STAGE_DOWNLOAD_FROM` if set, else `STAGE_SERVER`, else the one the server stamped into
+the script when it served it, else the `server` file of an earlier install. A script
+saved and run by hand has no stamped address, so it needs one of the first two:
+`sudo STAGE_DOWNLOAD_FROM=http://<server> sh install-macos.sh`. That names the server for
+this run and saves nothing. `STAGE_SERVER` is a different choice: it also writes the
+`server` file, which pins the Mac to that server and skips discovery for good, so the
+Mac does not follow the server if it moves. Use it only where discovery's broadcast
+does not cross. If that server cannot supply a zip
+that matches its checksum, it falls back to the GitHub release for the version in the
+server's `/api/update/status`. If neither works, it installs nothing and says what each
+answered.
+A server that has not cached the zip yet sends nothing until it has all of it, so the
+installer waits on a server for up to 2 hours 10 minutes. A download from GitHub is given
+up on after a minute below 1 KB/s, with the same overall limit.
+
+| Request | |
+|---|---|
+| `GET /kiosk/StageUtilityOutput-<arch>.zip` | The app. The first request fetches it from the GitHub release matching the server's version and checks it against the checksum the release publishes; later requests come from the cache |
+| `GET /kiosk/StageUtilityOutput-<arch>.zip.sha256` | That zip's SHA-256, one line, which the installer compares its download with |
+
+The cache is `cache/output-helper/<version>/` in the data directory. It holds the
+running version only, is not part of a config backup, and costs one download to
+rebuild. One fetch runs at a time per file, a transfer that goes a minute without data is
+given up on (one that keeps moving, however slowly, is not, up to two hours in all),
+and a file over 1 GB is refused. A download that does not match
+its checksum is never stored and answers `502`. A cached zip is hashed again against
+its checksum the first time it is served after the server starts, and again whenever its
+size or modification time changes, so a file damaged on disk is dropped and fetched
+again rather than served; every other request is a single stat.
+
+**Disk use.** Each architecture's zip is about 145 MB, so a version takes about 290 MB
+once Macs of both kinds have asked for it, and only an architecture someone has asked
+for is stored. On a Pi that serves from an SD card, that is real space. Older versions
+are removed when the server starts and on the first request after an update, so the
+cache never holds more than one.
+
+**With no internet on the server** and nothing cached, the route answers `404`
+with the reason. The installer then goes to GitHub from the Mac itself, so a Mac
+with internet still installs; a Mac with none cannot until the server has the file,
+which any request for the zip made while the server is online puts in its cache. A
+release made before the helper existed has no zip, and answers `404` the same way.
+Each release attaches the two zips and their `.sha256` files when the build ran for it;
+see [distribution](ops/distribution.md#what-a-release-contains).
+
+A release whose helper build failed has no zips either, and the installer does not get
+around that: a Mac whose server runs that version cannot install the helper, from the
+server or from GitHub, until the server updates to a release that has them.
+
+**Coming from the Chrome kiosk.** If the earlier agent is there
+(`com.stageutility.kiosk`), the installer writes
+`/Library/Application Support/StageUtility/migrated-from-kiosk` before it stops, swaps
+in or starts the helper, because the helper reads the file once, when it launches. Once
+the helper's agent is in, it stops the kiosk's agent and removes its LaunchAgent and
+launcher. The file is written only for a Mac that has the kiosk's agent, never on a
+fresh install, and a failure anywhere in the install takes it back and leaves the kiosk
+as it was. The Mac keeps its device id, token and Chrome profile. The helper reads the
+file and gives the Mac's main display the kiosk's own id and token, and turns it on, so
+the screen the Chrome kiosk showed comes back by itself on that display. The Mac's other
+displays are new outputs under *Not set up yet*. Deleting the file stops the helper doing
+this. With nobody logged in the kiosk is replaced at the next login.
+
+**Removing the helper.** Quit it from its menu bar icon, then, as root:
+
+```sh
+launchctl bootout gui/<uid>/com.stageutility.output
+rm -f /Library/LaunchAgents/com.stageutility.output.plist
+rm -rf /Applications/StageUtilityOutput.app
+```
+
+The plist is what starts it at every login, so removing only the app leaves an agent
+trying to launch a missing one. The helper's own state folder,
+`~/Library/Application Support/StageUtilityOutput`, can go too if you do not want
+its settings back. The device id in `/Library/Application Support/StageUtility` stays,
+so installing again keeps the Mac's binding. `install-macos.sh --browser` on a Mac that
+has the helper prints these same commands rather than running them.
+
+**What a person still has to do, once, at the Mac.** macOS does not let a script:
+
+- turn on **automatic login** (System Settings → Users & Groups). The helper's browser
+  needs a logged-in session;
+- answer the **Local Network** prompt the first time the helper opens ("Allow Stage
+  Utility Output to find devices on local networks?"). Without it the helper cannot
+  find the server, and says so in its own window. The answer is tied to the app's
+  signature, so after an update macOS may ask again;
+- check **Lock Screen**: require a password after the screen saver or display off is
+  *Never*, and the screen saver and display-off times read *Never*. The installer sets
+  them where macOS accepts it, and a managed Mac may not.
+
+The installer prints this list when it finishes. On a Mac that is not coming from the
+Chrome kiosk, the main display, the one with the menu bar, is off until you turn it on
+in the helper's window.
 
 ## Size
 
@@ -77,6 +215,8 @@ profile:
 So clearing browser data, wiping a cache, resetting a profile, a reboot, a DHCP
 change or the server moving all leave the binding intact. Re-running the
 installer keeps the existing id on purpose.
+The Mac output helper reads the same file. Each of its outputs is a device whose
+id starts with it, so one Mac's outputs keep their bindings across a re-install.
 
 You have to claim again only after a full OS reinstall or on different hardware —
 which is a different device. Even then, if the MAC matches a screen that is
@@ -128,11 +268,13 @@ dark on a Sunday:
 - **macOS / Windows** — best-effort. They need automatic login enabled and sleep
   and screen lock turned off, and they live on a general-purpose OS that reboots
   for updates on its own schedule. Good for a laptop on a cart; not what to
-  deploy for a permanent wall screen.
+  deploy for a permanent wall screen. On a Mac that is a screen for several
+  outputs, use the [output helper](#installing-the-mac-output-helper); with
+  `--browser` the installer sets up one Chrome kiosk.
 
 The installers set what they can and print what is left. On macOS, automatic
-login and the screen saver are not scriptable; on Windows, automatic login is set
-in `netplwiz`.
+login is not scriptable and the screen saver may not be; the helper installer sets
+what it can. On Windows, automatic login is set in `netplwiz`.
 
 ## The prebuilt Pi image
 
@@ -243,7 +385,8 @@ Raspberry Pi kiosks do. Open it: the menu bar icon opens its window, where each 
 Mac's displays and DeckLink ports has a switch and a status line. Launching it again
 brings the window back. Where `/Library/LaunchAgents/com.stageutility.output.plist`
 exists, it starts at every login from that LaunchAgent, and the window says "Starts at
-login (installed)".
+login (installed)"; the installer writes the file, see
+[Installing the Mac output helper](#installing-the-mac-output-helper).
 
 **DeckLink outputs.** Each output port of a Blackmagic DeckLink or UltraStudio card
 appears under *Not set up yet* as its own output, named as Blackmagic's driver names
@@ -272,7 +415,8 @@ latency` (a clock on every output, to photograph two side by side), `--frame-tim
 
 Where `/Library/Application Support/StageUtility/migrated-from-kiosk` exists, the Mac
 was a Chrome kiosk and keeps its screen: its main display takes over the kiosk's device
-id and secret.
+id and secret. The installer writes the marker, see
+[Installing the Mac output helper](#installing-the-mac-output-helper).
 
 Everything else about it (state files, discovery, health, rotation, DeckLink outputs,
 Chromium and its sandbox, the Local Network permission, recovering an output from a
