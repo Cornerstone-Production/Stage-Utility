@@ -18,7 +18,7 @@
 import { strict as assert } from "node:assert";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
@@ -158,10 +158,13 @@ describe("History: a service still in its arrival ramp", () => {
     t.after(() => cleanup());
     await settle();
 
+    await eventually(() => {
+      const txt = text(view.container);
+      assert.ok(txt.includes("Sunday Gathering"), `the attendance-only row never rendered: ${txt}`);
+      assert.ok(txt.includes("arriving"), `the row isn't captioned "arriving": ${txt}`);
+      assert.ok(txt.includes("42"), `the last occupancy (42) is missing from the caption: ${txt}`);
+    });
     const txt = text(view.container);
-    assert.ok(txt.includes("Sunday Gathering"), `the attendance-only row never rendered: ${txt}`);
-    assert.ok(txt.includes("arriving"), `the row isn't captioned "arriving": ${txt}`);
-    assert.ok(txt.includes("42"), `the last occupancy (42) is missing from the caption: ${txt}`);
 
     // The calendar's day count for TODAY — HistoryCalendar renders each day
     // with data as a button labeled "N service(s)".
@@ -175,14 +178,20 @@ describe("History: a service still in its arrival ramp", () => {
     t.after(() => cleanup());
     await settle();
 
-    const row = [...view.container.querySelectorAll("button")].find((b) => text(b as HTMLElement).includes("Sunday Gathering"));
-    assert.ok(row, "the row's button never rendered");
-    fireEvent.click(row!);
+    const row = await eventually(() => {
+      const found = [...view.container.querySelectorAll("button")].find((b) => text(b as HTMLElement).includes("Sunday Gathering"));
+      assert.ok(found, "the row's button never rendered");
+      return found;
+    });
+    fireEvent.click(row);
     await settle();
 
+    await eventually(() => {
+      const shown = text(view.container);
+      assert.ok(shown.includes("Attendance"), `no Attendance heading: ${shown}`);
+      assert.ok(view.container.querySelector("svg"), `no chart (svg) drawn: ${shown}`);
+    });
     const txt = text(view.container);
-    assert.ok(txt.includes("Attendance"), `no Attendance heading: ${txt}`);
-    assert.ok(view.container.querySelector("svg"), `no chart (svg) drawn: ${txt}`);
     assert.ok(!txt.includes("Copy report"), `the Copy report control assumes a timeline and should not be offered: ${txt}`);
     // The items-table header row ("Item" / "Plan" / "Actual" columns) never renders.
     assert.ok(!txt.includes("PlanActual"), `an items table rendered with no timeline to build one from: ${txt}`);
@@ -201,12 +210,15 @@ describe("History: a service still in its arrival ramp", () => {
     t.after(() => cleanup());
     await settle();
 
-    const row = [...view.container.querySelectorAll("button")].find((b) => text(b as HTMLElement).includes("Sunday Gathering"));
-    assert.ok(row, "the row's button never rendered");
-    fireEvent.click(row!);
+    const row = await eventually(() => {
+      const found = [...view.container.querySelectorAll("button")].find((b) => text(b as HTMLElement).includes("Sunday Gathering"));
+      assert.ok(found, "the row's button never rendered");
+      return found;
+    });
+    fireEvent.click(row);
     await settle();
 
-    assert.equal(view.container.querySelector('[data-history-loading="service"]') != null, true, "no loading page");
+    await eventually(() => assert.equal(view.container.querySelector('[data-history-loading="service"]') != null, true, "no loading page"));
     assert.equal(
       [...view.container.querySelectorAll("button")].some((b) => text(b as HTMLElement).includes("Sunday Gathering")),
       false,
@@ -216,8 +228,8 @@ describe("History: a service still in its arrival ramp", () => {
 
     await act(async () => release());
     await settle();
-    assert.equal(view.container.querySelector("[data-history-loading]"), null);
-    assert.ok(view.container.querySelector("svg"), "the Attendance chart replaced the placeholder");
+    await eventually(() => assert.equal(view.container.querySelector("[data-history-loading]") === null, true, "the loading page never went"));
+    await eventually(() => assert.ok(view.container.querySelector("svg"), "the Attendance chart replaced the placeholder"));
   });
 
   test("(d) the 'No service timings recorded yet' empty state is not shown", async (t) => {
@@ -226,6 +238,8 @@ describe("History: a service still in its arrival ramp", () => {
     t.after(() => cleanup());
     await settle();
 
+    // Read once the row is there: before it, no empty state is shown either way.
+    await eventually(() => assert.ok(text(view.container).includes("Sunday Gathering"), "the attendance-only row never rendered"));
     const txt = text(view.container);
     assert.ok(!txt.includes("No service timings recorded yet"), `the empty state showed with an attendance-only row present: ${txt}`);
   });
@@ -263,7 +277,7 @@ describe("History: a service still in its arrival ramp", () => {
     const view = mountSection(ServiceHistorySection);
     t.after(() => cleanup());
     await settle();
-    assert.ok(text(view.container).includes("Midweek"), "precondition: yesterday selected first");
+    await eventually(() => assert.ok(text(view.container).includes("Midweek"), "precondition: yesterday selected first"));
 
     await act(async () => FakeEventSource.last?.push("attendance:history", arrivingAttendance()));
     await settle();
@@ -272,9 +286,11 @@ describe("History: a service still in its arrival ramp", () => {
     // the whole visible month now, so yesterday's row is on screen either way;
     // what moves is which day is selected — the ringed calendar cell and the
     // ringed group in the list.
-    const txt = text(view.container);
-    assert.ok(txt.includes("Sunday Gathering"), `today's arriving row is not in the list at all: ${txt}`);
-    assert.equal(selectedDay(view.container), TODAY, `the selection stayed on yesterday: ${txt}`);
+    await eventually(() => {
+      const txt = text(view.container);
+      assert.ok(txt.includes("Sunday Gathering"), `today's arriving row is not in the list at all: ${txt}`);
+      assert.equal(selectedDay(view.container), TODAY, `the selection stayed on yesterday: ${txt}`);
+    });
   });
 
   test("(f) but a day the operator picked is not taken away from them", async (t) => {
@@ -282,12 +298,15 @@ describe("History: a service still in its arrival ramp", () => {
     const view = mountSection(ServiceHistorySection);
     t.after(() => cleanup());
     await settle();
-    assert.ok(text(view.container).includes("Midweek"), "precondition: yesterday selected");
+    await eventually(() => assert.ok(text(view.container).includes("Midweek"), "precondition: yesterday selected"));
 
     // Operator clicks yesterday explicitly (the one day with data), then today's
     // ramp begins.
-    const dayButton = view.container.querySelector("button[aria-label$='service']") as HTMLElement;
-    assert.ok(dayButton, "no calendar day button to pick");
+    const dayButton = await eventually(() => {
+      const found = view.container.querySelector("button[aria-label$='service']") as HTMLElement;
+      assert.ok(found, "no calendar day button to pick");
+      return found;
+    });
     fireEvent.click(dayButton);
     await act(async () => FakeEventSource.last?.push("attendance:history", arrivingAttendance()));
     await settle();
@@ -295,6 +314,9 @@ describe("History: a service still in its arrival ramp", () => {
     // Again on the SELECTION. Today's ramp appearing in the list is fine and
     // expected — the list is the month. What must not happen is the page
     // moving the operator off the day they chose.
+    // The selection is read once today's ramp has reached the list: before that
+    // there is nothing that could have taken the day away.
+    await eventually(() => assert.ok(text(view.container).includes("Sunday Gathering"), "today's ramp never reached the list"));
     const txt = text(view.container);
     assert.ok(txt.includes("Midweek"), `yesterday's service left the list entirely: ${txt}`);
     assert.equal(selectedDay(view.container), "2026-09-02", `a day the operator picked was switched away from: ${txt}`);
@@ -306,7 +328,7 @@ describe("History: a service still in its arrival ramp", () => {
     t.after(() => cleanup());
     await settle();
 
-    assert.ok(text(view.container).includes("arriving"), "precondition: row should start out captioned 'arriving'");
+    await eventually(() => assert.ok(text(view.container).includes("arriving"), "precondition: row should start out captioned 'arriving'"));
 
     const timeline = {
       serviceKey: SERVICE_KEY,
@@ -335,10 +357,14 @@ describe("History: a service still in its arrival ramp", () => {
     await act(async () => FakeEventSource.last!.push("service-timeline:history", timeline));
     await settle();
 
+    // The record arriving is what ends "arriving"; the row count is read after it.
+    await eventually(() => {
+      const shown = text(view.container);
+      assert.ok(!shown.includes("arriving"), `the row still reads "arriving" after the timeline record arrived: ${shown}`);
+    });
     const txt = text(view.container);
     const rows = [...view.container.querySelectorAll("button")].filter((b) => text(b as HTMLElement).includes("Sunday Gathering"));
     assert.equal(rows.length, 1, `expected exactly one row for the service, got ${rows.length}: ${txt}`);
-    assert.ok(!txt.includes("arriving"), `the row still reads "arriving" after the timeline record arrived: ${txt}`);
   });
 });
 

@@ -12,14 +12,14 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, before, describe, test } from "node:test";
 
-import { installDom, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
-const { render, cleanup, waitFor, act } = await import("@testing-library/react");
+const { render, cleanup, act } = await import("@testing-library/react");
 const React = await import("react");
 const { QueryClient, QueryClientProvider, useQuery } = await import("@tanstack/react-query");
 const { automationRegistryQuery } = await import("../lib/automation-registry.js");
@@ -94,29 +94,29 @@ describe("action-button — label", () => {
   test("an explicit label wins, before and after the registry answers", async () => {
     const { container } = renderButton({ type: "action-button", actionId: "baptism.advance", label: "ADVANCE" });
     assert.ok(container.textContent?.includes("ADVANCE"));
-    await waitFor(() => assert.ok(container.textContent?.includes("ADVANCE")));
+    await eventually(() => assert.ok(container.textContent?.includes("ADVANCE")));
   });
 
   test("a blank label falls back to the action's own label once the registry answers", async () => {
     const { container } = renderButton({ type: "action-button", actionId: "baptism.advance" });
-    await waitFor(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
+    await eventually(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
   });
 
   test("a blank label with no actionId chosen still reads a plain placeholder", async () => {
     const { container } = renderButton({ type: "action-button", actionId: "" });
-    await waitFor(() => assert.ok(container.textContent?.includes("Action")));
+    await eventually(() => assert.ok(container.textContent?.includes("Action")));
   });
 });
 
 describe("action-button — an id the registry no longer has", () => {
   test("says so plainly, rather than rendering exactly like a working button", async () => {
     const { container } = renderButton({ type: "action-button", actionId: "baptism.retired-action" });
-    await waitFor(() => assert.match(container.textContent ?? "", /unknown/i));
+    await eventually(() => assert.match(container.textContent ?? "", /unknown/i));
   });
 
   test("a chosen id that IS in the registry never reads unknown", async () => {
     const { container } = renderButton({ type: "action-button", actionId: "baptism.advance" });
-    await waitFor(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
+    await eventually(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
     assert.doesNotMatch(container.textContent ?? "", /unknown/i);
   });
 
@@ -141,26 +141,26 @@ describe("action-button — the registry itself could not be loaded", () => {
   test("says the action list could not be loaded, rather than a bare id or a silent nothing", async () => {
     registryActions = null; // GET /api/automation/registry rejects
     const { container } = renderButton({ type: "action-button", actionId: "baptism.advance", label: "ADVANCE" });
-    await waitFor(() => assert.match(container.textContent ?? "", /could not be loaded/i));
+    await eventually(() => assert.match(container.textContent ?? "", /could not be loaded/i));
   });
 
   test("logs the failure to the server, not only the browser console", async () => {
     registryActions = null;
     renderButton({ type: "action-button", actionId: "baptism.advance" });
-    await waitFor(() => assert.ok(logCalls.length > 0, "expected a POST /api/log/client call"));
+    await eventually(() => assert.ok(logCalls.length > 0, "expected a POST /api/log/client call"));
     assert.match(logCalls[0]!.message, /registry|could not/i);
   });
 
   test("a 200 with no actions array is treated as a failure too, not silence", async () => {
     registryActions = "malformed";
     const { container } = renderButton({ type: "action-button", actionId: "baptism.advance" });
-    await waitFor(() => assert.match(container.textContent ?? "", /could not be loaded/i));
+    await eventually(() => assert.match(container.textContent ?? "", /could not be loaded/i));
   });
 
   test("does not also claim the action is unknown — the two failures read differently", async () => {
     registryActions = null;
     const { container } = renderButton({ type: "action-button", actionId: "baptism.advance" });
-    await waitFor(() => assert.match(container.textContent ?? "", /could not be loaded/i));
+    await eventually(() => assert.match(container.textContent ?? "", /could not be loaded/i));
     assert.doesNotMatch(container.textContent ?? "", /unknown action/i);
   });
 });
@@ -218,9 +218,9 @@ describe("action-button — a registry read that fails once, then answers", () =
           React.createElement(ObjectContent as never, { o: obj, ctx }),
         ),
       );
-      await waitFor(
+      await eventually(
         () => assert.ok(container.textContent?.includes("Advance the baptism timer"), container.textContent ?? ""),
-        { timeout: 5000 },
+        5000,
       );
       assert.ok(attempts >= 2, `expected more than one registry fetch, got ${attempts}`);
     } finally {
@@ -264,7 +264,7 @@ describe("action-button — the Needs setup badge (editor only)", () => {
       { type: "action-button", actionId: "rosstalk.command", params: {} },
       { interactive: false, editing: true },
     );
-    await waitFor(() => assert.ok(container.querySelector('[data-needs-setup="true"]')));
+    await eventually(() => assert.ok(container.querySelector('[data-needs-setup="true"]')));
   });
 
   test("editing + every required param set: no badge", async () => {
@@ -273,7 +273,7 @@ describe("action-button — the Needs setup badge (editor only)", () => {
       { type: "action-button", actionId: "rosstalk.command", params: { targetId: "t1" } },
       { interactive: false, editing: true },
     );
-    await waitFor(() => assert.ok(container.textContent?.includes("Send a RossTalk command")));
+    await eventually(() => assert.ok(container.textContent?.includes("Send a RossTalk command")));
     // A COUNT, never the element itself: node:assert inspects `actual` to build
     // a failure message, and inspecting a live jsdom element does not
     // terminate in any useful time — see the header comment on
@@ -289,7 +289,7 @@ describe("action-button — the Needs setup badge (editor only)", () => {
       { type: "action-button", actionId: "rosstalk.command", params: {} },
       { interactive: true, editing: false },
     );
-    await waitFor(() => assert.ok(container.textContent?.includes("Send a RossTalk command")));
+    await eventually(() => assert.ok(container.textContent?.includes("Send a RossTalk command")));
     // A count, not the element — see the comment above.
     assert.equal(
       container.querySelectorAll('[data-needs-setup="true"]').length,
@@ -322,7 +322,7 @@ describe("action-button — the Needs setup badge (editor only)", () => {
       { type: "action-button", actionId: "companion.press", params: {} },
       { interactive: false, editing: true },
     );
-    await waitFor(() => assert.ok(container.querySelector('[data-needs-setup="true"]')));
+    await eventually(() => assert.ok(container.querySelector('[data-needs-setup="true"]')));
   });
 });
 
@@ -341,7 +341,7 @@ describe("action-button — sharing the registry request", () => {
     const { container } = render(
       React.createElement(QueryClientProvider as never, { client: qc }, ...buttons),
     );
-    await waitFor(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
+    await eventually(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
     assert.equal(registryFetchCount, 1, `expected one shared GET /api/automation/registry, saw ${registryFetchCount}`);
   });
 });
@@ -372,8 +372,8 @@ describe("action-button — one registry shape, shared with the editors", () => 
           ...(order === "button first" ? [button, reader] : [reader, button]),
         ),
       );
-      await waitFor(() => assert.ok(container.textContent?.includes("Advance the baptism timer"), container.textContent ?? ""));
-      await waitFor(() =>
+      await eventually(() => assert.ok(container.textContent?.includes("Advance the baptism timer"), container.textContent ?? ""));
+      await eventually(() =>
         assert.ok(
           Array.isArray((read as { actions?: unknown } | undefined)?.actions),
           `the registry reader got ${JSON.stringify(read)}, not the whole registry`,

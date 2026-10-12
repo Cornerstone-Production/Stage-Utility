@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing, readLedger, settle, unmountAndTeardown } from "../test-dom.js";
 import { baptismState } from "../test-fixtures/baptism-state.js";
 
 const teardown = installRenderDom();
@@ -48,12 +48,19 @@ const ARMED_STATE: BaptismState = baptismState({
   planId: "plan-1",
 });
 
+/** A read still on its way when the test ends lands after the DOM is gone. */
+const reads = readLedger();
+
 function stubFetch(state: BaptismState) {
+  reads.reset();
   return (async (input: string) => {
     const url = String(input);
-    if (url.endsWith("/api/baptism")) return { ok: true, status: 200, json: async () => state, text: async () => "" };
-    if (url.endsWith("/api/baptism/sessions")) return { ok: true, status: 200, json: async () => [], text: async () => "" };
-    return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
+    // The live-update subscription posts on its own schedule and lands whenever it
+    // likes; it is neither a read the page waits on nor one of these counts.
+    if (isPlumbing(url)) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
+    reads.begin();
+    const body = url.endsWith("/api/baptism") ? state : url.endsWith("/api/baptism/sessions") ? [] : {};
+    return reads.answer({ ok: true, status: 200, json: async () => body, text: async () => "" });
   }) as unknown as typeof fetch;
 }
 
@@ -63,7 +70,11 @@ async function mount(state: BaptismState = ARMED_STATE): Promise<void> {
   try {
     render(React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
     await settle();
-    await settle();
+    // The panel is "Loading…" until the state read lands. Waited for before the
+    // stub comes off, and before any test asserts that something is NOT drawn.
+    await eventually(() => assert.ok(!(document.body.textContent ?? "").includes("Loading…"), "the panel never left Loading…"));
+    // And every other read it began has been received, before the stub comes off.
+    await eventually(reads.landed);
   } finally {
     globalThis.fetch = realFetch;
   }

@@ -15,7 +15,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 import type { SectionHandlers } from "../types.js";
 
@@ -42,9 +42,16 @@ const lastToast = () => {
 
 /** Every read AdvancedSection's always-mounted panels issue on their own,
  *  answered inertly so only the kiosk-discovery write is under test. */
+/** How many times the switch's own write reached the server. */
+let kioskWrites = 0;
+
 function stubFetch(kioskDiscoveryFails: boolean) {
+  kioskWrites = 0;
   return stubFetchWithLog((url, init) => {
-    if (url.includes("/api/kiosk-discovery")) return kioskDiscoveryFails ? reply(500, { error: "boom" }) : ok({});
+    if (url.includes("/api/kiosk-discovery")) {
+      kioskWrites += 1;
+      return kioskDiscoveryFails ? reply(500, { error: "boom" }) : ok({});
+    }
     if (url.includes("/api/update/status")) return ok(null);
     if (url.includes("/api/update/lock")) return ok({ active: false, reasons: [] });
     if (url.includes("/api/backup/schedule")) return ok(null);
@@ -85,10 +92,9 @@ test("a failed kiosk-discovery toggle toasts, rather than doing nothing silently
   try {
     mount();
     await settle();
+    fireEvent.click(await eventually(() => screen.getByRole("switch", { name: "Answer kiosk devices looking for a server" })));
     await settle();
-    fireEvent.click(screen.getByRole("switch", { name: "Answer kiosk devices looking for a server" }));
-    await settle();
-    assert.match(lastToast(), /Could not change this setting/i);
+    await eventually(() => assert.match(lastToast(), /Could not change this setting/i));
   } finally {
     f.restore();
   }
@@ -99,8 +105,10 @@ test("control: a successful toggle does not toast", async () => {
   try {
     mount();
     await settle();
+    fireEvent.click(await eventually(() => screen.getByRole("switch", { name: "Answer kiosk devices looking for a server" })));
     await settle();
-    fireEvent.click(screen.getByRole("switch", { name: "Answer kiosk devices looking for a server" }));
+    // "No toast" is only worth reading once the write has gone out and been answered.
+    await eventually(() => assert.ok(kioskWrites > 0, "the switch sent no write"));
     await settle();
     assert.equal(lastToast(), "NO TOAST");
   } finally {

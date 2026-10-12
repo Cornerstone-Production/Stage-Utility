@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
@@ -140,14 +140,19 @@ async function openInEditMode(Section: React.ComponentType) {
   const view = mountSection(Section);
   await settle();
   await settle();
-  const row = [...view.container.querySelectorAll("button")].find((b) => text(b as HTMLElement).includes("Evening"));
-  assert.ok(row, "the service row never rendered");
-  fireEvent.click(row!);
+  const row = await eventually(() => {
+    const found = [...view.container.querySelectorAll("button")].find((b) => text(b as HTMLElement).includes("Evening"));
+    assert.ok(found, "the service row never rendered");
+    return found;
+  });
+  fireEvent.click(row);
   await settle();
-  await settle();
-  const edit = buttonNamed(view, "Edit times");
-  assert.ok(edit, "the Edit times button never rendered");
-  fireEvent.click(edit!);
+  const edit = await eventually(() => {
+    const found = buttonNamed(view, "Edit times");
+    assert.ok(found, "the Edit times button never rendered");
+    return found;
+  });
+  fireEvent.click(edit);
   await settle();
   return view;
 }
@@ -168,16 +173,21 @@ describe("History: correcting one item's recorded times", () => {
     const view = mountSection(ServiceHistorySection);
     t.after(() => cleanup());
     await settle();
-    await settle();
-    fireEvent.click([...view.container.querySelectorAll("button")].find((b) => text(b as HTMLElement).includes("Evening"))!);
-    await settle();
+    fireEvent.click(await eventually(() => {
+      const found = [...view.container.querySelectorAll("button")].find((b) => text(b as HTMLElement).includes("Evening"));
+      assert.ok(found, "the service row never rendered");
+      return found;
+    }));
     await settle();
 
     // Scoped to the table's own header row. A first version matched "Started"
     // anywhere on the page and passed with the column deleted — the Started STAT
     // TILE above the table carries the same word.
-    const header = view.container.querySelector<HTMLElement>('[data-testid="rundown-header"]');
-    assert.ok(header, "the rundown table never rendered");
+    const header = await eventually(() => {
+      const found = view.container.querySelector<HTMLElement>('[data-testid="rundown-header"]');
+      assert.ok(found, "the rundown table never rendered");
+      return found;
+    });
     assert.equal(text(header!), "#ItemPlanActualΔStartedEnded", "the rundown header's columns");
     assert.equal(
       view.container.querySelectorAll('input[type="time"]').length,
@@ -219,8 +229,15 @@ describe("History: correcting one item's recorded times", () => {
     await settle();
     await settle();
 
-    const post = state.posts.find((p) => p.url === "/api/history/item-times");
-    assert.ok(post, `nothing was POSTed to /api/history/item-times: ${JSON.stringify(state.posts)}`);
+    const post = await eventually(() => {
+
+      const found = state.posts.find((p) => p.url === "/api/history/item-times");
+
+      assert.ok(found, `nothing was POSTed to /api/history/item-times: ${JSON.stringify(state.posts)}`);
+
+      return found;
+
+    });
     assert.equal(post!.body.serviceKey, KEY);
     assert.equal(post!.body.itemId, "vid-1");
     assert.equal(post!.body.sequence, 0, "the RUN, not just the plan item");
@@ -247,8 +264,15 @@ describe("History: correcting one item's recorded times", () => {
     await settle();
     await settle();
 
-    const post = state.posts.find((p) => p.url === "/api/history/item-times");
-    assert.ok(post, "nothing was POSTed");
+    const post = await eventually(() => {
+
+      const found = state.posts.find((p) => p.url === "/api/history/item-times");
+
+      assert.ok(found, "nothing was POSTed");
+
+      return found;
+
+    });
     assert.equal(post!.body.endedAt, null, "typing the recorded time back must CLEAR the override");
     assert.equal(post!.body.startedAt, null);
   });
@@ -280,8 +304,15 @@ describe("History: correcting one item's recorded times", () => {
     await settle();
     await settle();
 
-    const post = state.posts.find((p) => p.url === "/api/history/item-times");
-    assert.ok(post, "Reset sent nothing");
+    const post = await eventually(() => {
+
+      const found = state.posts.find((p) => p.url === "/api/history/item-times");
+
+      assert.ok(found, "Reset sent nothing");
+
+      return found;
+
+    });
     assert.equal(post!.body.startedAt, null, "Reset must CLEAR the override, not restate it");
     assert.equal(post!.body.endedAt, null);
   });
@@ -365,8 +396,15 @@ describe("History: correcting one item's recorded times", () => {
     await settle();
     await settle();
 
-    const post = state.posts.find((p) => p.url === "/api/history/item-times");
-    assert.ok(post, "nothing was POSTed");
+    const post = await eventually(() => {
+
+      const found = state.posts.find((p) => p.url === "/api/history/item-times");
+
+      assert.ok(found, "nothing was POSTed");
+
+      return found;
+
+    });
     assert.equal(post!.body.endedAt, WINDOW_START, "the typed end must be SENT, not silently cleared");
   });
 

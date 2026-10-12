@@ -7,11 +7,11 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, mock, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { eventually, installDom } from "../../test-dom.js";
 
 const teardown = installDom();
 
-const { render, cleanup, fireEvent, screen, waitFor } = await import("@testing-library/react");
+const { render, cleanup, fireEvent, screen } = await import("@testing-library/react");
 const { Tooltip } = await import("./tooltip.js");
 const { TooltipProvider } = await import("./tooltip-provider.js");
 
@@ -70,7 +70,7 @@ describe("Tooltip — coarse pointer", () => {
       const trigger = screen.getByText("Icon");
       tap(trigger);
 
-      await waitFor(() => assert.ok(screen.getByText("Send to back"), "tooltip did not open on tap"));
+      await eventually(() => assert.ok(screen.getByText("Send to back"), "tooltip did not open on tap"));
       assert.equal(onClick.mock.callCount(), 1, "the trigger's own click must still fire");
     } finally {
       restore();
@@ -89,11 +89,11 @@ describe("Tooltip — coarse pointer", () => {
       );
       const trigger = screen.getByText("Icon");
       tap(trigger);
-      await waitFor(() => assert.ok(screen.getByText("Send to back")));
+      await eventually(() => assert.ok(screen.getByText("Send to back")));
 
       fireEvent.pointerDown(document.body, { pointerId: 2, pointerType: "touch" });
 
-      await waitFor(() => assert.equal(screen.queryByText("Send to back"), null, "a tap outside must close it"));
+      await eventually(() => assert.equal(screen.queryByText("Send to back") === null, true, "a tap outside must close it"));
     } finally {
       restore();
     }
@@ -111,9 +111,9 @@ describe("Tooltip — coarse pointer", () => {
       );
       const trigger = screen.getByText("Icon");
       tap(trigger);
-      await waitFor(() => assert.ok(screen.getByText("Send to back")));
+      await eventually(() => assert.ok(screen.getByText("Send to back")));
       tap(trigger);
-      await waitFor(() => assert.equal(screen.queryByText("Send to back"), null));
+      await eventually(() => assert.equal(screen.queryByText("Send to back") === null, true, "the tooltip stayed open"));
     } finally {
       restore();
     }

@@ -17,7 +17,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -75,10 +75,11 @@ test("RecordingCard: once both reads answer disconnected, it correctly says Offl
     const { container } = await mount(
       React.createElement(RecordingCard, { now: Date.now() }),
     );
-    await settle();
-    const text = container.textContent ?? "";
-    assert.match(text, /Offline/, "a settled, genuinely disconnected answer must still read Offline");
-    assert.match(text, /no recorder connected/);
+    await eventually(() => {
+      const text = container.textContent ?? "";
+      assert.match(text, /Offline/, "a settled, genuinely disconnected answer must still read Offline");
+      assert.match(text, /no recorder connected/);
+    });
   } finally {
     f.restore();
   }
@@ -117,9 +118,9 @@ test("ScoresCard: once the read answers no teams followed, it correctly says so"
   });
   try {
     const { container } = await mount(React.createElement(ScoresCard, {}));
-    await settle();
-    const text = container.textContent ?? "";
-    assert.match(text, /No teams followed/, "a settled, genuinely unconnected answer must still say so");
+    await eventually(() =>
+      assert.match(container.textContent ?? "", /No teams followed/, "a settled, genuinely unconnected answer must still say so"),
+    );
   } finally {
     f.restore();
   }

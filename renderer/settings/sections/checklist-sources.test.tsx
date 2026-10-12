@@ -20,7 +20,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, it } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import type { SectionProps } from "../types";
 
 const teardown = installDom();
@@ -98,10 +98,8 @@ describe("what the panel says while it is reading", () => {
 
     resolveSources?.();
     await settle();
-    await settle();
-    assert.ok(
-      screen.queryByText(/reading the categories/i) === null,
-      "still claiming to be loading after the read landed",
+    await eventually(() =>
+      assert.ok(screen.queryByText(/reading the categories/i) === null, "still claiming to be loading after the read landed"),
     );
   });
 
@@ -133,28 +131,27 @@ describe("what the panel says while it is reading", () => {
 
     resolveSources?.();
     await settle();
-    await settle();
+    await eventually(() => assert.ok(screen.queryByText(/reading the categories/i) === null, "the read never landed"));
   });
 
   it("says the read failed when it did", async () => {
     sourcesReply = () => Promise.reject(new Error("nope"));
     render(props({}).node);
     await settle();
-    await settle();
-    assert.ok(screen.getByText(/could not read the categories/i));
+    await eventually(() => assert.ok(screen.getByText(/could not read the categories/i)));
   });
 
   it("says nothing about reading once the categories are in", async () => {
     render(props({}).node);
     await settle();
-    assert.ok(screen.queryByText(/reading the categories/i) === null);
+    await eventually(() => assert.ok(screen.queryByText(/reading the categories/i) === null, "the read never landed"));
     assert.ok(screen.queryByText(/could not read the categories/i) === null);
   });
 
   it("asks for a service type instead, when there is none", async () => {
     render(props({ serviceTypeId: null }).node);
     await settle();
-    assert.ok(screen.getByText(/choose a service type first/i));
+    await eventually(() => assert.ok(screen.getByText(/choose a service type first/i)));
     assert.ok(
       screen.queryByText(/could not read the categories/i) === null,
       "no service type is not a failed read",
@@ -193,16 +190,21 @@ describe("a category Planning Center no longer offers", () => {
     render(props({ categories: ["Retired Notes"] }).node);
     await settle();
     open("categories");
-    assert.equal(
-      within(rows()).queryAllByText("Retired Notes (not in Planning Center)").length,
-      1,
-      "the operator's stored choice vanished from the picker",
+    // "Not in Planning Center" is a claim only a landed read can make.
+    await eventually(() =>
+      assert.equal(
+        within(rows()).queryAllByText("Retired Notes (not in Planning Center)").length,
+        1,
+        "the operator's stored choice vanished from the picker",
+      ),
     );
   });
 
   it("does not double up a choice PCO still offers", async () => {
     render(props({ categories: ["Production Notes"] }).node);
     await settle();
+    // Read once the categories have landed: before them there is no live option to double.
+    await eventually(() => assert.ok(screen.queryByText(/reading the categories/i) === null, "the read never landed"));
     open("categories");
     assert.equal(
       within(rows()).queryAllByText("Production Notes").length,
@@ -265,8 +267,10 @@ describe("ticking a category reaches the handler", () => {
     await settle();
 
     open("categories");
-    fireEvent.click(within(rows()).getByText("Band Notes"));
+    // The categories on offer are a read behind the first paint.
+    fireEvent.click(await eventually(() => within(rows()).getByText("Band Notes")));
 
+    await eventually(() => assert.ok(calls.length > 0, `the picker rendered and did nothing. Saw: ${JSON.stringify(calls)}`));
     assert.equal(calls.length, 1, `the picker rendered and did nothing. Saw: ${JSON.stringify(calls)}`);
     assert.deepEqual(calls[0], [["Band Notes"], ["Audio Team"]]);
   });

@@ -20,7 +20,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import type { View } from "@main/types/views";
 
 const teardown = installDom();
@@ -194,24 +194,31 @@ describe("the console tab reads that same key", () => {
 
     const container = drawRail(false);
     await settle();
-    assert.equal(
-      glyphOf(container),
-      glyphFor(chosen),
-      "the rail drew its fallback — it is not reading the key the Screens card writes",
+    // The stored icons are a read behind the first paint.
+    await eventually(() =>
+      assert.equal(
+        glyphOf(container),
+        glyphFor(chosen),
+        "the rail drew its fallback — it is not reading the key the Screens card writes",
+      ),
     );
   });
 
   test("and the colour stored under it, while this console is the page shown", async () => {
     const container = drawRail(true);
     await settle();
-    const svg = container.querySelector("svg");
-    assert.ok(svg);
-    assert.equal(svg.style.color, CHOSEN_COLOUR);
+    await eventually(() => {
+      const svg = container.querySelector("svg");
+      assert.ok(svg);
+      assert.equal(svg.style.color, CHOSEN_COLOUR);
+    });
   });
 
   test("but stays quiet when it is not, so the rail still says where you are", async () => {
     const container = drawRail(false);
     await settle();
+    // Read once the stored icons have landed: before them there is no colour to wear.
+    await eventually(() => assert.equal(glyphOf(container), glyphFor(resolveIcon(CHOSEN_GLYPH)!)));
     const svg = container.querySelector("svg");
     assert.ok(svg);
     assert.equal(svg.style.color, "", "an inactive row wore the operator's colour");
@@ -252,10 +259,12 @@ describe("a glyph set before the key moved", () => {
     ).container;
     await settle();
 
-    assert.equal(
-      glyphOf(container),
-      glyphFor(legacy),
-      "the card drew its built-in icon — the glyph stored before the re-key is read by nothing",
+    await eventually(() =>
+      assert.equal(
+        glyphOf(container),
+        glyphFor(legacy),
+        "the card drew its built-in icon — the glyph stored before the re-key is read by nothing",
+      ),
     );
   });
 });

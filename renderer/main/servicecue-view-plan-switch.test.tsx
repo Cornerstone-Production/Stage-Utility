@@ -20,7 +20,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -90,17 +90,18 @@ test("a plan switch whose new rundown fails to load drops the stale one, rather 
   const f = stubFetch();
   try {
     await mount();
-    assert.equal(document.body.textContent?.includes("Sunday service"), true, "the first plan's title is on screen");
+    await eventually(() => assert.equal(document.body.textContent?.includes("Sunday service"), true, "the first plan's title is on screen"));
     f.switchToNewPlan();
     await act(async () => FakeEventSource.last?.push("stage:state-changed", STATE_P2));
     await settle();
-    await settle();
+    // The failure ends the switch, so it is waited for before the stale plan is
+    // checked to be gone.
+    await eventually(() => assert.equal(!!screen.queryByRole("alert"), true, "the failure is shown, since there is nothing good left to fall back on"));
     assert.equal(
       document.body.textContent?.includes("Sunday service"),
       false,
       "the previous plan must not still read as current once the app has moved on",
     );
-    assert.equal(!!screen.queryByRole("alert"), true, "the failure is shown, since there is nothing good left to fall back on");
   } finally {
     f.restore();
   }
@@ -119,12 +120,11 @@ test("control: a plan switch whose new rundown SUCCEEDS shows the new plan, not 
   });
   try {
     await mount();
-    assert.equal(document.body.textContent?.includes("Sunday service"), true);
+    await eventually(() => assert.equal(document.body.textContent?.includes("Sunday service"), true));
     onP2 = true;
     await act(async () => FakeEventSource.last?.push("stage:state-changed", STATE_P2));
     await settle();
-    await settle();
-    assert.equal(document.body.textContent?.includes("Youth night"), true, "the new plan loaded in");
+    await eventually(() => assert.equal(document.body.textContent?.includes("Youth night"), true, "the new plan loaded in"));
     assert.equal(document.body.textContent?.includes("Sunday service"), false, "the previous plan is gone");
   } finally {
     f.restore();

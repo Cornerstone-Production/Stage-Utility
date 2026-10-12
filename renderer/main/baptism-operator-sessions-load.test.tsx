@@ -19,7 +19,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { baptismState } from "../test-fixtures/baptism-state.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 import { ok } from "../test-fixtures/fetch-log.js";
@@ -71,10 +71,14 @@ function rebuildButton(root: ParentNode): HTMLButtonElement {
 test("a genuinely empty history (sessions load OK, nothing recorded) gets its own reason", async () => {
   const { view, restore } = await mount(true);
   try {
-    const btn = rebuildButton(view.container);
-    assert.equal(btn.disabled, true);
-    const shown = await tooltipTextOf(btn);
-    assert.match(shown, /Nothing has been recorded/, `expected the empty-history reason, got: ${shown}`);
+    // The reason is read once the sessions have loaded, which is a fetch behind
+    // the first paint.
+    await eventually(async () => {
+      const btn = rebuildButton(view.container);
+      assert.equal(btn.disabled, true);
+      const shown = await tooltipTextOf(btn);
+      assert.match(shown, /Nothing has been recorded/, `expected the empty-history reason, got: ${shown}`);
+    });
   } finally {
     restore();
   }
@@ -83,11 +87,13 @@ test("a genuinely empty history (sessions load OK, nothing recorded) gets its ow
 test("a failed sessions load reaches the header as sessionsLoadFailed, with its OWN reason — not the empty-history one", async () => {
   const { view, restore } = await mount(false);
   try {
-    const btn = rebuildButton(view.container);
-    assert.equal(btn.disabled, true, "a failed load must still disable the action");
-    const shown = await tooltipTextOf(btn);
-    assert.match(shown, /could not be loaded/, `expected the load-failure's own reason, got: ${shown}`);
-    assert.notEqual(shown, "Nothing has been recorded yet — there is no service to rebuild", "a load failure must not read as a genuinely empty history");
+    await eventually(async () => {
+      const btn = rebuildButton(view.container);
+      assert.equal(btn.disabled, true, "a failed load must still disable the action");
+      const shown = await tooltipTextOf(btn);
+      assert.match(shown, /could not be loaded/, `expected the load-failure's own reason, got: ${shown}`);
+      assert.notEqual(shown, "Nothing has been recorded yet — there is no service to rebuild", "a load failure must not read as a genuinely empty history");
+    });
   } finally {
     restore();
   }
@@ -115,10 +121,9 @@ test("a rebuild reloads this page's own sessions, whether started here or pushed
   try {
     render(React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
     await settle();
-    await settle();
+    await eventually(() => assert.ok(sessionCalls >= 1, "sanity: mounting fetches sessions at least once"));
     await settle();
     const mountCalls = sessionCalls;
-    assert.ok(mountCalls >= 1, "sanity: mounting fetches sessions at least once");
 
     // A rebuild the server broadcasts as having actually restored something
     // — the shape a rebuild started from History (never touching this
@@ -126,11 +131,12 @@ test("a rebuild reloads this page's own sessions, whether started here or pushed
     FakeEventSource.last!.push("baptism:rebuilt", { serviceKey: "st1:plan-1:9am", ids: ["bap-1"] });
     await act(async () => {
       await settle();
-      await settle();
     });
-    assert.ok(
-      sessionCalls > mountCalls,
-      `expected a baptism:rebuilt push to refetch this page's own sessions; calls stayed at ${sessionCalls}`,
+    await eventually(() =>
+      assert.ok(
+        sessionCalls > mountCalls,
+        `expected a baptism:rebuilt push to refetch this page's own sessions; calls stayed at ${sessionCalls}`,
+      ),
     );
   } finally {
     globalThis.fetch = realFetch;
@@ -178,24 +184,30 @@ test("confirming the header's own Rebuild reloads this page's own sessions", asy
         children: React.createElement(TooltipProvider, null, React.createElement(BaptismOperator), React.createElement(ConfirmHost)),
       }),
     );
-    await settle();
-    await settle();
+    // The button has a target once the past session has loaded.
+    const btn = await eventually(() => {
+      const found = rebuildButton(view.container);
+      assert.equal(found.disabled, false, "a real past session gives the header's own Rebuild a real target");
+      return found;
+    });
     await settle();
     const mountCalls = sessionCalls;
 
-    const btn = rebuildButton(view.container);
-    assert.equal(btn.disabled, false, "a real past session gives the header's own Rebuild a real target");
     fireEvent.click(btn);
     await settle();
-    const confirmBtn = [...document.body.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === "Rebuild");
-    assert.ok(confirmBtn, "expected the shared confirm dialog to open");
-    fireEvent.click(confirmBtn!);
-    await settle();
+    const confirmBtn = await eventually(() => {
+      const found = [...document.body.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === "Rebuild");
+      assert.ok(found, "expected the shared confirm dialog to open");
+      return found;
+    });
+    fireEvent.click(confirmBtn);
     await settle();
 
-    assert.ok(
-      sessionCalls > mountCalls,
-      `expected confirming the header's own Rebuild to reload this page's sessions; calls stayed at ${sessionCalls}`,
+    await eventually(() =>
+      assert.ok(
+        sessionCalls > mountCalls,
+        `expected confirming the header's own Rebuild to reload this page's sessions; calls stayed at ${sessionCalls}`,
+      ),
     );
   } finally {
     globalThis.fetch = realFetch;
@@ -239,7 +251,8 @@ test("a Finish pushed from elsewhere (Companion, a second tab, the display) relo
   try {
     const view = render(React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
     await settle();
-    await settle();
+    await eventually(() => assert.ok(sessionCalls >= 1, "sanity: mounting fetches sessions at least once"));
+    await eventually(() => assert.ok(!(view.container.textContent ?? "").includes("Loading…"), "the page never left Loading…"));
     await settle();
     const mountCalls = sessionCalls;
     // The server finalizes (a Companion key bound to baptism.advance on the
@@ -248,12 +261,13 @@ test("a Finish pushed from elsewhere (Companion, a second tab, the display) relo
     FakeEventSource.last!.push("baptism:state", FINISHED);
     await act(async () => {
       await settle();
-      await settle();
     });
-    assert.match(view.container.textContent ?? "", /Finished/, "sanity: the pushed finished state reached the page");
-    assert.ok(
-      sessionCalls > mountCalls,
-      `a finish pushed from elsewhere never refetched sessions (calls stayed at ${sessionCalls}); Past sessions and Trends stay stale`,
+    await eventually(() => assert.match(view.container.textContent ?? "", /Finished/, "sanity: the pushed finished state reached the page"));
+    await eventually(() =>
+      assert.ok(
+        sessionCalls > mountCalls,
+        `a finish pushed from elsewhere never refetched sessions (calls stayed at ${sessionCalls}); Past sessions and Trends stay stale`,
+      ),
     );
   } finally {
     globalThis.fetch = realFetch;

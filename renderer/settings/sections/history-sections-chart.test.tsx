@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -283,11 +283,9 @@ test("the sound section draws the chart and offers its Smaart metrics in Customi
         timeline: TIMELINE,
       }),
     );
-    await act(async () => {
-      await Promise.resolve();
-    });
 
-    assert.ok(screen.getByLabelText(/Recorded sound level per plan item/), "no chart");
+    // The chart draws once the series read has answered (here, with a 404).
+    await eventually(() => assert.ok(screen.getByLabelText(/Recorded sound level per plan item/), "no chart"));
     // The per-item table is KEPT — it carries Max and Leq per metric, which the
     // line does not, and nothing in this change replaces it.
     assert.ok(screen.getByRole("table"), "the per-item table went missing");
@@ -316,12 +314,9 @@ test("the sound chart plots the real sample series when the route has one", asyn
         timeline: TIMELINE,
       }),
     );
-    await act(async () => {
-      await Promise.resolve();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
+
+    // The raw series is a read behind the first paint.
+    await eventually(() => assert.ok(document.querySelector("[data-series-line='max']"), "no peak line"));
 
     // Bucket max as the primary with its gradient, bucket avg as the dashed
     // secondary — NOT the per-item step, which draws one run per item.
@@ -356,15 +351,9 @@ test("the item peak is a triangle at the loudest bucket, named in the legend, an
         timeline: TIMELINE,
       }),
     );
-    await act(async () => {
-      await Promise.resolve();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
 
-    const mark = document.querySelector("[data-peak-mark]");
-    assert.ok(mark, "no peak marker");
+    await eventually(() => assert.ok(document.querySelector("[data-peak-mark]"), "no peak marker"));
+    const mark = document.querySelector("[data-peak-mark]")!;
     assert.equal(document.querySelectorAll("[data-peak-mark]").length, 1);
     const tri = mark.querySelector("[data-peak-triangle]") as SVGPathElement;
     assert.ok(tri, "the marker is not a triangle");
@@ -415,15 +404,9 @@ test("the dashed sound series is named Leq, never Average", async () => {
         timeline: TIMELINE,
       }),
     );
-    await act(async () => {
-      await Promise.resolve();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
 
+    await eventually(() => assert.ok(document.querySelector("[data-series-toggle='avg']"), "no legend entry for the dashed series"));
     const legend = document.querySelector("[data-series-toggle='avg']") as HTMLElement;
-    assert.ok(legend, "no legend entry for the dashed series");
     assert.equal(legend.textContent, "LAeq Leq", `the legend reads ${legend.textContent}`);
 
     fireEvent.click(screen.getByLabelText("Customize sound"));
@@ -447,13 +430,9 @@ test("a 404 falls back to the per-item step, one run per item", async () => {
         timeline: TIMELINE,
       }),
     );
-    await act(async () => {
-      await Promise.resolve();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
 
+    // The fallback is what the 404 leaves; the raw line is read as absent after it.
+    await eventually(() => assert.equal(document.querySelectorAll("[data-series-line='LAeq']").length, 2));
     assert.equal(document.querySelectorAll("[data-series-line='max']").length, 0, "the raw line drew on a 404");
     // TWO runs for two items, not one line walking between them: one item's
     // level is not a slope into the next one's, and items that OVERLAP drew a W.
@@ -573,12 +552,8 @@ test("the SOUND chart hatches its ramp and taper, from the window attendance use
         attendance: { serviceStartedAt: null, endedAt: new Date(T0 + 1 * MIN).toISOString() },
       }),
     );
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    assert.equal(document.querySelectorAll("[data-hatch='pre']").length, 1, "no pre-service hatch on sound");
-    assert.equal(document.querySelectorAll("[data-hatch='post']").length, 1, "no post-service hatch on sound");
+    await eventually(() => assert.equal(document.querySelectorAll("[data-hatch='pre']").length, 1, "no pre-service hatch on sound"));
+    await eventually(() => assert.equal(document.querySelectorAll("[data-hatch='post']").length, 1, "no post-service hatch on sound"));
     cleanup();
     await flushReact();
   } finally {

@@ -5,7 +5,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -39,10 +39,18 @@ const CONFIG = {
 };
 
 test("the page draws although the stage state failed to load, with no screen count rather than a 0", async () => {
+  let stateRefusalRead = false;
   const f = stubFetchWithLog((url) => {
     if (url === "/api/messaging") return ok(CONFIG);
     // The stage state fails: the page must not be waiting on it.
-    if (url === "/api/state") return reply(500, { error: "boom" });
+    if (url === "/api/state") {
+      const refusal = reply(500, { error: "boom" });
+      return {
+        ...refusal,
+        json: async () => ((stateRefusalRead = true), refusal.json()),
+        text: async () => ((stateRefusalRead = true), refusal.text()),
+      };
+    }
     return ok({});
   });
   try {
@@ -56,8 +64,11 @@ test("the page draws although the stage state failed to load, with no screen cou
       ),
     );
     await settle();
+    await eventually(() => assert.ok(screen.getByLabelText("Rename Green room"), "the groups editor never drew"));
+    // "No count" is only worth reading once the stage state has been refused and
+    // the page has had its chance to draw one.
+    await eventually(() => assert.ok(stateRefusalRead, "the stage state was never read"));
     await settle();
-    assert.ok(screen.getByLabelText("Rename Green room"), "the groups editor never drew");
     const row = document.querySelector('[data-group-row="g-11111111"]');
     assert.ok(row, "no group row");
     assert.doesNotMatch(row.textContent ?? "", /screen/, "a count was drawn before the screens were known");

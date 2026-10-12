@@ -25,7 +25,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -136,14 +136,14 @@ test("a failed settings read says so, and offers no empty list to Add a layout t
   const f = stubFetch({ failing: "layouts" });
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the ServiceCue layouts/i);
+    await eventually(() => assert.match(alerts(), /Couldn't load the ServiceCue layouts/i));
     assert.equal(!!screen.queryByText(/No layouts yet/i), false, "a failed read is not an empty layout list");
     assert.equal(
       !!screen.queryByRole("button", { name: /Add layout/i }),
       false,
       "adding to a list that never loaded would save over every real layout",
     );
-    assert.ok(logged(f.logs, /layouts/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`);
+    await eventually(() => assert.ok(logged(f.logs, /layouts/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -162,7 +162,7 @@ test("while the settings read is still in flight, no Add layout button can post 
     );
     await act(async () => answerLayouts());
     await settle();
-    assert.equal(!!screen.queryByDisplayValue("Audio"), true, "the real layout is there once the read lands");
+    await eventually(() => assert.equal(!!screen.queryByDisplayValue("Audio"), true, "the real layout is there once the read lands"));
     assert.equal(f.posts.length, 0, "the pending window issued no save");
   } finally {
     f.restore();
@@ -173,10 +173,10 @@ test("a failed service-type read costs the previews, never the layouts editor", 
   const f = stubFetch({ failing: "types" });
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the service types/i);
+    await eventually(() => assert.match(alerts(), /Couldn't load the service types/i));
     assert.equal(/ServiceCue layouts/i.test(alerts()), false, "the layouts themselves loaded");
-    assert.equal(!!screen.queryByDisplayValue("Audio"), true, "the layout is there to edit");
-    assert.ok(logged(f.logs, /the service types/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`);
+    await eventually(() => assert.equal(!!screen.queryByDisplayValue("Audio"), true, "the layout is there to edit"));
+    await eventually(() => assert.ok(logged(f.logs, /the service types/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -187,8 +187,8 @@ test("Planning Center not connected: the editor works, nothing alerts or logs, n
   try {
     await mount();
     await openLayout();
-    assert.equal(!!screen.queryByDisplayValue("Audio"), true, "the layouts editor works without Planning Center");
-    assert.equal(!!screen.queryByText(/Connect Planning Center to preview a plan/i), true);
+    await eventually(() => assert.equal(!!screen.queryByDisplayValue("Audio"), true, "the layouts editor works without Planning Center"));
+    await eventually(() => assert.equal(!!screen.queryByText(/Connect Planning Center to preview a plan/i), true));
     assert.equal(alerts(), "", "not connected is a state, not a failure");
     assert.deepEqual(f.logs, []);
     for (const route of ["/api/service-types", "/api/servicecue/note-categories", "/api/servicecue/rundown"]) {
@@ -203,7 +203,7 @@ test("a failed note-category read says so, above the previews and inside the rol
   const f = stubFetch({ failing: "noteCats" });
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load this service type's note categories/i);
+    await eventually(() => assert.match(alerts(), /Couldn't load this service type's note categories/i));
     fireEvent.click(screen.getByRole("button", { name: /Category roles/i }));
     await settle();
     assert.equal(
@@ -211,7 +211,7 @@ test("a failed note-category read says so, above the previews and inside the rol
       2,
       "the roles panel says it too: without it, no + Add category reads as a type with none",
     );
-    assert.ok(logged(f.logs, /note categories/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`);
+    await eventually(() => assert.ok(logged(f.logs, /note categories/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -243,11 +243,11 @@ test("a note-category failure for the type the operator left goes with it", asyn
   const f = stubFetch({ noteCats: (typeId) => (typeId === "st1" ? Promise.reject(new TypeError("fetch failed")) : ok(["Video"])) });
   try {
     await mount();
-    assert.match(alerts(), /note categories/i);
+    await eventually(() => assert.match(alerts(), /note categories/i));
     fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "st2" } });
     await settle();
     await settle();
-    assert.equal(alerts(), "", "Youth's categories loaded");
+    await eventually(() => assert.equal(alerts(), "", "Youth's categories loaded"));
   } finally {
     f.restore();
   }
@@ -269,7 +269,7 @@ test("the plan the operator left, answering late, is not previewed as the one th
     await settle();
     await act(async () => answerWeekend({ ...RUNDOWN, planTitle: "Weekend service" }));
     await settle();
-    assert.equal(!!screen.queryByText("Youth night"), true, "the preview is Youth's plan");
+    await eventually(() => assert.equal(!!screen.queryByText("Youth night"), true, "the preview is Youth's plan"));
     assert.equal(!!screen.queryByText("Weekend service"), false, "Weekend's late answer no longer applies");
   } finally {
     f.restore();
@@ -336,11 +336,11 @@ test("a failure from before the state said not connected gives way to the connec
   });
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the service types/i, "tried while the state was unknown, and failed");
+    await eventually(() => assert.match(alerts(), /Couldn't load the service types/i, "tried while the state was unknown, and failed"));
     await act(async () => FakeEventSource.last?.push("stage:state-changed", { pcoConfigured: false }));
     await settle();
-    assert.equal(alerts(), "", "not connected is a state, not a failure");
-    assert.match(previewShows(), /Connect Planning Center/i);
+    await eventually(() => assert.equal(alerts(), "", "not connected is a state, not a failure"));
+    await eventually(() => assert.match(previewShows(), /Connect Planning Center/i));
   } finally {
     f.restore();
   }
@@ -350,8 +350,8 @@ test("a stage state that cannot be read does not leave the page waiting for ever
   const f = stubFetch({ failing: "state" });
   try {
     await mount();
-    assert.equal(f.asked.some((u) => u.includes("/api/service-types")), true, "the service types are still tried");
-    assert.equal(!!screen.queryByRole("option", { name: "Weekend" }), true, "and the picker fills");
+    await eventually(() => assert.equal(f.asked.some((u) => u.includes("/api/service-types")), true, "the service types are still tried"));
+    await eventually(() => assert.equal(!!screen.queryByRole("option", { name: "Weekend" }), true, "and the picker fills"));
   } finally {
     f.restore();
   }
@@ -362,10 +362,10 @@ test("a failed plan read says so in the preview, not 'Loading plan…' for ever"
   try {
     await mount();
     await openLayout();
-    assert.match(alerts(), /Couldn't load the plan to preview/i);
+    await eventually(() => assert.match(alerts(), /Couldn't load the plan to preview/i));
     assert.equal(!!screen.queryByText(/Loading plan/i), false, "the read has finished; it failed");
     assert.equal(!!screen.queryByText(/No upcoming plan/i), false, "and it is not an empty plan either");
-    assert.ok(logged(f.logs, /plan/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`);
+    await eventually(() => assert.ok(logged(f.logs, /plan/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -376,7 +376,7 @@ test("control: every read loads, the preview reaches its own empty state, nothin
   try {
     await mount();
     await openLayout();
-    assert.equal(!!screen.queryByText(/No upcoming plan for this service type/i), true);
+    await eventually(() => assert.equal(!!screen.queryByText(/No upcoming plan for this service type/i), true));
     assert.equal(alerts(), "");
     assert.deepEqual(f.logs, []);
   } finally {

@@ -14,7 +14,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installDom } from "../test-dom.js";
 import { EVERYONE, type MessagesState, type StageMessage } from "@main/types/messages";
 
 const teardown = installDom();
@@ -135,6 +135,8 @@ async function showScreen(path: string, state: unknown): Promise<HTMLElement> {
     await settle();
     await settle();
   });
+  // The state is a read behind the first paint, and the widgets read their own.
+  await eventually(() => assert.ok(!(container.textContent ?? "").includes("Loading stage"), "the stage never left its loading screen"));
   return container;
 }
 
@@ -152,8 +154,8 @@ describe("a Messages widget follows the screen StageView says it is", () => {
       message(3, [EVERYONE], "for everyone"),
     ]);
     const c = await showScreen("/display-1", stageState(widget, { groups: [GREEN] }));
-    assert.ok(says(c, "for the green room"), c.textContent ?? "");
-    assert.ok(says(c, "for everyone"), c.textContent ?? "");
+    await eventually(() => assert.ok(says(c, "for the green room"), c.textContent ?? ""));
+    await eventually(() => assert.ok(says(c, "for everyone"), c.textContent ?? ""));
     assert.ok(!says(c, "for the stage"), "drew a message sent to a group this screen is not in");
   });
 
@@ -163,7 +165,7 @@ describe("a Messages widget follows the screen StageView says it is", () => {
     // messages the Screens page has no business answering.
     messagesBody = messagesState([message(1, [GREEN], "for the green room")]);
     const c = await showScreen("/preview-v1?output=display-1", stageState(widget, { groups: [GREEN] }));
-    assert.ok(says(c, "Messages"), "the widget drew nothing at all");
+    await eventually(() => assert.ok(says(c, "Messages"), "the widget drew nothing at all"));
     assert.ok(!says(c, "for the green room"), "a preview drew a screen's messages");
     assert.ok(!says(c, "No messages"), "a preview claimed no messages for groups it has none of");
   });
@@ -171,7 +173,7 @@ describe("a Messages widget follows the screen StageView says it is", () => {
   test("its own groups override the screen's", async () => {
     messagesBody = messagesState([message(1, [GREEN], "for the green room"), message(2, [STAGE], "for the stage")]);
     const c = await showScreen("/display-1", stageState({ type: "messages", groups: [STAGE] }, { groups: [GREEN] }));
-    assert.ok(says(c, "for the stage") && !says(c, "for the green room"), c.textContent ?? "");
+    await eventually(() => assert.ok(says(c, "for the stage") && !says(c, "for the green room"), c.textContent ?? ""));
   });
 });
 
@@ -184,9 +186,13 @@ describe("a reply pressed on a panel", () => {
     // unit mount supplies it itself.
     messagesBody = messagesState([message(1, [GREEN], "for the green room")]);
     const c = await showScreen("/display-1", stageState({ type: "messages" }, { groups: [GREEN], mode: "panel" }));
-    const copy = [...c.querySelectorAll("button")].find((b) => b.textContent === "Copy");
-    assert.ok(copy, "a panel in the group drew no reply button");
-    await act(async () => { fireEvent.click(copy!); });
+    const copy = await eventually(() => {
+      const found = [...c.querySelectorAll("button")].find((b) => b.textContent === "Copy");
+      assert.ok(found, "a panel in the group drew no reply button");
+      return found;
+    });
+    await act(async () => { fireEvent.click(copy); });
+    await eventually(() => assert.ok(posted.some((p) => p.url.endsWith("/replies")), "the press did not reach the replies route"));
     const sent = posted.filter((p) => p.url === `/api/messages/${(1).toString(16).padStart(16, "0")}/replies`);
     assert.equal(sent.length, 1, "the press did not reach the replies route");
     assert.deepEqual(sent[0].body, { text: "Copy", objectId: "w1", outputId: "display-1" });
@@ -223,7 +229,7 @@ describe("a Messages widget inside a screen-embed tile", () => {
   test("follows the screen it shows, not the one it sits on", async () => {
     messagesBody = messagesState([message(1, [GREEN], "for the green room"), message(2, [STAGE], "for the stage")]);
     const c = await showScreen("/display-1", withTile());
-    assert.ok(says(c, "for the stage"), c.textContent ?? "");
+    await eventually(() => assert.ok(says(c, "for the stage"), c.textContent ?? ""));
     assert.ok(!says(c, "for the green room"), "the tile followed the screen it sits on");
   });
 
@@ -232,7 +238,7 @@ describe("a Messages widget inside a screen-embed tile", () => {
     for (const mode of [undefined, "panel"]) {
       cleanup();
       const c = await showScreen("/display-1", withTile(mode));
-      assert.ok(says(c, "for the stage"), `the tile (${mode ?? "display"}) did not show the screen's message`);
+      await eventually(() => assert.ok(says(c, "for the stage"), `the tile (${mode ?? "display"}) did not show the screen's message`));
       assert.equal(!!copy(c), false, `a tile of a ${mode ?? "display"} offered to answer for it`);
     }
   });
@@ -258,9 +264,10 @@ describe("a Messages widget inside a view-embed tile", () => {
   test("follows the screen that draws it and offers to answer on a panel, signed as that panel", async () => {
     messagesBody = messagesState([message(1, [GREEN], "for the green room"), message(2, [STAGE], "for the stage")]);
     const c = await showScreen("/display-1", withEmbed());
-    assert.ok(says(c, "for the green room") && !says(c, "for the stage"), `the embedded widget did not follow the panel's groups: ${c.textContent}`);
+    await eventually(() => assert.ok(says(c, "for the green room") && !says(c, "for the stage"), `the embedded widget did not follow the panel's groups: ${c.textContent}`));
     assert.ok(copy(c), "an embedded widget on a panel offered no way to answer");
     await act(async () => { fireEvent.click(copy(c)!); });
+    await eventually(() => assert.ok(posted.some((p) => p.url.endsWith("/replies")), "the press did not reach the replies route"));
     const sent = posted.filter((p) => p.url.endsWith("/replies"));
     assert.deepEqual(sent.map((p) => p.body), [{ text: "Copy", objectId: "w2", outputId: "display-1" }]);
   });
@@ -282,7 +289,7 @@ describe("a Messages widget inside a view-embed tile", () => {
     };
     messagesBody = messagesState([message(1, [GREEN], "for the green room"), message(2, [STAGE], "for the stage")]);
     const c = await showScreen("/display-1", state);
-    assert.ok(says(c, "for the stage") && !says(c, "for the green room"), `the nested widget did not follow the screen the tile shows: ${c.textContent}`);
+    await eventually(() => assert.ok(says(c, "for the stage") && !says(c, "for the green room"), `the nested widget did not follow the screen the tile shows: ${c.textContent}`));
     assert.equal(!!copy(c), false, "a view inside a tile of a panel offered to answer for the panel");
   });
 });
@@ -297,14 +304,19 @@ describe("a Message composer on a screen", () => {
   async function sendFrom(path: string, state: unknown): Promise<HTMLElement> {
     messagesBody = { ...messagesState([]), quickMessages: ["Walk now"] };
     const c = await showScreen(path, state);
-    await press(named(c, "Green room"));
-    await press(named(c, "Walk now"));
-    await press(named(c, "Send"));
+    for (const name of ["Green room", "Walk now", "Send"]) {
+      await press(await eventually(() => {
+        const found = named(c, name);
+        assert.ok(found, `the composer drew no ${name} button`);
+        return found;
+      }));
+    }
     return c;
   }
 
   test("a panel sends as the screen's own name", async () => {
     await sendFrom("/display-1", stageState(composer, { groups: [GREEN], mode: "panel" }));
+    await eventually(() => assert.ok(posted.some((p) => p.url === "/api/messages"), "the press did not reach the server"));
     const sent = posted.filter((p) => p.url === "/api/messages");
     assert.equal(sent.length, 1, "the press did not reach the server");
     assert.deepEqual(sent[0].body, { to: [GREEN], text: "Walk now", alert: false, from: "Stage left" });
@@ -345,7 +357,7 @@ describe("a stage-message alert on a screen", () => {
     const c = await showScreen("/display-1", bare({ groups: [GREEN] }));
     const banner = c.querySelector('[role="alert"]');
     assert.ok(banner, "no banner");
-    assert.ok(says(c, "Walk now") && says(c, "Alert"), c.textContent ?? "");
+    await eventually(() => assert.ok(says(c, "Walk now") && says(c, "Alert"), c.textContent ?? ""));
   });
 
   test("not for a group the screen is not in, but Everyone reaches a screen in no group", async () => {
@@ -353,7 +365,8 @@ describe("a stage-message alert on a screen", () => {
     assert.ok(!says(await showScreen("/display-1", bare({ groups: [GREEN] })), "for the stage"));
     cleanup();
     withAlerts(running(2, [EVERYONE], "for everyone", 20_000));
-    assert.ok(says(await showScreen("/display-1", bare({ groups: [] })), "for everyone"));
+    const c = await showScreen("/display-1", bare({ groups: [] }));
+    await eventually(() => assert.ok(says(c, "for everyone")));
   });
 
   test("draws on every kind of view, and on a screen with nothing routed to it", async () => {
@@ -361,11 +374,13 @@ describe("a stage-message alert on a screen", () => {
     const slots = stageState({ type: "clock" }, {});
     (slots as { views: { kind: string }[] }).views[0].kind = "slots";
     (slots as { resolvedByOutput: Record<string, { kind: string }> }).resolvedByOutput["display-1"].kind = "slots";
-    assert.ok(says(await showScreen("/display-1", slots), "for everyone"), "not over a slots view");
+    const slotsScreen = await showScreen("/display-1", slots);
+    await eventually(() => assert.ok(says(slotsScreen, "for everyone"), "not over a slots view"));
     cleanup();
     const unrouted = stageState({ type: "clock" }, {});
     (unrouted as { resolvedByOutput: Record<string, { viewId: string | null }> }).resolvedByOutput["display-1"].viewId = null;
-    assert.ok(says(await showScreen("/display-1", unrouted), "for everyone"), "not over an unrouted screen");
+    const unroutedScreen = await showScreen("/display-1", unrouted);
+    await eventually(() => assert.ok(says(unroutedScreen, "for everyone"), "not over an unrouted screen"));
   });
 
   test("not on a Screens-card preview", async () => {
@@ -401,7 +416,7 @@ describe("a stage-message alert on a screen", () => {
     withAlerts(running(1, [EVERYONE], "on server time", 900, serverNow));
     messagesBody!.serverNow = serverNow;
     const c = await showScreen("/display-1", bare());
-    assert.ok(says(c, "on server time"), "ended by the host's clock instead of the server's");
+    await eventually(() => assert.ok(says(c, "on server time"), "ended by the host's clock instead of the server's"));
     await wait(1300);
     assert.ok(!c.querySelector('[role="alert"]'), "still on the wall after alertUntil on the server's clock");
   });
@@ -426,7 +441,7 @@ describe("a stage-message alert on a screen", () => {
       withAlerts(running(1, [EVERYONE], "twenty-five seconds left", 25_000, serverNow));
       messagesBody!.serverNow = serverNow;
       const c = await showScreen("/display-1", make());
-      assert.ok(says(c, "twenty-five seconds left"), "an alert with time left on the server's clock never drew");
+      await eventually(() => assert.ok(says(c, "twenty-five seconds left"), "an alert with time left on the server's clock never drew"));
     }
   });
 
@@ -434,7 +449,7 @@ describe("a stage-message alert on a screen", () => {
     const serverNow = Date.now() - 3_600_000;
     messagesBody = { ...messagesState([{ ...message(1, [EVERYONE], "three minutes ago"), at: serverNow - 3 * 60_000 }]), serverNow };
     const c = await showScreen("/display-1", stageState({ type: "messages" }, {}));
-    assert.ok(says(c, "3 min"), `age was not counted on the server's clock: ${c.textContent}`);
+    await eventually(() => assert.ok(says(c, "3 min"), `age was not counted on the server's clock: ${c.textContent}`));
   });
 
   test("a banner that fails to draw is hidden and reported, and the screen under it stays up", async () => {
@@ -469,7 +484,7 @@ describe("a stage-message alert on a screen", () => {
     } finally {
       console.error = quiet;
     }
-    assert.ok(says(c, "the next one draws"), "one failed alert hid every later one until a reload");
+    await eventually(() => assert.ok(says(c, "the next one draws"), "one failed alert hid every later one until a reload"));
   });
 
   test("a malformed alert frame hides the banner and is reported; the wall still renders, and the next frame is a fresh try", async () => {
@@ -484,7 +499,7 @@ describe("a stage-message alert on a screen", () => {
       await act(async () => FakeEventSource.last!.push("messages:state", { ...messagesState([]), alerts: [broken], rev: 2 }));
       assert.ok(!c.querySelector('[role="alert"]'));
       assert.ok(!says(c, "Display error"), "a malformed frame took the whole screen down");
-      assert.ok(says(c, "Stage Utility"), "the screen went blank");
+      await eventually(() => assert.ok(says(c, "Stage Utility"), "the screen went blank"));
       const logged = posted.find((p) => p.url === "/api/log/client");
       assert.match((logged?.body as { message?: string } | undefined)?.message ?? "", /the alert banner failed to draw/);
       const good = running(2, [EVERYONE], "back to normal", 20_000);
@@ -492,16 +507,16 @@ describe("a stage-message alert on a screen", () => {
     } finally {
       console.error = quiet;
     }
-    assert.ok(says(c, "back to normal"), "the next frame did not get a fresh try");
+    await eventually(() => assert.ok(says(c, "back to normal"), "the next frame did not get a fresh try"));
   });
 
   test("when the newest ends, the next one sent to this screen shows", async () => {
     // Newest first, as the server lists them: the Green room alert ends first.
     withAlerts(running(2, [GREEN], "the newer", 600), running(1, [EVERYONE], "the older", 60_000), running(0, [STAGE], "other room", 90_000));
     const c = await showScreen("/display-1", bare({ groups: [GREEN] }));
-    assert.ok(says(c, "the newer") && !says(c, "the older"), c.textContent ?? "");
+    await eventually(() => assert.ok(says(c, "the newer") && !says(c, "the older"), c.textContent ?? ""));
     await wait(1000);
-    assert.ok(says(c, "the older"), "the next alert did not follow");
+    await eventually(() => assert.ok(says(c, "the older"), "the next alert did not follow"));
     assert.ok(!says(c, "the newer") && !says(c, "other room"), c.textContent ?? "");
   });
 });
