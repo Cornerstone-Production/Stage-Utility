@@ -27,7 +27,7 @@ import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installRenderDom();
 
-const { renderHook, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { renderHook, screen, cleanup, fireEvent, act, waitFor } = await import("@testing-library/react");
 const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { ConfirmHost } = await import("../components/ui/index.js");
@@ -115,6 +115,21 @@ function start(hook: ReturnType<typeof mountHook>, id: string, surface: "display
 
 const dialog = () => screen.queryByRole("alertdialog");
 
+/** The confirm, once it is open and says `says`. Waited for rather than assumed
+ *  after a fixed number of ticks: on a slow CI runner the ask, a 409 and the
+ *  re-ask take more turns than on a laptop. */
+async function opened(says?: RegExp): Promise<HTMLElement> {
+  return waitFor(
+    () => {
+      const d = dialog();
+      assert.ok(d, "no confirm opened");
+      if (says) assert.match(d.textContent!, says);
+      return d;
+    },
+    { timeout: 5000 },
+  );
+}
+
 beforeEach(() => {
   cleanup();
   __resetReplayCacheForTests();
@@ -131,9 +146,7 @@ describe("making a view a control surface", () => {
       const hook = mountHook(seedState());
       await settle();
       const done = start(hook, "wall-a", "console");
-      await settle();
-      assert.ok(dialog(), "no confirm opened");
-      assert.match(dialog()!.textContent!, /Make "Lobby loop" a control surface\?/);
+      await opened(/Make "Lobby loop" a control surface\?/);
       assert.match(dialog()!.textContent!, /Lobby TV and Hallway TV will become control surfaces/);
       assert.deepEqual(f.writes(), [], "a write went out before the operator answered");
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -150,7 +163,7 @@ describe("making a view a control surface", () => {
       const hook = mountHook(seedState());
       await settle();
       const done = start(hook, "wall-a", "console");
-      await settle();
+      await opened();
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
       await settle();
       await done;
@@ -166,7 +179,7 @@ describe("making a view a control surface", () => {
       const hook = mountHook(seedState());
       await settle();
       const done = start(hook, "wall-a", "console");
-      await settle();
+      await opened();
       fireEvent.click(screen.getByRole("button", { name: "Make them control surfaces" }));
       await settle();
       await done;
@@ -186,8 +199,7 @@ describe("making a view a wall display", () => {
       const hook = mountHook(seedState());
       await settle();
       const done = start(hook, "ctl-a", "display");
-      await settle();
-      assert.match(dialog()!.textContent!, /Booth panel will become a wall display/);
+      await opened(/Booth panel will become a wall display/);
       fireEvent.click(screen.getByRole("button", { name: "Make it a wall display" }));
       await settle();
       await done;
@@ -241,13 +253,11 @@ describe("the screens changed while the dialog was open", () => {
       const hook = mountHook(seedState());
       await settle();
       const done = start(hook, "wall-a", "console");
-      await settle();
+      await opened();
       fireEvent.click(screen.getByRole("button", { name: "Make them control surfaces" }));
-      await settle();
-      await settle();
-      assert.ok(dialog(), "no second confirm after the 409");
-      assert.match(dialog()!.textContent!, /changed while you were deciding/);
-      assert.match(dialog()!.textContent!, /Lobby TV, Hallway TV and Spare will become control surfaces/);
+      const again = await opened(/changed while you were deciding/).catch(() => null);
+      assert.ok(again, "no second confirm after the 409");
+      assert.match(again.textContent!, /Lobby TV, Hallway TV and Spare will become control surfaces/);
       fireEvent.click(screen.getByRole("button", { name: "Make them control surfaces" }));
       await settle();
       await done;
