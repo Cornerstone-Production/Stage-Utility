@@ -27,7 +27,7 @@
 import { strict as assert } from "node:assert";
 import { after, before, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { eventually, installDom } from "../../test-dom.js";
 
 const teardown = installDom();
 
@@ -118,6 +118,10 @@ async function renderCard(activeCardMenuId: string | null): Promise<HTMLElement>
     ));
     await settle();
   });
+  // The chart draws once the weekends have been read, which is a fetch and a
+  // re-render behind the first paint. Waited for rather than assumed after one
+  // tick: how many turns that takes depends on the machine.
+  await eventually(() => assert.ok(chartSvg(container), "no chart rendered at all — the fixture gave it fewer than two weekends"));
   return container;
 }
 

@@ -22,7 +22,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -276,6 +276,14 @@ function mount() {
   return render(React.createElement(RouterProvider, { router } as never));
 }
 
+/** After mount(): the page is a spinner until its first read lands, and how many
+ *  turns that takes depends on the machine, so wait for the page itself. */
+async function pageReady(): Promise<void> {
+  await settle();
+  await settle();
+  await eventually(() => assert.ok(screen.getByRole("heading", { name: "Video feeds" }), "the page never left its spinner"));
+}
+
 beforeEach(() => {
   cleanup();
   __resetReplayCacheForTests();
@@ -293,10 +301,9 @@ test("the switch sends POST /api/integrations/video/enabled with { enabled: true
   const g = stubGlobals(makeState([]), { videoIntegrationEnabled: false });
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
 
-    const sw = screen.getByRole("switch", { name: "Video feeds on" });
+    const sw = await eventually(() => screen.getByRole("switch", { name: "Video feeds on" }));
     assert.equal(sw.getAttribute("aria-checked"), "false", "precondition: the switch starts off");
     fireEvent.click(sw);
     await settle();
@@ -317,8 +324,7 @@ test("both feeds render, the embed row's pill names its player, the external row
   const g = stubGlobals(makeState([embedFeed(), externalFeed()]));
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     // "Online stream" (the embed feed, selected by default) renders twice —
     // once in the list row, once as the editor's own heading — so this checks
@@ -377,8 +383,7 @@ test("\"On N screens\" counts DISTINCT outputIds reporting a feed, never raw scr
   );
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     assert.ok(screen.getByText("On 2 screens"), "feed-pull is reported by two distinct outputIds");
     assert.ok(screen.getByText("On 1 screen"), "feed-push is reported by one — singular, not \"1 screens\"");
@@ -396,8 +401,7 @@ test("\"On N screens\" shows for an external feed too — a screen's own playbac
   );
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     assert.ok(screen.getByText("On 1 screen"), "an external feed's own screens count must show just like a relay feed's");
   } finally {
@@ -409,8 +413,7 @@ test("Delete calls video:feedUsage BEFORE video:removeFeed, and the confirmation
   const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]));
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     const del = screen.getByRole("button", { name: "Delete feed" });
     // The editor reads usage once on its own, for its used-by line. What is
@@ -451,8 +454,7 @@ test("cancelling the delete confirmation never calls video:removeFeed", async ()
   const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]));
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete feed" }));
     await settle();
@@ -483,8 +485,7 @@ test("a refused save shows the server's error text under the buttons, and nothin
   });
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     const nameInput = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
     assert.ok(nameInput, "expected a Name input");
@@ -542,8 +543,7 @@ test("Add feed then Save calls video:addFeed with the form's name and source", a
   });
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
     await settle();
@@ -584,8 +584,7 @@ test("the just-saved feed stays selected until the pushed list contains it — t
   });
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
     await settle();
@@ -615,8 +614,7 @@ test("Cancel while creating a new feed returns to the previously selected feed",
   );
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     // feed-1 is selected by default (feeds[0]) — explicitly select feed-2 so
     // this proves Cancel restores the ACTUAL previous selection, not just a
@@ -651,15 +649,12 @@ test("a Delete the server refuses shows its error, and the feed stays", async ()
   });
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     fireEvent.click(screen.getByRole("button", { name: "Delete feed" }));
     await settle();
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Delete" })));
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    await settle();
-    await settle();
-    assert.equal(!!screen.queryByText("The feed store could not be written."), true, "a refused delete must say why");
+    await eventually(() => assert.equal(!!screen.queryByText("The feed store could not be written."), true, "a refused delete must say why"));
     assert.equal(screen.getAllByText("Program (IMAG)").length > 0, true);
   } finally {
     g.restore();
@@ -672,8 +667,7 @@ test("the card's heading is a level 2: the page has one h1, the shell's", async 
   const g = stubGlobals(makeState([]));
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     assert.equal(container.querySelectorAll("h1").length, 0, "the page drew a second h1 beside the shell's");
     assert.equal(!!screen.queryByRole("heading", { level: 2, name: "Video feeds" }), true);
   } finally {
@@ -686,8 +680,7 @@ test("the Source dropdown offers exactly the kinds video:state reports", async (
     const g = stubGlobals({ ...makeState([externalFeed()]), kinds: [...kinds] });
     try {
       const { container } = mount();
-      await settle();
-      await settle();
+      await pageReady();
       const select = container.querySelector('select[aria-label="Source"]') as HTMLSelectElement | null;
       assert.equal(!!select, true, "expected a Source select");
       const offered = [...select!.querySelectorAll("option")].map((o) => o.getAttribute("value"));
@@ -706,8 +699,7 @@ test("one layout is \"1 layout\", not \"1 layouts\"", async () => {
   });
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     fireEvent.click(screen.getByRole("button", { name: "Delete feed" }));
     await settle();
     await settle();
@@ -726,8 +718,7 @@ test("after a rename the editor's heading shows the new name before any push arr
   });
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     const nameInput = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
     fireEvent.change(nameInput, { target: { value: "Main program" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -745,8 +736,7 @@ test("the embed callout names the player: YouTube's delay for YouTube, Resi's ow
   const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]));
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     const editor = within(screen.getByRole("complementary", { name: "Feed settings" }));
     assert.equal(!!editor.queryByText(/Plays in YouTube's own player, 5 to 15 seconds behind/), true);
 
@@ -771,8 +761,7 @@ test("each row says how its feed plays", async () => {
   const g = stubGlobals(makeState([embedFeed(), embedFeed({ id: "resi", name: "Resi lobby", source: { kind: "embed", player: "resi", ref: "https://control.resi.io/webplayer/video.html?id=1" } }), externalFeed()]));
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     assert.equal(!!screen.queryByText("Plays in YouTube's own player · 5 to 15 s behind"), true);
     assert.equal(!!screen.queryByText("Plays in Resi's own player"), true);
     assert.equal(!!screen.queryByText("WebRTC, played as given"), true);
@@ -793,8 +782,7 @@ test("a delayed relay row's meta line says \"a few seconds behind\", never a fig
   });
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     assert.equal(!!screen.queryByText("WebRTC · under 1 s behind"), true, "expected the design's own live text, unchanged");
     assert.equal(!!screen.queryByText("HLS · a few seconds behind"), true);
     assert.equal(!!screen.queryByText(/about 4 s/), false, "a specific figure nothing in this pipeline computes must never appear");
@@ -807,10 +795,11 @@ test("the editor says which layouts use the selected feed", async () => {
   const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]));
   try {
     mount();
-    await settle();
-    await settle();
-    const editor = within(screen.getByRole("complementary", { name: "Feed settings" }));
-    assert.equal(!!editor.queryByText("Used by 2 layouts: Stage confidence, Home."), true);
+    // The usage line is a second read, behind the one that draws the editor.
+    await eventually(() => {
+      const editor = within(screen.getByRole("complementary", { name: "Feed settings" }));
+      assert.equal(!!editor.queryByText("Used by 2 layouts: Stage confidence, Home."), true);
+    });
   } finally {
     g.restore();
   }
@@ -820,15 +809,15 @@ test("a failed usage read says so, never that the feed is unused", async () => {
   const g = stubGlobals(makeState([embedFeed({ id: "feed-1", name: "Program (IMAG)" })]), { usage: "fail" });
   try {
     mount();
-    await settle();
-    await settle();
-    const editor = within(screen.getByRole("complementary", { name: "Feed settings" }));
-    assert.equal(!!editor.queryByText("Couldn't read which layouts use this feed."), true);
+    const editor = within(await eventually(() => screen.getByRole("complementary", { name: "Feed settings" })));
+    await eventually(() => assert.equal(!!editor.queryByText("Couldn't read which layouts use this feed."), true));
     assert.equal(!!editor.queryByText(/Not used by any layout/), false);
-    assert.equal(
-      g.calls.some((c) => c.method === "POST" && c.url.endsWith("/api/log/client")),
-      true,
-      "the failed read must reach /log",
+    await eventually(() =>
+      assert.equal(
+        g.calls.some((c) => c.method === "POST" && c.url.endsWith("/api/log/client")),
+        true,
+        "the failed read must reach /log",
+      ),
     );
   } finally {
     g.restore();
@@ -839,8 +828,7 @@ test("a field's description sits under its control, not beside its label", async
   const g = stubGlobals(makeState([embedFeed()]));
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     const input = container.querySelector('input[aria-label="Name"]')!;
     const description = screen.getByText("What layouts and Home show. Renaming keeps every layout using it.");
     assert.ok(input.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING, "the Name description must follow its input");
@@ -866,8 +854,7 @@ test("a pull feed's Address, Username and password fields render, the Magewell c
   );
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     const address = container.querySelector('input[aria-label="Address"]') as HTMLInputElement;
     assert.equal(address.value, "rtsp://192.0.2.21:8554/stream2");
@@ -898,8 +885,7 @@ test("an SRT address says a passphrase only, 10 to 80 plain ASCII characters, an
   const g = stubGlobals({ ...makeState([pullFeed()]), kinds: ALL_KINDS });
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     const hint = () => screen.queryByText("SRT takes a passphrase only: 10 to 80 plain letters, digits, spaces and punctuation. Leave Username empty and put it in Password.");
     assert.equal(!!hint(), false, "an RTSP address has a username and password like any other");
     const address = container.querySelector('input[aria-label="Address"]') as HTMLInputElement;
@@ -918,8 +904,7 @@ test("typing a pull password then clearing it back to empty still sends password
   );
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     const password = container.querySelector('input[aria-label="Password"]') as HTMLInputElement;
     fireEvent.change(password, { target: { value: "temp" } });
@@ -940,14 +925,13 @@ test("a push feed's segmented control, address and password load, and New passwo
   const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     assert.ok(screen.getByRole("group", { name: "How it connects" }), "expected the protocol segmented control");
     const srtButton = screen.getByRole("button", { name: "SRT" });
     assert.equal(srtButton.getAttribute("aria-pressed"), "true", "expected SRT pressed for this feed's saved protocol");
 
-    assert.ok(await screen.findByText("The password is part of the address. Anything that pushes without it is refused."));
+    assert.ok(await eventually(() => screen.getByText("The password is part of the address. Anything that pushes without it is refused.")));
     const addressInput = screen.getByLabelText("Paste this into the device") as HTMLInputElement;
     assert.ok(addressInput.value.includes("testpw"), addressInput.value);
     const passwordInput = screen.getByLabelText("Password") as HTMLInputElement;
@@ -984,9 +968,8 @@ test("WHIP's description names OBS's Bearer Token, switching from SRT/RTMP's pas
   );
   try {
     mount();
-    await settle();
-    await settle();
-    assert.ok(await screen.findByText(/Use the password below as the Bearer Token/));
+    await pageReady();
+    assert.ok(await eventually(() => screen.getByText(/Use the password below as the Bearer Token/)));
     assert.equal(screen.queryByText("The password is part of the address. Anything that pushes without it is refused."), null);
   } finally {
     g.restore();
@@ -997,8 +980,7 @@ test("a brand new push draft shows a note to save first, and never requests a pu
   const g = stubGlobals({ ...makeState([embedFeed({ id: "feed-1" })]), kinds: ALL_KINDS });
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
     await settle();
@@ -1021,10 +1003,9 @@ test("Copy falls back to selecting the address and prompting Ctrl+C/Cmd+C — js
   const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
 
-    const addressInput = (await screen.findByLabelText("Paste this into the device")) as HTMLInputElement;
+    const addressInput = (await eventually(() => screen.getByLabelText("Paste this into the device"))) as HTMLInputElement;
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await settle();
 
@@ -1047,8 +1028,7 @@ test("a push feed set to WHIP shows the OBS-specific callout and list hint; a pu
   });
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     // Scoped to the editor pane and the list row SEPARATELY — both carry the
     // shared sentence at once here (there is only one feed, selected), so a
     // regression in either location alone must still fail its own assertion.
@@ -1076,8 +1056,7 @@ test("a push feed set to WHIP shows the OBS-specific callout and list hint; a pu
     cleanup();
     __resetReplayCacheForTests();
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     const asideText = screen.getByLabelText("Feed settings").textContent ?? "";
     assert.ok(asideText.includes(DEVICE_HINT), "expected \"The device\", never OBS, for a pull feed");
     assert.equal(asideText.includes("OBS is sending"), false, "a pull feed must never be called OBS");
@@ -1098,8 +1077,7 @@ test("a push feed set to WHIP shows the OBS-specific callout and list hint; a pu
     cleanup();
     __resetReplayCacheForTests();
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     assert.equal(screen.queryByText(/Delayed a few seconds/), null, "a live feed must show no delay warning");
   } finally {
     g3.restore();
@@ -1113,8 +1091,7 @@ test("a pull feed with a stored password shows \"A password is saved\" with a Cl
   );
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     assert.ok(screen.getByText("A password is saved. Type to replace it, or clear it."));
     const clear = screen.getByRole("button", { name: "Clear" });
@@ -1134,8 +1111,7 @@ test("typing into the pull Password field hides the \"password is saved\" messag
   const g = stubGlobals({ ...makeState([pullFeed({ hasPassword: true })]), kinds: ALL_KINDS });
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     assert.ok(screen.getByText("A password is saved. Type to replace it, or clear it."));
 
     const password = container.querySelector('input[aria-label="Password"]') as HTMLInputElement;
@@ -1153,8 +1129,7 @@ test("a pull feed with no stored password shows neither the message nor Clear", 
   const g = stubGlobals({ ...makeState([pullFeed({ hasPassword: false })]), kinds: ALL_KINDS });
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     assert.equal(screen.queryByText(/A password is saved/), null);
     assert.equal(screen.queryByRole("button", { name: "Clear" }), null);
   } finally {
@@ -1176,10 +1151,9 @@ test("a failed rotation keeps the address and password fields visible, shows the
   );
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
 
-    const before = (await screen.findByLabelText("Paste this into the device")) as HTMLInputElement;
+    const before = (await eventually(() => screen.getByLabelText("Paste this into the device"))) as HTMLInputElement;
     assert.ok(before.value.includes("testpw"));
 
     fireEvent.click(screen.getByRole("button", { name: "New password" }));
@@ -1223,16 +1197,19 @@ test("flipping the segmented control before Save re-fetches the OTHER protocol's
   );
   try {
     mount();
-    await settle();
-    await settle();
-    assert.ok((await screen.findByLabelText("Paste this into the device") as HTMLInputElement).value.startsWith("srt://"));
+    await pageReady();
+    assert.ok((await eventually(() => screen.getByLabelText("Paste this into the device")) as HTMLInputElement).value.startsWith("srt://"));
 
     fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
     await settle();
     await settle();
 
-    const address = (await screen.findByLabelText("Paste this into the device")) as HTMLInputElement;
-    assert.ok(address.value.startsWith("http://"), address.value);
+    // The field is already there, holding the SRT address; it changes once the
+    // other protocol's preview has been fetched.
+    await eventually(() => {
+      const address = screen.getByLabelText("Paste this into the device") as HTMLInputElement;
+      assert.ok(address.value.startsWith("http://"), address.value);
+    });
     assert.ok(requested.includes("whip"), "expected a GET carrying ?protocol=whip");
 
     // Nothing was saved: no PATCH/POST /api/video/feeds went out for this.
@@ -1268,14 +1245,13 @@ test("a stale preview response landing late must not clobber a newer one — a r
   );
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     // The initial srt load is held — nothing to assert on it yet.
 
     fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
     await settle();
     await settle();
-    await screen.findByLabelText("Paste this into the device");
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
     let password = screen.getByLabelText("Password") as HTMLInputElement;
     assert.equal(password.value, "whippw");
 
@@ -1320,9 +1296,8 @@ test("a slow rotation that succeeds after a newer preview failed leaves the prev
   );
   try {
     mount();
-    await settle();
-    await settle();
-    await screen.findByLabelText("Paste this into the device");
+    await pageReady();
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
     fireEvent.click(screen.getByRole("button", { name: "New password" }));
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
@@ -1370,13 +1345,12 @@ test("New password during an unsaved preview re-fetches the address for the prot
   );
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
     await settle();
     await settle();
-    await screen.findByLabelText("Paste this into the device");
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
     let password = screen.getByLabelText("Password") as HTMLInputElement;
     assert.equal(password.value, "oldpw", "sanity: the preview shows the OLD password before any rotation");
 
@@ -1416,9 +1390,8 @@ test("switching protocol while a rotation is in flight still shows the rotation'
   );
   try {
     mount();
-    await settle();
-    await settle();
-    await screen.findByLabelText("Paste this into the device");
+    await pageReady();
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
 
     fireEvent.click(screen.getByRole("button", { name: "New password" }));
     await settle();
@@ -1463,9 +1436,8 @@ test("the Copy button reads \"Copy\" before any click, never stale \"Copied\" fr
   const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
   try {
     mount();
-    await settle();
-    await settle();
-    await screen.findByLabelText("Paste this into the device");
+    await pageReady();
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
     assert.ok(screen.getByRole("button", { name: "Copy" }), "expected the button to read \"Copy\" before any click");
   } finally {
     g.restore();
@@ -1478,9 +1450,8 @@ test("the secure-clipboard Copy path flips the button to \"Copied\" and reverts 
   const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
   try {
     mount();
-    await settle();
-    await settle();
-    await screen.findByLabelText("Paste this into the device");
+    await pageReady();
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
 
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await settle();
@@ -1505,9 +1476,8 @@ test("a second Copy restarts the \"Copied\" label's timer instead of letting the
   const wait = (ms: number) => act(async () => void (await new Promise((r) => setTimeout(r, ms))));
   try {
     mount();
-    await settle();
-    await settle();
-    await screen.findByLabelText("Paste this into the device");
+    await pageReady();
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
 
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await settle();
@@ -1545,9 +1515,8 @@ test("leaving the editor cancels the \"Copied\" label's timer", async () => {
   }) as typeof clearTimeout;
   try {
     const view = mount();
-    await settle();
-    await settle();
-    await screen.findByLabelText("Paste this into the device");
+    await pageReady();
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await settle();
     await settle();
@@ -1567,9 +1536,8 @@ test("blurring the address field clears the fallback's \"Press Ctrl+C / Cmd+C\" 
   const g = stubGlobals({ ...makeState([pushFeed()]), kinds: ALL_KINDS });
   try {
     mount();
-    await settle();
-    await settle();
-    const addressInput = (await screen.findByLabelText("Paste this into the device")) as HTMLInputElement;
+    await pageReady();
+    const addressInput = (await eventually(() => screen.getByLabelText("Paste this into the device"))) as HTMLInputElement;
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await settle();
     assert.ok(screen.getByText("Press Ctrl+C / Cmd+C to copy"), "expected the fallback hint to show first");
@@ -1614,9 +1582,8 @@ async function rotateAndCheckNotes(relay: VideoState["relay"], applied: boolean,
   );
   try {
     mount();
-    await settle();
-    await settle();
-    await screen.findByLabelText("Paste this into the device");
+    await pageReady();
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
     fireEvent.click(screen.getByRole("button", { name: "New password" }));
     await settle();
     await settle();
@@ -1673,8 +1640,7 @@ test("a new feed's fields start empty with placeholders; an existing feed shows 
   const g = stubGlobals({ ...makeState([pullFeed()]), kinds: ALL_KINDS });
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     let name = container.querySelector('input[aria-label="Name"]') as HTMLInputElement;
     let address = container.querySelector('input[aria-label="Address"]') as HTMLInputElement;
     assert.equal(name.value, "Program (IMAG)", "an existing feed shows its real name");
@@ -1697,8 +1663,7 @@ test("Add feed shows a draft row that follows the typed name and address, and Ca
   const g = stubGlobals({ ...makeState([pullFeed()]), kinds: ALL_KINDS });
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     assert.equal(draftRow() === null, true, "no draft row before Add feed");
 
     fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
@@ -1732,8 +1697,7 @@ test("selecting another feed removes the draft row", async () => {
   const g = stubGlobals({ ...makeState([pullFeed(), embedFeed({ id: "feed-2", name: "Lobby relay" })]), kinds: ALL_KINDS });
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
     await settle();
     assert.ok(draftRow());
@@ -1749,8 +1713,7 @@ test("Save with an empty name shows the error and sends nothing", async () => {
   const g = stubGlobals({ ...makeState([pullFeed()]), kinds: ALL_KINDS });
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
     await settle();
     fireEvent.change(container.querySelector('input[aria-label="Address"]') as HTMLInputElement, { target: { value: "rtsp://192.0.2.7/x" } });
@@ -1767,8 +1730,7 @@ test("Save with an empty or scheme-only address shows an error and sends nothing
   const g = stubGlobals({ ...makeState([pullFeed()]), kinds: ALL_KINDS });
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
     await settle();
     fireEvent.change(container.querySelector('input[aria-label="Name"]') as HTMLInputElement, { target: { value: "Lobby cam" } });
@@ -1882,8 +1844,7 @@ test("each probe state renders its pill and sub-line on the page, from what the 
   );
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
 
     const ready = within(rowOf("Ready cam"));
     assert.ok(ready.getByText("Ready"));
@@ -1918,8 +1879,7 @@ test("the relay's own Live wins over a probe result, and a push feed is untouche
   );
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     const live = within(rowOf("Live cam"));
     assert.ok(live.getByText("Live"));
     assert.ok(live.getByText("WebRTC · under 1 s behind"), "its own sub-line, unchanged");
@@ -1943,8 +1903,7 @@ test("'checked N s ago' follows the server's own ages, not the browser's clock: 
   );
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     assert.match(within(rowOf("Skew cam")).getByText(/^Camera answers/).textContent!, /checked [4-5] s ago$/, "the browser's clock leaked into the age");
   } finally {
     g.restore();
@@ -1958,8 +1917,7 @@ test("a busy camera that has never answered says so on a Checking row", async ()
   );
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     const row = within(rowOf("Busy cam"));
     assert.ok(row.getByText("Checking"));
     assert.ok(row.getByText("The camera is busy answering another request · trying again"));

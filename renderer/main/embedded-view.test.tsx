@@ -16,7 +16,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../test-dom.js";
+import { eventually, installRenderDom } from "../test-dom.js";
 
 // The act flag, one clientHeight for every element, and a do-nothing
 // EventSource — all three were written out verbatim here and in two neighbouring
@@ -144,8 +144,12 @@ describe("every kind reaches its own component", () => {
         // displayId is what the per-display kinds need; the others ignore it.
         React.createElement(EmbeddedView, { view: view(kind), ctx: ctxWith([]), displayId: "d-1" } as never),
       );
+      // The view's own component reads its data behind the first paint.
+      await eventually(() => {
+        const text = container.textContent ?? "";
+        assert.match(text, marker, `a ${kind} view did not reach its component (drew: ${text.slice(0, 120)})`);
+      });
       const text = container.textContent ?? "";
-      assert.match(text, marker, `a ${kind} view did not reach its component (drew: ${text.slice(0, 120)})`);
       assert.equal(text.includes("not embeddable yet"), false, `a ${kind} view still says it is not embeddable`);
     });
   }

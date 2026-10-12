@@ -10,7 +10,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -128,6 +128,14 @@ function mount() {
   return render(React.createElement(RouterProvider, { router } as never));
 }
 
+/** After mount(): the page is a spinner until its first read lands, and how many
+ *  turns that takes depends on the machine, so wait for the page itself. */
+async function pageReady(): Promise<void> {
+  await settle();
+  await settle();
+  await eventually(() => assert.ok(screen.getByRole("heading", { name: "Video feeds" }), "the page never left its spinner"));
+}
+
 beforeEach(() => {
   cleanup();
   __resetReplayCacheForTests();
@@ -153,8 +161,7 @@ test("Export opens in place of the editor, builds its link from the ticks, and r
   const g = stub();
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     fireEvent.click(screen.getByRole("button", { name: /Export/ }));
     await settle();
 
@@ -196,8 +203,7 @@ test("Import: pick a file, review it, choose, and the request carries exactly th
   const g = stub();
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     fireEvent.click(screen.getByRole("button", { name: /Import/ }));
     await settle();
 
@@ -206,11 +212,15 @@ test("Import: pick a file, review it, choose, and the request carries exactly th
     await settle();
     await settle();
 
-    const preview = g.calls.find((c) => c.url.endsWith("/api/video/import/preview"));
-    assert.ok(preview, "the file was not sent for review");
-    assert.deepEqual(preview!.body, FILE);
+    const preview = await eventually(() => {
+      const found = g.calls.find((c) => c.url.endsWith("/api/video/import/preview"));
+      assert.ok(found, "the file was not sent for review");
+      return found;
+    });
+    assert.deepEqual(preview.body, FILE);
 
-    assert.ok(screen.getByText(/feeds\.json · from Prod · 4 feeds · no passwords/));
+    // The review draws once the server has answered the preview.
+    await eventually(() => assert.ok(screen.getByText(/feeds\.json · from Prod · 4 feeds · no passwords/)));
     assert.ok(screen.getByText("Differs"));
     assert.ok(screen.getByText("New"));
     assert.ok(screen.getByText("Same as here"));
@@ -239,11 +249,14 @@ test("Import: pick a file, review it, choose, and the request carries exactly th
     await settle();
     await settle();
 
-    const apply = g.calls.find((c) => c.method === "POST" && c.url.endsWith("/api/video/import"));
-    assert.ok(apply, "Import never posted");
-    assert.deepEqual(apply!.body, { bundle: FILE, choices: { box: "replace" }, expect: EXPECT, ports: true });
+    const apply = await eventually(() => {
+      const found = g.calls.find((c) => c.method === "POST" && c.url.endsWith("/api/video/import"));
+      assert.ok(found, "Import never posted");
+      return found;
+    });
+    assert.deepEqual(apply.body, { bundle: FILE, choices: { box: "replace" }, expect: EXPECT, ports: true });
 
-    assert.ok(screen.getByText("Imported 2 feeds"));
+    await eventually(() => assert.ok(screen.getByText("Imported 2 feeds")));
     assert.ok(screen.getByText(/Added GYM/));
     assert.ok(screen.getByText(/Replaced BOX with the file's/));
     assert.ok(screen.getByText(/Resi was already the same/));
@@ -260,15 +273,14 @@ test("Import shows each new feed's own address when the review lists the feeds i
   const g = stub(undefined, undefined, { ...PREVIEW, feeds: [...PREVIEW.feeds].reverse() });
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     fireEvent.click(screen.getByRole("button", { name: /Import/ }));
     await settle();
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File([JSON.stringify(FILE)], "feeds.json", { type: "application/json" })] } });
     await settle();
     await settle();
-    assert.ok(screen.getByText("rtsp://192.0.2.50:554/gym"), "the new feed showed another feed's address");
+    await eventually(() => assert.ok(screen.getByText("rtsp://192.0.2.50:554/gym"), "the new feed showed another feed's address"));
   } finally {
     g.restore();
   }
@@ -278,21 +290,25 @@ test("Import with this server's feed kept and the ports left alone says exactly 
   const g = stub();
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     fireEvent.click(screen.getByRole("button", { name: /Import/ }));
     await settle();
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File([JSON.stringify(FILE)], "feeds.json")] } });
     await settle();
     await settle();
-    fireEvent.change(container.querySelector('select[aria-label="BOX: which to keep"]') as HTMLSelectElement, { target: { value: "keep" } });
+    const keep = await eventually(() => container.querySelector('select[aria-label="BOX: which to keep"]') as HTMLSelectElement);
+    assert.ok(keep, "the review never offered the choice");
+    fireEvent.change(keep, { target: { value: "keep" } });
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: "Import 1 feed" }));
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Import 1 feed" })));
     await settle();
-    await settle();
-    const apply = g.calls.find((c) => c.method === "POST" && c.url.endsWith("/api/video/import"));
-    assert.deepEqual(apply!.body, { bundle: FILE, choices: { box: "keep" }, expect: EXPECT, ports: false });
+    const apply = await eventually(() => {
+      const found = g.calls.find((c) => c.method === "POST" && c.url.endsWith("/api/video/import"));
+      assert.ok(found, "Import never posted");
+      return found;
+    });
+    assert.deepEqual(apply.body, { bundle: FILE, choices: { box: "keep" }, expect: EXPECT, ports: false });
   } finally {
     g.restore();
   }
@@ -302,15 +318,14 @@ test("Import refuses a file of the wrong kind by name, without sending it", asyn
   const g = stub();
   try {
     const { container } = mount();
-    await settle();
-    await settle();
+    await pageReady();
     fireEvent.click(screen.getByRole("button", { name: /Import/ }));
     await settle();
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     fireEvent.change(input, { target: { files: [new File([JSON.stringify({ kind: "stage-utility-view", views: [] })], "view.json")] } });
     await settle();
     await settle();
-    assert.ok(screen.getByText(/That is a "stage-utility-view" file, not a video feeds export\./));
+    await eventually(() => assert.ok(screen.getByText(/That is a "stage-utility-view" file, not a video feeds export\./)));
     assert.equal(g.calls.some((c) => c.url.includes("/import")), false);
   } finally {
     g.restore();
@@ -325,8 +340,7 @@ test("a second file dropped while the first is being reviewed is ignored, so the
   const g = stub(undefined, gate);
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     fireEvent.click(screen.getByRole("button", { name: /Import/ }));
     await settle();
 
@@ -341,8 +355,8 @@ test("a second file dropped while the first is being reviewed is ignored, so the
     await settle();
     await settle();
 
+    await eventually(() => assert.ok(screen.getByText(/first\.json · from Prod/)));
     assert.equal(g.calls.filter((c) => c.url.endsWith("/api/video/import/preview")).length, 1, "the second drop was sent for review as well");
-    assert.ok(screen.getByText(/first\.json · from Prod/));
   } finally {
     release();
     g.restore();
@@ -353,8 +367,7 @@ test("selecting a feed or Add feed returns to the editor", async () => {
   const g = stub();
   try {
     mount();
-    await settle();
-    await settle();
+    await pageReady();
     fireEvent.click(screen.getByRole("button", { name: /Export/ }));
     await settle();
     assert.ok(screen.getByRole("complementary", { name: "Export video feeds" }));

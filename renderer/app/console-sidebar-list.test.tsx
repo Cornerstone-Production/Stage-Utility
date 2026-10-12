@@ -18,7 +18,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import type { View } from "../../main/types/views.js";
 
@@ -118,9 +118,14 @@ describe("a hidden console is still a page", () => {
 describe("the real rail", () => {
   const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 
+  /** The rail's name for the app, which it takes from the state it has read: the
+   *  one thing on screen that says the views have arrived, even when no console
+   *  is drawn, which is what the hidden-console case is asserting. */
+  const STATE_ARRIVED = "Rail test app";
+
   async function renderRailAt(views: unknown[], url: string): Promise<HTMLElement> {
     const f = stubFetchWithLog((u) => {
-      if (u.includes("/api/state")) return ok({ views, outputs: [], appName: "Stage Utility" });
+      if (u.includes("/api/state")) return ok({ views, outputs: [], appName: STATE_ARRIVED });
       return ok({});
     });
     const rootRoute = createRootRoute({
@@ -133,9 +138,11 @@ describe("the real rail", () => {
     });
     const router = createRouter({ routeTree: rootRoute, history: createMemoryHistory({ initialEntries: [url] }) });
     const { container } = render(React.createElement(RouterProvider, { router }));
-    await settle();
-    await settle();
-    f.restore();
+    try {
+      await eventually(() => assert.ok(text(container).includes(STATE_ARRIVED), "the rail never read the state"));
+    } finally {
+      f.restore();
+    }
     return container;
   }
 

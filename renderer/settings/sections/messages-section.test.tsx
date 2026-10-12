@@ -12,7 +12,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, readLedger, settle, unmountAndTeardown } from "../../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -43,6 +43,9 @@ let halfDone = false;
 let gate: Promise<void> | null = null;
 let readFails = false;
 let fetchStub: ReturnType<typeof stubFetchWithLog>;
+/** The reads and saves begun, and the answers the page has taken. A save held on
+ *  purpose (`gate`) is left out: it is meant to stay in flight. */
+const reads = readLedger();
 
 type PutBody = { version: number; groups: { id?: string; name: string }[]; quickMessages: string[]; quickReplies: string[] };
 
@@ -82,16 +85,23 @@ beforeEach(() => {
   halfDone = false;
   gate = null;
   readFails = false;
+  reads.reset();
   fetchStub = stubFetchWithLog((url, init) => {
     if (url !== "/api/messaging") return ok({});
     if ((init?.method ?? "GET") === "PUT") {
       const body = JSON.parse(String(init?.body)) as PutBody;
       puts.push(body as Config);
-      if (refuse) return reply(400, { error: refuse });
-      return gate ? gate.then(() => answerPut(body)) : answerPut(body);
+      if (gate) return gate.then(() => answerPut(body));
+      reads.begin();
+      if (refuse) return reads.answer(reply(400, { error: refuse }));
+      return reads.answer(answerPut(body));
     }
-    if (readFails) throw new TypeError("fetch failed");
-    return ok(server);
+    reads.begin();
+    if (readFails) {
+      reads.failed();
+      throw new TypeError("fetch failed");
+    }
+    return reads.answer(ok(server));
   });
 });
 afterEach(() => fetchStub.restore());
@@ -111,7 +121,9 @@ async function mount(screens: Output[] | null = [], onConfigSaved?: () => void) 
     ),
   );
   await settle();
-  await settle();
+  // The section says "Loading..." until the groups have been read (or the read
+  // has failed, which it says too), however many turns that takes.
+  await eventually(() => assert.ok(!(document.body.textContent ?? "").includes("Loading..."), "the section never stopped loading"));
 }
 
 /** The change handler fires on React's synthetic input event. */
@@ -120,6 +132,8 @@ function type(label: string | RegExp, value: string) {
 }
 async function flush() {
   await settle();
+  // Whatever the action sent has been answered, and the page has taken the answer.
+  await eventually(reads.landed);
   await settle();
 }
 
@@ -511,9 +525,11 @@ test("a group that WAS saved clears the add box, though the server could not fin
   type("New group", "Booth");
   fireEvent.click(within(screen.getByTestId("messages-groups")).getByRole("button", { name: /Add/ }));
   await flush();
+  await eventually(() => assert.ok(puts.length > 0, "nothing was saved"));
   assert.equal(puts.length, 1);
-  assert.equal((screen.getByLabelText("New group") as HTMLInputElement).value, "", "a saved group stayed in the box to be added again");
-  assert.ok(screen.getByLabelText("Rename Booth"), "the reloaded page does not show the group that was saved");
+  // The box clears, and the group appears, once the answer has been taken.
+  await eventually(() => assert.equal((screen.getByLabelText("New group") as HTMLInputElement).value, "", "a saved group stayed in the box to be added again"));
+  await eventually(() => assert.ok(screen.getByLabelText("Rename Booth"), "the reloaded page does not show the group that was saved"));
 });
 
 test("editing a quick message and then clicking its trash can in the same breath removes the row", async () => {

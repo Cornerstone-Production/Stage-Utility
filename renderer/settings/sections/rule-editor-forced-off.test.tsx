@@ -25,7 +25,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom, settle } from "../../test-dom.js";
+import { eventually, installRenderDom, settle } from "../../test-dom.js";
 import { ruleIssues, type RuleStepsLike } from "@main/services/automation-param-validation";
 import type { ParamDef } from "@main/types/automation";
 import type { OptionSources } from "./automation-option-sources.js";
@@ -182,6 +182,15 @@ async function click(el: HTMLElement) {
   });
   await settle();
 }
+/** Press Save, and wait for the PATCH it sends to have reached the server. What
+ *  the save did to the rule is read only after that: "it stayed off" is
+ *  meaningless before the save that might have turned it on has happened. */
+async function save() {
+  const before = calls.length;
+  await click(button("Save"));
+  await eventually(() => assert.ok(calls.length > before, "Save sent nothing"));
+  await settle();
+}
 
 beforeEach(() => {
   calls = [];
@@ -218,16 +227,16 @@ describe("a save that turned the rule off over an issue", () => {
   test("A: enabled with an issue; forced off; operator switches Enabled OFF, fixes the field, saves — it must stay off", async () => {
     RULES = { r1: base(true) };
     await mount();
-    await click(button("Save"));
+    await save();
     assert.equal(RULES.r1.enabled, false, "first save should have been forced off");
 
     await click(enabledSwitch());
-    assert.equal(enabledSwitch().getAttribute("aria-checked"), "false", "switch should now show OFF");
+    await eventually(() => assert.equal(enabledSwitch().getAttribute("aria-checked"), "false", "switch should now show OFF"));
     await act(async () => {
       fireEvent.change(titleInput(), { target: { value: "Doors" } });
     });
     await settle();
-    await click(button("Save"));
+    await save();
 
     assert.equal(RULES.r1.enabled, false, "the operator switched it OFF and the save turned it back ON");
     const last = patchesFor("r1").at(-1);
@@ -237,8 +246,8 @@ describe("a save that turned the rule off over an issue", () => {
   test("B: OFF as Add rule creates it, with an issue; operator never touches Enabled; saves twice — it must stay off", async () => {
     RULES = { r1: base(false) };
     await mount();
-    await click(button("Save"));
-    assert.equal(enabledSwitch().getAttribute("aria-checked"), "false");
+    await save();
+    await eventually(() => assert.equal(enabledSwitch().getAttribute("aria-checked"), "false"));
 
     await act(async () => {
       fireEvent.change(titleInput(), { target: { value: "Doors" } });
@@ -249,7 +258,7 @@ describe("a save that turned the rule off over an issue", () => {
       false,
       "the footer promised to re-enable a rule that was never on",
     );
-    await click(button("Save"));
+    await save();
 
     assert.equal(RULES.r1.enabled, false, "a rule that was never on, with its switch showing OFF, was enabled by the save");
     const last = patchesFor("r1").at(-1);
@@ -263,16 +272,16 @@ describe("a save that turned the rule off over an issue", () => {
   test("control: switch stays ON throughout — the fixed field DOES turn it back on", async () => {
     RULES = { r1: base(true) };
     await mount();
-    await click(button("Save"));
+    await save();
     assert.equal(RULES.r1.enabled, false, "first save should have been forced off");
-    assert.equal(enabledSwitch().getAttribute("aria-checked"), "true", "the switch itself still reads ON");
+    await eventually(() => assert.equal(enabledSwitch().getAttribute("aria-checked"), "true", "the switch itself still reads ON"));
 
     await act(async () => {
       fireEvent.change(titleInput(), { target: { value: "Doors" } });
     });
     await settle();
-    assert.equal((document.body.textContent ?? "").includes("Save to turn it back on"), true, "the footer must offer to re-enable when the switch still reads on");
-    await click(button("Save"));
+    await eventually(() => assert.equal((document.body.textContent ?? "").includes("Save to turn it back on"), true, "the footer must offer to re-enable when the switch still reads on"));
+    await save();
 
     assert.equal(RULES.r1.enabled, true, "a switch left ON, once its field is fixed, must turn back on");
   });
@@ -286,23 +295,23 @@ describe("a pair whose OFF half was forced off over its own issue", () => {
     RULES = { on1: pairHalf("on1", "Doors"), off1: pairHalf("off1", "") };
     await mountPair();
 
-    await click(button("Save"));
+    await save();
     assert.equal(RULES.off1.enabled, false, "the off half with an issue should have been forced off");
     assert.equal(RULES.on1.enabled, true, "the on half had no issue and must be unaffected");
 
     await click(button("Turn off · Doors off"));
-    assert.equal(
+    await eventually(() => assert.equal(
       enabledSwitch().getAttribute("aria-checked"),
       "true",
       "the off half's own switch still reads ON after the forced-off save",
-    );
+    ));
     await click(enabledSwitch());
-    assert.equal(enabledSwitch().getAttribute("aria-checked"), "false", "operator switched the off half OFF");
+    await eventually(() => assert.equal(enabledSwitch().getAttribute("aria-checked"), "false", "operator switched the off half OFF"));
     await act(async () => {
       fireEvent.change(titleInput(), { target: { value: "Doors" } });
     });
     await settle();
-    await click(button("Save"));
+    await save();
 
     assert.equal(RULES.off1.enabled, false, "the operator switched the off half OFF and the save turned it back ON");
     const last = patchesFor("off1").at(-1);

@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { eventually, installDom, unmountAndTeardown } from "../../test-dom.js";
 import { routerWithBaptismDestination } from "../../test-fixtures/router.js";
 
 const teardown = installDom();
@@ -173,12 +173,12 @@ const { RouterContextProvider } = await import("@tanstack/react-router");
 // for their own cross-links.
 
 afterEach(cleanup);
-after(() => {
-  cleanup();
-  teardown();
-});
+// Unmount, let React finish, THEN take the DOM away: the unmount's own effects
+// flush after a bare teardown, onto a window that is gone, and fail the file.
+after(() => unmountAndTeardown(cleanup, teardown));
 
-async function renderList(readOnly = false, router?: ReturnType<typeof routerWithBaptismDestination>) {
+/** `rows: false` for a list that is expected to draw none (a failed load). */
+async function renderList(readOnly = false, router?: ReturnType<typeof routerWithBaptismDestination>, { rows = true } = {}) {
   let view!: ReturnType<typeof render>;
   await act(async () => {
     const section = React.createElement(ServiceHistorySection as React.ComponentType<{ readOnly: boolean }>, { readOnly });
@@ -190,10 +190,20 @@ async function renderList(readOnly = false, router?: ReturnType<typeof routerWit
       ? React.createElement(RouterContextProvider, { router, children: section })
       : section;
     view = render(React.createElement(TooltipProvider, null, tree));
-    // Four turns: the list, the attendance list, the day settling, then the
-    // per-row SPL fetches the day's rows kick off once it has.
-    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
   });
+  // The list, the attendance list and the day settling are reads behind the
+  // first paint; the rows are what they come to.
+  if (rows) {
+    await eventually(() => assert.ok(view.container.querySelector("[data-history-row]"), "the list drew no rows"));
+    // Each row then reads its own sound record, and says "loading" until it lands.
+    await eventually(() =>
+      assert.ok(
+        ![...view.container.querySelectorAll('[data-row-figure="level"]')].some((f) => (f.textContent ?? "").includes("loading")),
+        "a row was still loading its sound",
+      ),
+    );
+  }
   return view;
 }
 
@@ -297,32 +307,35 @@ describe("the All services day list", () => {
   test("a two-service day renders two rows, each with the service page's own figures", async () => {
     installFetch();
     const view = await renderList();
-    const rows = [...view.container.querySelectorAll("[data-history-row]")];
-    assert.deepEqual(
-      rows.map((r) => r.getAttribute("data-history-row")),
-      // Newest first, which is the order `rows` sorts in and the order an
-      // operator looking at today's services wants.
-      [ELEVEN.serviceKey, NINE.serviceKey],
-      "a day with two services must render two rows, newest first",
-    );
+    // The rows' figures come from per-row reads that follow the rows themselves.
+    await eventually(() => {
+      const rows = [...view.container.querySelectorAll("[data-history-row]")];
+      assert.deepEqual(
+        rows.map((r) => r.getAttribute("data-history-row")),
+        // Newest first, which is the order `rows` sorts in and the order an
+        // operator looking at today's services wants.
+        [ELEVEN.serviceKey, NINE.serviceKey],
+        "a day with two services must render two rows, newest first",
+      );
 
-    for (const [i, record] of [ELEVEN, NINE].entries()) {
-      const att = ATT.find((a) => a.serviceKey === record.serviceKey) ?? null;
-      const spl = record === ELEVEN ? SPL : null;
-      const kpis = new Map(serviceKpis(record, att, spl).map((k) => [k.key, k]));
-      const drawn = figuresOf(rows[i]);
-      // The identity, figure by figure: each drawn value is the header's own.
-      assert.equal(drawn.attendance.value, kpis.get("attendance")!.value, "Peak must be the header's");
-      assert.equal(drawn.actual.value, kpis.get("actual")!.value, "Ran must be the header's Actual");
-      assert.equal(drawn.level.value, kpis.get("level")!.value, "the peak level must be the header's");
-      // And the row's own extra: versus plan, which the header carries as a
-      // sub-line of Actual.
-      const vsPlan = serviceRowFigures(record, att, spl).figures.find((f) => f.key === "vs-plan");
-      assert.equal(drawn["vs-plan"].value, vsPlan!.value, "vs plan must come from the same derivation");
-      // The one figure that has been wrong before: attendance is people in the
-      // ROOM, not the cumulative door count.
-      assert.equal(drawn.attendance.value, att!.peakOccupancy.toLocaleString());
-    }
+      for (const [i, record] of [ELEVEN, NINE].entries()) {
+        const att = ATT.find((a) => a.serviceKey === record.serviceKey) ?? null;
+        const spl = record === ELEVEN ? SPL : null;
+        const kpis = new Map(serviceKpis(record, att, spl).map((k) => [k.key, k]));
+        const drawn = figuresOf(rows[i]);
+        // The identity, figure by figure: each drawn value is the header's own.
+        assert.equal(drawn.attendance.value, kpis.get("attendance")!.value, "Peak must be the header's");
+        assert.equal(drawn.actual.value, kpis.get("actual")!.value, "Ran must be the header's Actual");
+        assert.equal(drawn.level.value, kpis.get("level")!.value, "the peak level must be the header's");
+        // And the row's own extra: versus plan, which the header carries as a
+        // sub-line of Actual.
+        const vsPlan = serviceRowFigures(record, att, spl).figures.find((f) => f.key === "vs-plan");
+        assert.equal(drawn["vs-plan"].value, vsPlan!.value, "vs plan must come from the same derivation");
+        // The one figure that has been wrong before: attendance is people in the
+        // ROOM, not the cumulative door count.
+        assert.equal(drawn.attendance.value, att!.peakOccupancy.toLocaleString());
+      }
+    });
   });
 
   test("a row names its plan, its series and how many items ran", async () => {
@@ -456,16 +469,19 @@ describe("the level figure on a row", () => {
   test("a service that recorded sound shows a dB number, named after the metric it read", async () => {
     installFetch();
     const view = await renderList();
-    const drawn = figuresOf(view.container.querySelector(`[data-history-row="${ELEVEN.serviceKey}"]`)!);
     // The loudest reading on the record, not an energy average and not a dash.
     // The loudest reading, with the METRIC as its caption — which meter reading
     // this is matters more on a row than repeating the heading above it, and
-    // the heading has already said "peak".
-    assert.deepEqual(
-      drawn.level,
-      { value: "102 dB", caption: "LAeq 10" },
-      `the row did not show the recorded peak as a dB figure: ${JSON.stringify(drawn)}`,
-    );
+    // the heading has already said "peak". The row's own sound read lands behind
+    // the row, and until it does the row says there is none.
+    await eventually(() => {
+      const drawn = figuresOf(view.container.querySelector(`[data-history-row="${ELEVEN.serviceKey}"]`)!);
+      assert.deepEqual(
+        drawn.level,
+        { value: "102 dB", caption: "LAeq 10" },
+        `the row did not show the recorded peak as a dB figure: ${JSON.stringify(drawn)}`,
+      );
+    });
   });
 
   test("a service with no sound says WHY there is no number", async () => {
@@ -522,12 +538,20 @@ describe("a history load that failed, rather than came back empty", () => {
     console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(" ")); };
     installFetch();
     const real = (globalThis as unknown as { fetch: (i: unknown) => Promise<unknown> }).fetch;
+    const thrown = new Set<string>();
     (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
-      if (failing(String(input))) throw new Error("socket hang up");
+      if (failing(String(input))) {
+        thrown.add(String(input));
+        throw new Error("socket hang up");
+      }
       return real(input);
     };
     try {
-      return { view: await renderList(), warned };
+      const view = await renderList(false, undefined, { rows: false });
+      // Each failed read is logged once it has failed; the collector must still
+      // be in place when the last of them is.
+      await eventually(() => assert.ok(warned.length >= thrown.size && thrown.size > 0, `${thrown.size} read(s) failed, ${warned.length} line(s) logged`));
+      return { view, warned };
     } finally {
       console.warn = realWarn;
     }
@@ -539,11 +563,11 @@ describe("a history load that failed, rather than came back empty", () => {
     // yet" and sent an operator to look at a recorder that was fine.
     const { view, warned } = await withFailures((url) =>
       url === "/api/service-timeline" || url === "/api/attendance/history?summary=1");
+    await eventually(() => {
+      const shown = (view.container.textContent ?? "").replace(/\s+/g, " ");
+      assert.ok(shown.includes("could not be read"), `a failed read still reads as an empty history: ${shown.slice(0, 200)}`);
+    });
     const txt = (view.container.textContent ?? "").replace(/\s+/g, " ");
-    assert.ok(
-      txt.includes("could not be read"),
-      `a failed read still reads as an empty history: ${txt.slice(0, 200)}`,
-    );
     assert.equal(
       txt.includes("No service timings recorded yet"),
       false,
@@ -565,18 +589,28 @@ describe("a history load that failed, rather than came back empty", () => {
     // an attendance chart is not wrong because the sound summary did not load.
     // So this walks the path an operator walks: click Sound, then read it.
     const { act } = await import("@testing-library/react");
+    const sound = await eventually(() => {
+      const found = view.container.querySelector<HTMLButtonElement>('[data-trend-measure="sound"]');
+      assert.ok(found, "the Trends card never drew its Sound measure");
+      return found;
+    });
     await act(async () => {
-      view.container.querySelector<HTMLButtonElement>('[data-trend-measure="sound"]')!.click();
+      sound.click();
       await new Promise((r) => setTimeout(r, 0));
     });
-    assert.ok(
-      view.container.querySelector("[data-sound-unavailable]"),
-      "the Trends card must say the sound summary is missing, not just be missing it",
+    await eventually(() =>
+      assert.ok(
+        view.container.querySelector("[data-sound-unavailable]"),
+        "the Trends card must say the sound summary is missing, not just be missing it",
+      ),
     );
     // And the TILES, one level down, say the same thing: a type with no level
     // because the summary would not load is not a type that recorded no sound.
-    const tileNotes = [...view.container.querySelectorAll("[data-trend-change]")].map((n) => n.textContent);
-    assert.ok(tileNotes.length > 0, "no tiles at all, so this asserts nothing");
+    const tileNotes = await eventually(() => {
+      const notes = [...view.container.querySelectorAll("[data-trend-change]")].map((n) => n.textContent);
+      assert.ok(notes.length > 0, "no tiles at all, so this asserts nothing");
+      return notes;
+    });
     assert.deepEqual(
       [...new Set(tileNotes)],
       ["sound unavailable"],
@@ -596,11 +630,11 @@ describe("a history load that failed, rather than came back empty", () => {
   // flags this exact fetch; the list must do the same, once, not per row.
   test("a failed baptism-sessions read says so, once, never reading as a baptism-free month", async () => {
     const { view, warned } = await withFailures((url) => url === "/api/baptism/sessions");
+    await eventually(() => {
+      const shown = (view.container.textContent ?? "").replace(/\s+/g, " ");
+      assert.ok(shown.includes("Baptism counts could not be loaded"), `expected a note that baptism counts failed to load: ${shown.slice(0, 300)}`);
+    });
     const txt = (view.container.textContent ?? "").replace(/\s+/g, " ");
-    assert.ok(
-      txt.includes("Baptism counts could not be loaded"),
-      `expected a note that baptism counts failed to load: ${txt.slice(0, 300)}`,
-    );
     // Exactly once for the whole list — not a copy under every row.
     const notes = [...view.container.querySelectorAll('[role="alert"]')].filter((n) =>
       (n.textContent ?? "").includes("Baptism counts could not be loaded"),

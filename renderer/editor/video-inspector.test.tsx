@@ -9,7 +9,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -66,6 +66,13 @@ async function mount(config: Config, onConfig: (c: LayoutObjectConfig) => void) 
   );
   await settle();
   await settle();
+  // Every control reads the feeds, which land a fetch behind the first paint.
+  await eventually(() =>
+    assert.ok(
+      [...utils.container.querySelectorAll("option")].some((o) => o.textContent === "Lobby cam"),
+      "the feeds never arrived",
+    ),
+  );
   return utils;
 }
 

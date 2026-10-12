@@ -30,7 +30,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -153,10 +153,15 @@ function mountSection() {
 
 /** Click the row whose text includes `title`, and let its reads land. */
 async function open(container: HTMLElement, title: string): Promise<void> {
-  const row = [...container.querySelectorAll("button")].find((b) => text(b).includes(title));
-  assert.ok(!!row, `the ${title} row never rendered`);
-  fireEvent.click(row!);
+  const row = await eventually(() => {
+    const found = [...container.querySelectorAll("button")].find((b) => text(b).includes(title));
+    assert.ok(!!found, `the ${title} row never rendered`);
+    return found;
+  });
+  fireEvent.click(row);
   await settle();
+  // The service page is up once its header is; its own reads follow.
+  await eventually(() => assert.ok(document.querySelector('[data-testid="history-service-header"]'), `the ${title} service never opened`));
   await settle();
   await settle();
 }
@@ -220,13 +225,13 @@ test("a click opens the service at once while its own reads are in flight, and c
       true,
       "the list stayed on screen until the record landed",
     );
-    assert.deepEqual(sectionLabels(), ["Rundown", "Attendance", "Sound"]);
-    assert.deepEqual(loadingCards(), ["attendance", "sound"], "both charts say they are loading");
+    await eventually(() => assert.deepEqual(sectionLabels(), ["Rundown", "Attendance", "Sound"]));
+    await eventually(() => assert.deepEqual(loadingCards(), ["attendance", "sound"], "both charts say they are loading"));
     // Nothing yet claims the service recorded nothing — neither card, nor the
     // header's level figure.
     assert.equal(!!screen.queryByText(/No attendance recorded/i), false);
     assert.equal(!!screen.queryByText(/No sound recorded/i), false);
-    assert.equal(!!screen.queryByText("loading"), true, "the header's level figure says it is loading");
+    await eventually(() => assert.equal(!!screen.queryByText("loading"), true, "the header's level figure says it is loading"));
     assert.equal(alerts(), "");
 
     await act(async () => {
@@ -236,7 +241,7 @@ test("a click opens the service at once while its own reads are in flight, and c
     });
     await settle();
     await settle();
-    assert.deepEqual(loadingCards(), [], "the charts replace the placeholders");
+    await eventually(() => assert.deepEqual(loadingCards(), [], "the charts replace the placeholders"));
     assert.equal(!!screen.queryByText("loading"), false);
   } finally {
     f.restore();
@@ -258,7 +263,7 @@ test("a service the row already read the sound of does not wait on the page's ow
   try {
     await openA();
     assert.ok(splReads >= 2, "the page made its own read");
-    assert.deepEqual(loadingCards(), []);
+    await eventually(() => assert.deepEqual(loadingCards(), []));
     assert.equal(!!screen.queryByText(/No sound recorded/i), false);
   } finally {
     f.restore();
@@ -296,15 +301,16 @@ test("Copy report waits for the attendance rather than copying a report without 
     await settle();
     await settle();
     await open(view.container, "Evening");
-    fireEvent.click(screen.getByRole("button", { name: /Copy report/ }));
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: /Copy report/ })));
     await settle();
     assert.deepEqual(writes, [], "nothing is copied while the attendance is in flight");
-    assert.equal(!!screen.queryByText(/still loading/i), true, "and it says why");
+    await eventually(() => assert.equal(!!screen.queryByText(/still loading/i), true, "and it says why"));
 
     await act(async () => attendance.answer(A.attendance));
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: /Copy report/ }));
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: /Copy report/ })));
     await settle();
+    await eventually(() => assert.ok(writes.length > 0, "nothing was copied"));
     assert.equal(writes.length, 1);
     assert.match(writes[0]!, /Peak attendance 1,196/);
   } finally {
@@ -322,13 +328,13 @@ test("a service whose attendance is still in flight says so, not 'No attendance 
   });
   try {
     await openA();
-    assert.deepEqual(loadingCards(), ["attendance"]);
+    await eventually(() => assert.deepEqual(loadingCards(), ["attendance"]));
     assert.equal(!!screen.queryByText(/No attendance recorded/i), false);
     // A read that answers "none" is the only thing that may say so.
     await act(async () => attendance.answer(null));
     await settle();
-    assert.deepEqual(loadingCards(), []);
-    assert.equal(!!screen.queryByText(/No attendance recorded for this service/i), true);
+    await eventually(() => assert.deepEqual(loadingCards(), []));
+    await eventually(() => assert.equal(!!screen.queryByText(/No attendance recorded for this service/i), true));
   } finally {
     f.restore();
   }
@@ -357,7 +363,7 @@ test("a service opened a second time is loading again, not 'No attendance record
   });
   try {
     const container = await openA();
-    assert.deepEqual(loadingCards(), []);
+    await eventually(() => assert.deepEqual(loadingCards(), []));
     fireEvent.click(screen.getByRole("button", { name: /All services/ }));
     await settle();
     await open(container, "Evening");
@@ -369,7 +375,7 @@ test("a service opened a second time is loading again, not 'No attendance record
       sound.answer(A.spl);
     });
     await settle();
-    assert.deepEqual(loadingCards(), []);
+    await eventually(() => assert.deepEqual(loadingCards(), []));
   } finally {
     f.restore();
   }
@@ -394,7 +400,7 @@ test("a failed sound read says so on the Sound card and in the header, not 'No s
     assert.match(alerts(), /Couldn't load the sound for this service/i);
     // Nor the header's level figure, which said "no sound recorded" too.
     assert.equal(!!screen.queryByText(/No sound recorded/i), false);
-    assert.equal(!!screen.queryByText("sound unavailable"), true, "the header's level figure says why it has no level");
+    await eventually(() => assert.equal(!!screen.queryByText("sound unavailable"), true, "the header's level figure says why it has no level"));
     assert.ok(loggedFor(f.logs, "the sound"), `the page's own line, not a row's — got ${JSON.stringify(f.logs)}`);
   } finally {
     f.restore();
@@ -452,7 +458,7 @@ test("a failure on the service the operator left goes with it: the next one's ow
     await settle();
     await open(container, "Late");
     assert.equal(/Couldn't load the sound/i.test(alerts()), false, "Evening's failure is not Late's");
-    assert.equal(!!screen.queryByText(/No sound recorded for this service/i), true, "Late's own empty state");
+    await eventually(() => assert.equal(!!screen.queryByText(/No sound recorded for this service/i), true, "Late's own empty state"));
   } finally {
     f.restore();
   }

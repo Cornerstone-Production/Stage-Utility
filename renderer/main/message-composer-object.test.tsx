@@ -10,7 +10,7 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installDom } from "../test-dom.js";
 import { ALERT_MS, EVERYONE, type MessagesState, type StageMessage } from "@main/types/messages";
 
 const teardown = installDom();
@@ -214,11 +214,13 @@ describe("composing", () => {
     await type(c, "  Host: walk now  ");
     await press(c.querySelector('[role="switch"]') as HTMLElement);
     await press(button(c, "Send alert"));
+    // The send is a request, and the composer clears once it has been answered.
+    await eventually(() => assert.ok(posts().length > 0, "the press sent nothing"));
     assert.deepEqual(posts().map((r) => [r.url, r.body]), [
       ["/api/messages", { to: [GREEN, STAGE], text: "Host: walk now", alert: true, from: "Green room iPad" }],
     ]);
-    assert.equal(box(c).value, "");
-    assert.ok(button(c, "Send"), "the alert switch stayed on after a send");
+    await eventually(() => assert.equal(box(c).value, ""));
+    await eventually(() => assert.ok(button(c, "Send"), "the alert switch stayed on after a send"));
     assert.deepEqual(["Green room", "Stage"].map((n) => pressed(c, n)), ["true", "true"], "the targets were cleared");
   });
 
@@ -232,15 +234,21 @@ describe("composing", () => {
       await type(c, "Walk now");
       await press(c.querySelector('[role="switch"]') as HTMLElement);
       await press(button(c, "Send alert"));
+      // The operator being told is the failure having been handled; what the
+      // composer kept is read after it, since "kept" is about what did NOT change.
+      await eventually(() => assert.equal(toasts.length, 1, "the operator was not told"));
       assert.equal(box(c).value, "Walk now", "the typed text was dropped on a failed send");
       assert.equal(pressed(c, "Stage"), "true");
       assert.ok(button(c, "Send alert"), "the alert switch was reset on a failed send");
-      assert.equal(button(c, "Send alert")!.disabled, false, "stuck sending after a failure");
+      await eventually(() => assert.equal(button(c, "Send alert")!.disabled, false, "stuck sending after a failure"));
     } finally {
       console.warn = quiet;
     }
-    const logged = requests.find((r) => r.url === "/api/log/client");
-    assert.ok(logged, "the failure never reached /log");
+    const logged = await eventually(() => {
+      const found = requests.find((r) => r.url === "/api/log/client");
+      assert.ok(found, "the failure never reached /log");
+      return found;
+    });
     assert.equal(logged!.body!.tag, "messages");
     assert.match(String(logged!.body!.message), /could not send that message \(to g-00000002\): no group has the id/);
     assert.deepEqual(toasts, ["Could not send that message: no group has the id g-00000009"], "the operator was not told");
@@ -313,6 +321,7 @@ describe("the thread", () => {
     const running = msg(7, { alert: true, alertUntil: NOW + 10_000 });
     const c = mount({ state: stateOf([msg(1), running]) });
     await press(button(c, "Clear alert"));
+    await eventually(() => assert.ok(posts().length > 0, "the press sent nothing"));
     assert.deepEqual(posts().map((r) => [r.url, r.body]), [[`/api/messages/${running.id}/clear-alert`, { from: "Booth console" }]]);
   });
 
@@ -324,12 +333,18 @@ describe("the thread", () => {
       const running = msg(7, { alert: true, alertUntil: NOW + 10_000 });
       const c = mount({ state: stateOf([running]) });
       await press(button(c, "Clear alert"));
+      // The operator being told is the failure having been handled.
+      await eventually(() => assert.equal(toasts.length, 1, "the operator was not told"));
       assert.ok(button(c, "Clear alert") && !button(c, "Clear alert")!.disabled);
     } finally {
       console.warn = quiet;
     }
-    const logged = requests.find((r) => r.url === "/api/log/client");
-    assert.match(String(logged?.body?.message), /could not clear that alert \(/);
+    const logged = await eventually(() => {
+      const found = requests.find((r) => r.url === "/api/log/client");
+      assert.ok(found, "the failure never reached /log");
+      return found;
+    });
+    assert.match(String(logged.body?.message), /could not clear that alert \(/);
     assert.deepEqual(toasts, ["Could not clear that alert: could not save"], "the operator was not told");
   });
 });

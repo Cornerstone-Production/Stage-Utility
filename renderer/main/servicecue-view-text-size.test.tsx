@@ -17,7 +17,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -95,8 +95,13 @@ function zoom(): string {
   return (table!.parentElement as HTMLElement).style.zoom ?? "";
 }
 
+/** Let the page read its plan and draw the rundown. The rundown is a fetch and a
+ *  render behind the first paint, so it is waited for rather than a number of
+ *  turns assumed. */
 async function settleAll(): Promise<void> {
-  for (let i = 0; i < 4; i++) await settle();
+  await settle();
+  await eventually(() => assert.ok(document.querySelector("table"), "the rundown never rendered"));
+  await settle();
 }
 
 /** A display as StageView renders it: the size the server keeps for it
@@ -131,7 +136,7 @@ test("a display draws the size the server keeps for it, and writes nothing", asy
   const f = stubFetch();
   try {
     await mountDisplay(80);
-    assert.equal(zoom(), "0.8");
+    await eventually(() => assert.equal(zoom(), "0.8"));
     assert.deepEqual(patches, [], "a display with nothing new to keep must not write");
   } finally {
     f.restore();
@@ -143,8 +148,8 @@ test("?text= overrides what the server holds, and is kept there", async () => {
   const f = stubFetch();
   try {
     await mountDisplay(80);
-    assert.equal(zoom(), "1.5", "the address wins over what the server held");
-    assert.deepEqual(patches, [["display-1", { textSize: 150 }]]);
+    await eventually(() => assert.equal(zoom(), "1.5", "the address wins over what the server held"));
+    await eventually(() => assert.deepEqual(patches, [["display-1", { textSize: 150 }]]));
   } finally {
     f.restore();
   }
@@ -155,7 +160,7 @@ test("?text= the server already holds is not written again", async () => {
   const f = stubFetch();
   try {
     await mountDisplay(150);
-    assert.equal(zoom(), "1.5");
+    await eventually(() => assert.equal(zoom(), "1.5"));
     assert.deepEqual(patches, [], "opened with the same link on every boot, it rewrote the server's size each time");
   } finally {
     f.restore();
@@ -178,13 +183,13 @@ test("once kept, the address is spent: a size the server later holds is the disp
   const f = stubFetch();
   try {
     const view = await mountDisplay(null);
-    assert.equal(zoom(), "1.5");
+    await eventually(() => assert.equal(zoom(), "1.5"));
     // The server's broadcast arrives carrying what was kept, then something else.
     view.rerender(displayElement(150));
     await settleAll();
     view.rerender(displayElement(200));
     await settleAll();
-    assert.equal(zoom(), "2", "a stale link overrode a size set some other way");
+    await eventually(() => assert.equal(zoom(), "2", "a stale link overrode a size set some other way"));
     assert.equal(patches.length, 1, "the link was written more than once");
   } finally {
     f.restore();
@@ -198,7 +203,10 @@ test("a failed save is logged on /log, the size from the address still shows, an
     patchFails = new Error("HTTP 400: textSize must be a number from 50 to 300");
     await mountDisplay(null);
     await settleAll();
-    assert.equal(zoom(), "1.5");
+    await eventually(() => assert.equal(zoom(), "1.5"));
+    // The failure is logged once the refused save has been answered; the counts
+    // are read after that, since "not retried in a loop" is about what follows.
+    await eventually(() => assert.ok(f.logs.length > 0, "the refused save was never logged"));
     assert.equal(patches.length, 1, "a refused save was retried");
     assert.equal(f.logs.length, 1, JSON.stringify(f.logs));
     assert.equal(f.logs[0]?.tag, "servicecue");
@@ -213,12 +221,12 @@ test("a display the server holds nothing for hands over the size its device reme
   const f = stubFetch();
   try {
     const view = await mountDisplay(null);
-    assert.equal(zoom(), "0.8");
-    assert.deepEqual(patches, [["display-1", { textSize: 80 }]]);
+    await eventually(() => assert.equal(zoom(), "0.8"));
+    await eventually(() => assert.deepEqual(patches, [["display-1", { textSize: 80 }]]));
     // The server now holds it: the display reads that, and offers nothing more.
     view.rerender(displayElement(80));
     await settleAll();
-    assert.equal(zoom(), "0.8");
+    await eventually(() => assert.equal(zoom(), "0.8"));
     assert.equal(patches.length, 1);
     assert.equal(localStorage.getItem(DISPLAY_KEY), "80", "what the device remembered is the operator's; it is left alone");
   } finally {
@@ -235,8 +243,8 @@ test("a size remembered under the pre-rename key is handed over too", async () =
   const f = stubFetch();
   try {
     await mountDisplay(null);
-    assert.equal(zoom(), "0.8", "the size remembered under the old key was ignored");
-    assert.deepEqual(patches, [["display-1", { textSize: 80 }]]);
+    await eventually(() => assert.equal(zoom(), "0.8", "the size remembered under the old key was ignored"));
+    await eventually(() => assert.deepEqual(patches, [["display-1", { textSize: 80 }]]));
     assert.equal(localStorage.getItem(legacyKey), "80", "the old key is the operator's; it is left alone");
   } finally {
     f.restore();
@@ -248,7 +256,7 @@ test("what the server keeps beats what the device remembered, and nothing is off
   const f = stubFetch();
   try {
     await mountDisplay(120);
-    assert.equal(zoom(), "1.2");
+    await eventually(() => assert.equal(zoom(), "1.2"));
     assert.deepEqual(patches, []);
   } finally {
     f.restore();
@@ -272,7 +280,7 @@ test("a preview draws the display's kept size and neither reads the address or t
   const f = stubFetch();
   try {
     await mountDisplay(200, true);
-    assert.equal(zoom(), "2");
+    await eventually(() => assert.equal(zoom(), "2"));
     assert.deepEqual(patches, [], "a Screens card changed the display's size by being looked at");
   } finally {
     f.restore();
@@ -301,7 +309,7 @@ test("the page and a display keep separate sizes", async () => {
     await mountPage();
     assert.equal(zoom(), "", "the page does not read the display's size");
     await act(async () => void fireEvent.click(screen.getByLabelText("Larger text")));
-    assert.equal(zoom(), "1.1");
+    await eventually(() => assert.equal(zoom(), "1.1"));
     assert.equal(readStoredSize(PAGE_TEXT_SIZE_KEY), 110, "the page remembers its own");
     assert.equal(readStoredSize(DISPLAY_KEY), 80, "and the display's is untouched");
   } finally {
@@ -314,9 +322,9 @@ test("the page also starts from ?text=, and its control moves on from there", as
   const f = stubFetch();
   try {
     await mountPage();
-    assert.equal(zoom(), "2");
+    await eventually(() => assert.equal(zoom(), "2"));
     await act(async () => void fireEvent.click(screen.getByLabelText("Smaller text")));
-    assert.equal(zoom(), "1.9");
+    await eventually(() => assert.equal(zoom(), "1.9"));
   } finally {
     f.restore();
   }
@@ -328,9 +336,9 @@ test("a size set from the page's control is written back to ?text=, so a refresh
   const f = stubFetch();
   try {
     await mountPage();
-    assert.equal(zoom(), "1.5");
+    await eventually(() => assert.equal(zoom(), "1.5"));
     await act(async () => void fireEvent.click(screen.getByLabelText("Larger text")));
-    assert.equal(zoom(), "1.6");
+    await eventually(() => assert.equal(zoom(), "1.6"));
     assert.equal(
       window.location.search + window.location.hash,
       "?plan=p9&text=160#top",
@@ -341,7 +349,7 @@ test("a size set from the page's control is written back to ?text=, so a refresh
     // A refresh: the page mounts again on the same address.
     cleanup();
     await mountPage();
-    assert.equal(zoom(), "1.6");
+    await eventually(() => assert.equal(zoom(), "1.6"));
   } finally {
     f.restore();
   }
@@ -353,7 +361,7 @@ test("the page's control does not add ?text= to an address that had none", async
   try {
     await mountPage();
     await act(async () => void fireEvent.click(screen.getByLabelText("Larger text")));
-    assert.equal(zoom(), "1.1");
+    await eventually(() => assert.equal(zoom(), "1.1"));
     assert.equal(window.location.search, "?plan=p9");
   } finally {
     f.restore();

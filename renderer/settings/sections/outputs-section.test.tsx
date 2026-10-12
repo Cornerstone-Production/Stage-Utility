@@ -20,11 +20,11 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
-const { render, screen, cleanup, waitFor, within } = await import("@testing-library/react");
+const { render, screen, cleanup, within } = await import("@testing-library/react");
 const React = await import("react");
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
 const { OutputRow, OutputsSection, struggleSentences } = await import("./outputs-section.js");
@@ -258,7 +258,7 @@ test("OutputsSection shows the struggling feed's box, correctly naming it from v
     React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS, onOpenSettings: () => {}, onAddScreen: () => {} })),
   );
 
-  await waitFor(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
+  await eventually(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
   assert.ok(screen.getByText(/This screen dropped 300 frames in the last minute\./), "the box must carry THIS pair's own EPISODE numbers, not a placeholder");
   assert.equal(screen.queryByText(/Struggling with Stage PTZ/) === null, true, "a feed reporting clean on the same screen must get no box");
 });
@@ -281,7 +281,7 @@ test("OutputsSection builds the box from the pair's episode, not its live window
     React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS, onOpenSettings: () => {}, onAddScreen: () => {} })),
   );
 
-  await waitFor(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
+  await eventually(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
   const box = screen.getByText(/Struggling with Program \(IMAG\)\./).parentElement!;
   assert.equal(
     box.textContent,
@@ -303,7 +303,7 @@ test("OutputsSection routes each screen's own struggles to its own card — a se
     React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT, OTHER]), handlers: NOOP_HANDLERS, onOpenSettings: () => {}, onAddScreen: () => {} })),
   );
 
-  await waitFor(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
+  await eventually(() => assert.ok(screen.getByText(/Struggling with Program \(IMAG\)\./)));
   // Exactly one box, not one per card — the same feed struggling on ONE
   // screen must not paint a warning on a screen playing it cleanly.
   assert.equal(screen.getAllByText(/Struggling with Program \(IMAG\)\./).length, 1, "only the struggling screen's own card gets a box");
@@ -324,7 +324,7 @@ test("OutputsSection shows no struggle box for any screen before video:state has
   render(
     React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT]), handlers: NOOP_HANDLERS, onOpenSettings: () => {}, onAddScreen: () => {} })),
   );
-  await waitFor(() => assert.ok(screen.getByText("Nothing assigned"))); // the unrouted-screen placeholder — proof the card mounted
+  await eventually(() => assert.ok(screen.getByText("Nothing assigned"))); // the unrouted-screen placeholder — proof the card mounted
   assert.equal(screen.queryByText(/Struggling with/) === null, true);
 });
 
@@ -343,7 +343,7 @@ test("OutputsSection builds the lagging box from the pair's EPISODE — the wors
     React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: stageStateWith([OUTPUT, OTHER]), handlers: NOOP_HANDLERS, onOpenSettings: () => {}, onAddScreen: () => {} })),
   );
 
-  await waitFor(() => assert.ok(screen.getByText("Holding 3.2 s of Program (IMAG) in its own buffer.")));
+  await eventually(() => assert.ok(screen.getByText("Holding 3.2 s of Program (IMAG) in its own buffer.")));
   assert.equal(screen.queryByText(/of Stage PTZ in its own buffer/) === null, true, "a feed reporting clean on the same screen gets no box");
   const rightCard = screen.getByDisplayValue("Right Mic Display").closest('[class*="rounded-xl"]') as HTMLElement;
   assert.equal(within(rightCard).queryByText(/in its own buffer/), null, "the second screen is not lagging and carries no box");
