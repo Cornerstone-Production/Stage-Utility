@@ -459,140 +459,140 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
   return (
     <>
       <div className="flex-1 overflow-y-auto px-[18px] pb-[18px] pt-1.5">
-      {created && <CreatedNote output={output} viewMade={created.viewMade} onEditLayout={shown ? () => actions.onEditLayout(shown.id) : undefined} />}
-      <Section title="What it shows">
-        <ViewPicker
-          groups={viewGroups(views)}
-          value={output.viewId ?? NONE}
-          onChange={pickView}
-          noneLabel="— No view yet —"
-        />
-        <RoleLine surface={shown ? viewSurface(shown) : null} />
-        {shown && (
-          <div className="mt-2.5 flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="filled"
-              size="medium"
-              className="border border-line-strong"
-              onClick={() => actions.onSelect({ kind: "view", viewId: shown.id })}
-            >
-              View settings →
-            </Button>
-            <Button
-              type="button"
-              variant="filled"
-              size="medium"
-              className="border border-line-strong"
-              onClick={() => actions.onEditLayout(shown.id)}
-            >
-              Edit layout
-            </Button>
+        {created && <CreatedNote output={output} viewMade={created.viewMade} onEditLayout={shown ? () => actions.onEditLayout(shown.id) : undefined} />}
+        <Section title="What it shows">
+          <ViewPicker
+            groups={viewGroups(views)}
+            value={output.viewId ?? NONE}
+            onChange={pickView}
+            noneLabel="— No view yet —"
+          />
+          <RoleLine surface={shown ? viewSurface(shown) : null} />
+          {shown && (
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="filled"
+                size="medium"
+                className="border border-line-strong"
+                onClick={() => actions.onSelect({ kind: "view", viewId: shown.id })}
+              >
+                View settings →
+              </Button>
+              <Button
+                type="button"
+                variant="filled"
+                size="medium"
+                className="border border-line-strong"
+                onClick={() => actions.onEditLayout(shown.id)}
+              >
+                Edit layout
+              </Button>
+            </div>
+          )}
+          {/* Only for a console: the sidebar lists consoles, and the listing is
+              the view's, so it is written there. */}
+          {controlSurface && shown && (
+            <SidebarRow
+              checked={viewShownInSidebar(shown)}
+              onChange={(on) => actions.onSetShowInSidebar(shown.id, on)}
+            />
+          )}
+        </Section>
+        <Section title="Name and address">
+          <NameInput id="screen-name" value={name} onChange={setName} onCommit={commitName} />
+          <SlugField slug={output.slug ?? ""} baseUrl={baseUrl} onSave={(s) => actions.onSetSlug(output.id, s)} />
+          <div className="mt-1.5 flex items-start gap-1.5">
+            {/* overflow-wrap:anywhere, not break-all: a long URL may still break,
+                but only where it has to, and "also /display-2" stays whole. */}
+            <p className="min-w-0 flex-1 font-mono text-caption1 text-fg-muted [overflow-wrap:anywhere]">
+              {output.slug ? (
+                <>
+                  {`${baseUrl}/${output.slug}`} <span className="whitespace-nowrap">· also /{output.id}</span>
+                </>
+              ) : permanent}
+            </p>
+            {/* The permanent address, as the card's Copy URL copies it: it is what a
+                Pi or a printed QR is pointed at. copyText rather than
+                navigator.clipboard, which prod's plain HTTP does not have. */}
+            <Tooltip label="Copy the permanent URL">
+              <button
+                type="button"
+                aria-label="Copy the permanent URL"
+                onClick={async () => {
+                  if (await copyText(permanent)) toast.success("URL copied");
+                  else toast.error("Could not copy — select the URL and copy it by hand");
+                }}
+                className="shrink-0 rounded-md p-1 text-fg-subtle hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                <CopyIcon className="size-3.5" />
+              </button>
+            </Tooltip>
           </div>
-        )}
-        {/* Only for a console: the sidebar lists consoles, and the listing is
-            the view's, so it is written there. */}
-        {controlSurface && shown && (
-          <SidebarRow
-            checked={viewShownInSidebar(shown)}
-            onChange={(on) => actions.onSetShowInSidebar(shown.id, on)}
-          />
-        )}
-      </Section>
-      <Section title="Name and address">
-        <NameInput id="screen-name" value={name} onChange={setName} onCommit={commitName} />
-        <SlugField slug={output.slug ?? ""} baseUrl={baseUrl} onSave={(s) => actions.onSetSlug(output.id, s)} />
-        <div className="mt-1.5 flex items-start gap-1.5">
-          {/* overflow-wrap:anywhere, not break-all: a long URL may still break,
-              but only where it has to, and "also /display-2" stays whole. */}
-          <p className="min-w-0 flex-1 font-mono text-caption1 text-fg-muted [overflow-wrap:anywhere]">
-            {output.slug ? (
-              <>
-                {`${baseUrl}/${output.slug}`} <span className="whitespace-nowrap">· also /{output.id}</span>
-              </>
-            ) : permanent}
-          </p>
-          {/* The permanent address, as the card's Copy URL copies it: it is what a
-              Pi or a printed QR is pointed at. copyText rather than
-              navigator.clipboard, which prod's plain HTTP does not have. */}
-          <Tooltip label="Copy the permanent URL">
-            <button
-              type="button"
-              aria-label="Copy the permanent URL"
-              onClick={async () => {
-                if (await copyText(permanent)) toast.success("URL copied");
-                else toast.error("Could not copy — select the URL and copy it by hand");
+        </Section>
+
+        <Section title="On the screen">
+          {/* The lock's ONLY effect is on the top bar: it strips the home link and
+              the QR and leaves the rest. Neither is offered on a screen with no bar
+              — "Lock display" once shipped as a no-op on a calendar wall. */}
+          {drawsTopBar && (
+            <>
+              <SwitchRow
+                label="Top bar"
+                help="The brand, plan and QR strip along the top."
+                checked={!output.hideTopBar}
+                onChange={(on) => actions.onSetHideTopBar(output.id, !on)}
+              />
+              <SwitchRow
+                label="Lock"
+                help="Keeps the top bar but removes its links, so the screen cannot be navigated away from."
+                checked={output.locked ?? false}
+                onChange={(on) => actions.onSetLocked(output.id, on)}
+              />
+            </>
+          )}
+          <SettingRow label="Text size" help="For ServiceCue and readouts on this screen.">
+            {/* Held in a draft and written when settled (a blur or a stepper press),
+                not on every keystroke: typing 150 passes through 1 and 15, which
+                clamp to 50, and each would be sent to a live wall. */}
+            <NumberInput
+              aria-label="Text size"
+              value={draftSize ?? output.textSize ?? 100}
+              min={50}
+              max={300}
+              step={5}
+              suffix="%"
+              className="w-32"
+              onChange={setDraftSize}
+              onCommit={(v) => {
+                setDraftSize(null);
+                actions.onSetTextSize(output.id, v);
               }}
-              className="shrink-0 rounded-md p-1 text-fg-subtle hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <CopyIcon className="size-3.5" />
-            </button>
-          </Tooltip>
-        </div>
-      </Section>
+            />
+          </SettingRow>
+        </Section>
 
-      <Section title="On the screen">
-        {/* The lock's ONLY effect is on the top bar: it strips the home link and
-            the QR and leaves the rest. Neither is offered on a screen with no bar
-            — "Lock display" once shipped as a no-op on a calendar wall. */}
-        {drawsTopBar && (
-          <>
-            <SwitchRow
-              label="Top bar"
-              help="The brand, plan and QR strip along the top."
-              checked={!output.hideTopBar}
-              onChange={(on) => actions.onSetHideTopBar(output.id, !on)}
-            />
-            <SwitchRow
-              label="Lock"
-              help="Keeps the top bar but removes its links, so the screen cannot be navigated away from."
-              checked={output.locked ?? false}
-              onChange={(on) => actions.onSetLocked(output.id, on)}
-            />
-          </>
-        )}
-        <SettingRow label="Text size" help="For ServiceCue and readouts on this screen.">
-          {/* Held in a draft and written when settled (a blur or a stepper press),
-              not on every keystroke: typing 150 passes through 1 and 15, which
-              clamp to 50, and each would be sent to a live wall. */}
-          <NumberInput
-            aria-label="Text size"
-            value={draftSize ?? output.textSize ?? 100}
-            min={50}
-            max={300}
-            step={5}
-            suffix="%"
-            className="w-32"
-            onChange={setDraftSize}
-            onCommit={(v) => {
-              setDraftSize(null);
-              actions.onSetTextSize(output.id, v);
-            }}
+        <Section title="Messages">
+          <GroupsChecklist
+            messageGroups={messageGroups}
+            inGroups={output.groups ?? []}
+            onSetGroups={(g) => actions.onSetGroups(output.id, g)}
+            onOpenMessagingSettings={actions.onOpenMessagingSettings}
           />
-        </SettingRow>
-      </Section>
+        </Section>
 
-      <Section title="Messages">
-        <GroupsChecklist
-          messageGroups={messageGroups}
-          inGroups={output.groups ?? []}
-          onSetGroups={(g) => actions.onSetGroups(output.id, g)}
-          onOpenMessagingSettings={actions.onOpenMessagingSettings}
-        />
-      </Section>
+        <Section title="Video">
+          <SwitchRow
+            label="Use HLS"
+            help="Off, this screen plays only WebRTC. A feed that needs HLS says it can't play here."
+            checked={output.allowHls !== false}
+            onChange={(on) => actions.onSetAllowHls(output.id, on)}
+          />
+        </Section>
 
-      <Section title="Video">
-        <SwitchRow
-          label="Use HLS"
-          help="Off, this screen plays only WebRTC. A feed that needs HLS says it can't play here."
-          checked={output.allowHls !== false}
-          onChange={(on) => actions.onSetAllowHls(output.id, on)}
-        />
-      </Section>
-
-      <Section title="Device">
-        <DeviceSection output={output} online={online} actions={actions} />
-      </Section>
+        <Section title="Device">
+          <DeviceSection output={output} online={online} actions={actions} />
+        </Section>
       </div>
       <PanelFooter hint="Changes save as you make them.">
         <DangerButton

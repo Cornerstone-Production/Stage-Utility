@@ -251,17 +251,17 @@ open the same panel in two steps:
    **a view you already have** (a picker of both kinds, with a line saying what
    the screen becomes), or **nothing yet**. The screen is whatever its view is.
 
-**Nothing is created until Create screen**, which is on the second step and, for
-*a view you already have*, off until a view is picked. Left unnamed, a screen is
-named **Display** and its number, and so is a view made for it (a device is named
-for its hostname). Closing the panel creates nothing. A refusal (a link another
-screen holds, say) leaves the panel open with the reason. A device is claimed by
-the same step that creates its screen, and if that fails everything made for it is
-taken back. If another operator sets the same device up while the panel is open,
-the panel says which screen it became and **Create screen** is turned off. If
-somebody changes the kind of a view you chose from *a view you already have* while
-you decide, no screen is made: the panel stays on this step, says the view changed,
-and shows the view as it is now.
+**Nothing is created until Create screen**, which is on the second step and, for *a
+view you already have*, off until a view is picked. Left unnamed, a screen is named
+**Display** and its number, and so is a view made for it (a device is named for its
+hostname). Closing the panel creates nothing. A refusal (a link another screen
+holds, say) leaves the panel open with the reason. A device is claimed by the same
+step that creates its screen, and if that fails everything made for it is taken
+back. If another operator sets the same device up while the panel is open, the panel
+says which screen it became and **Create screen** is turned off. If somebody changes
+the kind of a view you chose from *a view you already have* while you decide, no
+screen is made: the panel stays on this step, says the view changed, and shows the
+view as it is now.
 
 After **Create screen** the panel stays open on the new screen and says what was
 made; when a view was made it adds **Edit layout**, since the view is blank until
@@ -295,21 +295,21 @@ device is doing; see [Widgets](../reference/widgets.md#control). A console meant
 Ross Ultritouch panel has its own presets and a starter; see
 [Ultritouch](../integrations/ultritouch.md).
 
-**Changing what a view is for.** [View settings](#view-settings) has **Wall
-view** and **Control surface**, a custom view's editor has a dropdown beside its
-type reading *Wall view* or *Control surface*, and the card of a view no screen
-shows has *Make it a wall view* or *Make it a control surface* in its menu. Either
-changes the view **and every screen showing it**: those screens become control
-surfaces, or wall displays, together with it. When any screen would change, a
-confirm names them first (*Buttons will work on "Lobby TV" and "Hallway TV".
-Anyone standing at those screens can press them.*) and declining changes nothing. A view no screen shows has nothing to confirm. If somebody
-points a screen at the view, or away from it, while the confirm is open, you
-are asked again with the screens as they are now, so a screen you were not
-shown is never changed. The whole change is one call: if any part of it fails,
-what already changed is put back and the message says which step failed. A
-view that cannot be a control surface (anything but a custom view or a calendar)
-is refused with the reason. To change what one screen is, point it at a view of the other
-kind in [Screen settings](#screen-settings), which changes no other screen.
+**Changing what a view is for.** [View settings](#view-settings) has **Wall view**
+and **Control surface**, a custom view's editor has a dropdown beside its type
+reading *Wall view* or *Control surface*, and the card of a view no screen shows has
+*Make it a wall view* or *Make it a control surface* in its menu. Either changes the
+view **and every screen showing it**: those screens become control surfaces, or wall
+displays, together with it. When any screen would change, a confirm names them first
+(*Buttons will work on "Lobby TV" and "Hallway TV". Anyone standing at those screens
+can press them.*) and declining changes nothing. A view no screen shows has nothing
+to confirm. If somebody points a screen at the view, or away from it, while the
+confirm is open, you are asked again with the screens as they are now, so a screen
+you were not shown is never changed. The whole change is one call: if any part of it
+fails, what already changed is put back and the message says which step failed. A
+view that cannot be a control surface (anything but a custom view or a calendar) is
+refused with the reason. To change what one screen is, point it at a view of the
+other kind in [Screen settings](#screen-settings), which changes no other screen.
 
 **Reaching one.** Every console gets its own row in the sidebar, at
 `/consoles/<view id>`, and the console's own name heads the page. Renaming the
