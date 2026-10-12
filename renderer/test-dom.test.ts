@@ -57,6 +57,24 @@ describe("eventually", () => {
     cleanup();
   });
 
+  test("keeps polling when the test has mocked the timers and the clock", { timeout: 3000 }, async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+    let looks = 0;
+    // Testing Library's own waitFor polls with setInterval, which a mock never fires.
+    await eventually(() => assert.ok(++looks >= 3, `looked ${looks} time(s)`));
+    assert.equal(looks, 3);
+  });
+
+  test("retries a check that is async, as it does one that throws", async () => {
+    let looks = 0;
+    const got = await eventually(async () => {
+      looks += 1;
+      assert.ok(looks >= 3, `looked ${looks} time(s)`);
+      return looks;
+    });
+    assert.equal(got, 3);
+  });
+
   test("reports the last failure, not a bare timeout, when the thing never arrives", async () => {
     await assert.rejects(
       eventually(() => assert.equal(1, 2, "the thing never arrived"), 100),

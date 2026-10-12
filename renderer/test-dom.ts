@@ -241,6 +241,13 @@ export async function settle(): Promise<void> {
 /** How long a test waits for something asynchronous to appear, in ms. */
 export const WAIT_TIMEOUT_MS = 5000;
 
+// The real clock and timer, taken when this module loads. A test that mocks
+// timers or Date.now afterwards must not be able to stop a wait from polling or
+// from giving up, which Testing Library's own waitFor cannot promise: it polls
+// with setInterval, and a mocked one never fires.
+const realSetTimeout = globalThis.setTimeout;
+const realNow = Date.now.bind(Date);
+
 /**
  * Wait until `check` stops throwing, then return what it returned.
  *
@@ -253,21 +260,43 @@ export const WAIT_TIMEOUT_MS = 5000;
  *   await eventually(() => assert.ok(screen.getByText("Saved")));
  *   const button = await eventually(() => screen.getByRole("button", { name: "Add" }));
  *
- * It is Testing Library's waitFor with a generous timeout. The timeout costs
- * nothing when the thing arrives, since the check runs at once and again on every
- * DOM change; it only bounds how long a real failure takes to report.
+ * It looks at once, then every 10 ms, each gap spent inside act() so React's work
+ * is flushed. `check` may be async. The timeout costs nothing when the thing arrives; it only bounds
+ * how long a real failure takes to report, and the failure is `check`'s own last
+ * error, not a bare timeout.
+ *
+ * A failing check's assert builds its message from its operands, so a check
+ * must not hand a DOM node to `assert.equal`: node:assert inspects it and, on a
+ * jsdom tree, does not finish. Coerce to a boolean or a string first
+ * (`=== null`, `!!`, `.textContent`).
  *
  * Not for absence. "Nothing was written" or "no dialog opened" cannot be waited
  * into being true: the wait passes at the first instant it is, and proves
  * nothing about a moment later. Those keep a `settle()` and then assert.
  *
+ * Nor for "exactly one". It returns at the first look that passes, so a second
+ * write behind the first would go unseen; wait for the first, then assert the
+ * count plainly.
+ *
  * The import is inside the function because Testing Library binds to `document`
  * when it loads, so a file must import it after installDom, and this module is
  * imported before.
  */
-export async function eventually<T>(check: () => T, timeout: number = WAIT_TIMEOUT_MS): Promise<T> {
-  const { waitFor } = await import("@testing-library/react");
-  return waitFor(check, { timeout });
+export async function eventually<T>(check: () => T, timeout: number = WAIT_TIMEOUT_MS): Promise<Awaited<T>> {
+  const { act } = await import("@testing-library/react");
+  const deadline = realNow() + timeout;
+  for (;;) {
+    try {
+      // `check` may be async (it may open a tooltip, say, to read it): a rejection
+      // is a failed look like a throw is.
+      return await check();
+    } catch (err) {
+      if (realNow() >= deadline) throw err;
+    }
+    await act(async () => {
+      await new Promise((resolve) => realSetTimeout(resolve, 10));
+    });
+  }
 }
 
 /**
