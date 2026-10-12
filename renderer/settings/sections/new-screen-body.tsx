@@ -41,7 +41,9 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
   // screen, and the form says so rather than inviting a claim that fails.
   const { bound } = useDevices();
   const taken = target.device ? bound.find((d) => d.id === target.device!.id) : undefined;
-  const takenBy = taken ? (outputs.find((o) => o.id === taken.outputId)?.name ?? taken.outputId) : null;
+  // Not while this form is creating: its own claim binds the device, and the list
+  // read back after it says so before the form is gone.
+  const takenBy = taken && !busy ? (outputs.find((o) => o.id === taken.outputId)?.name ?? taken.outputId) : null;
 
   const picked = views.find((v) => v.id === existing);
   // A screen left unnamed is named by the server from the id it issues, which the

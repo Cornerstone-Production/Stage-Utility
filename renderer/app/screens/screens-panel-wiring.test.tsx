@@ -80,6 +80,10 @@ let claimFails: string | null;
 let viewDeleteFails: boolean;
 /** A create naming a view is refused as if the view had just become this kind: the stub's
  *  view flips to it and the answer is the server's 409. Null: creates go through. */
+/** Devices the server holds as bound, and a gate on reading them back. */
+let boundDevices: unknown[];
+let deviceReadHeld: Promise<void> | null;
+let stateReadHeld: Promise<void> | null;
 let viewShownByServer: { id: string; name: string }[] | null;
 let surfaceMovedTo: "display" | "console" | null;
 /** The page's query client, so a test can land a stage-state broadcast. */
@@ -98,6 +102,9 @@ beforeEach(() => {
   viewDeleteFails = false;
   surfaceMovedTo = null;
   viewShownByServer = null;
+  boundDevices = [];
+  deviceReadHeld = null;
+  stateReadHeld = null;
   // The panel's open state is remembered per browser, so one test's close must not
   // be the next test's starting point.
   localStorage.clear();
@@ -118,7 +125,9 @@ beforeEach(() => {
       }
       if (method === "POST" && url === "/api/outputs") makeScreen(body as CreateBody);
       if (method === "POST" && url === "/api/devices/claim" && (body as { outputId?: string | null }).outputId === null) {
-        return ok({ ok: true, displaced: null, outputId: makeScreen(body as CreateBody) });
+        const made = makeScreen(body as CreateBody);
+        boundDevices = [...boundDevices, { id: (body as { deviceId: string }).deviceId, outputId: made, macs: [], hostname: "lobby-pi" }];
+        return ok({ ok: true, displaced: null, outputId: made });
       }
       if (method === "POST" && url === "/api/views") {
         const b = body as { name: string; kind: View["kind"]; surface?: View["surface"] };
@@ -141,10 +150,13 @@ beforeEach(() => {
       // REQUEST. The optimistic handlers reconcile to whatever comes back.
       return ok(state());
     }
-    if (url === "/api/state") return ok(state());
+    if (url === "/api/state") return stateReadHeld ? stateReadHeld.then(() => ok(state())) : ok(state());
     if (url === "/api/messages") return ok({ rev: 1, groups: [STAGE_GROUP], messages: [], alerts: [] });
     if (url.startsWith("/api/devices")) {
-      return ok({ scanning: false, seen: seenDevices, matches: {}, bound: [], error: null });
+      // The server's answer after a claim lists the device as bound; `deviceReadHeld`
+      // keeps that answer from arriving, to look at the form meanwhile.
+      const answer = () => ok({ scanning: false, seen: seenDevices, matches: {}, bound: boundDevices, error: null });
+      return deviceReadHeld ? deviceReadHeld.then(answer) : answer();
     }
     if (url === "/api/layout-templates" || url === "/api/presets" || url === "/api/integrations/wireless/channels") return ok([]);
     return ok({});
@@ -1087,6 +1099,24 @@ describe("a device waiting to be set up", () => {
     assert.ok(panel().getByText("Screen settings"));
     assert.ok(panel().getByRole("heading", { name: "lobby-pi" }));
     assert.match(panel().getByRole("status").textContent ?? "", /Created "lobby-pi" and its view/);
+  });
+
+  test("while its OWN claim is being read back the form does not say another operator took the device", async () => {
+    // The claim bound the device to the screen this form just made, and the device
+    // list read after it says so; the form is still up until the page's state has
+    // the new screen. That is not somebody else's doing.
+    let release!: () => void;
+    await mountScreens();
+    await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
+    await click(panel().getByRole("button", { name: "Next" }));
+    stateReadHeld = new Promise<void>((r) => { release = r; });
+    await act(async () => { fireEvent.click(panel().getByRole("button", { name: "Create screen" })); await settle(); await settle(); await settle(); });
+    assert.ok(writes.some((w) => w.url === "/api/devices/claim"), "the claim never went out");
+    assert.ok(panel().getByRole("button", { name: "Create screen" }), "the form is gone before the state arrived: the window was not reached");
+    assert.equal(/set up as .* meanwhile/.test(document.body.textContent ?? ""), false, "the form blamed another operator for its own claim");
+    stateReadHeld = null;
+    await act(async () => { release(); await settle(); await settle(); });
+    assert.ok(panel().getByRole("heading", { name: "lobby-pi" }));
   });
 
   test("a claim for a view that turned into the other kind is a 409: step 2 stays and no screen is made", async () => {
