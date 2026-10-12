@@ -19,9 +19,9 @@ const state = {
   ],
   outputs: [
     { id: "display-1", name: "Lobby TV", viewId: "wall-a" },
-    { id: "display-2", name: "Hallway TV", viewId: "wall-a", mode: "display" },
-    { id: "display-3", name: "Booth panel", viewId: "ctl-a", mode: "panel" },
-    { id: "display-4", name: "", viewId: "ctl-a", mode: "panel" },
+    { id: "display-2", name: "Hallway TV", viewId: "wall-a" },
+    { id: "display-3", name: "Booth panel", viewId: "ctl-a" },
+    { id: "display-4", name: "", viewId: "ctl-a" },
     { id: "display-5", name: "Spare", viewId: null },
   ],
 } as unknown as Slim;

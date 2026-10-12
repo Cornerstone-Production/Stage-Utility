@@ -219,7 +219,7 @@ describe("a Not set up yet output, set up as a new screen", () => {
     assert.deepEqual(claims, [{
       method: "POST",
       url: "/api/devices/claim",
-      body: { deviceId: "n.sdi-2", outputId: null, name: "SDI 2 · Card A", mode: "display" },
+      body: { deviceId: "n.sdi-2", outputId: null, name: "SDI 2 · Card A" },
     }]);
   });
 });

@@ -106,13 +106,6 @@ export interface SectionHandlers {
   handleSetOutputHideTopBar: (id: string, hideTopBar: boolean) => Promise<void>;
   handleSetOutputAllowHls: (id: string, allowHls: boolean) => Promise<void>;
   handleSetOutputGroups: (id: string, groups: string[]) => Promise<void>;
-  /** Change one screen's role without changing any other screen. True when it
-   *  landed; a refusal is already toasted. */
-  handleSetOutputRole: (
-    id: string,
-    mode: "display" | "panel",
-    opts?: { copyView?: boolean; viewId?: string },
-  ) => Promise<boolean>;
   handleSetOutputTextSize: (id: string, textSize: number) => Promise<void>;
   /** Turn a Mac output helper screen's picture by quarter turns. */
   handleSetOutputRotation: (id: string, rotation: Rotation) => Promise<void>;

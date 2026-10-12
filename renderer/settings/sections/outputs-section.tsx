@@ -28,8 +28,8 @@ import { IconTint } from "../../components/icon-tint";
 import { iconEntryAt } from "../../components/editable-icon";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { ImportLayout } from "./import-layout";
-import { SCREEN_PANEL_ID, confirmRole } from "./screen-settings-panel";
-import { viewSurface, viewShownInSidebar, outputMode } from "@main/types/views";
+import { SCREEN_PANEL_ID, confirmViewKind } from "./screen-settings-panel";
+import { viewSurface, viewShownInSidebar, screenIsControlSurface } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
 
@@ -185,9 +185,6 @@ export interface OutputRowProps {
    *  draws the ones this screen is in as chips under its name; choosing them is
    *  the Screen settings panel's job. */
   messageGroups: MessageGroups;
-  /** Change this screen's role, through the role route. True when it landed;
-   *  a refusal is already on screen. */
-  onSetRole: (mode: "display" | "panel", opts: { viewId?: string }) => Promise<boolean>;
   /** Open the Screen settings panel on this screen. */
   onOpenSettings: () => void;
   /** This screen's panel is open: the card says which one it is for. */
@@ -271,7 +268,7 @@ export function screenPickerViews(views: readonly View[]): View[] {
   return screensListViews(views).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function OutputRow({ output, views, baseUrl, online, struggles, lags, outputStruggle, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, onSetRole, onOpenSettings, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+export function OutputRow({ output, views, baseUrl, online, struggles, lags, outputStruggle, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, onOpenSettings, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   const [renamingView, setRenamingView] = useState(false);
@@ -289,31 +286,14 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
   });
 
   /**
-   * Assign a view, offering to make the screen match what that view IS.
-   *
-   * A control surface used to have to be declared twice — once on the view and
-   * again on the screen — and in a fixed order, because the SERVER refuses a
-   * console view on a display screen. That refusal is the safety property and
-   * it stays exactly as it is: a wall screen must not be able to render a live
-   * control. What was wrong is that the operator had to know the order, and
-   * find the second switch in a different menu, before the view they wanted
-   * even appeared in the list.
-   *
-   * So the offer comes FIRST. Decline it and nothing is assigned, because the
-   * server would refuse that binding anyway — an assignment that silently failed
-   * would be worse than one that did not happen. Accept it and the role and the
-   * view go in ONE call, the role route with the view named: the screen's own
-   * role change would also have tried to turn the view it is LEAVING into a
-   * console, which changes every other screen showing it.
+   * Assign a view. The view decides whether the screen is a control surface, so
+   * pointing a screen at a view of the other kind changes what the screen is: its
+   * buttons go live, or stop. That is asked about first, and declining assigns
+   * nothing. The same question the Screen settings panel's picker asks.
    */
   async function assignView(viewId: string | null): Promise<void> {
     if (!viewId) { onSetView(null); return; }
-    const picked = views.find((v) => v.id === viewId);
-    if (picked && viewSurface(picked) === "console" && outputMode(output) !== "panel") {
-      if (!(await confirmRole(output.name, "panel", `"${picked.name}" has live controls, so it can only go on a control surface.`))) return;
-      await onSetRole("panel", { viewId });
-      return;
-    }
+    if (!(await confirmViewKind(output, views, viewId))) return;
     onSetView(viewId);
   }
 
@@ -391,7 +371,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           className="h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0"
           aria-label="Display name"
         />
-        {outputMode(output) === "panel" && (
+        {screenIsControlSurface(output, views) && (
           <Tooltip label="A control surface: controls on this screen are live">
             <span className="shrink-0 rounded-full border border-accent bg-accent/12 px-2 py-0.5 text-caption2 font-medium text-accent">
               panel
@@ -621,17 +601,9 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={UNROUTED}>— Unrouted —</SelectItem>
-            {/* EVERY view, whatever the screen's mode. This used to filter out
-                console views on a display screen, which made "use a control
-                surface" a two-step job: the view you were reaching for was
-                missing until you had already found a different menu and flipped
-                the mode. Nothing was unsafe about showing it — a display renders
-                controls inert either way — so hiding it only removed the obvious
-                route to the thing you were trying to do. Picking a console view
-                for a display now OFFERS to switch the screen, and the switch is
-                awaited before the binding is sent so the server never sees the
-                pair in the order it refuses. The server refuses an invalid
-                binding regardless; this was never the safety property. */}
+            {/* EVERY view, of either kind. Picking one of the other kind than the
+                screen shows now asks first (see assignView), because the view is
+                what makes the screen a control surface. */}
             {views.map((v) => (
               <SelectItem key={v.id} value={v.id}>
                 {/* Say which ones are control surfaces, so choosing one is an
@@ -819,6 +791,7 @@ export function OutputsSection({
   // to it. "" means the dialog was opened from the unassigned section, where
   // there is nothing to assign to.
   const [creatingFor, setCreatingFor] = useState<string | null>(null);
+  const creatingScreen = creatingFor ? outputs.find((o) => o.id === creatingFor) : undefined;
 
   // A view no screen points at. Without a home these are unreachable: the only
   // way in was the Views list this page replaced.
@@ -927,7 +900,6 @@ export function OutputsSection({
                 onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
                 onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
                 messageGroups={messageGroups}
-                onSetRole={(mode, opts) => handlers.handleSetOutputRole(output.id, mode, opts)}
                 onOpenSettings={() => onOpenSettings(output.id)}
                 selected={selectedOutputId === output.id}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
@@ -1010,6 +982,10 @@ export function OutputsSection({
       <NewViewDialog
         handlers={handlers}
         open={creatingFor !== null}
+        // A view made from a screen's picker is the kind that screen shows, so
+        // making one never changes what the screen is. The page's own "New view"
+        // button (no screen) asks.
+        fixedSurface={creatingScreen ? (screenIsControlSurface(creatingScreen, stageState.views ?? []) ? "console" : "display") : undefined}
         onOpenChange={(o) => { if (!o) setCreatingFor(null); }}
         onCreated={(id) => {
           // Assign it straight to the screen that asked, so "New view..." in a

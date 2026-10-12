@@ -1,13 +1,13 @@
 // Changing what a view is for changes every screen showing it, so the operator
 // is told which screens before it happens.
 //
-// The server makes the whole change as one rolled-back call (POST
+// The server makes the change as one rolled-back call (POST
 // /api/views/:id/surface); this is the question asked first, and asked again
 // when the server says the screens changed while it was open. A function
 // rather than a few lines in the settings hook so that what it asks, and that
 // declining sends nothing, are driven rather than read off the source.
 
-import { outputMode, surfaceForMode, type ViewSurface } from "@main/types/views";
+import { viewSurface, type ViewSurface } from "@main/types/views";
 import type { StageState } from "@main/types/stage";
 import type { ConfirmOptions } from "../components/ui";
 import type { ApiError } from "../lib/api";
@@ -25,13 +25,15 @@ export interface ChangedScreen {
 }
 
 /**
- * The screens that showing `viewId` as `surface` would change: the ones whose
- * role does not already match. A screen already as asked is not named, because
- * nothing happens to it.
+ * The screens that making `viewId` a `surface` would change: every screen showing
+ * it, since a screen's role is its view's surface. None when the view already is
+ * one, because nothing happens then.
  */
-export function screensChangedBy(state: Pick<StageState, "outputs"> | undefined, viewId: string, surface: ViewSurface): ChangedScreen[] {
+export function screensChangedBy(state: Pick<StageState, "views" | "outputs"> | undefined, viewId: string, surface: ViewSurface): ChangedScreen[] {
+  const view = state?.views.find((v) => v.id === viewId);
+  if (!view || viewSurface(view) === surface) return [];
   return (state?.outputs ?? [])
-    .filter((o) => o.viewId === viewId && surfaceForMode(outputMode(o)) !== surface)
+    .filter((o) => o.viewId === viewId)
     .map((o) => ({ id: o.id, name: o.name || o.id }));
 }
 

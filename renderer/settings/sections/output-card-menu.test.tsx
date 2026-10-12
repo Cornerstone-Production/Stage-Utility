@@ -65,7 +65,6 @@ function card(over: Partial<OutputRowProps> = {}, routed = true) {
     onSetView: noop,
     onRenameView: noop,
     messageGroups: { groups: [], known: true, failed: false },
-    onSetRole: async () => true,
     onOpenSettings: noop,
     onRefresh: noop,
     onRemove: noop,

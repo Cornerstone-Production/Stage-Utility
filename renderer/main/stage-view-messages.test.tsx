@@ -91,7 +91,8 @@ function messagesState(messages: StageMessage[]): MessagesState {
   return { rev: 1, serverNow: Date.now(), groups: GROUPS, quickMessages: [], quickReplies: ["Copy"], messages, alerts: [] };
 }
 
-/** A display routed to one custom view holding one widget. */
+/** A display routed to one custom view holding one widget. A screen is a control
+ *  surface when its view is a console, so `mode: "panel"` here makes the view one. */
 function stageState(widget: Record<string, unknown>, over: { groups?: string[]; mode?: string; blackout?: boolean } = {}) {
   return {
     serviceTypeName: "Weekend", planTitle: "A plan", planSeriesTitle: null, planDates: null,
@@ -99,13 +100,13 @@ function stageState(widget: Record<string, unknown>, over: { groups?: string[]; 
     appLogoMonochrome: false, emptySlotLogo: null, defaultAvatar: null,
     pcoConfigured: true, hourCycle: "12h", accentColor: null,
     views: [{
-      id: "v1", name: "Wall", kind: "custom",
+      id: "v1", name: "Wall", kind: "custom", surface: over.mode === "panel" ? "console" : "display",
       layout: {
         canvas: { width: 1920, height: 1080, background: null },
         objects: [{ id: "w1", x: 0, y: 0, w: 1, h: 1, z: 0, config: widget }],
       },
     }],
-    outputs: [{ id: "display-1", name: "Stage left", viewId: "v1", groups: over.groups ?? [], ...(over.mode ? { mode: over.mode } : {}) }],
+    outputs: [{ id: "display-1", name: "Stage left", viewId: "v1", groups: over.groups ?? [] }],
     resolvedByOutput: {
       "display-1": {
         viewId: "v1", kind: "custom", ndiSource: null, viewName: "Wall",
@@ -208,10 +209,10 @@ describe("a Messages widget inside a screen-embed tile", () => {
       views: unknown[]; outputs: unknown[]; resolvedByOutput: Record<string, unknown>;
     };
     state.views.push({
-      id: "v2", name: "Stage view", kind: "custom",
+      id: "v2", name: "Stage view", kind: "custom", surface: tileMode === "panel" ? "console" : "display",
       layout: { canvas: { width: 1920, height: 1080, background: null }, objects: [{ id: "w2", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "messages" } }] },
     });
-    state.outputs.push({ id: "display-2", name: "Stage monitor", viewId: "v2", groups: [STAGE], ...(tileMode ? { mode: tileMode } : {}) });
+    state.outputs.push({ id: "display-2", name: "Stage monitor", viewId: "v2", groups: [STAGE] });
     state.resolvedByOutput["display-2"] = {
       viewId: "v2", kind: "custom", ndiSource: null, viewName: "Stage view", blackout: false, locked: false,
       hideTopBar: false, allowHls: true, groups: [STAGE], textSize: null,
@@ -272,10 +273,10 @@ describe("a Messages widget inside a view-embed tile", () => {
     };
     const canvas = { width: 1920, height: 1080, background: null };
     state.views.push(
-      { id: "v2", name: "Stage view", kind: "custom", layout: { canvas, objects: [{ id: "e2", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "view-embed", viewId: "v3", showHeader: false } }] } },
+      { id: "v2", name: "Stage view", kind: "custom", surface: "console", layout: { canvas, objects: [{ id: "e2", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "view-embed", viewId: "v3", showHeader: false } }] } },
       { id: "v3", name: "Inner", kind: "custom", layout: { canvas, objects: [{ id: "w3", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "messages" } }] } },
     );
-    state.outputs.push({ id: "display-2", name: "Stage monitor", viewId: "v2", groups: [STAGE], mode: "panel" });
+    state.outputs.push({ id: "display-2", name: "Stage monitor", viewId: "v2", groups: [STAGE] });
     state.resolvedByOutput["display-2"] = {
       viewId: "v2", kind: "custom", ndiSource: null, viewName: "Stage view", blackout: false, locked: false,
       hideTopBar: false, allowHls: true, groups: [STAGE], textSize: null,
@@ -310,7 +311,7 @@ describe("a Message composer on a screen", () => {
     assert.deepEqual(sent[0].body, { to: [GREEN], text: "Walk now", alert: false, from: "Stage left" });
   });
 
-  test("a display (the default mode) draws it and cannot send", async () => {
+  test("a display (a screen whose view is not a console) draws it and cannot send", async () => {
     await sendFrom("/display-1", stageState(composer, { groups: [GREEN] }));
     assert.equal(posted.filter((p) => p.url === "/api/messages").length, 0, "a wall display sent a message");
   });

@@ -1,27 +1,21 @@
-// stageController.setViewRole: change what a view is for AND every screen
-// showing it, as one write that is undone if it fails part-way. Driven against
-// the real controller, the real guards and real files in a temp data directory.
+// stageController.setViewRole: change what a view is for, and with it the role of
+// every screen showing it, as one write that is undone if it fails. A screen's
+// buttons work exactly when its view is a console, so the view's surface is the
+// only thing written. Driven against the real controller and real files in a
+// temp data directory.
 //
 // What these are here for, in the order it would have gone wrong:
 //
-//  - The guard order. setOutputMode(display) refuses while the view it shows is
-//    a console, and setViewSurface(console) refuses while a screen showing it is
-//    not a panel. A call that writes in the wrong order is refused by the
-//    server's own guards, in one direction or the other, so BOTH directions are
-//    run against the real guards, with two screens on the view.
-//  - A failure part-way leaving some screens changed and others not. Each
-//    rollback failure here is a real write failing (a directory where
-//    settings.json or views.json goes, for the one call); the races below are
-//    injected by wrapping a controller method mid-call. Files are read back off DISK:
-//    the in-memory state is what the rollback fixes first and the file is what a
-//    restart reads.
-//  - A screen pointed at the view after the call started. Toward a console the
-//    view's guard refuses, and everything before it is undone.
-//  - A screen pointed AWAY from the view after the call started. Its own step
-//    refuses, rather than changing a screen that is no longer the view's.
+//  - A screen that did not change role with its view. There is no second field to
+//    forget: the role is read from the view, and these assert it through the one
+//    function every reader uses.
+//  - A failure leaving the view changed in memory or on disk. The failing write is
+//    a real one (a directory where views.json goes, for the one call), and the
+//    files are read back off DISK: memory is what the rollback fixes first and
+//    the file is what a restart reads.
 //  - The screens the operator was shown no longer being the screens it would
-//    change, because one was pointed at the view while the question was open.
-//    Refused, writing nothing, with the list as it is now.
+//    change, because one was pointed at the view, or away from it, while the
+//    question was open. Refused, writing nothing, with the list as it is now.
 //  - Only a custom view being made a console.
 //
 // Every id and name is invented.
@@ -37,7 +31,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { stageController, ScreenWriteError, ViewScreensChangedError } = await import("./stage-controller.js");
-const { viewSurface, outputMode } = await import("../types/views.js");
+const { viewSurface, screenIsControlSurface } = await import("../types/views.js");
 
 type Mutable = {
   state: { views: View[]; outputs: Output[]; [k: string]: unknown };
@@ -61,9 +55,9 @@ function seed(): void {
     ] as unknown as View[],
     outputs: [
       { id: "display-1", name: "Lobby TV", viewId: "wall-a" },
-      { id: "display-2", name: "Hallway TV", viewId: "wall-a", mode: "display" },
-      { id: "display-3", name: "Booth panel", viewId: "ctl-a", mode: "panel" },
-      { id: "display-4", name: "Stage panel", viewId: "ctl-a", mode: "panel" },
+      { id: "display-2", name: "Hallway TV", viewId: "wall-a" },
+      { id: "display-3", name: "Booth panel", viewId: "ctl-a" },
+      { id: "display-4", name: "Stage panel", viewId: "ctl-a" },
       { id: "display-5", name: "Spare", viewId: null },
       { id: "display-6", name: "Cafe TV", viewId: "cal-a" },
     ] as unknown as Output[],
@@ -76,18 +70,15 @@ const outputs = () => stageController.getState().outputs;
 const views = () => stageController.getState().views;
 const out = (id: string) => outputs().find((o) => o.id === id)!;
 const view = (id: string) => views().find((v) => v.id === id)!;
-const modes = (...ids: string[]) => ids.map((i) => outputMode(out(i)));
+/** Which of these screens are control surfaces, read the way every reader does. */
+const live = (...ids: string[]) => ids.map((i) => screenIsControlSurface(out(i), views()));
 
 async function readDisk<T>(file: string, pick: (raw: unknown) => T): Promise<T> {
   return pick(JSON.parse(await fs.readFile(path.join(TMP, file), "utf8")));
 }
-const outputsOnDisk = () => readDisk("settings.json", (r) => ((r as { outputs?: Output[] }).outputs ?? []));
 const viewsOnDisk = () =>
   readDisk("views.json", (r) => (Array.isArray(r) ? (r as View[]) : ((r as { views?: View[] }).views ?? [])));
-const diskModes = async (...ids: string[]) => {
-  const on = await outputsOnDisk();
-  return ids.map((i) => outputMode(on.find((o) => o.id === i)!));
-};
+const diskSurface = async (viewId: string) => (await viewsOnDisk()).find((v) => v.id === viewId)?.surface;
 
 /** Write both files from the seeded state, so each exists and is cached before a
  *  test makes one of them fail. */
@@ -98,13 +89,6 @@ async function warm(): Promise<void> {
 
 /** Everything about every screen and view, to prove a call left them as they were. */
 const everything = () => JSON.stringify({ outputs: outputs(), views: views() });
-
-/** Every screen that is not a control surface but shows a console: the pairing
- *  the server exists to refuse. Empty is the only right answer. */
-const forbiddenPairings = () =>
-  outputs()
-    .filter((o) => outputMode(o) !== "panel" && o.viewId && viewSurface(view(o.viewId)) === "console")
-    .map((o) => `${o.id} on ${o.viewId}`);
 
 type Method = (...a: unknown[]) => Promise<unknown>;
 const proto = Object.getPrototypeOf(stageController) as Record<string, Method>;
@@ -135,42 +119,17 @@ function breakDiskOnCall(method: string, file: string, nth: number): () => void 
   return () => { delete own[method]; };
 }
 
-/** Run `fn` after the `nth` call to a controller method has landed, as a write
- *  from somewhere else arriving mid-call. */
-function afterCall(method: string, nth: number, fn: () => Promise<void>): () => void {
-  let calls = 0;
-  own[method] = async function (this: unknown, ...args: unknown[]) {
-    calls += 1;
-    const result = await proto[method].apply(stageController, args);
-    if (calls === nth) await fn();
-    return result;
-  };
-  return () => { delete own[method]; };
-}
-
-/** Run `fn` BEFORE the `nth` call to a controller method. */
-function beforeCall(method: string, nth: number, fn: () => Promise<void>): () => void {
-  let calls = 0;
-  own[method] = async function (this: unknown, ...args: unknown[]) {
-    calls += 1;
-    if (calls === nth) await fn();
-    return proto[method].apply(stageController, args);
-  };
-  return () => { delete own[method]; };
-}
-
 describe("setViewRole — to a control surface", () => {
-  it("makes every screen showing the view a control surface, then the view, against the real guards", async () => {
+  it("makes the view a console, and every screen showing it a control surface with it", async () => {
+    assert.deepEqual(live("display-1", "display-2"), [false, false]);
     await stageController.setViewRole("wall-a", "console");
-    assert.deepEqual(modes("display-1", "display-2"), ["panel", "panel"]);
     assert.equal(viewSurface(view("wall-a")), "console");
-    assert.deepEqual(forbiddenPairings(), []);
+    assert.deepEqual(live("display-1", "display-2"), [true, true]);
   });
 
-  it("persists the screens and the view", async () => {
+  it("persists the view", async () => {
     await stageController.setViewRole("wall-a", "console");
-    assert.deepEqual(await diskModes("display-1", "display-2"), ["panel", "panel"]);
-    assert.equal((await viewsOnDisk()).find((v) => v.id === "wall-a")?.surface, "console");
+    assert.equal(await diskSurface("wall-a"), "console");
   });
 
   it("leaves every other screen and view exactly as it was", async () => {
@@ -180,7 +139,7 @@ describe("setViewRole — to a control surface", () => {
     assert.equal(others(), before);
   });
 
-  it("changes a view no screen shows on its own, with nothing to convert", async () => {
+  it("changes a view no screen shows on its own", async () => {
     await stageController.setViewRole("wall-b", "console");
     assert.equal(viewSurface(view("wall-b")), "console");
     assert.equal(outputs().length, 6);
@@ -202,17 +161,16 @@ describe("setViewRole — to a control surface", () => {
 });
 
 describe("setViewRole — to a wall display", () => {
-  it("makes the view a wall-screen view, then every screen showing it a wall display, against the real guards", async () => {
+  it("makes the view a wall view, and every screen showing it read-only with it", async () => {
+    assert.deepEqual(live("display-3", "display-4"), [true, true]);
     await stageController.setViewRole("ctl-a", "display");
     assert.equal(viewSurface(view("ctl-a")), "display");
-    assert.deepEqual(modes("display-3", "display-4"), ["display", "display"]);
-    assert.deepEqual(forbiddenPairings(), []);
+    assert.deepEqual(live("display-3", "display-4"), [false, false]);
   });
 
-  it("persists the view and the screens", async () => {
+  it("persists the view", async () => {
     await stageController.setViewRole("ctl-a", "display");
-    assert.equal((await viewsOnDisk()).find((v) => v.id === "ctl-a")?.surface, "display");
-    assert.deepEqual(await diskModes("display-3", "display-4"), ["display", "display"]);
+    assert.equal(await diskSurface("ctl-a"), "display");
   });
 
   it("leaves every other screen and view exactly as it was", async () => {
@@ -265,50 +223,25 @@ describe("setViewRole — nothing to change", () => {
   it("is not an error, and writes nothing", async () => {
     await warm();
     const before = everything();
-    const settingsBefore = await fs.readFile(path.join(TMP, "settings.json"), "utf8");
+    const viewsBefore = await fs.readFile(path.join(TMP, "views.json"), "utf8");
     await stageController.setViewRole("wall-a", "display");
     await stageController.setViewRole("ctl-a", "console");
     assert.equal(everything(), before);
-    assert.equal(await fs.readFile(path.join(TMP, "settings.json"), "utf8"), settingsBefore);
+    assert.equal(await fs.readFile(path.join(TMP, "views.json"), "utf8"), viewsBefore);
   });
 
-  it("still brings along a screen that does not match a view already as asked", async () => {
-    // A console with a wall display left on it (an older build, a hand edit).
-    ctl.state = { ...ctl.state, outputs: outputs().map((o) => (o.id === "display-3" ? { ...o, mode: "display" as const } : o)) as Output[] };
-    await stageController.setViewRole("ctl-a", "console");
-    assert.deepEqual(modes("display-3", "display-4"), ["panel", "panel"]);
+  it("does not ask about screens when the view is already as asked", async () => {
+    // Nothing would change, so a stale list is not a reason to refuse.
+    await stageController.setViewRole("ctl-a", "console", { screens: [] });
+    assert.equal(viewSurface(view("ctl-a")), "console");
   });
 });
 
-describe("setViewRole — a write that fails part-way is taken back", () => {
-  it("to a control surface, the second screen's write fails: both screens and the view are as they were", async () => {
+describe("setViewRole — a write that fails is taken back", () => {
+  it("the view is as it was in memory and on disk, and the failure says what was undone", async () => {
     await warm();
+    const diskBefore = JSON.stringify(await viewsOnDisk());
     const before = everything();
-    const diskBefore = JSON.stringify([await outputsOnDisk(), await viewsOnDisk()]);
-    const restore = breakDiskOnCall("setOutputMode", "settings.json", 2);
-    try {
-      await assert.rejects(
-        () => stageController.setViewRole("wall-a", "console"),
-        (err: unknown) => {
-          assert.ok(err instanceof ScreenWriteError, String(err));
-          assert.match(err.failed, /"Hallway TV".*control surface/);
-          assert.equal(err.rolledBack.length, 2, `rolled back: ${err.rolledBack.join("; ")}`);
-          assert.deepEqual(err.notRolledBack, []);
-          return true;
-        },
-      );
-    } finally {
-      restore();
-    }
-    assert.deepEqual(modes("display-1", "display-2"), ["display", "display"]);
-    assert.equal(viewSurface(view("wall-a")), "display");
-    assert.equal(JSON.stringify([await outputsOnDisk(), await viewsOnDisk()]), diskBefore, "what a restart reads is not as it was");
-    assert.equal(everything(), before);
-  });
-
-  it("to a control surface, the view's write fails last: both screens are put back too", async () => {
-    await warm();
-    const diskBefore = JSON.stringify([await outputsOnDisk(), await viewsOnDisk()]);
     const restore = breakDiskOnCall("setViewSurface", "views.json", 1);
     try {
       await assert.rejects(
@@ -317,187 +250,41 @@ describe("setViewRole — a write that fails part-way is taken back", () => {
           assert.ok(err instanceof ScreenWriteError, String(err));
           assert.match(err.failed, /make the view a control surface/);
           assert.deepEqual(err.notRolledBack, []);
-          assert.equal(err.rolledBack.length, 3, `rolled back: ${err.rolledBack.join("; ")}`);
+          assert.equal(err.rolledBack.length, 1, `rolled back: ${err.rolledBack.join("; ")}`);
           return true;
         },
       );
     } finally {
       restore();
     }
-    assert.deepEqual(modes("display-1", "display-2"), ["display", "display"]);
     assert.equal(viewSurface(view("wall-a")), "display");
-    assert.equal(JSON.stringify([await outputsOnDisk(), await viewsOnDisk()]), diskBefore);
+    assert.deepEqual(live("display-1", "display-2"), [false, false], "a read-only screen was left live");
+    assert.equal(JSON.stringify(await viewsOnDisk()), diskBefore, "what a restart reads is not as it was");
+    assert.equal(everything(), before);
   });
 
-  it("to a wall display, the second screen's write fails: the view and the first screen are put back", async () => {
+  it("to a wall view, the same", async () => {
     await warm();
-    const diskBefore = JSON.stringify([await outputsOnDisk(), await viewsOnDisk()]);
-    const restore = breakDiskOnCall("setOutputMode", "settings.json", 2);
+    const diskBefore = JSON.stringify(await viewsOnDisk());
+    const restore = breakDiskOnCall("setViewSurface", "views.json", 1);
     try {
-      await assert.rejects(
-        () => stageController.setViewRole("ctl-a", "display"),
-        (err: unknown) => {
-          assert.ok(err instanceof ScreenWriteError, String(err));
-          assert.match(err.failed, /"Stage panel".*wall display/);
-          assert.deepEqual(err.notRolledBack, []);
-          assert.equal(err.rolledBack.length, 3, `rolled back: ${err.rolledBack.join("; ")}`);
-          return true;
-        },
-      );
+      await assert.rejects(() => stageController.setViewRole("ctl-a", "display"), ScreenWriteError);
     } finally {
       restore();
     }
     assert.equal(viewSurface(view("ctl-a")), "console");
-    assert.deepEqual(modes("display-3", "display-4"), ["panel", "panel"]);
-    assert.equal(JSON.stringify([await outputsOnDisk(), await viewsOnDisk()]), diskBefore);
-    assert.deepEqual(forbiddenPairings(), []);
-  });
-
-  it("says so when an undo could not be done, and never leaves a wall display on a console", async () => {
-    // The view lands in memory, fails, and cannot be put back. Putting the
-    // screens back as displays would then be wall displays on a console.
-    await warm();
-    let calls = 0;
-    own.setViewSurface = async (id: string, surface: string) => {
-      calls += 1;
-      if (calls > 1) throw new Error("still failing");
-      await proto.setViewSurface.call(stageController, id, surface);
-      throw new Error("late failure");
-    };
-    try {
-      await assert.rejects(
-        () => stageController.setViewRole("wall-a", "console"),
-        (err: unknown) => {
-          assert.ok(err instanceof ScreenWriteError, String(err));
-          // The view, and each screen: putting either back as a wall display
-          // would show a console on it.
-          assert.equal(err.notRolledBack.length, 3, `not rolled back: ${err.notRolledBack.join("; ")}`);
-          assert.deepEqual(err.rolledBack, []);
-          return true;
-        },
-      );
-    } finally {
-      delete own.setViewSurface;
-    }
-    assert.equal(viewSurface(view("wall-a")), "console");
-    assert.deepEqual(modes("display-1", "display-2"), ["panel", "panel"]);
-    assert.deepEqual(forbiddenPairings(), []);
-  });
-});
-
-describe("setViewRole — a screen pointed at the view after it started", () => {
-  it("to a control surface: the view's own guard refuses, and every screen is put back", async () => {
-    // display-5 is pointed at the view once the first screen has been changed.
-    // The view is still a wall-screen view, so the server allows it, and then
-    // the view cannot become a console under a wall display.
-    const restore = afterCall("setOutputMode", 1, async () => {
-      await stageController.setOutputView("display-5", "wall-a");
-    });
-    try {
-      await assert.rejects(
-        () => stageController.setViewRole("wall-a", "console"),
-        (err: unknown) => {
-          assert.ok(err instanceof ScreenWriteError, String(err));
-          assert.match(err.failed, /make the view a control surface/);
-          assert.match(err.reason, /Spare/);
-          return true;
-        },
-      );
-    } finally {
-      restore();
-    }
-    assert.equal(viewSurface(view("wall-a")), "display", "the view was made a console under a wall display");
-    assert.deepEqual(modes("display-1", "display-2", "display-5"), ["display", "display", "display"]);
-    assert.equal(out("display-5").viewId, "wall-a", "the screen that arrived was moved: it was not this call's to move");
-    assert.deepEqual(forbiddenPairings(), []);
-  });
-
-  it("to a wall display: a view turned back into a console meanwhile is refused by the screen's guard, and undone", async () => {
-    const restore = beforeCall("setOutputMode", 1, async () => {
-      // The view has already become a wall-screen view; somebody makes it a
-      // console again while the screens are still control surfaces.
-      await proto.setViewSurface.call(stageController, "ctl-a", "console");
-    });
-    try {
-      await assert.rejects(
-        () => stageController.setViewRole("ctl-a", "display"),
-        (err: unknown) => {
-          assert.ok(err instanceof ScreenWriteError, String(err));
-          assert.match(err.failed, /wall display/);
-          assert.match(err.reason, /control surface/);
-          assert.deepEqual(err.notRolledBack, []);
-          return true;
-        },
-      );
-    } finally {
-      restore();
-    }
-    assert.equal(viewSurface(view("ctl-a")), "console");
-    assert.deepEqual(modes("display-3", "display-4"), ["panel", "panel"]);
-    assert.deepEqual(forbiddenPairings(), []);
-  });
-});
-
-describe("setViewRole — a screen pointed AWAY from the view after it started", () => {
-  it("to a control surface: the screen that left is not changed, and the rest is undone", async () => {
-    // Hallway TV is recalled to another view once Lobby TV has been changed.
-    // Changing it anyway would make a control surface out of a screen that no
-    // longer shows the view.
-    const restore = afterCall("setOutputMode", 1, async () => {
-      await stageController.setOutputView("display-2", "wall-b");
-    });
-    try {
-      await assert.rejects(
-        () => stageController.setViewRole("wall-a", "console"),
-        (err: unknown) => {
-          assert.ok(err instanceof ScreenWriteError, String(err));
-          assert.match(err.failed, /"Hallway TV"/);
-          assert.match(err.reason, /another view meanwhile/);
-          assert.deepEqual(err.notRolledBack, []);
-          return true;
-        },
-      );
-    } finally {
-      restore();
-    }
-    assert.deepEqual({ viewId: out("display-2").viewId, mode: outputMode(out("display-2")) }, { viewId: "wall-b", mode: "display" });
-    assert.deepEqual(modes("display-1"), ["display"]);
-    assert.equal(viewSurface(view("wall-a")), "display");
-    assert.deepEqual(forbiddenPairings(), []);
-  });
-
-  it("to a wall display: the same, after the view has already changed", async () => {
-    const restore = afterCall("setOutputMode", 1, async () => {
-      await stageController.setOutputView("display-4", "wall-b");
-    });
-    try {
-      await assert.rejects(
-        () => stageController.setViewRole("ctl-a", "display"),
-        (err: unknown) => {
-          assert.ok(err instanceof ScreenWriteError, String(err));
-          assert.match(err.failed, /"Stage panel"/);
-          assert.deepEqual(err.notRolledBack, []);
-          return true;
-        },
-      );
-    } finally {
-      restore();
-    }
-    assert.deepEqual({ viewId: out("display-4").viewId, mode: outputMode(out("display-4")) }, { viewId: "wall-b", mode: "panel" });
-    assert.deepEqual(modes("display-3"), ["panel"]);
-    assert.equal(viewSurface(view("ctl-a")), "console");
-    assert.deepEqual(forbiddenPairings(), []);
+    assert.deepEqual(live("display-3", "display-4"), [true, true], "a control surface stopped working");
+    assert.equal(JSON.stringify(await viewsOnDisk()), diskBefore);
   });
 });
 
 /** The ids of the screens setViewRole would change, as a client computes them
- *  for the question it asks. */
-const askedAbout = (viewId: string, mode: "panel" | "display") =>
-  outputs().filter((o) => o.viewId === viewId && outputMode(o) !== mode).map((o) => o.id);
+ *  for the question it asks: every screen showing the view. */
+const askedAbout = (viewId: string) => outputs().filter((o) => o.viewId === viewId).map((o) => o.id);
 
 describe("setViewRole — the screens the operator was shown", () => {
   it("THE RACE: a screen pointed at the view while the question was open is refused, naming the screens now, and nothing is written", async () => {
-    const shown = askedAbout("wall-a", "panel");
+    const shown = askedAbout("wall-a");
     assert.deepEqual(shown, ["display-1", "display-2"]);
     // Somebody else points Spare at the view while the dialog is open.
     await stageController.setOutputView("display-5", "wall-a");
@@ -518,6 +305,17 @@ describe("setViewRole — the screens the operator was shown", () => {
     assert.equal(everything(), before, "a screen the operator was never shown was changed");
   });
 
+  it("a screen pointed AWAY while the question was open is refused too", async () => {
+    const shown = askedAbout("wall-a");
+    await stageController.setOutputView("display-2", "wall-b");
+    const before = everything();
+    await assert.rejects(
+      () => stageController.setViewRole("wall-a", "console", { screens: shown }),
+      (err: unknown) => err instanceof ViewScreensChangedError && err.screens.length === 1 && err.screens[0].id === "display-1",
+    );
+    assert.equal(everything(), before);
+  });
+
   it("refuses a call that asked about no screens when there is one now", async () => {
     const before = everything();
     await assert.rejects(
@@ -536,13 +334,13 @@ describe("setViewRole — the screens the operator was shown", () => {
 
   it("goes ahead when the list matches, in any order", async () => {
     await stageController.setViewRole("wall-a", "console", { screens: ["display-2", "display-1"] });
-    assert.deepEqual(modes("display-1", "display-2"), ["panel", "panel"]);
+    assert.deepEqual(live("display-1", "display-2"), [true, true]);
     assert.equal(viewSurface(view("wall-a")), "console");
   });
 
   it("with no list at all, changes whatever screens show the view: the call a script makes", async () => {
     await stageController.setOutputView("display-5", "wall-a");
     await stageController.setViewRole("wall-a", "console");
-    assert.deepEqual(modes("display-1", "display-2", "display-5"), ["panel", "panel", "panel"]);
+    assert.deepEqual(live("display-1", "display-2", "display-5"), [true, true, true]);
   });
 });

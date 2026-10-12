@@ -32,19 +32,22 @@ A view also declares what it is **for**, alongside its kind:
 
 | | Display | Console |
 |---|---|---|
-| Where it renders | a screen at its own URL | the app, or a screen set to panel mode |
+| Where it renders | a screen at its own URL | the app, or a screen at its own URL as a control surface |
 | Controls | never fire | live |
 | Editing (notes, checklists) | read-only | live |
 | Drill-down | no | in the app only |
 | Audience | anyone walking past | the operator |
 
-A screen has a matching **mode**. It is a read-only `display` unless deliberately
-set to `panel` — the way a control surface is built. Only a panel may show a console
-view, and that rule is enforced by the server, not just the picker: a wall screen
-cannot end up rendering a live button by accident.
+A screen has no role of its own: **the view decides.** A screen is a control
+surface, whose buttons work for anyone at it, exactly when the view it shows is a
+console, and a read-only wall display when it shows any other view or none. Either
+kind of view can be shown on any screen; the server refuses nothing here, and the
+Screens page asks before a screen goes live.
 
-Converting a view that screens are currently showing is refused, naming those
-screens, rather than silently unbinding them.
+Changing the surface of a view that screens are showing changes those screens, so
+the plain `PATCH /api/views/:id` refuses it, naming the screens, and
+`POST /api/views/:id/surface` is the call that does it, with the screens listed
+first.
 
 Only **custom** views can be consoles: the built-in kinds have no editable layout,
 so there is nowhere to put a control.
@@ -141,9 +144,19 @@ alone.
 ### Upgrading an existing install
 
 Nothing has to be done by hand. On first start, any view containing a button
-becomes a console and the screens showing it become panels, so a control surface that
-worked before still works. What moved is written to the log, so a stray control
-left on a wall display years ago can be spotted and set back deliberately.
+becomes a console, so the screens showing it are control surfaces and a control
+surface that worked before still works. What moved is written to the log, so a
+stray control left on a wall display years ago can be spotted and set back
+deliberately.
+
+An install that stored a role on each screen has it taken out on the first start
+(or the first start after a restore of such a backup), without changing what any
+screen does. A screen that was read-only never becomes live: one that was set to
+a wall display but showed a console now shows a wall copy of it, named `<view>
+(wall)`. A screen whose buttons worked keeps them: the view it showed becomes a
+console when only such screens showed it, and otherwise those screens share a
+control-surface copy, `<view> (control surface)`. Each is a `[screens]` line in
+the log.
 
 ## What a display shows
 

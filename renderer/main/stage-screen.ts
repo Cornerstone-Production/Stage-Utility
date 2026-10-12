@@ -15,6 +15,8 @@
 // included. Where a comment records a bug that was fixed once, it travelled
 // with the line it guards.
 
+import { viewSurface } from "@main/types/views";
+
 /**
  * The kiosk chrome a screen draws around whatever it is showing.
  *
@@ -58,13 +60,13 @@ export type StageScreen =
       view: View | null;
       displayId: string;
       isPreview: boolean;
-      /** How the Output renders — `panel` is the only surface whose controls are
-       *  live. Undefined on a preview and on an Output with no mode set, which
-       *  `contextForOutput` reads as `display`. Carried here rather than looked
-       *  up again by the caller: it comes from the same `outputs.find` the name
-       *  does, and a preview has to null it, which is a rule that must live in
-       *  exactly one place. */
-      outputMode: Output["mode"];
+      /** Whether the view this screen shows is a console, which is what makes the
+       *  screen a control surface: the one surface whose controls are live. Read
+       *  from the same `activeView` the arm renders from, so what a screen draws
+       *  and whether its buttons work cannot disagree. A preview is not live even
+       *  when this is true: `contextForOutput` reads `isPreview` first, which is a
+       *  rule that must live in exactly one place. */
+      showsControlSurface: boolean;
       /** Whether a Video widget here may attempt HLS — this screen's own "Use
        *  HLS on this screen" switch, `resolved`'s so it is never a picture of
        *  another screen the way `standingIn`'s chrome fields are. Always true
@@ -241,7 +243,7 @@ export function resolveScreen(input: ScreenInput): StageScreen {
     view: activeView,
     displayId,
     isPreview: !!previewViewId,
-    outputMode: currentDisplay?.mode,
+    showsControlSurface: activeView !== null && viewSurface(activeView) === "console",
     allowHls: resolved?.allowHls ?? true,
     textSize: standingIn?.textSize ?? null,
     ...chrome,

@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { errorMessage } from "@main/services/errors";
-import { outputMode, surfaceForMode } from "@main/types/views";
+import { screenIsControlSurface } from "@main/types/views";
 
 import { SCREEN_PANEL_ID, ScreenSettingsPanel, type PanelDevice, type PanelTarget, type ScreenPanelActions } from "../../settings/sections/screen-settings-panel";
 import { NewViewDialog } from "../../settings/sections/new-view-dialog";
@@ -73,7 +73,6 @@ export function ScreenPanelHost({
       await invoke("outputs:setSlug", { id, slug });
     },
     onSetView: handlers.handleSetOutputView,
-    onSetRole: handlers.handleSetOutputRole,
     onSetLocked: handlers.handleSetOutputLocked,
     onSetHideTopBar: handlers.handleSetOutputHideTopBar,
     onSetTextSize: handlers.handleSetOutputTextSize,
@@ -99,13 +98,12 @@ export function ScreenPanelHost({
         actions={actions}
         onClose={onClose}
       />
-      {/* The same dialog the cards use, told what the new view is FOR: the
-          panel's picker is already filtered to the screen's role, and a control
-          surface must not be offered a view it cannot show. */}
+      {/* The same dialog the cards use, told what the new view is FOR: the kind the
+          screen shows now, so making one never changes what the screen is. */}
       <NewViewDialog
         handlers={handlers}
         open={newViewFor !== null}
-        fixedSurface={newViewScreen ? surfaceForMode(outputMode(newViewScreen)) : "display"}
+        fixedSurface={newViewScreen && screenIsControlSurface(newViewScreen, stageState.views ?? []) ? "console" : "display"}
         onOpenChange={(o) => { if (!o) setNewViewFor(null); }}
         onCreated={(id) => {
           if (newViewFor) void handlers.handleSetOutputView(newViewFor, id);

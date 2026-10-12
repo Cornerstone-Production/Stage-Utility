@@ -78,8 +78,8 @@ let client: InstanceType<typeof QueryClient>;
 
 beforeEach(() => {
   outputs = [
-    { id: "display-1", name: "Booth panel", viewId: "ctl-a", mode: "panel" },
-    { id: "display-2", name: "Stage panel", viewId: "ctl-a", mode: "panel" },
+    { id: "display-1", name: "Booth panel", viewId: "ctl-a" },
+    { id: "display-2", name: "Stage panel", viewId: "ctl-a" },
     { id: "display-3", name: "Lobby TV", viewId: "wall-a" },
   ];
   views = [WALL, CONSOLE];
@@ -300,34 +300,32 @@ describe("each setting reaches the server", () => {
   });
 });
 
-describe("changing the role of a shared view", () => {
-  test("Use a copy POSTs the role route with copyView, and touches no other screen or view", async () => {
+describe("choosing a view of the other kind in the panel", () => {
+  // The view decides what a screen is, so there is no role route: the answer to
+  // the question is one PATCH of the screen's viewId, and nothing else moves.
+  test("a control surface pointed at a wall view asks, then PATCHes only viewId", async () => {
     await mountScreens();
     await openSettings("Booth panel");
-    await click(panel().getByRole("button", { name: /^Wall display/ }));
-    assert.deepEqual(writes, [], "the role went out before the operator chose how");
-    await click(panel().getByRole("button", { name: "Apply" }));
-    await answerConfirm("Make it a display");
-    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs/display-1/role", body: { mode: "display", copyView: true } }]);
+    await choose(panel().getByLabelText("View"), "wall-a");
+    assert.deepEqual(writes, [], "the screen was routed before the operator said yes");
+    await answerConfirm("Make it a wall display");
+    assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-1", body: { viewId: "wall-a" } }]);
   });
 
-  test("Choose a different view POSTs the role route with that view", async () => {
-    await mountScreens();
-    await openSettings("Booth panel");
-    await click(panel().getByRole("button", { name: /^Wall display/ }));
-    await click(panel().getByRole("radio", { name: /Choose a different view/ }));
-    await choose(panel().getByLabelText("A different view"), "wall-a");
-    await click(panel().getByRole("button", { name: "Apply" }));
-    await answerConfirm("Make it a display");
-    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs/display-1/role", body: { mode: "display", viewId: "wall-a" } }]);
-  });
-
-  test("a view only this screen shows is changed with it, in one call and no copy", async () => {
+  test("a wall display pointed at a console asks, then PATCHes only viewId", async () => {
     await mountScreens();
     await openSettings("Lobby TV");
-    await click(panel().getByRole("button", { name: /^Control surface/ }));
-    await answerConfirm("Use as a control surface");
-    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs/display-3/role", body: { mode: "panel" } }]);
+    await choose(panel().getByLabelText("View"), "ctl-a");
+    await answerConfirm("Make it a control surface");
+    assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { viewId: "ctl-a" } }]);
+  });
+
+  test("declining sends nothing", async () => {
+    await mountScreens();
+    await openSettings("Lobby TV");
+    await choose(panel().getByLabelText("View"), "ctl-a");
+    await answerConfirm("Cancel");
+    assert.deepEqual(writes, []);
   });
 });
 
@@ -339,17 +337,16 @@ describe("the card's own view picker", () => {
     return el!.querySelector("select")!;
   }
 
-  test("choosing a console for a wall display makes it a control surface on that view, in one call", async () => {
-    // Lobby TV shares its wall view with another screen. Going through the
-    // screen's old role change, the card made it a panel and then tried to turn
-    // the wall view it was LEAVING into a console, which the server refuses for
-    // a shared view and which would have changed the other screen anyway. The
-    // role route with the view named does it in one validated write.
+  test("choosing a console for a wall display asks, then points the screen at it: one PATCH of viewId", async () => {
+    // Lobby TV shares its wall view with another screen. Choosing a view is all
+    // it takes to make it a control surface, and the other screen, which keeps the
+    // wall view, is not touched.
     outputs = [...outputs, { id: "display-4", name: "Hallway TV", viewId: "wall-a" }];
     await mountScreens();
     await choose(cardPicker("Lobby TV"), "ctl-a");
-    await answerConfirm("Use as a control surface");
-    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs/display-3/role", body: { mode: "panel", viewId: "ctl-a" } }]);
+    assert.deepEqual(writes, [], "the screen was routed before the operator said yes");
+    await answerConfirm("Make it a control surface");
+    assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { viewId: "ctl-a" } }]);
   });
 
   test("declining the confirm assigns nothing", async () => {
@@ -385,7 +382,7 @@ describe("a console on no screen", () => {
   });
 
   test("a wall view's menu has no such item", async () => {
-    outputs = [{ id: "display-1", name: "Lobby TV", viewId: "ctl-a", mode: "panel" }];
+    outputs = [{ id: "display-1", name: "Lobby TV", viewId: "ctl-a" }];
     views = [CONSOLE, { ...WALL, id: "wall-free", name: "Spare loop" }];
     await mountScreens();
     const trigger = screen.getByLabelText("More actions for Spare loop");
@@ -427,7 +424,7 @@ describe("Add a screen", () => {
     await click(panel().getByRole("button", { name: "Next" }));
     await type(panel().getByLabelText("Name"), "Wing");
     await click(panel().getByRole("button", { name: "Create screen" }));
-    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { name: "Wing", mode: "panel", newView: true } }]);
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { name: "Wing", newView: "control" } }]);
     assert.equal(screen.queryByRole("complementary", { name: "Screen settings" }) !== null, false, "the panel stayed open after the screen was made");
   });
 
@@ -445,7 +442,7 @@ describe("Add a screen", () => {
     assert.equal(name.value, "", "the name field holds a guess at the number");
     assert.match(name.placeholder, /number/);
     await click(panel().getByRole("button", { name: "Create screen" }));
-    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { mode: "display" } }]);
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: {} }]);
   });
 });
 
@@ -479,7 +476,7 @@ describe("a device waiting to be set up", () => {
     assert.deepEqual(claims, [{
       method: "POST",
       url: "/api/devices/claim",
-      body: { deviceId: "kiosk-aaaa", outputId: null, name: "lobby-pi", mode: "panel" },
+      body: { deviceId: "kiosk-aaaa", outputId: null, name: "lobby-pi" },
     }]);
     assert.equal(writes.filter((w) => w.url === "/api/outputs").length, 0, "the screen was made through the add route, not the claim");
     assert.equal(screen.queryByRole("complementary", { name: "Screen settings" }) !== null, false, "it is on screen");

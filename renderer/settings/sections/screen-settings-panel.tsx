@@ -19,23 +19,22 @@
 // The mockup is the spec for both (scratchpad screen-settings-mockup.html, side
 // panel layout).
 //
-// CHANGING ONE SCREEN NEVER CHANGES ANOTHER. A view several screens show cannot
-// be made a control surface (the server refuses) or a wall screen (it would
-// silently strip the live controls from every other screen showing it) without
-// changing them, so when the role chosen no longer fits a shared view the panel
-// says which screens share it and offers a copy for this screen, or a different
-// view. A view that is not custom cannot be a control surface at all, nor can a
-// copy of it, so for one of those it offers only a different view. Both are
-// roleChangeConflict(), the function the server decides with.
+// THE VIEW DECIDES WHAT A SCREEN IS. A screen is a control surface (its buttons
+// work for anyone at it) exactly when the view it shows is a console, and a
+// read-only wall display otherwise. There is no role to set on the screen: the
+// picker offers views of both kinds, one line under it says what the choice makes
+// the screen, and choosing a view of the other kind asks first, because the
+// screen's buttons go live or stop. Changing what a view is for is the view's
+// own card, which names every screen it changes.
 
 import { useEffect, useRef, useState, type ChangeEvent, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { CopyIcon, XIcon } from "lucide-react";
 
-import { Button, Checkbox, ErrorNote, Input, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Tooltip, confirm, toast } from "../../components/ui";
+import { Button, Checkbox, ErrorNote, Input, NumberInput, Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, Switch, Tooltip, confirm, toast } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
-import { KIND_DRAWS_TOP_BAR, outputMode, roleChangeConflict, viewFitsRole, viewShownInSidebar, viewSurface, type CreateScreenInput, type OutputMode } from "@main/types/views";
+import { KIND_DRAWS_TOP_BAR, screenIsControlSurface, viewCanBeControlSurface, viewShownInSidebar, viewSurface, type CreateScreenInput, type NewViewKind, type ViewSurface } from "@main/types/views";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { useDevices } from "../../app/screens/use-devices";
 import { releaseDevice } from "../../app/screens/screen-device";
@@ -74,8 +73,6 @@ export interface ScreenPanelActions {
   /** Rejects with the server's reason, which the panel shows without closing. */
   onSetSlug: (id: string, slug: string) => Promise<void>;
   onSetView: (id: string, viewId: string | null) => void;
-  /** True when it landed; a refusal is already on screen. */
-  onSetRole: (id: string, mode: OutputMode, opts: { copyView?: boolean; viewId?: string }) => Promise<boolean>;
   onSetLocked: (id: string, locked: boolean) => void;
   onSetHideTopBar: (id: string, hideTopBar: boolean) => void;
   onSetTextSize: (id: string, size: number) => void;
@@ -108,36 +105,51 @@ export interface ScreenSettingsPanelProps {
  *  opens it needs to hand focus to it once the menu has finished closing. */
 export const SCREEN_PANEL_ID = "screen-settings-panel";
 
-const ROLE_LABEL: Record<OutputMode, string> = { display: "wall display", panel: "control surface" };
+/** The views a new screen of this kind may be shown: a custom console for a
+ *  control surface, a wall view for a wall display. (Guided creation only. An
+ *  existing screen's picker offers both kinds.) */
+export function viewsOfKind(views: readonly View[], kind: NewViewKind): View[] {
+  return views.filter((v) => (kind === "control" ? viewSurface(v) === "console" && viewCanBeControlSurface(v) : viewSurface(v) === "display"));
+}
 
-/** The views a screen of this role may show: custom control surfaces for a
- *  control surface, wall screens for a wall display (viewFitsRole, the server's
- *  own test). `current` is always kept so the picker never goes blank on a
- *  pairing the server has already accepted. */
-export function viewsFittingRole(views: readonly View[], mode: OutputMode, current: string | null): View[] {
-  return views.filter((v) => viewFitsRole(v, mode) || v.id === current);
+/** What a screen showing a view of this surface is, in the words the panel uses. */
+const WHAT_IT_IS: Record<ViewSurface, string> = {
+  console: "Control surface: its buttons work for anyone at it.",
+  display: "Wall display: read-only. Buttons draw but do nothing.",
+};
+
+/**
+ * Ask before a screen becomes what it is not. The one confirm for it, here and on
+ * the screen card's view picker, so the title and the button are written once.
+ *
+ * Making a screen a control surface makes its buttons live to anyone standing at
+ * it, which is not something to do by misclick, and making it a wall display
+ * switches them off. `why` leads the message when the change is a consequence of
+ * something else the operator chose.
+ */
+export async function confirmRole(name: string, becomes: ViewSurface, why?: string): Promise<boolean> {
+  const toConsole = becomes === "console";
+  const what = toConsole
+    ? "Its buttons will work. Anyone standing at it can press them."
+    : "It becomes read-only. Its buttons will render but do nothing.";
+  return confirm({
+    title: toConsole ? `Make "${name}" a control surface?` : `Make "${name}" a wall display?`,
+    message: why ? `${why} ${what}` : what,
+    confirmLabel: toConsole ? "Make it a control surface" : "Make it a wall display",
+  });
 }
 
 /**
- * Ask before changing a screen's role. The one confirm for it, here and on the
- * screen card (whose view picker offers it when a console is chosen), so the
- * title and the button are written once.
- *
- * Confirmed, and the confirm says what actually changes. Turning a screen into
- * a control surface makes its controls live to anyone standing at it, which is
- * not something to do by misclick. `why` leads the message when the change is
- * a consequence of something else the operator chose.
+ * Pointing a screen at a view is also choosing what the screen is. Asks when that
+ * changes it (the view is of the other kind than the screen shows now) and says
+ * whether to go ahead. A view of the kind the screen already shows asks nothing.
  */
-export async function confirmRole(name: string, mode: OutputMode, why?: string): Promise<boolean> {
-  const toPanel = mode === "panel";
-  const what = toPanel
-    ? "Buttons on this screen will work. Anyone standing at it can press them."
-    : "This screen becomes read-only. Its buttons will render but do nothing.";
-  return confirm({
-    title: toPanel ? `Use "${name}" as a control surface?` : `Make "${name}" a display again?`,
-    message: why ? `${why} ${what}` : what,
-    confirmLabel: toPanel ? "Use as a control surface" : "Make it a display",
-  });
+export async function confirmViewKind(output: Output, views: readonly View[], viewId: string): Promise<boolean> {
+  const picked = views.find((v) => v.id === viewId);
+  if (!picked) return true;
+  const becomes = viewSurface(picked);
+  if ((becomes === "console") === screenIsControlSurface(output, views)) return true;
+  return confirmRole(output.name, becomes, `"${picked.name}" is ${becomes === "console" ? "a control surface" : "a wall view"}.`);
 }
 
 // ── Small parts ──────────────────────────────────────────────────────────
@@ -246,22 +258,22 @@ function SlugInput({ id, baseUrl, value, onChange, children }: {
   );
 }
 
-function RoleCards({ role, onChoose }: { role: OutputMode; onChoose: (mode: OutputMode) => void }) {
-  const cards: { mode: OutputMode; title: string; hint: string }[] = [
-    { mode: "display", title: "Wall display", hint: "Read from across the room. Buttons draw but do nothing." },
-    { mode: "panel", title: "Control surface", hint: "A touch screen. Its buttons work for anyone at it." },
+function KindCards({ kind, onChoose }: { kind: NewViewKind; onChoose: (kind: NewViewKind) => void }) {
+  const cards: { kind: NewViewKind; title: string; hint: string }[] = [
+    { kind: "wall", title: "Wall display", hint: "Read from across the room. Buttons draw but do nothing." },
+    { kind: "control", title: "Control surface", hint: "A touch screen. Its buttons work for anyone at it." },
   ];
   return (
     <div role="group" aria-label="What this screen is" className="grid grid-cols-2 gap-2">
       {cards.map((c) => (
         <button
-          key={c.mode}
+          key={c.kind}
           type="button"
-          aria-pressed={role === c.mode}
-          onClick={() => onChoose(c.mode)}
+          aria-pressed={kind === c.kind}
+          onClick={() => onChoose(c.kind)}
           className={cn(
             "flex flex-col items-start justify-start rounded-[10px] border p-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
-            role === c.mode ? "border-accent bg-accent/12" : "border-line-strong bg-fill hover:bg-fill-hover",
+            kind === c.kind ? "border-accent bg-accent/12" : "border-line-strong bg-fill hover:bg-fill-hover",
           )}
         >
           <span className="block text-footnote font-semibold text-fg">{c.title}</span>
@@ -292,23 +304,23 @@ function SidebarRow({ checked, onChange, disabled }: { checked: boolean; onChang
   );
 }
 
-/** The role-filtered view picker, shared by both modes. */
+/** The view picker, shared by both modes: views in labelled groups (a group with
+ *  no label is flat), then the way to make a new one. `hint` is the line under it. */
 function ViewPicker({
-  views,
-  role,
+  groups,
   value,
   onChange,
   newLabel,
   noneLabel,
+  hint,
 }: {
-  views: readonly View[];
-  role: OutputMode;
+  groups: readonly { label: string | null; views: readonly View[] }[];
   value: string;
   onChange: (v: string) => void;
   newLabel: string;
   noneLabel: string;
+  hint: ReactNode;
 }) {
-  const fit = viewsFittingRole(views, role, value === NONE || value === NEW_VIEW ? null : value);
   return (
     <>
       <Select value={value} onValueChange={onChange}>
@@ -317,17 +329,28 @@ function ViewPicker({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE}>{noneLabel}</SelectItem>
-          {fit.map((v) => (
-            <SelectItem key={v.id} value={v.id}>
-              {v.name}
-            </SelectItem>
-          ))}
+          {groups.map((g) =>
+            g.label === null ? (
+              g.views.map((v) => (
+                <SelectItem key={v.id} value={v.id}>
+                  {v.name}
+                </SelectItem>
+              ))
+            ) : g.views.length > 0 ? (
+              <SelectGroup key={g.label}>
+                <SelectLabel>{g.label}</SelectLabel>
+                {g.views.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>
+                    {v.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ) : null,
+          )}
           <SelectItem value={NEW_VIEW}>{newLabel}</SelectItem>
         </SelectContent>
       </Select>
-      <p className="mt-1.5 text-caption1 text-fg-subtle">
-        {role === "panel" ? "Control-surface views only." : "Wall-display views only."}
-      </p>
+      <p className="mt-1.5 text-caption1 text-fg-subtle">{hint}</p>
     </>
   );
 }
@@ -419,116 +442,6 @@ function GroupsChecklist({
           {g.name}
         </label>
       ))}
-    </div>
-  );
-}
-
-// ── The shared-view prompt ───────────────────────────────────────────────
-
-function SharedViewPrompt({
-  conflict,
-  mode,
-  views,
-  choice,
-  picked,
-  busy,
-  onChoice,
-  onPick,
-  onApply,
-  onCancel,
-}: {
-  conflict: NonNullable<ReturnType<typeof roleChangeConflict>>;
-  mode: OutputMode;
-  views: readonly View[];
-  choice: "copy" | "pick";
-  picked: string;
-  busy: boolean;
-  onChoice: (c: "copy" | "pick") => void;
-  onPick: (id: string) => void;
-  onApply: () => void;
-  onCancel: () => void;
-}) {
-  const { view, others, copyName } = conflict;
-  const names = others.map((o) => o.name).join(", ");
-  const modes = new Set(others.map((o) => outputMode(o)));
-  const stays = modes.size === 1 ? `, which ${others.length === 1 ? "stays" : "stay"} a ${ROLE_LABEL[[...modes][0]]}` : "";
-  const fit = viewsFittingRole(views, mode, null).filter((v) => v.id !== view.id);
-  return (
-    <div
-      role="group"
-      aria-label={others.length > 0 ? "This view is shared" : "This view cannot be a control surface"}
-      className="mt-2.5 rounded-[9px] border border-warn-9/35 bg-warn-9/8 px-3 py-2.5 text-footnote"
-    >
-      <p className="mb-2 text-fg-muted">
-        {others.length > 0 && (
-          <>
-            <b className="font-semibold text-fg">
-              "{view.name}" is also on {names}
-            </b>
-            {stays}. Changing this screen never changes another one.{" "}
-          </>
-        )}
-        {/* No copy to offer: a copy of a view that is not custom is not custom
-            either, and the server refuses both. */}
-        {copyName === null && (
-          <>
-            {others.length === 0 && <b className="font-semibold text-fg">"{view.name}" </b>}
-            {others.length === 0 ? "cannot" : "It cannot"} be a control surface: only a custom view has a layout to put a
-            control on. Choose a control-surface view for this screen.
-          </>
-        )}
-      </p>
-      {copyName !== null && (
-        <>
-          <label className="flex cursor-pointer items-start gap-2 py-1">
-            <input type="radio" name="shared-view" checked={choice === "copy"} onChange={() => onChoice("copy")} className="mt-1 accent-[var(--su-accent)]" />
-            <span className="text-fg">
-              Use a copy on this screen
-              <small className="block text-caption1 text-fg-subtle">
-                "{copyName}", made as a {ROLE_LABEL[mode]}. {names} keeps the original.
-              </small>
-            </span>
-          </label>
-          <label className="flex cursor-pointer items-start gap-2 py-1">
-            <input type="radio" name="shared-view" checked={choice === "pick"} onChange={() => onChoice("pick")} className="mt-1 accent-[var(--su-accent)]" />
-            <span className="text-fg">
-              Choose a different view
-              <small className="block text-caption1 text-fg-subtle">
-                Only views that fit a {ROLE_LABEL[mode]} are offered.
-              </small>
-            </span>
-          </label>
-        </>
-      )}
-      {choice === "pick" && (
-        <Select value={picked || NONE} onValueChange={(v: string) => onPick(v === NONE ? "" : v)}>
-          <SelectTrigger aria-label="A different view" className="mt-1.5">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={NONE}>Pick a view…</SelectItem>
-            {fit.map((v) => (
-              <SelectItem key={v.id} value={v.id}>
-                {v.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
-      <PromptButtons busy={busy} disabled={choice === "pick" && !picked} onApply={onApply} onCancel={onCancel} />
-    </div>
-  );
-}
-
-function PromptButtons({ busy, disabled, onApply, onCancel }: { busy: boolean; disabled?: boolean; onApply: () => void; onCancel: () => void }) {
-  return (
-    <div className="mt-2.5 flex justify-end gap-2">
-      <Button type="button" variant="transparent" size="small" onClick={onCancel} disabled={busy}>
-        Cancel
-      </Button>
-      <Button type="button" variant="accent" size="small" onClick={onApply} disabled={busy || disabled}>
-        Apply
-      </Button>
     </div>
   );
 }
@@ -712,17 +625,17 @@ function DeviceSection({ output, online, actions }: { output: Output; online: bo
   );
 }
 
-function EditBody({ output, outputs, views, baseUrl, online, messageGroups, actions }: {
+function EditBody({ output, views, baseUrl, online, messageGroups, actions }: {
   output: Output;
-  outputs: Output[];
   views: View[];
   baseUrl: string;
   online: boolean;
   messageGroups: MessageGroups;
   actions: ScreenPanelActions;
 }) {
-  const role = outputMode(output);
   const shown = output.viewId ? views.find((v) => v.id === output.viewId) : undefined;
+  // What the screen is, from its view: the one question every reader asks.
+  const controlSurface = screenIsControlSurface(output, views);
   // The same condition the card's menu used for the lock and the top bar: both
   // are about a strip only some kinds draw. An unrouted screen still shows a bar.
   const drawsTopBar = shown ? KIND_DRAWS_TOP_BAR[shown.kind] : true;
@@ -731,46 +644,12 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
   useResyncOn([output.name], () => setName(output.name));
   const [draftSize, setDraftSize] = useState<number | null>(null);
 
-  // A role chosen that would change another screen, waiting for the operator to
-  // say how. `null` when nothing is waiting. `waiting` is the same, unless the
-  // screen has meanwhile become that role (another browser made the change).
-  const [pending, setPending] = useState<OutputMode | null>(null);
-  const [choice, setChoice] = useState<"copy" | "pick">("copy");
-  const [picked, setPicked] = useState("");
-  const [busy, setBusy] = useState(false);
-  const waiting = pending !== null && pending !== role ? pending : null;
-  // Recomputed from the props on every render, so it follows the other screens.
-  // It can go away while the operator is deciding (the screens sharing the view
-  // move off it); the choice they made still stands, and Apply then makes the
-  // plain change, which now changes nobody else.
-  const conflict = waiting ? roleChangeConflict(output, outputs, views, waiting) : null;
-
-  async function chooseRole(next: OutputMode) {
-    // Whatever was waiting is replaced by this choice, or dropped by choosing
-    // the role the screen already has.
-    setPending(null);
-    if (next === role) return;
-    const asks = roleChangeConflict(output, outputs, views, next);
-    if (asks) {
-      // A copy when one can take the role (the default), else a different view.
-      setPending(next);
-      setChoice(asks.copyName === null ? "pick" : "copy");
-      setPicked("");
-      return;
-    }
-    if (await confirmRole(output.name, next)) await actions.onSetRole(output.id, next, {});
-  }
-
-  async function applyPending() {
-    if (!waiting) return;
-    if (!(await confirmRole(output.name, waiting))) return;
-    setBusy(true);
-    try {
-      const opts = !conflict ? {} : choice === "copy" ? { copyView: true } : { viewId: picked };
-      if (await actions.onSetRole(output.id, waiting, opts)) setPending(null);
-    } finally {
-      setBusy(false);
-    }
+  /** Choosing a view is choosing what the screen is, so a view of the other kind
+   *  is asked about first. Declining leaves the picker on the view it was on. */
+  async function pickView(v: string) {
+    if (v === NEW_VIEW) actions.onRequestNewView(output.id);
+    else if (v === NONE) actions.onSetView(output.id, null);
+    else if (await confirmViewKind(output, views, v)) actions.onSetView(output.id, v);
   }
 
   function commitName() {
@@ -780,58 +659,29 @@ function EditBody({ output, outputs, views, baseUrl, online, messageGroups, acti
   }
 
   const permanent = `${baseUrl}/${encodeURIComponent(output.id)}`;
-  const shownRole = waiting ?? role;
 
   return (
     <>
-      <Section title="What this screen is">
-        <RoleCards role={shownRole} onChoose={(m) => void chooseRole(m)} />
-        {/* Only for a console, or for no view yet (the switch then says to
-            choose one). A panel can show a wall view, and the sidebar never
-            lists one. */}
-        {role === "panel" && waiting === null && (!shown || viewSurface(shown) === "console") && (
-          <SidebarRow
-            checked={shown ? viewShownInSidebar(shown) : true}
-            disabled={!shown}
-            onChange={(on) => shown && actions.onSetShowInSidebar(shown.id, on)}
-          />
-        )}
-        {waiting && conflict && (
-          <SharedViewPrompt
-            conflict={conflict}
-            mode={waiting}
-            views={views}
-            choice={choice}
-            picked={picked}
-            busy={busy}
-            onChoice={setChoice}
-            onPick={setPicked}
-            onApply={() => void applyPending()}
-            onCancel={() => setPending(null)}
-          />
-        )}
-        {waiting && !conflict && (
-          <div role="group" aria-label="Change the role" className="mt-2.5 rounded-[9px] border border-line px-3 py-2.5 text-footnote text-fg-muted">
-            <p>
-              {shown ? `No other screen shows "${shown.name}" now, so it changes with this screen.` : "No other screen is affected now."}
-            </p>
-            <PromptButtons busy={busy} onApply={() => void applyPending()} onCancel={() => setPending(null)} />
-          </div>
-        )}
-      </Section>
-
       <Section title="What it shows">
         <ViewPicker
-          views={views}
-          role={role}
+          groups={[
+            { label: "Wall views", views: views.filter((v) => viewSurface(v) === "display") },
+            { label: "Control surfaces", views: views.filter((v) => viewSurface(v) === "console") },
+          ]}
           value={output.viewId ?? NONE}
-          onChange={(v) => {
-            if (v === NEW_VIEW) actions.onRequestNewView(output.id);
-            else actions.onSetView(output.id, v === NONE ? null : v);
-          }}
-          newLabel={role === "panel" ? "+ New control surface…" : "+ New wall view…"}
+          onChange={(v) => void pickView(v)}
+          newLabel={controlSurface ? "+ New control surface…" : "+ New wall view…"}
           noneLabel="— Unrouted —"
+          hint={shown ? WHAT_IT_IS[viewSurface(shown)] : "Shows nothing yet."}
         />
+        {/* Only for a console: the sidebar lists consoles, and the listing is
+            the view's, so it is written there. */}
+        {controlSurface && shown && (
+          <SidebarRow
+            checked={viewShownInSidebar(shown)}
+            onChange={(on) => actions.onSetShowInSidebar(shown.id, on)}
+          />
+        )}
       </Section>
 
       <Section title="Name and address">
@@ -948,7 +798,7 @@ function GuidedBody({ target, outputs, views, baseUrl, step, setStep, actions, o
   actions: ScreenPanelActions;
   onClose: () => void;
 }) {
-  const [role, setRole] = useState<OutputMode>("display");
+  const [kind, setKind] = useState<NewViewKind>("wall");
   const [listed, setListed] = useState<boolean | null>(null);
   const [viewChoice, setViewChoice] = useState<string>(NONE);
   const [name, setName] = useState(target.defaultName);
@@ -963,8 +813,9 @@ function GuidedBody({ target, outputs, views, baseUrl, step, setStep, actions, o
   const taken = target.device ? bound.find((d) => d.id === target.device!.id) : undefined;
   const takenBy = taken ? (outputs.find((o) => o.id === taken.outputId)?.name ?? taken.outputId) : null;
 
-  // A view picked for one role does not follow the screen to the other.
-  const fits = viewChoice === NONE || viewChoice === NEW_VIEW || viewsFittingRole(views, role, null).some((v) => v.id === viewChoice);
+  // A view picked for one kind does not follow the screen to the other.
+  const fitting = viewsOfKind(views, kind);
+  const fits = viewChoice === NONE || viewChoice === NEW_VIEW || fitting.some((v) => v.id === viewChoice);
   const effectiveChoice = fits ? viewChoice : NONE;
   const hasView = effectiveChoice !== NONE;
   // What the switch shows until the operator moves it: the listing of the
@@ -980,12 +831,11 @@ function GuidedBody({ target, outputs, views, baseUrl, step, setStep, actions, o
       const input: CreateScreenInput = {
         // Omitted when empty, so the server names the screen from its id.
         ...(name.trim() ? { name: name.trim() } : {}),
-        mode: role,
-        ...(effectiveChoice === NEW_VIEW ? { newView: true } : effectiveChoice !== NONE ? { viewId: effectiveChoice } : {}),
+        ...(effectiveChoice === NEW_VIEW ? { newView: kind } : effectiveChoice !== NONE ? { viewId: effectiveChoice } : {}),
         ...(slug.trim() ? { slug: slug.trim() } : {}),
         // Sent only when the operator moved the switch: an existing control
         // surface that is hidden should not be re-listed by a screen made for it.
-        ...(role === "panel" && hasView && listed !== null ? { showInSidebar: listed } : {}),
+        ...(kind === "control" && hasView && listed !== null ? { showInSidebar: listed } : {}),
       };
       const refused = await actions.onCreate(input, target.device);
       if (refused) {
@@ -1005,23 +855,23 @@ function GuidedBody({ target, outputs, views, baseUrl, step, setStep, actions, o
       <div className="flex-1 overflow-y-auto px-[18px] pb-[18px] pt-1.5">
         {step === 1 && (
           <Section title="What this screen is">
-            <RoleCards role={role} onChoose={setRole} />
-            {role === "panel" && <SidebarRow checked={shownListed} onChange={setListed} />}
+            <KindCards kind={kind} onChoose={setKind} />
+            {kind === "control" && <SidebarRow checked={shownListed} onChange={setListed} />}
           </Section>
         )}
         {step === 2 && (
           <Section title="What it shows">
             <ViewPicker
-              views={views}
-              role={role}
+              groups={[{ label: null, views: fitting }]}
               value={effectiveChoice}
               onChange={setViewChoice}
               newLabel="+ New blank view"
               noneLabel="— No view yet —"
+              hint={kind === "control" ? "Control-surface views only." : "Wall-display views only."}
             />
             {effectiveChoice === NEW_VIEW && (
               <p className="mt-1.5 text-caption1 text-fg-subtle">
-                A blank {role === "panel" ? "control-surface" : "wall"} view named after the screen is made with it.
+                A blank {kind === "control" ? "control-surface" : "wall"} view named after the screen is made with it.
               </p>
             )}
           </Section>
@@ -1133,7 +983,6 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
             <EditBody
               key={output.id}
               output={output}
-              outputs={outputs}
               views={views}
               baseUrl={baseUrl}
               online={online}

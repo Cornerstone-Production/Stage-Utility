@@ -61,7 +61,7 @@ import { scrub, scrubError } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 import { Ticker } from "./ticker.js";
 import { viewsDrawnBy } from "./screen-reach.js";
-import { outputMode } from "../types/views.js";
+import { screenIsControlSurface } from "../types/views.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { WriteQueue } from "./write-queue.js";
 
@@ -429,7 +429,7 @@ export class MessagesService {
       if (outputId !== null) {
         output = (state.outputs ?? []).find((o) => o.id === outputId);
         if (!output) return refuse(403, "that screen does not draw that widget");
-        if (outputMode(output) !== "panel") return refuse(403, `${output.name} is a display, and a display cannot reply`);
+        if (!screenIsControlSurface(output, state.views ?? [])) return refuse(403, `${output.name} is a display, and a display cannot reply`);
         if (!viewsDrawnBy(output, state.views ?? [], state.outputs ?? []).has(widget.viewId)) {
           return refuse(403, "that screen does not draw that widget");
         }

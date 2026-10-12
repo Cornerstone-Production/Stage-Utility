@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { viewSurface, outputMode } from "./views.js";
+import { viewSurface, screenIsControlSurface, viewCanBeControlSurface } from "./views.js";
 
-// A View declares what it is FOR; an Output declares how it renders. Both fields
-// are OPTIONAL in the schema and read through these accessors, so an existing
-// views.json parses untouched — a required field would mean every install fails
-// to load until migrated, and the migration needs the app to boot in order to run.
+// A View declares what it is FOR, and that is the whole of a screen's role: a
+// screen is a control surface exactly when the view it shows is a console. The
+// surface field is OPTIONAL in the schema and read through viewSurface, so an
+// existing views.json parses untouched.
 //
 // The default is the safety property. A View written before this field existed
 // was rendering on a wall screen, so absent must mean "display": read-only, no
@@ -20,19 +20,49 @@ describe("surface defaults", () => {
     );
   });
 
-  test("an Output with no mode field is a display", () => {
-    assert.equal(outputMode({ id: "o1", name: "x", viewId: null } as Output), "display");
-  });
-
-  test("an explicit console/panel is respected", () => {
+  test("an explicit console is respected", () => {
     assert.equal(viewSurface({ surface: "console" } as View), "console");
-    assert.equal(outputMode({ mode: "panel" } as Output), "panel");
   });
 
   test("an unrecognised value falls back to the safe default", () => {
     // A hand-edited views.json, or a downgrade from a build that knew a third
     // surface. Anything not understood must read as the read-only one.
     assert.equal(viewSurface({ surface: "hologram" } as unknown as View), "display");
-    assert.equal(outputMode({ mode: "hologram" } as unknown as Output), "display");
+  });
+});
+
+describe("a screen's role is its view's surface", () => {
+  const views = [
+    { id: "wall", surface: "display" },
+    { id: "ctl", surface: "console" },
+    { id: "old" },
+    { id: "odd", surface: "hologram" },
+  ] as unknown as View[];
+  const shows = (viewId: string | null) => screenIsControlSurface({ viewId }, views);
+
+  test("a screen showing a console is a control surface", () => {
+    assert.equal(shows("ctl"), true);
+  });
+
+  test("a screen showing a wall view is read-only", () => {
+    assert.equal(shows("wall"), false);
+  });
+
+  test("a screen showing nothing is read-only", () => {
+    assert.equal(shows(null), false);
+  });
+
+  test("a screen whose view is gone is read-only", () => {
+    assert.equal(shows("deleted"), false);
+  });
+
+  test("a view with no surface, or one not understood, is read-only", () => {
+    assert.equal(shows("old"), false);
+    assert.equal(shows("odd"), false);
+  });
+
+  test("only a custom view can be a control surface", () => {
+    assert.equal(viewCanBeControlSurface({ kind: "custom" }), true);
+    assert.equal(viewCanBeControlSurface({ kind: "calendar" }), false);
   });
 });

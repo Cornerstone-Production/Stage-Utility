@@ -41,12 +41,14 @@ const reply = (id: string, body: unknown) =>
 const err = (r: { json: unknown }) => (r.json as { error?: string })?.error ?? "";
 const thread = () => messagesService.state().messages;
 
-/** A custom view holding the given objects. */
-function viewOf(id: string, name: string, objects: unknown[]): View {
+/** A custom view holding the given objects. A screen is a control surface when its
+ *  view is a console, so which of the two it is is part of the fixture. */
+function viewOf(id: string, name: string, objects: unknown[], surface: "display" | "console" = "console"): View {
   return {
     id,
     name,
     kind: "custom",
+    surface,
     createdAt: "",
     layout: { version: 1, canvas: { width: 1920, height: 1080, background: null }, objects },
   } as unknown as View;
@@ -72,7 +74,9 @@ beforeEach(async () => {
       // Follows whatever screen draws it.
       viewOf("v-follow", "Booth console", [widget("w-follow")]),
       // Its own list, on a console.
-      viewOf("v-own", "Green room iPad", [widget("w-green", [green]), widget("w-none", [])]),
+      viewOf("v-own", "Green room iPad", [widget("w-green", [green]), widget("w-none", [])], "display"),
+      // The same widget, drawn read-only: the screens below that are displays show it.
+      viewOf("v-follow-wall", "Booth wall", [widget("w-follow-wall")], "display"),
       viewOf("v-elsewhere", "Elsewhere", [{ id: "clock-2", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "clock" } }]),
       viewOf("v-embeds", "Embeds", [{ id: "tile", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "view-embed", viewId: "v-follow" } }]),
       viewOf("v-screen-embeds", "Screen embeds", [{ id: "stile", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "screen-embed", outputId: "panel-1" } }]),
@@ -83,21 +87,21 @@ beforeEach(async () => {
           children: [widget("w-deep", [stage])],
         },
         { id: "clock-1", x: 0, y: 0, w: 1, h: 1, z: 1, config: { type: "clock" } },
-      ]),
+      ], "display"),
     ],
     outputs: [
-      { id: "panel-1", name: "Booth panel", viewId: "v-follow", mode: "panel", groups: [booth, stage] },
-      { id: "wall", name: "Stage wall", viewId: "v-follow", mode: "display", groups: [stage] },
-      { id: "plain", name: "Plain", viewId: "v-follow", groups: [stage] },
+      { id: "panel-1", name: "Booth panel", viewId: "v-follow", groups: [booth, stage] },
+      { id: "wall", name: "Stage wall", viewId: "v-follow-wall", groups: [stage] },
+      { id: "plain", name: "Plain", viewId: "v-follow-wall", groups: [stage] },
       // A real panel in Stage that draws a view with no Messages widget in it: not
       // somewhere w-follow is drawn, whatever a request says.
-      { id: "victim", name: "Victim panel", viewId: "v-elsewhere", mode: "panel", groups: [stage, booth] },
+      { id: "victim", name: "Victim panel", viewId: "v-elsewhere", groups: [stage, booth] },
       // A display showing the view that holds the own-groups widgets.
-      { id: "own-wall", name: "Own wall", viewId: "v-own", mode: "display", groups: [green] },
+      { id: "own-wall", name: "Own wall", viewId: "v-own", groups: [green] },
       // A panel whose view embeds the follow view by view-embed, and one that
       // embeds another screen's view by screen-embed.
-      { id: "embedder", name: "Embedder panel", viewId: "v-embeds", mode: "panel", groups: [booth] },
-      { id: "screen-embedder", name: "Screen embedder", viewId: "v-screen-embeds", mode: "panel", groups: [booth] },
+      { id: "embedder", name: "Embedder panel", viewId: "v-embeds", groups: [booth] },
+      { id: "screen-embedder", name: "Screen embedder", viewId: "v-screen-embeds", groups: [booth] },
     ] as Output[],
   };
   (stageController as unknown as { recomputeResolved: () => void }).recomputeResolved();
@@ -183,10 +187,10 @@ describe("who may answer", () => {
     assert.equal((await reply(m.id, { text: "Copy", objectId: "w-none" })).status, 403);
   });
 
-  it("a display never answers, whatever groups it is in; a mode left unset is a display", async () => {
+  it("a display never answers, whatever groups it is in: a screen is a control surface only when its view is a console", async () => {
     const m = await send([stage]);
     for (const outputId of ["wall", "plain"]) {
-      const r = await reply(m.id, { text: "Copy", objectId: "w-follow", outputId });
+      const r = await reply(m.id, { text: "Copy", objectId: "w-follow-wall", outputId });
       assert.equal(r.status, 403, outputId);
       assert.match(err(r), /display cannot reply/);
     }

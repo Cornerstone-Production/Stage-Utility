@@ -218,7 +218,7 @@ Where controls are live, the widget also lets a console answer. Under the newest
 message it shows is the line **Answering: <text>** and the quick replies as
 buttons; with nothing to answer it says **Nothing to answer. This console can reply
 only to messages sent to Stage, Booth or Everyone.** (naming the groups it
-follows, then Everyone). Controls are live on a screen in **panel** mode and on a console in the
+follows, then Everyone). Controls are live on a screen showing a console (a control surface) and on a console in the
 operator app, never on a wall display, which draws no buttons.
 
 A reply is sent with `POST /api/messages/:id/replies`, and the server checks it
@@ -226,7 +226,7 @@ against the stored layouts and screens:
 
 - the widget the reply is pressed on is found by its id in every view's layout, and
   must be a Messages widget;
-- a reply that names a screen must name one in **panel** mode that actually draws
+- a reply that names a screen must name a control surface (a screen showing a console) that actually draws
   that widget, in the view it is routed to or one that view embeds. A display never
   replies, and a screen that does not draw the widget cannot answer for it;
 - a reply that names no screen (a console in the app) must come from a widget with

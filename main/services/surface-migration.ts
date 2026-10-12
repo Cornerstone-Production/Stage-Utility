@@ -8,26 +8,28 @@
 // nothing announces it.
 //
 // So the migration reads what is actually there. A View containing a control
-// becomes a console, and the Outputs bound to it become panels. Behaviour is
-// preserved with no operator action, and what moved is reported so a stray
-// control that pulled a wall display into panel mode can be demoted
-// deliberately.
+// becomes a console, and the Outputs bound to it are marked live (a screen is a
+// control surface when its view is a console; screen-role-migration.ts reads the
+// mark and removes it). Behaviour is preserved with no operator action, and what
+// moved is reported so a stray control that pulled a wall display into a control
+// surface can be demoted deliberately.
 
 import { isControl } from "../types/object-capabilities.js";
-import { viewSurface, outputMode } from "../types/views.js";
+import { screenIsControlSurface, viewSurface } from "../types/views.js";
+import { markedLive, type StoredOutput } from "./screen-role-migration.js";
 
 export interface MigrationNote {
   viewId: string;
   viewName: string;
   /** The control object types that made this a console, for the log. */
   controls: string[];
-  /** Names of the Outputs pulled to panel mode alongside it. */
+  /** Names of the Outputs now showing it as a control surface. */
   outputs: string[];
 }
 
 export interface MigrationResult {
   views: View[];
-  outputs: Output[];
+  outputs: StoredOutput[];
   changed: MigrationNote[];
 }
 
@@ -65,7 +67,7 @@ function controlsIn(objects: readonly LayoutObject[] | undefined): string[] {
  */
 export function migrateSurfaces(
   views: readonly View[],
-  outputs: readonly Output[],
+  outputs: readonly StoredOutput[],
 ): MigrationResult {
   const changed: MigrationNote[] = [];
   const toPanel = new Set<string>();
@@ -91,7 +93,7 @@ export function migrateSurfaces(
 
   const nextOutputs = outputs.map((o) =>
     // Only ever promotes. An Output the operator already set is left alone.
-    toPanel.has(o.id) && o.mode === undefined ? { ...o, mode: "panel" as const } : o,
+    toPanel.has(o.id) && o.mode === undefined ? markedLive(o) : o,
   );
 
   return { views: nextViews, outputs: nextOutputs, changed };
@@ -103,13 +105,13 @@ export function migrationLog(result: MigrationResult): string[] {
   const lines = result.changed.map(
     (n) =>
       `${n.viewName} — has ${n.controls.join(", ")} -> console` +
-      (n.outputs.length ? ` (screens moved to panel: ${n.outputs.join(", ")})` : " (not on any screen)"),
+      (n.outputs.length ? ` (screens now control surfaces: ${n.outputs.join(", ")})` : " (not on any screen)"),
   );
   const displays = result.views.filter((v) => viewSurface(v) === "display").length;
-  const panels = result.outputs.filter((o) => outputMode(o) === "panel").length;
+  const panels = result.outputs.filter((o) => screenIsControlSurface(o, result.views)).length;
   lines.push(
     `${result.changed.length} view${result.changed.length === 1 ? "" : "s"} moved to console, ` +
-      `${displays} left as displays, ${panels} screen${panels === 1 ? "" : "s"} now panels`,
+      `${displays} left as displays, ${panels} screen${panels === 1 ? "" : "s"} now control surface${panels === 1 ? "" : "s"}`,
   );
   return lines;
 }

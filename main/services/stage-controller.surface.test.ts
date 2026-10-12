@@ -1,12 +1,10 @@
-// A wall display must not be able to render a live control. That property lives
-// on the SERVER, not in the settings dropdown: a dropdown that only offers
-// bindable views makes the mistake hard to reach, but an API call, a Companion
-// button or a restored config can still ask for it.
-//
-// So these ATTEMPT the binding against the real controller and assert the
-// refusal. They deliberately do not scan the source for the check — a comment
-// satisfies a source scan, and this repository has shipped a guard that passed
-// on exactly that.
+// A screen is a control surface exactly when the view it shows is a console, so
+// the one way a read-only screen could start rendering live controls is a view
+// changing underneath it. That is what these attempt against the real controller:
+// pointing a screen at either kind of view, and changing the surface of a view
+// that screens show. They deliberately do not scan the source for a check: a
+// comment satisfies a source scan, and this repository has shipped a guard that
+// passed on exactly that.
 
 import assert from "node:assert/strict";
 import { describe, it, before, beforeEach } from "node:test";
@@ -19,7 +17,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { stageController } = await import("./stage-controller.js");
-const { viewSurface, outputMode } = await import("../types/views.js");
+const { viewSurface, screenIsControlSurface } = await import("../types/views.js");
 
 type Mutable = {
   state: {
@@ -43,7 +41,7 @@ function seed() {
     ] as View[],
     outputs: [
       { id: "wall", name: "Lobby", viewId: null },
-      { id: "booth", name: "Booth Touchscreen", viewId: null, mode: "panel" },
+      { id: "booth", name: "Booth Touchscreen", viewId: null },
     ] as Output[],
   };
 }
@@ -56,43 +54,31 @@ before(() => {
 
 beforeEach(seed);
 
+const isControlSurface = (id: string) => screenIsControlSurface(ctl.state.outputs.find((o) => o.id === id)!, ctl.state.views);
+
 describe("binding a view to a screen", () => {
-  it("refuses a console view on a display screen", async () => {
-    await assert.rejects(
-      () => stageController.setOutputView("wall", "vc"),
-      /console/i,
-      "a console on a wall screen must be refused, not silently allowed",
-    );
+  it("a screen showing a console is a control surface", async () => {
+    // The view decides: there is no second field to set first, and nothing to refuse.
+    assert.equal(isControlSurface("wall"), false);
+    const s = await stageController.setOutputView("wall", "vc");
+    assert.equal(s.outputs.find((o) => o.id === "wall")?.viewId, "vc");
+    assert.equal(isControlSurface("wall"), true);
   });
 
-  it("names both sides and what to do about it", async () => {
-    // A refusal that just says no leaves the operator guessing which of the two
-    // things they touched was wrong.
-    await assert.rejects(
-      () => stageController.setOutputView("wall", "vc"),
-      (e: Error) => {
-        assert.match(e.message, /FOH Console/, "must name the view");
-        assert.match(e.message, /Lobby/, "must name the screen");
-        // The exact words the UI uses: the card menu's "Screen settings" and the
-        // panel's "Control surface" role. An instruction naming something the
-        // operator cannot find is worse than no instruction — this refusal used
-        // to say "panel mode", which appears nowhere in the UI, and then named a
-        // menu item the Screen settings panel replaced.
-        assert.match(e.message, /Screen settings/, "must name where the role is set, in its words");
-        assert.match(e.message, /"Control surface"/, "must name the role, in its words");
-        assert.ok(!/^\w+:\w+ —/.test(e.message), "must not carry the internal handler name");
-        return true;
-      },
-    );
+  it("pointing a control surface at a wall view makes it read-only", async () => {
+    await stageController.setOutputView("booth", "vc");
+    assert.equal(isControlSurface("booth"), true);
+    await stageController.setOutputView("booth", "vd");
+    assert.equal(isControlSurface("booth"), false);
   });
 
-  it("allows a console view on a panel", async () => {
-    const s = await stageController.setOutputView("booth", "vc");
-    assert.equal(s.outputs.find((o) => o.id === "booth")?.viewId, "vc");
+  it("a screen with no view is read-only", async () => {
+    await stageController.setOutputView("booth", "vc");
+    await stageController.setOutputView("booth", null);
+    assert.equal(isControlSurface("booth"), false);
   });
 
-  it("allows a display view on either", async () => {
-    // A panel is a superset: it accepts both. Only the wall is restricted.
+  it("allows a display view on any screen", async () => {
     assert.equal((await stageController.setOutputView("wall", "vd")).outputs[0].viewId, "vd");
     assert.equal((await stageController.setOutputView("booth", "vd")).outputs[1].viewId, "vd");
   });
@@ -140,42 +126,28 @@ describe("binding a view to a screen", () => {
   });
 });
 
-describe("changing a screen's mode", () => {
-  it("promotes a display to a panel", async () => {
-    const s = await stageController.setOutputMode("wall", "panel");
-    assert.equal(outputMode(s.outputs.find((o) => o.id === "wall")!), "panel");
-  });
-
-  it("refuses to demote a panel that is showing a console", async () => {
-    // Demoting would leave a screen bound to a view it may not render. Refusing
-    // is better than silently unbinding: a blank screen with no reason given is
-    // discovered on Sunday morning.
-    await stageController.setOutputView("booth", "vc");
-    await assert.rejects(
-      () => stageController.setOutputMode("booth", "display"),
-      /showing the control surface/i,
-    );
-  });
-
-  it("allows demoting a panel that is showing nothing", async () => {
-    const s = await stageController.setOutputMode("booth", "display");
-    assert.equal(outputMode(s.outputs.find((o) => o.id === "booth")!), "display");
-  });
-});
-
 describe("converting a view's surface", () => {
-  it("refuses to convert a view that a display screen is showing", async () => {
+  // Converting a view a screen shows changes that screen: a read-only screen goes
+  // live, or a control surface stops working. setViewSurface refuses and names the
+  // screens; setViewRole is the call that does it once the operator has been asked.
+  it("refuses to make a wall view a console while a screen shows it, naming the screen", async () => {
     await stageController.setOutputView("wall", "vd");
     await assert.rejects(
       () => stageController.setViewSurface("vd", "console"),
       (e: Error) => {
-        assert.match(e.message, /Lobby/, "the refusal must name the screen it would strand, not just say no");
-        // Where the role is set now, in the UI's words; see "names both sides".
-        assert.match(e.message, /Screen settings/);
-        assert.match(e.message, /"Control surface"/);
+        assert.match(e.message, /Lobby/, "the refusal must name the screen it would change, not just say no");
+        assert.match(e.message, /control surface/);
         return true;
       },
     );
+    assert.equal(viewSurface(ctl.state.views.find((v) => v.id === "vd")!), "display");
+    assert.equal(isControlSurface("wall"), false, "a read-only screen went live");
+  });
+
+  it("refuses to make a console a wall view while a screen shows it", async () => {
+    await stageController.setOutputView("booth", "vc");
+    await assert.rejects(() => stageController.setViewSurface("vc", "display"), /Booth Touchscreen/);
+    assert.equal(isControlSurface("booth"), true, "a control surface stopped working");
   });
 
   it("allows converting a view nothing is showing", async () => {
@@ -183,13 +155,7 @@ describe("converting a view's surface", () => {
     assert.equal(viewSurface(s.views.find((v) => v.id === "vd")!), "console");
   });
 
-  it("allows converting a view only panels are showing", async () => {
-    await stageController.setOutputView("booth", "vd");
-    const s = await stageController.setViewSurface("vd", "console");
-    assert.equal(viewSurface(s.views.find((v) => v.id === "vd")!), "console");
-  });
-
-  it("names every stranded screen, not just the first", async () => {
+  it("names every screen showing it, not just the first", async () => {
     ctl.state.outputs = [
       { id: "a", name: "Lobby", viewId: "vd" },
       { id: "b", name: "Foyer", viewId: "vd" },
@@ -204,12 +170,12 @@ describe("converting a view's surface", () => {
     );
   });
 
-  it("always allows converting back to a display", async () => {
-    // Demotion is the safe direction and must never be blocked - it is the
-    // action the migration log tells an operator to take.
-    await stageController.setOutputView("booth", "vc");
-    const s = await stageController.setViewSurface("vc", "display");
-    assert.equal(viewSurface(s.views.find((v) => v.id === "vc")!), "display");
+  it("changes the view and its screens together once the screens are confirmed", async () => {
+    await stageController.setOutputView("wall", "vd");
+    await stageController.setViewRole("vd", "console");
+    assert.equal(isControlSurface("wall"), true);
+    await stageController.setViewRole("vd", "display");
+    assert.equal(isControlSurface("wall"), false);
   });
 });
 
