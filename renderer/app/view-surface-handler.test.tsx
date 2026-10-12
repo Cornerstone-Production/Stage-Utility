@@ -71,6 +71,9 @@ type Reply = { status: number; body: unknown };
 /** GETs answer the seeded state at /api/state and an empty list elsewhere. A
  *  write answers from `writes`, one per write in order; past the end, 200 and
  *  the state. */
+const isPlumbing = (url: string) => url.startsWith("/api/events");
+const isWrite = (c: Call) => c.method !== "GET" && !isPlumbing(c.url);
+
 function stubFetch(state: StageState, writes: Reply[] = []) {
   const calls: Call[] = [];
   const real = globalThis.fetch;
@@ -82,13 +85,18 @@ function stubFetch(state: StageState, writes: Reply[] = []) {
     const answer = (r: Reply) =>
       ({ ok: r.status < 400, status: r.status, statusText: String(r.status), json: async () => r.body, text: async () => "" }) as unknown as Response;
     if (method === "GET") return answer({ status: 200, body: url.endsWith("/api/state") ? state : [] });
-    const n = calls.filter((c) => c.method !== "GET").length - 1;
+    // The live-update subscription posts on its own schedule; on a slow runner it
+    // lands mid-test. It is plumbing, not one of the handler's writes, so it is
+    // answered apart and never takes one of the scripted replies.
+    if (isPlumbing(url)) return answer({ status: 200, body: {} });
+    const n = calls.filter(isWrite).length - 1;
     return answer(writes[n] ?? { status: 200, body: state });
   }) as typeof fetch;
   return {
     calls,
-    /** Every request that was not a read: the writes the handler made. */
-    writes: () => calls.filter((c) => c.method !== "GET"),
+    /** The writes the handler made: every request that was not a read, nor the
+     *  live-update subscription's. */
+    writes: () => calls.filter(isWrite),
     restore: () => { globalThis.fetch = real; },
   };
 }
