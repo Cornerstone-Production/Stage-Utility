@@ -18,7 +18,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, mock, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -75,9 +75,9 @@ describe("the people graph's recorded-service picker", () => {
     const f = stubFetch(ROUTE, "throw");
     try {
       await mount(graph());
-      assert.match(alerts(), /Couldn't load the recorded services/i);
+      await eventually(() => assert.match(alerts(), /Couldn't load the recorded services/i));
       assert.equal(!!screen.queryByText(/not found/i), false, "the chosen service was not deleted — the read failed");
-      assert.ok(logged(f.logs, /recorded services/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`);
+      await eventually(() => assert.ok(logged(f.logs, /recorded services/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`));
     } finally {
       f.restore();
     }
@@ -104,11 +104,11 @@ describe("the people graph's recorded-service picker", () => {
       view.rerender(el("recorded"));
       await settle();
       await settle();
-      assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true, "the second read filled the picker");
+      await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true, "the second read filled the picker"));
       await act(async () => failFirst(new TypeError("fetch failed")));
       await settle();
       assert.equal(alerts(), "", "the first read no longer applies; its failure must not land");
-      assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true);
+      await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true));
     } finally {
       f.restore();
     }
@@ -129,14 +129,14 @@ describe("the people graph's recorded-service picker", () => {
       const view = render(el("recorded"));
       await settle();
       await settle();
-      assert.match(alerts(), /Couldn't load the recorded services/i);
+      await eventually(() => assert.match(alerts(), /Couldn't load the recorded services/i));
       view.rerender(el("live"));
       await settle();
       view.rerender(el("recorded"));
       await settle();
       await settle();
-      assert.equal(alerts(), "", "the list loaded; the note must go with the failure");
-      assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true);
+      await eventually(() => assert.equal(alerts(), "", "the list loaded; the note must go with the failure"));
+      await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true));
     } finally {
       f.restore();
     }
@@ -149,7 +149,7 @@ describe("the people graph's recorded-service picker", () => {
     });
     try {
       await mount(graph());
-      assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true);
+      await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true));
       assert.equal(!!screen.queryByText(/not found/i), false);
       assert.equal(alerts(), "");
       assert.deepEqual(f.logs, []);
@@ -181,9 +181,9 @@ describe("the RossTalk button's target and command pickers", () => {
     const f = stubRossTalk("throw");
     try {
       await mount(button());
-      assert.match(alerts(), /Couldn't load the RossTalk targets/i);
+      await eventually(() => assert.match(alerts(), /Couldn't load the RossTalk targets/i));
       assert.equal(!!screen.queryByText(/not found/i), false, "the target was not deleted — the read failed");
-      assert.ok(logged(f.logs, /RossTalk targets/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`);
+      await eventually(() => assert.ok(logged(f.logs, /RossTalk targets/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`));
     } finally {
       f.restore();
     }
@@ -193,9 +193,9 @@ describe("the RossTalk button's target and command pickers", () => {
     const f = stubRossTalk(STUDIO, true);
     try {
       await mount(button());
-      assert.match(alerts(), /Couldn't load the RossTalk commands/i);
+      await eventually(() => assert.match(alerts(), /Couldn't load the RossTalk commands/i));
       assert.equal(!!screen.queryByText(/not found/i), false, "the command was not deleted — the read failed");
-      assert.ok(logged(f.logs, /RossTalk commands/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`);
+      await eventually(() => assert.ok(logged(f.logs, /RossTalk commands/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`));
     } finally {
       f.restore();
     }
@@ -205,8 +205,8 @@ describe("the RossTalk button's target and command pickers", () => {
     const f = stubRossTalk(STUDIO);
     try {
       await mount(button());
-      assert.equal(!!screen.queryByRole("option", { name: /Studio/ }), true);
-      assert.equal(!!screen.queryByRole("option", { name: "Cut" }), true);
+      await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /Studio/ }), true));
+      await eventually(() => assert.equal(!!screen.queryByRole("option", { name: "Cut" }), true));
       assert.equal(!!screen.queryByText(/not found/i), false);
       assert.equal(alerts(), "");
       assert.deepEqual(f.logs, []);
@@ -286,9 +286,9 @@ describe("the plan attachment's file picker", () => {
     const f = stubFetch(ROUTE, "throw", stateSays(true));
     try {
       await mount(attachment());
-      assert.match(alerts(), /Couldn't load the current plan's files/i);
+      await eventually(() => assert.match(alerts(), /Couldn't load the current plan's files/i));
       assert.equal(!!screen.queryByText(NO_DOCUMENTS), false);
-      assert.ok(logged(f.logs, /plan's files/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`);
+      await eventually(() => assert.ok(logged(f.logs, /plan's files/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`));
     } finally {
       f.restore();
     }
@@ -298,12 +298,12 @@ describe("the plan attachment's file picker", () => {
     const f = stubFetch(ROUTE, { status: 502, body: { error: "Planning Center did not answer" } }, stateSays(true));
     try {
       await mount(attachment());
-      assert.match(alerts(), /Couldn't load the current plan's files/i);
+      await eventually(() => assert.match(alerts(), /Couldn't load the current plan's files/i));
       assert.equal(!!screen.queryByText(NO_DOCUMENTS), false);
-      assert.ok(
+      await eventually(() => assert.ok(
         logged(f.logs, /Planning Center did not answer/),
         `expected the server's reason on the [layout-editor] line — got ${JSON.stringify(f.logs)}`,
-      );
+      ));
     } finally {
       f.restore();
     }
@@ -317,7 +317,7 @@ describe("the plan attachment's file picker", () => {
     });
     try {
       await mount(attachment());
-      assert.equal(!!screen.queryByText(/Connect Planning Center to pick from the current plan/i), true);
+      await eventually(() => assert.equal(!!screen.queryByText(/Connect Planning Center to pick from the current plan/i), true));
       assert.equal(!!screen.queryByText(NO_DOCUMENTS), false, "there is no plan to have no documents");
       assert.equal(alerts(), "");
       assert.deepEqual(f.logs, []);
@@ -331,7 +331,7 @@ describe("the plan attachment's file picker", () => {
     const f = stubFetch(ROUTE, { status: 200, body: [] }, stateSays(true));
     try {
       await mount(attachment());
-      assert.equal(!!screen.queryByText(NO_DOCUMENTS), true);
+      await eventually(() => assert.equal(!!screen.queryByText(NO_DOCUMENTS), true));
       assert.equal(alerts(), "");
       assert.deepEqual(f.logs, []);
     } finally {
@@ -368,6 +368,8 @@ describe("the Plan file inspector's Fit box to file", () => {
     try {
       await mount(attachment());
       await click();
+      // The notice follows the request's answer; the mocks must outlive it.
+      await eventually(() => assert.ok(errors.length > 0, "the failed request raised no notice"));
     } finally {
       f.restore();
       mock.restoreAll();

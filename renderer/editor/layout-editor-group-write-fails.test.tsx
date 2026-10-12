@@ -19,7 +19,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
@@ -122,22 +122,25 @@ test("a failed save leaves the name dialog open, toasts, and reaches the log", a
   const f = stubFetch((method) => (method === "POST" ? "fail" : []));
   try {
     await mount();
-    const saveAsGroup = screen.getByRole("button", { name: "Save as group" });
+    const saveAsGroup = await eventually(() => screen.getByRole("button", { name: "Save as group" }));
     fireEvent.click(saveAsGroup);
     await settleAct();
 
-    const nameInput = screen.getByRole("dialog").querySelector("input")!;
+    const nameInput = (await eventually(() => screen.getByRole("dialog"))).querySelector("input")!;
     fireEvent.change(nameInput, { target: { value: "Lower third" } });
     await settleAct();
 
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Save" })));
     await settleAct();
 
+    // The toast is the failure having been handled; the dialog is read after it.
+    await eventually(() => assert.match(document.body.textContent ?? "", /Couldn't save the group/i));
     assert.equal(!!screen.queryByRole("dialog"), true, "a failed save closed the name dialog");
-    assert.match(document.body.textContent ?? "", /Couldn't save the group/i);
-    assert.ok(
-      f.logs.some((l) => l.tag === "layout-editor" && /couldn't save a group/i.test(l.message)),
-      `expected a [layout-editor] line naming the failed save — got ${JSON.stringify(f.logs)}`,
+    await eventually(() =>
+      assert.ok(
+        f.logs.some((l) => l.tag === "layout-editor" && /couldn't save a group/i.test(l.message)),
+        `expected a [layout-editor] line naming the failed save — got ${JSON.stringify(f.logs)}`,
+      ),
     );
   } finally {
     f.restore();
@@ -148,17 +151,17 @@ test("control: a save that succeeds closes the dialog and adds the group", async
   const f = stubFetch((method) => (method === "POST" ? [{ id: "g1", name: "Lower third", object: {} } as unknown as LayoutGroup] : []));
   try {
     await mount();
-    fireEvent.click(screen.getByRole("button", { name: "Save as group" }));
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Save as group" })));
     await settleAct();
-    const nameInput = screen.getByRole("dialog").querySelector("input")!;
+    const nameInput = (await eventually(() => screen.getByRole("dialog"))).querySelector("input")!;
     fireEvent.change(nameInput, { target: { value: "Lower third" } });
     await settleAct();
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Save" })));
     await settleAct();
 
-    assert.equal(!!screen.queryByRole("dialog"), false, "a successful save left the name dialog open");
+    await eventually(() => assert.equal(!!screen.queryByRole("dialog"), false, "a successful save left the name dialog open"));
+    await eventually(() => assert.equal(!!screen.queryByText("Lower third"), true, "the saved group did not appear in the library"));
     assert.equal(alerts(), "");
-    assert.equal(!!screen.queryByText("Lower third"), true, "the saved group did not appear in the library");
   } finally {
     f.restore();
   }
@@ -178,15 +181,18 @@ test("a failed delete leaves the group in the list, toasts, and reaches the log"
   });
   try {
     await mount();
-    assert.equal(!!screen.queryByText("Lower third"), true, "the group was not offered to delete");
-    fireEvent.click(screen.getByRole("button", { name: "Delete group" }));
+    await eventually(() => assert.equal(!!screen.queryByText("Lower third"), true, "the group was not offered to delete"));
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Delete group" })));
     await settleAct();
 
+    // The toast is the failure having been handled; the list is read after it.
+    await eventually(() => assert.match(document.body.textContent ?? "", /Couldn't delete the group/i));
     assert.equal(!!screen.queryByText("Lower third"), true, "a failed delete removed the group from view");
-    assert.match(document.body.textContent ?? "", /Couldn't delete the group/i);
-    assert.ok(
-      f.logs.some((l) => l.tag === "layout-editor" && /couldn't delete a group/i.test(l.message)),
-      `expected a [layout-editor] line naming the failed delete — got ${JSON.stringify(f.logs)}`,
+    await eventually(() =>
+      assert.ok(
+        f.logs.some((l) => l.tag === "layout-editor" && /couldn't delete a group/i.test(l.message)),
+        `expected a [layout-editor] line naming the failed delete — got ${JSON.stringify(f.logs)}`,
+      ),
     );
   } finally {
     f.restore();

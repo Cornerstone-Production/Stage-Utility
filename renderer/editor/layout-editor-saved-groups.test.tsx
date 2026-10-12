@@ -15,7 +15,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -64,12 +64,12 @@ test("a failed library read says so, never the first-run hint, and reaches the l
   const f = stubFetch("fail");
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the saved groups/i);
+    await eventually(() => assert.match(alerts(), /Couldn't load the saved groups/i));
     assert.equal(!!screen.queryByText(FIRST_RUN_HINT), false, "a failed read is not an empty library");
-    assert.ok(
+    await eventually(() => assert.ok(
       f.logs.some((l) => l.tag === "layout-editor" && /saved groups/i.test(l.message)),
       `expected a [layout-editor] line naming the saved groups — got ${JSON.stringify(f.logs)}`,
-    );
+    ));
   } finally {
     f.restore();
   }
@@ -79,11 +79,11 @@ test("a save after a failed read shows the list it answered with, and stops aler
   const f = stubFetch("fail");
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the saved groups/i);
+    await eventually(() => assert.match(alerts(), /Couldn't load the saved groups/i));
     fireEvent.click(screen.getByRole("button", { name: "simulate a save" }));
     await settle();
-    assert.equal(!!screen.queryByText("Lower third"), true);
-    assert.equal(alerts(), "", "the library is known now");
+    await eventually(() => assert.equal(!!screen.queryByText("Lower third"), true));
+    await eventually(() => assert.equal(alerts(), "", "the library is known now"));
   } finally {
     f.restore();
   }
@@ -93,7 +93,7 @@ test("control: an empty library shows the first-run hint, with no alert", async 
   const f = stubFetch([]);
   try {
     await mount();
-    assert.equal(!!screen.queryByText(FIRST_RUN_HINT), true);
+    await eventually(() => assert.equal(!!screen.queryByText(FIRST_RUN_HINT), true));
     assert.equal(alerts(), "");
     assert.deepEqual(f.logs, []);
   } finally {
@@ -105,7 +105,7 @@ test("control: a library that loads lists its groups", async () => {
   const f = stubFetch([GROUP]);
   try {
     await mount();
-    assert.equal(!!screen.queryByText("Lower third"), true);
+    await eventually(() => assert.equal(!!screen.queryByText("Lower third"), true));
     assert.equal(alerts(), "");
   } finally {
     f.restore();

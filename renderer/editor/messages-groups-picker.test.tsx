@@ -4,7 +4,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
@@ -55,6 +55,15 @@ async function mount(own: string[] | null | undefined) {
   return { view, changes };
 }
 
+/** The group boxes, once the list has been read: how many turns that takes is
+ *  the machine's business, so it is waited for. */
+const boxesOf = (c: HTMLElement, count: number) =>
+  eventually(() => {
+    const boxes = [...c.querySelectorAll('[role="checkbox"]')] as HTMLElement[];
+    assert.equal(boxes.length, count, "one box per group");
+    return boxes;
+  });
+
 const button = (c: HTMLElement, name: string) =>
   [...c.querySelectorAll("button")].find((b) => b.textContent?.trim() === name) as HTMLButtonElement | undefined;
 
@@ -77,8 +86,7 @@ describe("MessagesGroupsPicker", () => {
 
   test("ticking a group stores the list in the config's order, not click order", async () => {
     const { view, changes } = await mount(["g-00000003"]);
-    const boxes = [...view.container.querySelectorAll('[role="checkbox"]')] as HTMLElement[];
-    assert.equal(boxes.length, 3, "one box per group");
+    const boxes = await boxesOf(view.container, 3);
     assert.deepEqual(boxes.map((b) => b.getAttribute("aria-checked")), ["false", "false", "true"]);
     await act(async () => { fireEvent.click(boxes[0]); });
     assert.deepEqual(changes, [["g-00000001", "g-00000003"]]);
@@ -86,16 +94,18 @@ describe("MessagesGroupsPicker", () => {
 
   test("unticking the last group leaves a list of its own, empty, rather than following the screen", async () => {
     const { view, changes } = await mount(["g-00000002"]);
-    const boxes = [...view.container.querySelectorAll('[role="checkbox"]')] as HTMLElement[];
+    const boxes = await boxesOf(view.container, 3);
     await act(async () => { fireEvent.click(boxes[1]); });
     assert.deepEqual(changes, [[]]);
   });
 
   test("saved groups this install does not have are named and kept, and ticking another keeps them", async () => {
     const { view, changes } = await mount(["g-00000002", "g-deadbeef", "g-cafef00d"]);
-    const note = view.container.textContent ?? "";
-    assert.ok(note.includes("2 saved groups no longer exist"), note);
-    const boxes = [...view.container.querySelectorAll('[role="checkbox"]')] as HTMLElement[];
+    await eventually(() => {
+      const note = view.container.textContent ?? "";
+      assert.ok(note.includes("2 saved groups no longer exist"), note);
+    });
+    const boxes = await boxesOf(view.container, 3);
     await act(async () => { fireEvent.click(boxes[0]); });
     assert.deepEqual(changes, [["g-00000001", "g-00000002", "g-deadbeef", "g-cafef00d"]], "the unknown ids were dropped from the value");
   });
@@ -123,8 +133,8 @@ describe("MessagesGroupsPicker", () => {
     console.warn = () => {};
     try {
       const failed = await mount(["g-00000001", "g-deadbeef"]);
+      await eventually(() => assert.ok((failed.view.container.textContent ?? "").includes("Could not read the groups")));
       assert.ok(!(failed.view.container.textContent ?? "").includes("no longer exist"), "warned off a read that failed");
-      assert.ok((failed.view.container.textContent ?? "").includes("Could not read the groups"));
     } finally {
       console.warn = quiet;
     }
@@ -132,18 +142,20 @@ describe("MessagesGroupsPicker", () => {
 
   test("no note when every saved group exists", async () => {
     const all = await mount(["g-00000001"]);
+    // Read after the list has arrived: before it, no note is shown either way.
+    await boxesOf(all.view.container, 3);
     assert.ok(!(all.view.container.textContent ?? "").includes("no longer exist"));
   });
 
   test("with no groups at all the saved ones are still named", async () => {
     groups = [];
     const { view } = await mount(["g-deadbeef"]);
-    assert.ok((view.container.textContent ?? "").includes("1 saved group no longer exists"), view.container.textContent ?? "");
+    await eventually(() => assert.ok((view.container.textContent ?? "").includes("1 saved group no longer exists"), view.container.textContent ?? ""));
   });
 
   test("with no groups yet it says where to make them", async () => {
     groups = [];
     const { view } = await mount([]);
-    assert.ok((view.container.textContent ?? "").includes("No groups yet"), view.container.textContent ?? "");
+    await eventually(() => assert.ok((view.container.textContent ?? "").includes("No groups yet"), view.container.textContent ?? ""));
   });
 });
