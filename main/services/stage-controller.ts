@@ -809,27 +809,22 @@ export class StageController {
     const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
     const outputsChanged =
       slugs.changed.length > 0 || result.outputs.some((o, i) => o !== outputs[i]);
-    // The flags that say these passes ran.
-    const ran = { layoutDefaultsCleaned: true, cardHairlineRaised: true, screenRolesFromView: true };
-    if (!viewsChanged && !outputsChanged) {
-      // Nothing left to save this pass, so recording the flags here cannot
-      // outrun a write that isn't happening.
-      if (needsFlagPatch) await settingsStore.patch(ran);
-      return { views, outputs };
-    }
-
     if (viewsChanged) await viewsStore.save(result.views);
     // The screens and the flags in ONE patch, never two. The first pass reads a
     // screen with no stored role as a read-only display, so the screens (their
     // stored role now removed) landing without the flag is a state a crash could
     // leave on disk, and the next start would read every live screen as read-only
-    // and give it a wall copy. The views are written before this, so a crash
+    // and give it a wall copy. The views are saved before this, so a crash
     // between the two leaves the screens still carrying their role and the flag
     // unset: the pass runs again on data it reads the same way (and reuses a copy
-    // it already made).
-    if (outputsChanged || needsFlagPatch) {
-      await settingsStore.patch({ ...(outputsChanged ? { outputs: slugs.outputs } : {}), ...(needsFlagPatch ? ran : {}) });
+    // it already made). With no screens to write, the flags go alone: recording
+    // them cannot outrun a write that is not happening.
+    if (outputsChanged) {
+      await settingsStore.patch({ outputs: slugs.outputs, layoutDefaultsCleaned: true, cardHairlineRaised: true, screenRolesFromView: true });
+    } else if (needsFlagPatch) {
+      await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: true, screenRolesFromView: true });
     }
+    if (!viewsChanged && !outputsChanged) return { views, outputs };
 
     // Logged in full, and this one is not optional: the operator's screen has a
     // different URL than it did yesterday, and the only way they learn that is
@@ -3803,7 +3798,7 @@ export class StageController {
    *  "why did that screen start (or stop) working". */
   private logRoleFlip(screen: string, nowControlSurface: boolean, viewName: string | undefined): void {
     console.log(
-      `[screens] "${scrub(screen)}" is now ${nowControlSurface ? "a control surface" : "read-only"} ` +
+      `[screens] "${scrub(screen)}" is now ${scrub(nowControlSurface ? "a control surface" : "read-only")} ` +
         `(${viewName === undefined ? "shows nothing" : `shows "${scrub(viewName)}"`})`,
     );
   }
@@ -4016,7 +4011,7 @@ export class StageController {
       // Everything refusable was checked above, so what reaches here is the save
       // failing, and setViewSurface has put the view back by then.
       console.warn(
-        `[stage-controller] setViewRole failed at "${step}": ${scrub(errorMessage(err))}; rolled back: ${scrub(step)}`,
+        `[stage-controller] setViewRole failed at "${scrub(step)}": ${scrub(errorMessage(err))}; rolled back: ${scrub(step)}`,
       );
       throw new ScreenWriteError("setViewRole", step, errorMessage(err), [step], []);
     }
