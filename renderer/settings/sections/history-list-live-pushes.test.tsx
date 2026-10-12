@@ -19,7 +19,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { eventually, installDom, settle } from "../../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
@@ -147,7 +147,9 @@ afterEach(() => {
   // into the next case's freshly-mounted page.
   __resetReplayCacheForTests();
 });
-after(teardown);
+// Unmount, let React finish, THEN take the DOM away: the unmount's own effects
+// flush after a bare teardown, onto a window that is gone, and fail the file.
+after(() => unmountAndTeardown(cleanup, teardown));
 
 async function renderList(): Promise<ReturnType<typeof render>> {
   let view!: ReturnType<typeof render>;

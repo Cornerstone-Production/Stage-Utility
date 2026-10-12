@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { eventually, installDom } from "../../test-dom.js";
+import { eventually, installDom, unmountAndTeardown } from "../../test-dom.js";
 import { routerWithBaptismDestination } from "../../test-fixtures/router.js";
 
 const teardown = installDom();
@@ -173,10 +173,9 @@ const { RouterContextProvider } = await import("@tanstack/react-router");
 // for their own cross-links.
 
 afterEach(cleanup);
-after(() => {
-  cleanup();
-  teardown();
-});
+// Unmount, let React finish, THEN take the DOM away: the unmount's own effects
+// flush after a bare teardown, onto a window that is gone, and fail the file.
+after(() => unmountAndTeardown(cleanup, teardown));
 
 /** `rows: false` for a list that is expected to draw none (a failed load). */
 async function renderList(readOnly = false, router?: ReturnType<typeof routerWithBaptismDestination>, { rows = true } = {}) {
@@ -470,16 +469,19 @@ describe("the level figure on a row", () => {
   test("a service that recorded sound shows a dB number, named after the metric it read", async () => {
     installFetch();
     const view = await renderList();
-    const drawn = figuresOf(view.container.querySelector(`[data-history-row="${ELEVEN.serviceKey}"]`)!);
     // The loudest reading on the record, not an energy average and not a dash.
     // The loudest reading, with the METRIC as its caption — which meter reading
     // this is matters more on a row than repeating the heading above it, and
-    // the heading has already said "peak".
-    assert.deepEqual(
-      drawn.level,
-      { value: "102 dB", caption: "LAeq 10" },
-      `the row did not show the recorded peak as a dB figure: ${JSON.stringify(drawn)}`,
-    );
+    // the heading has already said "peak". The row's own sound read lands behind
+    // the row, and until it does the row says there is none.
+    await eventually(() => {
+      const drawn = figuresOf(view.container.querySelector(`[data-history-row="${ELEVEN.serviceKey}"]`)!);
+      assert.deepEqual(
+        drawn.level,
+        { value: "102 dB", caption: "LAeq 10" },
+        `the row did not show the recorded peak as a dB figure: ${JSON.stringify(drawn)}`,
+      );
+    });
   });
 
   test("a service with no sound says WHY there is no number", async () => {
