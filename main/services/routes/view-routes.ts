@@ -496,26 +496,25 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.serviceCueLayoutId (string|null), body.hideChrome (boolean), body.showInSidebar (boolean), or body.calendarSources + body.calendarTags (arrays) required");
         return;
       }
-      // Checked before anything is written, so a rename in the same body does not
-      // land on its own. A body that also makes the view a wall view is judged as one.
-      const kindRefused = hasKind ? stageController.viewKindRefusal(id, body.kind as ViewKind, surface ?? undefined) : null;
-      if (kindRefused) {
-        error(res, kindRefused);
+      // Every refusal the kind and the surface can raise is decided here, before
+      // the first write, so a rename beside a refused body does not land alone. The
+      // view is judged as it will be once the whole body is applied.
+      const refused = stageController.viewPatchRefusal(id, {
+        ...(hasKind ? { kind: body.kind as ViewKind } : {}),
+        ...(hasSurface ? { surface } : {}),
+      });
+      if (refused) {
+        error(res, refused);
         return;
       }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameView(id, body.name as string);
-      // Refused with its reason: converting a bound View names the screens it
-      // would strand rather than silently unbinding them.
-      if (hasSurface) {
-        try {
-          state = await stageController.setViewSurface(id, surface);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
-      }
-      if (hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
+      // In the order that keeps the view valid at each step: a body making it a
+      // console takes the kind first (a console may only be a kind that can be
+      // one), and a body making it a wall view takes the surface first.
+      if (surface === "console" && hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
+      if (hasSurface) state = await stageController.setViewSurface(id, surface);
+      if (surface !== "console" && hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
       if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
       if (hasLayout) {
         // layoutRev is the revision the editor opened. Present = "only save if

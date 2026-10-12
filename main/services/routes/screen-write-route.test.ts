@@ -258,6 +258,48 @@ describe("PATCH /api/views/:id changing a console's kind", () => {
   });
 });
 
+describe("PATCH /api/views/:id with a kind and a surface in one body", () => {
+  const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
+  const unrouted = () => {
+    // A wall view nothing shows, of a kind with nothing to operate.
+    ctl.state = { ...ctl.state, views: [...views(), { id: "mics", name: "Mic board", kind: "slots", surface: "display", createdAt: NOW }] as unknown as View[] };
+  };
+  const shape = (id: string) => {
+    const v = views().find((x) => x.id === id)!;
+    return { name: v.name, kind: v.kind, surface: v.surface };
+  };
+
+  it("makes a wall view a console of a kind that can be one: the kind lands first, and the rename with it", async () => {
+    unrouted();
+    const r = await patch("/api/views/mics", { name: "Renamed", kind: "custom", surface: "console" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(shape("mics"), { name: "Renamed", kind: "custom", surface: "console" });
+  });
+
+  it("makes a console a wall view of any kind: the surface lands first", async () => {
+    ctl.state = { ...ctl.state, outputs: outputs().filter((o) => o.viewId !== "ctl-a") };
+    const r = await patch("/api/views/ctl-a", { name: "Renamed", kind: "slots", surface: "display" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(shape("ctl-a"), { name: "Renamed", kind: "slots", surface: "display" });
+  });
+
+  it("refuses a console of a kind that cannot be one, and writes none of the body", async () => {
+    unrouted();
+    const r = await patch("/api/views/mics", { name: "Renamed", surface: "console" });
+    assert.equal(r.status, 400, JSON.stringify(r.json));
+    assert.match((r.json as { error: string }).error, /cannot be a control surface/);
+    assert.deepEqual(shape("mics"), { name: "Mic board", kind: "slots", surface: "display" }, "a field beside the refused surface was applied");
+  });
+
+  it("refuses a surface a screen is showing the view on, and writes none of the body", async () => {
+    // wall-a is shown by two screens: making it a console would wake both.
+    const r = await patch("/api/views/wall-a", { name: "Renamed", kind: "calendar", surface: "console" });
+    assert.equal(r.status, 400, JSON.stringify(r.json));
+    assert.match((r.json as { error: string }).error, /"Lobby TV", "Hallway TV"/);
+    assert.deepEqual(shape("wall-a"), { name: "Lobby loop", kind: "custom", surface: "display" }, "a field beside the refused surface was applied");
+  });
+});
+
 describe("POST /api/views/:id/surface", () => {
   const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
 
