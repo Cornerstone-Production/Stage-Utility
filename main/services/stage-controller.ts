@@ -284,6 +284,25 @@ export class ViewScreensChangedError extends Error {
 }
 
 /**
+ * deleteView was told to delete the view only if no screen shows it (the screen
+ * that did was just removed, and the operator ticked "also delete its view"), and a
+ * screen shows it now: it was pointed at the view meanwhile. Nothing is written.
+ * `screens` are the ones showing it, to name to the operator.
+ */
+export class ViewShownError extends Error {
+  readonly code = "view-shown";
+  constructor(
+    readonly viewId: string,
+    readonly screens: { id: string; name: string }[],
+  ) {
+    super(
+      `The view was kept: ${screens.map((s) => `"${s.name}"`).join(", ")} ${screens.length > 1 ? "show" : "shows"} it now. Nothing was changed.`,
+    );
+    this.name = "ViewShownError";
+  }
+}
+
+/**
  * setOutputView was told which kind of view the caller expected (the one the
  * operator confirmed going live on) and the view is the other kind now: it was
  * made a console, or a wall view, while the question was open. Nothing is written.
@@ -3484,7 +3503,15 @@ export class StageController {
     return this.persistSlots("view", targetViewId, fresh(rows), effective);
   }
 
-  async deleteView(id: string): Promise<StageState> {
+  /**
+   * `ifUnshown`: delete only a view no screen shows. Checked in the same
+   * synchronous turn that reserves the view for deletion, and a view so reserved is
+   * refused to every write that would point a screen at it (setOutputView,
+   * addOutput), so a screen pointed at it while its inline slots are being cleaned
+   * up cannot be left with a view that is gone. ViewShownError, nothing written, when
+   * a screen shows it.
+   */
+  async deleteView(id: string, opts: { ifUnshown?: boolean } = {}): Promise<StageState> {
     if (!this.state.views.find((v) => v.id === id)) {
       throw new Error(`views:delete — view ${id} not found`);
     }
@@ -3495,7 +3522,23 @@ export class StageController {
     if (screensListViews(this.state.views).length <= 1) {
       throw new Error("views:delete — cannot remove the last view");
     }
-    return this.dropView(id);
+    if (opts.ifUnshown) {
+      const showing = screensShowing(id, this.state.outputs);
+      if (showing.length > 0) throw new ViewShownError(id, showing.map((o) => ({ id: o.id, name: o.name || o.id })));
+    }
+    this.viewsBeingDeleted.add(id);
+    try {
+      return await this.dropView(id);
+    } finally {
+      this.viewsBeingDeleted.delete(id);
+    }
+  }
+
+  /** Views whose deletion is under way: no screen may be pointed at one. */
+  private readonly viewsBeingDeleted = new Set<string>();
+
+  private assertViewNotBeingDeleted(viewId: string): void {
+    if (this.viewsBeingDeleted.has(viewId)) throw new Error(`view ${viewId} is being deleted`);
   }
 
   /**
@@ -3801,6 +3844,7 @@ export class StageController {
         if (viewId !== null && !view) {
           throw new Error(`outputs:setView — view ${viewId} not found`);
         }
+        if (viewId !== null) this.assertViewNotBeingDeleted(viewId);
         if (view && opts.expectSurface !== undefined && viewSurface(view) !== opts.expectSurface) {
           throw new ViewSurfaceChangedError(view.id, opts.expectSurface, viewSurface(view));
         }
@@ -3990,6 +4034,7 @@ export class StageController {
     }
     const view = this.state.views.find((v) => v.id === viewId);
     if (!view) throw new Error(`view ${viewId} not found`);
+    this.assertViewNotBeingDeleted(viewId);
     return view;
   }
 

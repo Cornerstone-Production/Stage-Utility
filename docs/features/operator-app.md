@@ -273,8 +273,9 @@ delete its view**, unticked; ticked, the button reads **Remove screen and view**
 Left unticked the view moves to *Views not on a screen*. When other screens show
 the view, the dialog names them and the view stays. Removing both is two steps,
 the screen first; if deleting the view fails, a message says the screen is gone
-and the view is not. A view another screen was pointed at while the dialog was
-open is kept, and the message says so.
+and the view is not. The view is deleted only if the server finds no screen showing
+it: one that another operator pointed at it while the dialog was open is kept, and
+the message names the screen that shows it now.
 
 ## Consoles
 

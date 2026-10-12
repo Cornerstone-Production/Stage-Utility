@@ -27,13 +27,11 @@
 import { useState } from "react";
 import { Loader2Icon, PanelRightIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
-import { screensShowing } from "@main/types/views";
 import { OutputsSection } from "../../settings/sections/outputs-section";
 import { ScreenPanelHost } from "./screen-panel-host";
 import type { PanelDevice, PanelTarget } from "../../settings/sections/screen-settings-panel";
-import { confirmDeleteView, removeScreen } from "../../settings/sections/screen-confirms";
+import { deleteView, removeScreen } from "../../settings/sections/screen-confirms";
 import { Button } from "../../components/ui";
-import { useLatestRef } from "../../lib/use-latest-ref";
 import { usePageActions } from "../page-actions";
 import { useStageSettings } from "../use-stage-settings";
 import { UnclaimedScreens } from "./unclaimed-screens";
@@ -49,7 +47,6 @@ export function ScreensRoute() {
   const [panel, setPanel] = useState<PanelTarget | null>(null);
   // The screen made a moment ago, so its panel can say so. Gone with the next selection.
   const [created, setCreated] = useState<{ outputId: string; viewMade: boolean } | null>(null);
-  const latest = useLatestRef(s.stageState);
 
   // Any selection opens the panel: the operator asked to see it.
   function select(target: PanelTarget | null) {
@@ -91,12 +88,11 @@ export function ScreensRoute() {
   const newTarget = (device: PanelDevice | null): PanelTarget => ({
     kind: "new",
     device,
-    // A device is named for itself, as it always was; an output of a Mac output
-    // helper for the output, since all of a Mac's outputs share its hostname. A
-    // screen from the Add tile
-    // is left unnamed, and the server names it "Display N" from the id it gets:
-    // a count of the screens here repeats a name once one has been removed, and
-    // an id is never reused.
+    // A device is named for itself; an output of a Mac output helper for the
+    // output, since all of a Mac's outputs share its hostname. A screen from the
+    // Add tile is left unnamed, and the server names it "Display N" from the id it
+    // gets: a count of the screens here repeats a name once one has been removed,
+    // and an id is never reused.
     defaultName: device ? device.name || device.hostname || "New screen" : "",
   });
   function editLayout(viewId: string) {
@@ -109,19 +105,13 @@ export function ScreensRoute() {
   function requestRemoveScreen(outputId: string) {
     const output = state.outputs?.find((o) => o.id === outputId);
     if (!output) return;
-    void removeScreen({
-      output,
-      state: { outputs: state.outputs ?? [], views: state.views ?? [] },
-      latest: () => ({ outputs: latest.current?.outputs ?? [] }),
-      handlers: s.handlers,
-    });
+    void removeScreen({ output, read: () => ({ outputs: state.outputs ?? [], views: state.views ?? [] }), handlers: s.handlers });
   }
-  async function requestDeleteView(viewId: string) {
+  function requestDeleteView(viewId: string) {
     const view = state.views?.find((v) => v.id === viewId);
-    if (!view) return;
-    const shownOn = screensShowing(viewId, state.outputs ?? []);
-    if (await confirmDeleteView(view, shownOn)) await s.handlers.handleRemoveView(viewId);
+    if (view) void deleteView({ view, outputs: state.outputs ?? [], handlers: s.handlers });
   }
+  const addScreen = () => select(newTarget(null));
 
   return (
     <div className="pb-[50vh] max-sm:pb-24 lg:flex lg:items-start lg:gap-4">
@@ -133,10 +123,10 @@ export function ScreensRoute() {
           panelOpen={open}
           selected={open ? panel : null}
           onSelect={select}
-          onAddScreen={() => select(newTarget(null))}
+          onAddScreen={addScreen}
           onEditLayout={editLayout}
           onRemoveScreen={requestRemoveScreen}
-          onDeleteView={(id) => void requestDeleteView(id)}
+          onDeleteView={requestDeleteView}
         />
         {/* Screens found on the network that are not set up yet. Here rather than
             on a tab of their own: this page exists BECAUSE Views and Displays used
@@ -155,7 +145,7 @@ export function ScreensRoute() {
           created={created}
           onClose={close}
           onSelect={select}
-          onAddScreen={() => select(newTarget(null))}
+          onAddScreen={addScreen}
           onCreated={(outputId, viewMade) => {
             // The panel stays open, on the screen that now exists.
             setPanel(outputId ? { kind: "edit", outputId } : null);
@@ -163,7 +153,7 @@ export function ScreensRoute() {
           }}
           onEditLayout={editLayout}
           onRemoveScreen={requestRemoveScreen}
-          onDeleteView={(id) => void requestDeleteView(id)}
+          onDeleteView={requestDeleteView}
           onOpenMessagingSettings={() => router.navigate({ to: "/settings/messages" as never })}
         />
       )}

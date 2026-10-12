@@ -80,6 +80,7 @@ let claimFails: string | null;
 let viewDeleteFails: boolean;
 /** A create naming a view is refused as if the view had just become this kind: the stub's
  *  view flips to it and the answer is the server's 409. Null: creates go through. */
+let viewShownByServer: { id: string; name: string }[] | null;
 let surfaceMovedTo: "display" | "console" | null;
 /** The page's query client, so a test can land a stage-state broadcast. */
 let client: InstanceType<typeof QueryClient>;
@@ -96,6 +97,7 @@ beforeEach(() => {
   claimFails = null;
   viewDeleteFails = false;
   surfaceMovedTo = null;
+  viewShownByServer = null;
   // The panel's open state is remembered per browser, so one test's close must not
   // be the next test's starting point.
   localStorage.clear();
@@ -125,7 +127,13 @@ beforeEach(() => {
       if (method === "DELETE" && url.startsWith("/api/outputs/")) outputs = outputs.filter((o) => o.id !== url.split("/").pop());
       if (method === "DELETE" && url.startsWith("/api/views/")) {
         if (viewDeleteFails) return reply(500, { error: "the view is locked" });
-        const gone = url.split("/").pop();
+        const [path, query] = url.split("?");
+        // The server's own answer to a delete that must not touch a view a screen
+        // shows: it knows of a screen the page does not (nothing here updates the page's state).
+        if (query === "ifUnshown=1" && viewShownByServer) {
+          return reply(409, { error: "The view was kept.", code: "view-shown", screens: viewShownByServer });
+        }
+        const gone = path.split("/").pop();
         views = views.filter((v) => v.id !== gone);
         outputs = outputs.map((o) => (o.viewId === gone ? { ...o, viewId: null } : o));
       }
@@ -807,7 +815,7 @@ describe("removing a screen", () => {
     await click(d.getByRole("button", { name: "Remove screen and view" }));
     assert.deepEqual(writes, [
       { method: "DELETE", url: "/api/outputs/display-3", body: undefined },
-      { method: "DELETE", url: "/api/views/wall-a", body: undefined },
+      { method: "DELETE", url: "/api/views/wall-a?ifUnshown=1", body: undefined },
     ]);
   });
 
@@ -845,7 +853,7 @@ describe("removing a screen", () => {
     assert.ok(d.getByRole("checkbox"));
     await click(d.getByRole("checkbox"));
     await click(d.getByRole("button", { name: "Remove screen and view" }));
-    assert.deepEqual(writes.map((w) => `${w.method} ${w.url}`), ["DELETE /api/outputs/display-3", "DELETE /api/views/wall-a"]);
+    assert.deepEqual(writes.map((w) => `${w.method} ${w.url}`), ["DELETE /api/outputs/display-3", "DELETE /api/views/wall-a?ifUnshown=1"]);
     // The screen is gone, so the panel has nothing to show.
     assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }));
   });
@@ -868,21 +876,21 @@ describe("removing a screen", () => {
     const toasts = document.body.textContent ?? "";
     assert.match(toasts, /Removed "Lobby TV", but its view "Lobby loop" was not deleted\./);
     assert.match(toasts, /Failed to remove view/, "the server's own reason was swallowed");
-    assert.deepEqual(writes.map((w) => `${w.method} ${w.url}`), ["DELETE /api/outputs/display-3", "DELETE /api/views/wall-a"]);
+    assert.deepEqual(writes.map((w) => `${w.method} ${w.url}`), ["DELETE /api/outputs/display-3", "DELETE /api/views/wall-a?ifUnshown=1"]);
   });
 
-  test("a view another screen picked up while the dialog was open is NOT deleted, and the operator is told", async () => {
+  test("a view another screen was pointed at is NOT deleted: the server says so, the page's own state never showed it, and the operator is told", async () => {
+    // The probe shape: nothing is pushed into the page's state. Only the server's
+    // reply knows the Booth panel shows the view now.
+    viewShownByServer = [{ id: "display-1", name: "Booth panel" }];
     await mountScreens();
     await removeFromMenu("Lobby TV");
     const d = await dialog();
     await click(d.getByRole("checkbox"));
-    // Somebody else points the Booth panel at the view meanwhile.
-    outputs = outputs.map((o) => (o.id === "display-1" ? { ...o, viewId: "wall-a" } : o));
-    await act(async () => { client.setQueryData(["stage:getState"], state()); await settle(); await settle(); });
     await click(d.getByRole("button", { name: "Remove screen and view" }));
     await act(async () => { await settle(); await settle(); });
-    assert.deepEqual(writes.map((w) => `${w.method} ${w.url}`), ["DELETE /api/outputs/display-3"], "a view another screen shows was deleted");
-    assert.match(document.body.textContent ?? "", /Its view "Lobby loop" was kept: "Booth panel" now shows it\./);
+    assert.deepEqual(writes.map((w) => `${w.method} ${w.url}`), ["DELETE /api/outputs/display-3", "DELETE /api/views/wall-a?ifUnshown=1"]);
+    assert.match(document.body.textContent ?? "", /Removed "Lobby TV"\. Its view "Lobby loop" was kept: "Booth panel" now shows it\./);
   });
 });
 
@@ -950,7 +958,7 @@ describe("View settings", () => {
     const d = await dialog();
     assert.ok(d.getByText('Delete view "Booth controls"?'));
     assert.ok(d.getByText("Its layout goes with it. This cannot be undone."));
-    assert.ok(d.getByText('"Booth panel" and "Stage panel" show it, and will show nothing until you pick another view.'));
+    assert.ok(d.getByText('"Booth panel" and "Stage panel" show it, and will show nothing until you pick another view. Their buttons stop working.'));
     assert.deepEqual(writes, []);
     await click(d.getByRole("button", { name: "Delete view" }));
     assert.deepEqual(writes, [{ method: "DELETE", url: "/api/views/ctl-a", body: undefined }]);

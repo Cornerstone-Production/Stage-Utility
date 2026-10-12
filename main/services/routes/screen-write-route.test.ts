@@ -638,3 +638,64 @@ describe("POST /api/outputs and a claim — expectSurface, the kind the operator
     assert.equal((await kioskDevicesStore.load()).length, 0);
   });
 });
+
+describe("DELETE /api/views/:id?ifUnshown=1 — delete a view only if no screen shows it", () => {
+  const del = (url: string) => callRoute(viewRoutes, url, { method: "DELETE" });
+  beforeEach(() => {
+    ctl.state = { ...ctl.state, views: [...views(), { id: "spare", name: "Spare loop", kind: "custom", surface: "display", createdAt: NOW, layout }] as unknown as View[] };
+  });
+
+  it("deletes a view no screen shows", async () => {
+    const r = await del("/api/views/spare?ifUnshown=1");
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(views().some((v) => v.id === "spare"), false);
+  });
+
+  it("is a 409 naming the screens when one shows it, and deletes nothing", async () => {
+    const before = JSON.stringify({ views: views(), outputs: outputs() });
+    const r = await del("/api/views/wall-a?ifUnshown=1");
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    const j = r.json as { code: string; screens: { id: string; name: string }[]; error: string };
+    assert.equal(j.code, "view-shown");
+    assert.deepEqual(j.screens, [{ id: "display-1", name: "Lobby TV" }, { id: "display-2", name: "Hallway TV" }]);
+    assert.match(j.error, /"Lobby TV", "Hallway TV" show it now/);
+    assert.equal(JSON.stringify({ views: views(), outputs: outputs() }), before, "the view was deleted or a screen unrouted");
+  });
+
+  it("without the flag it deletes a shown view and unroutes its screens, as it always did", async () => {
+    const r = await del("/api/views/wall-a");
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(outputs().filter((o) => o.id === "display-1" || o.id === "display-2").map((o) => o.viewId), [null, null]);
+  });
+
+  it("a view being deleted cannot be pointed at while its inline slots are cleaned up: not by routing, not by a new screen", async () => {
+    // The window is the await in deleteView before the view leaves the state. A
+    // view with an inline slots grid has one; hold it open and try both writes.
+    const inline = {
+      id: "inline", name: "Mic wall", kind: "custom", surface: "display", createdAt: NOW,
+      layout: { ...layout, objects: [{ id: "grid-1", x: 0, y: 0, w: 1, h: 1, z: 1, config: { type: "slots-grid", source: "inline" }, style: {} }] },
+    };
+    ctl.state = { ...ctl.state, views: [...views(), inline] as unknown as View[] };
+    const { slotsStore } = await import("../slots-store.js");
+    const store = slotsStore as unknown as { removeDisplay: (id: string) => Promise<unknown> };
+    const real = store.removeDisplay.bind(slotsStore);
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    store.removeDisplay = async (id: string) => { await held; return real(id); };
+    const deleting = del("/api/views/inline?ifUnshown=1");
+    try {
+      await new Promise((r) => setTimeout(r, 5));
+      const routed = await callRoute(viewRoutes, "/api/outputs/display-1", { method: "PATCH", body: { viewId: "inline" } });
+      assert.equal(routed.status, 400, JSON.stringify(routed.json));
+      assert.match((routed.json as { error: string }).error, /being deleted/);
+      const made = await post("/api/outputs", { name: "Wing", viewId: "inline" });
+      assert.equal(made.status, 400, JSON.stringify(made.json));
+    } finally {
+      release();
+      store.removeDisplay = real;
+    }
+    assert.equal((await deleting).status, 200);
+    assert.equal(outputs().find((o) => o.id === "display-1")?.viewId, "wall-a", "a screen was pointed at a view that is gone");
+    assert.equal(outputs().some((o) => o.name === "Wing"), false);
+  });
+});

@@ -17,6 +17,10 @@ import type { Rotation } from "@main/types/output-format";
  */
 export type WirelessChannel = DeviceChannel;
 
+/** How deleting a view went. `ifUnshown` asked the server to refuse a view a screen
+ *  shows; `shownOn` then names those screens, and no failure was toasted. */
+export type RemoveViewOutcome = { removed: true } | { removed: false; shownOn?: string[] };
+
 /** How making a screen went: why it was refused, or null, and the id of the
  *  screen that now exists (null when it was refused). */
 export interface CreateScreenOutcome {
@@ -83,7 +87,7 @@ export interface SectionHandlers {
   /** Resolves the copy's id, or null when it could not be made. */
   handleDuplicateView: (id: string) => Promise<string | null>;
   /** Resolves whether it is gone; the failure is already toasted. */
-  handleRemoveView: (id: string) => Promise<boolean>;
+  handleRemoveView: (id: string, opts?: { ifUnshown?: boolean }) => Promise<RemoveViewOutcome>;
   handleSetViewKind: (id: string, kind: ViewKind) => Promise<void>;
   /**
    * `layoutRev` is the revision the editor opened; omit to overwrite regardless.

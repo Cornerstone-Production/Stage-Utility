@@ -35,7 +35,7 @@ import { changeViewRole } from "../settings/view-role-change";
 import { confirmDiscardSlotEdits, useSlotsTarget } from "../settings/sections/slots-target-pill";
 import { registerTargetGuard } from "../settings/sections/editing-target";
 import { useSlotsPreview } from "../settings/sections/slots-preview-target";
-import type { CreateScreenOutcome, SectionHandlers } from "../settings/types";
+import type { CreateScreenOutcome, RemoveViewOutcome, SectionHandlers } from "../settings/types";
 import {
   useStageStateQuery,
   useServiceTypes,
@@ -549,10 +549,22 @@ export function useStageSettings(pinnedViewId?: string) {
     }
   }
 
-  /** Resolves whether the view is gone. The failure is toasted here; the answer
-   *  is for a caller that does more after it (removing a screen AND its view). */
-  async function handleRemoveView(id: string): Promise<boolean> {
-    return writeState("views:remove", { id }, { fail: "Failed to remove view" });
+  /** Resolves whether the view is gone. A failure is toasted here; the answer is for
+   *  a caller that does more after it (removing a screen AND its view). With
+   *  `ifUnshown`, a screen showing the view is not a failure: the server refuses and
+   *  the screens come back in `shownOn` for the caller to say. */
+  async function handleRemoveView(id: string, opts: { ifUnshown?: boolean } = {}): Promise<RemoveViewOutcome> {
+    try {
+      const next = await ipc<StageState>("views:remove", { id, ...(opts.ifUnshown ? { ifUnshown: true } : {}) });
+      queryClient.setQueryData(["stage:getState"], next);
+      return { removed: true };
+    } catch (err) {
+      const e = err as ApiError;
+      const screens = e.code === "view-shown" && Array.isArray(e.body?.screens) ? (e.body.screens as { id: string; name?: string }[]) : null;
+      if (screens) return { removed: false, shownOn: screens.map((s) => s.name || s.id) };
+      toast.error(`Failed to remove view: ${errorMessage(err)}`);
+      return { removed: false };
+    }
   }
 
   async function handleSetViewKind(id: string, kind: ViewKind) {

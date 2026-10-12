@@ -25,7 +25,7 @@ import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
-import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewSurfaceChangedError } from "../stage-controller.js";
+import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewShownError, ViewSurfaceChangedError } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
 import { datedExportFilename } from "../export-filename.js";
@@ -551,8 +551,18 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // DELETE /api/views/:id
     const viewDeleteMatch = pathname.match(/^\/api\/views\/([^/]+)$/);
     if (method === "DELETE" && viewDeleteMatch) {
-      const state = await stageController.deleteView(viewDeleteMatch[1]);
-      json(res, state);
+      // ?ifUnshown=1: only a view no screen shows. Removing a screen together with its
+      // view sends it, so a screen pointed at the view meanwhile is not left blank.
+      const ifUnshown = url.searchParams.get("ifUnshown") === "1";
+      try {
+        json(res, await stageController.deleteView(viewDeleteMatch[1], { ifUnshown }));
+      } catch (err) {
+        if (err instanceof ViewShownError) {
+          json(res, { error: err.message, code: err.code, screens: err.screens }, 409);
+          return;
+        }
+        throw err;
+      }
       return;
     }
 

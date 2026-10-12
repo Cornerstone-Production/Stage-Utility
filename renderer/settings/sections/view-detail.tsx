@@ -32,8 +32,8 @@ import { ViewPreview } from "./view-preview";
 import { SlotsPreviewNote } from "./slots-preview-target";
 import { KIND_LABELS, KIND_ORDER } from "./new-view-dialog";
 import { CalendarSources } from "./calendar-sources";
-import { screensShowing, viewSurface } from "@main/types/views";
-import { confirmDeleteView } from "./screen-confirms";
+import { viewSurface } from "@main/types/views";
+import { deleteView } from "./screen-confirms";
 
 const PREVIEW_ASPECTS = [
   { id: "16:9", label: "16:9 · landscape", ratio: 16 / 9 },
@@ -225,12 +225,7 @@ export function ViewDetail({
           variant="transparent"
           size="small"
           iconOnly
-          onClick={async () => {
-            // Names the screens that would lose their content: deleting a view
-            // is not recoverable, and a custom view can be a lot of layout work.
-            const ok = await confirmDeleteView(view, screensShowing(view.id, stageState.outputs ?? []));
-            if (ok) await handlers.handleRemoveView(view.id);
-          }}
+          onClick={() => void deleteView({ view, outputs: stageState.outputs ?? [], handlers })}
           disabled={!canDelete}
           aria-label="Delete view"
         >

@@ -138,7 +138,7 @@ test("deleting a console's view says its screens' buttons will stop working; a w
     fireEvent.click(screen.getByRole("button", { name: "Delete view" }));
     await settle();
     const dialog = text(document.querySelector('[role="alertdialog"]')!);
-    assert.match(dialog, /shown on Booth panel, Stage panel, which will have no view assigned, and its buttons will stop working\./);
+    assert.match(dialog, /"Booth panel" and "Stage panel" show it, and will show nothing until you pick another view\. Their buttons stop working\./);
     assert.equal(/Elsewhere/.test(dialog), false, "a screen showing another view was named");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await settle();
@@ -149,7 +149,7 @@ test("deleting a console's view says its screens' buttons will stop working; a w
     fireEvent.click(screen.getByRole("button", { name: "Delete view" }));
     await settle();
     const wall = text(document.querySelector('[role="alertdialog"]')!);
-    assert.match(wall, /which will have no view assigned\./);
+    assert.match(wall, /will show nothing until you pick another view\./);
     assert.equal(/buttons will stop working/.test(wall), false);
   } finally {
     f.restore();

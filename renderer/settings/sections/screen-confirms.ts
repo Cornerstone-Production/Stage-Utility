@@ -1,69 +1,78 @@
-// The two questions the Screens page asks before it destroys something, written
-// once. Removing a screen is asked from two places (a card's menu and the panel's
-// footer) and deleting a view from three (a view card's menu, the layout editor's
-// header and the View settings footer), and three copies of a confirm are how
-// their wording drifts apart.
+// Asking before a screen is removed or a view is deleted, and doing it: removeScreen
+// (with its view, if the operator says so) and deleteView. Each is offered from more
+// than one place, so each is one function.
 
-import { screensShowing } from "@main/types/views";
+import { screensShowing, viewIsConsole } from "@main/types/views";
 import { confirm, confirmWith, toast } from "../../components/ui";
 import type { SectionHandlers } from "../types";
 import { listNames } from "../screen-role-confirm";
 
+/** A screen's name, or its id when it has none. */
+const nameOf = (o: Pick<Output, "id" | "name">): string => o.name || o.id;
+
+/** "A shows it" / "A and B show it", for a note naming screens. */
+const showVerb = (screens: readonly unknown[]): string => (screens.length > 1 ? "show" : "shows");
+
 /**
  * Ask before a view is deleted. A view's layout cannot be got back, and every
- * screen showing it is left with nothing: so they are named. `shownOn` is the
- * screens that show it now.
+ * screen showing it is left with nothing: so they are named. A control surface's
+ * screens were live, and say so.
  */
-export function confirmDeleteView(view: Pick<View, "name">, shownOn: readonly Pick<Output, "name">[]): Promise<boolean> {
+function confirmDeleteView(view: Pick<View, "name" | "surface">, shownOn: readonly Pick<Output, "id" | "name">[]): Promise<boolean> {
+  const note = shownOn.length
+    ? `${listNames(shownOn.map(nameOf))} ${showVerb(shownOn)} it, and will show nothing until you pick another view.` +
+      (viewIsConsole(view) ? ` ${shownOn.length > 1 ? "Their" : "Its"} buttons stop working.` : "")
+    : undefined;
   return confirm({
     title: `Delete view "${view.name}"?`,
     message: "Its layout goes with it. This cannot be undone.",
-    note: shownOn.length
-      ? `${listNames(shownOn.map((o) => o.name))} ${shownOn.length > 1 ? "show" : "shows"} it, and will show nothing until you pick another view.`
-      : undefined,
+    note,
     confirmLabel: "Delete view",
     destructive: true,
   });
 }
 
-/** The screens other than `output` that show a view. */
-function othersShowing(outputs: readonly Output[], output: Output, viewId: string): Output[] {
-  return screensShowing(viewId, outputs).filter((o) => o.id !== output.id);
+/** Ask, then delete a view. Resolves whether it is gone. */
+export async function deleteView({ view, outputs, handlers }: {
+  view: View;
+  outputs: readonly Output[];
+  handlers: Pick<SectionHandlers, "handleRemoveView">;
+}): Promise<boolean> {
+  if (!(await confirmDeleteView(view, screensShowing(view.id, outputs)))) return false;
+  return (await handlers.handleRemoveView(view.id)).removed;
 }
 
 /**
  * Remove a screen, asking first, and with it its view if the operator says so.
  *
- * The question offers the view only when no other screen shows it: deleting a
- * view somebody else is showing would blank their screen. Left unticked (the
- * default) the view survives under "Views not on a screen". When the screen is
- * shared, the dialog says which others keep the view alive.
+ * The question offers the view only when no other screen shows it. Left unticked
+ * (the default) the view survives under "Views not on a screen"; when other
+ * screens show it the dialog names them and the view stays.
  *
- * Removing both is two writes, the screen first. If the second fails the
- * operator is told the screen is gone and the view is not: neither failure is
- * swallowed, and a view that was never deleted is not reported as deleted.
+ * Removing both is two writes, the screen first. The second asks the server to
+ * delete the view only if no screen shows it: another operator may have pointed a
+ * screen at it while the dialog was open, and the server, not this page's copy of
+ * the state, is what knows. A refusal is told as it is (the screen is gone, the
+ * view is kept, and which screen shows it), and so is a failure.
  *
- * `latest` reads the state as it is NOW, after the question was answered: another
- * operator may have put the view on a second screen while the dialog was open,
- * and the box was ticked on the strength of "nothing else shows it".
- *
- * Resolves whether the screen was removed.
+ * `read` is the state as it is when the screen is asked about. Resolves whether the
+ * screen was removed.
  */
-export async function removeScreen({ output, state, latest, handlers }: {
+export async function removeScreen({ output, read, handlers }: {
   output: Output;
-  state: { outputs: readonly Output[]; views: readonly View[] };
-  latest: () => { outputs: readonly Output[] };
+  read: () => { outputs: readonly Output[]; views: readonly View[] };
   handlers: Pick<SectionHandlers, "handleRemoveOutput" | "handleRemoveView">;
 }): Promise<boolean> {
-  const view = output.viewId ? state.views.find((v) => v.id === output.viewId) : undefined;
-  const others = view ? othersShowing(state.outputs, output, view.id) : [];
+  const { outputs, views } = read();
+  const view = output.viewId ? views.find((v) => v.id === output.viewId) : undefined;
+  const others = view ? screensShowing(view.id, outputs).filter((o) => o.id !== output.id) : [];
   const alone = view !== undefined && others.length === 0;
 
   const answer = await confirmWith({
     title: `Remove "${output.name}"?`,
     message: "Its address and settings go away. This cannot be undone.",
     note: view && !alone
-      ? `Its view, "${view.name}", stays: ${listNames(others.map((o) => o.name))} also ${others.length > 1 ? "show" : "shows"} it.`
+      ? `Its view, "${view.name}", stays: ${listNames(others.map(nameOf))} also ${showVerb(others)} it.`
       : undefined,
     checkbox: alone
       ? {
@@ -80,13 +89,12 @@ export async function removeScreen({ output, state, latest, handlers }: {
   if (!(await handlers.handleRemoveOutput(output.id))) return false;
   if (!answer.checked || !view) return true;
 
-  const sharedNow = othersShowing(latest().outputs, output, view.id);
-  if (sharedNow.length > 0) {
-    toast.error(`Removed "${output.name}". Its view "${view.name}" was kept: ${listNames(sharedNow.map((o) => o.name))} now ${sharedNow.length > 1 ? "show" : "shows"} it.`);
-    return true;
-  }
-  if (!(await handlers.handleRemoveView(view.id))) {
-    toast.error(`Removed "${output.name}", but its view "${view.name}" was not deleted. It is under Views not on a screen.`);
-  }
+  const outcome = await handlers.handleRemoveView(view.id, { ifUnshown: true });
+  if (outcome.removed) return true;
+  toast.error(
+    outcome.shownOn
+      ? `Removed "${output.name}". Its view "${view.name}" was kept: ${listNames(outcome.shownOn)} now ${showVerb(outcome.shownOn)} it.`
+      : `Removed "${output.name}", but its view "${view.name}" was not deleted. It is under Views not on a screen.`,
+  );
   return true;
 }
