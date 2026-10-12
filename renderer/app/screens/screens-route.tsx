@@ -45,20 +45,17 @@ export function ScreensRoute() {
   // waiting device's "Set up as a new screen", and the panel itself.
   const [open, setOpen] = usePanelOpen();
   const [panel, setPanel] = useState<PanelTarget | null>(null);
-  // The screen made a moment ago, so its panel can say so. Gone with the next selection.
-  const [created, setCreated] = useState<{ outputId: string; viewMade: boolean } | null>(null);
 
   // Any selection opens the panel: the operator asked to see it.
   function select(target: PanelTarget | null) {
     setPanel(target);
-    setCreated(null);
     setOpen(true);
   }
   function close() {
     setOpen(false);
-    setCreated(null);
-    // A half-filled new screen is not kept: closing creates nothing.
-    setPanel((p) => (p?.kind === "new" ? null : p));
+    // A half-filled new screen is not kept: closing creates nothing. Nor is the note
+    // after one that was made.
+    setPanel((p) => (p?.kind === "new" ? null : p?.kind === "edit" ? { kind: "edit", outputId: p.outputId } : p));
   }
 
   usePageActions(
@@ -142,14 +139,12 @@ export function ScreensRoute() {
           stageState={s.stageState}
           handlers={s.handlers}
           target={panel}
-          created={created}
           onClose={close}
           onSelect={select}
           onAddScreen={addScreen}
           onCreated={(outputId, viewMade) => {
             // The panel stays open, on the screen that now exists.
-            setPanel(outputId ? { kind: "edit", outputId } : null);
-            setCreated(outputId ? { outputId, viewMade } : null);
+            setPanel(outputId ? { kind: "edit", outputId, created: { viewMade } } : null);
           }}
           onEditLayout={editLayout}
           onRemoveScreen={requestRemoveScreen}

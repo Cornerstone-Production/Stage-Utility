@@ -23,7 +23,7 @@
 // of the other kind asks first, because the screen's buttons go live or stop.
 // What a view is for is set in View settings, which names every screen it changes.
 
-import { useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { CopyIcon, PanelRightIcon, XIcon } from "lucide-react";
 
 import { Button, Checkbox, ErrorNote, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip, toast } from "../../components/ui";
@@ -41,6 +41,7 @@ import { modeChoices, ROTATIONS, type Rotation } from "@main/types/output-format
 import type { DeviceOutput } from "@main/types/kiosk";
 import type { OutputHealth } from "@main/types/output-health";
 import type { MessageGroups } from "../../main/use-message-groups";
+import type { CreateScreenOutcome } from "../types";
 import {
   DangerButton, NEW_CONTROL, NEW_WALL, NONE, NameInput, PanelFooter, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
 } from "./screen-panel-parts";
@@ -49,7 +50,8 @@ import { ViewBody } from "./view-settings-body";
 
 /** What the panel is open on. */
 export type PanelTarget =
-  | { kind: "edit"; outputId: string }
+  /** `created`: the screen was made a moment ago, so its panel says so. */
+  | { kind: "edit"; outputId: string; created?: { viewMade: boolean } }
   | { kind: "view"; viewId: string }
   /** A new screen. `device` is the unclaimed machine it is being set up for.
    *  `defaultName` is what the name field starts with; empty sends no name, and
@@ -84,10 +86,9 @@ export interface ScreenPanelActions {
   onOpenMessagingSettings: () => void;
   /** Open the new-view dialog for this screen, for a view of this kind. */
   onRequestNewView: (outputId: string, surface: ViewSurface) => void;
-  /** Make the screen. Resolves with why it was refused, or null once it exists.
-   *  `{ viewChanged }` is the refusal of a view that changed kind while the
-   *  operator was deciding: the form stays where it is, with its message. */
-  onCreate: (input: CreateScreenInput, device: PanelDevice | null) => Promise<string | { viewChanged: string } | null>;
+  /** Make the screen. `refused` says why it was not; `viewChanged` is a view that
+   *  changed kind while the operator was deciding. */
+  onCreate: (input: CreateScreenInput, device: PanelDevice | null) => Promise<CreateScreenOutcome>;
   /** Point the panel at something else: a view's screens, a screen's view. */
   onSelect: (target: PanelTarget) => void;
   /** Start a new screen. */
@@ -114,9 +115,6 @@ export interface ScreenSettingsPanelProps {
   /** Whether a screen is connected to the one being edited. */
   online: boolean;
   messageGroups: MessageGroups;
-  /** The screen that was made a moment ago, so its panel says so. Cleared by the
-   *  caller on the next selection. */
-  created?: { outputId: string; viewMade: boolean } | null;
   actions: ScreenPanelActions;
   onClose: () => void;
 }
@@ -621,20 +619,19 @@ function EmptyBody({ onAddScreen }: { onAddScreen: () => void }) {
   );
 }
 
-export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, messageGroups, created, actions, onClose }: ScreenSettingsPanelProps) {
+export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, messageGroups, actions, onClose }: ScreenSettingsPanelProps) {
   const [step, setStep] = useState<Step>(1);
   // A different new screen (another device) starts again at its first step.
   useResyncOn([target?.kind === "new" ? (target.device?.id ?? "add") : null], () => setStep(1));
-  const ref = useRef<HTMLElement>(null);
   const output = target?.kind === "edit" ? outputs.find((o) => o.id === target.outputId) : undefined;
+  const created = target?.kind === "edit" ? target.created : undefined;
   const view = target?.kind === "view" ? views.find((v) => v.id === target.viewId) : undefined;
   // What the target resolves to. A screen or a view that is gone (removed here or
   // from another browser) leaves the panel on nothing rather than on a stale form.
-  const shownTarget = target?.kind === "new" ? target : output ? { kind: "edit" as const, output } : view ? { kind: "view" as const, view } : null;
+  const shownTarget = target?.kind === "new" ? target : output ? { kind: "edit" as const, output, created } : view ? { kind: "view" as const, view } : null;
 
   return (
     <aside
-      ref={ref}
       id={SCREEN_PANEL_ID}
       tabIndex={-1}
       aria-label="Settings"
@@ -696,7 +693,7 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
               baseUrl={baseUrl}
               online={online}
               messageGroups={messageGroups}
-              created={created?.outputId === shownTarget.output.id ? created : null}
+              created={shownTarget.created ?? null}
               actions={actions}
             />
           </div>

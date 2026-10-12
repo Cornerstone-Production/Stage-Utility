@@ -9,7 +9,7 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 
 import { Button, ErrorNote } from "../../components/ui";
 import { useDevices } from "../../app/screens/use-devices";
-import { viewIsConsole, viewSurface, type CreateScreenInput } from "@main/types/views";
+import { viewIsConsole, viewSurface, type CreateScreenInput, type NewViewKind } from "@main/types/views";
 import { ChoiceCard, NameInput, PanelFooter, RoleLine, Section, SlugInput, ViewPicker, viewGroups } from "./screen-panel-parts";
 import type { PanelTarget, ScreenPanelActions } from "./screen-settings-panel";
 
@@ -18,6 +18,12 @@ export const STEP_TITLES = ["Name it", "What should it show?"] as const;
 
 type Show = "newwall" | "newcontrol" | "existing" | "none";
 
+/** The two choices that make a view with the screen: what to ask the server for, and
+ *  what to call it. */
+const NEW_VIEW: Partial<Record<Show, { kind: NewViewKind; noun: string }>> = {
+  newwall: { kind: "wall", noun: "wall view" },
+  newcontrol: { kind: "control", noun: "control surface" },
+};
 export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, actions }: {
   target: Extract<PanelTarget, { kind: "new" }>;
   outputs: Output[];
@@ -50,6 +56,7 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
   // page cannot know (an id is never reused), so the copy says so rather than
   // guess a number.
   const called = name.trim() ? `called "${name.trim()}"` : "named like the screen";
+  const madeView = NEW_VIEW[show];
 
   async function create() {
     setBusy(true);
@@ -58,25 +65,20 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
       const input: CreateScreenInput = {
         // Omitted when empty, so the server names the screen from its id.
         ...(name.trim() ? { name: name.trim() } : {}),
-        ...(show === "newwall"
-          ? { newView: "wall" as const }
-          : show === "newcontrol"
-            ? { newView: "control" as const }
-            // The kind the role line showed: the server refuses if the view is the
-            // other kind by the time the screen is made.
-            : show === "existing" && picked ? { viewId: picked.id, expectSurface: viewSurface(picked) } : {}),
+        ...(madeView
+          ? { newView: madeView.kind }
+          // The kind the role line showed: the server refuses if the view is the
+          // other kind by the time the screen is made.
+          : show === "existing" && picked ? { viewId: picked.id, expectSurface: viewSurface(picked) } : {}),
         ...(slug.trim() ? { slug: slug.trim() } : {}),
       };
-      const refused = await actions.onCreate(input, target.device);
-      if (typeof refused === "object" && refused !== null) {
-        // Stays on this step: the view is what the operator is looking at, and its
-        // role line now says what it is.
-        setError(refused.viewChanged);
-      } else if (refused) {
+      const { refused, viewChanged } = await actions.onCreate(input, target.device);
+      if (refused) {
         setError(refused);
-        // The friendly link is the one answer the form cannot rule out itself,
-        // and it is on the first step.
-        if (slug.trim()) setStep(1);
+        // The friendly link is the one answer the form cannot rule out itself, and
+        // it is on the first step. A view that changed kind stays here: it is what
+        // the operator is looking at, and its role line now says what it is.
+        if (slug.trim() && !viewChanged) setStep(1);
       }
     } finally {
       setBusy(false);
@@ -88,11 +90,9 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
       ? target.device
         ? "Nothing is created until the last step. The device then shows this screen."
         : "Nothing is created until the last step."
-      : show === "newwall"
-        ? `Creates the screen and a wall view, both ${name.trim() ? `called "${name.trim()}"` : "with the same name"}.`
-        : show === "newcontrol"
-          ? `Creates the screen and a control surface, both ${name.trim() ? `called "${name.trim()}"` : "with the same name"}.`
-          : "Creates the screen.";
+      : madeView
+        ? `Creates the screen and a ${madeView.noun}, both ${name.trim() ? called : "with the same name"}.`
+        : "Creates the screen.";
 
   return (
     <>
@@ -110,14 +110,14 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
           <Section title="What it shows">
             <div role="group" aria-label="What it shows" className="grid gap-2">
               <ChoiceCard
-                title={`A new wall view ${called}`}
+                title={`A new ${NEW_VIEW.newwall!.noun} ${called}`}
                 badge="Usual"
                 hint="Read from across the room. Lay it out after."
                 pressed={show === "newwall"}
                 onChoose={() => setShow("newwall")}
               />
               <ChoiceCard
-                title={`A new control surface ${called}`}
+                title={`A new ${NEW_VIEW.newcontrol!.noun} ${called}`}
                 hint="A touch screen. Its buttons work for anyone at it."
                 pressed={show === "newcontrol"}
                 onChoose={() => setShow("newcontrol")}

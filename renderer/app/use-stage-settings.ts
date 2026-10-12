@@ -44,6 +44,7 @@ import {
   useLayoutTemplates,
   useSlotPresets,
   useUpdateStatus,
+  QUERY_KEYS,
 } from "./queries";
 import { markUpdatePending } from "./update-lifecycle";
 import { screensListViews } from "@main/services/home-view";
@@ -755,6 +756,15 @@ export function useStageSettings(pinnedViewId?: string) {
    * the server validates before it writes and puts back what it made if a later
    * step fails.
    */
+  /** What a refused create or claim comes to for the page. The server holds either
+   *  to the kind of view the operator was shown; when it changed, the views are read
+   *  again so the role line says what the view is now. */
+  function createRefusal(err: unknown): CreateScreenOutcome {
+    const viewChanged = (err as ApiError).code === "surface-changed";
+    if (viewChanged) void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.stageState });
+    return { refused: errorMessage(err), outputId: null, ...(viewChanged ? { viewChanged } : {}) };
+  }
+
   async function handleCreateScreen(input: CreateScreenInput): Promise<CreateScreenOutcome> {
     try {
       // The answer is the state and the id of the screen this call made.
@@ -762,11 +772,21 @@ export function useStageSettings(pinnedViewId?: string) {
       queryClient.setQueryData(["stage:getState"], next);
       return { refused: null, outputId: outputId ?? null };
     } catch (err) {
-      // The server holds a create to the kind of view the operator was shown. When
-      // it changed, read the views again so the role line says what it is now.
-      const viewChanged = (err as ApiError).code === "surface-changed";
-      if (viewChanged) void queryClient.invalidateQueries({ queryKey: ["stage:getState"] });
-      return { refused: errorMessage(err), outputId: null, ...(viewChanged ? { viewChanged } : {}) };
+      return createRefusal(err);
+    }
+  }
+
+  /**
+   * Make a screen for a waiting device and bind the device to it, as one call: the
+   * server takes the screen back if the binding fails. The answer is the id of the
+   * screen made, not the state.
+   */
+  async function handleClaimDevice(deviceId: string, input: CreateScreenInput): Promise<CreateScreenOutcome> {
+    try {
+      const claimed = await ipc<{ outputId?: string }>("devices:claim", { deviceId, outputId: null, ...input });
+      return { refused: null, outputId: claimed?.outputId ?? null };
+    } catch (err) {
+      return createRefusal(err);
     }
   }
 
@@ -949,6 +969,7 @@ export function useStageSettings(pinnedViewId?: string) {
     handleRenamePreset,
     handleOverwritePreset,
     handleCreateScreen,
+    handleClaimDevice,
     handleRenameOutput,
     handleSetOutputView,
     handleSetOutputLocked,

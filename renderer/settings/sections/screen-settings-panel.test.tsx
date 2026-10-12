@@ -112,7 +112,7 @@ function recorder(over: Partial<Actions> = {}): { calls: Call[]; actions: Action
     onSetShowInSidebar: rec("sidebar"),
     onOpenMessagingSettings: rec("openMessaging"),
     onRequestNewView: rec("newView"),
-    onCreate: async (...a) => { calls.push(["create", ...a]); return null; },
+    onCreate: async (...a) => { calls.push(["create", ...a]); return { refused: null, outputId: null }; },
     onSelect: rec("select"),
     onAddScreen: rec("add"),
     onEditLayout: rec("editLayout"),
@@ -859,7 +859,7 @@ describe("nothing selected", () => {
 
 describe("after Create screen", () => {
   test("names the screen and its view, says the view is blank, and offers Edit layout", async () => {
-    const { calls } = mount({ created: { outputId: "display-1", viewMade: true } });
+    const { calls } = mount({ target: { kind: "edit", outputId: "display-1", created: { viewMade: true } } });
     const note = screen.getByRole("status");
     assert.match(note.textContent ?? "", /Created "Lobby TV" and its view\. The view is blank until you lay it out\./);
     // Two Edit layout buttons: the note's, and the one under the role line. The
@@ -869,15 +869,10 @@ describe("after Create screen", () => {
   });
 
   test("without a view made it says only that the screen was created, and has no Edit layout of its own", () => {
-    mount({ created: { outputId: "display-1", viewMade: false } });
+    mount({ target: { kind: "edit", outputId: "display-1", created: { viewMade: false } } });
     const note = screen.getByRole("status");
     assert.equal((note.textContent ?? "").trim(), 'Created "Lobby TV".');
     assert.equal(within(note).queryByRole("button", { name: "Edit layout" }) !== null, false, "it is on screen");
-  });
-
-  test("is not shown on another screen", () => {
-    mount({ created: { outputId: "display-9", viewMade: true } });
-    assert.equal(screen.queryByRole("status") !== null, false, "the note followed the panel to a screen it is not about");
   });
 });
 
@@ -1115,7 +1110,7 @@ describe("guided creation", () => {
   });
 
   test("a refusal stays on screen with its reason, and creates nothing more", async () => {
-    const { actions, calls } = recorder({ onCreate: async () => '"/history" is a built-in page.' });
+    const { actions, calls } = recorder({ onCreate: async () => ({ refused: '"/history" is a built-in page.', outputId: null }) });
     mount({ target: NEW_TARGET, outputs: [MINE], actions, onClose: () => calls.push(["close"]) });
     await next();
     await click(create());
@@ -1124,7 +1119,7 @@ describe("guided creation", () => {
   });
 
   test("a view that changed kind keeps the form on step 2 with the message, even with a link typed, and the role line follows the view", async () => {
-    const { actions } = recorder({ onCreate: async () => ({ viewChanged: "The view changed while you were deciding: it is a wall view now, not a control surface. Nothing was changed." }) });
+    const { actions } = recorder({ onCreate: async () => ({ refused: "The view changed while you were deciding: it is a wall view now, not a control surface. Nothing was changed.", outputId: null, viewChanged: true }) });
     const r = mount({ target: NEW_TARGET, outputs: [MINE], actions });
     await type(screen.getByLabelText(/Friendly link/), "cafe");
     await next();
@@ -1140,7 +1135,7 @@ describe("guided creation", () => {
   });
 
   test("a refusal sends the operator back to the link when a link was typed", async () => {
-    const { actions } = recorder({ onCreate: async () => "taken" });
+    const { actions } = recorder({ onCreate: async () => ({ refused: "taken", outputId: null }) });
     mount({ target: NEW_TARGET, outputs: [MINE], actions });
     await type(screen.getByLabelText(/Friendly link/), "cafe");
     await next();

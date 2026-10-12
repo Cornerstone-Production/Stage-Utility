@@ -115,6 +115,8 @@ export interface SectionHandlers {
   // Outputs (physical screens + routing)
   /** Make a screen from the Screen settings panel's answers. */
   handleCreateScreen: (input: CreateScreenInput) => Promise<CreateScreenOutcome>;
+  /** Make a screen for a waiting device and bind the device to it. */
+  handleClaimDevice: (deviceId: string, input: CreateScreenInput) => Promise<CreateScreenOutcome>;
   handleRenameOutput: (id: string, name: string) => Promise<void>;
   /** `expectSurface` is the kind of view the operator confirmed going live on; the
    *  server refuses (409) when the view is the other kind by the time it writes. */
