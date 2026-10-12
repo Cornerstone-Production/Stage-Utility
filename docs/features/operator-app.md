@@ -166,7 +166,7 @@ control surface carries a **panel** pill.
 
 A view that no screen shows has its own card under **Views not on a screen**, with
 a pill for what it is (*wall* or *control surface*) and, for a console, whether it
-is in the sidebar. Its menu has **View settings…**, *Make it a wall screen* or
+is in the sidebar. Its menu has **View settings…**, *Make it a wall view* or
 *Make it a control surface*, *Duplicate view*, *Delete view…* and, for a console,
 **Show in the sidebar**.
 
@@ -258,7 +258,10 @@ for its hostname). Closing the panel creates nothing. A refusal (a link another
 screen holds, say) leaves the panel open with the reason. A device is claimed by
 the same step that creates its screen, and if that fails everything made for it is
 taken back. If another operator sets the same device up while the panel is open,
-the panel says which screen it became and **Create screen** is turned off. Choosing a view you already have also sends the kind the line under it showed; if somebody changed the view's kind meanwhile, no screen is made and the panel stays on this step, says so, and shows the view as it is now.
+the panel says which screen it became and **Create screen** is turned off. If
+somebody changes the kind of a view you chose from *a view you already have* while
+you decide, no screen is made: the panel stays on this step, says the view changed,
+and shows the view as it is now.
 
 After **Create screen** the panel stays open on the new screen and says what was
 made; when a view was made it adds **Edit layout**, since the view is blank until
@@ -283,7 +286,7 @@ A **console** is a custom view built for someone to touch rather than to watch.
 Its buttons fire; the same layout on a wall display draws them and does nothing.
 
 **Building one.** Screens → **New view** → *Custom Layout*, then pick **A
-control surface you operate** rather than *A wall screen anyone can see*. A
+control surface you operate** rather than *A wall view anyone can see*. A
 calendar can be a console too, and pages through months on it: the dialog does not
 offer that, so make the calendar view first and choose *Make it a control surface*
 in its card's menu (the card of a view no screen shows). Every other built-in kind
@@ -294,12 +297,12 @@ Ross Ultritouch panel has its own presets and a starter; see
 
 **Changing what a view is for.** [View settings](#view-settings) has **Wall
 view** and **Control surface**, a custom view's editor has a dropdown beside its
-type reading *Wall screen* or *Control surface*, and the card of a view no screen
-shows has *Make it a wall screen* or *Make it a control surface* in its menu. Either changes the view **and every screen showing it**: those screens
-become control surfaces, or wall displays, together with it. When any screen
-would change, a confirm names them first (*Lobby TV and Hallway TV will become
-control surfaces. Anyone at them can press their buttons.*) and declining
-changes nothing. A view no screen shows has nothing to confirm. If somebody
+type reading *Wall view* or *Control surface*, and the card of a view no screen
+shows has *Make it a wall view* or *Make it a control surface* in its menu. Either
+changes the view **and every screen showing it**: those screens become control
+surfaces, or wall displays, together with it. When any screen would change, a
+confirm names them first (*Buttons will work on "Lobby TV" and "Hallway TV".
+Anyone standing at those screens can press them.*) and declining changes nothing. A view no screen shows has nothing to confirm. If somebody
 points a screen at the view, or away from it, while the confirm is open, you
 are asked again with the screens as they are now, so a screen you were not
 shown is never changed. The whole change is one call: if any part of it fails,

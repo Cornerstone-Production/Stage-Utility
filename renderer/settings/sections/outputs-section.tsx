@@ -728,7 +728,7 @@ function UnassignedViewCard({
                   {isControl
                     ? <MonitorIcon className="size-3.5 text-fg-subtle" />
                     : <HandIcon className="size-3.5 text-fg-subtle" />}
-                  {isControl ? "Make it a wall screen" : "Make it a control surface"}
+                  {isControl ? "Make it a wall view" : "Make it a control surface"}
                 </DropdownMenu.Item>
               )}
               {/* A console on no screen has no Screen settings panel to hold this

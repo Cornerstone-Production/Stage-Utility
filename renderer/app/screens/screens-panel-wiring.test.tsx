@@ -1041,6 +1041,16 @@ describe("View settings", () => {
     assert.deepEqual(writes, []);
   });
 
+  test("a control surface's card menu offers 'Make it a wall view', the word the rest of the page uses for a view's kind", async () => {
+    views = [...views, { id: "spare-c", name: "Spare controls", kind: "custom", surface: "console", createdAt: NOW }];
+    await mountScreens();
+    await click(toggle());
+    const trigger = screen.getByLabelText("More actions for Spare controls");
+    await act(async () => { fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false }); fireEvent.click(trigger); await settle(); });
+    assert.ok(screen.getByRole("menuitem", { name: "Make it a wall view" }));
+    assert.equal(screen.queryByRole("menuitem", { name: /wall screen/ }) !== null, false, "the old label is back");
+  });
+
   test("a view card's menu has View settings…, and it opens them", async () => {
     views = [...views, { id: "spare", name: "Spare loop", kind: "custom", surface: "display", createdAt: NOW }];
     await mountScreens();

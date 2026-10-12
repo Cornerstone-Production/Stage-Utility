@@ -461,7 +461,7 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
           groups={viewGroups(views)}
           value={output.viewId ?? NONE}
           onChange={pickView}
-          noneLabel="— Unrouted —"
+          noneLabel="— No view yet —"
         />
         <RoleLine surface={shown ? viewSurface(shown) : null} />
         {shown && (

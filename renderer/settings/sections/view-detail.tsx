@@ -180,7 +180,7 @@ export function ViewDetail({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="display">Wall screen</SelectItem>
+              <SelectItem value="display">Wall view</SelectItem>
               <SelectItem value="console">Control surface</SelectItem>
             </SelectContent>
           </Select>

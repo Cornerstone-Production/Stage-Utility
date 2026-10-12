@@ -22,7 +22,7 @@ import { externKeyed } from "@main/types/extern-keyed";
 const SURFACE_CHOICES: { value: ViewSurface; title: string; hint: string }[] = [
   {
     value: "display",
-    title: "A wall screen anyone can see",
+    title: "A wall view anyone can see",
     hint: "Read-only. Controls never fire, whatever you put on it.",
   },
   {

@@ -425,7 +425,7 @@ describe("what it shows", () => {
   test("offers views of both kinds, grouped as wall views and control surfaces", () => {
     mount({});
     assert.deepEqual(groups(), [["Wall views", ["Lobby loop", "Hallway loop"]], ["Control surfaces", ["Booth controls", "Stage controls"]]]);
-    assert.equal(options()[0], "— Unrouted —");
+    assert.equal(options()[0], "— No view yet —", "the panel's empty row is the mockup's; the card's picker keeps Unrouted");
   });
 
   test("says in one line what the view makes the screen: a pill, then what it means", () => {
