@@ -791,9 +791,9 @@ describe("choosing a view of the other kind", () => {
     await choose(picker(), "ctl-b");
     const dialog = await screen.findByRole("alertdialog");
     assert.match(dialog.textContent ?? "", /Make "Lobby TV" a control surface\?/);
-    assert.match(dialog.textContent ?? "", /"Stage controls" is a control surface\. Its buttons will work\. Anyone standing at it can press them/);
+    assert.match(dialog.textContent ?? "", /"Stage controls" is a control surface\. Buttons on this screen will work, and anyone standing at it can press them/);
     assert.deepEqual(calls, [], "the screen was routed before the operator said yes");
-    await answerConfirm("Make it a control surface");
+    await answerConfirm("Show it and make it live");
     assert.deepEqual(calls, [["view", "display-1", "ctl-b"]]);
   });
 
@@ -811,7 +811,7 @@ describe("choosing a view of the other kind", () => {
     const dialog = await screen.findByRole("alertdialog");
     assert.match(dialog.textContent ?? "", /Make "Booth panel" a wall display\?/);
     assert.match(dialog.textContent ?? "", /read-only/);
-    await answerConfirm("Make it a wall display");
+    await answerConfirm("Show it");
     assert.deepEqual(calls, [["view", "display-3", "wall-b"]]);
   });
 
@@ -819,7 +819,7 @@ describe("choosing a view of the other kind", () => {
     const { calls } = mount({ outputs: [{ ...MINE, viewId: null }] });
     await choose(picker(), "ctl-a");
     await screen.findByRole("alertdialog");
-    await answerConfirm("Make it a control surface");
+    await answerConfirm("Show it and make it live");
     assert.deepEqual(calls, [["view", "display-1", "ctl-a"]]);
   });
 
@@ -899,6 +899,12 @@ describe("view settings", () => {
     assert.equal(role("Wall view").getAttribute("aria-pressed"), "false");
     await click(role("Wall view"));
     assert.deepEqual(calls, [["viewSurface", "ctl-a", "display"]]);
+  });
+
+  test("the kind cards use the mockup's sentences", () => {
+    onView(CTL_A);
+    assert.ok(screen.getByText("Read from across the room. Buttons draw but do nothing."));
+    assert.ok(screen.getByText("Its buttons work, in the sidebar and on any screen showing it."));
   });
 
   test("choosing the kind it already is sends nothing", async () => {

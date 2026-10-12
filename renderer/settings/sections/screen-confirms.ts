@@ -6,7 +6,7 @@
 
 import { confirm, confirmWith, toast } from "../../components/ui";
 import type { SectionHandlers } from "../types";
-import { listNames } from "./screen-panel-parts";
+import { listNames } from "../screen-role-confirm";
 
 /**
  * Ask before a view is deleted. A view's layout cannot be got back, and every

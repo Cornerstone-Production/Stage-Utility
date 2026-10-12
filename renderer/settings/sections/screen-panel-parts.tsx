@@ -24,16 +24,6 @@ export function viewGroups(views: readonly View[]): { label: string; views: View
   ];
 }
 
-/**
- * Names, quoted, for a sentence about screens or views: one, two joined by "and",
- * three or more separated by commas. The panel's own confirms and notes all name
- * things this way.
- */
-export function listNames(names: readonly string[]): string {
-  const quoted = names.map((n) => `"${n}"`);
-  return quoted.join(quoted.length > 2 ? ", " : " and ");
-}
-
 export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="border-b border-line py-3.5 last:border-b-0">

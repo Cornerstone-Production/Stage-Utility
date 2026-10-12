@@ -128,8 +128,8 @@ export const SCREEN_PANEL_ID = "screen-settings-panel";
  * not the kind the screen shows now the operator is asked first, as for any view.
  * Resolves whether the screen was pointed at it.
  */
-export async function assignNewView(output: Output, madeSurface: ViewSurface, screenIsControl: boolean, assign: () => void): Promise<void> {
-  if ((madeSurface === "console") !== screenIsControl && !(await confirmRole(output.name, madeSurface))) return;
+export async function assignNewView(output: Output, made: { surface: ViewSurface; name: string }, screenIsControl: boolean, assign: () => void): Promise<void> {
+  if ((made.surface === "console") !== screenIsControl && !(await confirmRole(output.name, made.surface, made.name))) return;
   assign();
 }
 

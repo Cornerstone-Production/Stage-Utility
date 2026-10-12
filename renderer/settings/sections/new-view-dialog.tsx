@@ -76,7 +76,7 @@ export function NewViewDialog({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   /** Called with the new view's id, so a caller can assign or open it. */
-  onCreated?: (id: string) => void;
+  onCreated?: (id: string, name: string) => void;
   /**
    * What the view is FOR, already decided by the caller: a screen's panel asks
    * for "a new control surface" or "a new wall view", and offering the choice
@@ -105,7 +105,8 @@ export function NewViewDialog({
       onConfirm={async () => {
         // Only a custom View has a layout to put a control on, so only a custom
         // View can be a console. The server enforces this too.
-        const id = await handlers.handleAddView(name.trim(), effectiveKind, effectiveKind === "custom" ? surface : "display");
+        const made = name.trim();
+        const id = await handlers.handleAddView(made, effectiveKind, effectiveKind === "custom" ? surface : "display");
         if (id && effectiveKind === "custom" && startFrom !== "blank") {
           const strip = startFrom.startsWith("ultritouch-") ? (startFrom as UltritouchModel) : null;
           const objects = strip ? ultritouchTemplate(strip) : startFrom === "dashboard" ? dashboardTemplate() : confidenceMonitorTemplate();
@@ -119,7 +120,7 @@ export function NewViewDialog({
         setKind("slots");
         setStartFrom("blank");
         setSurface("display");
-        if (id) onCreated?.(id);
+        if (id) onCreated?.(id, made);
       }}
     >
       <div className="flex flex-col gap-3">

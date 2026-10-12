@@ -545,7 +545,7 @@ describe("choosing a view of the other kind in the panel", () => {
     await openSettings("Booth panel");
     await choose(panel().getByLabelText("View"), "wall-a");
     assert.deepEqual(writes, [], "the screen was routed before the operator said yes");
-    await answerConfirm("Make it a wall display");
+    await answerConfirm("Show it");
     assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-1", body: { viewId: "wall-a" } }]);
   });
 
@@ -553,7 +553,7 @@ describe("choosing a view of the other kind in the panel", () => {
     await mountScreens();
     await openSettings("Lobby TV");
     await choose(panel().getByLabelText("View"), "ctl-a");
-    await answerConfirm("Make it a control surface");
+    await answerConfirm("Show it and make it live");
     assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { viewId: "ctl-a" } }]);
   });
 
@@ -582,7 +582,7 @@ describe("the card's own view picker", () => {
     await mountScreens();
     await choose(cardPicker("Lobby TV"), "ctl-a");
     assert.deepEqual(writes, [], "the screen was routed before the operator said yes");
-    await answerConfirm("Make it a control surface");
+    await answerConfirm("Show it and make it live");
     assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { viewId: "ctl-a" } }]);
   });
 
@@ -887,7 +887,7 @@ describe("View settings", () => {
     await click(panel().getByRole("button", { name: "View settings →" }));
     await click(panel().getByRole("button", { name: /^Wall view/ }));
     const d = await dialog();
-    assert.match(String(document.querySelector('[role="alertdialog"]')?.textContent), /Booth panel and Stage panel will become wall displays/);
+    assert.match(String(document.querySelector('[role="alertdialog"]')?.textContent), /"Booth panel" and "Stage panel" become read-only, and it leaves the sidebar/);
     assert.deepEqual(writes.map((w) => w.url), [], "the kind changed before the operator said yes");
     await click(d.getByRole("button", { name: /^Make (it|them)/ }));
     assert.deepEqual(writes.map((w) => w.url), ["/api/views/ctl-a/surface"]);
@@ -987,8 +987,9 @@ describe("a new view from a card's picker", () => {
     assert.deepEqual(create?.body, { name: "Lobby desk", kind: "custom", surface: "console" });
     const d = await dialog();
     assert.ok(d.getByText('Make "Lobby TV" a control surface?'));
+    assert.ok(d.getByText('"Lobby desk" is a control surface. Buttons on this screen will work, and anyone standing at it can press them.'));
     assert.equal(writes.some((w) => w.method === "PATCH"), false, "the screen was pointed at the view before the operator said yes");
-    await click(d.getByRole("button", { name: "Make it a control surface" }));
+    await click(d.getByRole("button", { name: "Show it and make it live" }));
     const patch = writes.find((w) => w.method === "PATCH");
     assert.equal(patch?.url, "/api/outputs/display-3");
     assert.match(String((patch?.body as { viewId: string }).viewId), /^view-new-/);

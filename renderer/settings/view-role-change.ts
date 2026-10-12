@@ -11,12 +11,7 @@ import { viewSurface, type ViewSurface } from "@main/types/views";
 import type { StageState } from "@main/types/stage";
 import type { ConfirmOptions } from "../components/ui";
 import type { ApiError } from "../lib/api";
-import { roleQuestionLabel, roleQuestionTitle } from "./screen-role-confirm";
-
-/** "A", "A and B", "A, B and C". */
-function nameList(names: string[]): string {
-  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
+import { listNames, roleQuestionTitle, viewKindLabel } from "./screen-role-confirm";
 
 /** One screen a change would make: the id the server is sent, the name the
  *  operator is shown. */
@@ -47,24 +42,18 @@ export function viewRoleQuestion(
   { again = false }: { again?: boolean } = {},
 ): ConfirmOptions | null {
   if (screens.length === 0) return null;
-  const one = screens.length === 1;
-  const names = nameList(screens);
+  const many = screens.length > 1;
+  const names = listNames(screens);
   const lead = again ? "The screens showing it changed while you were deciding. " : "";
-  return surface === "console"
-    ? {
-        title: roleQuestionTitle(viewName, "console"),
-        message: lead + (one
-          ? `${names} will become a control surface. Anyone at it can press its buttons.`
-          : `${names} will become control surfaces. Anyone at them can press their buttons.`),
-        confirmLabel: roleQuestionLabel("console", !one),
-      }
-    : {
-        title: roleQuestionTitle(viewName, "display"),
-        message: lead + (one
-          ? `${names} will become a wall display. Its buttons will stop working.`
-          : `${names} will become wall displays. Their buttons will stop working.`),
-        confirmLabel: roleQuestionLabel("display", !one),
-      };
+  return {
+    title: roleQuestionTitle(viewName, surface, "view"),
+    message:
+      lead +
+      (surface === "console"
+        ? `Buttons will work on ${names}. Anyone standing at ${many ? "those screens" : "it"} can press them.`
+        : `${names} ${many ? "become" : "becomes"} read-only, and it leaves the sidebar.`),
+    confirmLabel: viewKindLabel(surface),
+  };
 }
 
 /** The screens a 409 `screens-changed` says would change now, or null for any

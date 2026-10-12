@@ -9,50 +9,53 @@ import { confirm } from "../components/ui";
 import { screenIsControlSurface, viewSurface, type ViewSurface } from "@main/types/views";
 
 /**
- * What each surface is, in the words the panel, the cards and the questions all
- * use. `title` names it, `hint` says what it means for the buttons, and `becomes`
- * is what happens to a screen when it turns into one.
+ * What each surface is, in the words the panels and the questions use. `title`
+ * names it (for a screen), `hint` is the one line under a screen's view picker, and
+ * `card` is the longer sentence on a view's kind card.
  */
-export const SURFACE_COPY: Record<ViewSurface, { title: string; hint: string; becomes: string }> = {
+export const SURFACE_COPY: Record<ViewSurface, { title: string; hint: string; card: string }> = {
   console: {
     title: "Control surface",
     hint: "Its buttons work for anyone at it.",
-    becomes: "Its buttons will work. Anyone standing at it can press them.",
+    card: "Its buttons work, in the sidebar and on any screen showing it.",
   },
   display: {
     title: "Wall display",
     hint: "Read-only. Buttons draw but do nothing.",
-    becomes: "It becomes read-only. Its buttons will render but do nothing.",
+    card: "Read from across the room. Buttons draw but do nothing.",
   },
 };
 
-/** "a control surface" / "a wall display", for a sentence. */
-export const surfaceNoun = (surface: ViewSurface): string => `a ${SURFACE_COPY[surface].title.toLowerCase()}`;
+/** Names, quoted, for a sentence: one, two joined by "and", three or more
+ *  separated by commas. */
+export function listNames(names: readonly string[]): string {
+  const quoted = names.map((n) => `"${n}"`);
+  return quoted.join(quoted.length > 2 ? ", " : " and ");
+}
 
-/** The title of the question asked before `name` becomes `surface`. One wording
- *  for a screen changing because of the view it was pointed at and for a view
- *  being changed under the screens showing it. */
-export const roleQuestionTitle = (name: string, surface: ViewSurface): string => `Make "${name}" ${surfaceNoun(surface)}?`;
+/** The title of the question asked before `name` becomes `surface`. A screen
+ *  becomes a control surface or a wall display; a view, a control surface or a
+ *  wall view. */
+export const roleQuestionTitle = (name: string, surface: ViewSurface, subject: "screen" | "view"): string =>
+  `Make "${name}" ${surface === "console" ? "a control surface" : subject === "screen" ? "a wall display" : "a wall view"}?`;
 
-/** The confirm button of that question; `many` when several screens change. */
-export const roleQuestionLabel = (surface: ViewSurface, many = false): string =>
-  many ? `Make them ${SURFACE_COPY[surface].title.toLowerCase()}s` : `Make it ${surfaceNoun(surface)}`;
+/** The confirm button of the question asked about a view. */
+export const viewKindLabel = (surface: ViewSurface): string => (surface === "console" ? "Make it a control surface" : "Make it a wall view");
 
 /**
- * Ask before a screen becomes what it is not. The one confirm for it, here and on
- * the screen card's view picker, so the title and the button are written once.
- *
+ * Ask before a screen becomes what it is not: pointed at a view of the other kind.
  * Making a screen a control surface makes its buttons live to anyone standing at
  * it, which is not something to do by misclick, and making it a wall display
- * switches them off. `why` leads the message when the change is a consequence of
- * something else the operator chose.
+ * switches them off.
  */
-export async function confirmRole(name: string, becomes: ViewSurface, why?: string): Promise<boolean> {
-  const what = SURFACE_COPY[becomes].becomes;
+export async function confirmRole(screenName: string, becomes: ViewSurface, viewName: string): Promise<boolean> {
+  const live = becomes === "console";
   return confirm({
-    title: roleQuestionTitle(name, becomes),
-    message: why ? `${why} ${what}` : what,
-    confirmLabel: roleQuestionLabel(becomes),
+    title: roleQuestionTitle(screenName, becomes, "screen"),
+    message: live
+      ? `"${viewName}" is a control surface. Buttons on this screen will work, and anyone standing at it can press them.`
+      : `"${viewName}" is a wall view. This screen becomes read-only: its buttons will draw but do nothing.`,
+    confirmLabel: live ? "Show it and make it live" : "Show it",
   });
 }
 
@@ -66,6 +69,6 @@ export async function confirmViewKind(output: Output, views: readonly View[], vi
   if (!picked) return true;
   const becomes = viewSurface(picked);
   if ((becomes === "console") === screenIsControlSurface(output, views)) return true;
-  return confirmRole(output.name, becomes, `"${picked.name}" is ${becomes === "console" ? "a control surface" : "a wall view"}.`);
+  return confirmRole(output.name, becomes, picked.name);
 }
 

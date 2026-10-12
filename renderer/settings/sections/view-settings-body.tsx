@@ -49,13 +49,13 @@ export function ViewBody({ view, outputs, actions }: { view: View; outputs: Outp
           <div role="group" aria-label="What this view is" className="grid grid-cols-2 gap-2">
             <ChoiceCard
               title="Wall view"
-              hint={SURFACE_COPY.display.hint}
+              hint={SURFACE_COPY.display.card}
               pressed={surface === "display"}
               onChoose={() => choose("display")}
             />
             <ChoiceCard
               title={SURFACE_COPY.console.title}
-              hint={SURFACE_COPY.console.hint}
+              hint={SURFACE_COPY.console.card}
               pressed={surface === "console"}
               disabled={!canBeControl}
               onChoose={() => choose("console")}

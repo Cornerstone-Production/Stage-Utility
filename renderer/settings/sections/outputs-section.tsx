@@ -1041,12 +1041,12 @@ export function OutputsSection({
         // there. The page's own "New view" button (no screen) asks.
         fixedSurface={creating?.surface}
         onOpenChange={(o) => { if (!o) setCreating(null); }}
-        onCreated={(id) => {
+        onCreated={(id, name) => {
           // Assign it straight to the screen that asked, so "+ New wall view" in a
           // picker is one action rather than create-then-go-find-it. A view of the
           // other kind than the screen shows now is asked about first.
           if (creatingScreen && creating?.surface) {
-            void assignNewView(creatingScreen, creating.surface, screenIsControlSurface(creatingScreen, stageState.views ?? []), () => {
+            void assignNewView(creatingScreen, { surface: creating.surface, name }, screenIsControlSurface(creatingScreen, stageState.views ?? []), () => {
               void handlers.handleSetOutputView(creatingScreen.id, id);
             });
           }
