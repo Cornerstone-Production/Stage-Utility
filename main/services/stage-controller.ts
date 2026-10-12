@@ -787,18 +787,27 @@ export class StageController {
     const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
     const outputsChanged =
       slugs.changed.length > 0 || result.outputs.some((o, i) => o !== outputs[i]);
+    // The flags that say these passes ran.
+    const ran = { layoutDefaultsCleaned: true, cardHairlineRaised: true, screenRolesFromView: true };
     if (!viewsChanged && !outputsChanged) {
       // Nothing left to save this pass, so recording the flags here cannot
       // outrun a write that isn't happening.
-      if (needsFlagPatch) await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: true, screenRolesFromView: true });
+      if (needsFlagPatch) await settingsStore.patch(ran);
       return { views, outputs };
     }
 
     if (viewsChanged) await viewsStore.save(result.views);
-    if (outputsChanged) await settingsStore.patch({ outputs: slugs.outputs });
-    // AFTER the saves above, not before: a crash here at worst repeats an
-    // idempotent pass on the next boot, rather than skipping it for good.
-    if (needsFlagPatch) await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: true, screenRolesFromView: true });
+    // The screens and the flags in ONE patch, never two. The first pass reads a
+    // screen with no stored role as a read-only display, so the screens (their
+    // stored role now removed) landing without the flag is a state a crash could
+    // leave on disk, and the next start would read every live screen as read-only
+    // and give it a wall copy. The views are written before this, so a crash
+    // between the two leaves the screens still carrying their role and the flag
+    // unset: the pass runs again on data it reads the same way (and reuses a copy
+    // it already made).
+    if (outputsChanged || needsFlagPatch) {
+      await settingsStore.patch({ ...(outputsChanged ? { outputs: slugs.outputs } : {}), ...(needsFlagPatch ? ran : {}) });
+    }
 
     // Logged in full, and this one is not optional: the operator's screen has a
     // different URL than it did yesterday, and the only way they learn that is
