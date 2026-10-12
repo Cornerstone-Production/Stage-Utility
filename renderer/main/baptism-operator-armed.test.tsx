@@ -48,12 +48,24 @@ const ARMED_STATE: BaptismState = baptismState({
   planId: "plan-1",
 });
 
+/** Reads begun, and reads whose answer the page has taken: a read still on its
+ *  way when the test ends lands after the DOM is gone. */
+let readsBegun = 0;
+let readsTaken = 0;
+
 function stubFetch(state: BaptismState) {
+  readsBegun = 0;
+  readsTaken = 0;
   return (async (input: string) => {
     const url = String(input);
-    if (url.endsWith("/api/baptism")) return { ok: true, status: 200, json: async () => state, text: async () => "" };
-    if (url.endsWith("/api/baptism/sessions")) return { ok: true, status: 200, json: async () => [], text: async () => "" };
-    return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
+    readsBegun += 1;
+    const body = url.endsWith("/api/baptism") ? state : url.endsWith("/api/baptism/sessions") ? [] : {};
+    let taken = false;
+    const take = () => {
+      if (!taken) readsTaken += 1;
+      taken = true;
+    };
+    return { ok: true, status: 200, json: async () => (take(), body), text: async () => (take(), "") };
   }) as unknown as typeof fetch;
 }
 
@@ -66,6 +78,8 @@ async function mount(state: BaptismState = ARMED_STATE): Promise<void> {
     // The panel is "Loading…" until the state read lands. Waited for before the
     // stub comes off, and before any test asserts that something is NOT drawn.
     await eventually(() => assert.ok(!(document.body.textContent ?? "").includes("Loading…"), "the panel never left Loading…"));
+    // And every other read it began has been received, before the stub comes off.
+    await eventually(() => assert.equal(readsTaken, readsBegun, "a read was still on its way"));
   } finally {
     globalThis.fetch = realFetch;
   }

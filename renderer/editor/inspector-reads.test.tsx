@@ -360,13 +360,22 @@ describe("the Plan file inspector's Fit box to file", () => {
     const caches: Array<RequestCache | undefined> = [];
     const errors: string[] = [];
     mock.method(toast, "error", (m: string) => { errors.push(m); });
+    let stateRead = false;
     const f = stubFetchWithLog((url, init) => {
       if (url.includes("/api/pco/attachment?")) { asked.push(url); caches.push(init?.cache); return reply(status, ""); }
       if (url.includes("/api/pco/attachments")) return ok([]);
-      return url.includes("/api/state") ? ok({ pcoConfigured: true, planId: "p9" }) : ok({});
+      if (url.includes("/api/state")) {
+        const res = ok({ pcoConfigured: true, planId: "p9" });
+        return { ...res, json: async () => ((stateRead = true), res.json()), text: async () => ((stateRead = true), res.text()) };
+      }
+      return ok({});
     });
     try {
       await mount(attachment());
+      // The active plan id the request must carry is on the stage state; pressing
+      // Fit before it has landed asks for no plan at all.
+      await eventually(() => assert.ok(stateRead, "the stage state was never read"));
+      await settle();
       await click();
       // The notice follows the request's answer; the mocks must outlive it.
       await eventually(() => assert.ok(errors.length > 0, "the failed request raised no notice"));

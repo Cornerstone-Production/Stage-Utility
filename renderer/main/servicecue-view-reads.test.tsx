@@ -48,21 +48,44 @@ type Read = "layouts" | "roles" | "rundown";
 
 const CONNECTED = { serviceTypeId: "st1", planId: "p1", pcoConfigured: true };
 
+/** Reads begun, and reads whose answer the page has taken (or that failed). A
+ *  test that flips what fails must first let the reads already on their way land:
+ *  a good answer arriving after a failure ends its streak, so the next failure
+ *  would be logged as a new one. */
+let readsBegun = 0;
+let readsTaken = 0;
+const readsLanded = () => assert.equal(readsTaken, readsBegun, "a read was still on its way");
+
 /** `failing` is read at call time, so a test can change it between ticks. */
 function stubFetch(failing: Read[], state: Record<string, unknown> = CONNECTED) {
   const asked: string[] = [];
+  readsBegun = 0;
+  readsTaken = 0;
   const f = stubFetchWithLog((url) => {
     asked.push(url);
-    const read = (name: Read, json: unknown) => {
-      if (failing.includes(name)) throw new TypeError("fetch failed");
-      return ok(json);
+    readsBegun += 1;
+    const answer = (json: unknown) => {
+      const res = ok(json);
+      let taken = false;
+      const take = () => {
+        if (!taken) readsTaken += 1;
+        taken = true;
+      };
+      return { ...res, json: async () => (take(), res.json()), text: async () => (take(), res.text()) };
     };
-    if (url.includes("/api/state")) return ok(state);
+    const read = (name: Read, json: unknown) => {
+      if (failing.includes(name)) {
+        readsTaken += 1;
+        throw new TypeError("fetch failed");
+      }
+      return answer(json);
+    };
+    if (url.includes("/api/state")) return answer(state);
     if (url.includes("/api/servicecue/layouts")) return read("layouts", [{ id: "svl-audio", name: "Audio", order: 0, columnRoles: ["r1"] }]);
     if (url.includes("/api/servicecue/roles")) return read("roles", [{ id: "r1", name: "Sound", members: ["Audio"] }]);
     if (url.includes("/api/servicecue/rundown")) return read("rundown", RUNDOWN);
-    if (url.includes("/api/pco/live")) return ok(null);
-    return ok({});
+    if (url.includes("/api/pco/live")) return answer(null);
+    return answer({});
   });
   return { ...f, asked };
 }
@@ -116,6 +139,7 @@ test("once a list has loaded, a failed retry keeps it and changes nothing on scr
   const f = stubFetch(failing);
   try {
     await mount();
+    await eventually(readsLanded);
     assert.equal(alerts(), "");
     failing.push("layouts", "roles");
     // Two ticks of the timer: a retry that keeps failing is one failure, not

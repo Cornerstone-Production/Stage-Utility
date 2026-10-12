@@ -513,9 +513,11 @@ test("a group that WAS saved clears the add box, though the server could not fin
   type("New group", "Booth");
   fireEvent.click(within(screen.getByTestId("messages-groups")).getByRole("button", { name: /Add/ }));
   await flush();
+  await eventually(() => assert.ok(puts.length > 0, "nothing was saved"));
   assert.equal(puts.length, 1);
-  assert.equal((screen.getByLabelText("New group") as HTMLInputElement).value, "", "a saved group stayed in the box to be added again");
-  assert.ok(screen.getByLabelText("Rename Booth"), "the reloaded page does not show the group that was saved");
+  // The box clears, and the group appears, once the answer has been taken.
+  await eventually(() => assert.equal((screen.getByLabelText("New group") as HTMLInputElement).value, "", "a saved group stayed in the box to be added again"));
+  await eventually(() => assert.ok(screen.getByLabelText("Rename Booth"), "the reloaded page does not show the group that was saved"));
 });
 
 test("editing a quick message and then clicking its trash can in the same breath removes the row", async () => {

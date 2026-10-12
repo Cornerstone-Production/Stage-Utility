@@ -195,7 +195,16 @@ async function renderList(readOnly = false, router?: ReturnType<typeof routerWit
   });
   // The list, the attendance list and the day settling are reads behind the
   // first paint; the rows are what they come to.
-  if (rows) await eventually(() => assert.ok(view.container.querySelector("[data-history-row]"), "the list drew no rows"));
+  if (rows) {
+    await eventually(() => assert.ok(view.container.querySelector("[data-history-row]"), "the list drew no rows"));
+    // Each row then reads its own sound record, and says "loading" until it lands.
+    await eventually(() =>
+      assert.ok(
+        ![...view.container.querySelectorAll('[data-row-figure="level"]')].some((f) => (f.textContent ?? "").includes("loading")),
+        "a row was still loading its sound",
+      ),
+    );
+  }
   return view;
 }
 
