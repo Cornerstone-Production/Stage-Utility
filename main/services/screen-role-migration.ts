@@ -17,8 +17,9 @@
 //   was "panel", on a wall    its buttons were live, so they stay live: the view
 //   view                      becomes a console when every screen showing it was
 //                             a panel; otherwise those screens share a control-
-//                             surface copy. A view that is not a custom view has
-//                             no buttons to keep, so only the role is dropped.
+//                             surface copy. A view with nothing to operate (not
+//                             a custom view or a calendar) has no buttons to
+//                             keep, so only the role is dropped.
 //
 // A screen with no stored role was a read-only display. That is what the old
 // readers assumed, so on the FIRST pass (`absentIsDisplay`) it is treated the

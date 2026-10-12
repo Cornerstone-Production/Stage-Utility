@@ -3921,7 +3921,7 @@ export class StageController {
         ? [{
             label: "make the view",
             run: async () => {
-              // Custom, because only a custom view has a layout to put anything on.
+              // Custom: the guided creation makes a layout, which can be either kind of screen.
               await this.createViewRecord(name, "custom", newView === "control" ? "console" : "display", (view) => {
                 createdViewId = view.id;
                 viewId = view.id;

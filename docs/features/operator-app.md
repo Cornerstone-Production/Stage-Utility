@@ -186,8 +186,9 @@ the screen's card or in this panel, asks first (*Make "Lobby TV" a control
 surface?*, or *a wall display?*), because the screen's buttons go live or stop;
 declining changes nothing. Pointing a screen at a view changes only that
 screen. Changing what a *view* is for does change every screen showing it: see
-[Consoles](#consoles). **New view…** from a screen's picker makes a view of the
-kind the screen shows now.
+[Consoles](#consoles). **+ New view…** in the picker on a screen's card, and **+ New
+wall view…** or **+ New control surface…** in the screen's panel, make a view of
+the kind the screen shows now. A new control surface is a custom layout.
 
 Only a view with something to operate can be a control surface: a custom view
 (its buttons, faders and fields) or a calendar (its month chevrons, which a wall
@@ -223,9 +224,11 @@ Its buttons fire; the same layout on a wall display draws them and does nothing.
 
 **Building one.** Screens → **New view** → *Custom Layout*, then pick **A
 control surface you operate** rather than *A wall screen anyone can see*. A
-calendar can be a console too, and pages through months on it; every other
-built-in kind has nothing to operate. A **cue button** on one fires a cue and shows what its device is
-doing; see [Widgets](../reference/widgets.md#control). A console meant for a
+calendar can be a console too, and pages through months on it: the dialog does not
+offer that, so make the calendar view first and choose *Make it a control surface*
+in its card's menu (the card of a view no screen shows). Every other built-in kind
+has nothing to operate. A **cue button** on one fires a cue and shows what its
+device is doing; see [Widgets](../reference/widgets.md#control). A console meant for a
 Ross Ultritouch panel has its own presets and a starter; see
 [Ultritouch](../integrations/ultritouch.md).
 
