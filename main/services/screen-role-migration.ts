@@ -55,6 +55,16 @@ export function asMigratedConsole(view: View): View {
   return { ...view, surface: "console", showInSidebar: false, ...(layout === undefined ? {} : { layout }) };
 }
 
+/**
+ * What `asMigratedConsole` does to `source`, in the words of the `[screens]` line
+ * for it: an operator whose view left the sidebar after an upgrade finds why here.
+ * Names the fit only when it was set, which is when the layout chose none.
+ */
+function migratedConsoleEffects(source: View): string {
+  const fit = source.layout && source.layout.canvas.fit === undefined ? ` and its canvas fit set to "contain", the fit it had as a wall view` : "";
+  return `kept out of the sidebar (Show in the sidebar puts it back)${fit}`;
+}
+
 /** What a view draws, for comparing a copy to its source: object ids differ in a
  *  copy by design, so they are left out. */
 function content(view: View): string {
@@ -183,14 +193,15 @@ export function planScreenRoles(
         if (!consoleViewIds.has(view.id)) {
           consoleViewIds.add(view.id);
           notes.push(
-            `"${view.name}" is now a control surface: ${showing.map(label).join(", ")} had live buttons on it as a wall view`,
+            `"${view.name}" is now a control surface: ${showing.map(label).join(", ")} had live buttons on it as a wall view; ` +
+              migratedConsoleEffects(view),
           );
         }
       } else {
         copyFor(view, "console", o);
         notes.push(
           `${label(o)} had live buttons on the wall view "${view.name}", which other read-only screens also show; ` +
-            `it now shows a control-surface copy, "${copyViewName(view, "console")}"`,
+            `it now shows a control-surface copy, "${copyViewName(view, "console")}", ${migratedConsoleEffects(view)}`,
         );
       }
     }
