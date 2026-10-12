@@ -247,7 +247,7 @@ test("a note-category failure for the type the operator left goes with it", asyn
     fireEvent.change(screen.getByRole("combobox", { name: "Preview with" }), { target: { value: "st2" } });
     await settle();
     await settle();
-    assert.equal(alerts(), "", "Youth's categories loaded");
+    await eventually(() => assert.equal(alerts(), "", "Youth's categories loaded"));
   } finally {
     f.restore();
   }

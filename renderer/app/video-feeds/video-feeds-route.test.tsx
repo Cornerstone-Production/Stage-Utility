@@ -652,11 +652,9 @@ test("a Delete the server refuses shows its error, and the feed stays", async ()
     await pageReady();
     fireEvent.click(screen.getByRole("button", { name: "Delete feed" }));
     await settle();
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: "Delete" })));
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    await settle();
-    await settle();
-    assert.equal(!!screen.queryByText("The feed store could not be written."), true, "a refused delete must say why");
+    await eventually(() => assert.equal(!!screen.queryByText("The feed store could not be written."), true, "a refused delete must say why"));
     assert.equal(screen.getAllByText("Program (IMAG)").length > 0, true);
   } finally {
     g.restore();

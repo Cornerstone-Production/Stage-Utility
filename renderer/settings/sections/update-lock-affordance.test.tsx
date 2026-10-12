@@ -34,7 +34,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installDom, isPlumbing, readLedger, settle, unmountAndTeardown } from "../../test-dom.js";
 import type { UpdateStatus } from "@main/types/state";
 
 const teardown = installDom();
@@ -57,9 +57,16 @@ class StubEventSource {
 /** What GET /api/update/lock answers with. Swapped per test. */
 let lockReply: { active: boolean; reasons: string[] } = { active: false, reasons: [] };
 
+/** The reads the panel began and the answers it has taken: the lock is read on
+ *  mount, and every assertion is about what the panel draws once it has. */
+const reads = readLedger();
+
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: string) => {
+  // The live-update subscription is nobody's read; see isPlumbing.
+  if (isPlumbing(url)) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
+  reads.begin();
   const payload = url.includes("/api/update/lock") ? lockReply : {};
-  return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) };
+  return reads.answer({ ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) });
 };
 
 // After installDom(), never before: a static import evaluates first and React
@@ -70,7 +77,7 @@ const { UpdatesPanel } = await import("./advanced-section.js");
 const { ConfirmHost, TooltipProvider } = await import("../../components/ui/index.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
-beforeEach(() => { cleanup(); lockReply = { active: false, reasons: [] }; });
+beforeEach(() => { cleanup(); reads.reset(); lockReply = { active: false, reasons: [] }; });
 afterEach(async () => { cleanup(); await settle(); });
 
 /** Every apply the panel asked for, with the override flag it passed. */
@@ -128,6 +135,7 @@ async function mount(over: Partial<UpdateStatus> = {}) {
   );
   // The lock is fetched on mount; let that request land before asserting.
   await settle();
+  await eventually(reads.landed);
   await settle();
   return view;
 }
