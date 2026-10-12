@@ -108,7 +108,7 @@ export function ScreensRoute() {
   function requestRemoveScreen(outputId: string) {
     const output = state.outputs?.find((o) => o.id === outputId);
     if (!output) return;
-    void removeScreen({ output, read: () => ({ outputs: state.outputs ?? [], views: state.views ?? [] }), handlers: s.handlers });
+    void removeScreen({ output, state: { outputs: state.outputs ?? [], views: state.views ?? [] }, handlers: s.handlers });
   }
   function requestDeleteView(viewId: string) {
     const view = state.views?.find((v) => v.id === viewId);

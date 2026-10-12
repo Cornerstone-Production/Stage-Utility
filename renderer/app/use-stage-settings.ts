@@ -747,8 +747,19 @@ export function useStageSettings(pinnedViewId?: string) {
 
   // ── Outputs (physical screens + routing) ─────────────────────────────
   /**
+   * A refused create or claim, as the outcome the panel shows. The server holds either
+   * to the kind of view the operator was shown; when that changed, the views are read
+   * again so the role line says what the view is now.
+   */
+  function createRefusal(err: unknown): CreateScreenOutcome {
+    const viewChanged = (err as ApiError).code === "surface-changed";
+    if (viewChanged) void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.stageState });
+    return { refused: errorMessage(err), outputId: null, ...(viewChanged ? { viewChanged } : {}) };
+  }
+
+  /**
    * Make a screen from the answers the Screen settings panel collected. Resolves
-   * with the reason it was refused, or null when it was made.
+   * the id of the screen made, or why it was refused.
    *
    * Returned rather than toasted: the panel keeps its answers open after a
    * refusal (a taken friendly link, a view that does not fit) and says why where
@@ -756,15 +767,6 @@ export function useStageSettings(pinnedViewId?: string) {
    * the server validates before it writes and puts back what it made if a later
    * step fails.
    */
-  /** What a refused create or claim comes to for the page. The server holds either
-   *  to the kind of view the operator was shown; when it changed, the views are read
-   *  again so the role line says what the view is now. */
-  function createRefusal(err: unknown): CreateScreenOutcome {
-    const viewChanged = (err as ApiError).code === "surface-changed";
-    if (viewChanged) void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.stageState });
-    return { refused: errorMessage(err), outputId: null, ...(viewChanged ? { viewChanged } : {}) };
-  }
-
   async function handleCreateScreen(input: CreateScreenInput): Promise<CreateScreenOutcome> {
     try {
       // The answer is the state and the id of the screen this call made.

@@ -55,15 +55,16 @@ export async function deleteView({ view, outputs, handlers }: {
  * the state, is what knows. A refusal is told as it is (the screen is gone, the
  * view is kept, and which screen shows it), and so is a failure.
  *
- * `read` is the state as it is when the screen is asked about. Resolves whether the
+ * `state` is the screens and views as they are when the screen is asked about; the
+ * server, not this copy, decides about the view afterwards. Resolves whether the
  * screen was removed.
  */
-export async function removeScreen({ output, read, handlers }: {
+export async function removeScreen({ output, state, handlers }: {
   output: Output;
-  read: () => { outputs: readonly Output[]; views: readonly View[] };
+  state: { outputs: readonly Output[]; views: readonly View[] };
   handlers: Pick<SectionHandlers, "handleRemoveOutput" | "handleRemoveView">;
 }): Promise<boolean> {
-  const { outputs, views } = read();
+  const { outputs, views } = state;
   const view = output.viewId ? views.find((v) => v.id === output.viewId) : undefined;
   const others = view ? screensShowing(view.id, outputs).filter((o) => o.id !== output.id) : [];
   const alone = view !== undefined && others.length === 0;
