@@ -19,7 +19,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installDom, settle } from "../../test-dom.js";
+import { eventually, installDom, settle } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
@@ -159,8 +159,10 @@ async function renderList(): Promise<ReturnType<typeof render>> {
         React.createElement(ServiceHistorySection as React.ComponentType<{ readOnly: boolean }>, { readOnly: false }),
       ),
     );
-    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
   });
+  // The list is a read behind the first paint, and the row is what it comes to.
+  await eventually(() => assert.ok(view.container.querySelector(`[data-history-row="${KEY}"]`), "the row never rendered"));
   return view;
 }
 
@@ -187,14 +189,16 @@ describe("a live push updates a row already on screen", () => {
     FakeEventSource.last!.push("spl:history", splRecording());
     await settle();
 
-    const drawn = figuresOf(view.container.querySelector(`[data-history-row="${KEY}"]`)!);
     const kpis = new Map(serviceKpis(timeline(), attendance(), splRecording()).map((k) => [k.key, k]));
-    assert.equal(
-      drawn.level.value,
-      kpis.get("level")!.value,
-      `the row did not pick up the pushed SPL record: ${JSON.stringify(drawn)}`,
-    );
-    assert.notEqual(drawn.level.caption, "no sound recorded", "the row is still reading as silent");
+    await eventually(() => {
+      const drawn = figuresOf(view.container.querySelector(`[data-history-row="${KEY}"]`)!);
+      assert.equal(
+        drawn.level.value,
+        kpis.get("level")!.value,
+        `the row did not pick up the pushed SPL record: ${JSON.stringify(drawn)}`,
+      );
+      assert.notEqual(drawn.level.caption, "no sound recorded", "the row is still reading as silent");
+    });
   });
 
   test("service-timeline:history with endedAt set drops the recording pill from an already-listed row", async () => {
@@ -212,11 +216,13 @@ describe("a live push updates a row already on screen", () => {
     FakeEventSource.last!.push("service-timeline:history", closed);
     await settle();
 
-    const after = view.container.querySelector(`[data-history-row="${KEY}"]`) as HTMLElement;
-    assert.equal(
-      after.querySelectorAll('[data-testid="recording-pill"]').length,
-      0,
-      "the row is still showing the recording pill after the record closed",
-    );
+    await eventually(() => {
+      const after = view.container.querySelector(`[data-history-row="${KEY}"]`) as HTMLElement;
+      assert.equal(
+        after.querySelectorAll('[data-testid="recording-pill"]').length,
+        0,
+        "the row is still showing the recording pill after the record closed",
+      );
+    });
   });
 });

@@ -5,7 +5,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -61,6 +61,10 @@ async function renderPanel(ports: VideoPorts = PORTS, opts: { patchError?: strin
   globalThis.fetch = fn;
   const c = render(<VideoRelayPortsPanel />);
   await settle();
+  // The ports are a read behind the first paint; every test starts from them.
+  await eventually(() =>
+    assert.equal(screen.getByRole("textbox", { name: "RTMP" }).getAttribute("value"), String(ports.rtmp), "the ports never loaded"),
+  );
   return { ...c, calls, restore: () => (globalThis.fetch = realFetch) };
 }
 
@@ -85,10 +89,13 @@ test("Save PATCHes every field, including the one just edited", async () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await settle();
 
-    const saved = c.calls.find((call) => call.method === "PATCH" && call.url.endsWith("/api/video/ports"));
-    assert.ok(saved, "Save never PATCHed /api/video/ports");
-    assert.deepEqual(saved!.body, { ...PORTS, rtmp: 21935 });
-    assert.ok(screen.getByText("Saved."));
+    const saved = await eventually(() => {
+      const found = c.calls.find((call) => call.method === "PATCH" && call.url.endsWith("/api/video/ports"));
+      assert.ok(found, "Save never PATCHed /api/video/ports");
+      return found;
+    });
+    assert.deepEqual(saved.body, { ...PORTS, rtmp: 21935 });
+    await eventually(() => assert.ok(screen.getByText("Saved.")));
   } finally {
     c.restore();
   }
@@ -99,8 +106,7 @@ test("a refused save shows the rule inline, rather than swallowing it", async ()
   try {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await settle();
-    assert.ok(screen.getByRole("alert"));
-    assert.match(screen.getByRole("alert").textContent ?? "", /must be different/);
+    await eventually(() => assert.match(screen.getByRole("alert").textContent ?? "", /must be different/));
   } finally {
     c.restore();
   }

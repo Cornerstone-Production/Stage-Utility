@@ -12,7 +12,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -111,7 +111,9 @@ async function mount(screens: Output[] | null = [], onConfigSaved?: () => void) 
     ),
   );
   await settle();
-  await settle();
+  // The section says "Loading..." until the groups have been read (or the read
+  // has failed, which it says too), however many turns that takes.
+  await eventually(() => assert.ok(!(document.body.textContent ?? "").includes("Loading..."), "the section never stopped loading"));
 }
 
 /** The change handler fires on React's synthetic input event. */

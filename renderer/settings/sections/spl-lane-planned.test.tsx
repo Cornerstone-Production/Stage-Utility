@@ -17,7 +17,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -32,7 +32,7 @@ Object.defineProperty(Element.prototype, "getBoundingClientRect", {
   },
 });
 
-const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { SplDetail } = await import("./spl-history-section.js");
 
@@ -108,15 +108,15 @@ test("hovering a sound lane segment reads the item's PLANNED length off the time
         timeline: TIMELINE,
       }),
     );
-    await act(async () => {
-      await Promise.resolve();
-    });
-
     // By its label, NOT `querySelector("svg")` — the strip's Customize trigger
-    // is a lucide icon, so the first svg on the page is a glyph.
-    const svg = document.querySelector("svg[role='img']") as SVGSVGElement;
-    assert.ok(svg, "the sound chart did not render");
-    assert.equal(document.querySelectorAll("[data-lane-segment]").length, 1, "the lane drew no segment");
+    // is a lucide icon, so the first svg on the page is a glyph. The chart draws
+    // once the series read has answered (here, with a 404).
+    const svg = await eventually(() => {
+      const found = document.querySelector("svg[role='img']") as SVGSVGElement;
+      assert.ok(found, "the sound chart did not render");
+      return found;
+    });
+    await eventually(() => assert.equal(document.querySelectorAll("[data-lane-segment]").length, 1, "the lane drew no segment"));
 
     // A third across is inside the Message item (it runs the first two thirds of
     // the domain); y in the lane's service row, under the plot.
