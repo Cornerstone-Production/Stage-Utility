@@ -54,6 +54,18 @@ function release(token: symbol): void {
   }
 }
 
+/** Apple platforms, where Ctrl-click is a right click and Cmd is the key that opens
+ *  a link in a new tab. */
+function isApple(): boolean {
+  return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+}
+
+/** Is this click the one a browser opens a link in a new tab with: Shift, or Cmd on
+ *  a Mac and Ctrl everywhere else? (A middle click is its own event.) */
+export function opensInNewTab(e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }): boolean {
+  return e.shiftKey || (isApple() ? e.metaKey : e.ctrlKey);
+}
+
 export function LazyPreview({
   viewId,
   outputId = null,
@@ -78,8 +90,9 @@ export function LazyPreview({
    * While the page's side panel follows the operator, the preview is not the
    * editor's door: a plain click lands on the card and moves the panel (it is
    * left to bubble there), and the editor is a small button in the corner. A
-   * click with Ctrl, Cmd or Shift, or a middle click, is not a plain one and goes
-   * to `onOpenDisplay` instead, when the card has a display to open.
+   * click with Cmd (Ctrl on Windows and Linux) or Shift, or a middle click, is not a
+   * plain one and goes to `onOpenDisplay` instead, when the card has a display to
+   * open.
    */
   following?: { label: string; onOpenDisplay?: () => void };
 }) {
@@ -148,7 +161,7 @@ export function LazyPreview({
               aria-label={following.label}
               onClick={(e) => {
                 // Not a plain click: the card must not also move its panel.
-                if ((e.ctrlKey || e.metaKey || e.shiftKey) && following.onOpenDisplay) {
+                if (opensInNewTab(e) && following.onOpenDisplay) {
                   e.stopPropagation();
                   following.onOpenDisplay();
                 }

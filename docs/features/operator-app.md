@@ -184,8 +184,8 @@ card moves it to that screen's settings, and a click on a view card moves it to
 that view's settings. The card's own controls keep doing their own job and do not
 move it: the view picker, **Open**, the menu and the icon colour. Clicking the
 name still focuses it for renaming, and moves the panel too. Clicking the preview
-moves the panel; a Ctrl, Cmd, Shift or middle click on a screen's preview opens
-its display in a new tab, and the small button in the preview's corner goes to
+moves the panel; a Cmd (Ctrl on Windows and Linux), Shift or middle click on a screen's
+preview opens its display in a new tab, and the small button in the preview's corner goes to
 the layout editor. Dragging a card's header still reorders. With the panel
 closed the cards do what they always did: the preview opens the layout editor and
 a click on a card does nothing.

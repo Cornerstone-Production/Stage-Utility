@@ -480,13 +480,29 @@ describe("the preview", () => {
     assert.deepEqual(opened, [], "a plain click on the preview opened the display");
   });
 
-  for (const mod of ["ctrlKey", "metaKey", "shiftKey"] as const) {
-    test(`panel open: a ${mod} click opens the display and does not move the panel`, async () => {
+  /** Report this platform to the page, as a browser does. */
+  const asPlatform = (platform: string) => Object.defineProperty(navigator, "platform", { value: platform, configurable: true });
+  afterEach(() => { Reflect.deleteProperty(navigator, "platform"); });
+
+  // Cmd opens a link in a new tab on a Mac, where Ctrl-click is a right click; Ctrl
+  // does everywhere else, and Shift both.
+  for (const [platform, mod, opensIt] of [
+    ["MacIntel", "metaKey", true], ["MacIntel", "shiftKey", true], ["MacIntel", "ctrlKey", false],
+    ["Win32", "ctrlKey", true], ["Win32", "shiftKey", true], ["Win32", "metaKey", false],
+    ["Linux x86_64", "ctrlKey", true],
+  ] as const) {
+    test(`panel open on ${platform}: a ${mod} click ${opensIt ? "opens the display and does not move the panel" : "is a plain click: it moves the panel and opens nothing"}`, async () => {
+      asPlatform(platform);
       await mountScreens();
       const preview = await within(previewOf("Lobby TV")).findByRole("button", { name: "Show settings for Lobby TV" });
       await act(async () => { fireEvent.click(preview, { [mod]: true }); await settle(); });
-      assert.deepEqual(opened, [[`${window.location.origin}/display-3`, "display-display-3"]]);
-      assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }), "a modified click also moved the panel");
+      if (opensIt) {
+        assert.deepEqual(opened, [[`${window.location.origin}/display-3`, "display-display-3"]]);
+        assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }), "a modified click also moved the panel");
+      } else {
+        assert.deepEqual(opened, [], `${mod} opened the display on ${platform}`);
+        assert.ok(panel().getByRole("heading", { name: "Lobby TV" }), "a plain click did not move the panel");
+      }
     });
   }
 
