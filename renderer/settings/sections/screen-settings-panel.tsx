@@ -297,9 +297,8 @@ function OutputDeviceSection({ output, device, online, health, reported, actions
           ))}
         </div>
       </SettingRow>
-      {/* Tall enough to hold the picture turned on its side. Smaller than the
-          mockup's 160 x 90: turned, that is 160 high, which ran over the figures
-          under it. */}
+      {/* Tall enough to hold the picture turned on its side without running over
+          the figures under it. */}
       <div aria-hidden="true" className="grid h-[144px] place-items-center">
         <i
           style={{ transform: `rotate(${rotation}deg)` }}
@@ -411,13 +410,15 @@ function CreatedNote({ output, viewMade, onEditLayout }: { output: Output; viewM
   );
 }
 
-function EditBody({ output, views, baseUrl, online, messageGroups, created, actions }: {
+function EditBody({ output, views, baseUrl, online, messageGroups, created, canRemove, actions }: {
   output: Output;
   views: View[];
   baseUrl: string;
   online: boolean;
   messageGroups: MessageGroups;
   created: { viewMade: boolean } | null;
+  /** Another screen exists, so this one may be removed: the server refuses the last. */
+  canRemove: boolean;
   actions: ScreenPanelActions;
 }) {
   const shown = output.viewId ? views.find((v) => v.id === output.viewId) : undefined;
@@ -453,6 +454,7 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, acti
 
   return (
     <>
+      <div className="flex-1 overflow-y-auto px-[18px] pb-[18px] pt-1.5">
       {created && <CreatedNote output={output} viewMade={created.viewMade} onEditLayout={shown ? () => actions.onEditLayout(shown.id) : undefined} />}
       <Section title="What it shows">
         <ViewPicker
@@ -506,10 +508,9 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, acti
               </>
             ) : permanent}
           </p>
-          {/* The permanent one, as the old URL dialog and the card's Copy URL
-              copy: it is what a Pi or a printed QR is pointed at. copyText
-              rather than navigator.clipboard, which prod's plain HTTP does not
-              have. */}
+          {/* The permanent address, as the card's Copy URL copies it: it is what a
+              Pi or a printed QR is pointed at. copyText rather than
+              navigator.clipboard, which prod's plain HTTP does not have. */}
           <Tooltip label="Copy the permanent URL">
             <button
               type="button"
@@ -588,6 +589,16 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, acti
       <Section title="Device">
         <DeviceSection output={output} online={online} actions={actions} />
       </Section>
+      </div>
+      <PanelFooter hint="Changes save as you make them.">
+        <DangerButton
+          disabled={!canRemove}
+          title={canRemove ? undefined : "The last screen cannot be removed"}
+          onClick={() => actions.onRemoveScreen(output.id)}
+        >
+          Remove screen…
+        </DangerButton>
+      </PanelFooter>
     </>
   );
 }
@@ -675,29 +686,17 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
         </button>
       </div>
       {shownTarget?.kind === "edit" ? (
-        <>
-          <div className="flex-1 overflow-y-auto px-[18px] pb-[18px] pt-1.5">
-            <EditBody
-              key={shownTarget.output.id}
-              output={shownTarget.output}
-              views={views}
-              baseUrl={baseUrl}
-              online={online}
-              messageGroups={messageGroups}
-              created={shownTarget.created ?? null}
-              actions={actions}
-            />
-          </div>
-          <PanelFooter hint="Changes save as you make them.">
-            <DangerButton
-              disabled={outputs.length <= 1}
-              title={outputs.length <= 1 ? "The last screen cannot be removed" : undefined}
-              onClick={() => actions.onRemoveScreen(shownTarget.output.id)}
-            >
-              Remove screen…
-            </DangerButton>
-          </PanelFooter>
-        </>
+        <EditBody
+          key={shownTarget.output.id}
+          output={shownTarget.output}
+          views={views}
+          baseUrl={baseUrl}
+          online={online}
+          messageGroups={messageGroups}
+          created={shownTarget.created ?? null}
+          canRemove={outputs.length > 1}
+          actions={actions}
+        />
       ) : shownTarget?.kind === "view" ? (
         <ViewBody key={shownTarget.view.id} view={shownTarget.view} outputs={outputs} actions={actions} />
       ) : shownTarget?.kind === "new" ? (

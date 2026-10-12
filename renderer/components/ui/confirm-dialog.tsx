@@ -28,7 +28,6 @@ export interface ConfirmOptions {
   checkbox?: {
     label: string;
     detail?: string;
-    defaultChecked?: boolean;
     /** The confirm button's label while the box is ticked. */
     confirmLabel?: string;
   };
@@ -69,16 +68,16 @@ export async function confirm(opts: ConfirmOptions): Promise<boolean> {
 
 function settle(ok: boolean, checked = false) {
   // Guard so the close-after-confirm onOpenChange doesn't double-resolve.
-  if (_state) _state.resolve({ ok, checked: ok && checked });
+  if (_state) _state.resolve({ ok, checked });
   _state = null;
   notify();
 }
 
 export function ConfirmHost() {
   const [state, setState] = React.useState<ConfirmState | null>(null);
-  // Per dialog, not per host: the next one starts from its own default.
+  // Per dialog, not per host: every dialog starts unticked.
   const [checked, setChecked] = React.useState(false);
-  useResyncOn([state?.id], () => setChecked(state?.checkbox?.defaultChecked ?? false));
+  useResyncOn([state?.id], () => setChecked(false));
   React.useEffect(() => {
     _listeners.push(setState);
     return () => {

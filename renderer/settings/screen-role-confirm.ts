@@ -1,9 +1,6 @@
-// The question asked before a screen becomes what it is not, written once for the
-// screen card's view picker and the Screen settings panel.
-//
-// Making a screen a control surface makes its buttons live to anyone standing at
-// it, which is not something to do by misclick, and making it a wall display
-// switches them off.
+// Choosing a view for a screen, and the question asked before a screen or a view
+// becomes what it is not. Written once for the card's picker, the panel's, and the
+// view-kind switch.
 
 import { confirm } from "../components/ui";
 import { screenIsControlSurface, viewSurface, type ViewSurface } from "@main/types/views";
