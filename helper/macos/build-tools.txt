@@ -1,0 +1,10 @@
+# CMake and Ninja for build-cef-host.sh, pinned by version and by hash: pip installs
+# them with --require-hashes and --only-binary, so a wheel that is not exactly one of
+# these is refused. Each macOS wheel is universal2, one file for arm64 and x86_64.
+# To update, take the version and the macosx wheel's sha256 from
+# https://pypi.org/pypi/<name>/<version>/json; build-cef-host.sh remakes its venv when
+# this file changes.
+cmake==4.4.4 \
+    --hash=sha256:883962a72b1b3a16ff445427f24c8caca9797dd9e563bbe208cbcd89e877f9d3
+ninja==1.13.2 \
+    --hash=sha256:fd82e26c0706ad4ab88e5fdd26f3fab0a987a90f810160f6c322e752c6af298b

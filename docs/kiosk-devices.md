@@ -213,9 +213,8 @@ port's video mode (`videoMode`, `1080p59.94` unless changed) and a quarter-turn
 rotation for a monitor on its side (`rotation`, 0 unless changed). They are
 written through `PATCH /api/outputs/:id`, are in every backup, and the helper
 reads its output's record from `GET /api/outputs`. The helper applies rotation to
-display outputs, and DeckLink outputs apply Format; the helper does not drive
-DeckLink ports yet, so Format is saved but nothing sends it. See the
-[API](reference/api.md).
+every output and opens each DeckLink port in its Format; see
+[Running the helper](#running-the-helper-beta) and the [API](reference/api.md).
 
 **Health.** Each output reports every ten seconds, authenticated by the device's
 own secret, and the server keeps the latest in memory only. It is shown with the
@@ -233,6 +232,52 @@ dropped) and what to check. A reading that stops being refreshed is dropped afte
 60 seconds. Until one arrives, the Device section says the helper has not reported
 yet; after one was dropped, that it stopped reporting; and for a screen no page is
 showing, that it is offline.
+
+### Running the helper (beta)
+
+Build it with `helper/macos/build-app.sh --arch arm64` (or `x86_64`; macOS 14 or later,
+and the Command Line Tools are enough). That downloads the pinned Chromium Embedded
+Framework, checks its checksums, and writes `StageUtilityOutput.app` for that
+architecture, about 325 MB, signed ad hoc. It renders every screen in Chromium, as the
+Raspberry Pi kiosks do. Open it: the menu bar icon opens its window, where each of the
+Mac's displays and DeckLink ports has a switch and a status line. Launching it again
+brings the window back. Where `/Library/LaunchAgents/com.stageutility.output.plist`
+exists, it starts at every login from that LaunchAgent, and the window says "Starts at
+login (installed)".
+
+**DeckLink outputs.** Each output port of a Blackmagic DeckLink or UltraStudio card
+appears under *Not set up yet* as its own output, named as Blackmagic's driver names
+it ("DeckLink Duo 2 (3)"), with the formats the port can play, and is set up like a
+display. It needs Blackmagic's **Desktop Video** driver, 12.0 or later, installed on
+the Mac; without it there are no DeckLink outputs and the helper's window says so.
+**Restart the helper after installing or updating Desktop Video**: it looks for the
+driver only when it starts. The screen's **Format** (1080p59.94 unless changed) is the
+mode the port is opened in; a change reopens it, and a format the port does not have
+is refused, with the reason on that output's line in the helper's window. Rotation
+applies as it does on a display. A card unplugged keeps its screen and comes back by
+itself when plugged in again. A connector set as an input in Desktop Video Setup is
+not an output: the window lists it as "Set as an input in Desktop Video Setup", and it
+appears under *Not set up yet* within about 10 s of being set as an output. A DeckLink
+output runs 20 ms behind its page at 1080p59.94, and its line in the window says how
+far behind it is.
+
+Flags, for a Mac nobody is looking at: `--show-window`, `--list-outputs` (reads the
+stored state and exits), `--dump-frames <dir>` (a PNG of every output and of the window
+every 5 s, with no Screen Recording permission), `--discovery-port <n>`, `--log-stderr`,
+and, for development, `--virtual-sdi <n>` (n SDI outputs with no card behind them,
+offering every format, so the whole card path runs on any Mac), `--test-pattern
+latency` (a clock on every output, to photograph two side by side), `--frame-timings
+<file>` and `--head-start`/`--fill-lead <ms>`. The log is the unified log, subsystem
+`com.stageutility.output`.
+
+Where `/Library/Application Support/StageUtility/migrated-from-kiosk` exists, the Mac
+was a Chrome kiosk and keeps its screen: its main display takes over the kiosk's device
+id and secret.
+
+Everything else about it (state files, discovery, health, rotation, DeckLink outputs,
+Chromium and its sandbox, the Local Network permission, recovering an output from a
+server that is gone) is in [helper/macos/README.md](../helper/macos/README.md), and the
+DeckLink layer itself in [helper/macos/DECKLINK.md](../helper/macos/DECKLINK.md).
 
 ## Removing one
 
