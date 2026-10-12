@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -62,6 +62,9 @@ function stubFetch(failing: Read[], state: Record<string, unknown> = CONNECTED) 
   readsBegun = 0;
   readsTaken = 0;
   const f = stubFetchWithLog((url) => {
+    // The live-update subscription posts on its own schedule and lands whenever it
+    // likes; it is neither a read the page waits on nor one of these counts.
+    if (isPlumbing(url)) return ok({});
     asked.push(url);
     readsBegun += 1;
     const answer = (json: unknown) => {

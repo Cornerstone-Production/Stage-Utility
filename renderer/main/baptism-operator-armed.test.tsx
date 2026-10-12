@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing, settle, unmountAndTeardown } from "../test-dom.js";
 import { baptismState } from "../test-fixtures/baptism-state.js";
 
 const teardown = installRenderDom();
@@ -58,6 +58,9 @@ function stubFetch(state: BaptismState) {
   readsTaken = 0;
   return (async (input: string) => {
     const url = String(input);
+  // The live-update subscription posts on its own schedule and lands whenever it
+  // likes; it is neither a read the page waits on nor one of these counts.
+  if (isPlumbing(url)) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
     readsBegun += 1;
     const body = url.endsWith("/api/baptism") ? state : url.endsWith("/api/baptism/sessions") ? [] : {};
     let taken = false;

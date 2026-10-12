@@ -33,7 +33,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom } from "../test-dom.js";
+import { eventually, installDom, isPlumbing } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -281,6 +281,9 @@ let activePvpLive: PvpStatusDTO = PVP_LIVE;
 let readsBegun = 0;
 let readsTaken = 0;
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
+  // The live-update subscription posts on its own schedule and lands whenever it
+  // likes; it is neither a read the page waits on nor one of these counts.
+  if (isPlumbing(String(input))) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
   readsBegun += 1;
   let taken = false;
   const take = () => {

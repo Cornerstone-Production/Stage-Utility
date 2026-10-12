@@ -22,7 +22,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing } from "../test-dom.js";
 
 const BOX_PX = 240;
 const teardown = installRenderDom({ clientHeight: BOX_PX });
@@ -118,6 +118,9 @@ function respond<T extends { json: () => Promise<unknown>; text: () => Promise<s
 }
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
+  // The live-update subscription posts on its own schedule and lands whenever it
+  // likes; it is neither a read the page waits on nor one of these counts.
+  if (isPlumbing(String(url))) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
   readsBegun += 1;
   const path = String(url).split("?")[0];
   if (path === "/api/state") {

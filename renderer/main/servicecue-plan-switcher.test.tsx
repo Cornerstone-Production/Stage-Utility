@@ -21,7 +21,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -152,7 +152,7 @@ const planParam = (router: { state: { location: { search: Record<string, unknown
  *  this page listens to, and fires whenever the page subscribes), so it is not
  *  counted: left in, this guard flaked whenever the subscription landed mid-test. */
 const writes = (calls: { method: string; url: string }[]) =>
-  calls.filter((c) => c.method !== "GET" && !c.url.includes("/api/events/subscribe"));
+  calls.filter((c) => c.method !== "GET" && !isPlumbing(c.url));
 
 async function click(el: HTMLElement | null): Promise<void> {
   assert.ok(el, "the control never rendered");
