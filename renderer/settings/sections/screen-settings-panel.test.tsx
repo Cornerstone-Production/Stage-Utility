@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { eventually, installDom } from "../../test-dom.js";
 import { KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 
 const teardown = installDom();
@@ -155,7 +155,7 @@ const sw = (name: string) => screen.getByRole("switch", { name });
 const role = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}`) });
 /** Answer the confirm dialog the role change opens. */
 async function answerConfirm(label: string | null): Promise<void> {
-  const dialog = await screen.findByRole("alertdialog");
+  const dialog = await eventually(() => screen.getByRole("alertdialog"));
   await click(within(dialog).getByRole("button", { name: label ?? "Cancel" }));
 }
 
@@ -553,7 +553,7 @@ describe("choosing a role", () => {
   test("a control surface asks first, and says what changes", async () => {
     const { calls } = mount({ outputs: [{ ...MINE, viewId: null }] });
     await click(role("Control surface"));
-    const dialog = await screen.findByRole("alertdialog");
+    const dialog = await eventually(() => screen.getByRole("alertdialog"));
     assert.match(dialog.textContent ?? "", /Anyone standing at it can press them/);
     assert.deepEqual(calls, [], "the role changed before the operator said yes");
     await answerConfirm("Use as a control surface");
@@ -570,7 +570,7 @@ describe("choosing a role", () => {
   test("going back to a wall display asks first, too", async () => {
     const { calls } = mount({ outputs: [{ ...PANEL_A, viewId: null }] });
     await click(role("Wall display"));
-    const dialog = await screen.findByRole("alertdialog");
+    const dialog = await eventually(() => screen.getByRole("alertdialog"));
     assert.match(dialog.textContent ?? "", /read-only/);
     await answerConfirm("Make it a display");
     assert.deepEqual(calls, [["role", "display-3", "display", {}]]);

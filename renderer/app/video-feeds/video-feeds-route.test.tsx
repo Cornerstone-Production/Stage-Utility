@@ -933,7 +933,7 @@ test("a push feed's segmented control, address and password load, and New passwo
     const srtButton = screen.getByRole("button", { name: "SRT" });
     assert.equal(srtButton.getAttribute("aria-pressed"), "true", "expected SRT pressed for this feed's saved protocol");
 
-    assert.ok(await screen.findByText("The password is part of the address. Anything that pushes without it is refused."));
+    assert.ok(await eventually(() => screen.getByText("The password is part of the address. Anything that pushes without it is refused.")));
     const addressInput = screen.getByLabelText("Paste this into the device") as HTMLInputElement;
     assert.ok(addressInput.value.includes("testpw"), addressInput.value);
     const passwordInput = screen.getByLabelText("Password") as HTMLInputElement;
@@ -971,7 +971,7 @@ test("WHIP's description names OBS's Bearer Token, switching from SRT/RTMP's pas
   try {
     mount();
     await pageReady();
-    assert.ok(await screen.findByText(/Use the password below as the Bearer Token/));
+    assert.ok(await eventually(() => screen.getByText(/Use the password below as the Bearer Token/)));
     assert.equal(screen.queryByText("The password is part of the address. Anything that pushes without it is refused."), null);
   } finally {
     g.restore();
@@ -1007,7 +1007,7 @@ test("Copy falls back to selecting the address and prompting Ctrl+C/Cmd+C — js
     mount();
     await pageReady();
 
-    const addressInput = (await screen.findByLabelText("Paste this into the device")) as HTMLInputElement;
+    const addressInput = (await eventually(() => screen.getByLabelText("Paste this into the device"))) as HTMLInputElement;
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await settle();
 
@@ -1155,7 +1155,7 @@ test("a failed rotation keeps the address and password fields visible, shows the
     mount();
     await pageReady();
 
-    const before = (await screen.findByLabelText("Paste this into the device")) as HTMLInputElement;
+    const before = (await eventually(() => screen.getByLabelText("Paste this into the device"))) as HTMLInputElement;
     assert.ok(before.value.includes("testpw"));
 
     fireEvent.click(screen.getByRole("button", { name: "New password" }));
@@ -1200,14 +1200,18 @@ test("flipping the segmented control before Save re-fetches the OTHER protocol's
   try {
     mount();
     await pageReady();
-    assert.ok((await screen.findByLabelText("Paste this into the device") as HTMLInputElement).value.startsWith("srt://"));
+    assert.ok((await eventually(() => screen.getByLabelText("Paste this into the device")) as HTMLInputElement).value.startsWith("srt://"));
 
     fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
     await settle();
     await settle();
 
-    const address = (await screen.findByLabelText("Paste this into the device")) as HTMLInputElement;
-    assert.ok(address.value.startsWith("http://"), address.value);
+    // The field is already there, holding the SRT address; it changes once the
+    // other protocol's preview has been fetched.
+    await eventually(() => {
+      const address = screen.getByLabelText("Paste this into the device") as HTMLInputElement;
+      assert.ok(address.value.startsWith("http://"), address.value);
+    });
     assert.ok(requested.includes("whip"), "expected a GET carrying ?protocol=whip");
 
     // Nothing was saved: no PATCH/POST /api/video/feeds went out for this.
@@ -1249,7 +1253,7 @@ test("a stale preview response landing late must not clobber a newer one — a r
     fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
     await settle();
     await settle();
-    await screen.findByLabelText("Paste this into the device");
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
     let password = screen.getByLabelText("Password") as HTMLInputElement;
     assert.equal(password.value, "whippw");
 
@@ -1295,7 +1299,7 @@ test("a slow rotation that succeeds after a newer preview failed leaves the prev
   try {
     mount();
     await pageReady();
-    await screen.findByLabelText("Paste this into the device");
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
     fireEvent.click(screen.getByRole("button", { name: "New password" }));
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
@@ -1348,7 +1352,7 @@ test("New password during an unsaved preview re-fetches the address for the prot
     fireEvent.click(screen.getByRole("button", { name: "WHIP (OBS)" }));
     await settle();
     await settle();
-    await screen.findByLabelText("Paste this into the device");
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
     let password = screen.getByLabelText("Password") as HTMLInputElement;
     assert.equal(password.value, "oldpw", "sanity: the preview shows the OLD password before any rotation");
 
@@ -1389,7 +1393,7 @@ test("switching protocol while a rotation is in flight still shows the rotation'
   try {
     mount();
     await pageReady();
-    await screen.findByLabelText("Paste this into the device");
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
 
     fireEvent.click(screen.getByRole("button", { name: "New password" }));
     await settle();
@@ -1435,7 +1439,7 @@ test("the Copy button reads \"Copy\" before any click, never stale \"Copied\" fr
   try {
     mount();
     await pageReady();
-    await screen.findByLabelText("Paste this into the device");
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
     assert.ok(screen.getByRole("button", { name: "Copy" }), "expected the button to read \"Copy\" before any click");
   } finally {
     g.restore();
@@ -1449,7 +1453,7 @@ test("the secure-clipboard Copy path flips the button to \"Copied\" and reverts 
   try {
     mount();
     await pageReady();
-    await screen.findByLabelText("Paste this into the device");
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
 
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await settle();
@@ -1475,7 +1479,7 @@ test("a second Copy restarts the \"Copied\" label's timer instead of letting the
   try {
     mount();
     await pageReady();
-    await screen.findByLabelText("Paste this into the device");
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
 
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await settle();
@@ -1514,7 +1518,7 @@ test("leaving the editor cancels the \"Copied\" label's timer", async () => {
   try {
     const view = mount();
     await pageReady();
-    await screen.findByLabelText("Paste this into the device");
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await settle();
     await settle();
@@ -1535,7 +1539,7 @@ test("blurring the address field clears the fallback's \"Press Ctrl+C / Cmd+C\" 
   try {
     mount();
     await pageReady();
-    const addressInput = (await screen.findByLabelText("Paste this into the device")) as HTMLInputElement;
+    const addressInput = (await eventually(() => screen.getByLabelText("Paste this into the device"))) as HTMLInputElement;
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await settle();
     assert.ok(screen.getByText("Press Ctrl+C / Cmd+C to copy"), "expected the fallback hint to show first");
@@ -1581,7 +1585,7 @@ async function rotateAndCheckNotes(relay: VideoState["relay"], applied: boolean,
   try {
     mount();
     await pageReady();
-    await screen.findByLabelText("Paste this into the device");
+    await eventually(() => assert.ok((screen.getByLabelText("Paste this into the device") as HTMLInputElement).value, "the address never loaded"));
     fireEvent.click(screen.getByRole("button", { name: "New password" }));
     await settle();
     await settle();
