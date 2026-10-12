@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -77,14 +77,14 @@ test("a failed patch read says so and offers no editable empty patch", async () 
   const f = stubFetch("patch");
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the patch/i);
+    await eventually(() => assert.match(alerts(), /Couldn't load the patch/i));
     // The editor is absent entirely — not a blank sheet a Save would write back.
     assert.equal(!!screen.queryByLabelText("Sheet name"), false, "must not offer an empty sheet to edit");
     assert.equal(!!screen.queryByRole("button", { name: "Analog" }), false, "must not draw the blank default sheet");
-    assert.ok(
+    await eventually(() => assert.ok(
       f.logs.some((l) => l.tag === "patch" && /the patch/i.test(l.message)),
       `expected a [patch] line naming the patch — got ${JSON.stringify(f.logs)}`,
-    );
+    ));
   } finally {
     f.restore();
   }
@@ -94,8 +94,8 @@ test("a failed stage-state read says the plan could not load, not that there is 
   const f = stubFetch("state");
   try {
     await mount();
-    assert.equal(!!screen.queryByRole("button", { name: "Stage left" }), true, "the patch itself loaded");
-    assert.match(alerts(), /Couldn't load the current plan/i);
+    await eventually(() => assert.equal(!!screen.queryByRole("button", { name: "Stage left" }), true, "the patch itself loaded"));
+    await eventually(() => assert.match(alerts(), /Couldn't load the current plan/i));
     assert.ok(
       // Its own line. The Weekly assignment panel reads the same stage state and
       // logs "…the Plan tab enables", which a bare /plan/ would accept instead.
@@ -111,8 +111,8 @@ test("control: both reads load, This week is offered and nothing alerts", async 
   const f = stubFetch(null);
   try {
     await mount();
-    assert.equal(!!screen.queryByRole("button", { name: "Stage left" }), true);
-    assert.equal(!!screen.queryByRole("option", { name: /This week/ }), true, "a loaded plan offers This week");
+    await eventually(() => assert.equal(!!screen.queryByRole("button", { name: "Stage left" }), true));
+    await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /This week/ }), true, "a loaded plan offers This week"));
     assert.equal(alerts(), "");
     assert.deepEqual(f.logs, []);
   } finally {

@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom } from "../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -227,24 +227,34 @@ async function mountScreens() {
     await settle();
     await settle();
   });
+  // The page draws once the state and the views have been read.
+  await eventually(() => assert.ok(screen.getByRole("button", { name: "Settings" }), "the page never drew"));
   return router;
 }
 
-const click = async (el: Element) => {
+/** An element, or a lookup to wait for: what a control looks like after a read or
+ *  an earlier click is not settled after a fixed number of ticks. */
+type Target = Element | (() => Element);
+const find = async (t: Target): Promise<Element> => (typeof t === "function" ? eventually(t) : t);
+
+const click = async (target: Target) => {
+  const el = await find(target);
   await act(async () => {
     fireEvent.click(el);
     await settle();
     await settle();
   });
 };
-const choose = async (el: Element, value: string) => {
+const choose = async (target: Target, value: string) => {
+  const el = await find(target);
   await act(async () => {
     fireEvent.change(el, { target: { value } });
     await settle();
     await settle();
   });
 };
-const type = async (el: Element, value: string) => {
+const type = async (target: Target, value: string) => {
+  const el = await find(target);
   await act(async () => {
     fireEvent.change(el, { target: { value } });
     await settle();
@@ -253,7 +263,7 @@ const type = async (el: Element, value: string) => {
 
 /** Choose a menu item by pressing it the way Radix expects. */
 async function pressMenuItem(name: string): Promise<void> {
-  const item = screen.getByRole("menuitem", { name });
+  const item = await eventually(() => screen.getByRole("menuitem", { name }));
   await act(async () => {
     fireEvent.pointerDown(item, { button: 0, ctrlKey: false });
     fireEvent.pointerUp(item, { button: 0, ctrlKey: false });
@@ -264,7 +274,7 @@ async function pressMenuItem(name: string): Promise<void> {
 
 /** Open this screen's menu, then its Screen settings panel. */
 async function openSettings(screenName: string): Promise<void> {
-  const trigger = screen.getByLabelText(`More actions for ${screenName}`);
+  const trigger = await eventually(() => screen.getByLabelText(`More actions for ${screenName}`));
   await act(async () => {
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     fireEvent.click(trigger);
@@ -280,8 +290,8 @@ const addTile = () => screen.getAllByRole("button", { name: /Add a screen/ }).fi
 const toggle = () => screen.getByRole("button", { name: "Settings" });
 const sw = (name: string) => panel().getByRole("switch", { name });
 const answerConfirm = async (label: string) => {
-  const dialog = await screen.findByRole("alertdialog");
-  await click(within(dialog).getByRole("button", { name: label }));
+  const dialog = await eventually(() => screen.getByRole("alertdialog"));
+  await click(() => within(dialog).getByRole("button", { name: label }));
 };
 
 describe("the panel and its Settings button", () => {
@@ -494,13 +504,13 @@ describe("the preview", () => {
   test("panel closed: the preview goes to the layout editor, as it always did", async () => {
     await mountScreens();
     await click(toggle());
-    await click(await within(previewOf("Lobby TV")).findByRole("button", { name: "Edit what Lobby TV shows" }));
+    await click(await eventually(() => within(previewOf("Lobby TV")).getByRole("button", { name: "Edit what Lobby TV shows" })));
     assert.equal(here(), true, "the preview did not open the editor");
   });
 
   test("panel open: a plain click moves the panel and does not leave the page", async () => {
     await mountScreens();
-    await click(await within(previewOf("Lobby TV")).findByRole("button", { name: "Show settings for Lobby TV" }));
+    await click(await eventually(() => within(previewOf("Lobby TV")).getByRole("button", { name: "Show settings for Lobby TV" })));
     assert.ok(panel().getByRole("heading", { name: "Lobby TV" }));
     assert.equal(here(), false, "a plain click on the preview left for the editor");
     assert.deepEqual(opened, [], "a plain click on the preview opened the display");
@@ -520,7 +530,7 @@ describe("the preview", () => {
     test(`panel open on ${platform}: a ${mod} click ${opensIt ? "opens the display and does not move the panel" : "is a plain click: it moves the panel and opens nothing"}`, async () => {
       asPlatform(platform);
       await mountScreens();
-      const preview = await within(previewOf("Lobby TV")).findByRole("button", { name: "Show settings for Lobby TV" });
+      const preview = await eventually(() => within(previewOf("Lobby TV")).getByRole("button", { name: "Show settings for Lobby TV" }));
       await act(async () => { fireEvent.click(preview, { [mod]: true }); await settle(); });
       if (opensIt) {
         assert.deepEqual(opened, [[`${window.location.origin}/display-3`, "display-display-3"]]);
@@ -534,14 +544,14 @@ describe("the preview", () => {
 
   test("panel open: a middle click opens the display too", async () => {
     await mountScreens();
-    const preview = await within(previewOf("Lobby TV")).findByRole("button", { name: "Show settings for Lobby TV" });
+    const preview = await eventually(() => within(previewOf("Lobby TV")).getByRole("button", { name: "Show settings for Lobby TV" }));
     await act(async () => { fireEvent(preview, new window.MouseEvent("auxclick", { bubbles: true, button: 1 })); await settle(); });
     assert.deepEqual(opened, [[`${window.location.origin}/display-3`, "display-display-3"]]);
   });
 
   test("panel open: the preview's own expand button still goes to the editor, and does not move the panel", async () => {
     await mountScreens();
-    await click(await within(previewOf("Lobby TV")).findByRole("button", { name: "Edit what Lobby TV shows" }));
+    await click(await eventually(() => within(previewOf("Lobby TV")).getByRole("button", { name: "Edit what Lobby TV shows" })));
     assert.equal(here(), true, "the expand button did not open the editor");
   });
 });
@@ -670,7 +680,7 @@ await answerConfirm("Show it and make it live");
   test("declining the confirm assigns nothing", async () => {
     await mountScreens();
     await choose(cardPicker("Lobby TV"), "ctl-a");
-    const dialog = await screen.findByRole("alertdialog");
+    const dialog = await eventually(() => screen.getByRole("alertdialog"));
     await click(within(dialog).getByRole("button", { name: "Cancel" }));
     assert.deepEqual(writes, []);
   });
@@ -864,7 +874,7 @@ describe("Add a screen", () => {
 
 /** Open a card's menu and press Remove display…. */
 async function removeFromMenu(screenName: string): Promise<void> {
-  const trigger = screen.getByLabelText(`More actions for ${screenName}`);
+  const trigger = await eventually(() => screen.getByLabelText(`More actions for ${screenName}`));
   await act(async () => {
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     fireEvent.click(trigger);
@@ -872,7 +882,7 @@ async function removeFromMenu(screenName: string): Promise<void> {
   });
   await pressMenuItem("Remove display…");
 }
-const dialog = async () => within(await screen.findByRole("alertdialog"));
+const dialog = async () => within(await eventually(() => screen.getByRole("alertdialog")));
 
 describe("removing a screen", () => {
   test("from the card's menu: asks first, and the dialog is centred and names the screen", async () => {
@@ -1118,7 +1128,7 @@ describe("a new view from a card's picker", () => {
 
   /** Fill the new-view dialog a picker entry opened, and create. */
   async function createViewNamed(name: string) {
-    const dlg = await screen.findByRole("dialog");
+    const dlg = await eventually(() => screen.getByRole("dialog"));
     await type(within(dlg).getByPlaceholderText(/View name/), name);
     await click(within(dlg).getByRole("button", { name: "Create" }));
   }
@@ -1178,7 +1188,7 @@ describe("a device waiting to be set up", () => {
 
   test("Set up as a new screen opens the panel for it and claims NOTHING yet", async () => {
     await mountScreens();
-    await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
+    await click(await eventually(() => screen.getByRole("button", { name: "Set up as a new screen" })));
     assert.ok(panel().getByText("New screen · step 1 of 2"));
     assert.ok(panel().getByText("Nothing is created until the last step. The device then shows this screen."));
     assert.deepEqual(writes.filter((w) => w.url === "/api/devices/claim"), [], "the device was claimed by opening the panel");
@@ -1186,7 +1196,7 @@ describe("a device waiting to be set up", () => {
 
   test("after the claim the panel stays on the screen that was made for the device", async () => {
     await mountScreens();
-    await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
+    await click(await eventually(() => screen.getByRole("button", { name: "Set up as a new screen" })));
     await click(panel().getByRole("button", { name: "Next" }));
     await click(panel().getByRole("button", { name: "Create screen" }));
     await act(async () => { await settle(); await settle(); });
@@ -1201,7 +1211,7 @@ describe("a device waiting to be set up", () => {
     // the new screen. That is not somebody else's doing.
     let release!: () => void;
     await mountScreens();
-    await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
+    await click(await eventually(() => screen.getByRole("button", { name: "Set up as a new screen" })));
     await click(panel().getByRole("button", { name: "Next" }));
     stateReadHeld = new Promise<void>((r) => { release = r; });
     await act(async () => { fireEvent.click(panel().getByRole("button", { name: "Create screen" })); await settle(); await settle(); await settle(); });
@@ -1216,7 +1226,7 @@ describe("a device waiting to be set up", () => {
   test("a claim for a view that turned into the other kind is a 409: step 2 stays and no screen is made", async () => {
     surfaceMovedTo = "console";
     await mountScreens();
-    await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
+    await click(await eventually(() => screen.getByRole("button", { name: "Set up as a new screen" })));
     await click(panel().getByRole("button", { name: "Next" }));
     await click(panel().getByRole("button", { name: /^A view you already have/ }));
     await choose(panel().getByLabelText("Existing view"), "wall-a");
@@ -1231,7 +1241,7 @@ describe("a device waiting to be set up", () => {
 
   test("closing it midway leaves no screen and no claim", async () => {
     await mountScreens();
-    await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
+    await click(await eventually(() => screen.getByRole("button", { name: "Set up as a new screen" })));
     await click(panel().getByRole("button", { name: "Next" }));
     await click(panel().getByRole("button", { name: "Close" }));
     assert.deepEqual(writes.filter((w) => w.url === "/api/devices/claim" || w.url === "/api/outputs"), []);
@@ -1239,7 +1249,7 @@ describe("a device waiting to be set up", () => {
 
   test("Create screen claims it with the answers, named for the device by default", async () => {
     await mountScreens();
-    await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
+    await click(await eventually(() => screen.getByRole("button", { name: "Set up as a new screen" })));
     await click(panel().getByRole("button", { name: "Next" }));
     await click(panel().getByRole("button", { name: /^A new control surface/ }));
     await click(panel().getByRole("button", { name: "Create screen" }));
@@ -1256,7 +1266,7 @@ describe("a device waiting to be set up", () => {
   test("a claim the server refuses keeps the panel open with the reason", async () => {
     claimFails = '"/history" is a built-in page.';
     await mountScreens();
-    await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
+    await click(await eventually(() => screen.getByRole("button", { name: "Set up as a new screen" })));
     await click(panel().getByRole("button", { name: "Next" }));
     await click(panel().getByRole("button", { name: "Create screen" }));
     assert.match(panel().getByRole("alert").textContent ?? "", /built-in page/);
@@ -1265,7 +1275,7 @@ describe("a device waiting to be set up", () => {
 
   test("Use for an existing screen is unchanged: it claims straight onto that screen", async () => {
     await mountScreens();
-    await screen.findByRole("button", { name: "Set up as a new screen" });
+    await eventually(() => screen.getByRole("button", { name: "Set up as a new screen" }));
     const pick = screen.getAllByRole("combobox").find((c) => (c as HTMLSelectElement).textContent?.includes("Use for an existing screen"))!;
     await choose(pick, "display-3");
     assert.deepEqual(

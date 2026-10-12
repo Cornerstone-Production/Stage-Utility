@@ -23,7 +23,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -105,10 +105,9 @@ async function mount(detail: unknown = DETAIL): Promise<void> {
   render(
     React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, { detail }),
   );
-  // Twice: the seed read resolves, then the render it causes settles.
-  await act(async () => {
-    await Promise.resolve();
-  });
+  // The chart's table is there once the series read has answered (here, 404),
+  // and the seed read lands with it or just behind.
+  await eventually(() => assert.ok(screen.getByRole("table"), "the per-item table never drew"));
   await act(async () => {
     await Promise.resolve();
   });
@@ -180,10 +179,11 @@ test("a browser with no choice is SEEDED from the server setting, once", async (
   globalThis.fetch = stubFetch(["LAeq 1"]);
   try {
     await mount();
-    assert.deepEqual(stored(), ["LAeq 1"]);
+    // The seed is a read: the table shows the defaults until it lands.
+    await eventually(() => assert.deepEqual(stored(), ["LAeq 1"]));
     const table = within(screen.getByRole("table"));
+    await eventually(() => assert.equal(table.queryAllByText("SPL A Fast").length, 0, "the seed did not take"));
     assert.equal(table.queryAllByText("LAeq 1").length, 1);
-    assert.equal(table.queryAllByText("SPL A Fast").length, 0, "the seed did not take");
     cleanup();
     await flushReact();
   } finally {
@@ -239,15 +239,15 @@ test("the legend lists EVERY metric, so one that is off can come back", async ()
   try {
     await mount();
     const toggle = (id: string) => document.querySelector(`[data-series-toggle='${id}']`) as HTMLButtonElement;
-    assert.equal(toggle("SPL A Fast").getAttribute("aria-pressed"), "true");
-    assert.equal(toggle("LAeq 1").getAttribute("aria-pressed"), "true");
+    await eventually(() => assert.equal(toggle("SPL A Fast").getAttribute("aria-pressed"), "true"));
+    await eventually(() => assert.equal(toggle("LAeq 1").getAttribute("aria-pressed"), "true"));
 
     fireEvent.click(toggle("SPL A Fast"));
     await act(async () => {
       await Promise.resolve();
     });
-    assert.ok(toggle("SPL A Fast"), "the off metric left the legend");
-    assert.equal(toggle("SPL A Fast").getAttribute("aria-pressed"), "false");
+    await eventually(() => assert.ok(toggle("SPL A Fast"), "the off metric left the legend"));
+    await eventually(() => assert.equal(toggle("SPL A Fast").getAttribute("aria-pressed"), "false"));
     assert.equal(document.querySelectorAll("[data-series-line='SPL A Fast']").length, 0);
 
     // And back on, from the legend alone.
@@ -255,8 +255,8 @@ test("the legend lists EVERY metric, so one that is off can come back", async ()
     await act(async () => {
       await Promise.resolve();
     });
-    assert.equal(toggle("SPL A Fast").getAttribute("aria-pressed"), "true");
-    assert.ok(document.querySelectorAll("[data-series-line='SPL A Fast']").length > 0);
+    await eventually(() => assert.equal(toggle("SPL A Fast").getAttribute("aria-pressed"), "true"));
+    await eventually(() => assert.ok(document.querySelectorAll("[data-series-line='SPL A Fast']").length > 0));
     assert.deepEqual(stored()?.slice().sort(), ["LAeq 1", "SPL A Fast"]);
 
     cleanup();

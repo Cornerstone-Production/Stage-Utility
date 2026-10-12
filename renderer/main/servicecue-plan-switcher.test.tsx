@@ -21,7 +21,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -152,7 +152,7 @@ const planParam = (router: { state: { location: { search: Record<string, unknown
  *  this page listens to, and fires whenever the page subscribes), so it is not
  *  counted: left in, this guard flaked whenever the subscription landed mid-test. */
 const writes = (calls: { method: string; url: string }[]) =>
-  calls.filter((c) => c.method !== "GET" && !c.url.includes("/api/events/subscribe"));
+  calls.filter((c) => c.method !== "GET" && !isPlumbing(c.url));
 
 async function click(el: HTMLElement | null): Promise<void> {
   assert.ok(el, "the control never rendered");
@@ -164,9 +164,9 @@ test("on the plan the app follows it says Following, with no way back to live", 
   const f = stubServer();
   try {
     await mountAt("/servicecue/weekend/audio");
-    assert.equal(badge(), "following");
+    await eventually(() => assert.equal(badge(), "following"));
     assert.equal(hasText("Back to live"), false);
-    assert.ok(page().includes("Sunday"), "the followed plan's own title is on the page");
+    await eventually(() => assert.ok(page().includes("Sunday"), "the followed plan's own title is on the page"));
     assert.equal(
       f.calls.some((c) => c.url.includes("/api/servicecue/rundown") && c.url.includes("planId")),
       false,
@@ -182,13 +182,13 @@ test("an arrow moves the page to the next plan, in the address, and it reads Bro
   try {
     const router = await mountAt("/servicecue/weekend/audio");
     await click(button("Next plan"));
-    assert.equal(String(planParam(router)), "303");
+    await eventually(() => assert.equal(String(planParam(router)), "303"));
     assert.ok(router.state.location.href.includes("plan=303"), router.state.location.href);
     assert.ok(!router.state.location.href.includes("%22"), "an id is not quoted in the address");
-    assert.equal(badge(), "browsing");
-    assert.equal(hasText("Back to live"), true);
-    assert.ok(f.calls.some((c) => c.url.includes("/api/servicecue/rundown") && c.url.includes("planId=303")), "the rundown was asked for that plan");
-    assert.ok(page().includes("Special"), "and that plan is what is drawn");
+    await eventually(() => assert.equal(badge(), "browsing"));
+    await eventually(() => assert.equal(hasText("Back to live"), true));
+    await eventually(() => assert.ok(f.calls.some((c) => c.url.includes("/api/servicecue/rundown") && c.url.includes("planId=303")), "the rundown was asked for that plan"));
+    await eventually(() => assert.ok(page().includes("Special"), "and that plan is what is drawn"));
   } finally {
     f.restore();
   }
@@ -198,10 +198,10 @@ test("Back to live drops the param and reads Following again", async () => {
   const f = stubServer();
   try {
     const router = await mountAt("/servicecue/weekend/audio?plan=303");
-    assert.equal(badge(), "browsing");
+    await eventually(() => assert.equal(badge(), "browsing"));
     await click([...document.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === "Back to live") ?? null);
-    assert.equal(planParam(router), undefined);
-    assert.equal(badge(), "following");
+    await eventually(() => assert.equal(planParam(router), undefined));
+    await eventually(() => assert.equal(badge(), "following"));
   } finally {
     f.restore();
   }
@@ -212,8 +212,8 @@ test("stepping onto the followed plan reads Following, from the server's own wor
   try {
     const router = await mountAt("/servicecue/weekend/audio?plan=303");
     await click(button("Previous plan"));
-    assert.equal(String(planParam(router)), "302");
-    assert.equal(badge(), "following", "plan 302 is the app's plan, so it is the followed one even with a param");
+    await eventually(() => assert.equal(String(planParam(router)), "302"));
+    await eventually(() => assert.equal(badge(), "following", "plan 302 is the app's plan, so it is the followed one even with a param"));
   } finally {
     f.restore();
   }
@@ -223,8 +223,8 @@ test("a refresh stays put: ?plan= on load shows that plan, browsing", async () =
   const f = stubServer();
   try {
     await mountAt("/servicecue/weekend/audio?plan=301");
-    assert.equal(badge(), "browsing");
-    assert.ok(page().includes("Early"));
+    await eventually(() => assert.equal(badge(), "browsing"));
+    await eventually(() => assert.ok(page().includes("Early")));
   } finally {
     f.restore();
   }
@@ -235,11 +235,11 @@ test("the arrows stop at the first and last plan instead of wrapping", async () 
   try {
     await mountAt("/servicecue/weekend/audio?plan=301");
     assert.equal(button("Previous plan")?.disabled, true);
-    assert.equal(button("Next plan")?.disabled, false);
+    await eventually(() => assert.equal(button("Next plan")?.disabled, false));
     cleanup();
     await mountAt("/servicecue/weekend/audio?plan=303");
     assert.equal(button("Next plan")?.disabled, true);
-    assert.equal(button("Previous plan")?.disabled, false);
+    await eventually(() => assert.equal(button("Previous plan")?.disabled, false));
   } finally {
     f.restore();
   }
@@ -252,7 +252,7 @@ test("it walks this service type's plans only, never another type's", async () =
     // 901 (Youth) sits between 302 and 303 by date in the shared list; stepping
     // back must skip it.
     await click(button("Previous plan"));
-    assert.equal(String(planParam(router)), "302");
+    await eventually(() => assert.equal(String(planParam(router)), "302"));
   } finally {
     f.restore();
   }
@@ -269,9 +269,9 @@ test("nothing it does writes the app's plan: no request but GETs, through step, 
     await act(async () => void fireEvent.change(field, { target: { value: "https://services.planningcenteronline.com/plans/301" } }));
     await act(async () => void fireEvent.keyDown(field, { key: "Enter" }));
     for (let i = 0; i < 6; i++) await settle();
-    assert.equal(String(planParam(router)), "301");
+    await eventually(() => assert.equal(String(planParam(router)), "301"));
     await click([...document.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === "Back to live") ?? null);
-    assert.equal(planParam(router), undefined);
+    await eventually(() => assert.equal(planParam(router), undefined));
     assert.deepEqual(writes(f.calls), [], "a write went out");
     assert.equal(f.calls.some((c) => /\/api\/(plan|service-type)(\/|$|\?)/.test(c.url) && c.method !== "GET"), false);
   } finally {
@@ -284,11 +284,11 @@ test("a browsed plan counts down to its own start and shows no Live, Remaining o
   const f = stubServer({ live });
   try {
     await mountAt("/servicecue/weekend/audio");
-    assert.ok(page().includes("Remaining"), "the followed plan carries the live timer");
-    assert.ok(page().includes("Live"));
+    await eventually(() => assert.ok(page().includes("Remaining"), "the followed plan carries the live timer"));
+    await eventually(() => assert.ok(page().includes("Live")));
     cleanup();
     await mountAt("/servicecue/weekend/audio?plan=303");
-    assert.ok(page().includes("Starts in"), "a browsed plan shows its own countdown");
+    await eventually(() => assert.ok(page().includes("Starts in"), "a browsed plan shows its own countdown"));
     assert.equal(page().includes("Remaining"), false);
     assert.equal(page().includes("Over"), false);
     assert.equal(page().includes("Live"), false);
@@ -306,7 +306,7 @@ test("pasting a link to a plan of this type browses to it", async () => {
     await act(async () => void fireEvent.change(field, { target: { value: "https://services.planningcenteronline.com/plans/303/live" } }));
     await act(async () => void fireEvent.keyDown(field, { key: "Enter" }));
     for (let i = 0; i < 6; i++) await settle();
-    assert.equal(String(planParam(router)), "303");
+    await eventually(() => assert.equal(String(planParam(router)), "303"));
     assert.equal(router.state.location.pathname, "/servicecue/weekend/audio");
   } finally {
     f.restore();
@@ -323,8 +323,8 @@ test("pasting a link to another service type's plan opens that type's page on it
     await act(async () => void fireEvent.keyDown(field, { key: "Enter" }));
     for (let i = 0; i < 6; i++) await settle();
     assert.equal(router.state.location.pathname, "/servicecue/youth/audio");
-    assert.equal(String(planParam(router)), "901");
-    assert.ok(page().includes("Youth night"));
+    await eventually(() => assert.equal(String(planParam(router)), "901"));
+    await eventually(() => assert.ok(page().includes("Youth night")));
   } finally {
     f.restore();
   }
@@ -358,7 +358,7 @@ test("text that is not a plan link says so in the menu and goes nowhere", async 
     await act(async () => void fireEvent.change(field, { target: { value: "hello" } }));
     await act(async () => void fireEvent.keyDown(field, { key: "Enter" }));
     assert.match(alerts(), /doesn't look like a Planning Center plan link/i);
-    assert.equal(planParam(router), undefined);
+    await eventually(() => assert.equal(planParam(router), undefined));
   } finally {
     f.restore();
   }
@@ -370,8 +370,8 @@ test("a link whose plan this type does not have says so on the page, and reaches
     await mountAt("/servicecue/weekend/audio?plan=777");
     assert.match(alerts(), /isn't one of this service type's plans/i);
     assert.ok(f.logs.some((l) => l.tag === "servicecue" && /plan 777/.test(l.message)), `expected a [servicecue] line, got ${JSON.stringify(f.logs)}`);
-    assert.equal(badge(), "browsing", "an unresolved plan is not the followed one");
-    assert.equal(hasText("Back to live"), true, "and the way out is there");
+    await eventually(() => assert.equal(badge(), "browsing", "an unresolved plan is not the followed one"));
+    await eventually(() => assert.equal(hasText("Back to live"), true, "and the way out is there"));
   } finally {
     f.restore();
   }
@@ -405,7 +405,7 @@ test("a failed plan list says so, logs it, and leaves the arrows off", async () 
     assert.ok(f.logs.some((l) => l.tag === "servicecue" && /plan list/.test(l.message)), JSON.stringify(f.logs));
     assert.equal(button("Next plan")?.disabled, true);
     assert.equal(button("Previous plan")?.disabled, true);
-    assert.ok(page().includes("Sunday"), "the page itself still follows its plan");
+    await eventually(() => assert.ok(page().includes("Sunday"), "the page itself still follows its plan"));
   } finally {
     f.restore();
   }
@@ -429,7 +429,7 @@ test("an empty list is not an error: disabled arrows and a plain line in the men
     assert.equal(alerts(), "");
     assert.equal(button("Next plan")?.disabled, true);
     await click(button("Choose a plan"));
-    assert.ok(page().includes("No plans for this service type"));
+    await eventually(() => assert.ok(page().includes("No plans for this service type")));
     assert.ok(screen.getByLabelText("Paste a Planning Center plan link"), "pasting still works with no list");
   } finally {
     f.restore();
@@ -481,9 +481,9 @@ test("a layout change keeps the plan being browsed, and the text size, in the ad
     await act(async () => void fireEvent.change(select, { target: { value: "svl1" } }));
     for (let i = 0; i < 6; i++) await settle();
     assert.equal(router.state.location.pathname, "/servicecue/weekend/audio");
-    assert.equal(String(planParam(router)), "303", "still browsing 303");
+    await eventually(() => assert.equal(String(planParam(router)), "303", "still browsing 303"));
     assert.equal(String((router.state.location.search as Record<string, unknown>).text), "150");
-    assert.equal(badge(), "browsing");
+    await eventually(() => assert.equal(badge(), "browsing"));
   } finally {
     f.restore();
   }
@@ -498,7 +498,7 @@ test("the arrows wait for the page's own plan: forward before it has loaded does
     assert.equal(button("Previous plan")?.disabled, true);
     gate.release();
     for (let i = 0; i < 6; i++) await settle();
-    assert.equal(button("Next plan")?.disabled, false);
+    await eventually(() => assert.equal(button("Next plan")?.disabled, false));
     assert.equal(planParam(router), undefined, "nothing was navigated while it loaded");
   } finally {
     f.restore();
@@ -510,12 +510,12 @@ test("stepping on drops the previous plan from the screen at once, rather than d
   const f = stubServer({ hold: (id) => (id === "303" ? gate.promise : undefined) });
   try {
     await mountAt("/servicecue/weekend/audio");
-    assert.ok(page().includes("Sunday"));
+    await eventually(() => assert.ok(page().includes("Sunday")));
     await click(button("Next plan"));
     assert.equal(page().includes("Sunday"), false, "303 has not answered, and 302 must not still be on screen");
     gate.release();
     for (let i = 0; i < 6; i++) await settle();
-    assert.ok(page().includes("Special"));
+    await eventually(() => assert.ok(page().includes("Special")));
   } finally {
     f.restore();
   }
@@ -527,8 +527,8 @@ test("a slow answer for the plan stepped away from does not overwrite the one st
   try {
     const router = await mountAt("/servicecue/weekend/audio?plan=303");
     await click(button("Previous plan"));
-    assert.equal(String(planParam(router)), "302");
-    assert.ok(page().includes("Sunday"), "302 answered");
+    await eventually(() => assert.equal(String(planParam(router)), "302"));
+    await eventually(() => assert.ok(page().includes("Sunday"), "302 answered"));
     slow303.release();
     for (let i = 0; i < 6; i++) await settle();
     assert.ok(page().includes("Sunday"), "302 is still what is on screen");

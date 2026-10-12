@@ -9,7 +9,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
@@ -69,7 +69,7 @@ describe("useMessageGroups", () => {
     const seen = mount();
     assert.equal(seen.current.known, false, "claimed to know before anything answered");
     await settle();
-    assert.deepEqual(seen.current.groups.map((g) => g.name), ["Green room", "Stage"]);
+    await eventually(() => assert.deepEqual(seen.current.groups.map((g) => g.name), ["Green room", "Stage"]));
     assert.equal(seen.current.known, true);
     assert.equal(seen.current.failed, false);
   });
@@ -78,16 +78,17 @@ describe("useMessageGroups", () => {
     answer = async () => state(["Green room"], 1);
     const seen = mount();
     await settle();
+    await eventually(() => assert.deepEqual(seen.current.groups.map((g) => g.name), ["Green room"]));
     await act(async () => FakeEventSource.last!.push("messages:state", state(["Greenroom", "Booth"], 2)));
     await settle();
-    assert.deepEqual(seen.current.groups.map((g) => g.name), ["Greenroom", "Booth"]);
+    await eventually(() => assert.deepEqual(seen.current.groups.map((g) => g.name), ["Greenroom", "Booth"]));
   });
 
   test("a read that answers nothing is failed, not an empty list", async () => {
     answer = async () => null;
     const seen = mount();
     await settle();
-    assert.equal(seen.current.known, true);
+    await eventually(() => assert.equal(seen.current.known, true));
     assert.equal(seen.current.failed, true, "an unanswered read must not read as 'no groups yet'");
     assert.deepEqual(seen.current.groups, []);
   });
@@ -102,12 +103,13 @@ describe("useMessageGroups", () => {
     try {
       const seen = mount();
       await settle();
-      assert.equal(seen.current.failed, true);
+      await eventually(() => assert.equal(seen.current.failed, true));
     } finally {
       console.warn = warn;
     }
     // And said on /log: a screen that cannot read the messages is otherwise a
     // screen that silently never shows an alert.
+    await eventually(() => assert.ok(toLog.length > 0, "the failure never reached /log"));
     assert.deepEqual(toLog, [{ tag: "messages", message: "could not read the stage messages: network down" }]);
   });
 });

@@ -15,7 +15,7 @@
 import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -119,8 +119,12 @@ describe("a photo on a letterboxed layout", () => {
       await settle();
     });
 
-    const src = container.querySelector("img")?.getAttribute("src");
-    assert.ok(src, "the grid drew no photo");
+    // The grid reads its slots, then measures; the photo arrives behind both.
+    const src = await eventually(() => {
+      const found = container.querySelector("img")?.getAttribute("src");
+      assert.ok(found, "the grid drew no photo");
+      return found;
+    });
     // 360 design px at 1280/1920 = 240 on screen: the 256 rung. Measured at
     // scale(1) it asks for 384, and a size that only grows keeps it.
     assert.equal(new URLSearchParams(src.split("?")[1]).get("s"), "256");

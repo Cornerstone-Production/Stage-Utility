@@ -12,7 +12,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, mock, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
 import { baptismState } from "../../../test-fixtures/baptism-state.js";
 import { FakeEventSource } from "../../../test-fixtures/fake-event-source.js";
 import { ok } from "../../../test-fixtures/fetch-log.js";
@@ -192,8 +192,8 @@ test("the chart re-lays out when its host resizes, even though the host was empt
       },
     );
 
-    assert.ok(observed, "expected the host to be observed once the lane finished loading and the chart drew");
-    const svg = screen.getByRole("img", { name: /Baptism session timeline/i }) as unknown as SVGSVGElement;
+    await eventually(() => assert.ok(observed, "expected the host to be observed once the lane finished loading and the chart drew"));
+    const svg = await eventually(() => screen.getByRole("img", { name: /Baptism session timeline/i })) as unknown as SVGSVGElement;
     assert.equal(svg.getAttribute("viewBox")?.split(" ")[2], "640", "sanity: the default width before any resize");
 
     Object.defineProperty(observed!, "clientWidth", { value: 900, configurable: true });
@@ -577,7 +577,7 @@ test("hovering the running segment keeps moving, not frozen at whatever duration
       await settle();
     });
 
-    const svg = screen.getByRole("img", { name: /Baptism session timeline/i }) as unknown as SVGSVGElement;
+    const svg = await eventually(() => screen.getByRole("img", { name: /Baptism session timeline/i })) as unknown as SVGSVGElement;
     // Inside the plot area (session-chart.tsx's own PAD_L=46/PAD_R=14), near
     // the live edge where a running segment (open-ended, drawn to "now")
     // sits.
@@ -657,10 +657,12 @@ test("a press's own new span draws immediately, even before the next second's cl
       await settle();
     });
 
-    assert.equal(
-      document.querySelectorAll("[data-timer-segment]").length,
-      1,
-      "sanity: the first (open) segment drew before the press",
+    await eventually(() =>
+      assert.equal(
+        document.querySelectorAll("[data-timer-segment]").length,
+        1,
+        "sanity: the first (open) segment drew before the press",
+      ),
     );
 
     // The operator presses "Next person in": person 1's testimony closes at
@@ -678,10 +680,14 @@ test("a press's own new span draws immediately, even before the next second's cl
       await settle();
     });
 
-    assert.equal(
-      document.querySelectorAll("[data-timer-segment]").length,
-      2,
-      "the span the press just started must draw immediately, not wait for the next second's tick",
+    // The clock is mocked here, so nothing ticks: what draws is the lane
+    // re-read the push caused, and only that.
+    await eventually(() =>
+      assert.equal(
+        document.querySelectorAll("[data-timer-segment]").length,
+        2,
+        "the span the press just started must draw immediately, not wait for the next second's tick",
+      ),
     );
   } finally {
     globalThis.fetch = realFetch;

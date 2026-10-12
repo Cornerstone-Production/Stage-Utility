@@ -12,7 +12,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -74,7 +74,7 @@ test("Planning Center not connected says to connect it — no alert, no log, not
   const f = stubFetch({ pcoConfigured: false });
   try {
     await mount();
-    assert.equal(!!screen.queryByText(/Connect Planning Center to use ServiceCue/i), true);
+    await eventually(() => assert.equal(!!screen.queryByText(/Connect Planning Center to use ServiceCue/i), true));
     assert.equal(!!screen.queryByText(/PCO not configured/i), false, "not an error printed from the server");
     assert.equal(alerts(), "");
     assert.deepEqual(f.logs, []);
@@ -88,11 +88,11 @@ test("a failed read on a connected server says so, and reaches the log", async (
   const f = stubFetch({ failing: "load" });
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load ServiceCue's service types and layouts/i);
-    assert.ok(
+    await eventually(() => assert.match(alerts(), /Couldn't load ServiceCue's service types and layouts/i));
+    await eventually(() => assert.ok(
       f.logs.some((l) => l.tag === "servicecue" && /service types and layouts/.test(l.message)),
       `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`,
-    );
+    ));
   } finally {
     f.restore();
   }
@@ -102,7 +102,7 @@ test("a stage state that cannot be read does not leave the launcher spinning for
   const f = stubFetch({ failing: "state" });
   try {
     await mount();
-    assert.equal(!!screen.queryByText("Weekend"), true, "the service types are still read, and listed");
+    await eventually(() => assert.equal(!!screen.queryByText("Weekend"), true, "the service types are still read, and listed"));
   } finally {
     f.restore();
   }
@@ -115,15 +115,15 @@ test("a failure a later read answers is taken away", async () => {
   const f = stubFetch({ live });
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load ServiceCue's service types and layouts/i);
+    await eventually(() => assert.match(alerts(), /Couldn't load ServiceCue's service types and layouts/i));
     live.loadFails = false;
     await act(async () => FakeEventSource.last?.push("stage:state-changed", { pcoConfigured: false }));
     await settle();
     await act(async () => FakeEventSource.last?.push("stage:state-changed", { pcoConfigured: true }));
     await settle();
     await settle();
-    assert.equal(alerts(), "", "the read that worked is the page now");
-    assert.equal(!!screen.queryByText("Weekend"), true);
+    await eventually(() => assert.equal(alerts(), "", "the read that worked is the page now"));
+    await eventually(() => assert.equal(!!screen.queryByText("Weekend"), true));
   } finally {
     f.restore();
   }
@@ -133,7 +133,7 @@ test("control: connected, the enabled service types are listed with no alert", a
   const f = stubFetch();
   try {
     await mount();
-    assert.equal(!!screen.queryByText("Weekend"), true);
+    await eventually(() => assert.equal(!!screen.queryByText("Weekend"), true));
     assert.equal(alerts(), "");
     assert.deepEqual(f.logs, []);
   } finally {

@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 import { routerWithBaptismDestination } from "../../test-fixtures/router.js";
 import { fmtTime } from "./overview-data.js";
@@ -171,11 +171,15 @@ async function openTheService(Section: React.ComponentType, opts: { router?: Ret
     React.createElement(TooltipProvider, null, section, React.createElement(ConfirmHost)),
   );
   await settle();
+  const row = await eventually(() => {
+    const found = [...view.container.querySelectorAll("button")].find((b) => text(b).includes("Evening"));
+    assert.ok(found, "the service row never rendered");
+    return found;
+  });
+  fireEvent.click(row);
   await settle();
-  const row = [...view.container.querySelectorAll("button")].find((b) => text(b).includes("Evening"));
-  assert.ok(row, "the service row never rendered");
-  fireEvent.click(row!);
-  await settle();
+  // The service page is up once its header is; its own reads follow.
+  await eventually(() => assert.ok(view.container.querySelector('[data-testid="history-service-header"]'), "the service never opened"));
   await settle();
   await settle();
   return view;

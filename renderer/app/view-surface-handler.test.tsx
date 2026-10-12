@@ -23,11 +23,11 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installRenderDom();
 
-const { renderHook, screen, cleanup, fireEvent, act, waitFor } = await import("@testing-library/react");
+const { renderHook, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { ConfirmHost } = await import("../components/ui/index.js");
@@ -71,7 +71,6 @@ type Reply = { status: number; body: unknown };
 /** GETs answer the seeded state at /api/state and an empty list elsewhere. A
  *  write answers from `writes`, one per write in order; past the end, 200 and
  *  the state. */
-const isPlumbing = (url: string) => url.startsWith("/api/events");
 const isWrite = (c: Call) => c.method !== "GET" && !isPlumbing(c.url);
 
 function stubFetch(state: StageState, writes: Reply[] = []) {
@@ -127,15 +126,12 @@ const dialog = () => screen.queryByRole("alertdialog");
  *  after a fixed number of ticks: on a slow CI runner the ask, a 409 and the
  *  re-ask take more turns than on a laptop. */
 async function opened(says?: RegExp): Promise<HTMLElement> {
-  return waitFor(
-    () => {
-      const d = dialog();
-      assert.ok(d, "no confirm opened");
-      if (says) assert.match(d.textContent!, says);
-      return d;
-    },
-    { timeout: 5000 },
-  );
+  return eventually(() => {
+    const d = dialog();
+    assert.ok(d, "no confirm opened");
+    if (says) assert.match(d.textContent!, says);
+    return d;
+  });
 }
 
 beforeEach(() => {

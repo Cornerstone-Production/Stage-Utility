@@ -20,7 +20,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, it } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import type { CalendarSelection } from "@main/types/calendar";
 import type { View } from "@main/types/stage";
 
@@ -117,6 +117,13 @@ describe("choosing a tag reaches the server", () => {
   const draw = () =>
     render(React.createElement(CalendarSources, { view, pcoConfigured: true }));
 
+  /** Draw, and wait for the read of the calendars and tags to have landed. */
+  const drawn = async () => {
+    draw();
+    await settle();
+    await eventually(() => assert.equal(screen.queryByText(/reading the calendars/i) === null, true, "the calendars never loaded"));
+  };
+
   /**
    * Open one of the two pickers and click one of its rows.
    *
@@ -124,43 +131,48 @@ describe("choosing a tag reaches the server", () => {
    * shows a SUMMARY of the current selection ("All (1)", "2 selected"), so
    * matching on it makes the test depend on how many options happened to load.
    */
-  const choose = (field: string, option: string | RegExp) => {
-    const panel = document.querySelector(`[data-field="${field}"]`);
-    assert.ok(panel, `no picker named ${field}`);
+  const choose = async (field: string, option: string | RegExp) => {
+    const panel = await eventually(() => {
+      const found = document.querySelector(`[data-field="${field}"]`);
+      assert.ok(found, `no picker named ${field}`);
+      return found;
+    });
     const trigger = within(panel as HTMLElement).getByRole("button");
     fireEvent.click(trigger);
     // The popover portals to document.body, so the rows are found on `screen`
-    // rather than inside the field.
-    fireEvent.click(screen.getByText(option));
+    // rather than inside the field. The options are what the read brought.
+    fireEvent.click(await eventually(() => screen.getByText(option)));
   };
 
   it("PATCHes the view when a tag is ticked", async () => {
-    draw();
-    await settle();
+    await drawn();
     sent = [];
-    choose("tags", /Departments · Alpha Ministry/);
-    const patch = sent.find((r) => r.method === "PATCH");
-    assert.ok(patch, `nothing was sent — the picker rendered and did nothing. Saw: ${JSON.stringify(sent)}`);
+    await choose("tags", /Departments · Alpha Ministry/);
+    const patch = await eventually(() => {
+      const found = sent.find((r) => r.method === "PATCH");
+      assert.ok(found, `nothing was sent — the picker rendered and did nothing. Saw: ${JSON.stringify(sent)}`);
+      return found;
+    });
     assert.match(patch.url, /\/api\/views\/v-1$/);
   });
 
   it("sends BOTH lists, which is the only shape the server accepts", async () => {
     // view-routes refuses a body carrying one list and not the other, so a
     // picker that sent only the one it changed would fail every save.
-    draw();
-    await settle();
+    await drawn();
     sent = [];
-    choose("tags", /Departments · Alpha Ministry/);
+    await choose("tags", /Departments · Alpha Ministry/);
+    await eventually(() => assert.ok(sent.find((r) => r.method === "PATCH"), "nothing was sent"));
     const body = sent.find((r) => r.method === "PATCH")?.body as Record<string, unknown>;
     assert.ok(Array.isArray(body.calendarSources), "calendarSources missing from the body");
     assert.ok(Array.isArray(body.calendarTags), "calendarTags missing from the body");
   });
 
   it("sends the id AND the name, and keeps the choice PCO no longer offers", async () => {
-    draw();
-    await settle();
+    await drawn();
     sent = [];
-    choose("tags", /Departments · Alpha Ministry/);
+    await choose("tags", /Departments · Alpha Ministry/);
+    await eventually(() => assert.ok(sent.find((r) => r.method === "PATCH"), "nothing was sent"));
     const body = sent.find((r) => r.method === "PATCH")?.body as { calendarTags: CalendarSelection[] };
     assert.deepEqual(body.calendarTags, [
       { id: "tag-gone", name: "Gamma Ministry" },
@@ -174,7 +186,7 @@ describe("choosing a tag reaches the server", () => {
     draw();
     assert.ok(screen.getByText(/reading the calendars/i));
     await settle();
-    assert.ok(screen.queryByText(/reading the calendars/i) === null, "still claiming to be loading after the read landed");
+    await eventually(() => assert.ok(screen.queryByText(/reading the calendars/i) === null, "still claiming to be loading after the read landed"));
   });
 
   it("does not call a stored choice missing before it knows", async () => {
@@ -205,15 +217,14 @@ describe("choosing a tag reaches the server", () => {
 
     landed.fn();
     await settle();
-    await settle();
+    await eventually(() => assert.equal(screen.queryByText(/reading the calendars/i) === null, true, "the calendars never loaded"));
   });
 
   it("says the read failed when it did", async () => {
     sourcesReply = () => Promise.reject(new Error("nope"));
     draw();
     await settle();
-    await settle();
-    assert.ok(screen.getByText(/could not read the calendars/i));
+    await eventually(() => assert.ok(screen.getByText(/could not read the calendars/i)));
   });
 
   it("THE GUARD: the two pickers announce their own captions, not just a summary", async () => {
@@ -223,8 +234,7 @@ describe("choosing a tag reaches the server", () => {
     // browser does rather than reading DOM text — the caption is clipped, not
     // written into the markup beside the summary. jsdom settles nothing about
     // the clip itself; that is the app's existing sr-only utility.
-    draw();
-    await settle();
+    await drawn();
     assert.equal(
       screen.queryAllByRole("button", { name: "Calendars All calendars" }).length,
       1,
@@ -252,7 +262,7 @@ describe("choosing a tag reaches the server", () => {
     sourcesReply = async () => ({ calendars: [], tags: [] });
     render(React.createElement(CalendarSources, { view, pcoConfigured: false }));
     await settle();
-    assert.ok(screen.getByText(/planning center is not connected/i));
+    await eventually(() => assert.ok(screen.getByText(/planning center is not connected/i)));
   });
 });
 

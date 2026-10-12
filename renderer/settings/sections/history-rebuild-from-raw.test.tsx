@@ -18,7 +18,7 @@
 import { strict as assert } from "node:assert";
 import { after, before, beforeEach, describe, test } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -133,15 +133,45 @@ const lastToast = () => {
   return all.length ? text(all[all.length - 1] as HTMLElement) : "NO TOAST";
 };
 
+/** The button with this label, once it is there. */
+const buttonLater = (root: HTMLElement, label: string, why: string) =>
+  eventually(() => {
+    const found = button(root, label);
+    assert.ok(found, why);
+    return found;
+  });
+
+/** Press Rebuild from raw, confirm it, and wait for the toast the answer brings.
+ *  A toast already on screen is not the answer: the count or the newest text
+ *  has to have changed. */
+async function confirmRebuild(container: HTMLElement) {
+  const toastsBefore = document.querySelectorAll(".text-footnote").length;
+  const newestBefore = lastToast();
+  fireEvent.click(await buttonLater(container, "Rebuild from raw", "the Rebuild from raw button never rendered"));
+  await settle();
+  fireEvent.click(await buttonLater(document.body as HTMLElement, "Rebuild", "the confirm dialog offered no Rebuild button"));
+  await settle();
+  await eventually(() =>
+    assert.ok(
+      document.querySelectorAll(".text-footnote").length > toastsBefore || lastToast() !== newestBefore,
+      "no toast followed the rebuild",
+    ),
+  );
+}
+
 /** Open the one recording. Nothing else: Rebuild from raw is in the header's
  *  action group, so edit mode is not a step on the way to it. */
 async function openRecording(container: HTMLElement) {
-  const row = [...container.querySelectorAll("button")].find((b) =>
-    text(b as HTMLElement).includes("Sunday Gathering"),
-  );
-  assert.ok(row, "the recording's row never rendered");
-  fireEvent.click(row!);
+  const row = await eventually(() => {
+    const found = [...container.querySelectorAll("button")].find((b) =>
+      text(b as HTMLElement).includes("Sunday Gathering"),
+    );
+    assert.ok(found, "the recording's row never rendered");
+    return found;
+  });
+  fireEvent.click(row);
   await settle();
+  await buttonLater(container, "Rebuild from raw", "the recording never opened");
   await settle();
   assert.equal(
     container.querySelectorAll('input[type="time"]').length,
@@ -197,11 +227,18 @@ describe("History: Rebuild from raw", () => {
     assert.match(dialog, /baptism sessions are merged/i, `the confirm does not mention the baptism merge: ${dialog}`);
     assert.match(dialog, /never deleted|can come back/i, `the confirm does not warn that a deleted session can return: ${dialog}`);
 
+    const toastsBefore = document.querySelectorAll(".text-footnote").length;
+    const newestBefore = lastToast();
     const go = button(document.body as HTMLElement, "Rebuild");
     assert.ok(go, `the confirm dialog offered no Rebuild button: ${dialog}`);
     fireEvent.click(go!);
     await settle();
-    await settle();
+    await eventually(() =>
+      assert.ok(
+        document.querySelectorAll(".text-footnote").length > toastsBefore || lastToast() !== newestBefore,
+        "no toast followed the rebuild",
+      ),
+    );
 
     const posted = calls.filter((c) => c.url === "/api/history/rebuild");
     assert.equal(posted.length, 1, `expected exactly one rebuild request, got ${JSON.stringify(calls)}`);
@@ -236,11 +273,7 @@ describe("History: Rebuild from raw", () => {
     await settle();
     await openRecording(view.container);
 
-    fireEvent.click(button(view.container, "Rebuild from raw")!);
-    await settle();
-    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
-    await settle();
-    await settle();
+    await confirmRebuild(view.container);
 
     const shown = lastToast();
     assert.match(shown, /baptism sessions/, `the baptism leg is missing from the result entirely: ${shown}`);
@@ -271,11 +304,7 @@ describe("History: Rebuild from raw", () => {
     await settle();
     await openRecording(view.container);
 
-    fireEvent.click(button(view.container, "Rebuild from raw")!);
-    await settle();
-    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
-    await settle();
-    await settle();
+    await confirmRebuild(view.container);
 
     const shown = lastToast();
     assert.match(shown, /1 added/, `missing the added count: ${shown}`);
@@ -320,11 +349,7 @@ describe("History: Rebuild from raw", () => {
     await settle();
     await openRecording(view.container);
 
-    fireEvent.click(button(view.container, "Rebuild from raw")!);
-    await settle();
-    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
-    await settle();
-    await settle();
+    await confirmRebuild(view.container);
 
     const shown = lastToast();
     const occurrences = (shown.match(/left alone/g) ?? []).length;
@@ -354,11 +379,7 @@ describe("History: Rebuild from raw", () => {
     await settle();
     await openRecording(view.container);
 
-    fireEvent.click(button(view.container, "Rebuild from raw")!);
-    await settle();
-    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
-    await settle();
-    await settle();
+    await confirmRebuild(view.container);
 
     const shown = lastToast();
     assert.match(shown, /the store is full, so 3 baptism sessions were not added/, `missing the full-store clause: ${shown}`);
@@ -383,11 +404,7 @@ describe("History: Rebuild from raw", () => {
     await settle();
     await openRecording(view.container);
 
-    fireEvent.click(button(view.container, "Rebuild from raw")!);
-    await settle();
-    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
-    await settle();
-    await settle();
+    await confirmRebuild(view.container);
 
     assert.doesNotMatch(lastToast(), /\bfull\b/, "full:0 must not mention the store being full at all");
   });
@@ -413,11 +430,7 @@ describe("History: Rebuild from raw", () => {
     await settle();
     await openRecording(view.container);
 
-    fireEvent.click(button(view.container, "Rebuild from raw")!);
-    await settle();
-    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
-    await settle();
-    await settle();
+    await confirmRebuild(view.container);
 
     const shown = lastToast();
     assert.match(shown, /left alone: item timings, SPL items/, `the toast hid what it did not touch: ${shown}`);
@@ -443,11 +456,7 @@ describe("History: Rebuild from raw", () => {
     await settle();
     await openRecording(view.container);
 
-    fireEvent.click(button(view.container, "Rebuild from raw")!);
-    await settle();
-    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
-    await settle();
-    await settle();
+    await confirmRebuild(view.container);
 
     const shown = lastToast();
     assert.match(shown, /could not save: spl/, `a failed write was not reported to the operator: ${shown}`);
@@ -498,11 +507,7 @@ describe("History: Rebuild from raw", () => {
     await settle();
     await openRecording(view.container);
 
-    fireEvent.click(button(view.container, "Rebuild from raw")!);
-    await settle();
-    fireEvent.click(button(document.body as HTMLElement, "Rebuild")!);
-    await settle();
-    await settle();
+    await confirmRebuild(view.container);
 
     const shown = lastToast();
     assert.match(shown, /Rebuild failed/, `no failure toast: ${shown}`);

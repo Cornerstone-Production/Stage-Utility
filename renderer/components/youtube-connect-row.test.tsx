@@ -17,7 +17,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installDom, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
 // React only act-wraps a render, and only warns when an update escapes one,
@@ -80,18 +80,22 @@ describe("the four states", () => {
   test("idle, enabled: Connect YouTube and 'Not connected'", async () => {
     installFetch(() => ({ status: "idle" }));
     const { container } = await mount();
-    assert.match(container.textContent ?? "", /Not connected/);
-    const button = container.querySelector("button");
-    assert.match(button?.textContent ?? "", /Connect YouTube/);
-    assert.equal(button?.disabled, false);
+    await eventually(() => {
+      assert.match(container.textContent ?? "", /Not connected/);
+      const button = container.querySelector("button");
+      assert.match(button?.textContent ?? "", /Connect YouTube/);
+      assert.equal(button?.disabled, false);
+    });
   });
 
   test("idle, disabled: the hint shows and the button cannot be pressed", async () => {
     installFetch(() => ({ status: "idle" }));
     const { container } = await mount({ disabled: true });
-    assert.match(container.textContent ?? "", /Save the client ID and secret first/);
-    const button = [...container.querySelectorAll("button")].find((b) => /Connect YouTube/.test(b.textContent ?? ""));
-    assert.equal(button?.disabled, true);
+    await eventually(() => {
+      assert.match(container.textContent ?? "", /Save the client ID and secret first/);
+      const button = [...container.querySelectorAll("button")].find((b) => /Connect YouTube/.test(b.textContent ?? ""));
+      assert.equal(button?.disabled, true);
+    });
   });
 
   test("pending: the code, the instruction, and a Cancel control", async () => {
@@ -102,28 +106,34 @@ describe("the four states", () => {
       expiresAt: Date.now() + 30 * 60_000,
     }));
     const { container } = await mount();
-    const text = container.textContent ?? "";
-    assert.match(text, /GQVQ-SHNC/);
-    assert.ok(text.includes("google.com/device"), "the row must name where to enter the code");
-    assert.match(text, /Cancel/);
+    await eventually(() => {
+      const text = container.textContent ?? "";
+      assert.match(text, /GQVQ-SHNC/);
+      assert.ok(text.includes("google.com/device"), "the row must name where to enter the code");
+      assert.match(text, /Cancel/);
+    });
   });
 
   test("connected: the channel title and Reconnect / Disconnect", async () => {
     installFetch(() => ({ status: "connected", channelTitle: "Grace Church" }));
     const { container } = await mount();
-    const text = container.textContent ?? "";
-    assert.match(text, /Connected/);
-    assert.match(text, /Grace Church/);
-    assert.match(text, /Reconnect/);
-    assert.match(text, /Disconnect/);
+    await eventually(() => {
+      const text = container.textContent ?? "";
+      assert.match(text, /Connected/);
+      assert.match(text, /Grace Church/);
+      assert.match(text, /Reconnect/);
+      assert.match(text, /Disconnect/);
+    });
   });
 
   test("error: the server's sentence and Try again", async () => {
     installFetch(() => ({ status: "error", message: "You declined the request in Google" }));
     const { container } = await mount();
-    const text = container.textContent ?? "";
-    assert.match(text, /You declined the request in Google/);
-    assert.match(text, /Try again/);
+    await eventually(() => {
+      const text = container.textContent ?? "";
+      assert.match(text, /You declined the request in Google/);
+      assert.match(text, /Try again/);
+    });
   });
 });
 
@@ -135,11 +145,12 @@ describe("pressing the buttons", () => {
         : { status: "pending", userCode: "NEW-CODE", verificationUrl: "https://www.google.com/device", expiresAt: Date.now() + 60_000 },
     );
     const { container } = await mount();
-    const button = container.querySelector("button")!;
+    const button = await eventually(() => container.querySelector("button")!);
     await act(async () => {
       fireEvent.click(button);
       await new Promise((r) => setTimeout(r, 0));
     });
+    await eventually(() => assert.ok(calls.some((c) => c.method === "POST"), "Connect sent nothing"));
     const posts = calls.filter((c) => c.method === "POST");
     assert.equal(posts.length, 1, "Connect must POST exactly once to the start route");
   });
@@ -151,11 +162,16 @@ describe("pressing the buttons", () => {
         : { status: "pending", userCode: "GQVQ-SHNC", verificationUrl: "https://www.google.com/device", expiresAt: Date.now() + 30 * 60_000 },
     );
     const { container } = await mount();
-    const cancelButton = [...container.querySelectorAll("button")].find((b) => /Cancel/.test(b.textContent ?? ""))!;
+    const cancelButton = await eventually(() => {
+      const found = [...container.querySelectorAll("button")].find((b) => /Cancel/.test(b.textContent ?? ""));
+      assert.ok(found, "no Cancel control");
+      return found;
+    });
     await act(async () => {
       fireEvent.click(cancelButton);
       await new Promise((r) => setTimeout(r, 0));
     });
+    await eventually(() => assert.ok(calls.some((c) => c.method === "DELETE"), "Cancel sent nothing"));
     const deletes = calls.filter((c) => c.method === "DELETE");
     assert.equal(deletes.length, 1, "Cancel must DELETE exactly once");
     assert.equal(deletes[0].body, undefined, "a bare Cancel must not carry a disconnect body");
@@ -164,11 +180,16 @@ describe("pressing the buttons", () => {
   test("Disconnect DELETEs with { disconnect: true }", async () => {
     installFetch((method) => (method === "DELETE" ? { status: "idle" } : { status: "connected", channelTitle: "Grace Church" }));
     const { container } = await mount();
-    const disconnectButton = [...container.querySelectorAll("button")].find((b) => b.textContent === "Disconnect")!;
+    const disconnectButton = await eventually(() => {
+      const found = [...container.querySelectorAll("button")].find((b) => b.textContent === "Disconnect");
+      assert.ok(found, "no Disconnect control");
+      return found;
+    });
     await act(async () => {
       fireEvent.click(disconnectButton);
       await new Promise((r) => setTimeout(r, 0));
     });
+    await eventually(() => assert.ok(calls.some((c) => c.method === "DELETE"), "Disconnect sent nothing"));
     const deletes = calls.filter((c) => c.method === "DELETE");
     assert.equal(deletes.length, 1, "Disconnect must DELETE exactly once");
     assert.deepEqual(deletes[0].body, { disconnect: true });
@@ -183,7 +204,11 @@ describe("the paste-a-token disclosure", () => {
 
     assert.equal(container.querySelector('input[type="password"]'), null, "the disclosure must start closed");
 
-    const toggle = [...container.querySelectorAll("button")].find((b) => /Paste a token instead/.test(b.textContent ?? ""))!;
+    const toggle = await eventually(() => {
+      const found = [...container.querySelectorAll("button")].find((b) => /Paste a token instead/.test(b.textContent ?? ""));
+      assert.ok(found, "no disclosure toggle");
+      return found;
+    });
     fireEvent.click(toggle);
     await act(async () => {});
 
@@ -206,10 +231,7 @@ describe("polling", () => {
     }));
     await mount({ pollMs: 10 });
     const afterMount = calls.length;
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-    assert.ok(calls.length > afterMount, "no further GET was made while pending");
+    await eventually(() => assert.ok(calls.length > afterMount, "no further GET was made while pending"));
   });
 
   test("stops once connected, even if a stray timer is already queued", async () => {

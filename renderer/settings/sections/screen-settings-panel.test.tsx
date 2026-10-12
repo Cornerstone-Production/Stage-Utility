@@ -23,7 +23,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { eventually, installDom } from "../../test-dom.js";
 import { KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 
 const teardown = installDom();
@@ -172,7 +172,7 @@ const sw = (name: string) => screen.getByRole("switch", { name });
 const role = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}`) });
 /** Answer the confirm dialog that choosing a view of the other kind opens. */
 async function answerConfirm(label: string | null): Promise<void> {
-  const dialog = await screen.findByRole("alertdialog");
+  const dialog = await eventually(() => screen.getByRole("alertdialog"));
   await click(within(dialog).getByRole("button", { name: label ?? "Cancel" }));
 }
 
@@ -789,7 +789,7 @@ describe("choosing a view of the other kind", () => {
   test("a wall display pointed at a console asks first, and says what changes", async () => {
     const { calls } = mount({});
     await choose(picker(), "ctl-b");
-    const dialog = await screen.findByRole("alertdialog");
+    const dialog = await eventually(() => screen.getByRole("alertdialog"));
     assert.match(dialog.textContent ?? "", /Make "Lobby TV" a control surface\?/);
     assert.match(dialog.textContent ?? "", /"Stage controls" is a control surface\. Buttons on this screen will work, and anyone standing at it can press them/);
     assert.deepEqual(calls, [], "the screen was routed before the operator said yes");
@@ -802,7 +802,7 @@ describe("choosing a view of the other kind", () => {
     // was open is refused, rather than a screen going live on what nobody confirmed.
     const { calls, rerender } = mount({});
     await choose(picker(), "ctl-b");
-    await screen.findByRole("alertdialog");
+    await eventually(() => screen.getByRole("alertdialog"));
     await rerender({ views: VIEWS.map((v) => (v.id === "ctl-b" ? { ...v, surface: "display" as const } : v)) });
     await answerConfirm("Show it and make it live");
     assert.deepEqual(calls, [["view", "display-1", "ctl-b", "console"]]);
@@ -819,7 +819,7 @@ describe("choosing a view of the other kind", () => {
   test("a control surface pointed at a wall view asks first, too", async () => {
     const { calls } = mount({ outputs: [PANEL_A] });
     await choose(picker(), "wall-b");
-    const dialog = await screen.findByRole("alertdialog");
+    const dialog = await eventually(() => screen.getByRole("alertdialog"));
     assert.match(dialog.textContent ?? "", /Make "Booth panel" a wall display\?/);
     assert.match(dialog.textContent ?? "", /read-only/);
 await answerConfirm("Show it");
@@ -829,8 +829,8 @@ await answerConfirm("Show it");
   test("a screen showing nothing, given a console, asks: its buttons would go live", async () => {
     const { calls } = mount({ outputs: [{ ...MINE, viewId: null }] });
     await choose(picker(), "ctl-a");
-    await screen.findByRole("alertdialog");
-await answerConfirm("Show it and make it live");
+    await eventually(() => screen.getByRole("alertdialog"));
+    await answerConfirm("Show it and make it live");
     assert.deepEqual(calls, [["view", "display-1", "ctl-a", "console"]]);
   });
 

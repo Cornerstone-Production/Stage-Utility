@@ -16,7 +16,7 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
 // React only act-wraps a render, and only warns when an update escapes one,
@@ -47,6 +47,8 @@ after(() =>
 /** Awaits the card. The synchronous read this replaced could run before React
  *  had committed it — see integrationCard. */
 const tile = (c: { container: HTMLElement }, id: string) => integrationCard(c.container, id);
+const cardOrder = (c: { container: HTMLElement }) =>
+  [...c.container.querySelectorAll("[data-integration-card]")].map((el) => el.getAttribute("data-integration-card"));
 
 /** The settings dialog, which renders in a portal outside the container. */
 const dialog = (): HTMLElement | null =>
@@ -77,12 +79,10 @@ describe("a draft survives the card moving between groups", () => {
     fireEvent.click(dialogSwitch);
     await settle();
 
-    // The card really did move: it is now in the half above "Not set up".
-    assert.equal(server.states.get("obs")?.enabled, true, "the switch did not enable anything");
-    const order = [...c.container.querySelectorAll("[data-integration-card]")].map((el) =>
-      el.getAttribute("data-integration-card"),
-    );
-    assert.equal(order[0], "obs", "the card did not move to the in-use half");
+    // The card really did move: it is now in the half above "Not set up". The
+    // move follows the server's answer, so it is waited for, not assumed.
+    await eventually(() => assert.equal(server.states.get("obs")?.enabled, true, "the switch did not enable anything"));
+    await eventually(() => assert.equal(cardOrder(c)[0], "obs", "the card did not move to the in-use half"));
 
     assert.ok(dialog(), "the dialog was unmounted when the card moved");
     assert.equal(
@@ -110,7 +110,10 @@ describe("a draft survives the card moving between groups", () => {
     fireEvent.click(dialog()!.querySelector<HTMLElement>('[aria-label="Enable OBS Studio"]')!);
     await settle();
 
-    assert.equal(server.states.get("obs")?.enabled, true, "the switch did not enable anything");
+    await eventually(() => assert.equal(server.states.get("obs")?.enabled, true, "the switch did not enable anything"));
+    // Identity is only worth reading once the card has moved, which is the
+    // moment a tile-owned dialog would have been rebuilt.
+    await eventually(() => assert.equal(cardOrder(c)[0], "obs", "the card did not move to the in-use half"));
     assert.equal(
       dialog() === before,
       true,

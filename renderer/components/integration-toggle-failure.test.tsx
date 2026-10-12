@@ -12,12 +12,12 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const { render, cleanup, fireEvent, screen, waitFor, act } = await import("@testing-library/react");
+const { render, cleanup, fireEvent, screen, act } = await import("@testing-library/react");
 const { installFakeServer, withQueryClient, integrationCard, actIdle } = await import(
   "../test-fixtures/integrations-harness.js"
 );
@@ -57,7 +57,7 @@ describe("a failed toggle's toast", () => {
       fireEvent.click(sw!);
     });
 
-    await waitFor(() => {
+    await eventually(() => {
       assert.ok(screen.getByText(/Failed to enable Video feeds: the relay is not running/));
     });
     const toastText = document.body.textContent ?? "";

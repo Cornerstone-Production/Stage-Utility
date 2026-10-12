@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../../test-dom.js";
+import { eventually, installRenderDom } from "../../../test-dom.js";
 
 const teardown = installRenderDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -1150,9 +1150,11 @@ async function withCard(check: (view: ReturnType<typeof render>) => void | Promi
     view = render(
       React.createElement(TooltipProvider, null, React.createElement(TrendsCard, { recordings: recs })),
     );
-    for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
   });
   try {
+    // The marks are the milestones read, a fetch behind the first paint.
+    await eventually(() => assert.ok(view.container.querySelector("[data-milestone]"), "no marks drawn at all, so this asserts nothing"));
     await check(view);
   } finally {
     view.unmount();

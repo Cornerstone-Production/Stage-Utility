@@ -8,7 +8,7 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installDom } from "../test-dom.js";
 import { EVERYONE, type MessagesState, type StageMessage } from "@main/types/messages";
 
 const teardown = installDom();
@@ -261,6 +261,7 @@ describe("answering from a console", () => {
     await act(async () => {
       fireEvent.click([...c.querySelectorAll("button")].find((b) => b.textContent === "Walking now")!);
     });
+    await eventually(() => assert.ok(requests.some((r) => r.method === "POST" && r.url.includes("/replies")), "the press sent nothing"));
     const posts = requests.filter((r) => r.method === "POST" && r.url.includes("/replies"));
     assert.equal(posts.length, 1);
     assert.equal(posts[0].url, `/api/messages/${thread.messages[2].id}/replies`, "answered a message that is not the newest this widget shows");
@@ -279,7 +280,7 @@ describe("answering from a console", () => {
       await act(async () => { fireEvent.click(copy()); });
       assert.equal(requests.filter((r) => r.url.includes("/replies")).length, 1, "a second tap sent a second reply");
       await act(async () => { release(); });
-      assert.deepEqual([...c.querySelectorAll("button")].map((b) => b.disabled), [false, false, false], "the buttons stayed disabled after the answer");
+      await eventually(() => assert.deepEqual([...c.querySelectorAll("button")].map((b) => b.disabled), [false, false, false], "the buttons stayed disabled after the answer"));
     } finally {
       replyGate = null;
       release();
@@ -296,16 +297,21 @@ describe("answering from a console", () => {
       await act(async () => {
         fireEvent.click([...c.querySelectorAll("button")].find((b) => b.textContent === "Copy")!);
       });
+      // The operator being told is the failure having been handled.
+      await eventually(() => assert.equal(toasts.length, 1, "the operator was not told"));
       assert.deepEqual(buttons(c), ["Copy", "Walking now", "Need 2 min"], "the buttons went away after a failed reply");
-      assert.ok((c.querySelector("button") as HTMLButtonElement).disabled === false, "left disabled after the failure");
+      await eventually(() => assert.ok((c.querySelector("button") as HTMLButtonElement).disabled === false, "left disabled after the failure"));
     } finally {
       console.warn = quiet;
       replyStatus = 201;
     }
-    const logged = requests.find((r) => r.url === "/api/log/client");
-    assert.ok(logged, "the failure was not sent to /log");
-    assert.deepEqual((logged!.body as { tag: string }).tag, "messages");
-    assert.match((logged!.body as { message: string }).message, /could not send that reply \(to .*\): .*does not follow a group/);
+    const logged = await eventually(() => {
+      const found = requests.find((r) => r.url === "/api/log/client");
+      assert.ok(found, "the failure was not sent to /log");
+      return found;
+    });
+    assert.deepEqual((logged.body as { tag: string }).tag, "messages");
+    assert.match((logged.body as { message: string }).message, /could not send that reply \(to .*\): .*does not follow a group/);
     assert.deepEqual(toasts, ["Could not send that reply: that widget does not follow a group this message was sent to"], "the operator was not told");
   });
 });

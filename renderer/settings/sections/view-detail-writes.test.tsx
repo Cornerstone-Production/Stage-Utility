@@ -14,7 +14,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -100,9 +100,9 @@ test("a failed console-chrome toggle toasts, rather than doing nothing silently"
   try {
     mount(CONSOLE_VIEW);
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: /Hide the app's bars on this console/i }));
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: /Hide the app's bars on this console/i })));
     await settle();
-    assert.match(lastToast(), /Could not change this console's chrome/i);
+    await eventually(() => assert.match(lastToast(), /Could not change this console's chrome/i));
   } finally {
     f.restore();
   }
@@ -117,10 +117,16 @@ test("a failed Columns save toasts, rather than doing nothing silently", async (
   try {
     mount(SERVICE_CUE_VIEW);
     await settle();
+    // The layouts are a read behind the first paint; the option the test picks
+    // is one of them.
+    const columns = await eventually(() => {
+      const box = screen.getByRole("combobox", { name: "Columns" });
+      assert.ok([...(box as HTMLSelectElement).options].some((o) => o.value === "svl-audio"), "the layouts never loaded");
+      return box;
+    });
+    fireEvent.change(columns, { target: { value: "svl-audio" } });
     await settle();
-    fireEvent.change(screen.getByRole("combobox", { name: "Columns" }), { target: { value: "svl-audio" } });
-    await settle();
-    assert.match(lastToast(), /Could not change this view's columns/i);
+    await eventually(() => assert.match(lastToast(), /Could not change this view's columns/i));
   } finally {
     f.restore();
   }

@@ -6,12 +6,12 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installDom } from "../test-dom.js";
 import type { ParamDef } from "@main/types/automation.js";
 
 const teardown = installDom();
 
-const { render, cleanup, fireEvent, waitFor } = await import("@testing-library/react");
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { ActionButtonInspector } = await import("./action-button-inspector.js");
@@ -113,7 +113,7 @@ function mountStateful(initial: { type: "action-button"; actionId: string; param
 describe("the action-button inspector", () => {
   test("picking an action writes its id into config.actionId, clearing old params", async () => {
     const { container, configs } = mount({ type: "action-button", actionId: "", params: { stale: "x" } });
-    await waitFor(() => assert.ok(container.querySelectorAll("option").length > 1));
+    await eventually(() => assert.ok(container.querySelectorAll("option").length > 1));
     fireEvent.change(container.querySelector("select")!, { target: { value: "baptism.advance" } });
     assert.equal(configs.at(-1)?.actionId, "baptism.advance");
     assert.deepEqual(configs.at(-1)?.params, {});
@@ -124,7 +124,7 @@ describe("the action-button inspector", () => {
     // Waits for the REGISTRY's answer specifically, not just any input — the
     // Label field's own input renders immediately, before the fetch resolves,
     // and satisfied a weaker wait here without the param fields ever existing.
-    await waitFor(() => assert.ok(container.textContent?.includes("Signal name")));
+    await eventually(() => assert.ok(container.textContent?.includes("Signal name")));
     assert.ok(container.textContent?.includes("Only this position"), "expected a field per parameter");
     // Three inputs: Signal name, Only this position, and the Label field.
     const inputs = container.querySelectorAll("input");
@@ -140,7 +140,7 @@ describe("the action-button inspector", () => {
   // through its OWN picker and must never be seeded — see the describe below.
   test("picking an action with number params seeds them into config.params at once", async () => {
     const { container, configs } = mount({ type: "action-button", actionId: "", params: {} });
-    await waitFor(() => assert.ok(container.querySelectorAll("option").length > 1));
+    await eventually(() => assert.ok(container.querySelectorAll("option").length > 1));
     fireEvent.change(container.querySelector("select")!, { target: { value: "osc.send" } });
     assert.deepEqual(
       configs.at(-1)?.params,
@@ -151,7 +151,7 @@ describe("the action-button inspector", () => {
 
   test("an action with no parameters renders none — only the Label field", async () => {
     const { container } = mount({ type: "action-button", actionId: "baptism.advance", params: {} });
-    await waitFor(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
+    await eventually(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
     assert.equal(container.querySelectorAll("input").length, 1);
   });
 
@@ -165,7 +165,7 @@ describe("the action-button inspector", () => {
   // by this file.
   test("a missing field's message names the field, then says why it matters here", async () => {
     const { container } = mount({ type: "action-button", actionId: "rosstalk.command", params: {} });
-    await waitFor(() =>
+    await eventually(() =>
       assert.ok(
         container.textContent?.includes(
           "Pick a target. Until then, pressing this button does nothing and says why.",
@@ -185,9 +185,9 @@ describe("the action-button inspector", () => {
   // this shipped — the SCREEN, not the recorded config, is what was wrong.
   test("picking companion.press shows 'Choose Companion button…', never a seeded coordinate", async () => {
     const { container } = mountStateful({ type: "action-button", actionId: "", params: {} });
-    await waitFor(() => assert.ok(container.querySelectorAll("option").length > 1));
+    await eventually(() => assert.ok(container.querySelectorAll("option").length > 1));
     fireEvent.change(container.querySelector("select")!, { target: { value: "companion.press" } });
-    await waitFor(() => assert.ok(container.textContent?.includes("Choose Companion button")));
+    await eventually(() => assert.ok(container.textContent?.includes("Choose Companion button")));
     assert.doesNotMatch(
       container.textContent ?? "",
       /p1 r0 c0/,
@@ -204,9 +204,9 @@ describe("the action-button inspector", () => {
   // whose action nobody had actually chosen yet.
   test("the params a fresh companion.press pick leaves behind still fail validateParams, so the badge would show", async () => {
     const { container, configs } = mountStateful({ type: "action-button", actionId: "", params: {} });
-    await waitFor(() => assert.ok(container.querySelectorAll("option").length > 1));
+    await eventually(() => assert.ok(container.querySelectorAll("option").length > 1));
     fireEvent.change(container.querySelector("select")!, { target: { value: "companion.press" } });
-    await waitFor(() => assert.ok(container.textContent?.includes("Choose Companion button")));
+    await eventually(() => assert.ok(container.textContent?.includes("Choose Companion button")));
     const companionPress = REGISTRY_ACTIONS.find((a) => a.id === "companion.press")!;
     const issues = validateParams(companionPress.params, (configs.at(-1)?.params ?? {}) as Record<string, unknown>);
     assert.ok(
@@ -217,7 +217,7 @@ describe("the action-button inspector", () => {
 
   test("typing a label writes it into config.label", async () => {
     const { container, configs } = mount({ type: "action-button", actionId: "baptism.advance" });
-    await waitFor(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
+    await eventually(() => assert.ok(container.textContent?.includes("Advance the baptism timer")));
     const labelInput = [...container.querySelectorAll("input")].find(
       (i) => (i as HTMLInputElement).placeholder === "Advance the baptism timer",
     ) as HTMLInputElement;

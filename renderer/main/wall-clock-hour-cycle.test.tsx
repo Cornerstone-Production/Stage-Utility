@@ -14,7 +14,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -77,11 +77,15 @@ const VIEWS = {
   "SPL rundown": () => React.createElement(SplRundownView, { displayId: "d1" }),
 } as const;
 
-async function textOf(make: () => React.ReactElement): Promise<string> {
+/** Mount the view and return what the page says once `expected` is on it: the
+ *  clock draws a read behind the first paint, and how many turns that takes is
+ *  the machine's business. */
+async function textOf(make: () => React.ReactElement, expected: RegExp, why: string): Promise<string> {
   await act(async () => {
     render(React.createElement(TooltipProvider, null, make()));
-    for (let i = 0; i < 6; i++) await settle();
+    await settle();
   });
+  await eventually(() => assert.match(document.body.textContent ?? "", expected, why));
   return document.body.textContent ?? "";
 }
 
@@ -89,16 +93,14 @@ describe("a display view's clock follows the 12h/24h setting, in the app's zone"
   for (const [name, make] of Object.entries(VIEWS)) {
     test(`${name} in 24h`, async () => {
       hourCycle = "24h";
-      const text = await textOf(make);
-      assert.match(text, /04:05/, `${name} did not draw the app zone's 24-hour time`);
+      const text = await textOf(make, /04:05/, `${name} did not draw the app zone's 24-hour time`);
       assert.doesNotMatch(text, DAY_PERIOD, `${name} drew a day period under a 24h setting`);
     });
 
     test(`${name} in 12h`, async () => {
       hourCycle = "12h";
-      const text = await textOf(make);
-      assert.match(text, /4:05/, `${name} did not draw the app zone's time`);
-      assert.match(text, DAY_PERIOD, `${name} drew no day period under a 12h setting`);
+      await textOf(make, /4:05/, `${name} did not draw the app zone's time`);
+      await eventually(() => assert.match(document.body.textContent ?? "", DAY_PERIOD, `${name} drew no day period under a 12h setting`));
     });
   }
 });

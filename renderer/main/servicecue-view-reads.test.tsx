@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing, readLedger, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -48,21 +48,35 @@ type Read = "layouts" | "roles" | "rundown";
 
 const CONNECTED = { serviceTypeId: "st1", planId: "p1", pcoConfigured: true };
 
+/** A test that flips what fails must first let the reads already on their way
+ *  land: a good answer arriving after a failure ends its streak, so the next
+ *  failure would be logged as a new one. */
+const reads = readLedger();
+
 /** `failing` is read at call time, so a test can change it between ticks. */
 function stubFetch(failing: Read[], state: Record<string, unknown> = CONNECTED) {
   const asked: string[] = [];
+  reads.reset();
   const f = stubFetchWithLog((url) => {
+    // The live-update subscription posts on its own schedule and lands whenever it
+    // likes; it is neither a read the page waits on nor one of these counts.
+    if (isPlumbing(url)) return ok({});
     asked.push(url);
+    reads.begin();
+    const answer = (json: unknown) => reads.answer(ok(json));
     const read = (name: Read, json: unknown) => {
-      if (failing.includes(name)) throw new TypeError("fetch failed");
-      return ok(json);
+      if (failing.includes(name)) {
+        reads.failed();
+        throw new TypeError("fetch failed");
+      }
+      return answer(json);
     };
-    if (url.includes("/api/state")) return ok(state);
+    if (url.includes("/api/state")) return answer(state);
     if (url.includes("/api/servicecue/layouts")) return read("layouts", [{ id: "svl-audio", name: "Audio", order: 0, columnRoles: ["r1"] }]);
     if (url.includes("/api/servicecue/roles")) return read("roles", [{ id: "r1", name: "Sound", members: ["Audio"] }]);
     if (url.includes("/api/servicecue/rundown")) return read("rundown", RUNDOWN);
-    if (url.includes("/api/pco/live")) return ok(null);
-    return ok({});
+    if (url.includes("/api/pco/live")) return answer(null);
+    return answer({});
   });
   return { ...f, asked };
 }
@@ -82,8 +96,8 @@ test("layouts that never loaded say the display fell back to all columns", async
   const f = stubFetch(["layouts"]);
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the column layouts, so all columns are shown/i);
-    assert.ok(logged(f.logs, /column layouts/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`);
+    await eventually(() => assert.match(alerts(), /Couldn't load the column layouts, so all columns are shown/i));
+    await eventually(() => assert.ok(logged(f.logs, /column layouts/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -93,8 +107,8 @@ test("roles that never loaded say the note columns are missing", async () => {
   const f = stubFetch(["roles"]);
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the category roles, so no note columns are shown/i);
-    assert.ok(logged(f.logs, /category roles/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`);
+    await eventually(() => assert.match(alerts(), /Couldn't load the category roles, so no note columns are shown/i));
+    await eventually(() => assert.ok(logged(f.logs, /category roles/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -116,6 +130,7 @@ test("once a list has loaded, a failed retry keeps it and changes nothing on scr
   const f = stubFetch(failing);
   try {
     await mount();
+    await eventually(reads.landed);
     assert.equal(alerts(), "");
     failing.push("layouts", "roles");
     // Two ticks of the timer: a retry that keeps failing is one failure, not
@@ -125,6 +140,9 @@ test("once a list has loaded, a failed retry keeps it and changes nothing on scr
       await settle();
       await settle();
     }
+    // The failures reach /log once the retries have been answered; "once" is
+    // read after that, since it is about what the second tick did NOT add.
+    await eventually(() => assert.ok(lines(f.logs, /column layouts/i) > 0 && lines(f.logs, /category roles/i) > 0, "the failures never reached /log"));
     assert.equal(alerts(), "", "the last good lists are still the right ones");
     assert.equal(lines(f.logs, /column layouts/i), 1, "the layouts failure is on /log, once");
     assert.equal(lines(f.logs, /category roles/i), 1, "the roles failure is on /log, once");
@@ -137,7 +155,7 @@ test("a rundown that cannot be read reaches the log", async () => {
   const f = stubFetch(["rundown"]);
   try {
     await mount();
-    assert.ok(logged(f.logs, /could not read the rundown for a ServiceCue view/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`);
+    await eventually(() => assert.ok(logged(f.logs, /could not read the rundown for a ServiceCue view/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -147,7 +165,7 @@ test("Planning Center not connected: the display says so quietly and asks for no
   const f = stubFetch([], { ...CONNECTED, pcoConfigured: false });
   try {
     await mount();
-    assert.equal(document.body.textContent?.includes("Planning Center isn't connected, so this display can't find its plan."), true);
+    await eventually(() => assert.equal(document.body.textContent?.includes("Planning Center isn't connected, so this display can't find its plan."), true));
     assert.equal(alerts(), "", "not connected is a state, not a failure");
     assert.equal(f.asked.some((u) => u.includes("/api/servicecue/rundown")), false, "without credentials the plan can only come back empty");
     assert.deepEqual(f.logs, []);
@@ -160,7 +178,7 @@ test("no service type selected: the display says so quietly, not that Planning C
   const f = stubFetch([], { ...CONNECTED, serviceTypeId: null, planId: null });
   try {
     await mount();
-    assert.equal(document.body.textContent?.includes("No service type is selected, so this display has no plan to follow."), true);
+    await eventually(() => assert.equal(document.body.textContent?.includes("No service type is selected, so this display has no plan to follow."), true));
     assert.equal(document.body.textContent?.includes("not configured"), false, "Planning Center is connected");
     assert.equal(alerts(), "");
   } finally {
