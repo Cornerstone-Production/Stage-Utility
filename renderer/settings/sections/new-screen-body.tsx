@@ -56,11 +56,21 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
       const input: CreateScreenInput = {
         // Omitted when empty, so the server names the screen from its id.
         ...(name.trim() ? { name: name.trim() } : {}),
-        ...(show === "newwall" ? { newView: "wall" as const } : show === "newcontrol" ? { newView: "control" as const } : show === "existing" && picked ? { viewId: picked.id } : {}),
+        ...(show === "newwall"
+          ? { newView: "wall" as const }
+          : show === "newcontrol"
+            ? { newView: "control" as const }
+            // The kind the role line showed: the server refuses if the view is the
+            // other kind by the time the screen is made.
+            : show === "existing" && picked ? { viewId: picked.id, expectSurface: viewSurface(picked) } : {}),
         ...(slug.trim() ? { slug: slug.trim() } : {}),
       };
       const refused = await actions.onCreate(input, target.device);
-      if (refused) {
+      if (typeof refused === "object" && refused !== null) {
+        // Stays on this step: the view is what the operator is looking at, and its
+        // role line now says what it is.
+        setError(refused.viewChanged);
+      } else if (refused) {
         setError(refused);
         // The friendly link is the one answer the form cannot rule out itself,
         // and it is on the first step.

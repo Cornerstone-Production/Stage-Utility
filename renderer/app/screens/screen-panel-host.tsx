@@ -16,7 +16,7 @@ import { NewViewDialog } from "../../settings/sections/new-view-dialog";
 import { screenPickerViews } from "../../settings/sections/outputs-section";
 import type { SectionHandlers } from "../../settings/types";
 import { toast } from "../../components/ui";
-import { invoke } from "../../lib/api";
+import { invoke, type ApiError } from "../../lib/api";
 import { useMessageGroups } from "../../main/use-message-groups";
 import { useDisplayPresence } from "./use-display-presence";
 import { refreshDevices } from "./use-devices";
@@ -66,13 +66,13 @@ export function ScreenPanelHost({
   const [newViewFor, setNewViewFor] = useState<{ outputId: string; surface: ViewSurface } | null>(null);
   const newViewScreen = newViewFor ? outputs.find((o) => o.id === newViewFor.outputId) : undefined;
 
-  async function create(input: Parameters<ScreenPanelActions["onCreate"]>[0], device: PanelDevice | null): Promise<string | null> {
+  async function create(input: Parameters<ScreenPanelActions["onCreate"]>[0], device: PanelDevice | null): ReturnType<ScreenPanelActions["onCreate"]> {
     // Whether a view is made with the screen: the note after it offers its layout.
     const viewMade = input.newView !== undefined;
     if (!device) {
-      const { refused, outputId } = await handlers.handleCreateScreen(input);
+      const { refused, outputId, viewChanged } = await handlers.handleCreateScreen(input);
       if (!refused) onCreated(outputId, viewMade);
-      return refused;
+      return viewChanged && refused ? { viewChanged: refused } : refused;
     }
     // Created and claimed as one call: the server makes the screen, binds the
     // device, and takes the screen back if the binding fails.
@@ -81,6 +81,12 @@ export function ScreenPanelHost({
       const claimed = await invoke<{ outputId?: string }>("devices:claim", { deviceId: device.id, outputId: null, ...input });
       outputId = claimed?.outputId ?? null;
     } catch (err) {
+      // As handleCreateScreen: a view that changed kind is read again, so the role
+      // line the operator is looking at says what it is now.
+      if ((err as ApiError).code === "surface-changed") {
+        void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.stageState });
+        return { viewChanged: errorMessage(err) };
+      }
       return errorMessage(err);
     }
     // refreshDevices returns its failure rather than throwing, so it is checked

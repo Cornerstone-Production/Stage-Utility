@@ -22,7 +22,7 @@ process.env.HOME = path.join(TMP, "home");
 const { viewRoutes } = await import("./view-routes.js");
 const { kioskDeviceRoutes } = await import("./kiosk-device-routes.js");
 const { callRoute } = await import("./route-harness.js");
-const { stageController } = await import("../stage-controller.js");
+const { stageController, ViewSurfaceChangedError } = await import("../stage-controller.js");
 const { screenIsControlSurface } = await import("../../types/views.js");
 const { recordSeen, resetKioskPresence } = await import("../kiosk-presence.js");
 const { kioskDevicesStore } = await import("../kiosk-devices-store.js");
@@ -484,5 +484,108 @@ describe("POST /api/devices/claim — a new screen", () => {
     }
     assert.equal(outputs().some((o) => o.name === "Wing"), false, "the empty screen was left behind");
     assert.equal(views().some((v) => v.name === "Wing"), false, "the view made for it was left behind");
+  });
+});
+
+describe("POST /api/outputs and a claim — expectSurface, the kind the operator was shown", () => {
+  const device = { id: "kiosk-aaaa", macs: ["aa:bb:cc:dd:ee:ff"], hostname: "lobby-pi", os: "linux", ip: "192.0.2.10" };
+  const claim = (body: Record<string, unknown>) => callRoute(kioskDeviceRoutes, "/api/devices/claim", { method: "POST", body: { deviceId: device.id, ...body } });
+  const snapshot = () => JSON.stringify({ views: views(), outputs: outputs() });
+
+  it("a create goes ahead when the view is the kind that was shown", async () => {
+    const r = await post("/api/outputs", { name: "Wing", viewId: "ctl-a", expectSurface: "console" });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(screenIsControlSurface(outputs().find((o) => o.name === "Wing")!, views()), true);
+  });
+
+  it("a create is a 409 naming what the view is now when it is the other kind, and makes nothing", async () => {
+    const before = snapshot();
+    const r = await post("/api/outputs", { name: "Wing", viewId: "wall-a", expectSurface: "console" });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    const j = r.json as { code: string; surface: string; error: string };
+    assert.equal(j.code, "surface-changed");
+    assert.equal(j.surface, "display");
+    assert.match(j.error, /Nothing was changed/);
+    assert.equal(snapshot(), before, "a screen or a view was written");
+  });
+
+  it("is checked in the write turn of the add itself, not only before it", async () => {
+    // What the route's own early check cannot see: the view changed kind after it.
+    const before = snapshot();
+    await assert.rejects(
+      () => stageController.addOutput({ name: "Wing", viewId: "wall-a", expectSurface: "console" }),
+      (err: unknown) => err instanceof ViewSurfaceChangedError && err.surface === "display",
+    );
+    assert.equal(snapshot(), before, "the screen was added before the check");
+  });
+
+  it("a view that changes kind AFTER the early check, before the add, still creates nothing and is a 409", async () => {
+    const real = stageController.addOutput.bind(stageController);
+    const flip = stageController as unknown as { addOutput: unknown };
+    flip.addOutput = async (...args: Parameters<typeof real>) => {
+      ctl.state = { ...ctl.state, views: views().map((v) => (v.id === "ctl-a" ? { ...v, surface: "display" as const } : v)) };
+      return real(...args);
+    };
+    const before = JSON.stringify({ outputs: outputs() });
+    try {
+      const r = await post("/api/outputs", { name: "Wing", viewId: "ctl-a", expectSurface: "console" });
+      assert.equal(r.status, 409, JSON.stringify(r.json));
+      assert.equal((r.json as { surface: string }).surface, "display");
+    } finally {
+      delete (flip as { addOutput?: unknown }).addOutput;
+    }
+    assert.equal(JSON.stringify({ outputs: outputs() }), before, "the screen was added");
+  });
+
+  it("is a 400 without a viewId, with newView, or with a value that is not a kind", async () => {
+    const before = snapshot();
+    for (const body of [
+      { expectSurface: "console" },
+      { viewId: null, expectSurface: "console" },
+      { newView: "control", expectSurface: "console" },
+      { viewId: "ctl-a", newView: "control", expectSurface: "console" },
+      { viewId: "ctl-a", expectSurface: "wall" },
+      { viewId: "ctl-a", expectSurface: null },
+    ]) {
+      const r = await post("/api/outputs", body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.match((r.json as { error: string }).error, /expectSurface/);
+    }
+    assert.equal(snapshot(), before);
+  });
+
+  it("a claim goes ahead when the view is the kind that was shown, and binds the device", async () => {
+    recordSeen(device);
+    const r = await claim({ name: "Wing", viewId: "ctl-a", expectSurface: "console" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const made = outputs().find((o) => o.name === "Wing")!;
+    assert.equal((await kioskDevicesStore.load()).find((d) => d.id === device.id)?.outputId, made.id);
+  });
+
+  it("a claim for a view of the other kind is a 409, makes no screen and leaves the device unbound", async () => {
+    recordSeen(device);
+    const before = snapshot();
+    const r = await claim({ name: "Wing", viewId: "wall-a", expectSurface: "console" });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    assert.equal((r.json as { code: string }).code, "surface-changed");
+    assert.equal(snapshot(), before, "a screen was made for a refused claim");
+    assert.equal((await kioskDevicesStore.load()).length, 0, "the device was bound");
+  });
+
+  it("a claim with a bad combination is a 400 and creates nothing", async () => {
+    recordSeen(device);
+    const before = snapshot();
+    for (const body of [
+      { expectSurface: "console" },
+      { newView: "wall", expectSurface: "display" },
+      { viewId: "ctl-a", expectSurface: "wall" },
+      // Naming a screen to take over AND describing a new one.
+      { outputId: "display-1", viewId: "ctl-a", expectSurface: "console" },
+    ]) {
+      const r = await claim(body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+    }
+    assert.equal(snapshot(), before);
+    assert.equal((await kioskDevicesStore.load()).length, 0);
   });
 });

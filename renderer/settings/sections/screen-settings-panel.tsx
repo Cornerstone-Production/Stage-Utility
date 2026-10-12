@@ -84,8 +84,10 @@ export interface ScreenPanelActions {
   onOpenMessagingSettings: () => void;
   /** Open the new-view dialog for this screen, for a view of this kind. */
   onRequestNewView: (outputId: string, surface: ViewSurface) => void;
-  /** Make the screen. Resolves with why it was refused, or null once it exists. */
-  onCreate: (input: CreateScreenInput, device: PanelDevice | null) => Promise<string | null>;
+  /** Make the screen. Resolves with why it was refused, or null once it exists.
+   *  `{ viewChanged }` is the refusal of a view that changed kind while the
+   *  operator was deciding: the form stays where it is, with its message. */
+  onCreate: (input: CreateScreenInput, device: PanelDevice | null) => Promise<string | { viewChanged: string } | null>;
   /** Point the panel at something else: a view's screens, a screen's view. */
   onSelect: (target: PanelTarget) => void;
   /** Start a new screen. */

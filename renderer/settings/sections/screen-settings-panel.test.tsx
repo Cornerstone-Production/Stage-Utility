@@ -1094,7 +1094,7 @@ describe("guided creation", () => {
     assert.ok(screen.getByText("Its buttons will work on this screen."));
     assert.equal(create().disabled, false);
     await click(create());
-    assert.deepEqual(calls, [["create", { viewId: "ctl-b" }, null]]);
+    assert.deepEqual(calls, [["create", { viewId: "ctl-b", expectSurface: "console" }, null]], "the kind the role line showed was not sent with the view");
   });
 
   test("a wall view picked says it is read-only", async () => {
@@ -1121,6 +1121,22 @@ describe("guided creation", () => {
     await click(create());
     assert.match(screen.getByRole("alert").textContent ?? "", /built-in page/);
     assert.deepEqual(calls, [], "the panel closed on a screen that was refused");
+  });
+
+  test("a view that changed kind keeps the form on step 2 with the message, even with a link typed, and the role line follows the view", async () => {
+    const { actions } = recorder({ onCreate: async () => ({ viewChanged: "The view changed while you were deciding: it is a wall view now, not a control surface. Nothing was changed." }) });
+    const r = mount({ target: NEW_TARGET, outputs: [MINE], actions });
+    await type(screen.getByLabelText(/Friendly link/), "cafe");
+    await next();
+    await click(choice(/^A view you already have/));
+    await choose(screen.getByLabelText("Existing view"), "ctl-b");
+    assert.ok(screen.getByText("Its buttons will work on this screen."));
+    await click(create());
+    assert.match(screen.getByRole("alert").textContent ?? "", /it is a wall view now/);
+    assert.ok(screen.getByRole("heading", { name: "What should it show?" }), "the form went back to the link for a view problem");
+    // The page reloads the views; the line says what the view is now.
+    await r.rerender({ views: VIEWS.map((v) => (v.id === "ctl-b" ? { ...v, surface: "display" as const } : v)) });
+    assert.ok(screen.getByText("Read-only."), "the role line still says the old kind");
   });
 
   test("a refusal sends the operator back to the link when a link was typed", async () => {

@@ -7,14 +7,14 @@
 
 import type * as http from "node:http";
 
-import { ScreenWriteError } from "../stage-controller.js";
+import { ScreenWriteError, ViewSurfaceChangedError } from "../stage-controller.js";
 import type { CreateScreenInput } from "../../types/views.js";
 import { errorMessage } from "../errors.js";
 import { error, json } from "./context.js";
 
 /** The creation fields a body may carry. A claim that names an existing screen
  *  carries none of them. */
-export const CREATE_SCREEN_FIELDS = ["viewId", "newView", "slug", "showInSidebar"] as const;
+export const CREATE_SCREEN_FIELDS = ["viewId", "newView", "slug", "showInSidebar", "expectSurface"] as const;
 
 /**
  * Why a `mode` in a body is refused, or null when the body has none. A screen has
@@ -49,6 +49,15 @@ export function readCreateScreenBody(body: Record<string, unknown>): CreateScree
     if (body.newView !== "wall" && body.newView !== "control") return { error: 'body.newView must be "wall" or "control"' };
     input.newView = body.newView;
   }
+  if ("expectSurface" in body) {
+    if (body.expectSurface !== "display" && body.expectSurface !== "console") return { error: 'body.expectSurface must be "display" or "console"' };
+    // Checked against the view in `viewId`, so it means nothing without one, or with
+    // a view being made: an ignored field is a caller believing the check ran.
+    if (typeof body.viewId !== "string" || "newView" in body) {
+      return { error: "body.expectSurface is checked against body.viewId, which must name an existing view (and not come with newView)" };
+    }
+    input.expectSurface = body.expectSurface;
+  }
   if ("slug" in body) {
     if (typeof body.slug !== "string") return { error: "body.slug must be a string" };
     input.slug = body.slug;
@@ -63,10 +72,16 @@ export function readCreateScreenBody(body: Record<string, unknown>): CreateScree
 /**
  * Answer a failed screen write. A ScreenWriteError is the server failing part-way
  * through, so it is a 500 that says which step and what was and was not put back;
- * anything else a screen write throws is a refusal made before anything was
- * written, a 400 with the reason.
+ * a view that is not the kind the caller expected is a 409; anything else a screen
+ * write throws is a refusal made before anything was written, a 400 with the reason.
  */
 export function answerScreenWriteFailure(res: http.ServerResponse, err: unknown): void {
+  // The view changed kind while the operator was deciding: nothing was made, and
+  // `surface` is what the view is now to ask again with (as PATCH answers).
+  if (err instanceof ViewSurfaceChangedError) {
+    json(res, { error: err.message, code: err.code, surface: err.surface }, 409);
+    return;
+  }
   if (err instanceof ScreenWriteError) {
     json(
       res,

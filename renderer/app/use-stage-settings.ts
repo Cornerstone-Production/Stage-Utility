@@ -754,7 +754,11 @@ export function useStageSettings(pinnedViewId?: string) {
       const made = (next.outputs ?? []).filter((o) => !before.has(o.id)).at(-1);
       return { refused: null, outputId: made?.id ?? null };
     } catch (err) {
-      return { refused: errorMessage(err), outputId: null };
+      // The server holds a create to the kind of view the operator was shown. When
+      // it changed, read the views again so the role line says what it is now.
+      const viewChanged = (err as ApiError).code === "surface-changed";
+      if (viewChanged) void queryClient.invalidateQueries({ queryKey: ["stage:getState"] });
+      return { refused: errorMessage(err), outputId: null, ...(viewChanged ? { viewChanged } : {}) };
     }
   }
 

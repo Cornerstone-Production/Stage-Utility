@@ -78,6 +78,9 @@ let writes: { method: string; url: string; body: unknown }[];
 let claimFails: string | null;
 /** Answer DELETE /api/views/:id with a refusal, to show the second half of a removal failing. */
 let viewDeleteFails: boolean;
+/** A create naming a view is refused as if the view had just become this kind: the stub's
+ *  view flips to it and the answer is the server's 409. Null: creates go through. */
+let surfaceMovedTo: "display" | "console" | null;
 /** The page's query client, so a test can land a stage-state broadcast. */
 let client: InstanceType<typeof QueryClient>;
 
@@ -92,6 +95,7 @@ beforeEach(() => {
   writes = [];
   claimFails = null;
   viewDeleteFails = false;
+  surfaceMovedTo = null;
   // The panel's open state is remembered per browser, so one test's close must not
   // be the next test's starting point.
   localStorage.clear();
@@ -105,6 +109,11 @@ beforeEach(() => {
       if (/^\/api\/(outputs|views|devices\/claim)/.test(url)) writes.push({ method, url, body });
       if (url === "/api/devices/claim" && claimFails) return reply(400, { error: claimFails });
       // The writes that change what the page lists, answered the way the server does.
+      if (method === "POST" && (url === "/api/outputs" || url === "/api/devices/claim") && surfaceMovedTo) {
+        const moved = surfaceMovedTo;
+        views = views.map((v) => (v.id === (body as CreateBody).viewId ? { ...v, surface: moved } : v));
+        return reply(409, { error: "The view changed while you were deciding: it is now. Nothing was changed.", code: "surface-changed", surface: moved });
+      }
       if (method === "POST" && url === "/api/outputs") makeScreen(body as CreateBody);
       if (method === "POST" && url === "/api/devices/claim" && (body as { outputId?: string | null }).outputId === null) {
         return ok({ ok: true, displaced: null, outputId: makeScreen(body as CreateBody) });
@@ -699,10 +708,31 @@ describe("Add a screen", () => {
     await click(panel().getByRole("button", { name: /^A view you already have/ }));
     await choose(panel().getByLabelText("Existing view"), "wall-a");
     await click(panel().getByRole("button", { name: "Create screen" }));
-    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { viewId: "wall-a" } }]);
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { viewId: "wall-a", expectSurface: "display" } }]);
     const note = panel().getByRole("status");
     assert.doesNotMatch(note.textContent ?? "", /and its view/);
     assert.equal(within(note).queryByRole("button", { name: "Edit layout" }) !== null, false, "it is on screen");
+  });
+
+  test("a view that turned into the other kind meanwhile is a 409: no screen, step 2 stays, and the role line is reloaded", async () => {
+    surfaceMovedTo = "console";
+    await mountScreens();
+    await click(addTile());
+    await nextStep();
+    await click(panel().getByRole("button", { name: /^A view you already have/ }));
+    await choose(panel().getByLabelText("Existing view"), "wall-a");
+    assert.ok(panel().getByText("Wall display"), "the role line did not start on the wall kind");
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    await act(async () => { await settle(); await settle(); await settle(); });
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { viewId: "wall-a", expectSurface: "display" } }]);
+    assert.match(panel().getByRole("alert").textContent ?? "", /The view changed while you were deciding/);
+    assert.ok(panel().getByRole("heading", { name: "What should it show?" }), "the panel left step 2");
+    assert.equal(outputs.length, 3, "a screen was made");
+    assert.ok(panel().getByText("Control surface"), "the role line did not follow the view to its new kind");
+    // Create again: now it sends the kind the line shows.
+    surfaceMovedTo = null;
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    assert.deepEqual(writes.at(-1), { method: "POST", url: "/api/outputs", body: { viewId: "wall-a", expectSurface: "console" } });
   });
 
   test("Nothing yet POSTs no view at all", async () => {
@@ -1049,6 +1079,22 @@ describe("a device waiting to be set up", () => {
     assert.ok(panel().getByText("Screen settings"));
     assert.ok(panel().getByRole("heading", { name: "lobby-pi" }));
     assert.match(panel().getByRole("status").textContent ?? "", /Created "lobby-pi" and its view/);
+  });
+
+  test("a claim for a view that turned into the other kind is a 409: step 2 stays and no screen is made", async () => {
+    surfaceMovedTo = "console";
+    await mountScreens();
+    await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
+    await click(panel().getByRole("button", { name: "Next" }));
+    await click(panel().getByRole("button", { name: /^A view you already have/ }));
+    await choose(panel().getByLabelText("Existing view"), "wall-a");
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    await act(async () => { await settle(); await settle(); await settle(); });
+    const claim = writes.find((w) => w.url === "/api/devices/claim");
+    assert.deepEqual(claim?.body, { deviceId: "kiosk-aaaa", outputId: null, name: "lobby-pi", viewId: "wall-a", expectSurface: "display" });
+    assert.match(panel().getByRole("alert").textContent ?? "", /The view changed while you were deciding/);
+    assert.ok(panel().getByRole("heading", { name: "What should it show?" }));
+    assert.equal(outputs.length, 3);
   });
 
   test("closing it midway leaves no screen and no claim", async () => {

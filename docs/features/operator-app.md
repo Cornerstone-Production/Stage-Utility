@@ -258,7 +258,7 @@ for its hostname). Closing the panel creates nothing. A refusal (a link another
 screen holds, say) leaves the panel open with the reason. A device is claimed by
 the same step that creates its screen, and if that fails everything made for it is
 taken back. If another operator sets the same device up while the panel is open,
-the panel says which screen it became and **Create screen** is turned off.
+the panel says which screen it became and **Create screen** is turned off. Choosing a view you already have also sends the kind the line under it showed; if somebody changed the view's kind meanwhile, no screen is made and the panel stays on this step, says so, and shows the view as it is now.
 
 After **Create screen** the panel stays open on the new screen and says what was
 made; when a view was made it adds **Edit layout**, since the view is blank until

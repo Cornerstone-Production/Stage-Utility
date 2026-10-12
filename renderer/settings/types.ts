@@ -22,6 +22,9 @@ export type WirelessChannel = DeviceChannel;
 export interface CreateScreenOutcome {
   refused: string | null;
   outputId: string | null;
+  /** Refused because the view chose changed kind while the operator was deciding:
+   *  nothing was made, and the page's copy of the view has been reloaded. */
+  viewChanged?: boolean;
 }
 
 // Action callbacks owned by SettingsView and threaded into each section.

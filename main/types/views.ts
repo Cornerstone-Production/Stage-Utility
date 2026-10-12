@@ -1171,6 +1171,11 @@ export interface CreateScreenInput {
   slug?: string;
   /** Written onto the view the screen shows, when that view is a control surface. */
   showInSidebar?: boolean;
+  /** The kind of view `viewId` is, as the caller last saw it: what the operator was
+   *  shown the screen would be. Checked against the view in the same write turn as
+   *  the create; a view that is the other kind by then creates nothing. Only with
+   *  `viewId`. */
+  expectSurface?: ViewSurface;
 }
 
 /** Is this view a console? False for no view. The one spelling of the question,

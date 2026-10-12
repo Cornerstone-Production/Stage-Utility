@@ -3586,7 +3586,11 @@ export class StageController {
      *  must already have passed validateSlug against the ids and slugs in use;
      *  only the new id, which does not exist until the allocation below, is
      *  checked here. */
-    fields: Partial<Pick<Output, "name" | "viewId" | "slug">> = {},
+    fields: Partial<Pick<Output, "name" | "viewId" | "slug">> & {
+      /** The kind `viewId` was when the caller asked the operator: checked in the
+       *  same turn as the write, ViewSurfaceChangedError and nothing made if not. */
+      expectSurface?: ViewSurface;
+    } = {},
     /**
      * Told the new screen in the same synchronous turn it enters the state, and
      * BEFORE the write that can fail. For a caller that has to take it back: the
@@ -3597,7 +3601,7 @@ export class StageController {
      */
     onAssigned?: (output: Output) => void,
   ): Promise<{ state: StageState; output: Output }> {
-    const { name, viewId, slug } = fields;
+    const { name, viewId, slug, expectSurface } = fields;
     // One write: the id, the floor that stops it ever coming back, and the
     // outputs list that could not be built until the id existed. The whole
     // read-allocate-write happens inside the settings write queue, so two
@@ -3619,7 +3623,7 @@ export class StageController {
             const verdict = validateSlug(slug, [...this.takenSlugs(), id]);
             if (!verdict.ok) throw new Error(verdict.reason);
           }
-          if (viewId) this.requireViewToShow(viewId);
+          if (viewId) this.assertViewIsExpectedKind(this.requireViewToShow(viewId), expectSurface);
           const created: Output = {
             id,
             name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
@@ -3844,6 +3848,9 @@ export class StageController {
             `rolled back: ${scrub(rolledBack.join(", ") || "nothing")}` +
             (notRolledBack.length > 0 ? `; COULD NOT roll back: ${scrub(notRolledBack.join(", "))}` : ""),
         );
+        // A caller's expectation that did not hold is the caller's to ask again
+        // with, not the server failing part-way: it keeps its own type.
+        if (err instanceof ViewSurfaceChangedError) throw err;
         throw new ScreenWriteError(what, step.label, errorMessage(err), rolledBack, notRolledBack);
       }
     }
@@ -3885,6 +3892,10 @@ export class StageController {
       throw new Error("outputs:add — viewId and newView are alternatives: name an existing view, or ask for a new one");
     }
     const existing = typeof input.viewId === "string" ? this.requireViewToShow(input.viewId) : undefined;
+    if (input.expectSurface !== undefined) {
+      if (!existing) throw new Error("outputs:add — expectSurface is checked against viewId, which must name a view");
+      this.assertViewIsExpectedKind(existing, input.expectSurface);
+    }
     // The listing is written on a control surface's view. Anywhere else there is
     // nothing to write it on, and accepting it would be dropping it silently.
     const showsControlSurface = newView === "control" || viewIsConsole(existing);
@@ -3920,7 +3931,9 @@ export class StageController {
         : []),
       {
         label: "add the screen",
-        run: () => this.addOutput({ name, viewId, slug: slug || undefined }, (made) => { output = made; }),
+        // `expectSurface` again, in addOutput's own turn: the check above costs
+        // nothing when it fails, this one holds against a write that lands between.
+        run: () => this.addOutput({ name, viewId, slug: slug || undefined, ...(existing ? { expectSurface: input.expectSurface } : {}) }, (made) => { output = made; }),
         undo: async () => { if (!output) return false; await this.removeOutput(output.id); },
       },
       // Decided here from the INPUT, not from `viewId`: that is still null while
@@ -3948,6 +3961,13 @@ export class StageController {
         `view=${scrub(viewId ?? "(none)")}${scrub(createdViewId ? " (made for it)" : "")}${scrub(slug ? ` slug="${slug}"` : "")}`,
     );
     return { state: this.state, output: output!, createdViewId };
+  }
+
+  /** Refuse, writing nothing, a view that is not the kind the caller expected. */
+  private assertViewIsExpectedKind(view: View, expectSurface: ViewSurface | undefined): void {
+    if (expectSurface !== undefined && viewSurface(view) !== expectSurface) {
+      throw new ViewSurfaceChangedError(view.id, expectSurface, viewSurface(view));
+    }
   }
 
   /** The view a screen is about to be pointed at: refused unless it exists and is
