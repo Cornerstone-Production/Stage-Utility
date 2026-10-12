@@ -238,6 +238,26 @@ describe("a write that flips a screen's role says so in the log", () => {
   });
 });
 
+describe("deleting a view a control surface shows", () => {
+  it("names every screen that stops working; a wall view's screens, which were read-only, are not named", async () => {
+    ctl.state.views = [
+      ...ctl.state.views,
+      { id: "keep", name: "Keeper", kind: "custom", createdAt: "", surface: "display" } as View,
+    ];
+    ctl.state.outputs = [
+      { id: "a", name: "Booth", viewId: "vc" },
+      { id: "b", name: "Stage", viewId: "vc" },
+      { id: "c", name: "Lobby", viewId: "vd" },
+    ] as Output[];
+    assert.deepEqual(await screensLog(() => stageController.deleteView("vc")), [
+      '[screens] "Booth" is now read-only (shows nothing)',
+      '[screens] "Stage" is now read-only (shows nothing)',
+    ]);
+    assert.deepEqual(ctl.state.outputs.map((o) => o.viewId), [null, null, "vd"]);
+    assert.deepEqual(await screensLog(() => stageController.deleteView("vd")), [], "a read-only screen lost its view and nothing changed for it");
+  });
+});
+
 describe("converting a view's surface", () => {
   // Converting a view a screen shows changes that screen: a read-only screen goes
   // live, or a control surface stops working. setViewSurface refuses and names the

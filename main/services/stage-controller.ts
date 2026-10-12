@@ -3540,11 +3540,15 @@ export class StageController {
     // output pointing at a view that is gone — which renders a placeholder —
     // rather than a view nothing routes to that comes back on the next boot.
     await this.outputWrites.enqueue(async () => {
+      // A control surface that loses its view stops working: say which screens,
+      // as every other write that flips a screen's role does.
+      const stopped = viewIsConsole(removed) ? screensShowing(id, this.state.outputs) : [];
       const outputs = this.state.outputs.map((o) =>
         o.viewId === id ? { ...o, viewId: null } : o,
       );
       this.state = { ...this.state, outputs };
       await settingsStore.patch({ outputs });
+      for (const o of stopped) this.logRoleFlip(o.name || o.id, false, undefined);
     });
     await slotsStore.removeDisplay(id);
     this.rawSlotsByView.delete(id);
