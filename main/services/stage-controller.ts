@@ -235,7 +235,21 @@ export interface ScreenStep {
 }
 
 /**
- * A multi-step screen write (createScreen, setOutputRole) that failed part-way.
+ * Screen steps and view steps in the order the server's own guards allow.
+ *
+ * The two guards wait for each other: setOutputMode refuses a wall display while
+ * its view is a console, and setViewSurface refuses a console while a screen
+ * showing it is not a control surface. So whichever side is being made MORE
+ * permissive goes first: becoming a control surface (`panel`) the screens lead,
+ * becoming a wall display the view does. The other order is refused by the
+ * guards however the steps are undone.
+ */
+function inGuardOrder(mode: OutputMode, screens: ScreenStep[], view: ScreenStep[]): ScreenStep[] {
+  return mode === "panel" ? [...screens, ...view] : [...view, ...screens];
+}
+
+/**
+ * A multi-step screen write (createScreen, setOutputRole, setViewRole) that failed part-way.
  * Says which step failed and what was put back, and what could NOT be, so the
  * caller never has to guess whether a half-made screen is still there.
  */
@@ -264,6 +278,29 @@ export interface CreateScreenResult {
   output: Output;
   /** The view createScreen made, when it made one. */
   createdViewId: string | null;
+}
+
+/**
+ * setViewRole was told which screens the operator was shown before they agreed,
+ * and they are not the screens it would change now: another operator or a
+ * Companion recall pointed a screen at the view, or away from it, while the
+ * question was open. Nothing is written. `screens` is the list as it is now, so
+ * the caller can ask again with it.
+ */
+export class ViewScreensChangedError extends Error {
+  readonly code = "screens-changed";
+  constructor(
+    readonly viewId: string,
+    readonly screens: { id: string; name: string }[],
+  ) {
+    super(
+      `The screens showing this view changed while you were deciding. ` +
+        (screens.length === 0
+          ? "No screen would change now."
+          : `It would now change ${screens.map((s) => `"${s.name}"`).join(", ")}.`),
+    );
+    this.name = "ViewScreensChangedError";
+  }
 }
 
 export class LayoutConflictError extends Error {
@@ -3044,7 +3081,7 @@ export class StageController {
     opts: { onlyShownBy?: string } = {},
   ): Promise<StageState> {
     const view = this.state.views.find((v) => v.id === id);
-    if (!view) throw new Error(`views:setSurface — view ${id} not found`);
+    if (!view) throw new Error(`setViewSurface — view ${id} not found`);
     if (opts.onlyShownBy !== undefined) {
       const others = this.state.outputs.filter((o) => o.viewId === id && o.id !== opts.onlyShownBy);
       if (others.length > 0) {
@@ -3661,14 +3698,27 @@ export class StageController {
    * silently unbinding it: the operator would be left with a screen showing
    * nothing and no indication why.
    */
-  async setOutputMode(id: string, mode: OutputMode): Promise<StageState> {
-    if (!this.state.outputs.find((o) => o.id === id)) throw new Error(`outputs:setMode — output ${id} not found`);
+  async setOutputMode(
+    id: string,
+    mode: OutputMode,
+    /** Refuse unless the screen still shows this view. For a change made to every
+     *  screen showing a view: the list is decided before the first write, and
+     *  checked again here, in the same turn as the assignment, because the screen
+     *  may have been pointed somewhere else since. */
+    opts: { whileShowing?: string } = {},
+  ): Promise<StageState> {
+    if (!this.state.outputs.find((o) => o.id === id)) throw new Error(`setOutputMode — output ${id} not found`);
     // Inside the write, against the view the screen shows then: see setOutputView.
     return this.commitOutputPatch(
       id,
       { mode },
       `[stage-controller] setOutputMode output=${scrub(id)} → ${scrub(mode)}`,
       (output) => {
+        if (opts.whileShowing !== undefined && output.viewId !== opts.whileShowing) {
+          throw new Error(
+            `"${output.name || output.id}" was pointed at another view meanwhile, so it is no longer one of this view's screens.`,
+          );
+        }
         const view = mode === "display" && output.viewId ? this.state.views.find((v) => v.id === output.viewId) : undefined;
         if (view && viewSurface(view) === "console") {
           throw new Error(
@@ -3829,12 +3879,7 @@ export class StageController {
    * createScreen and setOutputRole, which used to word the same refusal two ways.
    */
   private requireViewForRole(viewId: string, mode: OutputMode): View {
-    if (viewId === HOME_VIEW_ID) {
-      throw new Error(`"Home" is the operator's front page, not a screen. Choose another view.`);
-    }
-    const view = this.state.views.find((v) => v.id === viewId);
-    if (!view) throw new Error(`view ${viewId} not found`);
-    if (!viewCanTakeRole(view, mode)) throw new Error(noControlSurfaceReason(view));
+    const view = this.requireViewCanTakeRole(viewId, mode);
     if (viewSurface(view) !== surfaceForMode(mode)) {
       throw new Error(
         mode === "panel"
@@ -3843,6 +3888,53 @@ export class StageController {
       );
     }
     return view;
+  }
+
+  /**
+   * The view named, refused unless it could take `mode` at all: it exists, it is
+   * not Home, and a control surface needs a custom view. Whether it ALREADY fits
+   * is requireViewForRole's question; setViewRole is about to make it fit.
+   */
+  private requireViewCanTakeRole(viewId: string, mode: OutputMode): View {
+    if (viewId === HOME_VIEW_ID) {
+      throw new Error(`"Home" is the operator's front page, not a screen. Choose another view.`);
+    }
+    const view = this.state.views.find((v) => v.id === viewId);
+    if (!view) throw new Error(`view ${viewId} not found`);
+    if (!viewCanTakeRole(view, mode)) throw new Error(noControlSurfaceReason(view));
+    return view;
+  }
+
+  /**
+   * A step that changes a view's kind, with an undo that puts back the kind it
+   * had when the step was built. The undo writes only when the view is not
+   * already as it was, so it is safe when the run did nothing.
+   */
+  private viewSurfaceStep(label: string, view: View, surface: ViewSurface, opts: { onlyShownBy?: string } = {}): ScreenStep {
+    const was = viewSurface(view);
+    return {
+      label,
+      run: () => this.setViewSurface(view.id, surface, opts),
+      undo: async () => {
+        const now = this.state.views.find((v) => v.id === view.id);
+        if (!now || viewSurface(now) === was) return false;
+        await this.setViewSurface(view.id, was);
+      },
+    };
+  }
+
+  /**
+   * The one pairing a restore must never make: a screen that would be a wall
+   * display (`mode` not `panel`) showing a view that is a console. An undo puts
+   * back exact values rather than going through setOutputMode, so it carries
+   * this refusal itself, to run as its commitOutputPatch check; the step is then
+   * reported as not put back.
+   */
+  private refuseWallDisplayOnConsole(viewId: string | null | undefined, mode: OutputMode | undefined): void {
+    const view = viewId ? this.state.views.find((v) => v.id === viewId) : undefined;
+    if (view && viewSurface(view) === "console" && mode !== "panel") {
+      throw new Error(`"${view.name}" is still a control surface, and a wall display cannot show it`);
+    }
   }
 
   /**
@@ -3907,27 +3999,16 @@ export class StageController {
         id,
         { mode: before.mode, viewId: before.viewId },
         `[stage-controller] setOutputRole output=${scrub(id)} restored mode=${scrub(before.mode ?? "(display)")} view=${scrub(before.viewId ?? "(none)")}`,
-        () => {
-          const was = before.viewId ? this.state.views.find((v) => v.id === before.viewId) : undefined;
-          if (was && viewSurface(was) === "console" && outputMode(before) !== "panel") {
-            throw new Error(`"${was.name}" is still a control surface, and a wall display cannot show it`);
-          }
-        },
+        () => this.refuseWallDisplayOnConsole(before.viewId, before.mode),
       );
     };
     const setMode: ScreenStep = { label: "set the screen's role", run: () => this.setOutputMode(id, mode), undo: restore };
-    // The two guards wait for each other (setOutputMode refuses a display while
-    // its view is a console; setViewSurface refuses a console while a screen
-    // showing it is not a panel), so whichever side is being made MORE permissive
-    // goes first: becoming a control surface the screen leads, becoming a wall
-    // display the view does. The other order is refused by the server's own
-    // guards, however the steps are undone.
-    const inGuardOrder = (viewStep: ScreenStep): ScreenStep[] => (mode === "panel" ? [setMode, viewStep] : [viewStep, setMode]);
+    const withMode = (viewStep: ScreenStep): ScreenStep[] => inGuardOrder(mode, [setMode], [viewStep]);
 
     let copy: View | undefined;
     const steps: ScreenStep[] = [];
     if (chosen) {
-      steps.push(...inGuardOrder({ label: "point the screen at the view", run: () => this.setOutputView(id, chosen.id), undo: restore }));
+      steps.push(...withMode({ label: "point the screen at the view", run: () => this.setOutputView(id, chosen.id), undo: restore }));
     } else if (view && misfit && opts.copyView) {
       steps.push(
         {
@@ -3937,21 +4018,12 @@ export class StageController {
         },
         // Nobody shows the copy yet, so neither guard can refuse this.
         { label: "give the copy its role", run: () => this.setViewSurface(copy!.id, wants) },
-        ...inGuardOrder({ label: "point the screen at the copy", run: () => this.setOutputView(id, copy!.id), undo: restore }),
+        ...withMode({ label: "point the screen at the copy", run: () => this.setOutputView(id, copy!.id), undo: restore }),
       );
     } else if (view && misfit) {
       // Only this screen shows it (checked above): the role and the view's kind
       // change together.
-      const was = viewSurface(view);
-      steps.push(...inGuardOrder({
-        label: "change the view's kind",
-        run: () => this.setViewSurface(view.id, wants, { onlyShownBy: id }),
-        undo: async () => {
-          const now = this.state.views.find((v) => v.id === view.id);
-          if (!now || viewSurface(now) === was) return false;
-          await this.setViewSurface(view.id, was);
-        },
-      }));
+      steps.push(...withMode(this.viewSurfaceStep("change the view's kind", view, wants, { onlyShownBy: id })));
     } else {
       steps.push(setMode);
     }
@@ -3963,6 +4035,98 @@ export class StageController {
       );
     }
     return { state: this.state, copiedViewId: copy?.id ?? null };
+  }
+
+  /**
+   * Change what a view is for AND every screen showing it, as one call.
+   *
+   * The view card's deliberate "all of them" path. (One screen's role is
+   * setOutputRole, which never changes another screen; setViewSurface alone
+   * refuses a view that screens are showing.) The same two guards decide the
+   * order, whichever side is being made MORE permissive going first:
+   *
+   *   console   each screen to a control surface, then the view
+   *   display   the view, then each screen to a wall display
+   *
+   * Every screen is a step with its own undo, so one that fails part-way puts
+   * back the ones that landed, newest first, and the failure says what was and
+   * was not put back.
+   *
+   * A screen that changes view while this runs is checked inside the writes, not
+   * here, where the check would be stale by the first await:
+   *
+   *   pointed AWAY   its own step refuses (setOutputMode's whileShowing), and
+   *                  everything before it is undone, in either direction
+   *   pointed AT     toward a console, the view's own guard refuses to leave it a
+   *                  wall display under a console, and everything is undone.
+   *                  Toward a wall display it is left as it is: a control surface
+   *                  showing a wall-screen view is a pairing the server allows,
+   *                  and somebody else pointed it there after the operator was
+   *                  asked, so changing it here would change a screen they were
+   *                  never shown. No sweep at the end, for that reason.
+   *
+   * `screens` is the ids of the screens the operator was shown before agreeing
+   * (`[]` when they were asked nothing). When it is not, as a set, the screens
+   * this would change now, nothing is written and ViewScreensChangedError
+   * carries the list as it is. Absent, whatever screens show the view are
+   * changed: the call a script makes.
+   *
+   * A view already as asked, with every screen already matching, is not an error
+   * and writes nothing. Only a custom view may become a console.
+   */
+  async setViewRole(id: string, surface: ViewSurface, opts: { screens?: string[] } = {}): Promise<StageState> {
+    if (surface !== "display" && surface !== "console") throw new Error('views:setRole — surface must be "display" or "console"');
+    const mode: OutputMode = surface === "console" ? "panel" : "display";
+    const view = this.requireViewCanTakeRole(id, mode);
+
+    // The screens that will change. Decided here, before the first write; the
+    // checks inside each write are what hold if this turns out to be stale (see
+    // above for which way each one covers).
+    const changing = this.state.outputs.filter((o) => o.viewId === id && outputMode(o) !== mode);
+    const viewChanges = viewSurface(view) !== surface;
+    if (!viewChanges && changing.length === 0) return this.state;
+
+    // The screens the operator agreed to, against the screens this would change.
+    // Any difference, either way, and they are asked again: a screen they were
+    // never shown is the one the question exists to protect.
+    if (opts.screens !== undefined) {
+      const shown = new Set(opts.screens);
+      if (shown.size !== changing.length || changing.some((o) => !shown.has(o.id))) {
+        console.log(
+          `[stage-controller] setViewRole view=${scrub(id)} → ${scrub(surface)} not made: the screens changed since the operator was asked ` +
+            `(asked about: ${scrub([...shown].join(", ") || "none")}; now: ${scrub(changing.map((o) => o.id).join(", ") || "none")})`,
+        );
+        throw new ViewScreensChangedError(id, changing.map((o) => ({ id: o.id, name: o.name || o.id })));
+      }
+    }
+
+    const viewStep = this.viewSurfaceStep(`make the view a ${surface === "console" ? "control surface" : "wall-screen view"}`, view, surface);
+    const screenSteps: ScreenStep[] = changing.map((o) => {
+      const was = o.mode;
+      return {
+        label: `make "${o.name || o.id}" ${mode === "panel" ? "a control surface" : "a wall display"}`,
+        run: () => this.setOutputMode(o.id, mode, { whileShowing: id }),
+        // Puts the exact value back, so not setOutputMode (an absent mode stays
+        // absent).
+        undo: async () => {
+          const now = this.state.outputs.find((x) => x.id === o.id);
+          if (!now || now.mode === was) return false;
+          await this.commitOutputPatch(
+            o.id,
+            { mode: was },
+            `[stage-controller] setViewRole output=${scrub(o.id)} restored mode=${scrub(was ?? "(display)")}`,
+            (cur) => this.refuseWallDisplayOnConsole(cur.viewId, was),
+          );
+        },
+      };
+    });
+
+    await this.runScreenSteps("setViewRole", inGuardOrder(mode, screenSteps, viewChanges ? [viewStep] : []));
+    console.log(
+      `[stage-controller] setViewRole view=${scrub(id)} → ${scrub(surface)}, screens: ` +
+        `${scrub(changing.map((o) => `"${o.name || o.id}"`).join(", ") || "(none changed)")}`,
+    );
+    return this.state;
   }
 
   /**
