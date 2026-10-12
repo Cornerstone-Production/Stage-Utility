@@ -54,8 +54,9 @@ export type PanelTarget =
   | { kind: "view"; viewId: string }
   /** A new screen. `device` is the unclaimed machine it is being set up for.
    *  `defaultName` is what the name field starts with; empty sends no name, and
-   *  the server names the screen from its id. */
-  | { kind: "new"; device: PanelDevice | null; defaultName: string };
+   *  the server names the screen from its id. `start` tells one start from the next:
+   *  pressing Add a screen again begins a new form rather than continuing the last. */
+  | { kind: "new"; device: PanelDevice | null; defaultName: string; start?: number };
 
 /** An unclaimed device, as the guided panel needs to name it. */
 export interface PanelDevice {
@@ -117,6 +118,9 @@ export interface ScreenSettingsPanelProps {
   actions: ScreenPanelActions;
   onClose: () => void;
 }
+
+/** Which new screen a form belongs to: another device, or another start, is another form. */
+const newScreenKey = (target: Extract<PanelTarget, { kind: "new" }>): string => `${target.device?.id ?? "add"}:${target.start ?? 0}`;
 
 /** The panel's element id: there is one panel on the page, and the card menu that
  *  opens it needs to hand focus to it once the menu has finished closing. */
@@ -624,7 +628,7 @@ function EmptyBody({ onAddScreen }: { onAddScreen: () => void }) {
 export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, messageGroups, actions, onClose }: ScreenSettingsPanelProps) {
   const [step, setStep] = useState<Step>(1);
   // A different new screen (another device) starts again at its first step.
-  useResyncOn([target?.kind === "new" ? (target.device?.id ?? "add") : null], () => setStep(1));
+  useResyncOn([target?.kind === "new" ? newScreenKey(target) : null], () => setStep(1));
   const output = target?.kind === "edit" ? outputs.find((o) => o.id === target.outputId) : undefined;
   const created = target?.kind === "edit" ? target.created : undefined;
   const view = target?.kind === "view" ? views.find((v) => v.id === target.viewId) : undefined;
@@ -701,7 +705,7 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
         <ViewBody key={shownTarget.view.id} view={shownTarget.view} outputs={outputs} actions={actions} />
       ) : shownTarget?.kind === "new" ? (
         <NewScreenBody
-          key={shownTarget.device?.id ?? "add"}
+          key={newScreenKey(shownTarget)}
           target={shownTarget}
           outputs={outputs}
           views={views}

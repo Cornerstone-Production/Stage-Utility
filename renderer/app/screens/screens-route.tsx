@@ -24,7 +24,7 @@
 // side panel. Manual view REORDERING was dropped on purpose: nothing read the
 // order except that one dropdown, which now sorts by name.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Loader2Icon, PanelRightIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { OutputsSection } from "../../settings/sections/outputs-section";
@@ -48,6 +48,8 @@ export function ScreensRoute() {
   // waiting device's "Set up as a new screen", and the panel itself.
   const [open, setOpen] = usePanelOpen();
   const [panel, setPanel] = useState<PanelTarget | null>(null);
+  // Counts starts of a new screen, so pressing Add a screen again resets the form.
+  const starts = useRef(0);
   // A screen's picker asked for a new view of this kind: the one dialog for it,
   // wherever the picker is (a card or the panel).
   const [newViewFor, setNewViewFor] = useState<{ outputId: string; surface: ViewSurface } | null>(null);
@@ -91,6 +93,7 @@ export function ScreensRoute() {
   const newTarget = (device: PanelDevice | null): PanelTarget => ({
     kind: "new",
     device,
+    start: ++starts.current,
     // A device is named for itself; an output of a Mac output helper for the
     // output, since all of a Mac's outputs share its hostname. A screen from the
     // Add tile is left unnamed, and the server names it "Display N" from the id it

@@ -763,6 +763,29 @@ describe("Add a screen", () => {
     assert.ok(panel().getByRole("heading", { name: "Wing" }), "the panel opened on the other operator's screen");
   });
 
+  test("the note after a screen is made does not survive closing the panel and opening it again", async () => {
+    await mountScreens();
+    await click(addTile());
+    await nextStep();
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    assert.ok(panel().getByRole("status"), "no note after creating");
+    await click(panel().getByRole("button", { name: "Close" }));
+    await click(toggle());
+    assert.ok(panel().getByText("Screen settings"), "the panel did not come back on the screen");
+    assert.equal(panel().queryByRole("status") !== null, false, "the note came back with the panel");
+  });
+
+  test("+ Add a screen while a new screen is already being made starts it again: the typed name and the step are gone", async () => {
+    await mountScreens();
+    await click(addTile());
+    await type(panel().getByLabelText("Name"), "Wing");
+    await nextStep();
+    assert.ok(panel().getByText("New screen · step 2 of 2"));
+    await click(addTile());
+    assert.ok(panel().getByText("New screen · step 1 of 2"), "the form stayed on its step");
+    assert.equal((panel().getByLabelText("Name") as HTMLInputElement).value, "", "the typed name was kept");
+  });
+
   test("a new control surface POSTs newView: control", async () => {
     await mountScreens();
     await click(addTile());
