@@ -496,6 +496,13 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.serviceCueLayoutId (string|null), body.hideChrome (boolean), body.showInSidebar (boolean), or body.calendarSources + body.calendarTags (arrays) required");
         return;
       }
+      // Checked before anything is written, so a rename in the same body does not
+      // land on its own. A body that also makes the view a wall view is judged as one.
+      const kindRefused = hasKind ? stageController.viewKindRefusal(id, body.kind as ViewKind, surface ?? undefined) : null;
+      if (kindRefused) {
+        error(res, kindRefused);
+        return;
+      }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameView(id, body.name as string);
       // Refused with its reason: converting a bound View names the screens it

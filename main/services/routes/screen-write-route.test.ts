@@ -233,6 +233,31 @@ describe("PATCH /api/outputs/:id — expectSurface", () => {
   });
 });
 
+describe("PATCH /api/views/:id changing a console's kind", () => {
+  const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
+
+  it("refuses a kind with nothing to operate, with the reason, and writes nothing else in the body", async () => {
+    const r = await patch("/api/views/ctl-a", { name: "Renamed", kind: "slots" });
+    assert.equal(r.status, 400, JSON.stringify(r.json));
+    assert.match((r.json as { error: string }).error, /Booth controls.*cannot be a control surface/s);
+    const view = views().find((v) => v.id === "ctl-a")!;
+    assert.deepEqual([view.kind, view.name], ["custom", "Booth controls"], "a field beside the refused kind was applied");
+    assert.deepEqual(controlSurfaces("ctl-a"), [true, true]);
+  });
+
+  it("takes a kind that still has controls, and any kind once the same body makes it a wall view", async () => {
+    assert.equal((await patch("/api/views/ctl-a", { kind: "calendar" })).status, 200);
+    assert.equal(views().find((v) => v.id === "ctl-a")!.kind, "calendar");
+    const r = await post("/api/views/ctl-a/surface", { surface: "display" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    ctl.state = { ...ctl.state, outputs: outputs().filter((o) => o.viewId !== "ctl-a") };
+    ctl.state.views = views().map((v) => (v.id === "ctl-a" ? { ...v, surface: "console" } : v));
+    const both = await patch("/api/views/ctl-a", { surface: "display", kind: "slots" });
+    assert.equal(both.status, 200, JSON.stringify(both.json));
+    assert.deepEqual([views().find((v) => v.id === "ctl-a")!.kind, views().find((v) => v.id === "ctl-a")!.surface], ["slots", "display"]);
+  });
+});
+
 describe("POST /api/views/:id/surface", () => {
   const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
 

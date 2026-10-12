@@ -148,6 +148,15 @@ describe("which kinds of view can be made a control surface", () => {
     const s = await stageController.setViewSurface("cal", "console");
     assert.equal(viewSurface(s.views.find((v) => v.id === "cal")!), "console");
   });
+
+  it("setViewKind keeps a console a kind with something to operate", async () => {
+    await assert.rejects(() => stageController.setViewKind("vc", "slots"), /FOH Console.*cannot be a control surface/s);
+    assert.equal(ctl.state.views.find((v) => v.id === "vc")!.kind, "custom");
+    const s = await stageController.setViewKind("vc", "calendar");
+    assert.equal(s.views.find((v) => v.id === "vc")!.kind, "calendar");
+    // A wall view may become any kind.
+    assert.equal((await stageController.setViewKind("vd", "slots")).views.find((v) => v.id === "vd")!.kind, "slots");
+  });
 });
 
 /** The `[screens]` lines `fn` logged, which is how an operator at 9am learns a

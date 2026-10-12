@@ -3185,9 +3185,13 @@ export class StageController {
   }
 
   async setViewKind(id: string, kind: ViewKind): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
+    const current = this.state.views.find((v) => v.id === id);
+    if (!current) {
       throw new Error(`views:setKind — view ${id} not found`);
     }
+    // A console is live on every screen showing it, so it may only become a kind
+    // that still has something to operate.
+    if (viewSurface(current) === "console") this.assertCanBeControlSurface({ ...current, kind });
     const views = this.state.views.map((v) =>
       v.id === id
         ? { ...v, kind, layout: kind === "custom" ? (v.layout ?? defaultCustomLayout()) : v.layout }
@@ -3955,6 +3959,21 @@ export class StageController {
     const view = this.state.views.find((v) => v.id === viewId);
     if (!view) throw new Error(`view ${viewId} not found`);
     return view;
+  }
+
+  /**
+   * Why `setViewKind(id, kind)` would be refused once the view has `surface`, or
+   * null. For a route that must refuse before it writes anything else.
+   */
+  viewKindRefusal(id: string, kind: ViewKind, surface?: ViewSurface): string | null {
+    const view = this.state.views.find((v) => v.id === id);
+    if (!view || (surface ?? viewSurface(view)) !== "console") return null;
+    try {
+      this.assertCanBeControlSurface({ ...view, kind });
+      return null;
+    } catch (err) {
+      return errorMessage(err);
+    }
   }
 
   /** Refuse, with the reason, a view whose kind has nothing to operate. */
