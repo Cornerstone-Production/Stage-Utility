@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { carriesStoredRole, planScreenRoles, type StoredOutput } from "./screen-role-migration.js";
-import { screenIsControlSurface, viewSurface } from "../types/views.js";
+import { asMigratedConsole, findLeftoverCopy, planScreenRoles, type StoredOutput } from "./screen-role-migration.js";
+import { screenIsControlSurface, viewCanBeControlSurface, viewSurface } from "../types/views.js";
 
 // A screen's role now comes from its view. This takes the role an older build
 // stored on the screen out of the data, and the property it must keep is the one
@@ -88,6 +88,29 @@ describe("a read-only screen on a console", () => {
   });
 });
 
+describe("a screen the surface migration made live", () => {
+  const views = [view("ctl", { name: "Booth controls", surface: "console" })];
+
+  test("has no stored role and was live: it stays on the console, with no copy", () => {
+    const outputs = [screen("a", "ctl")];
+    const plan = planScreenRoles(views, outputs, { absentIsDisplay: true, liveScreenIds: new Set(["a"]) });
+    assert.deepEqual([plan.copies, plan.changed, plan.carried], [[], 0, 1]);
+  });
+
+  test("only the screens named are live: a neighbour with no role is still read-only", () => {
+    const outputs = [screen("a", "ctl"), screen("b", "ctl")];
+    const plan = planScreenRoles(views, outputs, { absentIsDisplay: true, liveScreenIds: new Set(["a"]) });
+    assert.deepEqual(plan.copies.map((c) => c.screenIds), [["b"]]);
+  });
+
+  test("is looked at on a later pass too, because it was just made live", () => {
+    const outputs = [screen("a", "ctl"), screen("b", "ctl", "display")];
+    const plan = planScreenRoles(views, outputs, { absentIsDisplay: false, liveScreenIds: new Set(["a"]) });
+    assert.deepEqual(plan.copies.map((c) => [c.surface, c.screenIds]), [["display", ["b"]]]);
+    assert.equal(plan.carried, 2);
+  });
+});
+
 describe("a live screen on a wall view", () => {
   test("the view becomes a console when only live screens show it, and no copy is made", () => {
     const views = [view("wall", { name: "Lobby loop" })];
@@ -112,21 +135,34 @@ describe("a live screen on a wall view", () => {
     }
   });
 
-  test("a view that is not a custom view has no buttons to keep: only the role goes", () => {
-    const views = [view("cal", { kind: "calendar" })];
-    const plan = planScreenRoles(views, [screen("a", "cal", "panel")], { absentIsDisplay: false });
+  test("a view whose kind draws nothing to operate has no buttons to keep: only the role goes", () => {
+    const views = [view("mics", { kind: "slots" })];
+    const plan = planScreenRoles(views, [screen("a", "mics", "panel")], { absentIsDisplay: false });
     assert.deepEqual([plan.consoleViewIds, plan.copies, plan.changed], [[], [], 0]);
     assert.equal("mode" in plan.outputs[0], false);
+  });
+
+  test("a calendar has its month chevrons to keep: it becomes a console like a custom view", () => {
+    const views = [view("cal", { kind: "calendar", name: "Week ahead" })];
+    const alone = planScreenRoles(views, [screen("a", "cal", "panel")], { absentIsDisplay: false });
+    assert.deepEqual([alone.consoleViewIds, alone.copies, alone.changed], [["cal"], [], 1]);
+    // Shared with a read-only screen: the live one gets a copy, the other is not woken.
+    const shared = planScreenRoles(views, [screen("a", "cal", "panel"), screen("b", "cal", "display")], { absentIsDisplay: false });
+    assert.deepEqual(shared.consoleViewIds, []);
+    assert.deepEqual(shared.copies.map((c) => [c.name, c.surface, c.screenIds]), [["Week ahead (control surface)", "console", ["a"]]]);
   });
 });
 
 describe("the principle, over every combination", () => {
-  test("no screen that was read-only is live afterwards, and none that was live loses its buttons on a custom view", () => {
+  test("no screen that was read-only is live afterwards, and none that was live loses its buttons on a view that has some", () => {
     const stored = [undefined, "display", "panel", "hologram"];
     const kinds = [
       { surface: "display" as const, kind: "custom" },
       { surface: "console" as const, kind: "custom" },
       { surface: "display" as const, kind: "calendar" },
+      { surface: "console" as const, kind: "calendar" },
+      { surface: "display" as const, kind: "slots" },
+      { surface: "console" as const, kind: "slots" },
     ];
     for (const absentIsDisplay of [true, false]) {
       for (const k of kinds) {
@@ -141,9 +177,9 @@ describe("the principle, over every combination", () => {
               const label = `${JSON.stringify([k, a, b, absentIsDisplay])} screen ${o.id}`;
               const before = o.mode === "panel" || (!absentIsDisplay && o.mode === undefined && k.surface === "console");
               if (!before) assert.equal(live, false, `a read-only screen went live: ${label}`);
-              if (before && k.kind === "custom") assert.equal(live, true, `a live screen lost its buttons: ${label}`);
+              if (before && viewCanBeControlSurface({ kind: k.kind as View["kind"] })) assert.equal(live, true, `a live screen lost its buttons: ${label}`);
             }
-            assert.equal(carriesStoredRole(plan.outputs), false, "a role was left in the data");
+            assert.equal(plan.outputs.some((o) => "mode" in o), false, "a role was left in the data");
           }
         }
       }
@@ -170,5 +206,58 @@ describe("what it reports", () => {
     assert.equal(plan.notes.length, 1);
     assert.match(plan.notes[0], /"Lobby TV".*"Booth controls".*"Booth controls \(wall\)".*read-only/);
     assert.deepEqual([plan.checked, plan.changed], [1, 1]);
+  });
+});
+
+describe("a view the migration makes a control surface", () => {
+  const layout = (fit?: "contain" | "fill" | "responsive") =>
+    ({ version: 1, canvas: { width: 1920, height: 1080, background: null, ...(fit ? { fit } : {}) }, objects: [] }) as unknown as View["layout"];
+
+  test("is a console, kept out of the sidebar, with the fit it had as a wall view", () => {
+    const made = asMigratedConsole(view("w", { layout: layout() }));
+    assert.deepEqual([viewSurface(made), made.showInSidebar, made.layout?.canvas.fit], ["console", false, "contain"]);
+  });
+
+  test("keeps a fit the layout chose, whatever it was", () => {
+    for (const fit of ["contain", "fill", "responsive"] as const) {
+      assert.equal(asMigratedConsole(view("w", { layout: layout(fit) })).layout?.canvas.fit, fit);
+    }
+  });
+
+  test("a view with no layout (a calendar) gets none made up", () => {
+    const made = asMigratedConsole(view("cal", { kind: "calendar" }));
+    assert.equal("layout" in made, false);
+    assert.equal(viewSurface(made), "console");
+  });
+});
+
+describe("a copy an interrupted upgrade left behind", () => {
+  const withObjects = (objectId: string) =>
+    ({ version: 1, canvas: { width: 1920, height: 1080 }, objects: [{ id: objectId, x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "clock" } }] }) as unknown as View["layout"];
+  const source = view("ctl", { name: "Booth controls", surface: "console", layout: withObjects("a") });
+  const planned = { name: "Booth controls (wall)", surface: "display" as const };
+  /** What the interrupted pass saved: the same content under new object ids. */
+  const leftover = view("left", { name: planned.name, surface: "display", layout: withObjects("b") });
+
+  test("is found: same name, same surface, same content under other object ids, shown by no screen", () => {
+    assert.equal(findLeftoverCopy([source, leftover], [screen("a", "ctl", "display")], source, planned), leftover);
+  });
+
+  test("is not found when a screen shows it: that is somebody's view now", () => {
+    assert.equal(findLeftoverCopy([source, leftover], [screen("a", "left")], source, planned), undefined);
+  });
+
+  test("is not found when it draws something else, or has another name or surface", () => {
+    const other = view("x", { name: planned.name, surface: "display", layout: withObjects("c") });
+    (other.layout as { objects: { config: { type: string } }[] }).objects[0].config.type = "countdown";
+    assert.equal(findLeftoverCopy([source, other], [], source, planned), undefined);
+    assert.equal(findLeftoverCopy([source, { ...leftover, name: "Booth controls (wall) 2" }], [], source, planned), undefined);
+    assert.equal(findLeftoverCopy([source, { ...leftover, surface: "console" }], [], source, planned), undefined);
+  });
+
+  test("a control-surface copy is compared to what it would be made as: with the fit a panel keeps", () => {
+    const wall = view("w", { name: "Lobby loop", layout: withObjects("a") });
+    const made = { ...asMigratedConsole({ ...wall, id: "made", name: "Lobby loop (control surface)", layout: withObjects("z") }) };
+    assert.equal(findLeftoverCopy([wall, made], [], wall, { name: "Lobby loop (control surface)", surface: "console" }), made);
   });
 });

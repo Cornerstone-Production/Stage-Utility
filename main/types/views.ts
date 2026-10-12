@@ -1161,11 +1161,6 @@ export function viewShownInSidebar(v: Pick<View, "showInSidebar">): boolean {
  *  or a control surface (its buttons work). */
 export type NewViewKind = "wall" | "control";
 
-/** The surface a blank view of this kind has. */
-export function surfaceForNewView(kind: NewViewKind): ViewSurface {
-  return kind === "control" ? "console" : "display";
-}
-
 /** What createScreen takes. */
 export interface CreateScreenInput {
   name?: string;
@@ -1178,37 +1173,75 @@ export interface CreateScreenInput {
   showInSidebar?: boolean;
 }
 
+/** Is this view a console? False for no view. The one spelling of the question,
+ *  for a caller that already holds the view a screen shows. */
+export function viewIsConsole(view: Pick<View, "surface"> | null | undefined): boolean {
+  return view !== null && view !== undefined && viewSurface(view) === "console";
+}
+
 /**
- * Is this screen a control surface: do its buttons work for anyone at it?
+ * What a screen is, from the view it shows: a "console" (its buttons work for
+ * anyone at it, a control surface) or a read-only "display" wall screen.
  *
- * The view decides. A screen is a control surface exactly when the view it shows
- * is a console, and a read-only wall display otherwise, including when it shows
- * nothing. There is no stored role to disagree with the view, so nothing needs
- * keeping in step. Every reader, server and renderer, asks this one function.
+ * The view decides: a screen is a control surface exactly when the view it shows
+ * is a console, and a wall display otherwise, including when it shows nothing or
+ * a view that is gone. Every reader, server and renderer, asks this or
+ * {@link screenIsControlSurface}.
  */
+export function surfaceOfScreen(
+  output: Pick<Output, "viewId">,
+  views: readonly Pick<View, "id" | "surface">[],
+): ViewSurface {
+  const view = output.viewId ? views.find((v) => v.id === output.viewId) : undefined;
+  return viewIsConsole(view) ? "console" : "display";
+}
+
+/** Is this screen a control surface: do its buttons work for anyone at it? */
 export function screenIsControlSurface(
   output: Pick<Output, "viewId">,
   views: readonly Pick<View, "id" | "surface">[],
 ): boolean {
-  if (!output.viewId) return false;
-  const view = views.find((v) => v.id === output.viewId);
-  return view !== undefined && viewSurface(view) === "console";
+  return surfaceOfScreen(output, views) === "console";
+}
+
+/** The screens showing a view, in the order they are listed. */
+export function screensShowing<T extends Pick<Output, "viewId">>(viewId: string, outputs: readonly T[]): T[] {
+  return outputs.filter((o) => o.viewId === viewId);
 }
 
 /**
- * Can this view be a control surface? Only a custom view: it is the only kind
- * with a layout to put a control on, which is why createView makes anything else
- * a wall view whatever it was asked for, and why the view card does not offer
- * the switch for one. A calendar "console" is a promise nothing keeps. Any view
- * can be a wall view.
+ * Can this view be a control surface: does what it draws have anything for
+ * someone at the screen to operate?
+ *
+ * A custom view does (a button, a fader, an editable field on its layout), and so
+ * does a calendar (its month chevrons, which a wall display does not draw). Every
+ * other kind is a finished picture, so a console of one would promise controls
+ * that are not there. `stage-view-paths.test.tsx` renders each kind as a wall
+ * screen and as a control surface and fails when this list and the renderer
+ * disagree. Any view can be a wall view.
+ *
+ * A switch over every kind, not a list of the true ones: the build refuses a new
+ * kind until someone has decided which it is.
  */
 export function viewCanBeControlSurface(view: Pick<View, "kind">): boolean {
-  return view.kind === "custom";
-}
-
-/** What the copy of a view made for one screen is called. */
-export function copyViewName(view: Pick<View, "name">, surface: ViewSurface): string {
-  return `${view.name} (${surface === "console" ? "control surface" : "wall"})`;
+  switch (view.kind) {
+    case "custom":
+    case "calendar":
+      return true;
+    case "slots":
+    case "dashboard":
+    case "stage":
+    case "transcription":
+    case "script":
+    case "spl-rundown":
+      return false;
+    default: {
+      // A kind read from disk that this build does not know: nothing to operate.
+      const _never: never = view.kind;
+      void _never;
+      return false;
+    }
+  }
 }
 
 /** A physical screen at a URL slug, routed to exactly one View (or none). */

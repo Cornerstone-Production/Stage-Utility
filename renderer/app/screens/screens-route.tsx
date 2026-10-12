@@ -27,6 +27,7 @@
 import { useState } from "react";
 import { Loader2Icon, PanelRightIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
+import { screensShowing } from "@main/types/views";
 import { OutputsSection } from "../../settings/sections/outputs-section";
 import { ScreenPanelHost } from "./screen-panel-host";
 import type { PanelDevice, PanelTarget } from "../../settings/sections/screen-settings-panel";
@@ -118,7 +119,7 @@ export function ScreensRoute() {
   async function requestDeleteView(viewId: string) {
     const view = state.views?.find((v) => v.id === viewId);
     if (!view) return;
-    const shownOn = (state.outputs ?? []).filter((o) => o.viewId === viewId);
+    const shownOn = screensShowing(viewId, state.outputs ?? []);
     if (await confirmDeleteView(view, shownOn)) await s.handlers.handleRemoveView(viewId);
   }
 

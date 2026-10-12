@@ -4,6 +4,7 @@
 // header and the View settings footer), and three copies of a confirm are how
 // their wording drifts apart.
 
+import { screensShowing } from "@main/types/views";
 import { confirm, confirmWith, toast } from "../../components/ui";
 import type { SectionHandlers } from "../types";
 import { listNames } from "../screen-role-confirm";
@@ -27,7 +28,7 @@ export function confirmDeleteView(view: Pick<View, "name">, shownOn: readonly Pi
 
 /** The screens other than `output` that show a view. */
 function othersShowing(outputs: readonly Output[], output: Output, viewId: string): Output[] {
-  return outputs.filter((o) => o.id !== output.id && o.viewId === viewId);
+  return screensShowing(viewId, outputs).filter((o) => o.id !== output.id);
 }
 
 /**

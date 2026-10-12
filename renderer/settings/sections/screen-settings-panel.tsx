@@ -30,6 +30,7 @@ import { Button, Checkbox, ErrorNote, NumberInput, Select, SelectContent, Select
 import { copyText } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
+import { expectedSurface } from "../view-role-change";
 import { KIND_DRAWS_TOP_BAR, screenIsControlSurface, viewShownInSidebar, viewSurface, type CreateScreenInput, type ViewSurface } from "@main/types/views";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { confirmRole, confirmViewKind } from "../screen-role-confirm";
@@ -71,7 +72,7 @@ export interface ScreenPanelActions {
   onRename: (id: string, name: string) => void;
   /** Rejects with the server's reason, which the panel shows without closing. */
   onSetSlug: (id: string, slug: string) => Promise<void>;
-  onSetView: (id: string, viewId: string | null) => void;
+  onSetView: (id: string, viewId: string | null, expectSurface?: ViewSurface) => void;
   onSetLocked: (id: string, locked: boolean) => void;
   onSetHideTopBar: (id: string, hideTopBar: boolean) => void;
   onSetTextSize: (id: string, size: number) => void;
@@ -448,7 +449,7 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, acti
     if (v === NEW_WALL) actions.onRequestNewView(output.id, "display");
     else if (v === NEW_CONTROL) actions.onRequestNewView(output.id, "console");
     else if (v === NONE) actions.onSetView(output.id, null);
-    else if (await confirmViewKind(output, views, v)) actions.onSetView(output.id, v);
+    else if (await confirmViewKind(output, views, v)) actions.onSetView(output.id, v, expectedSurface(views, v));
   }
 
   function commitName() {

@@ -154,7 +154,8 @@ export function ScreenPanelHost({
         onCreated={(id, name) => {
           if (newViewFor && newViewScreen) {
             void assignNewView(newViewScreen, { surface: newViewFor.surface, name }, screenIsControlSurface(newViewScreen, stageState.views ?? []), () => {
-              void handlers.handleSetOutputView(newViewScreen.id, id);
+              // The kind just made is the kind the operator was asked about.
+              void handlers.handleSetOutputView(newViewScreen.id, id, newViewFor.surface);
             });
           }
           setNewViewFor(null);

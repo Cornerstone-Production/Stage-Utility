@@ -9,7 +9,7 @@ import { useState } from "react";
 
 import { Button } from "../../components/ui";
 import { useResyncOn } from "../../lib/use-resync-on";
-import { viewCanBeControlSurface, viewShownInSidebar, viewSurface, type ViewSurface } from "@main/types/views";
+import { screensShowing, viewCanBeControlSurface, viewShownInSidebar, viewSurface, type ViewSurface } from "@main/types/views";
 import { SURFACE_COPY } from "../screen-role-confirm";
 import { ChoiceCard, DangerButton, NameInput, PanelFooter, Section, SidebarRow } from "./screen-panel-parts";
 import type { PanelTarget, ScreenPanelActions } from "./screen-settings-panel";
@@ -22,7 +22,7 @@ export type ViewPanelActions = Pick<
 
 export function ViewBody({ view, outputs, actions }: { view: View; outputs: Output[]; actions: ViewPanelActions }) {
   const surface = viewSurface(view);
-  const shownOn = outputs.filter((o) => o.viewId === view.id);
+  const shownOn = screensShowing(view.id, outputs);
   const canBeControl = viewCanBeControlSurface(view);
 
   const [name, setName] = useState(view.name);
@@ -63,7 +63,7 @@ export function ViewBody({ view, outputs, actions }: { view: View; outputs: Outp
           </div>
           {!canBeControl && (
             <p className="mt-1.5 text-caption1 text-fg-subtle">
-              Only a custom layout can be a control surface: a calendar has no buttons to press.
+              Only a layout or a calendar can be a control surface: this view has nothing to press.
             </p>
           )}
           {surface === "console" && (
@@ -103,7 +103,9 @@ export function ViewBody({ view, outputs, actions }: { view: View; outputs: Outp
 
         <Section title="Layout">
           <div className="flex flex-wrap gap-2">
-            {canBeControl && (
+            {/* A layout to edit is a custom view's: a calendar can be a control
+                surface but has no layout of its own. */}
+            {view.kind === "custom" && (
               <Button type="button" variant="accent" size="medium" onClick={() => actions.onEditLayout(view.id)}>
                 Edit layout
               </Button>

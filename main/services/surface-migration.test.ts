@@ -45,6 +45,20 @@ describe("surface migration", () => {
     assert.equal(screenIsControlSurface(r.outputs[0], r.views), true);
   });
 
+  test("the screens it makes live are returned by id, and a screen that said it was read-only is not among them", () => {
+    const views = [view({ id: "v1", name: "Booth Panel", layout: layout([obj("osc-button")]) })];
+    const outputs = [
+      { id: "a", name: "A", viewId: "v1" },
+      { id: "b", name: "B", viewId: "v1", mode: "display" },
+      { id: "c", name: "C", viewId: "elsewhere" },
+    ] as Output[];
+
+    const r = migrateSurfaces(views, outputs);
+
+    assert.deepEqual([...r.liveScreenIds], ["a"]);
+    assert.deepEqual(r.outputs, outputs, "the screens are handed back as given: nothing is written onto them");
+  });
+
   test("a View with no controls is left as a display", () => {
     const views = [view({ id: "v2", name: "Lobby Wall", layout: layout([obj("clock")]) })];
     const outputs = [{ id: "out2", name: "Lobby", viewId: "v2" }] as Output[];

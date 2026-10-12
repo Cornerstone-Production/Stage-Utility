@@ -39,18 +39,25 @@ const layout = (id: string) => ({
   canvas: { width: 1920, height: 1080, background: null },
   objects: [{ id: `${id}-clock`, x: 0, y: 0, w: 10, h: 10, z: 0, config: { type: "clock" } }],
 });
-const custom = (id: string, name: string, surface: "display" | "console") => ({
-  id, name, kind: "custom", surface, createdAt: NOW, layout: layout(id),
+const custom = (id: string, name: string, surface: "display" | "console", fit?: string) => ({
+  id, name, kind: "custom", surface, createdAt: NOW,
+  layout: fit ? { ...layout(id), canvas: { ...layout(id).canvas, fit } } : layout(id),
 });
 
 // What the stored files looked like when a screen had a role of its own.
 const STORED_VIEWS = [
   custom("wall-solo", "Lobby loop", "display"),
   custom("wall-shared", "Hallway loop", "display"),
-  custom("wall-mixed", "Atrium loop", "display"),
+  custom("wall-mixed", "Atrium loop", "display", "responsive"),
   custom("ctl-a", "Booth controls", "console"),
   { id: "cal", name: "Week ahead", kind: "calendar", surface: "display", createdAt: NOW },
+  { id: "mics", name: "Mic board", kind: "slots", surface: "display", createdAt: NOW },
   { id: "home", name: "Home", kind: "custom", surface: "console", createdAt: NOW, layout: layout("home") },
+  // Older than the surface field: a button on it, and no surface decided yet.
+  {
+    id: "old-pad", name: "Old pad", kind: "custom", createdAt: NOW,
+    layout: { ...layout("old-pad"), objects: [{ id: "old-pad-btn", x: 0, y: 0, w: 10, h: 10, z: 0, config: { type: "osc-button" } }] },
+  },
 ];
 
 // `live` is what the screen did before: only an explicit "panel" had working buttons.
@@ -65,8 +72,13 @@ const STORED_SCREENS: { id: string; viewId: string | null; mode?: string; live: 
   { id: "display-8", viewId: "ctl-a", live: false, expect: false },
   { id: "display-9", viewId: "wall-solo", mode: "display", live: false, expect: false },
   { id: "display-10", viewId: null, mode: "panel", live: true, expect: false },
-  { id: "display-11", viewId: "cal", mode: "panel", live: true, expect: false },
+  { id: "display-11", viewId: "cal", mode: "panel", live: true, expect: true },
   { id: "display-12", viewId: "gone", mode: "display", live: false, expect: false },
+  // Never stored a role, and showed a view the surface migration makes a console:
+  // its buttons worked, because that migration marked it live.
+  { id: "display-13", viewId: "old-pad", live: true, expect: true },
+  // Live on a slot board: nothing on it to operate, so only the role goes.
+  { id: "display-14", viewId: "mics", mode: "panel", live: true, expect: false },
 ];
 
 const lines: string[] = [];
@@ -159,9 +171,32 @@ describe("the first boot after the upgrade", () => {
     assert.equal(viewSurface(state().views.find((v) => v.id === "wall-mixed")!), "display");
   });
 
-  it("a live screen on a view with no layout to put a control on is only read-only now; nothing is made", () => {
+  const fitOf = (view: { layout?: unknown }) => (view.layout as { canvas: { fit?: string } } | null | undefined)?.canvas.fit;
+  const named = (name: string) => state().views.find((v) => v.name === name)!;
+
+  it("a panel keeps its shape: a view made a console, or copied into one, gets the fit it had as a wall view unless its layout chose one", () => {
+    assert.equal(fitOf(state().views.find((v) => v.id === "wall-shared")!), "contain", "a converted view would reflow on its fixed-aspect panel");
+    assert.equal(fitOf(named("Lobby loop (control surface)")), "contain");
+    assert.equal(fitOf(named("Atrium loop (control surface)")), "responsive", "an explicit fit was overridden");
+    // What the migration did not make a console is not touched.
+    assert.equal(fitOf(state().views.find((v) => v.id === "ctl-a")!), undefined);
+    assert.equal(fitOf(named("Booth controls (wall)")), undefined);
+  });
+
+  it("a view the migration makes a console, and its control-surface copies, are kept out of the sidebar; nothing else is", () => {
+    const hidden = state().views.filter((v) => v.showInSidebar === false).map((v) => v.name).sort();
+    // Not "Old pad": the surface migration made that one a console, as it did before.
+    assert.deepEqual(hidden, ["Atrium loop (control surface)", "Hallway loop", "Lobby loop (control surface)", "Week ahead"]);
+  });
+
+  it("a live screen on a calendar keeps its month chevrons: the calendar becomes a control surface, with no copy", () => {
     assert.equal(screen("display-11").viewId, "cal");
-    assert.equal(viewSurface(state().views.find((v) => v.id === "cal")!), "display");
+    assert.equal(viewSurface(state().views.find((v) => v.id === "cal")!), "console");
+  });
+
+  it("a live screen on a view with nothing to operate is only read-only now; nothing is made", () => {
+    assert.equal(screen("display-14").viewId, "mics");
+    assert.equal(viewSurface(state().views.find((v) => v.id === "mics")!), "display");
   });
 
   it("persists the views, copies included, and the screens' new views", async () => {
@@ -178,13 +213,13 @@ describe("the first boot after the upgrade", () => {
   it("says what it did: a line for each screen it had to do something for, and one summary", () => {
     const screens = lines.filter((l) => l.startsWith("[screens] "));
     const summary = screens.filter((l) => /role from view:/.test(l));
-    assert.deepEqual(summary, ["[screens] role from view: 12 screens checked, 6 changed (1 view made a control surface, 3 copies made)"]);
+    assert.deepEqual(summary, ["[screens] role from view: 14 screens checked, 7 changed (2 views made a control surface, 3 copies made)"]);
     const named = (id: string) => screens.some((l) => !/role from view:/.test(l) && l.includes(`"Screen ${id}"`));
-    for (const id of ["display-1", "display-2", "display-3", "display-4", "display-7", "display-8"]) {
+    for (const id of ["display-1", "display-2", "display-3", "display-4", "display-7", "display-8", "display-11"]) {
       assert.equal(named(id), true, `${id} was changed and is not in the log`);
     }
     // A screen that only lost the stored role changed nothing, and is not named.
-    for (const id of ["display-5", "display-6", "display-9", "display-10", "display-11", "display-12"]) {
+    for (const id of ["display-5", "display-6", "display-9", "display-10", "display-12", "display-13", "display-14"]) {
       assert.equal(named(id), false, `${id} was not changed and is in the log`);
     }
   });

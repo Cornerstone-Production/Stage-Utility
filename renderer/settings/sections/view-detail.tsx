@@ -32,7 +32,7 @@ import { ViewPreview } from "./view-preview";
 import { SlotsPreviewNote } from "./slots-preview-target";
 import { KIND_LABELS, KIND_ORDER } from "./new-view-dialog";
 import { CalendarSources } from "./calendar-sources";
-import { viewSurface } from "@main/types/views";
+import { screensShowing, viewSurface } from "@main/types/views";
 import { confirmDeleteView } from "./screen-confirms";
 
 const PREVIEW_ASPECTS = [
@@ -227,7 +227,7 @@ export function ViewDetail({
           onClick={async () => {
             // Names the screens that would lose their content: deleting a view
             // is not recoverable, and a custom view can be a lot of layout work.
-            const ok = await confirmDeleteView(view, (stageState.outputs ?? []).filter((o) => o.viewId === view.id));
+            const ok = await confirmDeleteView(view, screensShowing(view.id, stageState.outputs ?? []));
             if (ok) await handlers.handleRemoveView(view.id);
           }}
           disabled={!canDelete}

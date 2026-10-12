@@ -33,7 +33,8 @@ import { ImportLayout } from "./import-layout";
 import { SCREEN_PANEL_ID, assignNewView, type PanelTarget } from "./screen-settings-panel";
 import { confirmViewKind } from "../screen-role-confirm";
 import { NEW_CONTROL, NEW_WALL, Pill, viewGroups } from "./screen-panel-parts";
-import { viewSurface, viewShownInSidebar, screenIsControlSurface, viewCanBeControlSurface, type ViewSurface } from "@main/types/views";
+import { viewSurface, viewShownInSidebar, screenIsControlSurface, viewCanBeControlSurface, viewIsConsole, type ViewSurface } from "@main/types/views";
+import { expectedSurface } from "../view-role-change";
 import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
 
@@ -180,7 +181,7 @@ export interface OutputRowProps {
   /** Where it was stored before that key moved, if it did. Undefined when the two
    *  are the same key. Read as a fallback, migrated on the next write. */
   legacyIconKey?: string;
-  onSetView: (viewId: string | null) => void;
+  onSetView: (viewId: string | null, expectSurface?: ViewSurface) => void;
   /** Rename the view this screen is showing (not the screen). */
   onRenameView: (viewId: string, name: string) => void;
   /** The message groups that exist, and whether they have been read. The card
@@ -318,7 +319,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
   async function assignView(viewId: string | null): Promise<void> {
     if (!viewId) { onSetView(null); return; }
     if (!(await confirmViewKind(output, views, viewId))) return;
-    onSetView(viewId);
+    onSetView(viewId, expectedSurface(views, viewId));
   }
 
   function handleBlur() {
@@ -711,7 +712,7 @@ function UnassignedViewCard({
   // clobbering what is being typed here.
   useResyncOn([view.name], () => setEditName(view.name));
   const openingSettings = useRef(false);
-  const isControl = viewSurface(view) === "console";
+  const isControl = viewIsConsole(view);
 
   return (
     <div
@@ -770,8 +771,7 @@ function UnassignedViewCard({
                 <SlidersHorizontalIcon className="size-3.5 text-fg-subtle" />
                 View settings…
               </DropdownMenu.Item>
-              {/* Only a custom layout can be a console: the built-in kinds have
-                  no layout to put a control on. */}
+              {/* Only a kind with something to operate can be a console. */}
               {viewCanBeControlSurface(view) && (
                 <DropdownMenu.Item onSelect={onToggleSurface} className={MENU_ITEM}>
                   {isControl
@@ -962,7 +962,7 @@ export function OutputsSection({
                 legacyIconKey={icon.legacyKey}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
                 onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
-                onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
+                onSetView={(viewId, expectSurface) => handlers.handleSetOutputView(output.id, viewId, expectSurface)}
                 messageGroups={messageGroups}
                 onOpenSettings={() => onSelect({ kind: "edit", outputId: output.id })}
                 panelOpen={panelOpen}
@@ -1021,7 +1021,7 @@ export function OutputsSection({
                 onRename={(name) => handlers.handleRenameView(v.id, name)}
                 onDuplicate={() => void handlers.handleDuplicateView(v.id)}
                 onToggleSurface={() =>
-                  handlers.handleSetViewSurface(v.id, viewSurface(v) === "console" ? "display" : "console")
+                  handlers.handleSetViewSurface(v.id, viewIsConsole(v) ? "display" : "console")
                 }
                 onSetShowInSidebar={(show) => handlers.handleSetViewShowInSidebar(v.id, show)}
                 onRemove={() => onDeleteView(v.id)}
@@ -1047,7 +1047,8 @@ export function OutputsSection({
           // other kind than the screen shows now is asked about first.
           if (creatingScreen && creating?.surface) {
             void assignNewView(creatingScreen, { surface: creating.surface, name }, screenIsControlSurface(creatingScreen, stageState.views ?? []), () => {
-              void handlers.handleSetOutputView(creatingScreen.id, id);
+              // The kind just made is the kind the operator was asked about.
+              void handlers.handleSetOutputView(creatingScreen.id, id, creating.surface);
             });
           }
           setCreating(null);

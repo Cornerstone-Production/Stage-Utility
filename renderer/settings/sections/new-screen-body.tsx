@@ -9,7 +9,7 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 
 import { Button, ErrorNote } from "../../components/ui";
 import { useDevices } from "../../app/screens/use-devices";
-import { viewSurface, type CreateScreenInput } from "@main/types/views";
+import { viewIsConsole, viewSurface, type CreateScreenInput } from "@main/types/views";
 import { ChoiceCard, NameInput, PanelFooter, RoleLine, Section, SlugInput, ViewPicker, viewGroups } from "./screen-panel-parts";
 import type { PanelTarget, ScreenPanelActions } from "./screen-settings-panel";
 
@@ -129,7 +129,7 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
                   {picked && (
                     <RoleLine
                       surface={viewSurface(picked)}
-                      line={viewSurface(picked) === "console" ? "Its buttons will work on this screen." : "Read-only."}
+                      line={viewIsConsole(picked) ? "Its buttons will work on this screen." : "Read-only."}
                     />
                   )}
                 </div>

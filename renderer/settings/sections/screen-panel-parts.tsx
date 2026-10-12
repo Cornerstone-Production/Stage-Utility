@@ -8,7 +8,7 @@ import type { ChangeEvent, ReactNode } from "react";
 
 import { Button, Input, Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, Switch, type ButtonProps } from "../../components/ui";
 import { cn } from "../../lib/cn";
-import { viewSurface, type ViewSurface } from "@main/types/views";
+import { viewIsConsole, viewSurface, type ViewSurface } from "@main/types/views";
 import { SURFACE_COPY } from "../screen-role-confirm";
 
 /** Select sentinels. Never stored: one clears the view, the others ask for a new one. */
@@ -20,7 +20,7 @@ export const NEW_CONTROL = "__new_control__";
 export function viewGroups(views: readonly View[]): { label: string; views: View[] }[] {
   return [
     { label: "Wall views", views: views.filter((v) => viewSurface(v) === "display") },
-    { label: "Control surfaces", views: views.filter((v) => viewSurface(v) === "console") },
+    { label: "Control surfaces", views: views.filter(viewIsConsole) },
   ];
 }
 

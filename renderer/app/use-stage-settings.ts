@@ -21,7 +21,7 @@
 //     Settings is routes inside the app rather than its own window
 
 import { useState, useEffect } from "react";
-import type { CreateScreenInput } from "@main/types/views";
+import type { CreateScreenInput, ViewSurface } from "@main/types/views";
 import type { Rotation } from "@main/types/output-format";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
@@ -780,8 +780,13 @@ export function useStageSettings(pinnedViewId?: string) {
 
   /** Optimistic so the controlled <Select> shows the new view at once instead
    *  of snapping back to the cached one while the request is in flight. */
-  async function handleSetOutputView(id: string, viewId: string | null) {
-    await setOutputField("outputs:setView", id, { viewId }, "Failed to route display");
+  async function handleSetOutputView(id: string, viewId: string | null, expectSurface?: ViewSurface) {
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { viewId }) }),
+      () => ipc<StageState>("outputs:setView", { id, viewId, ...(expectSurface ? { expectSurface } : {}) }),
+      "Failed to route display",
+    );
   }
 
   async function handleSetOutputLocked(id: string, locked: boolean) {

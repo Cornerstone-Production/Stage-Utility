@@ -462,7 +462,7 @@ describe("the view kind", () => {
       locked: false,
       hideTopBar: false,
       isPreview: false,
-      showsControlSurface: false,
+      interactive: false,
       allowHls: true,
       textSize: null,
     });
@@ -502,27 +502,27 @@ describe("the view kind", () => {
     assert.equal(noPco.k, "unknown-kind");
   });
 
-  test("knows whether its view is a console: that is what makes a screen a control surface", () => {
-    // The custom arm turns this into `contextForOutput(showsControlSurface,
-    // isPreview)`, which decides whether a button on the screen actually fires.
-    // It is read from the view the arm renders, not from anything stored on the
-    // screen, so what is drawn and whether it works cannot disagree.
+  test("is interactive when its view is a console: that is what makes a screen a control surface", () => {
+    // Every arm that draws a control reads `interactive`, which decides whether a
+    // button on the screen actually fires. It is read from the view the arm
+    // renders, not from anything stored on the screen, so what is drawn and
+    // whether it works cannot disagree.
     const consoleView = { id: "v1", name: "Booth", kind: "custom", surface: "console", layout: { canvas: { width: 1920 }, objects: [] } };
     const wallView = { ...consoleView, surface: "display" };
     const showing = (view: object) => resolveScreen(input({
       state: stageState({ views: [view] as unknown as View[], resolvedByOutput: { "display-1": resolvedOutput({ kind: "custom" }) } }),
     }));
     const onConsole = showing(consoleView);
-    assert.equal(onConsole.k === "view" && onConsole.showsControlSurface, true);
+    assert.equal(onConsole.k === "view" && onConsole.interactive, true);
     const onWall = showing(wallView);
-    assert.equal(onWall.k === "view" && onWall.showsControlSurface, false);
+    assert.equal(onWall.k === "view" && onWall.interactive, false);
     // A view with no surface written is a wall view: nothing is live by inference.
     const { surface: _unset, ...legacy } = consoleView;
     const onLegacy = showing(legacy);
-    assert.equal(onLegacy.k === "view" && onLegacy.showsControlSurface, false);
+    assert.equal(onLegacy.k === "view" && onLegacy.interactive, false);
   });
 
-  test("a preview of a console still knows it is one; contextForOutput is what keeps it from firing", () => {
+  test("a preview of a console is never interactive: a picture of a screen must not fire its buttons", () => {
     const preview = resolveScreen(input({
       displayId: "preview-v1",
       previewViewId: "v1",
@@ -531,7 +531,7 @@ describe("the view kind", () => {
       }),
     }));
     assert.equal(preview.k === "view" && preview.isPreview, true);
-    assert.equal(preview.k === "view" && preview.showsControlSurface, true);
+    assert.equal(preview.k === "view" && preview.interactive, false);
   });
 
   test("carries the output's own allowHls, but a preview always reads allowed", () => {

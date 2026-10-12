@@ -7,7 +7,7 @@
 // rather than a few lines in the settings hook so that what it asks, and that
 // declining sends nothing, are driven rather than read off the source.
 
-import { viewSurface, type ViewSurface } from "@main/types/views";
+import { screensShowing, viewSurface, type ViewSurface } from "@main/types/views";
 import type { StageState } from "@main/types/stage";
 import type { ConfirmOptions } from "../components/ui";
 import type { ApiError } from "../lib/api";
@@ -28,9 +28,19 @@ export interface ChangedScreen {
 export function screensChangedBy(state: Pick<StageState, "views" | "outputs"> | undefined, viewId: string, surface: ViewSurface): ChangedScreen[] {
   const view = state?.views.find((v) => v.id === viewId);
   if (!view || viewSurface(view) === surface) return [];
-  return (state?.outputs ?? [])
-    .filter((o) => o.viewId === viewId)
-    .map((o) => ({ id: o.id, name: o.name || o.id }));
+  return screensShowing(viewId, state?.outputs ?? []).map((o) => ({ id: o.id, name: o.name || o.id }));
+}
+
+/**
+ * The kind of view `viewId` is, as the operator saw it: what to send as
+ * `expectSurface` after they confirm a screen going live on it. Read from the
+ * views the confirm was asked against, never from a fresher copy: the point is
+ * that the server refuses when the view changed while the question was open.
+ * Undefined for a view that is not there, which sends no expectation.
+ */
+export function expectedSurface(views: readonly Pick<View, "id" | "surface">[], viewId: string): ViewSurface | undefined {
+  const view = views.find((v) => v.id === viewId);
+  return view ? viewSurface(view) : undefined;
 }
 
 /** What to ask before changing these screens, or null when there is none to

@@ -458,11 +458,11 @@ describe("what it shows", () => {
     const { calls } = mount({});
     await choose(picker(), "wall-b");
     assert.equal(screen.queryByRole("alertdialog") !== null, false, "a confirm was asked for a change that changes nothing");
-    assert.deepEqual(calls, [["view", "display-1", "wall-b"]]);
+    assert.deepEqual(calls, [["view", "display-1", "wall-b", "display"]]);
     cleanup();
     const ctl = mount({ outputs: [PANEL_A] });
     await choose(picker(), "ctl-b");
-    assert.deepEqual(ctl.calls, [["view", "display-3", "ctl-b"]]);
+    assert.deepEqual(ctl.calls, [["view", "display-3", "ctl-b", "console"]]);
   });
 
   test("choosing Unrouted clears it, asking nothing, even for a control surface", async () => {
@@ -794,7 +794,18 @@ describe("choosing a view of the other kind", () => {
     assert.match(dialog.textContent ?? "", /"Stage controls" is a control surface\. Buttons on this screen will work, and anyone standing at it can press them/);
     assert.deepEqual(calls, [], "the screen was routed before the operator said yes");
     await answerConfirm("Show it and make it live");
-    assert.deepEqual(calls, [["view", "display-1", "ctl-b"]]);
+    assert.deepEqual(calls, [["view", "display-1", "ctl-b", "console"]]);
+  });
+
+  test("sends the kind of view the operator was asked about, not what it is when they answer", async () => {
+    // The server holds the write to this: a view made a wall view while the dialog
+    // was open is refused, rather than a screen going live on what nobody confirmed.
+    const { calls, rerender } = mount({});
+    await choose(picker(), "ctl-b");
+    await screen.findByRole("alertdialog");
+    await rerender({ views: VIEWS.map((v) => (v.id === "ctl-b" ? { ...v, surface: "display" as const } : v)) });
+    await answerConfirm("Show it and make it live");
+    assert.deepEqual(calls, [["view", "display-1", "ctl-b", "console"]]);
   });
 
   test("declining changes nothing", async () => {
@@ -811,23 +822,23 @@ describe("choosing a view of the other kind", () => {
     const dialog = await screen.findByRole("alertdialog");
     assert.match(dialog.textContent ?? "", /Make "Booth panel" a wall display\?/);
     assert.match(dialog.textContent ?? "", /read-only/);
-    await answerConfirm("Show it");
-    assert.deepEqual(calls, [["view", "display-3", "wall-b"]]);
+await answerConfirm("Show it");
+    assert.deepEqual(calls, [["view", "display-3", "wall-b", "display"]]);
   });
 
   test("a screen showing nothing, given a console, asks: its buttons would go live", async () => {
     const { calls } = mount({ outputs: [{ ...MINE, viewId: null }] });
     await choose(picker(), "ctl-a");
     await screen.findByRole("alertdialog");
-    await answerConfirm("Show it and make it live");
-    assert.deepEqual(calls, [["view", "display-1", "ctl-a"]]);
+await answerConfirm("Show it and make it live");
+    assert.deepEqual(calls, [["view", "display-1", "ctl-a", "console"]]);
   });
 
   test("a screen showing nothing, given a wall view, asks nothing: it was read-only and stays so", async () => {
     const { calls } = mount({ outputs: [{ ...MINE, viewId: null }] });
     await choose(picker(), "wall-b");
     assert.equal(screen.queryByRole("alertdialog") !== null, false, "a confirm was asked for a change that changes nothing");
-    assert.deepEqual(calls, [["view", "display-1", "wall-b"]]);
+    assert.deepEqual(calls, [["view", "display-1", "wall-b", "display"]]);
   });
 });
 
@@ -913,13 +924,22 @@ describe("view settings", () => {
     assert.deepEqual(calls, []);
   });
 
-  test("a view that is not a custom layout cannot be a control surface, and says why", async () => {
-    const calendar: View = { id: "cal", name: "Month calendar", kind: "calendar", surface: "display", createdAt: NOW };
-    const { calls } = mount({ target: { kind: "view", viewId: "cal" }, views: [calendar], outputs: [MINE] });
+  test("a view with nothing to operate cannot be a control surface, and says why", async () => {
+    const slots: View = { id: "mics", name: "Mic board", kind: "slots", surface: "display", createdAt: NOW };
+    const { calls } = mount({ target: { kind: "view", viewId: "mics" }, views: [slots], outputs: [MINE] });
     assert.equal((role("Control surface") as HTMLButtonElement).disabled, true);
-    assert.ok(screen.getByText("Only a custom layout can be a control surface: a calendar has no buttons to press."));
+    assert.ok(screen.getByText("Only a layout or a calendar can be a control surface: this view has nothing to press."));
     await click(role("Control surface"));
     assert.deepEqual(calls, []);
+  });
+
+  test("a calendar CAN be a control surface: its month chevrons are something to operate", async () => {
+    const calendar: View = { id: "cal", name: "Month calendar", kind: "calendar", surface: "display", createdAt: NOW };
+    const { calls } = mount({ target: { kind: "view", viewId: "cal" }, views: [calendar], outputs: [MINE] });
+    assert.equal((role("Control surface") as HTMLButtonElement).disabled, false, "a calendar's Control surface card is off");
+    assert.equal(screen.queryByText(/has nothing to press/) !== null, false, "the refusal note is shown for a calendar");
+    await click(role("Control surface"));
+    assert.deepEqual(calls, [["viewSurface", "cal", "console"]]);
   });
 
   test("List in the sidebar is there for a control surface only, and writes this view", async () => {
@@ -960,7 +980,7 @@ describe("view settings", () => {
     cleanup();
     const calendar: View = { id: "cal", name: "Month calendar", kind: "calendar", surface: "display", createdAt: NOW };
     mount({ target: { kind: "view", viewId: "cal" }, views: [calendar], outputs: [MINE] });
-    assert.equal(screen.queryByRole("button", { name: "Edit layout" }) !== null, false, "a calendar has no layout to edit");
+    assert.equal(screen.queryByRole("button", { name: "Edit layout" }) !== null, false, "a calendar has no layout to edit, though it can be a control surface");
     assert.ok(screen.getByRole("button", { name: "Duplicate" }));
   });
 

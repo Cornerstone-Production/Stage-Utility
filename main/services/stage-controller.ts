@@ -3,7 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
-import { carriesStoredRole, planScreenRoles } from "./screen-role-migration.js";
+import { asMigratedConsole, findLeftoverCopy, planScreenRoles } from "./screen-role-migration.js";
 import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
 import { getUserDataPath } from "./app-paths.js";
 import { adoptLegacyStoreFiles } from "./store-file-adoption.js";
@@ -20,7 +20,7 @@ import {
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
-import { viewSurface, viewShownInSidebar, surfaceForNewView, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
+import { screenIsControlSurface, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
@@ -217,14 +217,6 @@ export class SlotsNotFoundError extends Error {
   }
 }
 
-/** Why a view cannot be a control surface: it is not a custom view. */
-function noControlSurfaceReason(view: View): string {
-  return (
-    `"${view.name}" is a ${defaultViewName(view.kind)} view, and only a custom view has a layout to put a control on, ` +
-    `so it cannot be a control surface.`
-  );
-}
-
 /** One write in a multi-write screen change, and how to take it back. */
 export interface ScreenStep {
   label: string;
@@ -236,7 +228,8 @@ export interface ScreenStep {
 }
 
 /**
- * A multi-step screen write (createScreen, setViewRole) that failed part-way.
+ * A multi-step screen write (createScreen) that failed part-way, or setViewRole
+ * when its one write failed.
  * Says which step failed and what was put back, and what could NOT be, so the
  * caller never has to guess whether a half-made screen is still there.
  */
@@ -287,6 +280,27 @@ export class ViewScreensChangedError extends Error {
           : `It would now change ${screens.map((s) => `"${s.name}"`).join(", ")}.`),
     );
     this.name = "ViewScreensChangedError";
+  }
+}
+
+/**
+ * setOutputView was told which kind of view the caller expected (the one the
+ * operator confirmed going live on) and the view is the other kind now: it was
+ * made a console, or a wall view, while the question was open. Nothing is written.
+ * `surface` is what the view is now, so the caller can ask again.
+ */
+export class ViewSurfaceChangedError extends Error {
+  readonly code = "surface-changed";
+  constructor(
+    readonly viewId: string,
+    readonly expected: ViewSurface,
+    readonly surface: ViewSurface,
+  ) {
+    super(
+      `The view changed while you were deciding: it is ${surface === "console" ? "a control surface" : "a wall view"} now, ` +
+        `not ${expected === "console" ? "a control surface" : "a wall view"}. Nothing was changed.`,
+    );
+    this.name = "ViewSurfaceChangedError";
   }
 }
 
@@ -786,7 +800,7 @@ export class StageController {
     // After the surfaces are decided and before anything is written: the role an
     // older build stored on each screen leaves the data here, on every path that
     // loads it (a restored backup is loaded like any other).
-    const roles = await this.applyScreenRoles(surfaced.views, surfaced.outputs, !rolesAlreadyFromView);
+    const roles = await this.applyScreenRoles(surfaced.views, surfaced.outputs, !rolesAlreadyFromView, surfaced.liveScreenIds);
     const result = { ...surfaced, views: roles.views, outputs: roles.outputs };
     // A stored slug is only ever checked on the way IN, so a path the app claims
     // for itself later silently shadows the screen holding it. Re-checked here,
@@ -795,18 +809,22 @@ export class StageController {
     const viewsChanged = result.views.length !== views.length || result.views.some((v, i) => v !== views[i]);
     const outputsChanged =
       slugs.changed.length > 0 || result.outputs.some((o, i) => o !== outputs[i]);
-    if (!viewsChanged && !outputsChanged) {
-      // Nothing left to save this pass, so recording the flags here cannot
-      // outrun a write that isn't happening.
-      if (needsFlagPatch) await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: true, screenRolesFromView: true });
-      return { views, outputs };
-    }
-
     if (viewsChanged) await viewsStore.save(result.views);
-    if (outputsChanged) await settingsStore.patch({ outputs: slugs.outputs });
-    // AFTER the saves above, not before: a crash here at worst repeats an
-    // idempotent pass on the next boot, rather than skipping it for good.
-    if (needsFlagPatch) await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: true, screenRolesFromView: true });
+    // The screens and the flags in ONE patch, never two. The first pass reads a
+    // screen with no stored role as a read-only display, so the screens (their
+    // stored role now removed) landing without the flag is a state a crash could
+    // leave on disk, and the next start would read every live screen as read-only
+    // and give it a wall copy. The views are saved before this, so a crash
+    // between the two leaves the screens still carrying their role and the flag
+    // unset: the pass runs again on data it reads the same way (and reuses a copy
+    // it already made). With no screens to write, the flags go alone: recording
+    // them cannot outrun a write that is not happening.
+    if (outputsChanged) {
+      await settingsStore.patch({ outputs: slugs.outputs, layoutDefaultsCleaned: true, cardHairlineRaised: true, screenRolesFromView: true });
+    } else if (needsFlagPatch) {
+      await settingsStore.patch({ layoutDefaultsCleaned: true, cardHairlineRaised: true, screenRolesFromView: true });
+    }
+    if (!viewsChanged && !outputsChanged) return { views, outputs };
 
     // Logged in full, and this one is not optional: the operator's screen has a
     // different URL than it did yesterday, and the only way they learn that is
@@ -840,29 +858,41 @@ export class StageController {
     views: View[],
     outputs: Output[],
     first: boolean,
+    liveScreenIds: ReadonlySet<string>,
   ): Promise<{ views: View[]; outputs: Output[]; log: string[] }> {
-    if (!first && !carriesStoredRole(outputs)) return { views, outputs, log: [] };
-    const plan = planScreenRoles(views, outputs, { absentIsDisplay: first });
-    let nextViews = views.map((v) => (plan.consoleViewIds.includes(v.id) ? { ...v, surface: "console" as const } : v));
+    const plan = planScreenRoles(views, outputs, { absentIsDisplay: first, liveScreenIds });
+    let nextViews = views.map((v) => (plan.consoleViewIds.includes(v.id) ? asMigratedConsole(v) : v));
     let nextOutputs = plan.outputs;
+    const reused: string[] = [];
     for (const c of plan.copies) {
       const src = views.find((v) => v.id === c.sourceViewId);
-      if (!src) continue; // the plan was made from this list
-      const { copy, cloned } = this.cloneViewRecord(src, await this.allocateViewId(nextViews), c.name);
-      await this.copyViewSlotConfig(src, copy, cloned);
-      nextViews = [...nextViews, { ...copy, surface: c.surface }];
-      nextOutputs = nextOutputs.map((o) => (c.screenIds.includes(o.id) ? { ...o, viewId: copy.id } : o));
+      if (!src) throw new Error(`screen roles: the plan copies view ${c.sourceViewId}, which is not in the list it was made from`);
+      // A pass that died after saving a copy and before pointing the screen at it
+      // plans the same copy again: reuse what it left rather than make a second.
+      let copy = findLeftoverCopy(nextViews, nextOutputs, src, c);
+      if (copy) {
+        reused.push(`reused the copy left by an interrupted upgrade: "${copy.name}"`);
+      } else {
+        const cloned = this.cloneViewRecord(src, await this.allocateViewId(nextViews), c.name);
+        await this.copyViewSlotConfig(src, cloned.copy, cloned.cloned);
+        copy = c.surface === "console" ? asMigratedConsole(cloned.copy) : { ...cloned.copy, surface: "display" };
+        nextViews = [...nextViews, copy];
+      }
+      const copyId = copy.id;
+      nextOutputs = nextOutputs.map((o) => (c.screenIds.includes(o.id) ? { ...o, viewId: copyId } : o));
     }
     // Quiet when nothing was stored: a fresh install, or every later boot.
+    const made = plan.copies.length - reused.length;
     const log =
-      plan.checked === 0 || (!carriesStoredRole(outputs) && plan.changed === 0)
+      plan.carried === 0 && plan.changed === 0
         ? []
         : [
             ...plan.notes,
+            ...reused,
             `role from view: ${plan.checked} screen${plan.checked === 1 ? "" : "s"} checked, ${plan.changed} changed` +
               (plan.changed > 0
                 ? ` (${plan.consoleViewIds.length} view${plan.consoleViewIds.length === 1 ? "" : "s"} made a control surface, ` +
-                  `${plan.copies.length} cop${plan.copies.length === 1 ? "y" : "ies"} made)`
+                  `${made} cop${made === 1 ? "y" : "ies"} made)`
                 : ""),
           ];
     return { views: nextViews, outputs: nextOutputs, log };
@@ -3061,10 +3091,9 @@ export class StageController {
     onAssigned?: (view: View) => void,
   ): Promise<View> {
     const id = await this.allocateViewId();
-    // Only a custom View has an editable layout, so only a custom View has
-    // anywhere to put a control. Anything else asked for as a console would be
-    // a console that cannot carry one - a promise the UI could not keep.
-    const effectiveSurface: ViewSurface = kind === "custom" ? surface : "display";
+    // A kind with nothing to operate asked for as a console would be a console
+    // that cannot carry a control: a promise the screen could not keep.
+    const effectiveSurface: ViewSurface = viewCanBeControlSurface({ kind }) ? surface : "display";
     const view: View = {
       id,
       name: name?.trim() || defaultViewName(kind),
@@ -3120,8 +3149,9 @@ export class StageController {
   ): Promise<StageState> {
     const view = this.state.views.find((v) => v.id === id);
     if (!view) throw new Error(`setViewSurface — view ${id} not found`);
+    if (surface === "console" && viewSurface(view) !== "console") this.assertCanBeControlSurface(view);
 
-    const shownOn = this.state.outputs.filter((o) => o.viewId === id);
+    const shownOn = screensShowing(id, this.state.outputs);
     if (!opts.screensConfirmed && viewSurface(view) !== surface && shownOn.length > 0) {
       const names = shownOn.map((o) => `"${o.name || o.id}"`).join(", ");
       const them = shownOn.length === 1 ? "that screen" : "those screens";
@@ -3138,16 +3168,30 @@ export class StageController {
     const views = this.state.views.map((v) => (v.id === id ? { ...v, surface } : v));
     console.log(`[stage-controller] setViewSurface view=${scrub(id)} → ${scrub(surface)}`);
     this.state = { ...this.state, views };
-    await viewsStore.save(views);
+    try {
+      await viewsStore.save(views);
+    } catch (err) {
+      // Memory follows the disk: the store dropped its cache when the write
+      // failed, and the view goes back to what it was, so a failed save is not
+      // left looking saved until the next restart.
+      this.state = { ...this.state, views: this.state.views.map((v) => (v.id === id ? { ...v, surface: view.surface } : v)) };
+      this.recomputeResolved();
+      this.broadcast();
+      throw err;
+    }
     this.recomputeResolved();
     this.broadcast();
     return this.state;
   }
 
   async setViewKind(id: string, kind: ViewKind): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
+    const current = this.state.views.find((v) => v.id === id);
+    if (!current) {
       throw new Error(`views:setKind — view ${id} not found`);
     }
+    // A console is live on every screen showing it, so it may only become a kind
+    // that still has something to operate.
+    if (viewSurface(current) === "console") this.assertCanBeControlSurface({ ...current, kind });
     const views = this.state.views.map((v) =>
       v.id === id
         ? { ...v, kind, layout: kind === "custom" ? (v.layout ?? defaultCustomLayout()) : v.layout }
@@ -3334,18 +3378,15 @@ export class StageController {
    * service type's default and every per-plan override, not just the active
    * type's rows. Copying one type's board by hand is what this did before, and a
    * duplicate of a view configured for three service types came back configured
-   * for one. Returns the ids it wrote under, for a caller that holds them in memory.
+   * for one.
    */
   private async copyViewSlotConfig(
     src: View,
     copy: View,
     cloned: ReturnType<typeof cloneLayoutWithMap> | null,
-  ): Promise<{ viewKeyCopied: boolean; objectIds: string[] }> {
-    let viewKeyCopied = false;
-    const objectIds: string[] = [];
+  ): Promise<void> {
     if (src.kind === "slots") {
       await slotsStore.copyKey(src.id, copy.id, () => randomUUID());
-      viewKeyCopied = true;
     }
     // Each inline mic-slots object's slots (all service types) to the cloned
     // object ids, so the duplicated layout keeps its lineups.
@@ -3356,10 +3397,8 @@ export class StageController {
         const mapped = cloned.idMap.get(oldId);
         if (!mapped) continue;
         await slotsStore.copyKey(oldId, mapped, () => randomUUID());
-        objectIds.push(mapped);
       }
     }
-    return { viewKeyCopied, objectIds };
   }
 
   /** duplicateView, returning the copy — see createViewRecord for why, and for
@@ -3375,10 +3414,13 @@ export class StageController {
     onAssigned?.(copy);
     await viewsStore.save(views);
 
-    const copied = await this.copyViewSlotConfig(src, copy, cloned);
-    if (copied.viewKeyCopied) this.rawSlotsByView.set(newId, await this.rawFor(newId));
+    await this.copyViewSlotConfig(src, copy, cloned);
+    if (src.kind === "slots") this.rawSlotsByView.set(newId, await this.rawFor(newId));
     if (this.state.serviceTypeId) {
-      for (const mapped of copied.objectIds) this.rawSlotsByObject.set(mapped, await this.rawFor(mapped));
+      // The copy's own inline grids are the ids the config was just copied under.
+      const inlineIds: string[] = [];
+      forEachInlineSlotsGrid([copy], (oid) => inlineIds.push(oid));
+      for (const oid of inlineIds) this.rawSlotsByObject.set(oid, await this.rawFor(oid));
     }
     this.recomputeResolved();
     this.broadcast();
@@ -3701,8 +3743,17 @@ export class StageController {
     return this.state.outputs.filter((o) => o.id !== exceptId).flatMap((o) => (o.slug ? [o.id, o.slug] : [o.id]));
   }
 
-  /** Route an output to a View (or null to unroute). The recall operation. */
-  async setOutputView(id: string, viewId: string | null): Promise<StageState> {
+  /**
+   * Route an output to a View (or null to unroute). The recall operation.
+   *
+   * `expectSurface` is the kind of view the caller believes it is routing to: a
+   * client that asked the operator before a screen went live sends the kind it
+   * asked about. When the view is the other kind by the time the write runs (the
+   * same turn as the check), nothing is written and ViewSurfaceChangedError says
+   * what the view is now. Absent, the write is allowed whatever the kind: a
+   * Companion recall, a script.
+   */
+  async setOutputView(id: string, viewId: string | null, opts: { expectSurface?: ViewSurface } = {}): Promise<StageState> {
     if (!this.state.outputs.find((o) => o.id === id)) {
       throw new Error(`outputs:setView — output ${id} not found`);
     }
@@ -3719,18 +3770,40 @@ export class StageController {
     }
     // Either kind of view may go on any screen: the view decides whether the
     // screen's buttons work, so there is no pairing to refuse. Asking the
-    // operator before a screen goes live is the client's job.
-    return this.commitOutputPatch(
+    // operator before a screen goes live is the client's job; `expectSurface` is
+    // how it makes the server hold the answer to what it asked about.
+    let wasControlSurface = false;
+    let screenName = id;
+    const state = await this.commitOutputPatch(
       id,
       { viewId },
       `[stage-controller] setOutputView output=${scrub(id)} → view=${scrub(viewId ?? "(none)")}`,
       // Inside the write, against the views as they are then: a view deleted while
       // this waited its turn must not be pointed at.
-      () => {
-        if (viewId !== null && !this.state.views.find((v) => v.id === viewId)) {
+      (current) => {
+        const view = viewId === null ? undefined : this.state.views.find((v) => v.id === viewId);
+        if (viewId !== null && !view) {
           throw new Error(`outputs:setView — view ${viewId} not found`);
         }
+        if (view && opts.expectSurface !== undefined && viewSurface(view) !== opts.expectSurface) {
+          throw new ViewSurfaceChangedError(view.id, opts.expectSurface, viewSurface(view));
+        }
+        wasControlSurface = screenIsControlSurface(current, this.state.views);
+        screenName = current.name || current.id;
       },
+    );
+    const view = viewId === null ? undefined : state.views.find((v) => v.id === viewId);
+    const isControlSurface = viewIsConsole(view);
+    if (isControlSurface !== wasControlSurface) this.logRoleFlip(screenName, isControlSurface, view?.name);
+    return state;
+  }
+
+  /** One `[screens]` line for a screen whose role just changed, so the log answers
+   *  "why did that screen start (or stop) working". */
+  private logRoleFlip(screen: string, nowControlSurface: boolean, viewName: string | undefined): void {
+    console.log(
+      `[screens] "${scrub(screen)}" is now ${scrub(nowControlSurface ? "a control surface" : "read-only")} ` +
+        `(${viewName === undefined ? "shows nothing" : `shows "${scrub(viewName)}"`})`,
     );
   }
 
@@ -3814,7 +3887,7 @@ export class StageController {
     const existing = typeof input.viewId === "string" ? this.requireViewToShow(input.viewId) : undefined;
     // The listing is written on a control surface's view. Anywhere else there is
     // nothing to write it on, and accepting it would be dropping it silently.
-    const showsControlSurface = newView === "control" || (existing !== undefined && viewSurface(existing) === "console");
+    const showsControlSurface = newView === "control" || viewIsConsole(existing);
     if (input.showInSidebar !== undefined && !showsControlSurface) {
       throw new Error(
         'outputs:add — showInSidebar is the listing of a control surface\'s view: send it with newView "control", or a viewId that names a control surface',
@@ -3837,7 +3910,7 @@ export class StageController {
             label: "make the view",
             run: async () => {
               // Custom, because only a custom view has a layout to put anything on.
-              await this.createViewRecord(name, "custom", surfaceForNewView(newView), (view) => {
+              await this.createViewRecord(name, "custom", newView === "control" ? "console" : "display", (view) => {
                 createdViewId = view.id;
                 viewId = view.id;
               });
@@ -3889,13 +3962,27 @@ export class StageController {
   }
 
   /**
-   * The view named, refused unless it can be made a control surface at all: it
-   * exists, is not Home, and is a custom view. setViewRole is about to make it one.
+   * Why `setViewKind(id, kind)` would be refused once the view has `surface`, or
+   * null. For a route that must refuse before it writes anything else.
    */
-  private requireViewCanBeControlSurface(viewId: string): View {
-    const view = this.requireViewToShow(viewId);
-    if (!viewCanBeControlSurface(view)) throw new Error(noControlSurfaceReason(view));
-    return view;
+  viewKindRefusal(id: string, kind: ViewKind, surface?: ViewSurface): string | null {
+    const view = this.state.views.find((v) => v.id === id);
+    if (!view || (surface ?? viewSurface(view)) !== "console") return null;
+    try {
+      this.assertCanBeControlSurface({ ...view, kind });
+      return null;
+    } catch (err) {
+      return errorMessage(err);
+    }
+  }
+
+  /** Refuse, with the reason, a view whose kind has nothing to operate. */
+  private assertCanBeControlSurface(view: View): void {
+    if (viewCanBeControlSurface(view)) return;
+    throw new Error(
+      `"${view.name}" is a ${defaultViewName(view.kind)} view, which draws nothing a screen could operate, ` +
+        `so it cannot be a control surface.`,
+    );
   }
 
   /**
@@ -3915,15 +4002,16 @@ export class StageController {
    * the write share a turn, so nothing can land between them. Absent, whatever
    * screens show the view are changed: the call a script makes.
    *
-   * A view already as asked is not an error and writes nothing. Only a custom
-   * view may become a console.
+   * A view already as asked is not an error and writes nothing. Only a view whose
+   * kind has something to operate may become a console.
    */
   async setViewRole(id: string, surface: ViewSurface, opts: { screens?: string[] } = {}): Promise<StageState> {
     if (surface !== "display" && surface !== "console") throw new Error('views:setRole — surface must be "display" or "console"');
-    const view = surface === "console" ? this.requireViewCanBeControlSurface(id) : this.requireViewToShow(id);
+    const view = this.requireViewToShow(id);
     if (viewSurface(view) === surface) return this.state;
+    if (surface === "console") this.assertCanBeControlSurface(view);
 
-    const changing = this.state.outputs.filter((o) => o.viewId === id);
+    const changing = screensShowing(id, this.state.outputs);
     if (opts.screens !== undefined) {
       const shown = new Set(opts.screens);
       if (shown.size !== changing.length || changing.some((o) => !shown.has(o.id))) {
@@ -3935,21 +4023,22 @@ export class StageController {
       }
     }
 
-    const was = viewSurface(view);
-    await this.runScreenSteps("setViewRole", [{
-      label: `make the view a ${surface === "console" ? "control surface" : "wall view"}`,
-      run: () => this.setViewSurface(id, surface, { screensConfirmed: true }),
-      // Idempotent, like every undo here: it writes only when the view is not as it was.
-      undo: async () => {
-        const now = this.state.views.find((v) => v.id === id);
-        if (!now || viewSurface(now) === was) return false;
-        await this.setViewSurface(id, was, { screensConfirmed: true });
-      },
-    }]);
+    const step = `make the view a ${surface === "console" ? "control surface" : "wall view"}`;
+    try {
+      await this.setViewSurface(id, surface, { screensConfirmed: true });
+    } catch (err) {
+      // Everything refusable was checked above, so what reaches here is the save
+      // failing, and setViewSurface has put the view back by then.
+      console.warn(
+        `[stage-controller] setViewRole failed at "${scrub(step)}": ${scrub(errorMessage(err))}; rolled back: ${scrub(step)}`,
+      );
+      throw new ScreenWriteError("setViewRole", step, errorMessage(err), [step], []);
+    }
     console.log(
       `[stage-controller] setViewRole view=${scrub(id)} → ${scrub(surface)}, screens: ` +
         `${scrub(changing.map((o) => `"${o.name || o.id}"`).join(", ") || "(none)")}`,
     );
+    for (const o of changing) this.logRoleFlip(o.name || o.id, surface === "console", view.name);
     return this.state;
   }
 

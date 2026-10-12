@@ -20,12 +20,12 @@ import {
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
-import { isLayoutShape } from "../../types/views.js";
+import { isLayoutShape, type ViewSurface } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
-import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError } from "../stage-controller.js";
+import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewSurfaceChangedError } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
 import { datedExportFilename } from "../export-filename.js";
@@ -496,6 +496,13 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.serviceCueLayoutId (string|null), body.hideChrome (boolean), body.showInSidebar (boolean), or body.calendarSources + body.calendarTags (arrays) required");
         return;
       }
+      // Checked before anything is written, so a rename in the same body does not
+      // land on its own. A body that also makes the view a wall view is judged as one.
+      const kindRefused = hasKind ? stageController.viewKindRefusal(id, body.kind as ViewKind, surface ?? undefined) : null;
+      if (kindRefused) {
+        error(res, kindRefused);
+        return;
+      }
       let state = stageController.getState();
       if (hasName) state = await stageController.renameView(id, body.name as string);
       // Refused with its reason: converting a bound View names the screens it
@@ -633,6 +640,11 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // which validates before it writes. A `mode` is refused: the view decides.
     if (method === "POST" && pathname === "/api/outputs") {
       const body = await readBody(req) as Record<string, unknown>;
+      const refusedMode = modeRefusal(body);
+      if (refusedMode) {
+        error(res, refusedMode);
+        return;
+      }
       const input = readCreateScreenBody(body);
       if ("error" in input) {
         error(res, input.error);
@@ -697,6 +709,19 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, refusedMode);
         return;
       }
+      // Checked against the view in `viewId`, so it means nothing without one: an
+      // ignored field is a caller believing the check ran.
+      const expectSurface = body.expectSurface;
+      if ("expectSurface" in body) {
+        if (expectSurface !== "display" && expectSurface !== "console") {
+          error(res, 'body.expectSurface must be "display" or "console"');
+          return;
+        }
+        if (typeof body.viewId !== "string") {
+          error(res, "body.expectSurface is checked against body.viewId, which must name a view");
+          return;
+        }
+      }
       if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasGroups && !hasTextSize && !hasRotation && !hasVideoMode && !hasSlug) {
         error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.groups (string[]), body.textSize (number, 50 to 300), body.rotation (0, 90, 180 or 270), body.videoMode (string), or body.slug (string) required");
         return;
@@ -709,7 +734,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       // applied, as they always did.
       try {
         if (hasName) state = await stageController.renameOutput(id, body.name as string);
-        if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null);
+        if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null, { expectSurface: expectSurface as ViewSurface | undefined });
         if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
         if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
         if (hasHideTopBar) state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
@@ -720,6 +745,12 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         if (hasVideoMode) state = await stageController.setOutputVideoMode(id, body.videoMode);
         if (hasSlug) state = await stageController.setOutputSlug(id, body.slug as string);
       } catch (err) {
+        if (err instanceof ViewSurfaceChangedError) {
+          // The caller has a real choice to make, as with a stale layoutRev: `surface`
+          // is what the view is now, to ask the operator again with.
+          json(res, { error: err.message, code: err.code, surface: err.surface }, 409);
+          return;
+        }
         error(res, errorMessage(err));
         return;
       }

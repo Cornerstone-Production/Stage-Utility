@@ -22,7 +22,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installDom } from "../test-dom.js";
-import { KIND_DRAWS_TOP_BAR, everyViewKind, type ViewKind } from "@main/types/views";
+import { KIND_DRAWS_TOP_BAR, everyViewKind, viewCanBeControlSurface, type ViewKind } from "@main/types/views";
 
 const teardown = installDom();
 
@@ -560,6 +560,49 @@ describe("StageView keeps controls dead unless the screen shows a console", () =
     const c = await showScreen("/preview-v1", withControls("console"));
     assert.equal(hasInertControls(c), true, "a preview's controls were live");
   });
+});
+
+describe("viewCanBeControlSurface is what the arms actually render", () => {
+  // The anti-drift guard for the list of kinds that can be a control surface. Each
+  // kind is rendered as a wall screen and as a control surface, and a kind that
+  // draws something different has controls a screen can operate: pressable
+  // buttons, or objects that are inert on a wall. The two must agree with the
+  // predicate in BOTH directions: a kind with live controls that the predicate
+  // refuses is how a panel lost its buttons on upgrade, and a kind the predicate
+  // allows that draws the same either way is a console that promises nothing.
+  const EXTRAS: Partial<Record<ViewKind, Record<string, unknown>>> = {
+    custom: {
+      layout: {
+        canvas: { width: 1920, height: 1080, background: null },
+        objects: [{ id: "o1", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "live-controls" } }],
+      },
+    },
+    script: { serviceCueLayoutId: "sl1" },
+  };
+  /** What a press could reach: buttons on screen and objects the renderer made inert. */
+  const operable = (c: HTMLElement) =>
+    `${c.querySelectorAll("button:not([disabled])").length} buttons, ${c.querySelectorAll(".pointer-events-none").length} inert`;
+
+  for (const kind of everyViewKind(["slots", "dashboard", "stage", "transcription", "custom", "script", "spl-rundown", "calendar"])) {
+    test(`${kind}: a control surface draws something to operate exactly when viewCanBeControlSurface says so`, async () => {
+      const draw = async (surface: "display" | "console") => {
+        const c = await showScreen("/display-1", {
+          ...ofKind(kind, { ...(EXTRAS[kind] ?? {}), surface }),
+          slotsByView: { v1: [slot("Pastor")] },
+        });
+        const seen = operable(c);
+        cleanup();
+        return seen;
+      };
+      const wall = await draw("display");
+      const console_ = await draw("console");
+      assert.equal(
+        wall !== console_,
+        viewCanBeControlSurface({ kind }),
+        `${kind} draws ${wall} on a wall screen and ${console_} on a control surface, and viewCanBeControlSurface says ${viewCanBeControlSurface({ kind })}`,
+      );
+    });
+  }
 });
 
 // ---- the per-display top bar ------------------------------------------------

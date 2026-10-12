@@ -3,7 +3,7 @@
 import type { DragEndEvent } from "@dnd-kit/core";
 import type { useSensors } from "@dnd-kit/core";
 import type { DeviceChannel } from "@main/types/devices";
-import type { CreateScreenInput } from "@main/types/views";
+import type { CreateScreenInput, ViewSurface } from "@main/types/views";
 import type { Rotation } from "@main/types/output-format";
 
 /**
@@ -109,7 +109,9 @@ export interface SectionHandlers {
   /** Make a screen from the Screen settings panel's answers. */
   handleCreateScreen: (input: CreateScreenInput) => Promise<CreateScreenOutcome>;
   handleRenameOutput: (id: string, name: string) => Promise<void>;
-  handleSetOutputView: (id: string, viewId: string | null) => Promise<void>;
+  /** `expectSurface` is the kind of view the operator confirmed going live on; the
+   *  server refuses (409) when the view is the other kind by the time it writes. */
+  handleSetOutputView: (id: string, viewId: string | null, expectSurface?: ViewSurface) => Promise<void>;
   handleSetOutputLocked: (id: string, locked: boolean) => Promise<void>;
   handleSetOutputHideTopBar: (id: string, hideTopBar: boolean) => Promise<void>;
   handleSetOutputAllowHls: (id: string, allowHls: boolean) => Promise<void>;
