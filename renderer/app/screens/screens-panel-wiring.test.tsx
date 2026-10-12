@@ -398,6 +398,16 @@ describe("the panel follows the click, only while it is open", () => {
     assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }), "a control moved the panel");
   });
 
+  test("an item pressed in a card's menu (rendered in a portal) does not move the panel: Refresh is not a click on the card", async () => {
+    await mountScreens();
+    await click(card("Booth panel"));
+    assert.ok(panel().getByRole("heading", { name: "Booth panel" }));
+    const trigger = screen.getByLabelText("More actions for Lobby TV");
+    await act(async () => { fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false }); fireEvent.click(trigger); await settle(); });
+    await pressMenuItem("Refresh display");
+    assert.ok(panel().getByRole("heading", { name: "Booth panel" }), "pressing a menu item moved the panel to the card the menu belongs to");
+  });
+
   test("a card's picker change does not move it either", async () => {
     await mountScreens();
     await choose(within(card("Lobby TV")).getByLabelText("View on Lobby TV"), "wall-a");
