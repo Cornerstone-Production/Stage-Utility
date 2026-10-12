@@ -12,7 +12,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, readLedger, settle, unmountAndTeardown } from "../../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -43,6 +43,9 @@ let halfDone = false;
 let gate: Promise<void> | null = null;
 let readFails = false;
 let fetchStub: ReturnType<typeof stubFetchWithLog>;
+/** The reads and saves begun, and the answers the page has taken. A save held on
+ *  purpose (`gate`) is left out: it is meant to stay in flight. */
+const reads = readLedger();
 
 type PutBody = { version: number; groups: { id?: string; name: string }[]; quickMessages: string[]; quickReplies: string[] };
 
@@ -82,16 +85,23 @@ beforeEach(() => {
   halfDone = false;
   gate = null;
   readFails = false;
+  reads.reset();
   fetchStub = stubFetchWithLog((url, init) => {
     if (url !== "/api/messaging") return ok({});
     if ((init?.method ?? "GET") === "PUT") {
       const body = JSON.parse(String(init?.body)) as PutBody;
       puts.push(body as Config);
-      if (refuse) return reply(400, { error: refuse });
-      return gate ? gate.then(() => answerPut(body)) : answerPut(body);
+      if (gate) return gate.then(() => answerPut(body));
+      reads.begin();
+      if (refuse) return reads.answer(reply(400, { error: refuse }));
+      return reads.answer(answerPut(body));
     }
-    if (readFails) throw new TypeError("fetch failed");
-    return ok(server);
+    reads.begin();
+    if (readFails) {
+      reads.failed();
+      throw new TypeError("fetch failed");
+    }
+    return reads.answer(ok(server));
   });
 });
 afterEach(() => fetchStub.restore());
@@ -122,6 +132,8 @@ function type(label: string | RegExp, value: string) {
 }
 async function flush() {
   await settle();
+  // Whatever the action sent has been answered, and the page has taken the answer.
+  await eventually(reads.landed);
   await settle();
 }
 

@@ -22,7 +22,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom, isPlumbing } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing, readLedger } from "../test-dom.js";
 
 const BOX_PX = 240;
 const teardown = installRenderDom({ clientHeight: BOX_PX });
@@ -99,32 +99,20 @@ let overrides: Record<string, unknown> = {};
  *  read of the integration fails; cleared between tests. */
 let failing = new Set<string>();
 
-/** Reads begun, and reads whose answer a caller has taken. The difference, less
- *  the reads a test is holding on purpose, is what is still on its way. */
-let readsBegun = 0;
-let readsTaken = 0;
+/** The reads begun and the answers a caller has taken. Less the reads a test is
+ *  holding on purpose, what is left is still on its way. */
+const reads = readLedger();
 let readsHeld = 0;
-const readsOnTheirWay = () => readsBegun - readsTaken - readsHeld;
-
-/** A response whose body counts as taken the first time a caller reads it. */
-function respond<T extends { json: () => Promise<unknown>; text: () => Promise<string> }>(res: T): T {
-  let taken = false;
-  const take = () => {
-    if (!taken) readsTaken += 1;
-    taken = true;
-  };
-  const { json, text } = res;
-  return { ...res, json: async () => (take(), json()), text: async () => (take(), text()) };
-}
+const readsOnTheirWay = () => reads.pending() - readsHeld;
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
   // The live-update subscription posts on its own schedule and lands whenever it
   // likes; it is neither a read the page waits on nor one of these counts.
   if (isPlumbing(String(url))) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
-  readsBegun += 1;
+  reads.begin();
   const path = String(url).split("?")[0];
   if (path === "/api/state") {
-    return respond({ ok: true, status: 200, json: async () => STATE, text: async () => JSON.stringify(STATE) });
+    return reads.answer({ ok: true, status: 200, json: async () => STATE, text: async () => JSON.stringify(STATE) });
   }
   // Decided when the request is made, as a server would: a read released late
   // still carries the answer for the moment it asked.
@@ -144,9 +132,9 @@ function respond<T extends { json: () => Promise<unknown>; text: () => Promise<s
   });
   if (fails) {
     const err = { error: "upstream read failed" };
-    return respond({ ok: false, status: 502, statusText: "Bad Gateway", json: async () => err, text: async () => JSON.stringify(err) });
+    return reads.answer({ ok: false, status: 502, statusText: "Bad Gateway", json: async () => err, text: async () => JSON.stringify(err) });
   }
-  return respond({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+  return reads.answer({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
 };
 
 const { render, cleanup } = await import("@testing-library/react");

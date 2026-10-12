@@ -33,7 +33,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom, isPlumbing } from "../test-dom.js";
+import { eventually, installDom, isPlumbing, readLedger } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -276,20 +276,13 @@ let happening = true;
  * objects) agree on which one is up.
  */
 let activePvpLive: PvpStatusDTO = PVP_LIVE;
-/** Reads begun, and reads whose answer a caller has taken. A card is only worth
- *  comparing once every one of its reads has been received. */
-let readsBegun = 0;
-let readsTaken = 0;
+/** A card is only worth comparing once every one of its reads has been received. */
+const reads = readLedger();
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
   // The live-update subscription posts on its own schedule and lands whenever it
   // likes; it is neither a read the page waits on nor one of these counts.
   if (isPlumbing(String(input))) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
-  readsBegun += 1;
-  let taken = false;
-  const take = () => {
-    if (!taken) readsTaken += 1;
-    taken = true;
-  };
+  reads.begin();
   const url = String(input);
   const pick = <T,>(live: T, idle: T): T => (happening ? live : idle);
   const body =
@@ -303,12 +296,7 @@ let readsTaken = 0;
     : url.includes("/api/spl/summary") ? SPL_SUMMARY
     : url.includes("/api/service-timeline") ? []
     : {};
-  return {
-    ok: true,
-    status: 200,
-    json: async () => (take(), body),
-    text: async () => (take(), JSON.stringify(body)),
-  };
+  return reads.answer({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
 };
 
 const { render, cleanup, act } = await import("@testing-library/react");
@@ -419,13 +407,12 @@ async function draw(type: string, key: string, value: unknown, home: boolean, li
   });
   // A Home card reads its own data, and a card compared before the answer lands
   // looks the same on and off. Waited for by what the cards asked, not by turns.
-  const reads = () => assert.equal(readsTaken, readsBegun, "a card's read was never answered");
-  await eventually(reads);
+  await eventually(reads.landed);
   await act(async () => {
     await settle();
     await settle();
   });
-  await eventually(reads);
+  await eventually(reads.landed);
   // React's useId values are NOT evidence of anything. They increment per render
   // tree, so two renders of the same card carry different ids by construction —
   // and any card whose markup contains one differs from itself no matter what the

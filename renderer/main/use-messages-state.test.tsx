@@ -8,7 +8,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, readLedger, settle, unmountAndTeardown } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
@@ -18,27 +18,20 @@ const teardown = installDom();
 let answer: () => Promise<unknown> = async () => ({});
 /** The init each read of the messages was sent with. */
 const inits: (RequestInit | undefined)[] = [];
-/** Reads begun, and reads whose answer the page has taken. A read still on its
- *  way when a test ends is delivered into the NEXT test, as a clock reading it
- *  never asked for, so each test waits for these to meet before it is over. */
-let readsBegun = 0;
-let readsTaken = 0;
+/** A read still on its way when a test ends is delivered into the NEXT test, as a
+ *  clock reading it never asked for, so each test waits for the reads it began. */
+const reads = readLedger();
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
   if (url.startsWith("/api/log/client")) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
   if (!url.startsWith("/api/messages")) throw new Error(`unexpected fetch: ${url}`);
   inits.push(init);
-  readsBegun += 1;
+  reads.begin();
   const body = await answer().catch((err: unknown) => {
-    readsTaken += 1;
+    reads.failed();
     throw err;
   });
-  let taken = false;
-  const take = () => {
-    if (!taken) readsTaken += 1;
-    taken = true;
-  };
-  return { ok: true, status: 200, json: async () => (take(), body), text: async () => (take(), JSON.stringify(body)) };
+  return reads.answer({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
 };
 
 const { render, cleanup, act } = await import("@testing-library/react");
@@ -56,7 +49,7 @@ beforeEach(() => {
 afterEach(async () => {
   cleanup();
   await settle();
-  await eventually(() => assert.equal(readsTaken, readsBegun, "a read was still on its way when the test ended"));
+  await eventually(reads.landed);
 });
 
 const HOUR = 3_600_000;

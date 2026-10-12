@@ -11,7 +11,7 @@
 import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
-import { eventually, installDom, isPlumbing } from "./test-dom.js";
+import { eventually, installDom, isPlumbing, readLedger } from "./test-dom.js";
 
 // The client build reads `window`, as it would in a browser.
 const teardown = installDom();
@@ -80,6 +80,33 @@ describe("eventually", () => {
       eventually(() => assert.equal(1, 2, "the thing never arrived"), 100),
       /the thing never arrived/,
     );
+  });
+});
+
+describe("readLedger", () => {
+  const response = (body: unknown) => ({ ok: true, json: async () => body, text: async () => JSON.stringify(body) });
+
+  test("a read is on its way until a caller takes its body, once", async () => {
+    const reads = readLedger();
+    reads.begin();
+    const res = reads.answer(response({ a: 1 }));
+    assert.equal(reads.pending(), 1, "an answer nobody has read is still on its way");
+    assert.throws(() => reads.landed(), /1 read\(s\) still on their way/);
+    assert.deepEqual(await res.json(), { a: 1 });
+    assert.equal(reads.pending(), 0);
+    reads.landed();
+    await res.text();
+    assert.equal(reads.pending(), 0, "reading the body twice must not take two reads");
+  });
+
+  test("a read that failed is not left pending, and reset starts again", () => {
+    const reads = readLedger();
+    reads.begin();
+    reads.failed();
+    assert.equal(reads.pending(), 0);
+    reads.begin();
+    reads.reset();
+    assert.equal(reads.pending(), 0);
   });
 });
 

@@ -299,6 +299,70 @@ export async function eventually<T>(check: () => T, timeout: number = WAIT_TIMEO
   }
 }
 
+/** A fetch stub's own tally of the reads it was asked for and the answers a caller took. */
+export interface ReadLedger {
+  /** A read has started. */
+  begin: () => void;
+  /** The answer to a read. It counts as taken the first time its body is read. */
+  answer: <R extends { json: () => Promise<unknown>; text: () => Promise<string> }>(res: R) => R;
+  /** A read that failed before it could be answered; nobody is going to take it. */
+  failed: () => void;
+  /** Reads begun whose answer has not been taken. */
+  pending: () => number;
+  /** For eventually(): throws unless every read begun has been taken. */
+  landed: () => void;
+  /** Start again, for a test that installs a fresh stub. */
+  reset: () => void;
+}
+
+/**
+ * Count what a fetch stub has been asked, and what its callers have taken.
+ *
+ * A test that flips what the stub answers, or ends, while a read is still on its
+ * way is wrong in a way that depends on the machine: the late answer lands in the
+ * next step (a good answer after a failure ends its streak, so the failure logs
+ * twice), or in the next test (a clock reading it never asked for), or after the
+ * DOM has gone ("window is not defined", failing the file with every test green).
+ * The cure is to wait for the reads that were begun, not for a number of turns:
+ *
+ *   const reads = readLedger();
+ *   globalThis.fetch = async (url) => {
+ *     reads.begin();
+ *     return reads.answer(ok(body));
+ *   };
+ *   ...
+ *   await eventually(reads.landed);
+ *
+ * "Taken" is when a caller reads the body, which is after any delay between the
+ * stub and the caller, so the tally cannot say a read has landed before the page
+ * has it. Leave the live-update subscription out (isPlumbing): nobody waits on it.
+ */
+export function readLedger(): ReadLedger {
+  let begun = 0;
+  let taken = 0;
+  return {
+    begin: () => void (begun += 1),
+    answer(res) {
+      let counted = false;
+      const take = () => {
+        if (!counted) taken += 1;
+        counted = true;
+      };
+      const { json, text } = res;
+      return { ...res, json: async () => (take(), json()), text: async () => (take(), text()) };
+    },
+    failed: () => void (taken += 1),
+    pending: () => begun - taken,
+    landed() {
+      if (begun !== taken) throw new Error(`${begun - taken} read(s) still on their way`);
+    },
+    reset() {
+      begun = 0;
+      taken = 0;
+    },
+  };
+}
+
 /**
  * Whether a request is the live-update stream's own traffic rather than
  * something the component under test did.

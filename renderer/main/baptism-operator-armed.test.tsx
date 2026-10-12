@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { eventually, installRenderDom, isPlumbing, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing, readLedger, settle, unmountAndTeardown } from "../test-dom.js";
 import { baptismState } from "../test-fixtures/baptism-state.js";
 
 const teardown = installRenderDom();
@@ -48,27 +48,19 @@ const ARMED_STATE: BaptismState = baptismState({
   planId: "plan-1",
 });
 
-/** Reads begun, and reads whose answer the page has taken: a read still on its
- *  way when the test ends lands after the DOM is gone. */
-let readsBegun = 0;
-let readsTaken = 0;
+/** A read still on its way when the test ends lands after the DOM is gone. */
+const reads = readLedger();
 
 function stubFetch(state: BaptismState) {
-  readsBegun = 0;
-  readsTaken = 0;
+  reads.reset();
   return (async (input: string) => {
     const url = String(input);
-  // The live-update subscription posts on its own schedule and lands whenever it
-  // likes; it is neither a read the page waits on nor one of these counts.
-  if (isPlumbing(url)) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
-    readsBegun += 1;
+    // The live-update subscription posts on its own schedule and lands whenever it
+    // likes; it is neither a read the page waits on nor one of these counts.
+    if (isPlumbing(url)) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
+    reads.begin();
     const body = url.endsWith("/api/baptism") ? state : url.endsWith("/api/baptism/sessions") ? [] : {};
-    let taken = false;
-    const take = () => {
-      if (!taken) readsTaken += 1;
-      taken = true;
-    };
-    return { ok: true, status: 200, json: async () => (take(), body), text: async () => (take(), "") };
+    return reads.answer({ ok: true, status: 200, json: async () => body, text: async () => "" });
   }) as unknown as typeof fetch;
 }
 
@@ -82,7 +74,7 @@ async function mount(state: BaptismState = ARMED_STATE): Promise<void> {
     // stub comes off, and before any test asserts that something is NOT drawn.
     await eventually(() => assert.ok(!(document.body.textContent ?? "").includes("Loading…"), "the panel never left Loading…"));
     // And every other read it began has been received, before the stub comes off.
-    await eventually(() => assert.equal(readsTaken, readsBegun, "a read was still on its way"));
+    await eventually(reads.landed);
   } finally {
     globalThis.fetch = realFetch;
   }

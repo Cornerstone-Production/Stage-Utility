@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { eventually, installRenderDom, isPlumbing, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing, readLedger, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -48,37 +48,25 @@ type Read = "layouts" | "roles" | "rundown";
 
 const CONNECTED = { serviceTypeId: "st1", planId: "p1", pcoConfigured: true };
 
-/** Reads begun, and reads whose answer the page has taken (or that failed). A
- *  test that flips what fails must first let the reads already on their way land:
- *  a good answer arriving after a failure ends its streak, so the next failure
- *  would be logged as a new one. */
-let readsBegun = 0;
-let readsTaken = 0;
-const readsLanded = () => assert.equal(readsTaken, readsBegun, "a read was still on its way");
+/** A test that flips what fails must first let the reads already on their way
+ *  land: a good answer arriving after a failure ends its streak, so the next
+ *  failure would be logged as a new one. */
+const reads = readLedger();
 
 /** `failing` is read at call time, so a test can change it between ticks. */
 function stubFetch(failing: Read[], state: Record<string, unknown> = CONNECTED) {
   const asked: string[] = [];
-  readsBegun = 0;
-  readsTaken = 0;
+  reads.reset();
   const f = stubFetchWithLog((url) => {
     // The live-update subscription posts on its own schedule and lands whenever it
     // likes; it is neither a read the page waits on nor one of these counts.
     if (isPlumbing(url)) return ok({});
     asked.push(url);
-    readsBegun += 1;
-    const answer = (json: unknown) => {
-      const res = ok(json);
-      let taken = false;
-      const take = () => {
-        if (!taken) readsTaken += 1;
-        taken = true;
-      };
-      return { ...res, json: async () => (take(), res.json()), text: async () => (take(), res.text()) };
-    };
+    reads.begin();
+    const answer = (json: unknown) => reads.answer(ok(json));
     const read = (name: Read, json: unknown) => {
       if (failing.includes(name)) {
-        readsTaken += 1;
+        reads.failed();
         throw new TypeError("fetch failed");
       }
       return answer(json);
@@ -142,7 +130,7 @@ test("once a list has loaded, a failed retry keeps it and changes nothing on scr
   const f = stubFetch(failing);
   try {
     await mount();
-    await eventually(readsLanded);
+    await eventually(reads.landed);
     assert.equal(alerts(), "");
     failing.push("layouts", "roles");
     // Two ticks of the timer: a retry that keeps failing is one failure, not
