@@ -12,7 +12,7 @@ import * as http from "node:http";
 import type { AddressInfo } from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
-import { after, before, beforeEach, describe, it } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import { captureConsole } from "../fixtures/capture-console.js";
 
@@ -33,6 +33,11 @@ let github: http.Server;
 let githubBase: string;
 const published = new Map<string, Buffer>();
 let githubHits: string[] = [];
+/** Errors the route under test threw: none is the expectation in every test. */
+const routeErrors: unknown[] = [];
+afterEach(() => {
+  assert.deepEqual(routeErrors.splice(0), [], "the route threw");
+});
 
 const listen = (server: http.Server) =>
   new Promise<string>((resolve) => server.listen(0, "127.0.0.1", () => resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}`)));
@@ -47,9 +52,12 @@ before(async () => {
           res.end("unhandled");
         }
       },
-      (err) => {
+      (err: unknown) => {
+        // Kept for the check after each test, not sent: the answer carries no
+        // error text of its own.
+        routeErrors.push(err);
         res.writeHead(500);
-        res.end(String(err));
+        res.end("the route threw");
       },
     );
   });

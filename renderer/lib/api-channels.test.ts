@@ -564,6 +564,36 @@ describe("IPC channel wiring", () => {
     assert.deepEqual(unresolved, flags, "calls and values refused in the fixture");
   });
 
+  it("every channel encodes what it puts in a URL", async () => {
+    // An id interpolated raw into a path can walk the request to another
+    // route: `a/../../x` turns DELETE /api/automation/rules/<id> into a DELETE
+    // somewhere else, and ids reach these channels from the page URL. Five
+    // channels sent theirs raw (code scanning js/client-side-request-forgery).
+    // This sends every case a hostile value under every key it reads and
+    // checks each URL that leaves, so a new raw interpolation fails here
+    // whichever channel it lands in.
+    const HOSTILE = "su-hostile/../?x#y";
+    const raw = HOSTILE.slice(0, "su-hostile/".length);
+    const params = new Proxy({}, { get: (_t, key) => (typeof key === "string" ? HOSTILE : undefined) });
+    const { invoke } = await import("./api.js");
+    const realFetch = globalThis.fetch;
+    const sent: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      sent.push(String(input));
+      return { ok: true, status: 200, headers: new Headers(), json: async () => ({}), text: async () => "" };
+    }) as unknown as typeof fetch;
+    try {
+      for (const channel of walk().cases) {
+        const call = invoke(channel as Parameters<typeof invoke>[0], params).catch(() => undefined);
+        await Promise.race([call, new Promise((r) => setTimeout(r, 20))]);
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    assert.ok(sent.some((u) => u.includes(encodeURIComponent(HOSTILE))), "no channel put the value in a URL at all");
+    assert.deepEqual(sent.filter((u) => u.includes(raw)), [], "URLs carrying the value unencoded");
+  });
+
   it("a channel with no case is reported unknown AT RUNTIME, not just absent from a string scan", async () => {
     // I5: a guard that matches error PROSE (`err.message.includes("Unknown IPC
     // channel")`) is one rewording away from vacuous — a reviewer deleted two

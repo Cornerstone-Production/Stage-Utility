@@ -555,7 +555,7 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
     fs.writeFileSync(stamped, src.replace('\nFETCHED_FROM=""\n', `\nFETCHED_FROM="${stageServer.base}"\n`));
     const r = await sh(`. "${stamped}"; trap on_exit EXIT; WORK="$(mktemp -d)"; ${FLOW}; FINISHED=1`, { ...baseEnv(), STAGE_SERVER: "" });
     assert.equal(r.status, 0, r.out + r.err);
-    assert.match(r.out, new RegExp(`from this server \\(${stageServer.base.replace(/\./g, "\\.")}\\)`));
+    assert.ok(r.out.includes(`from this server (${stageServer.base})`), r.out);
     assert.equal(marker(), "build-a");
     // and an unstamped copy, with no server file either, has nowhere to go
     const bare = await sh(`. "${SCRIPT}"; trap on_exit EXIT; WORK="$(mktemp -d)"; ${FLOW}`, { ...baseEnv(), STAGE_SERVER: "" });
@@ -880,8 +880,14 @@ describe("root does not write through a link left in the state directory", () =>
     assert.equal(r.status, 0, r.out + r.err);
     untouched();
     const f = path.join(state(), "server");
-    assert.ok(fs.lstatSync(f).isFile());
-    assert.equal(fs.readFileSync(f, "utf8"), "http://192.0.2.10:8788");
+    // One open, refusing a link, so the check and the read are of the same file.
+    const fd = fs.openSync(f, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+      assert.ok(fs.fstatSync(fd).isFile());
+      assert.equal(fs.readFileSync(fd, "utf8"), "http://192.0.2.10:8788");
+    } finally {
+      fs.closeSync(fd);
+    }
   });
 
   it("device-id and token: refused, and neither written nor chmod-ed through", { skip: !(has("uuidgen") && has("xxd")) && "needs uuidgen and xxd" }, async () => {
