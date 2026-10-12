@@ -54,6 +54,36 @@ export function asMigratedConsole(view: View): View {
   return { ...view, surface: "console", showInSidebar: false, ...(layout === undefined ? {} : { layout }) };
 }
 
+/** What a view draws, for comparing a copy to its source: object ids differ in a
+ *  copy by design, so they are left out. */
+function content(view: View): string {
+  return JSON.stringify({ kind: view.kind, ndiSource: view.ndiSource ?? null, layout: view.layout ?? null }, (key, value) =>
+    key === "id" ? undefined : value,
+  );
+}
+
+/**
+ * A copy an interrupted upgrade left behind, to reuse instead of copying again.
+ *
+ * The views are saved before the screens are repointed, so a process that died
+ * between the two leaves the copy on disk with no screen showing it, and the
+ * pass that runs again plans the same copy. A view qualifies when it carries the
+ * planned name and surface, no screen shows it, and it draws what the copy would
+ * draw (ids aside). Anything else with that name is the operator's.
+ */
+export function findLeftoverCopy(
+  views: readonly View[],
+  outputs: readonly Output[],
+  source: View,
+  planned: Pick<PlannedViewCopy, "name" | "surface">,
+): View | undefined {
+  const shown = new Set(outputs.map((o) => o.viewId));
+  const wanted = content(planned.surface === "console" ? asMigratedConsole(source) : source);
+  return views.find(
+    (v) => v.id !== source.id && v.name === planned.name && viewSurface(v) === planned.surface && !shown.has(v.id) && content(v) === wanted,
+  );
+}
+
 /** A copy of a view the controller must make, and the screens that will show it. */
 export interface PlannedViewCopy {
   sourceViewId: string;

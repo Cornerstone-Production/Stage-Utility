@@ -3,7 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
-import { asMigratedConsole, planScreenRoles } from "./screen-role-migration.js";
+import { asMigratedConsole, findLeftoverCopy, planScreenRoles } from "./screen-role-migration.js";
 import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
 import { getUserDataPath } from "./app-paths.js";
 import { adoptLegacyStoreFiles } from "./store-file-adoption.js";
@@ -846,26 +846,36 @@ export class StageController {
     const plan = planScreenRoles(views, outputs, { absentIsDisplay: first, liveScreenIds });
     let nextViews = views.map((v) => (plan.consoleViewIds.includes(v.id) ? asMigratedConsole(v) : v));
     let nextOutputs = plan.outputs;
+    const reused: string[] = [];
     for (const c of plan.copies) {
       const src = views.find((v) => v.id === c.sourceViewId);
       if (!src) throw new Error(`screen roles: the plan copies view ${c.sourceViewId}, which is not in the list it was made from`);
-      const cloned = this.cloneViewRecord(src, await this.allocateViewId(nextViews), c.name);
-      await this.copyViewSlotConfig(src, cloned.copy, cloned.cloned);
-      const copy = c.surface === "console" ? asMigratedConsole(cloned.copy) : { ...cloned.copy, surface: "display" as const };
-      nextViews = [...nextViews, copy];
+      // A pass that died after saving a copy and before pointing the screen at it
+      // plans the same copy again: reuse what it left rather than make a second.
+      let copy = findLeftoverCopy(nextViews, nextOutputs, src, c);
+      if (copy) {
+        reused.push(`reused the copy left by an interrupted upgrade: "${copy.name}"`);
+      } else {
+        const cloned = this.cloneViewRecord(src, await this.allocateViewId(nextViews), c.name);
+        await this.copyViewSlotConfig(src, cloned.copy, cloned.cloned);
+        copy = c.surface === "console" ? asMigratedConsole(cloned.copy) : { ...cloned.copy, surface: "display" };
+        nextViews = [...nextViews, copy];
+      }
       const copyId = copy.id;
       nextOutputs = nextOutputs.map((o) => (c.screenIds.includes(o.id) ? { ...o, viewId: copyId } : o));
     }
     // Quiet when nothing was stored: a fresh install, or every later boot.
+    const made = plan.copies.length - reused.length;
     const log =
       plan.carried === 0 && plan.changed === 0
         ? []
         : [
             ...plan.notes,
+            ...reused,
             `role from view: ${plan.checked} screen${plan.checked === 1 ? "" : "s"} checked, ${plan.changed} changed` +
               (plan.changed > 0
                 ? ` (${plan.consoleViewIds.length} view${plan.consoleViewIds.length === 1 ? "" : "s"} made a control surface, ` +
-                  `${plan.copies.length} cop${plan.copies.length === 1 ? "y" : "ies"} made)`
+                  `${made} cop${made === 1 ? "y" : "ies"} made)`
                 : ""),
           ];
     return { views: nextViews, outputs: nextOutputs, log };

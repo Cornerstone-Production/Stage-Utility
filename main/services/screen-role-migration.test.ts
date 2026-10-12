@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { asMigratedConsole, planScreenRoles, type StoredOutput } from "./screen-role-migration.js";
+import { asMigratedConsole, findLeftoverCopy, planScreenRoles, type StoredOutput } from "./screen-role-migration.js";
 import { screenIsControlSurface, viewCanBeControlSurface, viewSurface } from "../types/views.js";
 
 // A screen's role now comes from its view. This takes the role an older build
@@ -231,3 +231,33 @@ describe("a view the migration makes a control surface", () => {
   });
 });
 
+describe("a copy an interrupted upgrade left behind", () => {
+  const withObjects = (objectId: string) =>
+    ({ version: 1, canvas: { width: 1920, height: 1080 }, objects: [{ id: objectId, x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "clock" } }] }) as unknown as View["layout"];
+  const source = view("ctl", { name: "Booth controls", surface: "console", layout: withObjects("a") });
+  const planned = { name: "Booth controls (wall)", surface: "display" as const };
+  /** What the interrupted pass saved: the same content under new object ids. */
+  const leftover = view("left", { name: planned.name, surface: "display", layout: withObjects("b") });
+
+  test("is found: same name, same surface, same content under other object ids, shown by no screen", () => {
+    assert.equal(findLeftoverCopy([source, leftover], [screen("a", "ctl", "display")], source, planned), leftover);
+  });
+
+  test("is not found when a screen shows it: that is somebody's view now", () => {
+    assert.equal(findLeftoverCopy([source, leftover], [screen("a", "left")], source, planned), undefined);
+  });
+
+  test("is not found when it draws something else, or has another name or surface", () => {
+    const other = view("x", { name: planned.name, surface: "display", layout: withObjects("c") });
+    (other.layout as { objects: { config: { type: string } }[] }).objects[0].config.type = "countdown";
+    assert.equal(findLeftoverCopy([source, other], [], source, planned), undefined);
+    assert.equal(findLeftoverCopy([source, { ...leftover, name: "Booth controls (wall) 2" }], [], source, planned), undefined);
+    assert.equal(findLeftoverCopy([source, { ...leftover, surface: "console" }], [], source, planned), undefined);
+  });
+
+  test("a control-surface copy is compared to what it would be made as: with the fit a panel keeps", () => {
+    const wall = view("w", { name: "Lobby loop", layout: withObjects("a") });
+    const made = { ...asMigratedConsole({ ...wall, id: "made", name: "Lobby loop (control surface)", layout: withObjects("z") }) };
+    assert.equal(findLeftoverCopy([wall, made], [], wall, { name: "Lobby loop (control surface)", surface: "console" }), made);
+  });
+});
