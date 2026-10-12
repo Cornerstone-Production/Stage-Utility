@@ -14,9 +14,41 @@ import { useState } from "react";
 import { invoke } from "../../lib/api";
 import { Tooltip, toast } from "../../components/ui";
 import { errorMessage } from "@main/services/errors";
+import type { PublicDevice } from "@main/services/kiosk-devices-store";
+import type { DeviceOutput } from "@main/types/kiosk";
 import { useDevices, refreshDevices, describeScreen } from "./use-devices";
+import { outputModeLine } from "./output-helpers";
 
-export function ScreenDevice({ outputId, name }: { outputId: string; name: string }) {
+/**
+ * Unbind a device from the screen it shows, and say so. One function for the two
+ * places that offer it, the card's strip and the Device section of Screen
+ * settings, so a release reads and fails the same from either.
+ */
+export async function releaseDevice(deviceId: string, screenName: string): Promise<void> {
+  try {
+    await invoke("devices:release", { deviceId });
+    // Returns its failure rather than throwing — a release that worked but did
+    // not reload leaves a card claiming a machine that is no longer bound.
+    const failed = await refreshDevices();
+    if (failed) toast.error(`Released, but the list did not reload: ${failed.message}`);
+    // Said out loud because nothing else on the card changes visibly except
+    // this strip disappearing, and a strip disappearing reads like a bug.
+    toast.success(`${screenName} released — the screen goes back to waiting`);
+  } catch (err) {
+    toast.error(errorMessage(err));
+  }
+}
+
+/** What the strip says an output of a Mac output helper is: the Mac, the port
+ *  and what it is sending. A DeckLink port sends the mode the screen is set to;
+ *  a display runs at whatever the Mac drives it at. */
+export function outputSummary(device: PublicDevice & { output: DeviceOutput }, videoMode: string | undefined): string {
+  const { output } = device;
+  const mode = outputModeLine(output, videoMode, device.screen);
+  return [device.hostname || device.label || "Set up on a device", output.port, mode].filter(Boolean).join(" · ");
+}
+
+export function ScreenDevice({ outputId, name, videoMode }: { outputId: string; name: string; videoMode?: string }) {
   const { bound } = useDevices();
   const [busy, setBusy] = useState(false);
   const device = bound.find((d) => d.outputId === outputId);
@@ -28,16 +60,7 @@ export function ScreenDevice({ outputId, name }: { outputId: string; name: strin
     if (!device) return;
     setBusy(true);
     try {
-      await invoke("devices:release", { deviceId: device.id });
-      // Returns its failure rather than throwing — a release that worked but did
-      // not reload leaves a card claiming a machine that is no longer bound.
-      const failed = await refreshDevices();
-      if (failed) toast.error(`Released, but the list did not reload: ${failed.message}`);
-      // Said out loud because nothing else on the card changes visibly except
-      // this strip disappearing, and a strip disappearing reads like a bug.
-      toast.success(`${name} released — the screen goes back to waiting`);
-    } catch (err) {
-      toast.error(errorMessage(err));
+      await releaseDevice(device.id, name);
     } finally {
       setBusy(false);
     }
@@ -47,8 +70,14 @@ export function ScreenDevice({ outputId, name }: { outputId: string; name: strin
     <div className="flex items-center gap-2 border-t border-line px-3 py-2">
       <div className="min-w-0 flex-1">
         <div className="truncate text-caption1 text-fg-muted">
-          {device.label || device.hostname || "Set up on a device"}
-          {size && <span className="text-fg-subtle"> · {size}</span>}
+          {device.output ? (
+            outputSummary({ ...device, output: device.output }, videoMode)
+          ) : (
+            <>
+              {device.label || device.hostname || "Set up on a device"}
+              {size && <span className="text-fg-subtle"> · {size}</span>}
+            </>
+          )}
         </div>
         <div className="truncate font-mono text-caption2 text-fg-faint">{device.id}</div>
       </div>

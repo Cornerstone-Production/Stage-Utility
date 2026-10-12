@@ -388,6 +388,112 @@ jobs:
           echo "::error::v$V is tagged and pushed, but ${BUMP:0:7} carries no build status. Re-run this workflow, or: gh api repos/${GITHUB_REPOSITORY}/statuses/${BUMP} -f state=success -f context=build"
           exit 1
 
+  # Does this tag carry the Mac output helper yet?
+  #
+  # A job-level `if` is decided before any step runs, so it cannot test for a file;
+  # this job does, and the helper job below reads its answer. It exists so merging
+  # this workflow ahead of the helper's source cannot break a release: with no
+  # helper/macos/build-app.sh in the tagged tree the macOS job is SKIPPED, not
+  # failed, and nothing waits on it. See scripts/release-workflow-helper.test.ts.
+  helper-gate:
+    needs: release
+    if: ${{ always() && needs.release.outputs.published == 'true' }}
+    runs-on: ubuntu-latest
+    # It only reads the tagged tree. The workflow's default is contents: write.
+    permissions:
+      contents: read
+    outputs:
+      present: ${{ steps.probe.outputs.present }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - name: Is the helper's build script in this tree
+        id: probe
+        run: |
+          set -euo pipefail
+          if [ -f helper/macos/build-app.sh ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "helper/macos/build-app.sh is here: building the Mac output helper."
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Mac output helper::helper/macos/build-app.sh is not in this tree, so no helper is built for v${{ needs.release.outputs.version }}."
+          fi
+
+  # The Mac output helper, one zip per architecture, built on macOS.
+  #
+  # Built BEFORE the release is created and handed to the artifacts job as a
+  # workflow artifact, because a published release cannot be added to (see the
+  # note on the release step below). A failure here, or a hand on the cancel
+  # button, costs the release its helper zips and nothing else: the artifacts job
+  # runs whatever this one does, and attaches the zips only if they exist.
+  helper:
+    needs: [release, helper-gate]
+    if: ${{ always() && needs.release.outputs.published == 'true' && needs.helper-gate.outputs.present == 'true' }}
+    runs-on: macos-14
+    # Chromium's framework is most of the app and the build is long; a hung build
+    # must not hold the release for ever, since the artifacts job waits on this.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: v${{ needs.release.outputs.version }} # the tagged tree, not the branch
+
+      # The helper is Swift 6, so it is built with the Xcode helper-macos.yml tests
+      # with, not the runner image's default.
+      - uses: ./.github/actions/select-xcode
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Build and package both architectures
+        env:
+          V: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p helper-dist
+          for arch in arm64 x86_64; do
+            out="$RUNNER_TEMP/helper-$arch"
+            OUT="$out" helper/macos/build-app.sh --arch "$arch"
+            app="$out/StageUtilityOutput.app"
+
+            # What was built is checked before it ships: the right architecture,
+            # this release's version, and a signature that holds.
+            test "$(lipo -archs "$app/Contents/MacOS/StageUtilityOutput")" = "$arch" \
+              || { echo "::error::$arch build is not $arch"; exit 1; }
+            got=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")
+            test "$got" = "$V" || { echo "::error::$arch helper reports version $got, not $V"; exit 1; }
+            # Not --deep: it reports the versioned Chromium framework as missing,
+            # although a plain --strict verifies every nested item including it.
+            # This is the same check helper/macos/build-app.sh ends with.
+            codesign --verify --strict "$app"
+
+            # ditto keeps the framework's symlinks and the bundle layout, with the
+            # app at the top of the zip, which is where the installer looks.
+            zip="helper-dist/StageUtilityOutput-$arch.zip"
+            ditto -c -k --keepParent "$app" "$zip"
+
+            # And the zip is checked the way a Mac will meet it: unpacked, signed.
+            check="$RUNNER_TEMP/check-$arch"
+            mkdir -p "$check"
+            ditto -x -k "$zip" "$check"
+            codesign --verify --strict "$check/StageUtilityOutput.app"
+
+            ( cd helper-dist && shasum -a 256 "StageUtilityOutput-$arch.zip" > "StageUtilityOutput-$arch.zip.sha256" )
+          done
+          ls -l helper-dist
+          cat helper-dist/*.sha256
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: output-helper
+          path: helper-dist/
+          if-no-files-found: error
+          retention-days: 1
+
   # Downloadable installs, attached to the release the job above just published.
   #
   # Every platform is built on this one runner because there is nothing to
@@ -395,7 +501,13 @@ jobs:
   # and there are no native modules, so the per-platform part is which Node binary
   # gets copied in. Five archives take about twenty seconds.
   artifacts:
-    needs: release
+    # `helper` is a need so its zips can go into the release in the one create
+    # call. It cannot stop the release, since the `always()` below runs this job
+    # whether the helper was skipped, failed, cancelled or passed, but it can
+    # delay it: the archives wait for the helper job to finish, up to its 60
+    # minute timeout plus any wait for a macOS runner. A failed or cancelled
+    # helper is announced by the error step below.
+    needs: [release, helper]
     # `always()`, not the default success(): once the tag is pushed the
     # archives must follow whatever happens to the release job afterwards — a
     # failed status write, or a hand on the cancel button — because a tag with
@@ -425,6 +537,28 @@ jobs:
 
       - name: Assemble the archives
         run: scripts/build-artifacts.sh "${{ needs.release.outputs.version }}" dist
+
+      - name: Fetch the Mac output helper
+        # Only a helper that built and verified. A skipped or failed one leaves the
+        # release without it, and the installer does NOT recover from that: the
+        # release has no zips, so a Mac whose server runs this version cannot
+        # install the helper, from the server or from GitHub, until the server
+        # updates to a release that has them. The step below makes that loud.
+        if: ${{ needs.helper.result == 'success' }}
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: output-helper
+          path: helper-dist
+
+      - name: Say so when the Mac output helper failed
+        # The tag is already pushed, so the release is still created, without the
+        # helper. This only makes the gap visible in the run instead of leaving a
+        # green job that shipped a release Macs cannot install the helper from.
+        if: ${{ needs.helper.result == 'failure' || needs.helper.result == 'cancelled' }}
+        env:
+          V: ${{ needs.release.outputs.version }}
+        run: |
+          echo "::error title=Mac output helper::the helper build failed or was cancelled, so v$V is released without StageUtilityOutput-<arch>.zip. Macs whose server runs this version cannot install the helper until the server updates to a release that has it."
 
       - name: Smoke-test the Linux archive
         # An archive that unpacks is not the same as one that runs. This starts the
@@ -473,12 +607,15 @@ jobs:
           # v1.9.3 ship two lines, one of them its own release-bump commit.
           if [ "$PRE" = true ]; then FROM="$LAST"; else FROM="$STABLE"; fi
           node scripts/release-notes.mjs "$V" "$FROM" > /tmp/notes.md
+          assets=(dist/*.tar.gz)
+          # The Mac output helper's zips and checksums, when the helper job made them.
+          if [ -d helper-dist ]; then assets+=(helper-dist/*); fi
           gh release create "v$V" \
             --title "v$V" \
             --notes-file /tmp/notes.md \
             $([ "$PRE" = true ] && echo --prerelease || echo --latest) \
-            dist/*.tar.gz
-          echo "published v$V with $(ls dist/*.tar.gz | wc -l) archives"
+            "${assets[@]}"
+          echo "published v$V with ${#assets[@]} assets"
 
       - name: Update the Homebrew tap
         # Skipped until STAGE_TAP_TOKEN exists, so this cannot fail a release

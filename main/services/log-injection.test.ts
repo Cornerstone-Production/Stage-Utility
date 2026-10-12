@@ -106,6 +106,10 @@ const REQUEST_FACING = [
   // into an HTTP body.
   "home-assistant-yaml.ts",
   "integration-manager.ts",
+  // Its lines name a device id and the figures of a health report, both taken from
+  // POST /api/devices/:id/health (the path and the body), and an output name and
+  // hostname taken from a UDP probe.
+  "kiosk-presence.ts",
   // Its sent line names the groups, the sender and the TEXT of a message, all
   // typed into POST /api/messages; its refusal line carries the reason, which
   // can name an id off the wire.
@@ -115,6 +119,9 @@ const REQUEST_FACING = [
   // Its one warning names the stored groups and quick messages that break a
   // limit, text the operator typed into PUT /api/messaging.
   "messaging-store.ts",
+  // Every line names a file it serves (an allowlisted name) and what the release
+  // host or the disk said back, which is text from outside.
+  "output-helper-download.ts",
   "pco-service.ts",
   "person-directory.ts",
   // GET /photos?u= hands the caller's string to every one of its log lines: the
@@ -419,6 +426,11 @@ function requestFacingFiles(): string[] {
     // then foldConfigEntries warns with the rejected KEY. That key is an
     // attacker's string, verbatim, and this file was missing from the list.
     path.join(HERE, "integration-manager.ts"),
+    // The device id on its health lines is the path of POST /api/devices/:id/health
+    // (checked against the stored bindings first, but only after authorise), and its
+    // figures come out of that request body; the output seen line names what a UDP
+    // probe said. All scrubbed at the logger.
+    path.join(HERE, "kiosk-presence.ts"),
     // Its sent line names the groups, the sender and the TEXT of a message, all
     // typed into POST /api/messages; its refusal line carries the reason, which
     // can name an id off the wire.
@@ -428,6 +440,9 @@ function requestFacingFiles(): string[] {
     // Its one warning names the stored groups and quick messages that break a
     // limit, text the operator typed into PUT /api/messaging.
     path.join(HERE, "messaging-store.ts"),
+    // Every line names a file it serves (an allowlisted name) and what the release
+    // host or the disk said back, which is text from outside.
+    path.join(HERE, "output-helper-download.ts"),
     path.join(HERE, "pco-service.ts"),
     // Its lines name a by-person slot's person ID, which the operator types into
     // the slot editor and saves over HTTP; scrubbed at the logger.

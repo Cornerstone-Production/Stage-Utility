@@ -77,6 +77,8 @@ export function ScreenPanelHost({
     onSetLocked: handlers.handleSetOutputLocked,
     onSetHideTopBar: handlers.handleSetOutputHideTopBar,
     onSetTextSize: handlers.handleSetOutputTextSize,
+    onSetRotation: handlers.handleSetOutputRotation,
+    onSetVideoMode: handlers.handleSetOutputVideoMode,
     onSetAllowHls: handlers.handleSetOutputAllowHls,
     onSetGroups: handlers.handleSetOutputGroups,
     onSetShowInSidebar: handlers.handleSetViewShowInSidebar,

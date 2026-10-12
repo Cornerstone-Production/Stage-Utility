@@ -14,8 +14,9 @@ Built for a room full of always-on screens.
 - **Writes are atomic** — temp file then rename — and a file that will not parse is
   backed up rather than overwritten. Recorded services are one file each, so
   persisting a live service does not rewrite your whole history.
-- **Disk caches are pruned** by age and size. Photos and plan attachments are
-  cached, and images are served immutable so a screen fetches each one once.
+- **Disk caches are pruned.** Photos and plan attachments go by age and size, and
+  the Mac output helper's downloads (`cache/output-helper/`) are cut back to the
+  running version. Images are served immutable so a screen fetches each one once.
 - **Updates skip what they can** — no reinstall unless dependencies changed, no
   rebuild unless the interface did.
 
@@ -91,6 +92,7 @@ machine's history rather than how you set it up:
 | | |
 |---|---|
 | `cache/photos/`, `cache/attachments/` | cached Planning Center photos and plan files |
+| `cache/output-helper/` | the Mac output helper's zips, one folder per release, downloaded again when missing |
 | `server.log`, `update.log` | log history, replayed into `/log` on boot |
 | `secrets.bin` | integration and wireless credentials, AES-256-GCM encrypted |
 | `encryption.key` | 32-byte key, generated on first run, mode `600` |

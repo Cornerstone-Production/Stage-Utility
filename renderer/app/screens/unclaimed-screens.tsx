@@ -21,7 +21,12 @@ import { ErrorNote } from "../../components/ui/error-note";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../../components/ui/select";
 import { cn } from "../../lib/cn";
 import { useDevices, refreshDevices, describeScreen } from "./use-devices";
+import { cardOf, outputModeLine } from "./output-helpers";
+import { useDisplayPresence } from "./use-display-presence";
+import { groupByMachine, type Machine, type MachineRow } from "./machine-groups";
+import type { DeviceOutput, SeenDevice } from "@main/types/kiosk";
 import type { Output } from "@main/types/views";
+import type { PanelDevice } from "../../settings/sections/screen-settings-panel";
 
 /** The page holds a scan open while it is on screen — work gated on somebody
  *  actually looking, which is the house rule applied to a UDP socket. */
@@ -34,9 +39,10 @@ export function UnclaimedScreens({
   outputs: Output[];
   /** "Set up as a new screen": open the Screen settings panel for this device.
    *  The screen is made, and the device claimed, when the panel finishes. */
-  onSetUpNew: (device: { id: string; hostname?: string; ip?: string }) => void;
+  onSetUpNew: (device: PanelDevice) => void;
 }) {
   const data = useDevices();
+  const connected = useDisplayPresence();
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -93,6 +99,10 @@ export function UnclaimedScreens({
   // even with no rows — it is the reason there are no rows.
   if (data.seen.length === 0 && !error) return null;
 
+  const { machines, plain } = groupByMachine(data.seen, data.bound);
+  const lookedLikeNames = (id: string) =>
+    (data.matches[id] ?? []).map((m) => data.bound.find((b) => b.id === m)?.label ?? m).join(", ");
+
   return (
     <section className="mt-6">
       <header className="mb-2 flex items-center gap-2">
@@ -110,78 +120,254 @@ export function UnclaimedScreens({
 
       {error && <ErrorNote className="mb-2">{error}</ErrorNote>}
 
-      <div className="overflow-hidden rounded-xl border border-line bg-surface">
-        {data.seen.map((d) => {
-          const looksLike = (data.matches[d.id] ?? [])
-            .map((id) => data.bound.find((b) => b.id === id)?.label ?? id)
-            .join(", ");
-          return (
-            <div
-              key={d.id}
-              className={cn(
-                "flex flex-wrap items-start gap-3 border-b border-line px-4 py-3.5 last:border-b-0",
-                d.boundTo ? "bg-warn-9/[0.06]" : "bg-accent/[0.06]",
-              )}
-            >
-              <span
-                aria-hidden="true"
-                className={cn("mt-2 size-2 shrink-0 rounded-full", d.boundTo ? "bg-warn-9" : "bg-accent")}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="text-callout font-semibold text-fg">
-                  {d.hostname || "Unconfigured screen"}
-                </div>
-                <div className="text-caption1 text-fg-muted">
-                  {[d.os, d.ip, describeScreen(d.screen)].filter(Boolean).join(" · ")}
-                </div>
-                {d.boundTo && (
-                  <div className="mt-1 text-caption1 text-warn-11">
-                    Set up on another server, which it cannot reach.
-                  </div>
-                )}
-                {looksLike && (
-                  <div className="mt-1 text-caption1 text-warn-11">
-                    Looks like {looksLike} — same MAC address.
-                  </div>
-                )}
-                <div className="mt-0.5 truncate font-mono text-caption2 text-fg-subtle">
-                  {d.id}
-                  {d.macs[0] ? ` · ${d.macs[0]}` : ""}
-                </div>
-              </div>
+      {machines.map((m) => (
+        <MachineCard
+          key={m.key}
+          machine={m}
+          outputs={outputs}
+          connected={connected}
+          busy={busy}
+          lookedLikeNames={lookedLikeNames}
+          onSetUpNew={onSetUpNew}
+          onClaim={(deviceId, outputId) => void claim(deviceId, outputId)}
+        />
+      ))}
 
-              <div className="flex shrink-0 flex-wrap items-center gap-2">
-                {/* The two things you can mean, kept apart on purpose: a brand new
-                    screen, or a replacement for one that already exists. */}
-                <Button
-                  variant="accent"
-                  size="small"
-                  disabled={busy === d.id}
-                  onClick={() => onSetUpNew({ id: d.id, hostname: d.hostname, ip: d.ip })}
-                >
-                  Set up as a new screen
-                </Button>
-                <Select
-                  value=""
-                  onValueChange={(outputId: string) => void claim(d.id, outputId)}
-                  disabled={busy === d.id}
-                >
-                  <SelectTrigger className="w-52">
-                    <SelectValue placeholder="Use for an existing screen…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {outputs.map((o) => (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+      {plain.length > 0 && (
+        <div className={cn("overflow-hidden rounded-xl border border-line bg-surface", machines.length > 0 && "mt-3")}>
+          {plain.map((d) => {
+            const looksLike = lookedLikeNames(d.id);
+            return (
+              <div
+                key={d.id}
+                className={cn(
+                  "flex flex-wrap items-start gap-3 border-b border-line px-4 py-3.5 last:border-b-0",
+                  d.boundTo ? "bg-warn-9/[0.06]" : "bg-accent/[0.06]",
+                )}
+              >
+                <span
+                  aria-hidden="true"
+                  className={cn("mt-2 size-2 shrink-0 rounded-full", d.boundTo ? "bg-warn-9" : "bg-accent")}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="text-callout font-semibold text-fg">
+                    {d.hostname || "Unconfigured screen"}
+                  </div>
+                  <div className="text-caption1 text-fg-muted">
+                    {[d.os, d.ip, describeScreen(d.screen)].filter(Boolean).join(" · ")}
+                  </div>
+                  {d.boundTo && (
+                    <div className="mt-1 text-caption1 text-warn-11">
+                      Set up on another server, which it cannot reach.
+                    </div>
+                  )}
+                  {looksLike && (
+                    <div className="mt-1 text-caption1 text-warn-11">
+                      Looks like {looksLike} — same MAC address.
+                    </div>
+                  )}
+                  <div className="mt-0.5 truncate font-mono text-caption2 text-fg-subtle">
+                    {d.id}
+                    {d.macs[0] ? ` · ${d.macs[0]}` : ""}
+                  </div>
+                </div>
+
+                <DeviceActions
+                  device={d}
+                  outputs={outputs}
+                  busy={busy === d.id}
+                  onSetUpNew={onSetUpNew}
+                  onClaim={(outputId) => void claim(d.id, outputId)}
+                />
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </section>
+  );
+}
+
+/** The two things you can mean, kept apart on purpose: a brand new screen, or a
+ *  replacement for one that already exists. */
+function DeviceActions({ device, outputs, busy, onSetUpNew, onClaim, describedBy }: {
+  device: SeenDevice;
+  outputs: Output[];
+  busy: boolean;
+  onSetUpNew: (device: PanelDevice) => void;
+  onClaim: (outputId: string) => void;
+  /** The id of the text naming this device, for when the page offers the same two
+   *  actions for several of them. */
+  describedBy?: string;
+}) {
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <Button
+        variant="accent"
+        size="small"
+        disabled={busy}
+        aria-describedby={describedBy}
+        // An output is named for itself ("SDI 1 · Card A"), not for the Mac it
+        // shares with its siblings: four screens called booth-mini are no use.
+        onClick={() => onSetUpNew({ id: device.id, hostname: device.hostname, ip: device.ip, name: device.output?.name })}
+      >
+        Set up as a new screen
+      </Button>
+      <Select value="" onValueChange={onClaim} disabled={busy}>
+        <SelectTrigger className="w-52" aria-describedby={describedBy}>
+          <SelectValue placeholder="Use for an existing screen…" />
+        </SelectTrigger>
+        <SelectContent>
+          {outputs.map((o) => (
+            <SelectItem key={o.id} value={o.id}>
+              {o.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+/** What an output is, in a line. A DeckLink port sends a mode the screen will
+ *  have, so it says the house one until the screen is set; a display says what
+ *  the Mac is driving it at, when it has said. */
+function outputLine(output: DeviceOutput, device: SeenDevice): string {
+  const mode = outputModeLine(output, undefined, device.screen);
+  return output.kind === "decklink" ? `Video output · ${mode} until set` : ["Built-in display", mode].filter(Boolean).join(" · ");
+}
+
+function OutputIcon({ kind }: { kind: DeviceOutput["kind"] }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "border-[1.5px] border-fg-muted",
+        kind === "decklink" ? "ml-0.5 size-3.5 rounded-full" : "h-3 w-[18px] rounded-[2px]",
+      )}
+    />
+  );
+}
+
+/**
+ * One Mac and its outputs, as the helper announced them.
+ *
+ * The outputs share a MAC and a hostname, so four look-alike rows would be four
+ * copies of the same line and a same-MAC warning on every one. Grouped, the Mac is
+ * said once and each output is told apart by what it is. Outputs already set up
+ * stay in the list, dimmed, so "SDI 1 is Main stage left" reads beside "SDI 2 is
+ * not set up".
+ */
+function MachineCard({ machine, outputs, connected, busy, lookedLikeNames, onSetUpNew, onClaim }: {
+  machine: Machine;
+  outputs: Output[];
+  connected: ReadonlySet<string>;
+  busy: string | null;
+  lookedLikeNames: (id: string) => string;
+  onSetUpNew: (device: PanelDevice) => void;
+  onClaim: (deviceId: string, outputId: string) => void;
+}) {
+  // The card is named inside each DeckLink output's name; nothing else on the
+  // wire carries it, nor the driver or the helper's own version, so those are not
+  // shown.
+  const cards = [
+    ...new Set(machine.rows.flatMap((r) => (r.device.output?.kind === "decklink" ? [cardOf(r.device.output)] : []))),
+  ];
+  return (
+    <div className="mt-3 rounded-xl border border-dashed border-line-strong bg-surface px-3.5 py-3">
+      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+        <b className="text-callout font-semibold text-fg">{machine.hostname || "Unconfigured Mac"}</b>
+        <span className="font-mono text-caption2 text-fg-subtle">
+          {[machine.os, machine.ip].filter(Boolean).join(" · ")}
+        </span>
+        {cards.map((card) => (
+          <span key={card} className="rounded-full border border-line-strong px-2 text-caption2 text-fg-muted">
+            {card}
+          </span>
+        ))}
+      </div>
+      <div className="mt-2.5 grid gap-1.5">
+        {machine.rows.map((row) => (
+          <OutputRow
+            key={row.device.id}
+            row={row}
+            outputs={outputs}
+            connected={connected}
+            busy={busy}
+            lookedLikeNames={lookedLikeNames}
+            onSetUpNew={onSetUpNew}
+            onClaim={onClaim}
+          />
+        ))}
+      </div>
+      <p className="mt-2.5 text-caption1 text-fg-subtle">
+        The Mac&apos;s main display (the one with the menu bar) is not offered: it stays the Mac&apos;s desktop unless it is
+        switched on in the helper.
+      </p>
+    </div>
+  );
+}
+
+function OutputRow({ row, outputs, connected, busy, lookedLikeNames, onSetUpNew, onClaim }: {
+  row: MachineRow;
+  outputs: Output[];
+  connected: ReadonlySet<string>;
+  busy: string | null;
+  lookedLikeNames: (id: string) => string;
+  onSetUpNew: (device: PanelDevice) => void;
+  onClaim: (deviceId: string, outputId: string) => void;
+}) {
+  const output = row.device.output!;
+  const titleId = `output-${row.device.id}`;
+  const base = "grid grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[9px] border border-line bg-bg px-2.5 py-2 max-sm:grid-cols-[22px_minmax(0,1fr)]";
+
+  if (row.state === "bound") {
+    const screen = outputs.find((o) => o.id === row.device.outputId);
+    const mode = outputModeLine(output, screen?.videoMode, row.device.screen);
+    const showing = connected.has(row.device.outputId);
+    return (
+      <div className={cn(base, "opacity-55")}>
+        <OutputIcon kind={output.kind} />
+        <div className="min-w-0">
+          <b className="block truncate text-footnote font-semibold text-fg">{output.name}</b>
+          <span className="block truncate text-caption1 text-fg-subtle">
+            Set up as &ldquo;{screen?.name ?? row.device.outputId}&rdquo;{mode && ` · ${mode}`}
+          </span>
+        </div>
+        <span className="rounded-full border border-line-strong px-2 text-caption2 text-fg-muted max-sm:col-span-full">
+          {showing ? "Showing" : "Offline"}
+        </span>
+      </div>
+    );
+  }
+
+  const d = row.device;
+  const looksLike = lookedLikeNames(d.id);
+  return (
+    <div className={base}>
+      <OutputIcon kind={output.kind} />
+      <div className="min-w-0">
+        <b id={titleId} className="block truncate text-footnote font-semibold text-fg">{output.name}</b>
+        <span className="block truncate text-caption1 text-fg-subtle">{outputLine(output, d)}</span>
+        {d.boundTo && (
+          <span className="block text-caption1 text-warn-11">Set up on another server, which it cannot reach.</span>
+        )}
+        {/* Only ever a device that is not itself an output: its siblings share
+            its MAC and are not what it might be replacing. See /api/devices. */}
+        {looksLike && (
+          <span className="block text-caption1 text-warn-11">Looks like {looksLike} — same MAC address.</span>
+        )}
+      </div>
+      <div className="max-sm:col-span-full">
+        <DeviceActions
+          device={d}
+          outputs={outputs}
+          busy={busy === d.id}
+          describedBy={titleId}
+          onSetUpNew={onSetUpNew}
+          onClaim={(outputId) => onClaim(d.id, outputId)}
+        />
+      </div>
+    </div>
   );
 }

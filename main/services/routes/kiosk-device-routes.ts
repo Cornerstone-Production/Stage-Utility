@@ -6,20 +6,33 @@
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
-import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen } from "../kiosk-presence.js";
+import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, healthList, forgetHealth } from "../kiosk-presence.js";
+import { parseHealthReport } from "../output-health.js";
+import { headerValue } from "../http-origin.js";
 import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
 import { holdingScreen } from "../kiosk-holding-screen.js";
 import { stageController } from "../stage-controller.js";
 import type { CreateScreenInput } from "../../types/views.js";
 import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, readCreateScreenBody } from "./screen-write.js";
 import { errorMessage } from "../errors.js";
+import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import * as path from "node:path";
 import { APP_ROOT } from "../app-root.js";
+import { getUserDataPath } from "../app-paths.js";
+import { OutputHelperDownloads, parseHelperPath } from "../output-helper-download.js";
+import { pkgVersion } from "../updater.js";
+import { scrub } from "../scrub.js";
+import { originFromHost, stampOrigin } from "../kiosk-installer-origin.js";
 
 /** Exactly what may be served from scripts/kiosk. An allowlist rather than a
  *  path join, because this reads a file from disk on request. */
 const KIOSK_INSTALLERS = new Set(["install-linux.sh", "install-macos.sh", "install-windows.ps1"]);
+
+/** The Mac output helper's zips, fetched from the release on first request and
+ *  kept in the data directory. See output-helper-download.ts. */
+const helperDownloads = new OutputHelperDownloads({ dataDir: getUserDataPath, version: pkgVersion });
 
 /** A device id from a query string is untrusted. Bound like the datagram is. */
 const clean = (v: string | null): string | undefined =>
@@ -94,17 +107,65 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       error(res, "unknown installer", 404);
       return;
     }
+    let body: string;
     try {
       // APP_ROOT, not a path relative to this module. `import.meta.url` is
       // main/services/routes/ in a checkout but the bundled server.mjs at the
       // install root, where "../../../scripts" resolves to file:///scripts and
       // 404s. app-root.ts exists for exactly this and is used in five other
       // places; this was the copy that drifted.
-      const body = await readFile(path.join(APP_ROOT, "scripts", "kiosk", name), "utf8");
-      res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
-      res.end(body);
+      body = await readFile(path.join(APP_ROOT, "scripts", "kiosk", name), "utf8");
     } catch {
       error(res, "installer not found in this build", 404);
+      return;
+    }
+    // The Mac installer downloads the output helper from the server it came
+    // from, and is told which that is here. The others carry no address. A
+    // missing marker throws, and is the server's fault, not a missing file.
+    if (name === "install-macos.sh") {
+      const secure = "encrypted" in req.socket && req.socket.encrypted === true;
+      try {
+        body = stampOrigin(body, originFromHost(req.headers.host, secure));
+      } catch (err) {
+        console.error(`[output-helper] could not prepare ${scrub(name)}: ${scrub(err)}`);
+        error(res, "installer could not be prepared", 500);
+        return;
+      }
+    }
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+    res.end(body);
+    return;
+  }
+
+  // ── The Mac output helper, and the checksum its installer verifies ──────
+  // A Mac on a network with no internet gets the app from here. The first
+  // request fetches it from the release this server is running; see
+  // output-helper-download.ts for what is bounded and why.
+  if (method === "GET" && pathname.startsWith("/kiosk/StageUtilityOutput-")) {
+    const asset = parseHelperPath(pathname);
+    if (!asset) {
+      error(res, "unknown download", 404);
+      return;
+    }
+    const got = await helperDownloads.resolve(asset);
+    if (!got.ok) {
+      error(res, got.message, got.status);
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": asset.kind === "zip" ? "application/zip" : "text/plain; charset=utf-8",
+      "content-length": String(got.size),
+      "content-disposition": `attachment; filename="${asset.name}"`,
+      "cache-control": "no-store",
+    });
+    try {
+      await pipeline(createReadStream(got.file), res);
+    } catch (err) {
+      // Headers are out, so there is no status left to send: closing the socket
+      // is what tells the client the file is short, and curl then fails the
+      // transfer. The line is for whoever asks why the install stopped.
+      console.warn(`[output-helper] transfer of ${scrub(asset.name)} did not finish: ${scrub(err)}`);
+      res.destroy();
     }
     return;
   }
@@ -125,15 +186,55 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // more, it lives in its own map. A field that had to be removed on the way
       // out was removed here and forgotten on the SSE broadcast.
       seen: seen.filter((s) => !bound.some((b) => b.id === s.id)),
+      // What each helper output last reported about itself, for the ones that
+      // are still reporting. Runtime: never stored, gone on restart.
+      health: healthList(),
       // For each unclaimed device, which bound devices share a MAC — the
       // "this looks like Left Mic Display" hint. A suggestion, never a binding.
       matches: Object.fromEntries(
         seen
           .filter((s) => !bound.some((b) => b.id === s.id))
-          .map((s) => [s.id, matchByMac(bound, s.macs).map((d) => d.id)])
+          // An output of a helper Mac shares its MAC with every sibling output, so
+          // matching it against them would flag each as a look-alike of the others.
+          // Only a device that is not an output can be what it is replacing.
+          .map((s) => [s.id, matchByMac(s.output ? bound.filter((b) => !b.output) : bound, s.macs).map((d) => d.id)])
           .filter(([, ids]) => (ids as string[]).length > 0),
       ),
     });
+    return;
+  }
+
+  // ── An output helper's health, from the device itself ──────────────────
+  // Authenticated by the device's own secret, the one /enroll checks, not by the
+  // same-origin gate a browser is held to: the caller is a native app, and it
+  // sends the secret in `x-device-token` only. An id this server holds no binding
+  // for, a binding with no secret pinned yet, and a wrong or missing secret are
+  // all the same 401, so the route cannot be used to ask which ids exist.
+  const healthMatch = method === "POST" ? pathname.match(/^\/api\/devices\/([^/]+)\/health$/) : null;
+  if (healthMatch) {
+    let id: string;
+    try {
+      id = decodeURIComponent(healthMatch[1]);
+    } catch {
+      error(res, "the device id in the path is not valid", 400);
+      return;
+    }
+    const devices = await kioskDevicesStore.load();
+    const known = findById(devices, id);
+    const secret = clean(headerValue(req.headers, "x-device-token") || null);
+    // authorise() trusts the first secret an UNPINNED binding is shown, which is
+    // right for /enroll and would let anyone who knew an id report for it here.
+    if (!known || known.token === "" || !authorise(devices, id, secret)) {
+      error(res, "the device id or secret is missing or wrong", 401);
+      return;
+    }
+    const parsed = parseHealthReport(await readBody(req));
+    if ("error" in parsed) {
+      error(res, parsed.error, 400);
+      return;
+    }
+    recordHealth(id, parsed.report, known.output?.kind);
+    json(res, { ok: true });
     return;
   }
 
@@ -216,6 +317,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
           secret: secretFor(id),
           macs: seen?.macs, hostname: seen?.hostname, os: seen?.os, ip: seen?.ip,
           screen: seen?.screen,
+          output: seen?.output,
           label: typeof body.label === "string" ? body.label : undefined,
           now: Date.now(),
         });
@@ -239,6 +341,14 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // lingers in the unclaimed list for the whole TTL, which reads as the
       // claim not having worked.
       forgetSeen(id);
+      // What a displaced device reported was about the screen it no longer shows.
+      if (displacedId) forgetHealth(displacedId);
+      if (seen?.output) {
+        console.log(
+          `[output-helper] claimed: ${scrub(id)} (${scrub(seen.output.kind)} "${scrub(seen.output.name)}") now shows screen ${scrub(outputId)}`
+          + (displacedId ? `, displacing ${scrub(displacedId)}` : ""),
+        );
+      }
       // Tell the kiosk pages to reload: the device is sitting on the holding
       // screen and this is what sends it to its display. "all", not the output
       // id — the device is not showing that output yet, it is on /enroll, so
@@ -265,7 +375,12 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     try {
+      const output = findById(await kioskDevicesStore.load(), id)?.output;
       await updateDevices((current) => release(current, id));
+      forgetHealth(id);
+      if (output) {
+        console.log(`[output-helper] released: ${scrub(id)} (${scrub(output.kind)} "${scrub(output.name)}") is not set up again`);
+      }
       stageController.refreshDisplays("all");
       json(res, { ok: true });
     } catch (err) {

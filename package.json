@@ -1,6 +1,6 @@
 {
   "name": "stage-utility",
-  "version": "1.26.0-beta.4",
+  "version": "1.26.0-beta.7",
   "description": "Display band lineup and wireless device status pulled from Planning Center Online and Shure wireless systems.",
   "private": true,
   "license": "GPL-3.0-or-later",
@@ -73,7 +73,8 @@
     "oxfmt": "^0.70.0",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3",
-    "vite": "^8.3.0"
+    "vite": "^8.3.0",
+    "yaml": "^2.9.1"
   },
   "engines": {
     "node": "^24.0.0"

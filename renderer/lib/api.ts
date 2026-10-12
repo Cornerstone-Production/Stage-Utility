@@ -479,8 +479,10 @@ export type IpcChannel =
   | "outputs:setHideTopBar"
   | "outputs:setLocked"
   | "outputs:setRole"
+  | "outputs:setRotation"
   | "outputs:setSlug"
   | "outputs:setTextSize"
+  | "outputs:setVideoMode"
   | "outputs:setView"
   | "patch:get"
   | "patch:parseXlsx"
@@ -1363,6 +1365,16 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { textSize: p.textSize });
     }
 
+    case "outputs:setRotation": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { rotation: p.rotation });
+    }
+
+    case "outputs:setVideoMode": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { videoMode: p.videoMode });
+    }
+
     case "outputs:setAllowHls": {
       const id = p.id as string;
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { allowHls: p.allowHls });
@@ -1509,8 +1521,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "automation:propresenter-instances": return apiFetch("/api/automation/propresenter-instances");
     case "automation:propresenter-macros": return apiFetch("/api/automation/propresenter-macros");
     case "automation:addRule": return post("/api/automation/rules", params);
-    case "automation:updateRule": return patch(`/api/automation/rules/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);
-    case "automation:removeRule": return del(`/api/automation/rules/${(params as { id: string }).id}`);
+    case "automation:updateRule": return patch(`/api/automation/rules/${encodeURIComponent((params as { id: string }).id)}`, (params as { patch: unknown }).patch);
+    case "automation:removeRule": return del(`/api/automation/rules/${encodeURIComponent((params as { id: string }).id)}`);
     case "automation:runRule": {
       const { id, confirmed } = params as { id: string; confirmed?: boolean };
       return post(`/api/automation/rules/${encodeURIComponent(id)}/run`, { confirmed: confirmed === true });
@@ -1559,9 +1571,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     }
     case "rosstalk:targets": return apiFetch("/api/rosstalk/targets");
     case "rosstalk:addTarget": return post("/api/rosstalk/targets", params);
-    case "rosstalk:updateTarget": return patch(`/api/rosstalk/targets/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);
-    case "rosstalk:removeTarget": return del(`/api/rosstalk/targets/${(params as { id: string }).id}`);
-    case "rosstalk:test": return post(`/api/rosstalk/targets/${(params as { id: string }).id}/test`);
+    case "rosstalk:updateTarget": return patch(`/api/rosstalk/targets/${encodeURIComponent((params as { id: string }).id)}`, (params as { patch: unknown }).patch);
+    case "rosstalk:removeTarget": return del(`/api/rosstalk/targets/${encodeURIComponent((params as { id: string }).id)}`);
+    case "rosstalk:test": return post(`/api/rosstalk/targets/${encodeURIComponent((params as { id: string }).id)}/test`);
     case "rosstalk:commands": return apiFetch("/api/rosstalk/commands");
     case "rosstalk:send": return post("/api/rosstalk/send", params);
     case "rosstalk:setSimulate": return post("/api/rosstalk/simulate", params);
