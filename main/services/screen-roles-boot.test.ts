@@ -39,15 +39,16 @@ const layout = (id: string) => ({
   canvas: { width: 1920, height: 1080, background: null },
   objects: [{ id: `${id}-clock`, x: 0, y: 0, w: 10, h: 10, z: 0, config: { type: "clock" } }],
 });
-const custom = (id: string, name: string, surface: "display" | "console") => ({
-  id, name, kind: "custom", surface, createdAt: NOW, layout: layout(id),
+const custom = (id: string, name: string, surface: "display" | "console", fit?: string) => ({
+  id, name, kind: "custom", surface, createdAt: NOW,
+  layout: fit ? { ...layout(id), canvas: { ...layout(id).canvas, fit } } : layout(id),
 });
 
 // What the stored files looked like when a screen had a role of its own.
 const STORED_VIEWS = [
   custom("wall-solo", "Lobby loop", "display"),
   custom("wall-shared", "Hallway loop", "display"),
-  custom("wall-mixed", "Atrium loop", "display"),
+  custom("wall-mixed", "Atrium loop", "display", "responsive"),
   custom("ctl-a", "Booth controls", "console"),
   { id: "cal", name: "Week ahead", kind: "calendar", surface: "display", createdAt: NOW },
   { id: "mics", name: "Mic board", kind: "slots", surface: "display", createdAt: NOW },
@@ -168,6 +169,24 @@ describe("the first boot after the upgrade", () => {
     assert.equal(screen("display-4").viewId, mixed[0].id);
     assert.equal(screen("display-5").viewId, "wall-mixed");
     assert.equal(viewSurface(state().views.find((v) => v.id === "wall-mixed")!), "display");
+  });
+
+  const fitOf = (view: { layout?: unknown }) => (view.layout as { canvas: { fit?: string } } | null | undefined)?.canvas.fit;
+  const named = (name: string) => state().views.find((v) => v.name === name)!;
+
+  it("a panel keeps its shape: a view made a console, or copied into one, gets the fit it had as a wall view unless its layout chose one", () => {
+    assert.equal(fitOf(state().views.find((v) => v.id === "wall-shared")!), "contain", "a converted view would reflow on its fixed-aspect panel");
+    assert.equal(fitOf(named("Lobby loop (control surface)")), "contain");
+    assert.equal(fitOf(named("Atrium loop (control surface)")), "responsive", "an explicit fit was overridden");
+    // What the migration did not make a console is not touched.
+    assert.equal(fitOf(state().views.find((v) => v.id === "ctl-a")!), undefined);
+    assert.equal(fitOf(named("Booth controls (wall)")), undefined);
+  });
+
+  it("a view the migration makes a console, and its control-surface copies, are kept out of the sidebar; nothing else is", () => {
+    const hidden = state().views.filter((v) => v.showInSidebar === false).map((v) => v.name).sort();
+    // Not "Old pad": the surface migration made that one a console, as it did before.
+    assert.deepEqual(hidden, ["Atrium loop (control surface)", "Hallway loop", "Lobby loop (control surface)", "Week ahead"]);
   });
 
   it("a live screen on a calendar keeps its month chevrons: the calendar becomes a control surface, with no copy", () => {

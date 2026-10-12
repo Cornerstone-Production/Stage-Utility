@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { planScreenRoles, type StoredOutput } from "./screen-role-migration.js";
+import { asMigratedConsole, planScreenRoles, type StoredOutput } from "./screen-role-migration.js";
 import { screenIsControlSurface, viewCanBeControlSurface, viewSurface } from "../types/views.js";
 
 // A screen's role now comes from its view. This takes the role an older build
@@ -208,3 +208,26 @@ describe("what it reports", () => {
     assert.deepEqual([plan.checked, plan.changed], [1, 1]);
   });
 });
+
+describe("a view the migration makes a control surface", () => {
+  const layout = (fit?: "contain" | "fill" | "responsive") =>
+    ({ version: 1, canvas: { width: 1920, height: 1080, background: null, ...(fit ? { fit } : {}) }, objects: [] }) as unknown as View["layout"];
+
+  test("is a console, kept out of the sidebar, with the fit it had as a wall view", () => {
+    const made = asMigratedConsole(view("w", { layout: layout() }));
+    assert.deepEqual([viewSurface(made), made.showInSidebar, made.layout?.canvas.fit], ["console", false, "contain"]);
+  });
+
+  test("keeps a fit the layout chose, whatever it was", () => {
+    for (const fit of ["contain", "fill", "responsive"] as const) {
+      assert.equal(asMigratedConsole(view("w", { layout: layout(fit) })).layout?.canvas.fit, fit);
+    }
+  });
+
+  test("a view with no layout (a calendar) gets none made up", () => {
+    const made = asMigratedConsole(view("cal", { kind: "calendar" }));
+    assert.equal("layout" in made, false);
+    assert.equal(viewSurface(made), "console");
+  });
+});
+

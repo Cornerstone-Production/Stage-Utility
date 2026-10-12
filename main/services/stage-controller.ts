@@ -3,7 +3,7 @@
 
 import { cloneLayoutWithMap, defaultCustomLayout, defaultViewName, forEachInlineSlotsGrid, forEachViewSourcedSlotsGrid } from "./layout-clone.js";
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
-import { planScreenRoles } from "./screen-role-migration.js";
+import { asMigratedConsole, planScreenRoles } from "./screen-role-migration.js";
 import { migrateReservedSlugs, slugMigrationLog } from "./slug-migration.js";
 import { getUserDataPath } from "./app-paths.js";
 import { adoptLegacyStoreFiles } from "./store-file-adoption.js";
@@ -844,15 +844,17 @@ export class StageController {
     liveScreenIds: ReadonlySet<string>,
   ): Promise<{ views: View[]; outputs: Output[]; log: string[] }> {
     const plan = planScreenRoles(views, outputs, { absentIsDisplay: first, liveScreenIds });
-    let nextViews = views.map((v) => (plan.consoleViewIds.includes(v.id) ? { ...v, surface: "console" as const } : v));
+    let nextViews = views.map((v) => (plan.consoleViewIds.includes(v.id) ? asMigratedConsole(v) : v));
     let nextOutputs = plan.outputs;
     for (const c of plan.copies) {
       const src = views.find((v) => v.id === c.sourceViewId);
       if (!src) throw new Error(`screen roles: the plan copies view ${c.sourceViewId}, which is not in the list it was made from`);
-      const { copy, cloned } = this.cloneViewRecord(src, await this.allocateViewId(nextViews), c.name);
-      await this.copyViewSlotConfig(src, copy, cloned);
-      nextViews = [...nextViews, { ...copy, surface: c.surface }];
-      nextOutputs = nextOutputs.map((o) => (c.screenIds.includes(o.id) ? { ...o, viewId: copy.id } : o));
+      const cloned = this.cloneViewRecord(src, await this.allocateViewId(nextViews), c.name);
+      await this.copyViewSlotConfig(src, cloned.copy, cloned.cloned);
+      const copy = c.surface === "console" ? asMigratedConsole(cloned.copy) : { ...cloned.copy, surface: "display" as const };
+      nextViews = [...nextViews, copy];
+      const copyId = copy.id;
+      nextOutputs = nextOutputs.map((o) => (c.screenIds.includes(o.id) ? { ...o, viewId: copyId } : o));
     }
     // Quiet when nothing was stored: a fresh install, or every later boot.
     const log =

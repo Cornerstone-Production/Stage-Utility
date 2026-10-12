@@ -37,6 +37,23 @@ function copyViewName(view: Pick<View, "name">, surface: ViewSurface): string {
   return `${view.name} (${surface === "console" ? "control surface" : "wall"})`;
 }
 
+/**
+ * A view this migration makes a control surface, whether by turning it into one
+ * or by copying it into one.
+ *
+ * Two things follow from the screens that were showing it. They were fixed-aspect
+ * panels, and a console reflows to whatever window it is on unless its layout
+ * says otherwise, so a layout with no explicit fit gets `contain`, the fit it
+ * had as a wall view: the panel does not move on upgrade. And the operator never
+ * asked for it to appear in the sidebar, so it does not.
+ */
+export function asMigratedConsole(view: View): View {
+  const layout = view.layout && view.layout.canvas.fit === undefined
+    ? { ...view.layout, canvas: { ...view.layout.canvas, fit: "contain" as const } }
+    : view.layout;
+  return { ...view, surface: "console", showInSidebar: false, ...(layout === undefined ? {} : { layout }) };
+}
+
 /** A copy of a view the controller must make, and the screens that will show it. */
 export interface PlannedViewCopy {
   sourceViewId: string;
