@@ -3847,9 +3847,7 @@ export class StageController {
           throw new Error(`outputs:setView — view ${viewId} not found`);
         }
         if (viewId !== null) this.assertViewNotBeingDeleted(viewId);
-        if (view && opts.expectSurface !== undefined && viewSurface(view) !== opts.expectSurface) {
-          throw new ViewSurfaceChangedError(view.id, opts.expectSurface, viewSurface(view));
-        }
+        if (view) this.assertViewIsExpectedKind(view, opts.expectSurface);
         wasControlSurface = screenIsControlSurface(current, this.state.views);
         screenName = current.name || current.id;
       },
