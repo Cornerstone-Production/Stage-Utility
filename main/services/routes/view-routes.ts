@@ -633,6 +633,11 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // which validates before it writes. A `mode` is refused: the view decides.
     if (method === "POST" && pathname === "/api/outputs") {
       const body = await readBody(req) as Record<string, unknown>;
+      const refusedMode = modeRefusal(body);
+      if (refusedMode) {
+        error(res, refusedMode);
+        return;
+      }
       const input = readCreateScreenBody(body);
       if ("error" in input) {
         error(res, input.error);

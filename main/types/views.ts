@@ -1161,11 +1161,6 @@ export function viewShownInSidebar(v: Pick<View, "showInSidebar">): boolean {
  *  or a control surface (its buttons work). */
 export type NewViewKind = "wall" | "control";
 
-/** The surface a blank view of this kind has. */
-export function surfaceForNewView(kind: NewViewKind): ViewSurface {
-  return kind === "control" ? "console" : "display";
-}
-
 /** What createScreen takes. */
 export interface CreateScreenInput {
   name?: string;

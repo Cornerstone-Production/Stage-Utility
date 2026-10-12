@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { everyViewKind, viewSurface, screenIsControlSurface, viewCanBeControlSurface } from "./views.js";
+import { everyViewKind, viewSurface, screenIsControlSurface, screensShowing, surfaceOfScreen, viewCanBeControlSurface, viewIsConsole } from "./views.js";
 
 // A View declares what it is FOR, and that is the whole of a screen's role: a
 // screen is a control surface exactly when the view it shows is a console. The
@@ -42,6 +42,28 @@ describe("a screen's role is its view's surface", () => {
 
   test("a screen showing a console is a control surface", () => {
     assert.equal(shows("ctl"), true);
+  });
+
+  test("surfaceOfScreen says the same thing in the view's own words, for every case above", () => {
+    const of = (viewId: string | null) => surfaceOfScreen({ viewId }, views);
+    assert.deepEqual(
+      ["ctl", "wall", "old", "odd", "deleted", null].map(of),
+      ["console", "display", "display", "display", "display", "display"],
+    );
+    for (const id of ["ctl", "wall", "old", "odd", "deleted", null]) assert.equal(shows(id), of(id) === "console");
+  });
+
+  test("viewIsConsole: a console, and nothing else, including no view at all", () => {
+    assert.deepEqual(
+      [views[1], views[0], views[2], views[3], undefined, null].map((v) => viewIsConsole(v)),
+      [true, false, false, false, false, false],
+    );
+  });
+
+  test("screensShowing lists the screens on a view, in order", () => {
+    const outputs = [{ id: "a", viewId: "ctl" }, { id: "b", viewId: "wall" }, { id: "c", viewId: "ctl" }, { id: "d", viewId: null }];
+    assert.deepEqual(screensShowing("ctl", outputs).map((o) => o.id), ["a", "c"]);
+    assert.deepEqual(screensShowing("nobody", outputs), []);
   });
 
   test("a screen showing a wall view is read-only", () => {

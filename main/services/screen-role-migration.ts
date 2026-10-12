@@ -30,7 +30,7 @@
 // copy takes new ids and a slots board) and reports. A second pass over its own
 // output finds nothing, because that output carries no stored role.
 
-import { viewCanBeControlSurface, viewSurface, type ViewSurface } from "../types/views.js";
+import { screensShowing, viewCanBeControlSurface, viewSurface, type ViewSurface } from "../types/views.js";
 
 /** What the copy of a view made for one screen is called. */
 function copyViewName(view: Pick<View, "name">, surface: ViewSurface): string {
@@ -176,7 +176,7 @@ export function planScreenRoles(
       // Live screens only: one that was read-only must not be woken by the view
       // turning into a console. "Live" is what the old readers saw, so a screen
       // with no stored role counts as read-only here too.
-      const showing = outputs.filter((x) => x.viewId === view.id);
+      const showing = screensShowing(view.id, outputs);
       changed += 1;
       if (showing.every(wasPanel)) {
         if (!consoleViewIds.has(view.id)) {

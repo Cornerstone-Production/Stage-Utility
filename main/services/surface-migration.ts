@@ -15,7 +15,7 @@
 // deliberately.
 
 import { isControl } from "../types/object-capabilities.js";
-import { screenIsControlSurface, viewSurface } from "../types/views.js";
+import { screenIsControlSurface, screensShowing, viewSurface } from "../types/views.js";
 import type { StoredOutput } from "./screen-role-migration.js";
 
 export interface MigrationNote {
@@ -85,7 +85,7 @@ export function migrateSurfaces(
     const controls = controlsIn(v.layout?.objects);
     if (controls.length === 0) return { ...v, surface: "display" as const };
 
-    const bound = outputs.filter((o) => o.viewId === v.id);
+    const bound = screensShowing(v.id, outputs);
     for (const o of bound) if (o.mode === undefined) liveScreenIds.add(o.id);
     changed.push({
       viewId: v.id,

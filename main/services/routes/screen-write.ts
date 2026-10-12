@@ -34,12 +34,13 @@ export function modeRefusal(body: Record<string, unknown>): string | null {
  * wrong type is ignored, not refused). The fields added since are strict: one
  * that is present and the wrong type is a 400, not a field quietly dropped.
  *
+ * A `mode` is NOT checked here: each route refuses it once, itself (modeRefusal),
+ * because a claim naming an existing screen has no creation body to read.
+ *
  * Shape only. What a value MEANS — a view that does not exist, a slug that is
  * taken — is createScreen's to refuse.
  */
 export function readCreateScreenBody(body: Record<string, unknown>): CreateScreenInput | { error: string } {
-  const refused = modeRefusal(body);
-  if (refused) return { error: refused };
   const input: CreateScreenInput = {
     name: typeof body.name === "string" ? body.name : undefined,
     viewId: typeof body.viewId === "string" ? body.viewId : null,

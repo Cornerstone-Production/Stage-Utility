@@ -20,7 +20,7 @@ import {
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
-import { screenIsControlSurface, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, surfaceForNewView, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
+import { screenIsControlSurface, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
@@ -3379,18 +3379,15 @@ export class StageController {
    * service type's default and every per-plan override, not just the active
    * type's rows. Copying one type's board by hand is what this did before, and a
    * duplicate of a view configured for three service types came back configured
-   * for one. Returns the ids it wrote under, for a caller that holds them in memory.
+   * for one.
    */
   private async copyViewSlotConfig(
     src: View,
     copy: View,
     cloned: ReturnType<typeof cloneLayoutWithMap> | null,
-  ): Promise<{ viewKeyCopied: boolean; objectIds: string[] }> {
-    let viewKeyCopied = false;
-    const objectIds: string[] = [];
+  ): Promise<void> {
     if (src.kind === "slots") {
       await slotsStore.copyKey(src.id, copy.id, () => randomUUID());
-      viewKeyCopied = true;
     }
     // Each inline mic-slots object's slots (all service types) to the cloned
     // object ids, so the duplicated layout keeps its lineups.
@@ -3401,10 +3398,8 @@ export class StageController {
         const mapped = cloned.idMap.get(oldId);
         if (!mapped) continue;
         await slotsStore.copyKey(oldId, mapped, () => randomUUID());
-        objectIds.push(mapped);
       }
     }
-    return { viewKeyCopied, objectIds };
   }
 
   /** duplicateView, returning the copy — see createViewRecord for why, and for
@@ -3420,10 +3415,13 @@ export class StageController {
     onAssigned?.(copy);
     await viewsStore.save(views);
 
-    const copied = await this.copyViewSlotConfig(src, copy, cloned);
-    if (copied.viewKeyCopied) this.rawSlotsByView.set(newId, await this.rawFor(newId));
+    await this.copyViewSlotConfig(src, copy, cloned);
+    if (src.kind === "slots") this.rawSlotsByView.set(newId, await this.rawFor(newId));
     if (this.state.serviceTypeId) {
-      for (const mapped of copied.objectIds) this.rawSlotsByObject.set(mapped, await this.rawFor(mapped));
+      // The copy's own inline grids are the ids the config was just copied under.
+      const inlineIds: string[] = [];
+      forEachInlineSlotsGrid([copy], (oid) => inlineIds.push(oid));
+      for (const oid of inlineIds) this.rawSlotsByObject.set(oid, await this.rawFor(oid));
     }
     this.recomputeResolved();
     this.broadcast();
@@ -3890,7 +3888,7 @@ export class StageController {
     const existing = typeof input.viewId === "string" ? this.requireViewToShow(input.viewId) : undefined;
     // The listing is written on a control surface's view. Anywhere else there is
     // nothing to write it on, and accepting it would be dropping it silently.
-    const showsControlSurface = newView === "control" || (existing !== undefined && viewSurface(existing) === "console");
+    const showsControlSurface = newView === "control" || viewIsConsole(existing);
     if (input.showInSidebar !== undefined && !showsControlSurface) {
       throw new Error(
         'outputs:add — showInSidebar is the listing of a control surface\'s view: send it with newView "control", or a viewId that names a control surface',
@@ -3913,7 +3911,7 @@ export class StageController {
             label: "make the view",
             run: async () => {
               // Custom, because only a custom view has a layout to put anything on.
-              await this.createViewRecord(name, "custom", surfaceForNewView(newView), (view) => {
+              await this.createViewRecord(name, "custom", newView === "control" ? "console" : "display", (view) => {
                 createdViewId = view.id;
                 viewId = view.id;
               });
