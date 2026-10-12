@@ -11,6 +11,7 @@ import { viewSurface, type ViewSurface } from "@main/types/views";
 import type { StageState } from "@main/types/stage";
 import type { ConfirmOptions } from "../components/ui";
 import type { ApiError } from "../lib/api";
+import { roleQuestionLabel, roleQuestionTitle } from "./screen-role-confirm";
 
 /** "A", "A and B", "A, B and C". */
 function nameList(names: string[]): string {
@@ -51,18 +52,18 @@ export function viewRoleQuestion(
   const lead = again ? "The screens showing it changed while you were deciding. " : "";
   return surface === "console"
     ? {
-        title: `Make "${viewName}" a control surface?`,
+        title: roleQuestionTitle(viewName, "console"),
         message: lead + (one
           ? `${names} will become a control surface. Anyone at it can press its buttons.`
           : `${names} will become control surfaces. Anyone at them can press their buttons.`),
-        confirmLabel: one ? "Make it a control surface" : "Make them control surfaces",
+        confirmLabel: roleQuestionLabel("console", !one),
       }
     : {
-        title: `Make "${viewName}" a wall display?`,
+        title: roleQuestionTitle(viewName, "display"),
         message: lead + (one
           ? `${names} will become a wall display. Its buttons will stop working.`
           : `${names} will become wall displays. Their buttons will stop working.`),
-        confirmLabel: one ? "Make it a wall display" : "Make them wall displays",
+        confirmLabel: roleQuestionLabel("display", !one),
       };
 }
 

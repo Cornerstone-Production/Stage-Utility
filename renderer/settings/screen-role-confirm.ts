@@ -9,6 +9,36 @@ import { confirm } from "../components/ui";
 import { screenIsControlSurface, viewSurface, type ViewSurface } from "@main/types/views";
 
 /**
+ * What each surface is, in the words the panel, the cards and the questions all
+ * use. `title` names it, `hint` says what it means for the buttons, and `becomes`
+ * is what happens to a screen when it turns into one.
+ */
+export const SURFACE_COPY: Record<ViewSurface, { title: string; hint: string; becomes: string }> = {
+  console: {
+    title: "Control surface",
+    hint: "Its buttons work for anyone at it.",
+    becomes: "Its buttons will work. Anyone standing at it can press them.",
+  },
+  display: {
+    title: "Wall display",
+    hint: "Read-only. Buttons draw but do nothing.",
+    becomes: "It becomes read-only. Its buttons will render but do nothing.",
+  },
+};
+
+/** "a control surface" / "a wall display", for a sentence. */
+export const surfaceNoun = (surface: ViewSurface): string => `a ${SURFACE_COPY[surface].title.toLowerCase()}`;
+
+/** The title of the question asked before `name` becomes `surface`. One wording
+ *  for a screen changing because of the view it was pointed at and for a view
+ *  being changed under the screens showing it. */
+export const roleQuestionTitle = (name: string, surface: ViewSurface): string => `Make "${name}" ${surfaceNoun(surface)}?`;
+
+/** The confirm button of that question; `many` when several screens change. */
+export const roleQuestionLabel = (surface: ViewSurface, many = false): string =>
+  many ? `Make them ${SURFACE_COPY[surface].title.toLowerCase()}s` : `Make it ${surfaceNoun(surface)}`;
+
+/**
  * Ask before a screen becomes what it is not. The one confirm for it, here and on
  * the screen card's view picker, so the title and the button are written once.
  *
@@ -18,14 +48,11 @@ import { screenIsControlSurface, viewSurface, type ViewSurface } from "@main/typ
  * something else the operator chose.
  */
 export async function confirmRole(name: string, becomes: ViewSurface, why?: string): Promise<boolean> {
-  const toConsole = becomes === "console";
-  const what = toConsole
-    ? "Its buttons will work. Anyone standing at it can press them."
-    : "It becomes read-only. Its buttons will render but do nothing.";
+  const what = SURFACE_COPY[becomes].becomes;
   return confirm({
-    title: toConsole ? `Make "${name}" a control surface?` : `Make "${name}" a wall display?`,
+    title: roleQuestionTitle(name, becomes),
     message: why ? `${why} ${what}` : what,
-    confirmLabel: toConsole ? "Make it a control surface" : "Make it a wall display",
+    confirmLabel: roleQuestionLabel(becomes),
   });
 }
 

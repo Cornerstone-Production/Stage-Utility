@@ -36,7 +36,7 @@ import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
 import { KIND_DRAWS_TOP_BAR, screenIsControlSurface, viewCanBeControlSurface, viewShownInSidebar, viewSurface, type CreateScreenInput, type NewViewKind, type ViewSurface } from "@main/types/views";
 import { useResyncOn } from "../../lib/use-resync-on";
-import { confirmViewKind } from "../screen-role-confirm";
+import { SURFACE_COPY, confirmViewKind } from "../screen-role-confirm";
 import { useDevices } from "../../app/screens/use-devices";
 import { releaseDevice } from "../../app/screens/screen-device";
 import { cardOf, outputModeLine } from "../../app/screens/output-helpers";
@@ -114,10 +114,7 @@ export function viewsOfKind(views: readonly View[], kind: NewViewKind): View[] {
 }
 
 /** What a screen showing a view of this surface is, in the words the panel uses. */
-const WHAT_IT_IS: Record<ViewSurface, string> = {
-  console: "Control surface: its buttons work for anyone at it.",
-  display: "Wall display: read-only. Buttons draw but do nothing.",
-};
+const whatItIs = (surface: ViewSurface): string => `${SURFACE_COPY[surface].title}: ${SURFACE_COPY[surface].hint.replace(/^Its/, "its").replace(/^Read-only/, "read-only")}`;
 
 // ── Small parts ──────────────────────────────────────────────────────────
 
@@ -227,8 +224,8 @@ function SlugInput({ id, baseUrl, value, onChange, children }: {
 
 function KindCards({ kind, onChoose }: { kind: NewViewKind; onChoose: (kind: NewViewKind) => void }) {
   const cards: { kind: NewViewKind; title: string; hint: string }[] = [
-    { kind: "wall", title: "Wall display", hint: "Read from across the room. Buttons draw but do nothing." },
-    { kind: "control", title: "Control surface", hint: "A touch screen. Its buttons work for anyone at it." },
+    { kind: "wall", ...SURFACE_COPY.display },
+    { kind: "control", ...SURFACE_COPY.console },
   ];
   return (
     <div role="group" aria-label="What this screen is" className="grid grid-cols-2 gap-2">
@@ -639,7 +636,7 @@ function EditBody({ output, views, baseUrl, online, messageGroups, actions }: {
           onChange={(v) => void pickView(v)}
           newLabel={controlSurface ? "+ New control surface…" : "+ New wall view…"}
           noneLabel="— Unrouted —"
-          hint={shown ? WHAT_IT_IS[viewSurface(shown)] : "Shows nothing yet."}
+          hint={shown ? whatItIs(viewSurface(shown)) : "Shows nothing yet."}
         />
         {/* Only for a console: the sidebar lists consoles, and the listing is
             the view's, so it is written there. */}
