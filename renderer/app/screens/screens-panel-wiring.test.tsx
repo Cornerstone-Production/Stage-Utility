@@ -303,21 +303,21 @@ describe("each setting reaches the server", () => {
 describe("choosing a view of the other kind in the panel", () => {
   // The view decides what a screen is, so there is no role route: the answer to
   // the question is one PATCH of the screen's viewId, and nothing else moves.
-  test("a control surface pointed at a wall view asks, then PATCHes only viewId", async () => {
+  test("a control surface pointed at a wall view asks, then PATCHes viewId with the kind it asked about", async () => {
     await mountScreens();
     await openSettings("Booth panel");
     await choose(panel().getByLabelText("View"), "wall-a");
     assert.deepEqual(writes, [], "the screen was routed before the operator said yes");
     await answerConfirm("Make it a wall display");
-    assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-1", body: { viewId: "wall-a" } }]);
+    assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-1", body: { viewId: "wall-a", expectSurface: "display" } }]);
   });
 
-  test("a wall display pointed at a console asks, then PATCHes only viewId", async () => {
+  test("a wall display pointed at a console asks, then PATCHes viewId with the kind it asked about", async () => {
     await mountScreens();
     await openSettings("Lobby TV");
     await choose(panel().getByLabelText("View"), "ctl-a");
     await answerConfirm("Make it a control surface");
-    assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { viewId: "ctl-a" } }]);
+    assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { viewId: "ctl-a", expectSurface: "console" } }]);
   });
 
   test("declining sends nothing", async () => {
@@ -337,7 +337,7 @@ describe("the card's own view picker", () => {
     return el!.querySelector("select")!;
   }
 
-  test("choosing a console for a wall display asks, then points the screen at it: one PATCH of viewId", async () => {
+  test("choosing a console for a wall display asks, then points the screen at it: one PATCH of viewId and the kind asked about", async () => {
     // Lobby TV shares its wall view with another screen. Choosing a view is all
     // it takes to make it a control surface, and the other screen, which keeps the
     // wall view, is not touched.
@@ -346,7 +346,7 @@ describe("the card's own view picker", () => {
     await choose(cardPicker("Lobby TV"), "ctl-a");
     assert.deepEqual(writes, [], "the screen was routed before the operator said yes");
     await answerConfirm("Make it a control surface");
-    assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { viewId: "ctl-a" } }]);
+    assert.deepEqual(writes, [{ method: "PATCH", url: "/api/outputs/display-3", body: { viewId: "ctl-a", expectSurface: "console" } }]);
   });
 
   test("declining the confirm assigns nothing", async () => {
