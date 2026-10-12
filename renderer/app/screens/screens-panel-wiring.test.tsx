@@ -137,6 +137,13 @@ beforeEach(() => {
         boundDevices = [...boundDevices, { id: (body as { deviceId: string }).deviceId, outputId: made, macs: [], hostname: "lobby-pi" }];
         return ok({ ok: true, displaced: null, outputId: made });
       }
+      if (method === "POST" && url.endsWith("/duplicate")) {
+        const source = views.find((v) => v.id === url.split("/")[3])!;
+        views = [...views, { ...source, id: `${source.id}-copy`, name: `${source.name} copy` }];
+        // Another operator adds a view in the same moment, and lands after ours.
+        if (otherOperatorAdds) views = [...views, { id: "their-view", name: "Their view", kind: "custom", surface: "display", createdAt: NOW }];
+        return ok({ ...state(), viewId: `${source.id}-copy` });
+      }
       if (method === "POST" && url === "/api/views") {
         const b = body as { name: string; kind: View["kind"]; surface?: View["surface"] };
         views = [...views, { id: `view-new-${views.length}`, name: b.name, kind: b.kind, surface: b.surface ?? "display", createdAt: NOW }];
@@ -991,19 +998,18 @@ describe("View settings", () => {
     await mountScreens();
     await openSettings("Lobby TV");
     await click(panel().getByRole("button", { name: "View settings →" }));
-    // The server answers a duplicate with the state including the copy.
-    const dup = async () => { views = [...views, { ...WALL, id: "wall-copy", name: "Lobby loop copy" }]; };
-    const stub = globalThis.fetch;
-    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
-      if (String(input).includes("/duplicate")) await dup();
-      return stub(input as RequestInfo, init);
-    }) as typeof fetch;
-    try {
-      await click(panel().getByRole("button", { name: "Duplicate" }));
-    } finally {
-      globalThis.fetch = stub;
-    }
+    await click(panel().getByRole("button", { name: "Duplicate" }));
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/views/wall-a/duplicate", body: {} }]);
     assert.ok(panel().getByRole("heading", { name: "Lobby loop copy" }), "the panel stayed on the original");
+  });
+
+  test("the panel lands on the copy THIS call made, not a view another operator added at the same moment", async () => {
+    otherOperatorAdds = true;
+    await mountScreens();
+    await openSettings("Lobby TV");
+    await click(panel().getByRole("button", { name: "View settings →" }));
+    await click(panel().getByRole("button", { name: "Duplicate" }));
+    assert.ok(panel().getByRole("heading", { name: "Lobby loop copy" }), "the panel opened on the other operator's view");
   });
 
   test("Delete view… names every screen showing it, then deletes it", async () => {

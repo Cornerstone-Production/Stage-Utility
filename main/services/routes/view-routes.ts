@@ -380,8 +380,9 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     if (method === "POST" && viewDuplicateMatch) {
       const body = await readBody(req) as Record<string, unknown>;
       const name = typeof body.name === "string" ? body.name : undefined;
-      const state = await stageController.duplicateView(viewDuplicateMatch[1], name);
-      json(res, state, 201);
+      const { state, view } = await stageController.duplicateView(viewDuplicateMatch[1], name);
+      // The copy this call made, beside the state, as POST /api/outputs answers.
+      json(res, { ...state, viewId: view.id }, 201);
       return;
     }
 

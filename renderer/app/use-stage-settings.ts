@@ -538,12 +538,12 @@ export function useStageSettings(pinnedViewId?: string) {
   /** Resolves the copy's id, or null when it could not be made (already toasted). */
   async function handleDuplicateView(id: string): Promise<string | null> {
     try {
-      const next = await ipc<StageState>("views:duplicate", { id });
+      // The answer is the state and the id of the copy this call made.
+      const { viewId, ...next } = await ipc<StageState & { viewId?: string }>("views:duplicate", { id });
       queryClient.setQueryData(["stage:getState"], next);
-      const created = next.views?.[next.views.length - 1];
-      if (created) setSelectedViewId(created.id);
+      if (viewId) setSelectedViewId(viewId);
       toast.success("View duplicated.");
-      return created?.id ?? null;
+      return viewId ?? null;
     } catch (err) {
       toast.error(`Failed to duplicate view: ${errorMessage(err)}`);
       return null;

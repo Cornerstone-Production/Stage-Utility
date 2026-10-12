@@ -705,3 +705,14 @@ describe("DELETE /api/views/:id?ifUnshown=1 — delete a view only if no screen 
     assert.equal(outputs().some((o) => o.name === "Wing"), false);
   });
 });
+
+describe("POST /api/views/:id/duplicate — answers the copy it made", () => {
+  it("answers the id of the copy beside the state, so a client need not look for the newest view", async () => {
+    const r = await post("/api/views/wall-a/duplicate", { name: "Lobby loop 2" });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    const made = views().find((v) => v.name === "Lobby loop 2");
+    assert.ok(made, "no copy was made");
+    assert.equal((r.json as { viewId: string }).viewId, made!.id);
+    assert.equal((r.json as { views: View[] }).views.some((v) => v.id === made!.id), true, "the answer is not the state");
+  });
+});

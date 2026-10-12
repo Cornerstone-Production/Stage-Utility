@@ -3365,9 +3365,11 @@ export class StageController {
     return this.state;
   }
 
-  async duplicateView(id: string, name?: string): Promise<StageState> {
-    await this.copyViewRecord(id, name);
-    return this.state;
+  /** Copy a view. Answers the state and the copy this call made, so a caller need not
+   *  look for "the newest view" in a state another operator may have added to. */
+  async duplicateView(id: string, name?: string): Promise<{ state: StageState; view: View }> {
+    const view = await this.copyViewRecord(id, name);
+    return { state: this.state, view };
   }
 
   /**
