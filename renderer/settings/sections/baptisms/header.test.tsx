@@ -172,6 +172,14 @@ function rebuildButton(root: ParentNode): HTMLButtonElement {
   return btn;
 }
 
+/** Press Rebuild from raw once it is enabled. It is disabled until the sessions
+ *  and the live check have been read, and a click on a disabled button does
+ *  nothing, so the confirm never opens. */
+async function clickRebuild(root: ParentNode): Promise<void> {
+  await eventually(() => assert.equal(rebuildButton(root).disabled, false, "the Rebuild button never enabled"));
+  fireEvent.click(rebuildButton(root));
+}
+
 const text = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 const findButton = (root: ParentNode, label: string) =>
   [...root.querySelectorAll("button")].find((b) => text(b) === label) as HTMLElement | undefined;
@@ -217,7 +225,7 @@ test("targets the current session's serviceKey when the page is showing one", as
   const { view, calls, restore } = await mount(state, [session({ serviceKey: "svc-old" })], { live: false });
   try {
     await eventually(() => assert.equal(rebuildButton(view.container).disabled, false));
-    fireEvent.click(rebuildButton(view.container));
+    await clickRebuild(view.container);
     await settle();
     fireEvent.click(await eventually(() => {
       const found = findButton(document.body, "Rebuild");
@@ -240,7 +248,7 @@ test("falls back to the most recent past session's serviceKey when state.service
   const { view, calls, restore } = await mount(IDLE, [session({ serviceKey: "svc-past" })], { live: false });
   try {
     await eventually(() => assert.equal(rebuildButton(view.container).disabled, false));
-    fireEvent.click(rebuildButton(view.container));
+    await clickRebuild(view.container);
     await settle();
     fireEvent.click(await eventually(() => {
       const found = findButton(document.body, "Rebuild");
@@ -283,7 +291,7 @@ test("cancelling the confirm reaches neither the server nor onRebuilt", async ()
   const state: BaptismState = { ...IDLE, serviceKey: "svc-a" };
   const { view, calls, rebuiltCount, restore } = await mount(state, [], { live: false });
   try {
-    fireEvent.click(rebuildButton(view.container));
+    await clickRebuild(view.container);
     await settle();
     fireEvent.click(findButton(document.body, "Cancel")!);
     await settle();
@@ -304,7 +312,7 @@ test("confirming a rebuild that restored something calls onRebuilt from its own 
     rebuildAnswer: { rows: 5, sessions: 2, updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, restoredIds: ["restored-1"] },
   });
   try {
-    fireEvent.click(rebuildButton(view.container));
+    await clickRebuild(view.container);
     await settle();
     fireEvent.click(await eventually(() => {
       const found = findButton(document.body, "Rebuild");
@@ -325,7 +333,7 @@ test("confirming a NO-OP rebuild (nothing restored) calls onRebuilt directly —
     rebuildAnswer: { rows: 5, sessions: 2, updated: 0, added: 0, unchanged: 2, newer: 0, disagreeing: 0, invalid: 0, kept: 0, restoredIds: [] },
   });
   try {
-    fireEvent.click(rebuildButton(view.container));
+    await clickRebuild(view.container);
     await settle();
     fireEvent.click(await eventually(() => {
       const found = findButton(document.body, "Rebuild");
@@ -626,7 +634,7 @@ test("the confirm names the target service's title and date", async () => {
   };
   const { view, restore } = await mount(state, [], { live: false });
   try {
-    fireEvent.click(rebuildButton(view.container));
+    await clickRebuild(view.container);
     await settle();
     const dialog = text(document.body);
     assert.match(dialog, /Sunday Gathering/, `the confirm did not name the service: ${dialog}`);
@@ -666,7 +674,7 @@ test("a successful rebuild toasts what changed", async () => {
     rebuildAnswer: { rows: 5, sessions: 2, updated: 1, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, restoredIds: ["restored-1"] },
   });
   try {
-    fireEvent.click(rebuildButton(view.container));
+    await clickRebuild(view.container);
     await settle();
     fireEvent.click(await eventually(() => {
       const found = findButton(document.body, "Rebuild");
@@ -697,7 +705,7 @@ test("a refused rebuild toasts the failure, not a silent no-op", async () => {
     rebuildAnswer: { error: "That recording could not be rebuilt, and nothing was changed. The log says why." },
   });
   try {
-    fireEvent.click(rebuildButton(view.container));
+    await clickRebuild(view.container);
     await settle();
     fireEvent.click(await eventually(() => {
       const found = findButton(document.body, "Rebuild");
@@ -721,7 +729,7 @@ test("a confirm left open across the target starting to record again does not po
   const { view, calls, restore } = await mount({ ...IDLE, serviceKey: "svc-a" }, [], { live: () => raceToLive });
   try {
     await eventually(() => assert.equal(rebuildButton(view.container).disabled, false, "precondition: not live when the confirm opens"));
-    fireEvent.click(rebuildButton(view.container));
+    await clickRebuild(view.container);
     await settle();
     // The operator reads the confirm; meanwhile the target starts recording.
     raceToLive = true;
@@ -751,7 +759,7 @@ test("a 409 the recheck did not catch still refuses cleanly and marks the target
     rebuildAnswer: { error: "That service is recording right now — it cannot be rebuilt until it ends.", code: "live" },
   });
   try {
-    fireEvent.click(rebuildButton(view.container));
+    await clickRebuild(view.container);
     await settle();
     fireEvent.click(await eventually(() => {
       const found = findButton(document.body, "Rebuild");
@@ -789,7 +797,7 @@ test("a no-raw-rows 409 shows the server's own sentence and leaves the button en
     },
   });
   try {
-    fireEvent.click(rebuildButton(view.container));
+    await clickRebuild(view.container);
     await settle();
     fireEvent.click(await eventually(() => {
       const found = findButton(document.body, "Rebuild");
