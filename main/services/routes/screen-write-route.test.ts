@@ -218,10 +218,13 @@ describe("POST /api/views/:id/surface", () => {
   });
 
   it("refuses a view that cannot be a control surface, and a missing one, with the reason as a 400", async () => {
-    ctl.state = { ...ctl.state, views: [...views(), { id: "cal-a", name: "Week ahead", kind: "calendar", createdAt: NOW }] as unknown as View[] };
-    const refused = await post("/api/views/cal-a/surface", { surface: "console" });
+    ctl.state = { ...ctl.state, views: [...views(), { id: "mics", name: "Mic board", kind: "slots", createdAt: NOW }] as unknown as View[] };
+    const refused = await post("/api/views/mics/surface", { surface: "console" });
     assert.equal(refused.status, 400);
-    assert.match((refused.json as { error: string }).error, /Week ahead.*Calendar view/s);
+    assert.match((refused.json as { error: string }).error, /Mic board.*Slots view/s);
+    const patched = await patch("/api/views/mics", { surface: "console" });
+    assert.equal(patched.status, 400, "PATCH took the view the POST refused");
+    assert.equal(views().find((v) => v.id === "mics")!.surface, undefined);
     const missing = await post("/api/views/ghost/surface", { surface: "display" });
     assert.equal(missing.status, 400);
     assert.match((missing.json as { error: string }).error, /not found/);

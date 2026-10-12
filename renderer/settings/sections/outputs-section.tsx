@@ -29,7 +29,7 @@ import { iconEntryAt } from "../../components/editable-icon";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { ImportLayout } from "./import-layout";
 import { SCREEN_PANEL_ID, confirmViewKind } from "./screen-settings-panel";
-import { viewSurface, viewShownInSidebar, screenIsControlSurface } from "@main/types/views";
+import { viewSurface, viewShownInSidebar, screenIsControlSurface, viewCanBeControlSurface } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
 
@@ -687,9 +687,8 @@ function UnassignedViewCard({
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content className={menuContent()} align="end" sideOffset={4}>
-              {/* Only a custom layout can be a console: the built-in kinds have
-                  no layout to put a control on. */}
-              {view.kind === "custom" && (
+              {/* Only a kind with something to operate can be a console. */}
+              {viewCanBeControlSurface(view) && (
                 <DropdownMenu.Item onSelect={onToggleSurface} className={MENU_ITEM}>
                   {viewSurface(view) === "console"
                     ? <MonitorIcon className="size-3.5 text-fg-subtle" />

@@ -126,6 +126,30 @@ describe("binding a view to a screen", () => {
   });
 });
 
+describe("which kinds of view can be made a control surface", () => {
+  // createView is what POST /api/views reaches, and it is asked for a surface by
+  // whoever calls it: a kind with nothing to operate is made a wall view whatever
+  // was asked, and a kind with something to operate is made what was asked.
+  it("a new calendar or custom view asked for as a console is one; a slots view is made a wall view", async () => {
+    const made = async (kind: "calendar" | "custom" | "slots") => {
+      const s = await stageController.createView(`New ${kind}`, kind, "console");
+      return viewSurface(s.views.find((v) => v.name === `New ${kind}`)!);
+    };
+    assert.deepEqual([await made("calendar"), await made("custom"), await made("slots")], ["console", "console", "display"]);
+  });
+
+  it("PATCH-level setViewSurface refuses a view with nothing to operate, and takes a calendar", async () => {
+    ctl.state.views = [
+      ...ctl.state.views,
+      { id: "mics", name: "Mic board", kind: "slots", createdAt: "", surface: "display" },
+      { id: "cal", name: "Week ahead", kind: "calendar", createdAt: "", surface: "display" },
+    ] as View[];
+    await assert.rejects(() => stageController.setViewSurface("mics", "console"), /Mic board.*cannot be a control surface/s);
+    const s = await stageController.setViewSurface("cal", "console");
+    assert.equal(viewSurface(s.views.find((v) => v.id === "cal")!), "console");
+  });
+});
+
 describe("converting a view's surface", () => {
   // Converting a view a screen shows changes that screen: a read-only screen goes
   // live, or a control surface stops working. setViewSurface refuses and names the

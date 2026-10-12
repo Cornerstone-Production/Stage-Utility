@@ -16,7 +16,7 @@
 //  - The screens the operator was shown no longer being the screens it would
 //    change, because one was pointed at the view, or away from it, while the
 //    question was open. Refused, writing nothing, with the list as it is now.
-//  - Only a custom view being made a console.
+//  - A view whose kind has nothing to operate being made a console.
 //
 // Every id and name is invented.
 
@@ -52,6 +52,7 @@ function seed(): void {
       { id: "wall-b", name: "Unplaced loop", kind: "custom", surface: "display", createdAt: NOW, layout },
       { id: "ctl-a", name: "Booth controls", kind: "custom", surface: "console", createdAt: NOW, layout },
       { id: "cal-a", name: "Week ahead", kind: "calendar", surface: "display", createdAt: NOW },
+      { id: "slots-a", name: "Mic board", kind: "slots", surface: "display", createdAt: NOW },
     ] as unknown as View[],
     outputs: [
       { id: "display-1", name: "Lobby TV", viewId: "wall-a" },
@@ -145,10 +146,17 @@ describe("setViewRole — to a control surface", () => {
     assert.equal(outputs().length, 6);
   });
 
-  it("refuses a view that is not a custom view, saying why, and changes nothing", async () => {
+  it("refuses a view whose kind has nothing to operate, saying why, and changes nothing", async () => {
     const before = everything();
-    await assert.rejects(() => stageController.setViewRole("cal-a", "console"), /Week ahead.*Calendar view.*control surface/s);
+    await assert.rejects(() => stageController.setViewRole("slots-a", "console"), /Mic board.*Slots view.*control surface/s);
     assert.equal(everything(), before);
+  });
+
+  it("makes a calendar a console: its month chevrons are a control, and the screen showing it goes live with it", async () => {
+    assert.deepEqual(live("display-6"), [false]);
+    await stageController.setViewRole("cal-a", "console");
+    assert.equal(viewSurface(view("cal-a")), "console");
+    assert.deepEqual(live("display-6"), [true]);
   });
 
   it("refuses Home and a view that does not exist", async () => {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { planScreenRoles, type StoredOutput } from "./screen-role-migration.js";
-import { screenIsControlSurface, viewSurface } from "../types/views.js";
+import { screenIsControlSurface, viewCanBeControlSurface, viewSurface } from "../types/views.js";
 
 // A screen's role now comes from its view. This takes the role an older build
 // stored on the screen out of the data, and the property it must keep is the one
@@ -135,21 +135,34 @@ describe("a live screen on a wall view", () => {
     }
   });
 
-  test("a view that is not a custom view has no buttons to keep: only the role goes", () => {
-    const views = [view("cal", { kind: "calendar" })];
-    const plan = planScreenRoles(views, [screen("a", "cal", "panel")], { absentIsDisplay: false });
+  test("a view whose kind draws nothing to operate has no buttons to keep: only the role goes", () => {
+    const views = [view("mics", { kind: "slots" })];
+    const plan = planScreenRoles(views, [screen("a", "mics", "panel")], { absentIsDisplay: false });
     assert.deepEqual([plan.consoleViewIds, plan.copies, plan.changed], [[], [], 0]);
     assert.equal("mode" in plan.outputs[0], false);
+  });
+
+  test("a calendar has its month chevrons to keep: it becomes a console like a custom view", () => {
+    const views = [view("cal", { kind: "calendar", name: "Week ahead" })];
+    const alone = planScreenRoles(views, [screen("a", "cal", "panel")], { absentIsDisplay: false });
+    assert.deepEqual([alone.consoleViewIds, alone.copies, alone.changed], [["cal"], [], 1]);
+    // Shared with a read-only screen: the live one gets a copy, the other is not woken.
+    const shared = planScreenRoles(views, [screen("a", "cal", "panel"), screen("b", "cal", "display")], { absentIsDisplay: false });
+    assert.deepEqual(shared.consoleViewIds, []);
+    assert.deepEqual(shared.copies.map((c) => [c.name, c.surface, c.screenIds]), [["Week ahead (control surface)", "console", ["a"]]]);
   });
 });
 
 describe("the principle, over every combination", () => {
-  test("no screen that was read-only is live afterwards, and none that was live loses its buttons on a custom view", () => {
+  test("no screen that was read-only is live afterwards, and none that was live loses its buttons on a view that has some", () => {
     const stored = [undefined, "display", "panel", "hologram"];
     const kinds = [
       { surface: "display" as const, kind: "custom" },
       { surface: "console" as const, kind: "custom" },
       { surface: "display" as const, kind: "calendar" },
+      { surface: "console" as const, kind: "calendar" },
+      { surface: "display" as const, kind: "slots" },
+      { surface: "console" as const, kind: "slots" },
     ];
     for (const absentIsDisplay of [true, false]) {
       for (const k of kinds) {
@@ -164,7 +177,7 @@ describe("the principle, over every combination", () => {
               const label = `${JSON.stringify([k, a, b, absentIsDisplay])} screen ${o.id}`;
               const before = o.mode === "panel" || (!absentIsDisplay && o.mode === undefined && k.surface === "console");
               if (!before) assert.equal(live, false, `a read-only screen went live: ${label}`);
-              if (before && k.kind === "custom") assert.equal(live, true, `a live screen lost its buttons: ${label}`);
+              if (before && viewCanBeControlSurface({ kind: k.kind as View["kind"] })) assert.equal(live, true, `a live screen lost its buttons: ${label}`);
             }
             assert.equal(plan.outputs.some((o) => "mode" in o), false, "a role was left in the data");
           }

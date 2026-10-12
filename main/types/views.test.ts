@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { viewSurface, screenIsControlSurface, viewCanBeControlSurface } from "./views.js";
+import { everyViewKind, viewSurface, screenIsControlSurface, viewCanBeControlSurface } from "./views.js";
 
 // A View declares what it is FOR, and that is the whole of a screen's role: a
 // screen is a control surface exactly when the view it shows is a console. The
@@ -61,8 +61,21 @@ describe("a screen's role is its view's surface", () => {
     assert.equal(shows("odd"), false);
   });
 
-  test("only a custom view can be a control surface", () => {
-    assert.equal(viewCanBeControlSurface({ kind: "custom" }), true);
-    assert.equal(viewCanBeControlSurface({ kind: "calendar" }), false);
+  test("the kinds that can be a control surface are exactly these", () => {
+    // Sorted, one per line. The renderer test (stage-view-paths.test.tsx) holds the
+    // other end: it renders every kind as a wall screen and as a console and fails
+    // when this list and what is drawn disagree.
+    const kinds = everyViewKind(["slots", "dashboard", "stage", "transcription", "custom", "script", "spl-rundown", "calendar"]);
+    assert.deepEqual(
+      kinds.filter((kind) => viewCanBeControlSurface({ kind })).sort(),
+      [
+        "calendar",
+        "custom",
+      ],
+    );
+  });
+
+  test("a kind this build does not know has nothing to operate", () => {
+    assert.equal(viewCanBeControlSurface({ kind: "hologram" as never }), false);
   });
 });

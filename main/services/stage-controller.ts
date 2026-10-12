@@ -217,14 +217,6 @@ export class SlotsNotFoundError extends Error {
   }
 }
 
-/** Why a view cannot be a control surface: it is not a custom view. */
-function noControlSurfaceReason(view: View): string {
-  return (
-    `"${view.name}" is a ${defaultViewName(view.kind)} view, and only a custom view has a layout to put a control on, ` +
-    `so it cannot be a control surface.`
-  );
-}
-
 /** One write in a multi-write screen change, and how to take it back. */
 export interface ScreenStep {
   label: string;
@@ -3061,10 +3053,9 @@ export class StageController {
     onAssigned?: (view: View) => void,
   ): Promise<View> {
     const id = await this.allocateViewId();
-    // Only a custom View has an editable layout, so only a custom View has
-    // anywhere to put a control. Anything else asked for as a console would be
-    // a console that cannot carry one - a promise the UI could not keep.
-    const effectiveSurface: ViewSurface = kind === "custom" ? surface : "display";
+    // A kind with nothing to operate asked for as a console would be a console
+    // that cannot carry a control: a promise the screen could not keep.
+    const effectiveSurface: ViewSurface = viewCanBeControlSurface({ kind }) ? surface : "display";
     const view: View = {
       id,
       name: name?.trim() || defaultViewName(kind),
@@ -3120,6 +3111,7 @@ export class StageController {
   ): Promise<StageState> {
     const view = this.state.views.find((v) => v.id === id);
     if (!view) throw new Error(`setViewSurface — view ${id} not found`);
+    if (surface === "console" && viewSurface(view) !== "console") this.assertCanBeControlSurface(view);
 
     const shownOn = this.state.outputs.filter((o) => o.viewId === id);
     if (!opts.screensConfirmed && viewSurface(view) !== surface && shownOn.length > 0) {
@@ -3888,14 +3880,13 @@ export class StageController {
     return view;
   }
 
-  /**
-   * The view named, refused unless it can be made a control surface at all: it
-   * exists, is not Home, and is a custom view. setViewRole is about to make it one.
-   */
-  private requireViewCanBeControlSurface(viewId: string): View {
-    const view = this.requireViewToShow(viewId);
-    if (!viewCanBeControlSurface(view)) throw new Error(noControlSurfaceReason(view));
-    return view;
+  /** Refuse, with the reason, a view whose kind has nothing to operate. */
+  private assertCanBeControlSurface(view: View): void {
+    if (viewCanBeControlSurface(view)) return;
+    throw new Error(
+      `"${view.name}" is a ${defaultViewName(view.kind)} view, which draws nothing a screen could operate, ` +
+        `so it cannot be a control surface.`,
+    );
   }
 
   /**
@@ -3915,13 +3906,14 @@ export class StageController {
    * the write share a turn, so nothing can land between them. Absent, whatever
    * screens show the view are changed: the call a script makes.
    *
-   * A view already as asked is not an error and writes nothing. Only a custom
-   * view may become a console.
+   * A view already as asked is not an error and writes nothing. Only a view whose
+   * kind has something to operate may become a console.
    */
   async setViewRole(id: string, surface: ViewSurface, opts: { screens?: string[] } = {}): Promise<StageState> {
     if (surface !== "display" && surface !== "console") throw new Error('views:setRole — surface must be "display" or "console"');
-    const view = surface === "console" ? this.requireViewCanBeControlSurface(id) : this.requireViewToShow(id);
+    const view = this.requireViewToShow(id);
     if (viewSurface(view) === surface) return this.state;
+    if (surface === "console") this.assertCanBeControlSurface(view);
 
     const changing = this.state.outputs.filter((o) => o.viewId === id);
     if (opts.screens !== undefined) {

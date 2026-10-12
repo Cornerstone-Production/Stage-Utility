@@ -49,8 +49,11 @@ the plain `PATCH /api/views/:id` refuses it, naming the screens, and
 `POST /api/views/:id/surface` is the call that does it, with the screens listed
 first.
 
-Only **custom** views can be consoles: the built-in kinds have no editable layout,
-so there is nowhere to put a control.
+Only a view with something to operate can be a console: a **custom** view, and a
+**calendar** (its month chevrons are live on a console and absent on a wall
+display). The other kinds are finished pictures with nowhere to put a control. A
+calendar console opens at `/consoles/<view id>` like any other and shows the
+calendar.
 
 A console can also ask the app to get out of its way. See
 [Running a console without the app's chrome](../features/operator-app.md#running-a-console-without-the-apps-chrome).
@@ -153,9 +156,10 @@ An install that stored a role on each screen has it taken out on the first start
 (or the first start after a restore of such a backup), without changing what any
 screen does. A screen that was read-only never becomes live: one that was set to
 a wall display but showed a console now shows a wall copy of it, named `<view>
-(wall)`. A screen whose buttons worked keeps them: the view it showed becomes a
-console when only such screens showed it, and otherwise those screens share a
-control-surface copy, `<view> (control surface)`. Each is a `[screens]` line in
+(wall)`. A screen whose buttons worked keeps them: the view it showed (a custom view or a
+calendar) becomes a console when only such screens showed it, and otherwise those
+screens share a control-surface copy, `<view> (control surface)`. A view of any
+other kind has no controls to keep, so only the role is dropped. Each is a `[screens]` line in
 the log.
 
 ## What a display shows

@@ -1196,14 +1196,38 @@ export function screenIsControlSurface(
 }
 
 /**
- * Can this view be a control surface? Only a custom view: it is the only kind
- * with a layout to put a control on, which is why createView makes anything else
- * a wall view whatever it was asked for, and why the view card does not offer
- * the switch for one. A calendar "console" is a promise nothing keeps. Any view
- * can be a wall view.
+ * Can this view be a control surface: does what it draws have anything for
+ * someone at the screen to operate?
+ *
+ * A custom view does (a button, a fader, an editable field on its layout), and so
+ * does a calendar (its month chevrons, which a wall display does not draw). Every
+ * other kind is a finished picture, so a console of one would promise controls
+ * that are not there. `stage-view-paths.test.tsx` renders each kind as a wall
+ * screen and as a control surface and fails when this list and the renderer
+ * disagree. Any view can be a wall view.
+ *
+ * A switch over every kind, not a list of the true ones: the build refuses a new
+ * kind until someone has decided which it is.
  */
 export function viewCanBeControlSurface(view: Pick<View, "kind">): boolean {
-  return view.kind === "custom";
+  switch (view.kind) {
+    case "custom":
+    case "calendar":
+      return true;
+    case "slots":
+    case "dashboard":
+    case "stage":
+    case "transcription":
+    case "script":
+    case "spl-rundown":
+      return false;
+    default: {
+      // A kind read from disk that this build does not know: nothing to operate.
+      const _never: never = view.kind;
+      void _never;
+      return false;
+    }
+  }
 }
 
 /** A physical screen at a URL slug, routed to exactly one View (or none). */
