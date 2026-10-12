@@ -84,6 +84,8 @@ let viewDeleteFails: boolean;
 let boundDevices: unknown[];
 let deviceReadHeld: Promise<void> | null;
 let stateReadHeld: Promise<void> | null;
+/** Another operator adds a screen at the same moment as this page does. */
+let otherOperatorAdds: boolean;
 let viewShownByServer: { id: string; name: string }[] | null;
 let surfaceMovedTo: "display" | "console" | null;
 /** The page's query client, so a test can land a stage-state broadcast. */
@@ -102,6 +104,7 @@ beforeEach(() => {
   viewDeleteFails = false;
   surfaceMovedTo = null;
   viewShownByServer = null;
+  otherOperatorAdds = false;
   boundDevices = [];
   deviceReadHeld = null;
   stateReadHeld = null;
@@ -123,7 +126,12 @@ beforeEach(() => {
         views = views.map((v) => (v.id === (body as CreateBody).viewId ? { ...v, surface: moved } : v));
         return reply(409, { error: "The view changed while you were deciding: it is now. Nothing was changed.", code: "surface-changed", surface: moved });
       }
-      if (method === "POST" && url === "/api/outputs") makeScreen(body as CreateBody);
+      if (method === "POST" && url === "/api/outputs") {
+        const made = makeScreen(body as CreateBody);
+        // Another operator adds a screen in the same moment, and lands after ours.
+        if (otherOperatorAdds) outputs = [...outputs, { id: "display-99", name: "Their screen", viewId: null }];
+        return ok({ ...state(), outputId: made });
+      }
       if (method === "POST" && url === "/api/devices/claim" && (body as { outputId?: string | null }).outputId === null) {
         const made = makeScreen(body as CreateBody);
         boundDevices = [...boundDevices, { id: (body as { deviceId: string }).deviceId, outputId: made, macs: [], hostname: "lobby-pi" }];
@@ -736,6 +744,16 @@ describe("Add a screen", () => {
     // Edit layout in the note goes to the new view's editor.
     await click(within(note).getByRole("button", { name: "Edit layout" }));
     assert.ok((document.body.textContent ?? "").includes("The layout editor"), "Edit layout did not open the editor");
+  });
+
+  test("the panel lands on the screen THIS call made, not one another operator added at the same moment", async () => {
+    otherOperatorAdds = true;
+    await mountScreens();
+    await click(addTile());
+    await type(panel().getByLabelText("Name"), "Wing");
+    await nextStep();
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    assert.ok(panel().getByRole("heading", { name: "Wing" }), "the panel opened on the other operator's screen");
   });
 
   test("a new control surface POSTs newView: control", async () => {

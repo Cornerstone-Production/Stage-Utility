@@ -660,8 +660,10 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       try {
-        const { state } = await stageController.createScreen(input);
-        json(res, state, 201);
+        const { state, output } = await stageController.createScreen(input);
+        // The id of the screen THIS call made, as a claim answers: a client that
+        // looked for "the new screen" in the state would find another operator's.
+        json(res, { ...state, outputId: output.id }, 201);
       } catch (err) {
         answerScreenWriteFailure(res, err);
       }

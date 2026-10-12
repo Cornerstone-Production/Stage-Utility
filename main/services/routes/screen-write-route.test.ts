@@ -73,6 +73,12 @@ describe("POST /api/outputs — the original { name, viewId } call", () => {
     assert.ok(body.outputs.some((o) => o.name === "Cafe TV"), "the answer is not the state");
   });
 
+  it("answers the id of the screen it made, so a client need not look for it in the state", async () => {
+    const r = await post("/api/outputs", { name: "Cafe TV", viewId: "wall-a" });
+    const made = outputs().find((o) => o.name === "Cafe TV")!;
+    assert.equal((r.json as { outputId: string }).outputId, made.id);
+  });
+
   it("with no body at all makes 'Display N' routed nowhere", async () => {
     const r = await post("/api/outputs", {});
     assert.equal(r.status, 201);

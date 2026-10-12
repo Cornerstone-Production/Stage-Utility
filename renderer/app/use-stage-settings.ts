@@ -756,15 +756,11 @@ export function useStageSettings(pinnedViewId?: string) {
    * step fails.
    */
   async function handleCreateScreen(input: CreateScreenInput): Promise<CreateScreenOutcome> {
-    const before = new Set((stateNow()?.outputs ?? []).map((o) => o.id));
     try {
-      const next = await ipc<StageState>("outputs:add", { ...input });
+      // The answer is the state and the id of the screen this call made.
+      const { outputId, ...next } = await ipc<StageState & { outputId?: string }>("outputs:add", { ...input });
       queryClient.setQueryData(["stage:getState"], next);
-      // The route answers with the state, not the screen: it is the one id that was
-      // not there a moment ago. Two operators adding at once could make that two;
-      // the last is taken, and the panel then opens on a screen that does exist.
-      const made = (next.outputs ?? []).filter((o) => !before.has(o.id)).at(-1);
-      return { refused: null, outputId: made?.id ?? null };
+      return { refused: null, outputId: outputId ?? null };
     } catch (err) {
       // The server holds a create to the kind of view the operator was shown. When
       // it changed, read the views again so the role line says what it is now.
