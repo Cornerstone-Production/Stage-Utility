@@ -213,6 +213,13 @@ describe("PATCH /api/outputs/:id — expectSurface", () => {
     assert.equal(routed("display-3"), "ctl-a");
   });
 
+  it("writes nothing else in the body when it refuses: a rename beside it does not land alone", async () => {
+    const r = await patch("/api/outputs/display-1", { name: "Renamed", viewId: "ctl-a", expectSurface: "display" });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    assert.equal(outputs().find((o) => o.id === "display-1")!.name, "Lobby TV", "a field beside the refused viewId was applied");
+    assert.equal(routed("display-1"), "wall-a");
+  });
+
   it("without it the write is allowed whatever the kind: Companion and scripts", async () => {
     const r = await patch("/api/outputs/display-1", { viewId: "ctl-a" });
     assert.equal(r.status, 200, JSON.stringify(r.json));

@@ -732,8 +732,11 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       // the server itself being broken. Fields applied before the refusal stay
       // applied, as they always did.
       try {
-        if (hasName) state = await stageController.renameOutput(id, body.name as string);
+        // The view first: it is the one write that can be refused for something other
+        // than the field's own value (a view that is not the kind the caller was
+        // told, with 409), so a refusal there writes nothing, the name included.
         if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null, { expectSurface: expectSurface as ViewSurface | undefined });
+        if (hasName) state = await stageController.renameOutput(id, body.name as string);
         if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
         if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
         if (hasHideTopBar) state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
