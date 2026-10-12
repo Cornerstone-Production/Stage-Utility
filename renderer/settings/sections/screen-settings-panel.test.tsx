@@ -424,11 +424,11 @@ describe("what it shows", () => {
     const { calls } = mount({});
     await choose(picker(), "wall-b");
     assert.equal(screen.queryByRole("alertdialog") !== null, false, "a confirm was asked for a change that changes nothing");
-    assert.deepEqual(calls, [["view", "display-1", "wall-b"]]);
+    assert.deepEqual(calls, [["view", "display-1", "wall-b", "display"]]);
     cleanup();
     const ctl = mount({ outputs: [PANEL_A] });
     await choose(picker(), "ctl-b");
-    assert.deepEqual(ctl.calls, [["view", "display-3", "ctl-b"]]);
+    assert.deepEqual(ctl.calls, [["view", "display-3", "ctl-b", "console"]]);
   });
 
   test("choosing Unrouted clears it, asking nothing, even for a control surface", async () => {
@@ -444,11 +444,13 @@ describe("what it shows", () => {
     assert.deepEqual(calls, [["newView", "display-1"]]);
   });
 
-  test("viewsOfKind: a control surface is a custom console, a wall display a wall view", () => {
+  test("viewsOfKind: a control surface is a console with something to operate, a wall display a wall view", () => {
     assert.deepEqual(viewsOfKind(VIEWS, "control").map((v) => v.id), ["ctl-a", "ctl-b"]);
     assert.deepEqual(viewsOfKind(VIEWS, "wall").map((v) => v.id), ["wall-a", "wall-b"]);
-    const legacy: View = { id: "cal-c", name: "Old calendar console", kind: "calendar", surface: "console", createdAt: NOW };
-    assert.deepEqual(viewsOfKind([...VIEWS, legacy], "control").map((v) => v.id), ["ctl-a", "ctl-b"], "a console with no layout to put a control on was offered");
+    const legacy: View = { id: "mics-c", name: "Old slot console", kind: "slots", surface: "console", createdAt: NOW };
+    assert.deepEqual(viewsOfKind([...VIEWS, legacy], "control").map((v) => v.id), ["ctl-a", "ctl-b"], "a console with nothing to operate was offered");
+    const calendar: View = { id: "cal-c", name: "Month console", kind: "calendar", surface: "console", createdAt: NOW };
+    assert.deepEqual(viewsOfKind([...VIEWS, calendar], "control").map((v) => v.id), ["ctl-a", "ctl-b", "cal-c"], "a calendar console, which has chevrons to operate, was not offered");
   });
 });
 
@@ -766,7 +768,18 @@ describe("choosing a view of the other kind", () => {
     assert.match(dialog.textContent ?? "", /"Stage controls" is a control surface\. Its buttons will work\. Anyone standing at it can press them/);
     assert.deepEqual(calls, [], "the screen was routed before the operator said yes");
     await answerConfirm("Make it a control surface");
-    assert.deepEqual(calls, [["view", "display-1", "ctl-b"]]);
+    assert.deepEqual(calls, [["view", "display-1", "ctl-b", "console"]]);
+  });
+
+  test("sends the kind of view the operator was asked about, not what it is when they answer", async () => {
+    // The server holds the write to this: a view made a wall view while the dialog
+    // was open is refused, rather than a screen going live on what nobody confirmed.
+    const { calls, rerender } = mount({});
+    await choose(picker(), "ctl-b");
+    await screen.findByRole("alertdialog");
+    await rerender({ views: VIEWS.map((v) => (v.id === "ctl-b" ? { ...v, surface: "display" as const } : v)) });
+    await answerConfirm("Make it a control surface");
+    assert.deepEqual(calls, [["view", "display-1", "ctl-b", "console"]]);
   });
 
   test("declining changes nothing", async () => {
@@ -784,7 +797,7 @@ describe("choosing a view of the other kind", () => {
     assert.match(dialog.textContent ?? "", /Make "Booth panel" a wall display\?/);
     assert.match(dialog.textContent ?? "", /read-only/);
     await answerConfirm("Make it a wall display");
-    assert.deepEqual(calls, [["view", "display-3", "wall-b"]]);
+    assert.deepEqual(calls, [["view", "display-3", "wall-b", "display"]]);
   });
 
   test("a screen showing nothing, given a console, asks: its buttons would go live", async () => {
@@ -792,14 +805,14 @@ describe("choosing a view of the other kind", () => {
     await choose(picker(), "ctl-a");
     await screen.findByRole("alertdialog");
     await answerConfirm("Make it a control surface");
-    assert.deepEqual(calls, [["view", "display-1", "ctl-a"]]);
+    assert.deepEqual(calls, [["view", "display-1", "ctl-a", "console"]]);
   });
 
   test("a screen showing nothing, given a wall view, asks nothing: it was read-only and stays so", async () => {
     const { calls } = mount({ outputs: [{ ...MINE, viewId: null }] });
     await choose(picker(), "wall-b");
     assert.equal(screen.queryByRole("alertdialog") !== null, false, "a confirm was asked for a change that changes nothing");
-    assert.deepEqual(calls, [["view", "display-1", "wall-b"]]);
+    assert.deepEqual(calls, [["view", "display-1", "wall-b", "display"]]);
   });
 });
 

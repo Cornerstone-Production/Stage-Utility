@@ -16,7 +16,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-surface-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { stageController } = await import("./stage-controller.js");
+const { stageController, ViewSurfaceChangedError } = await import("./stage-controller.js");
 const { viewSurface, screenIsControlSurface } = await import("../types/views.js");
 
 type Mutable = {
@@ -147,6 +147,85 @@ describe("which kinds of view can be made a control surface", () => {
     await assert.rejects(() => stageController.setViewSurface("mics", "console"), /Mic board.*cannot be a control surface/s);
     const s = await stageController.setViewSurface("cal", "console");
     assert.equal(viewSurface(s.views.find((v) => v.id === "cal")!), "console");
+  });
+});
+
+/** The `[screens]` lines `fn` logged, which is how an operator at 9am learns a
+ *  screen started or stopped working. */
+async function screensLog(fn: () => Promise<unknown>): Promise<string[]> {
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (...a: unknown[]) => { lines.push(a.join(" ")); };
+  try {
+    await fn();
+  } finally {
+    console.log = original;
+  }
+  return lines.filter((l) => l.startsWith("[screens]"));
+}
+
+describe("routing a screen with expectSurface", () => {
+  it("refuses a view that is the other kind than the caller was asking about, naming what it is now, and writes nothing", async () => {
+    const before = JSON.stringify(ctl.state.outputs);
+    await assert.rejects(
+      () => stageController.setOutputView("wall", "vc", { expectSurface: "display" }),
+      (e: unknown) => e instanceof ViewSurfaceChangedError && e.surface === "console" && e.expected === "display",
+    );
+    assert.equal(JSON.stringify(ctl.state.outputs), before);
+    assert.equal(isControlSurface("wall"), false, "a read-only screen went live on a view nobody confirmed");
+  });
+
+  it("goes ahead when the kind matches, and without an expectation whatever the kind", async () => {
+    await stageController.setOutputView("wall", "vd", { expectSurface: "display" });
+    await stageController.setOutputView("booth", "vc", { expectSurface: "console" });
+    await stageController.setOutputView("wall", "vc");
+    assert.equal(isControlSurface("wall"), true);
+  });
+
+  it("holds the check to the write: a view flipped while the write waited its turn is refused", async () => {
+    // The check runs in the same turn as the write, not when the call was made.
+    const route = stageController.setOutputView("wall", "vd", { expectSurface: "display" });
+    ctl.state.views = ctl.state.views.map((v) => (v.id === "vd" ? { ...v, surface: "console" as const } : v));
+    await assert.rejects(() => route, ViewSurfaceChangedError);
+    assert.equal(isControlSurface("wall"), false);
+  });
+});
+
+describe("a write that flips a screen's role says so in the log", () => {
+  it("routing a read-only screen to a console, and a control surface to a wall view or to nothing", async () => {
+    assert.deepEqual(await screensLog(() => stageController.setOutputView("wall", "vc")), [
+      '[screens] "Lobby" is now a control surface (shows "FOH Console")',
+    ]);
+    assert.deepEqual(await screensLog(() => stageController.setOutputView("wall", "vd")), [
+      '[screens] "Lobby" is now read-only (shows "Lobby Countdown")',
+    ]);
+    await stageController.setOutputView("booth", "vc");
+    assert.deepEqual(await screensLog(() => stageController.setOutputView("booth", null)), [
+      '[screens] "Booth Touchscreen" is now read-only (shows nothing)',
+    ]);
+  });
+
+  it("says nothing when the role stays what it was", async () => {
+    await stageController.setOutputView("booth", "vc");
+    assert.deepEqual(await screensLog(() => stageController.setOutputView("booth", "vc")), []);
+    assert.deepEqual(await screensLog(() => stageController.setOutputView("wall", "vd")), []);
+    assert.deepEqual(await screensLog(() => stageController.setOutputView("wall", null)), []);
+  });
+
+  it("changing what a view is for names every screen it changed", async () => {
+    ctl.state.outputs = [
+      { id: "a", name: "Lobby", viewId: "vd" },
+      { id: "b", name: "Hallway", viewId: "vd" },
+      { id: "c", name: "Booth", viewId: "vc" },
+    ] as Output[];
+    assert.deepEqual(await screensLog(() => stageController.setViewRole("vd", "console")), [
+      '[screens] "Lobby" is now a control surface (shows "Lobby Countdown")',
+      '[screens] "Hallway" is now a control surface (shows "Lobby Countdown")',
+    ]);
+    assert.deepEqual(await screensLog(() => stageController.setViewRole("vc", "display")), [
+      '[screens] "Booth" is now read-only (shows "FOH Console")',
+    ]);
+    assert.deepEqual(await screensLog(() => stageController.setViewRole("vc", "display")), [], "a view already as asked changed no screen");
   });
 });
 

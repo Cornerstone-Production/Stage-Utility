@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { StageState } from "@main/types/stage";
-import { changeViewRole, screensChangedBy, viewRoleQuestion } from "./view-role-change";
+import { changeViewRole, expectedSurface, screensChangedBy, viewRoleQuestion } from "./view-role-change";
 
 type Slim = Pick<StageState, "views" | "outputs">;
 const state = {
@@ -181,5 +181,13 @@ describe("the screens changed while the question was open", () => {
     assert.equal(h.asked.length, 1);
     assert.match(h.asked[0]!.message!, /Spare will become a control surface/);
     assert.deepEqual(h.sentScreens(), [[], ["display-5"]]);
+  });
+});
+
+describe("expectedSurface", () => {
+  it("is the kind of view it was asked about, and nothing for a view that is not there", () => {
+    assert.equal(expectedSurface(state.views, "wall-a"), "display");
+    assert.equal(expectedSurface(state.views, "ctl-a"), "console");
+    assert.equal(expectedSurface(state.views, "gone"), undefined);
   });
 });

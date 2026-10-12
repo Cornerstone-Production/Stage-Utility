@@ -1178,21 +1178,40 @@ export interface CreateScreenInput {
   showInSidebar?: boolean;
 }
 
+/** Is this view a console? False for no view. The one spelling of the question,
+ *  for a caller that already holds the view a screen shows. */
+export function viewIsConsole(view: Pick<View, "surface"> | null | undefined): boolean {
+  return view !== null && view !== undefined && viewSurface(view) === "console";
+}
+
 /**
- * Is this screen a control surface: do its buttons work for anyone at it?
+ * What a screen is, from the view it shows: a "console" (its buttons work for
+ * anyone at it, a control surface) or a read-only "display" wall screen.
  *
- * The view decides. A screen is a control surface exactly when the view it shows
- * is a console, and a read-only wall display otherwise, including when it shows
- * nothing. There is no stored role to disagree with the view, so nothing needs
- * keeping in step. Every reader, server and renderer, asks this one function.
+ * The view decides: a screen is a control surface exactly when the view it shows
+ * is a console, and a wall display otherwise, including when it shows nothing or
+ * a view that is gone. Every reader, server and renderer, asks this or
+ * {@link screenIsControlSurface}.
  */
+export function surfaceOfScreen(
+  output: Pick<Output, "viewId">,
+  views: readonly Pick<View, "id" | "surface">[],
+): ViewSurface {
+  const view = output.viewId ? views.find((v) => v.id === output.viewId) : undefined;
+  return viewIsConsole(view) ? "console" : "display";
+}
+
+/** Is this screen a control surface: do its buttons work for anyone at it? */
 export function screenIsControlSurface(
   output: Pick<Output, "viewId">,
   views: readonly Pick<View, "id" | "surface">[],
 ): boolean {
-  if (!output.viewId) return false;
-  const view = views.find((v) => v.id === output.viewId);
-  return view !== undefined && viewSurface(view) === "console";
+  return surfaceOfScreen(output, views) === "console";
+}
+
+/** The screens showing a view, in the order they are listed. */
+export function screensShowing<T extends Pick<Output, "viewId">>(viewId: string, outputs: readonly T[]): T[] {
+  return outputs.filter((o) => o.viewId === viewId);
 }
 
 /**

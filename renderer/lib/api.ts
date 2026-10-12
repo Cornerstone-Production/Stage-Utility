@@ -1346,7 +1346,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "outputs:setView": {
       const id = p.id as string;
-      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { viewId: p.viewId });
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { viewId: p.viewId, expectSurface: p.expectSurface });
     }
 
     case "outputs:setLocked": {

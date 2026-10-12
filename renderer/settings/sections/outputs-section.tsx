@@ -29,7 +29,8 @@ import { iconEntryAt } from "../../components/editable-icon";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { ImportLayout } from "./import-layout";
 import { SCREEN_PANEL_ID, confirmViewKind } from "./screen-settings-panel";
-import { viewSurface, viewShownInSidebar, screenIsControlSurface, viewCanBeControlSurface } from "@main/types/views";
+import { viewSurface, viewShownInSidebar, screenIsControlSurface, viewCanBeControlSurface, type ViewSurface } from "@main/types/views";
+import { expectedSurface } from "../view-role-change";
 import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
 
@@ -178,7 +179,7 @@ export interface OutputRowProps {
   /** Where it was stored before that key moved, if it did. Undefined when the two
    *  are the same key. Read as a fallback, migrated on the next write. */
   legacyIconKey?: string;
-  onSetView: (viewId: string | null) => void;
+  onSetView: (viewId: string | null, expectSurface?: ViewSurface) => void;
   /** Rename the view this screen is showing (not the screen). */
   onRenameView: (viewId: string, name: string) => void;
   /** The message groups that exist, and whether they have been read. The card
@@ -294,7 +295,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
   async function assignView(viewId: string | null): Promise<void> {
     if (!viewId) { onSetView(null); return; }
     if (!(await confirmViewKind(output, views, viewId))) return;
-    onSetView(viewId);
+    onSetView(viewId, expectedSurface(views, viewId));
   }
 
   function handleBlur() {
@@ -897,7 +898,7 @@ export function OutputsSection({
                 legacyIconKey={icon.legacyKey}
                 onRename={(name) => handlers.handleRenameOutput(output.id, name)}
                 onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
-                onSetView={(viewId) => handlers.handleSetOutputView(output.id, viewId)}
+                onSetView={(viewId, expectSurface) => handlers.handleSetOutputView(output.id, viewId, expectSurface)}
                 messageGroups={messageGroups}
                 onOpenSettings={() => onOpenSettings(output.id)}
                 selected={selectedOutputId === output.id}

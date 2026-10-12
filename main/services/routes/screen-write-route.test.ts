@@ -26,6 +26,7 @@ const { stageController } = await import("../stage-controller.js");
 const { screenIsControlSurface } = await import("../../types/views.js");
 const { recordSeen, resetKioskPresence } = await import("../kiosk-presence.js");
 const { kioskDevicesStore } = await import("../kiosk-devices-store.js");
+const { viewsStore } = await import("../views-store.js");
 
 type Mutable = { state: { views: View[]; outputs: Output[]; [k: string]: unknown }; broadcast: () => void; recomputeResolved: () => void };
 const ctl = stageController as unknown as Mutable;
@@ -191,6 +192,47 @@ describe("PATCH /api/outputs/:id — the view decides", () => {
   });
 });
 
+describe("PATCH /api/outputs/:id — expectSurface", () => {
+  const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
+  const routed = (id: string) => outputs().find((o) => o.id === id)!.viewId;
+
+  it("goes ahead when the view is the kind the caller expected", async () => {
+    const r = await patch("/api/outputs/display-1", { viewId: "ctl-a", expectSurface: "console" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(routed("display-1"), "ctl-a");
+  });
+
+  it("is a 409 naming what the view is now, and writes nothing, when it is the other kind", async () => {
+    // The operator was asked about a wall view and said yes; it is a console now.
+    const r = await patch("/api/outputs/display-1", { viewId: "ctl-a", expectSurface: "display" });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    assert.deepEqual({ code: (r.json as { code: string }).code, surface: (r.json as { surface: string }).surface }, { code: "surface-changed", surface: "console" });
+    assert.equal(routed("display-1"), "wall-a", "the screen went live on a view nobody confirmed");
+    const live = await patch("/api/outputs/display-3", { viewId: "wall-a", expectSurface: "console" });
+    assert.equal(live.status, 409);
+    assert.equal(routed("display-3"), "ctl-a");
+  });
+
+  it("without it the write is allowed whatever the kind: Companion and scripts", async () => {
+    const r = await patch("/api/outputs/display-1", { viewId: "ctl-a" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+  });
+
+  it("is refused as a 400 when it is not a kind, or has no view to be checked against", async () => {
+    for (const body of [
+      { viewId: "ctl-a", expectSurface: "kiosk" },
+      { viewId: "ctl-a", expectSurface: true },
+      { viewId: null, expectSurface: "display" },
+      { name: "Renamed", expectSurface: "display" },
+    ]) {
+      const r = await patch("/api/outputs/display-1", body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+    }
+    assert.equal(routed("display-1"), "wall-a");
+    assert.equal(outputs().find((o) => o.id === "display-1")!.name, "Lobby TV", "a field beside a refused one was applied");
+  });
+});
+
 describe("POST /api/views/:id/surface", () => {
   const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
 
@@ -231,17 +273,10 @@ describe("POST /api/views/:id/surface", () => {
   });
 
   it("answers a failed write with the 500 shape of POST /api/outputs, and puts the view back", async () => {
-    const own = stageController as unknown as Record<string, unknown>;
-    const proto = Object.getPrototypeOf(stageController) as Record<string, (...a: unknown[]) => Promise<unknown>>;
-    let calls = 0;
-    // Lands in memory, then fails: what a full disk does. The first call is the
-    // write, and the undo that follows must be allowed through.
-    own.setViewSurface = async (...args: unknown[]) => {
-      calls += 1;
-      const result = await proto.setViewSurface.apply(stageController, args);
-      if (calls === 1) throw new Error("disk full");
-      return result;
-    };
+    // The write fails at the disk, after the view changed in memory: what a full
+    // disk does. setViewSurface puts the view back itself.
+    const store = viewsStore as unknown as Record<string, unknown>;
+    store.save = async () => { throw new Error("disk full"); };
     try {
       const r = await post("/api/views/wall-a/surface", { surface: "console" });
       assert.equal(r.status, 500);
@@ -250,7 +285,7 @@ describe("POST /api/views/:id/surface", () => {
       assert.deepEqual(j.rolledBack, ["make the view a control surface"]);
       assert.deepEqual(j.notRolledBack, []);
     } finally {
-      delete own.setViewSurface;
+      delete store.save;
     }
     assert.equal(views().find((v) => v.id === "wall-a")!.surface, "display");
     assert.deepEqual(controlSurfaces("wall-a"), [false, false]);

@@ -20,7 +20,7 @@ import {
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
-import { viewSurface, viewShownInSidebar, surfaceForNewView, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
+import { screenIsControlSurface, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, surfaceForNewView, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
@@ -228,7 +228,8 @@ export interface ScreenStep {
 }
 
 /**
- * A multi-step screen write (createScreen, setViewRole) that failed part-way.
+ * A multi-step screen write (createScreen) that failed part-way, or setViewRole
+ * when its one write failed.
  * Says which step failed and what was put back, and what could NOT be, so the
  * caller never has to guess whether a half-made screen is still there.
  */
@@ -279,6 +280,27 @@ export class ViewScreensChangedError extends Error {
           : `It would now change ${screens.map((s) => `"${s.name}"`).join(", ")}.`),
     );
     this.name = "ViewScreensChangedError";
+  }
+}
+
+/**
+ * setOutputView was told which kind of view the caller expected (the one the
+ * operator confirmed going live on) and the view is the other kind now: it was
+ * made a console, or a wall view, while the question was open. Nothing is written.
+ * `surface` is what the view is now, so the caller can ask again.
+ */
+export class ViewSurfaceChangedError extends Error {
+  readonly code = "surface-changed";
+  constructor(
+    readonly viewId: string,
+    readonly expected: ViewSurface,
+    readonly surface: ViewSurface,
+  ) {
+    super(
+      `The view changed while you were deciding: it is ${surface === "console" ? "a control surface" : "a wall view"} now, ` +
+        `not ${expected === "console" ? "a control surface" : "a wall view"}. Nothing was changed.`,
+    );
+    this.name = "ViewSurfaceChangedError";
   }
 }
 
@@ -3134,7 +3156,7 @@ export class StageController {
     if (!view) throw new Error(`setViewSurface — view ${id} not found`);
     if (surface === "console" && viewSurface(view) !== "console") this.assertCanBeControlSurface(view);
 
-    const shownOn = this.state.outputs.filter((o) => o.viewId === id);
+    const shownOn = screensShowing(id, this.state.outputs);
     if (!opts.screensConfirmed && viewSurface(view) !== surface && shownOn.length > 0) {
       const names = shownOn.map((o) => `"${o.name || o.id}"`).join(", ");
       const them = shownOn.length === 1 ? "that screen" : "those screens";
@@ -3151,7 +3173,17 @@ export class StageController {
     const views = this.state.views.map((v) => (v.id === id ? { ...v, surface } : v));
     console.log(`[stage-controller] setViewSurface view=${scrub(id)} → ${scrub(surface)}`);
     this.state = { ...this.state, views };
-    await viewsStore.save(views);
+    try {
+      await viewsStore.save(views);
+    } catch (err) {
+      // Memory follows the disk: the store dropped its cache when the write
+      // failed, and the view goes back to what it was, so a failed save is not
+      // left looking saved until the next restart.
+      this.state = { ...this.state, views: this.state.views.map((v) => (v.id === id ? { ...v, surface: view.surface } : v)) };
+      this.recomputeResolved();
+      this.broadcast();
+      throw err;
+    }
     this.recomputeResolved();
     this.broadcast();
     return this.state;
@@ -3714,8 +3746,17 @@ export class StageController {
     return this.state.outputs.filter((o) => o.id !== exceptId).flatMap((o) => (o.slug ? [o.id, o.slug] : [o.id]));
   }
 
-  /** Route an output to a View (or null to unroute). The recall operation. */
-  async setOutputView(id: string, viewId: string | null): Promise<StageState> {
+  /**
+   * Route an output to a View (or null to unroute). The recall operation.
+   *
+   * `expectSurface` is the kind of view the caller believes it is routing to: a
+   * client that asked the operator before a screen went live sends the kind it
+   * asked about. When the view is the other kind by the time the write runs (the
+   * same turn as the check), nothing is written and ViewSurfaceChangedError says
+   * what the view is now. Absent, the write is allowed whatever the kind: a
+   * Companion recall, a script.
+   */
+  async setOutputView(id: string, viewId: string | null, opts: { expectSurface?: ViewSurface } = {}): Promise<StageState> {
     if (!this.state.outputs.find((o) => o.id === id)) {
       throw new Error(`outputs:setView — output ${id} not found`);
     }
@@ -3732,18 +3773,40 @@ export class StageController {
     }
     // Either kind of view may go on any screen: the view decides whether the
     // screen's buttons work, so there is no pairing to refuse. Asking the
-    // operator before a screen goes live is the client's job.
-    return this.commitOutputPatch(
+    // operator before a screen goes live is the client's job; `expectSurface` is
+    // how it makes the server hold the answer to what it asked about.
+    let wasControlSurface = false;
+    let screenName = id;
+    const state = await this.commitOutputPatch(
       id,
       { viewId },
       `[stage-controller] setOutputView output=${scrub(id)} → view=${scrub(viewId ?? "(none)")}`,
       // Inside the write, against the views as they are then: a view deleted while
       // this waited its turn must not be pointed at.
-      () => {
-        if (viewId !== null && !this.state.views.find((v) => v.id === viewId)) {
+      (current) => {
+        const view = viewId === null ? undefined : this.state.views.find((v) => v.id === viewId);
+        if (viewId !== null && !view) {
           throw new Error(`outputs:setView — view ${viewId} not found`);
         }
+        if (view && opts.expectSurface !== undefined && viewSurface(view) !== opts.expectSurface) {
+          throw new ViewSurfaceChangedError(view.id, opts.expectSurface, viewSurface(view));
+        }
+        wasControlSurface = screenIsControlSurface(current, this.state.views);
+        screenName = current.name || current.id;
       },
+    );
+    const view = viewId === null ? undefined : state.views.find((v) => v.id === viewId);
+    const isControlSurface = viewIsConsole(view);
+    if (isControlSurface !== wasControlSurface) this.logRoleFlip(screenName, isControlSurface, view?.name);
+    return state;
+  }
+
+  /** One `[screens]` line for a screen whose role just changed, so the log answers
+   *  "why did that screen start (or stop) working". */
+  private logRoleFlip(screen: string, nowControlSurface: boolean, viewName: string | undefined): void {
+    console.log(
+      `[screens] "${scrub(screen)}" is now ${nowControlSurface ? "a control surface" : "read-only"} ` +
+        `(${viewName === undefined ? "shows nothing" : `shows "${scrub(viewName)}"`})`,
     );
   }
 
@@ -3936,7 +3999,7 @@ export class StageController {
     if (viewSurface(view) === surface) return this.state;
     if (surface === "console") this.assertCanBeControlSurface(view);
 
-    const changing = this.state.outputs.filter((o) => o.viewId === id);
+    const changing = screensShowing(id, this.state.outputs);
     if (opts.screens !== undefined) {
       const shown = new Set(opts.screens);
       if (shown.size !== changing.length || changing.some((o) => !shown.has(o.id))) {
@@ -3948,21 +4011,22 @@ export class StageController {
       }
     }
 
-    const was = viewSurface(view);
-    await this.runScreenSteps("setViewRole", [{
-      label: `make the view a ${surface === "console" ? "control surface" : "wall view"}`,
-      run: () => this.setViewSurface(id, surface, { screensConfirmed: true }),
-      // Idempotent, like every undo here: it writes only when the view is not as it was.
-      undo: async () => {
-        const now = this.state.views.find((v) => v.id === id);
-        if (!now || viewSurface(now) === was) return false;
-        await this.setViewSurface(id, was, { screensConfirmed: true });
-      },
-    }]);
+    const step = `make the view a ${surface === "console" ? "control surface" : "wall view"}`;
+    try {
+      await this.setViewSurface(id, surface, { screensConfirmed: true });
+    } catch (err) {
+      // Everything refusable was checked above, so what reaches here is the save
+      // failing, and setViewSurface has put the view back by then.
+      console.warn(
+        `[stage-controller] setViewRole failed at "${step}": ${scrub(errorMessage(err))}; rolled back: ${scrub(step)}`,
+      );
+      throw new ScreenWriteError("setViewRole", step, errorMessage(err), [step], []);
+    }
     console.log(
       `[stage-controller] setViewRole view=${scrub(id)} → ${scrub(surface)}, screens: ` +
         `${scrub(changing.map((o) => `"${o.name || o.id}"`).join(", ") || "(none)")}`,
     );
+    for (const o of changing) this.logRoleFlip(o.name || o.id, surface === "console", view.name);
     return this.state;
   }
 
