@@ -156,63 +156,120 @@ layout. Its menu (the vertical dots) is actions only:
 | **Rename view** | renames the view the screen shows, everywhere it is used. Only while a view is assigned |
 | **Copy URL** | copies the screen's permanent address |
 | **Refresh display** | reloads that screen |
-| **Screen settings…** | opens the panel below |
-| **Remove display** | removes the screen. Refused for the last one |
+| **Screen settings…** | opens the panel below on this screen |
+| **Remove display…** | asks, then removes the screen: see [Removing a screen](#removing-a-screen). Refused for the last one |
 
-A view that no screen shows has its own card under **Views not on a screen**,
-with *Make it a wall screen* or *Make it a control surface*, *Duplicate view*,
-*Delete view* and, for a console, **Show in the sidebar**.
+The card's view picker lists every view, grouped as **Wall views** and
+**Control surfaces**, then **+ New wall view…** and **+ New control surface…**,
+which make a view of that kind and point the screen at it. A screen showing a
+control surface carries a **panel** pill.
+
+A view that no screen shows has its own card under **Views not on a screen**, with
+a pill for what it is (*wall* or *control surface*) and, for a console, whether it
+is in the sidebar. Its menu has **View settings…**, *Make it a wall screen* or
+*Make it a control surface*, *Duplicate view*, *Delete view…* and, for a console,
+**Show in the sidebar**.
+
+### The settings panel
+
+A panel docks beside the cards, so a card and its preview stay in view while a
+setting changes. **Settings**, at the top right of the page, opens and closes it,
+and the choice is remembered in the browser. It starts open where it fits beside
+the cards; on a narrower window it starts closed and covers the page when opened.
+With nothing selected it says *Select a screen or view* and offers **+ Add a
+screen**.
+
+**While the panel is open it follows the click.** A click anywhere on a screen
+card moves it to that screen's settings, and a click on a view card moves it to
+that view's settings. The card's own controls keep doing their own job and do not
+move it: the view picker, **Open**, the menu and the icon colour. Clicking the
+name still focuses it for renaming, and moves the panel too. Clicking the preview
+moves the panel; a Ctrl, Cmd, Shift or middle click on a screen's preview opens
+its display in a new tab, and the small button in the preview's corner goes to
+the layout editor. Dragging a card's header still reorders. With the panel
+closed the cards do what they always did: the preview opens the layout editor and
+a click on a card does nothing.
+
+The panel has four faces: nothing selected, a screen's settings, a view's
+settings, and a new screen.
 
 ### Screen settings
 
-**Screen settings…** opens a panel beside the cards, so the card and its preview
-stay in view while a setting changes. Changes save as they are made. On a phone
-the panel covers the page instead.
+Changes save as they are made.
 
 | Section | |
 |---|---|
-| **What it shows** | the view, from every view, grouped as **Wall views** and **Control surfaces**. Under the picker one line says what the choice makes the screen: *Control surface: its buttons work for anyone at it.*, *Wall display: read-only. Buttons draw but do nothing.*, or *Shows nothing yet.* For a screen showing a console, **List in the sidebar** keeps that console in the sidebar's list, or out of it: see [Consoles](#consoles) |
+| **What it shows** | the view, grouped as **Wall views** and **Control surfaces**. Under the picker one line says what the choice makes the screen: a *Control surface* pill and *Its buttons work for anyone at it.*, a *Wall display* pill and *Read-only. Buttons draw but do nothing.*, or *Shows nothing yet.* **View settings →** opens the view's settings and **Edit layout** its layout editor. For a screen showing a console, **List in the sidebar** keeps that console in the sidebar's list, or out of it: see [Consoles](#consoles) |
 | **Name and address** | the name; the **friendly link** (an alias such as `lobby`, saved with **Save** so a refusal stays on screen: see [Friendly URLs](../display-urls.md#friendly-urls)); and the permanent address, which never changes, with a button that copies it |
 | **On the screen** | **Top bar** (the brand, plan and QR strip along the top), **Lock** (keeps the top bar but removes its links, so the screen cannot be navigated away from) and **Text size** (50 to 300 %, for ServiceCue and readouts). Top bar and Lock are offered only where the view draws a bar; a calendar or a script wall draws none |
 | **Messages** | the [message groups](stage-messages.md#putting-a-screen-in-groups) the screen is in |
 | **Video** | **Use HLS**. Off, the screen plays only WebRTC, and a feed that needs HLS says it can't play there |
 | **Device** | the machine bound to the screen, with its hostname and address, and whether the screen is online. For a plain device the section is read-only: release it from the card. For a screen shown by an output of a [Mac output helper](../kiosk-devices.md#mac-output-helper) it also holds the port and card, **Format** (DeckLink ports), **Rotation**, the output's health (a DeckLink port also its latency) and a **Release** button |
 
+The footer has **Remove screen…**, which asks first and is off for the last
+screen.
+
 **The view decides what a screen is.** A screen is a control surface, whose
 buttons work for anyone at it, exactly when the view it shows is a console. It
-is a read-only wall display when it shows any other view, or none. There is no
-role to set on the screen. Choosing a view of the other kind from the picker, on
-the screen's card or in this panel, asks first (*Make "Lobby TV" a control
-surface?*, or *a wall display?*), because the screen's buttons go live or stop;
-declining changes nothing. Pointing a screen at a view changes only that
-screen. Changing what a *view* is for does change every screen showing it: see
-[Consoles](#consoles). **New view…** from a screen's picker makes a view of the
-kind the screen shows now.
+is a read-only wall display when it shows any other view, or none. Choosing a view
+of the other kind from the picker, on the screen's card or in this panel, asks
+first (*Make "Lobby TV" a control surface?*, or *a wall display?*), because the
+screen's buttons go live or stop; declining changes nothing. Pointing a screen at
+a view changes only that screen. Changing what a *view* is for does change every
+screen showing it: see [View settings](#view-settings) and [Consoles](#consoles).
 
-Only a custom view can be a control surface, so a calendar, script or other
-built-in view is never made one.
+### View settings
+
+A view's own panel. Changes save as they are made.
+
+| Section | |
+|---|---|
+| **Name** | the view's name, everywhere it is used |
+| **What this view is** | **Wall view** or **Control surface**. Switching it changes every screen showing the view, and a confirm names them first: see [Consoles](#consoles). Only a custom layout can be a control surface, so the other is off for any other view. For a control surface, **List in the sidebar** |
+| **Shown on** | a chip for each screen showing the view, each jumping to that screen's settings; or *No screen shows it.* |
+| **Layout** | **Edit layout** (a custom view) and **Duplicate**, which opens the copy |
+
+The footer has **Delete view…**. It asks first, says the layout goes with it, and
+names every screen showing the view, which will show nothing until another view
+is picked. The same question is asked from a view card's menu and from the layout
+editor.
 
 ### Adding a screen
 
-**Add a screen**, and a waiting device's **Set up as a new screen** (see
-[Kiosk devices](../kiosk-devices.md)), open the same panel in three steps:
+**Add a screen** (the tile, or the button in the empty panel), and a waiting
+device's **Set up as a new screen** (see [Kiosk devices](../kiosk-devices.md)),
+open the same panel in two steps:
 
-1. **What is this screen?** A wall display or a control surface, and for a control
-   surface whether to list it in the sidebar. This chooses which views step 2
-   offers; the screen's role is whatever its view is.
-2. **What should it show?** A view of that kind, none yet, or **New blank
-   view**, which makes an empty view of that kind named after the screen.
-3. **Name it.** The name and an optional friendly link.
+1. **Name it.** The name and an optional friendly link.
+2. **What should it show?** Four choices: **a new wall view** called after the
+   screen (the usual, and the default), **a new control surface** called after it,
+   **a view you already have** (a picker of both kinds, with a line saying what
+   the screen becomes), or **nothing yet**. The screen is whatever its view is.
 
-**Nothing is created until Create screen**, which is available on every step
-because every step has a default: no view, and no name, which
-names the screen **Display** and its number (a device is named for its
-hostname). Closing the panel creates nothing. A refusal (a link another screen
-holds, say) leaves the panel open with the reason. A device is claimed by the
-same step that creates its screen, and if that fails everything made for it is
-taken back. If another operator sets the same device up while the panel is
-open, the panel says which screen it became and **Create screen** is turned
-off.
+**Nothing is created until Create screen**, which is on the second step and, for
+*a view you already have*, off until a view is picked. Left unnamed, a screen is
+named **Display** and its number, and so is a view made for it (a device is named
+for its hostname). Closing the panel creates nothing. A refusal (a link another
+screen holds, say) leaves the panel open with the reason. A device is claimed by
+the same step that creates its screen, and if that fails everything made for it is
+taken back. If another operator sets the same device up while the panel is open,
+the panel says which screen it became and **Create screen** is turned off.
+
+After **Create screen** the panel stays open on the new screen and says what was
+made; when a view was made it adds **Edit layout**, since the view is blank until
+it is laid out.
+
+### Removing a screen
+
+**Remove display…** in a card's menu and **Remove screen…** in the panel ask the
+same question in a dialog: *Its address and settings go away. This cannot be
+undone.* When no other screen shows the screen's view, the dialog offers **Also
+delete its view**, unticked; ticked, the button reads **Remove screen and view**.
+Left unticked the view moves to *Views not on a screen*. When other screens show
+the view, the dialog names them and the view stays. Removing both is two steps,
+the screen first; if deleting the view fails, a message says the screen is gone
+and the view is not. A view another screen was pointed at while the dialog was
+open is kept, and the message says so.
 
 ## Consoles
 
@@ -227,10 +284,10 @@ doing; see [Widgets](../reference/widgets.md#control). A console meant for a
 Ross Ultritouch panel has its own presets and a starter; see
 [Ultritouch](../integrations/ultritouch.md).
 
-**Changing what a view is for.** A custom view's editor has a dropdown beside
-its type reading *Wall screen* or *Control surface*, and the card of a view no
-screen shows has *Make it a wall screen* or *Make it a control surface* in its
-menu. Either changes the view **and every screen showing it**: those screens
+**Changing what a view is for.** [View settings](#view-settings) has **Wall
+view** and **Control surface**, a custom view's editor has a dropdown beside its
+type reading *Wall screen* or *Control surface*, and the card of a view no screen
+shows has *Make it a wall screen* or *Make it a control surface* in its menu. Either changes the view **and every screen showing it**: those screens
 become control surfaces, or wall displays, together with it. When any screen
 would change, a confirm names them first (*Lobby TV and Hallway TV will become
 control surfaces. Anyone at them can press their buttons.*) and declining
@@ -254,8 +311,9 @@ live button.
 **Keeping one out of the sidebar.** A console can be kept out of the sidebar's
 list. That suits a console that lives on a stage display as a control surface and
 has no business being a place the operator works from. Turn off **List in the
-sidebar** in the [Screen settings](#screen-settings) of a screen showing it, or
-**Show in the sidebar** in the menu of a console no screen shows. It is a setting
+sidebar** in the [View settings](#view-settings) of the console or the
+[Screen settings](#screen-settings) of a screen showing it, or **Show in the
+sidebar** in the menu of a console no screen shows. It is a setting
 on the view, `showInSidebar`, and a console with none is listed — so every
 console you had before it existed still is. Only the *list* changes. A console kept out of it
 keeps its live controls on every screen showing it, still opens at
