@@ -126,6 +126,21 @@ test("a failed Columns save toasts, rather than doing nothing silently", async (
   }
 });
 
+test("deleting a view names a screen that has no name by its id, not as an empty pair of quotes", async () => {
+  const f = stubFetchWithLog(() => ok({}));
+  try {
+    mount(CONSOLE_VIEW, [{ id: "display-7", name: "", viewId: "v1" }, { id: "o2", name: "Stage panel", viewId: "v1" }]);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Delete view" }));
+    await settle();
+    const dialog = text(document.querySelector('[role="alertdialog"]')!);
+    assert.match(dialog, /"display-7" and "Stage panel" show it/);
+    assert.equal(/""/.test(dialog), false, "an unnamed screen was named with empty quotes");
+  } finally {
+    f.restore();
+  }
+});
+
 // Deleting a view un-routes every screen showing it. A control surface's screens
 // were live, so the operator is told its buttons stop working, not only that the
 // screens lose their view.
