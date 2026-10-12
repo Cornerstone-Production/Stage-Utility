@@ -154,7 +154,7 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
       <PanelFooter hint={hint}>
         <span className="flex gap-2">
           {step > 1 && (
-            <Button type="button" variant="transparent" size="medium" onClick={() => setStep(1)} disabled={busy}>
+            <Button type="button" variant="filled" size="medium" className="border border-line-strong" onClick={() => setStep(1)} disabled={busy}>
               Back
             </Button>
           )}

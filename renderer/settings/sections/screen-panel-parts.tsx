@@ -246,7 +246,7 @@ export function ViewPicker({
 }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger id={id} aria-label={ariaLabel}>
+      <SelectTrigger id={id} aria-label={ariaLabel} className="w-full">
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
