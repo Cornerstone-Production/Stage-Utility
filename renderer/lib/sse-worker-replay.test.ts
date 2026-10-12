@@ -199,4 +199,25 @@ describe("onNotification on the shared-worker path", () => {
     offFirst();
     offSecond();
   });
+
+  test("two subscribers handing over the SAME function are two subscriptions", () => {
+    // The worker-path twin of sse-subscribe.test.ts's case: the React Compiler
+    // hoists a callback that captures nothing, so every useDevices hands over the
+    // identical function. Deduplicated by a Set, the first to unmount took the
+    // channel away from the rest, and here it also told the worker to stop
+    // forwarding it to this tab.
+    const ch = "kiosk:health";
+    let calls = 0;
+    const shared = () => { calls += 1; };
+    const offPanel = onNotification(ch, shared);
+    const offPage = onNotification(ch, shared);
+    offPanel();
+
+    const worker = FakeSharedWorker.instances.at(-1)!;
+    const lastReport = worker.port.sent.at(-1) as { type: string; channels: string[] };
+    assert.ok(lastReport.channels.includes(ch), "the tab told the worker it no longer wants the channel");
+    worker.port.deliver({ channel: ch, data: { any: 1 }, replay: false });
+    assert.equal(calls, 1, "the remaining subscriber was unsubscribed by the other's cleanup");
+    offPage();
+  });
 });
