@@ -51,16 +51,17 @@ export interface HelperAsset {
 const REPO = "Cornerstone-Production/Stage-Utility";
 const DEFAULT_RELEASE_BASE = `https://github.com/${REPO}/releases/download`;
 
-/** Names the request path may carry. An allowlist, because the name ends up in a
- *  file path and in an outgoing URL. */
-const PATH_RE = /^\/kiosk\/(StageUtilityOutput-(arm64|x86_64)\.zip)(\.sha256)?$/;
+/** Every file this route serves, by name. The request path is only ever compared
+ *  with these: the name that goes into the cache path and the outgoing URL is the
+ *  table's own string, never text taken from the request. */
+const HELPER_ASSETS: readonly HelperAsset[] = HELPER_ARCHES.flatMap((arch) => [
+  { arch, kind: "zip" as const, name: `StageUtilityOutput-${arch}.zip` },
+  { arch, kind: "sha256" as const, name: `StageUtilityOutput-${arch}.zip.sha256` },
+]);
 
 /** The asset a request path names, or null when it names none of them. */
 export function parseHelperPath(pathname: string): HelperAsset | null {
-  const m = PATH_RE.exec(pathname);
-  if (!m) return null;
-  const arch = m[2] as HelperArch;
-  return m[3] ? { arch, kind: "sha256", name: `${m[1]}.sha256` } : { arch, kind: "zip", name: m[1] };
+  return HELPER_ASSETS.find((a) => pathname === `/kiosk/${a.name}`) ?? null;
 }
 
 /** The most the app can weigh. The Chromium framework is nearly all of it and a
