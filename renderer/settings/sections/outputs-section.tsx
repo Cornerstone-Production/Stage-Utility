@@ -1,7 +1,7 @@
 import { ScreenDevice } from "../../app/screens/screen-device";
 import { useDevices } from "../../app/screens/use-devices";
 import { outputStruggleSentences, struggleByScreen, type OutputStruggle } from "../../app/screens/output-helpers";
-import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { useRef, useState, type ChangeEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Tooltip } from "../../components/ui/tooltip";
 import { DndContext, closestCenter, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, rectSortingStrategy, arrayMove } from "@dnd-kit/sortable";
@@ -16,13 +16,6 @@ import {
   menuContent,
   Button,
   Input,
-  Select,
-  SelectTrigger,
-  SelectContent,
-  SelectItem,
-  SelectGroup,
-  SelectLabel,
-  SelectValue,
   toast,
   Dialog} from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
@@ -30,11 +23,10 @@ import { IconTint } from "../../components/icon-tint";
 import { iconEntryAt } from "../../components/editable-icon";
 import { NewViewDialog } from "./new-view-dialog";
 import { ImportLayout } from "./import-layout";
-import { SCREEN_PANEL_ID, assignNewView, type PanelTarget } from "./screen-settings-panel";
-import { confirmViewKind } from "../screen-role-confirm";
-import { NEW_CONTROL, NEW_WALL, Pill, viewGroups } from "./screen-panel-parts";
+import { SCREEN_PANEL_ID, type PanelTarget } from "./screen-settings-panel";
+import { NONE, chooseViewForScreen } from "../screen-role-confirm";
+import { Pill, ViewPicker, viewGroups } from "./screen-panel-parts";
 import { viewSurface, viewShownInSidebar, screenIsControlSurface, viewCanBeControlSurface, viewIsConsole, type ViewSurface } from "@main/types/views";
-import { expectedSurface } from "../view-role-change";
 import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
 
@@ -46,7 +38,6 @@ import { useMessageGroups, type MessageGroups } from "../../main/use-message-gro
 import { useDisplayPresence } from "../../app/screens/use-display-presence";
 
 
-const UNROUTED = "__none__";
 
 /** ScreenVideoHealth.episode reduced to what the card's warning box needs to
  *  say — computed once in OutputsSection from video:state's `screens` and
@@ -188,11 +179,9 @@ export interface OutputRowProps {
    *  draws the ones this screen is in as chips under its name; choosing them is
    *  the Screen settings panel's job. */
   messageGroups: MessageGroups;
-  /** Open the Screen settings panel on this screen, from the card's menu. */
-  onOpenSettings: () => void;
   /** The panel follows the operator: a click on the card moves it to this screen. */
   panelOpen: boolean;
-  /** Move the panel to this screen. */
+  /** Move the panel to this screen (also from the card's menu). */
   onSelect: () => void;
   /** This screen's panel is open: the card says which one it is for. */
   selected?: boolean;
@@ -293,7 +282,38 @@ export function landedOnOwnControl(e: { target: EventTarget; currentTarget: Elem
   return !control.matches("[data-retarget]");
 }
 
-export function OutputRow({ output, views, baseUrl, online, struggles, lags, outputStruggle, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, onOpenSettings, panelOpen, onSelect, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
+/**
+ * What makes a card selectable while the side panel follows the operator: a click
+ * on it that is not on one of its own controls selects it, and the selected card
+ * is ringed. Closed, the card is as it always was.
+ */
+function selectableCard(panelOpen: boolean, selected: boolean, onSelect: () => void) {
+  return {
+    onClick: (e: ReactMouseEvent<HTMLElement>) => { if (panelOpen && !landedOnOwnControl(e)) onSelect(); },
+    className: cn(selected ? "border-accent ring-1 ring-inset ring-accent/55" : "border-line", panelOpen && "cursor-pointer"),
+  };
+}
+
+/**
+ * The card menu's hand-off of focus to the panel. The menu traps focus while it is
+ * open, so the panel cannot take it until the menu has finished closing; without
+ * this focus lands back on the card's trigger. `request` marks the item that opens
+ * the panel, so every other item leaves focus where it belongs.
+ */
+function useMenuFocusHandoff() {
+  const opening = useRef(false);
+  return {
+    request: () => { opening.current = true; },
+    onCloseAutoFocus: (e: Event) => {
+      if (!opening.current) return;
+      e.preventDefault();
+      opening.current = false;
+      document.getElementById(SCREEN_PANEL_ID)?.focus({ preventScroll: true });
+    },
+  };
+}
+
+export function OutputRow({ output, views, baseUrl, online, struggles, lags, outputStruggle, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, panelOpen, onSelect, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const [editName, setEditName] = useState(output.name);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   const [renamingView, setRenamingView] = useState(false);
@@ -310,18 +330,6 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
     setEditName(output.name);
   });
 
-  /**
-   * Assign a view. The view decides whether the screen is a control surface, so
-   * pointing a screen at a view of the other kind changes what the screen is: its
-   * buttons go live, or stop. That is asked about first, and declining assigns
-   * nothing. The same question the Screen settings panel's picker asks.
-   */
-  async function assignView(viewId: string | null): Promise<void> {
-    if (!viewId) { onSetView(null); return; }
-    if (!(await confirmViewKind(output, views, viewId))) return;
-    onSetView(viewId, expectedSurface(views, viewId));
-  }
-
   function handleBlur() {
     const trimmed = editName.trim();
     if (trimmed && trimmed !== output.name) {
@@ -335,21 +343,15 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
 
   const [nameFocused, setNameFocused] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const openingSettings = useRef(false);
+  const handoff = useMenuFocusHandoff();
+  const card = selectableCard(panelOpen, selected ?? false, onSelect);
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      // While the panel is open a click anywhere on the card moves it here, except
-      // on the card's own controls. Closed, the card is as it always was.
-      onClick={(e) => { if (panelOpen && !landedOnOwnControl(e)) onSelect(); }}
-      className={cn(
-        "flex flex-col overflow-hidden rounded-xl border bg-surface shadow-[var(--su-shadow-1)]",
-        // The card whose settings are open beside it.
-        selected ? "border-accent ring-1 ring-inset ring-accent/55" : "border-line",
-        panelOpen && "cursor-pointer",
-      )}
+      onClick={card.onClick}
+      className={cn("flex flex-col overflow-hidden rounded-xl border bg-surface shadow-[var(--su-shadow-1)]", card.className)}
     >
       {/* Header: the drag handle + tinted icon + editable name + status + overflow.
           Only the HEADER drags. The card as a whole cannot, because the preview
@@ -437,16 +439,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
               align="end"
               sideOffset={4}
               className={menuContent()}
-              onCloseAutoFocus={(e) => {
-                if (openingSettings.current) {
-                  // The menu traps focus while it is open, so the panel cannot
-                  // take it until the menu has finished closing: this is that
-                  // moment. Without it focus lands back on this card's trigger.
-                  e.preventDefault();
-                  openingSettings.current = false;
-                  document.getElementById(SCREEN_PANEL_ID)?.focus({ preventScroll: true });
-                }
-              }}
+              onCloseAutoFocus={handoff.onCloseAutoFocus}
             >
               {/* Opens the SAME address the "Open" link below does. This used
                   to go through a handler that built the URL from
@@ -506,11 +499,8 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
                   This menu is actions. */}
               <DropdownMenu.Item
                 onSelect={() => {
-                  // Focus is handed to the panel as the menu finishes closing
-                  // (onCloseAutoFocus above); every other item leaves it where
-                  // it belongs, on the trigger.
-                  openingSettings.current = true;
-                  onOpenSettings();
+                  handoff.request();
+                  onSelect();
                 }}
                 className={MENU_ITEM}
               >
@@ -610,47 +600,22 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
             <Input value={viewName} onChange={(e) => setViewName(e.target.value)} autoFocus />
           </Dialog>
         )}
-        <Select
-          value={output.viewId ?? UNROUTED}
-          onValueChange={(v: string) => {
-            // Creating a view is nearly always in service of assigning one, so
-            // the picker is where the need arises. The sentinels open the
-            // dialog for that kind of view and the new view is assigned here on
-            // the way back, rather than sending a sentinel id to the server as a
-            // real value.
-            if (v === NEW_WALL) { onRequestNewView("display"); return; }
-            if (v === NEW_CONTROL) { onRequestNewView("console"); return; }
-            void assignView(v === UNROUTED ? null : v);
-          }}
-        >
-          <SelectTrigger
-            aria-label={`View on ${output.name}`}
-            className={cn(
-              "h-7 w-auto min-w-0 max-w-[70%] truncate rounded-lg border-transparent px-2.5 text-footnote font-medium",
-              output.viewId ? "bg-fill text-fg" : "bg-warn-3 text-warn-11",
-            )}
-          >
-            <SelectValue placeholder="Pick a view" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={UNROUTED}>— Unrouted —</SelectItem>
-            {/* EVERY view, of either kind, in a group for each. Picking one of the
-                other kind than the screen shows now asks first (see assignView),
-                because the view is what makes the screen a control surface. */}
-            {viewGroups(views).map((g) =>
-              g.views.length > 0 ? (
-                <SelectGroup key={g.label}>
-                  <SelectLabel>{g.label}</SelectLabel>
-                  {g.views.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
-                  ))}
-                </SelectGroup>
-              ) : null,
-            )}
-            <SelectItem value={NEW_WALL}>+ New wall view…</SelectItem>
-            <SelectItem value={NEW_CONTROL}>+ New control surface…</SelectItem>
-          </SelectContent>
-        </Select>
+        {/* The sentinels open the new-view dialog for that kind of view, and the view
+            made is assigned on the way back, rather than a sentinel id going to the
+            server as a real value. Picking a view of the other kind than the screen
+            shows asks first: the view is what makes the screen a control surface. */}
+        <ViewPicker
+          groups={viewGroups(views)}
+          value={output.viewId ?? NONE}
+          onChange={(value) => void chooseViewForScreen({ output, views, value, setView: onSetView, requestNewView: onRequestNewView })}
+          noneLabel="— Unrouted —"
+          placeholder="Pick a view"
+          ariaLabel={`View on ${output.name}`}
+          triggerClassName={cn(
+            "h-7 w-auto min-w-0 max-w-[70%] truncate rounded-lg border-transparent px-2.5 text-footnote font-medium",
+            output.viewId ? "bg-fill text-fg" : "bg-warn-3 text-warn-11",
+          )}
+        />
         {/* Opening the real screen moved here, because the preview now opens the
             editor. An anchor, so middle-click and cmd-click behave and the URL
             shows on hover. */}
@@ -683,7 +648,6 @@ function UnassignedViewCard({
   panelOpen,
   selected,
   onSelect,
-  onOpenSettings,
   onRename,
   onDuplicate,
   onToggleSurface,
@@ -696,8 +660,6 @@ function UnassignedViewCard({
   panelOpen: boolean;
   selected: boolean;
   onSelect: () => void;
-  /** From the menu: open this view's settings, and hand the panel focus. */
-  onOpenSettings: () => void;
   onRename: (name: string) => void;
   onDuplicate: () => void;
   onToggleSurface: () => void;
@@ -711,17 +673,14 @@ function UnassignedViewCard({
   // Follow a rename that happened elsewhere (a duplicate, an import) without
   // clobbering what is being typed here.
   useResyncOn([view.name], () => setEditName(view.name));
-  const openingSettings = useRef(false);
+  const handoff = useMenuFocusHandoff();
   const isControl = viewIsConsole(view);
+  const card = selectableCard(panelOpen, selected, onSelect);
 
   return (
     <div
-      onClick={(e) => { if (panelOpen && !landedOnOwnControl(e)) onSelect(); }}
-      className={cn(
-        "flex flex-col overflow-hidden rounded-xl border border-dashed bg-surface",
-        selected ? "border-accent ring-1 ring-inset ring-accent/55" : "border-line",
-        panelOpen && "cursor-pointer",
-      )}
+      onClick={card.onClick}
+      className={cn("flex flex-col overflow-hidden rounded-xl border border-dashed bg-surface", card.className)}
     >
       <div className="flex items-center gap-2 px-3 pt-2.5">
         <LayoutGridIcon className="size-4 shrink-0 text-accent" aria-hidden="true" />
@@ -751,20 +710,12 @@ function UnassignedViewCard({
               className={menuContent()}
               align="end"
               sideOffset={4}
-              onCloseAutoFocus={(e) => {
-                // As the screen card's menu does: the panel takes focus once the
-                // menu has finished closing.
-                if (openingSettings.current) {
-                  e.preventDefault();
-                  openingSettings.current = false;
-                  document.getElementById(SCREEN_PANEL_ID)?.focus({ preventScroll: true });
-                }
-              }}
+              onCloseAutoFocus={handoff.onCloseAutoFocus}
             >
               <DropdownMenu.Item
                 onSelect={() => {
-                  openingSettings.current = true;
-                  onOpenSettings();
+                  handoff.request();
+                  onSelect();
                 }}
                 className={MENU_ITEM}
               >
@@ -829,6 +780,7 @@ export function OutputsSection({
   selected,
   onSelect,
   onAddScreen,
+  onRequestNewView,
   onRemoveScreen,
   onDeleteView,
   serviceTypes = [],
@@ -841,6 +793,8 @@ export function OutputsSection({
   onSelect: (target: PanelTarget) => void;
   /** Open the panel in guided mode. Nothing is made until it finishes. */
   onAddScreen: () => void;
+  /** A screen's picker asked for a new view of this kind. */
+  onRequestNewView: (outputId: string, surface: ViewSurface) => void;
   /** Ask, then remove a screen. */
   onRemoveScreen: (outputId: string) => void;
   /** Ask, then delete a view. */
@@ -859,11 +813,9 @@ export function OutputsSection({
   // tab, and it has no geometry — see main/services/home-view.ts.
   const views = screenPickerViews(stageState.views ?? []);
 
-  // Which output asked for a new view, and of which kind, so the created view can
-  // be assigned back to it. `for` "" means the dialog was opened from the New view
-  // button, where there is nothing to assign to and the kind is asked.
-  const [creating, setCreating] = useState<{ for: string; surface?: ViewSurface } | null>(null);
-  const creatingScreen = creating?.for ? outputs.find((o) => o.id === creating.for) : undefined;
+  // The page's own New view button: a view for nobody in particular, so the dialog
+  // asks what kind. (A screen's picker asks for one through onRequestNewView.)
+  const [creatingView, setCreatingView] = useState(false);
 
   // A view no screen points at. Without a home these are unreachable: the only
   // way in was the Views list this page replaced.
@@ -964,13 +916,12 @@ export function OutputsSection({
                 onRenameView={(viewId, name) => handlers.handleRenameView(viewId, name)}
                 onSetView={(viewId, expectSurface) => handlers.handleSetOutputView(output.id, viewId, expectSurface)}
                 messageGroups={messageGroups}
-                onOpenSettings={() => onSelect({ kind: "edit", outputId: output.id })}
                 panelOpen={panelOpen}
                 onSelect={() => onSelect({ kind: "edit", outputId: output.id })}
                 selected={selected?.kind === "edit" && selected.outputId === output.id}
                 onRefresh={() => handlers.handleRefreshDisplay(output.id)}
                 onRemove={() => onRemoveScreen(output.id)}
-                onRequestNewView={(surface) => setCreating({ for: output.id, surface })}
+                onRequestNewView={(surface) => onRequestNewView(output.id, surface)}
                 onEditLayout={
                   // ANY assigned view, not just a custom one. The comment here
                   // used to say the built-in kinds "would open an editor with
@@ -1017,7 +968,6 @@ export function OutputsSection({
                 panelOpen={panelOpen}
                 selected={selected?.kind === "view" && selected.viewId === v.id}
                 onSelect={() => onSelect({ kind: "view", viewId: v.id })}
-                onOpenSettings={() => onSelect({ kind: "view", viewId: v.id })}
                 onRename={(name) => handlers.handleRenameView(v.id, name)}
                 onDuplicate={() => void handlers.handleDuplicateView(v.id)}
                 onToggleSurface={() =>
@@ -1032,32 +982,15 @@ export function OutputsSection({
         </div>
       )}
 
-      {/* One dialog for the whole page. Controlled, because it is opened from a
-          view picker on any card as well as from the button below. */}
       <NewViewDialog
         handlers={handlers}
-        open={creating !== null}
-        // A view made from a screen's picker is the kind the operator asked for
-        // there. The page's own "New view" button (no screen) asks.
-        fixedSurface={creating?.surface}
-        onOpenChange={(o) => { if (!o) setCreating(null); }}
-        onCreated={(id, name) => {
-          // Assign it straight to the screen that asked, so "+ New wall view" in a
-          // picker is one action rather than create-then-go-find-it. A view of the
-          // other kind than the screen shows now is asked about first.
-          if (creatingScreen && creating?.surface) {
-            void assignNewView(creatingScreen, { surface: creating.surface, name }, screenIsControlSurface(creatingScreen, stageState.views ?? []), () => {
-              // The kind just made is the kind the operator was asked about.
-              void handlers.handleSetOutputView(creatingScreen.id, id, creating.surface);
-            });
-          }
-          setCreating(null);
-        }}
+        open={creatingView}
+        onOpenChange={setCreatingView}
         trigger={<span className="hidden" />}
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="transparent" size="small" onClick={() => setCreating({ for: "" })}>
+        <Button variant="transparent" size="small" onClick={() => setCreatingView(true)}>
           <PlusIcon className="size-3.5 text-gray-9" />
           New view
         </Button>

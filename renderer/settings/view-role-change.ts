@@ -31,17 +31,7 @@ export function screensChangedBy(state: Pick<StageState, "views" | "outputs"> | 
   return screensShowing(viewId, state?.outputs ?? []).map((o) => ({ id: o.id, name: o.name || o.id }));
 }
 
-/**
- * The kind of view `viewId` is, as the operator saw it: what to send as
- * `expectSurface` after they confirm a screen going live on it. Read from the
- * views the confirm was asked against, never from a fresher copy: the point is
- * that the server refuses when the view changed while the question was open.
- * Undefined for a view that is not there, which sends no expectation.
- */
-export function expectedSurface(views: readonly Pick<View, "id" | "surface">[], viewId: string): ViewSurface | undefined {
-  const view = views.find((v) => v.id === viewId);
-  return view ? viewSurface(view) : undefined;
-}
+export { expectedSurface } from "./screen-role-confirm";
 
 /** What to ask before changing these screens, or null when there is none to
  *  ask about. `again` says the list changed since the operator was last asked. */

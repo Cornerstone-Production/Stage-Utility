@@ -65,7 +65,6 @@ function card(over: Partial<OutputRowProps> = {}, routed = true) {
     onSetView: noop,
     onRenameView: noop,
     messageGroups: { groups: [], known: true, failed: false },
-    onOpenSettings: noop,
     panelOpen: false,
     onSelect: noop,
     onRefresh: noop,
@@ -150,7 +149,7 @@ describe("the card's menu", () => {
 
   test("Screen settings… opens THIS screen's panel", async () => {
     let opened = 0;
-    card({ onOpenSettings: () => { opened++; } });
+    card({ onSelect: () => { opened++; } });
     await openMenu();
     await select(screen.getByRole("menuitem", { name: "Screen settings…" }));
     assert.equal(opened, 1);

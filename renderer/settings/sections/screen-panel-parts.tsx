@@ -9,12 +9,8 @@ import type { ChangeEvent, ReactNode } from "react";
 import { Button, Input, Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, Switch, type ButtonProps } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { viewIsConsole, viewSurface, type ViewSurface } from "@main/types/views";
-import { SURFACE_COPY } from "../screen-role-confirm";
+import { NEW_CONTROL, NEW_WALL, NONE, SURFACE_COPY } from "../screen-role-confirm";
 
-/** Select sentinels. Never stored: one clears the view, the others ask for a new one. */
-export const NONE = "__none__";
-export const NEW_WALL = "__new_wall__";
-export const NEW_CONTROL = "__new_control__";
 
 /** The views a picker offers, split the way the picker groups them. */
 export function viewGroups(views: readonly View[]): { label: string; views: View[] }[] {
@@ -223,6 +219,7 @@ export function ViewPicker({
   newItems = true,
   ariaLabel = "View",
   id,
+  triggerClassName = "w-full",
 }: {
   groups: readonly { label: string; views: readonly View[] }[];
   value: string;
@@ -233,10 +230,11 @@ export function ViewPicker({
   newItems?: boolean;
   ariaLabel?: string;
   id?: string;
+  triggerClassName?: string;
 }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger id={id} aria-label={ariaLabel} className="w-full">
+      <SelectTrigger id={id} aria-label={ariaLabel} className={triggerClassName}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>

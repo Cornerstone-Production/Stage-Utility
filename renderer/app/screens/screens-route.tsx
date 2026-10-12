@@ -28,6 +28,9 @@ import { useState } from "react";
 import { Loader2Icon, PanelRightIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { OutputsSection } from "../../settings/sections/outputs-section";
+import { NewViewDialog } from "../../settings/sections/new-view-dialog";
+import { assignMadeView } from "../../settings/screen-role-confirm";
+import type { ViewSurface } from "@main/types/views";
 import { ScreenPanelHost } from "./screen-panel-host";
 import type { PanelDevice, PanelTarget } from "../../settings/sections/screen-settings-panel";
 import { deleteView, removeScreen } from "../../settings/sections/screen-confirms";
@@ -45,6 +48,9 @@ export function ScreensRoute() {
   // waiting device's "Set up as a new screen", and the panel itself.
   const [open, setOpen] = usePanelOpen();
   const [panel, setPanel] = useState<PanelTarget | null>(null);
+  // A screen's picker asked for a new view of this kind: the one dialog for it,
+  // wherever the picker is (a card or the panel).
+  const [newViewFor, setNewViewFor] = useState<{ outputId: string; surface: ViewSurface } | null>(null);
 
   // Any selection opens the panel: the operator asked to see it.
   function select(target: PanelTarget | null) {
@@ -109,6 +115,7 @@ export function ScreensRoute() {
     if (view) void deleteView({ view, outputs: state.outputs ?? [], handlers: s.handlers });
   }
   const addScreen = () => select(newTarget(null));
+  const requestNewView = (outputId: string, surface: ViewSurface) => setNewViewFor({ outputId, surface });
 
   return (
     <div className="pb-[50vh] max-sm:pb-24 lg:flex lg:items-start lg:gap-4">
@@ -121,6 +128,7 @@ export function ScreensRoute() {
           selected={open ? panel : null}
           onSelect={select}
           onAddScreen={addScreen}
+          onRequestNewView={requestNewView}
           onEditLayout={editLayout}
           onRemoveScreen={requestRemoveScreen}
           onDeleteView={requestDeleteView}
@@ -134,6 +142,27 @@ export function ScreensRoute() {
             screen made in one click had no say in its view or its name. */}
         <UnclaimedScreens outputs={outputs} onSetUpNew={(device) => select(newTarget(device))} />
       </div>
+      <NewViewDialog
+        handlers={s.handlers}
+        open={newViewFor !== null}
+        fixedSurface={newViewFor?.surface}
+        onOpenChange={(o) => { if (!o) setNewViewFor(null); }}
+        onCreated={(id, name) => {
+          // Assign it straight to the screen that asked: "+ New wall view" in a picker
+          // is one action rather than create-then-go-find-it.
+          const output = newViewFor && outputs.find((o) => o.id === newViewFor.outputId);
+          if (output) {
+            void assignMadeView({
+              output,
+              views: state.views ?? [],
+              made: { id, name, surface: newViewFor.surface },
+              setView: (viewId, expectSurface) => s.handlers.handleSetOutputView(output.id, viewId, expectSurface),
+            });
+          }
+          setNewViewFor(null);
+        }}
+        trigger={<span className="hidden" />}
+      />
       {open && (
         <ScreenPanelHost
           stageState={s.stageState}
@@ -142,6 +171,7 @@ export function ScreensRoute() {
           onClose={close}
           onSelect={select}
           onAddScreen={addScreen}
+          onRequestNewView={requestNewView}
           onCreated={(outputId, viewMade) => {
             // The panel stays open, on the screen that now exists.
             setPanel(outputId ? { kind: "edit", outputId, created: { viewMade } } : null);

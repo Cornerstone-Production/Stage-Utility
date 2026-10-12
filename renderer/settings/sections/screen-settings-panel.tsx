@@ -30,10 +30,9 @@ import { Button, Checkbox, ErrorNote, NumberInput, Select, SelectContent, Select
 import { copyText } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
-import { expectedSurface } from "../view-role-change";
 import { KIND_DRAWS_TOP_BAR, screenIsControlSurface, viewShownInSidebar, viewSurface, type CreateScreenInput, type ViewSurface } from "@main/types/views";
 import { useResyncOn } from "../../lib/use-resync-on";
-import { confirmRole, confirmViewKind } from "../screen-role-confirm";
+import { NONE, chooseViewForScreen } from "../screen-role-confirm";
 import { useDevices } from "../../app/screens/use-devices";
 import { releaseDevice } from "../../app/screens/screen-device";
 import { cardOf, outputModeLine } from "../../app/screens/output-helpers";
@@ -43,7 +42,7 @@ import type { OutputHealth } from "@main/types/output-health";
 import type { MessageGroups } from "../../main/use-message-groups";
 import type { CreateScreenOutcome } from "../types";
 import {
-  DangerButton, NEW_CONTROL, NEW_WALL, NONE, NameInput, PanelFooter, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
+  DangerButton, NameInput, PanelFooter, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
 } from "./screen-panel-parts";
 import { NewScreenBody, STEP_TITLES, type Step } from "./new-screen-body";
 import { ViewBody } from "./view-settings-body";
@@ -122,17 +121,6 @@ export interface ScreenSettingsPanelProps {
 /** The panel's element id: there is one panel on the page, and the card menu that
  *  opens it needs to hand focus to it once the menu has finished closing. */
 export const SCREEN_PANEL_ID = "screen-settings-panel";
-
-/**
- * Point a screen at a view just made for it. The view's kind is known (it was made
- * from the picker's "+ New wall view" or "+ New control surface"), and when it is
- * not the kind the screen shows now the operator is asked first, as for any view.
- * Resolves whether the screen was pointed at it.
- */
-export async function assignNewView(output: Output, made: { surface: ViewSurface; name: string }, screenIsControl: boolean, assign: () => void): Promise<void> {
-  if ((made.surface === "console") !== screenIsControl && !(await confirmRole(output.name, made.surface, made.name))) return;
-  assign();
-}
 
 // ── Small parts ──────────────────────────────────────────────────────────
 
@@ -445,11 +433,14 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, acti
 
   /** Choosing a view is choosing what the screen is, so a view of the other kind
    *  is asked about first. Declining leaves the picker on the view it was on. */
-  async function pickView(v: string) {
-    if (v === NEW_WALL) actions.onRequestNewView(output.id, "display");
-    else if (v === NEW_CONTROL) actions.onRequestNewView(output.id, "console");
-    else if (v === NONE) actions.onSetView(output.id, null);
-    else if (await confirmViewKind(output, views, v)) actions.onSetView(output.id, v, expectedSurface(views, v));
+  function pickView(value: string) {
+    void chooseViewForScreen({
+      output,
+      views,
+      value,
+      setView: (...choice) => actions.onSetView(output.id, ...choice),
+      requestNewView: (surface) => actions.onRequestNewView(output.id, surface),
+    });
   }
 
   function commitName() {
@@ -467,7 +458,7 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, acti
         <ViewPicker
           groups={viewGroups(views)}
           value={output.viewId ?? NONE}
-          onChange={(v) => void pickView(v)}
+          onChange={pickView}
           noneLabel="— Unrouted —"
         />
         <RoleLine surface={shown ? viewSurface(shown) : null} />

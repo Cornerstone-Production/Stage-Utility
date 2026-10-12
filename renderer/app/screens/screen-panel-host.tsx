@@ -6,12 +6,10 @@
 // be driven with no server behind it. This is the one place that knows which
 // handler each callback is.
 
-import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { screenIsControlSurface, type ViewSurface } from "@main/types/views";
+import type { ViewSurface } from "@main/types/views";
 
-import { SCREEN_PANEL_ID, ScreenSettingsPanel, assignNewView, type PanelDevice, type PanelTarget, type ScreenPanelActions } from "../../settings/sections/screen-settings-panel";
-import { NewViewDialog } from "../../settings/sections/new-view-dialog";
+import { SCREEN_PANEL_ID, ScreenSettingsPanel, type PanelDevice, type PanelTarget, type ScreenPanelActions } from "../../settings/sections/screen-settings-panel";
 import { screenPickerViews } from "../../settings/sections/outputs-section";
 import type { CreateScreenOutcome, SectionHandlers } from "../../settings/types";
 import { toast } from "../../components/ui";
@@ -33,6 +31,8 @@ export interface ScreenPanelHostProps {
   /** A screen was made: the panel moves to it. */
   onCreated: (outputId: string | null, viewMade: boolean) => void;
   onEditLayout: (viewId: string) => void;
+  /** A screen's picker asked for a new view of this kind. */
+  onRequestNewView: (outputId: string, surface: ViewSurface) => void;
   onRemoveScreen: (outputId: string) => void;
   onDeleteView: (viewId: string) => void;
   onOpenMessagingSettings: () => void;
@@ -47,6 +47,7 @@ export function ScreenPanelHost({
   onAddScreen,
   onCreated,
   onEditLayout,
+  onRequestNewView,
   onRemoveScreen,
   onDeleteView,
   onOpenMessagingSettings,
@@ -57,10 +58,6 @@ export function ScreenPanelHost({
   const views = screenPickerViews(stageState.views ?? []);
   const connected = useDisplayPresence();
   const messageGroups = useMessageGroups();
-  // Which screen asked for a new view, and of which kind, so the one made is
-  // pointed at it.
-  const [newViewFor, setNewViewFor] = useState<{ outputId: string; surface: ViewSurface } | null>(null);
-  const newViewScreen = newViewFor ? outputs.find((o) => o.id === newViewFor.outputId) : undefined;
 
   async function create(input: Parameters<ScreenPanelActions["onCreate"]>[0], device: PanelDevice | null): Promise<CreateScreenOutcome> {
     // Created and claimed as one call for a device (the server makes the screen,
@@ -102,7 +99,7 @@ export function ScreenPanelHost({
     onSetGroups: handlers.handleSetOutputGroups,
     onSetShowInSidebar: handlers.handleSetViewShowInSidebar,
     onOpenMessagingSettings,
-    onRequestNewView: (outputId, surface) => setNewViewFor({ outputId, surface }),
+    onRequestNewView,
     onCreate: create,
     onSelect,
     onAddScreen,
@@ -128,25 +125,6 @@ export function ScreenPanelHost({
         messageGroups={messageGroups}
         actions={actions}
         onClose={onClose}
-      />
-      {/* The same dialog the cards use, told what the new view is FOR: the kind the
-          operator asked for, which may not be the kind the screen shows now (and
-          then it is asked about before the screen is pointed at it). */}
-      <NewViewDialog
-        handlers={handlers}
-        open={newViewFor !== null}
-        fixedSurface={newViewFor?.surface}
-        onOpenChange={(o) => { if (!o) setNewViewFor(null); }}
-        onCreated={(id, name) => {
-          if (newViewFor && newViewScreen) {
-            void assignNewView(newViewScreen, { surface: newViewFor.surface, name }, screenIsControlSurface(newViewScreen, stageState.views ?? []), () => {
-              // The kind just made is the kind the operator was asked about.
-              void handlers.handleSetOutputView(newViewScreen.id, id, newViewFor.surface);
-            });
-          }
-          setNewViewFor(null);
-        }}
-        trigger={<span className="hidden" />}
       />
     </div>
   );
