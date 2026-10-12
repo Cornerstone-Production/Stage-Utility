@@ -29,7 +29,7 @@ import { iconEntryAt } from "../../components/editable-icon";
 import { NewViewDialog, KIND_LABELS } from "./new-view-dialog";
 import { ImportLayout } from "./import-layout";
 import { SCREEN_PANEL_ID, confirmViewKind } from "./screen-settings-panel";
-import { viewSurface, viewShownInSidebar, screenIsControlSurface, viewCanBeControlSurface, type ViewSurface } from "@main/types/views";
+import { viewSurface, viewShownInSidebar, screenIsControlSurface, surfaceOfScreen, viewCanBeControlSurface, type ViewSurface } from "@main/types/views";
 import { expectedSurface } from "../view-role-change";
 import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
@@ -985,7 +985,7 @@ export function OutputsSection({
         // A view made from a screen's picker is the kind that screen shows, so
         // making one never changes what the screen is. The page's own "New view"
         // button (no screen) asks.
-        fixedSurface={creatingScreen ? (screenIsControlSurface(creatingScreen, stageState.views ?? []) ? "console" : "display") : undefined}
+        fixedSurface={creatingScreen ? surfaceOfScreen(creatingScreen, stageState.views ?? []) : undefined}
         onOpenChange={(o) => { if (!o) setCreatingFor(null); }}
         onCreated={(id) => {
           // Assign it straight to the screen that asked, so "New view..." in a

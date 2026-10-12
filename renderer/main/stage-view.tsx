@@ -14,7 +14,6 @@ import { DisplayServiceCue } from "./servicecue-display";
 import { SplRundownView } from "./spl-rundown-view";
 import { CalendarView } from "./calendar-view";
 import { LayoutRenderer } from "./layout-renderer";
-import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface, KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
@@ -639,7 +638,7 @@ function renderView(
   previewDraftSlots: Slot[] | null,
   own: OwnScreen | null,
 ): ReactNode {
-  const { kind, view: activeView, displayId, isPreview, showsControlSurface, allowHls } = screen;
+  const { kind, view: activeView, displayId, isPreview, interactive, allowHls } = screen;
 
   switch (kind) {
     // Custom-layout views render the visual-editor layout below the same kiosk top
@@ -668,7 +667,7 @@ function renderView(
               // is. Null would read as "no ancestor" and lose both.
               viewId={activeView?.id ?? null}
               ndiSource={activeView?.ndiSource ?? null}
-              interactive={capabilityLive(contextForOutput(showsControlSurface, isPreview), "control")}
+              interactive={interactive}
               surface={viewSurface(activeView)}
               allowHls={allowHls}
               // Which screen this is and the message groups it is in; null on a
@@ -737,7 +736,7 @@ function renderView(
             // The same answer every control on every surface uses. False on a
             // wall display, so it gets no chevrons and cannot be left on the
             // wrong month by a passer-by.
-            interactive={capabilityLive(contextForOutput(showsControlSurface, isPreview), "control")}
+            interactive={interactive}
           />
         </KioskFrame>
       );

@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { errorMessage } from "@main/services/errors";
-import { screenIsControlSurface } from "@main/types/views";
+import { surfaceOfScreen } from "@main/types/views";
 
 import { SCREEN_PANEL_ID, ScreenSettingsPanel, type PanelDevice, type PanelTarget, type ScreenPanelActions } from "../../settings/sections/screen-settings-panel";
 import { NewViewDialog } from "../../settings/sections/new-view-dialog";
@@ -103,7 +103,7 @@ export function ScreenPanelHost({
       <NewViewDialog
         handlers={handlers}
         open={newViewFor !== null}
-        fixedSurface={newViewScreen && screenIsControlSurface(newViewScreen, stageState.views ?? []) ? "console" : "display"}
+        fixedSurface={newViewScreen ? surfaceOfScreen(newViewScreen, stageState.views ?? []) : "display"}
         onOpenChange={(o) => { if (!o) setNewViewFor(null); }}
         onCreated={(id) => {
           if (newViewFor) void handlers.handleSetOutputView(newViewFor, id);
