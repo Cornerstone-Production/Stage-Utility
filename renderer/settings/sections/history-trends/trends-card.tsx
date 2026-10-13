@@ -401,7 +401,7 @@ export function TrendsCard({
       byType.get(key)!.push(r);
     }
     // Order decides only which line draws on top; the COLOUR no longer follows
-    // it — see colorIndexes. It used to, and that is how The Salt Company was
+    // it — see colorIndexes. It used to, and that is how The Gathering was
     // blue on Attendance and green on Sound.
     const order = tiles.map((t) => t.serviceTypeId ?? "").filter((k) => byType.has(k));
     for (const k of byType.keys()) if (!order.includes(k)) order.push(k);

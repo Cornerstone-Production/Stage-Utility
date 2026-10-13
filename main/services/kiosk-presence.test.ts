@@ -14,7 +14,7 @@ import { addBroadcastListener } from "./broadcaster.js";
 // powering a Pi off before pairing makes it disappear everywhere.
 
 const dev = (id: string, over: Record<string, unknown> = {}) =>
-  ({ id, macs: [`aa:${id}`], ip: "192.168.16.74", ...over }) as Parameters<typeof recordSeen>[0];
+  ({ id, macs: [`aa:${id}`], ip: "192.168.1.54", ...over }) as Parameters<typeof recordSeen>[0];
 
 beforeEach(() => resetKioskPresence());
 
@@ -175,7 +175,7 @@ describe("what is broadcast", () => {
   test("a device that changed address reaches them too", () => {
     recordSeen(dev("d2"), now());
     const before = frames();
-    recordSeen(dev("d2", { ip: "192.168.16.99" }), now());
+    recordSeen(dev("d2", { ip: "192.168.1.59" }), now());
     assert.equal(frames(), before + 1, "a new address never left the server");
   });
 

@@ -40,8 +40,8 @@ const { stageController } = await import("./stage-controller.js");
 const { serviceTimelineStore } = await import("./service-timeline-store.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 
-const OCC_1 = "225131080";
-const OCC_2 = "225131082";
+const OCC_1 = "200000011";
+const OCC_2 = "200000013";
 const OCC_1_STARTS = "2026-09-18T23:30:00.000Z";
 const OCC_2_STARTS = "2026-09-19T01:15:00.000Z";
 
@@ -89,7 +89,7 @@ describe("ServiceRecorder.ensureRecord: back-to-back services on one plan", () =
     planId = `plan-${++n}`; // a fresh key space per case, so no store entry leaks between them
     (stageController as unknown as { getState(): unknown }).getState = () => ({
       serviceTypeId: "75953",
-      serviceTypeName: "The Salt Company",
+      serviceTypeName: "The Gathering",
       planId,
       planTitle: "The Man Who Didn't Risk",
       planSeriesTitle: null,

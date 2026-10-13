@@ -88,3 +88,6 @@ scripts/survival/.survival-*.log
 # test, redacted; the raw capture never gets committed.
 resi-capture.json
 *-capture.json
+
+# Local list for scripts/check-public-hygiene.mjs (see docs/contributing.md)
+.private-terms

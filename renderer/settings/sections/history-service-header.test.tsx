@@ -42,9 +42,9 @@ const iso = (hhmmss: string) => new Date(`${DAY}T${hhmmss}`).toISOString();
  *  Three counted items, two of which ran over. */
 function timeline(overrides: Partial<ServiceTimeline> = {}): ServiceTimeline {
   return {
-    serviceKey: "salt:plan-1:2026-09-17",
-    serviceTypeId: "salt",
-    serviceTypeName: "The Salt Company",
+    serviceKey: "gathering:plan-1:2026-09-17",
+    serviceTypeId: "gathering",
+    serviceTypeName: "The Gathering",
     planId: "plan-1",
     planTitle: "Evening",
     seriesTitle: "Kickoff",
@@ -66,7 +66,7 @@ function timeline(overrides: Partial<ServiceTimeline> = {}): ServiceTimeline {
 }
 
 /**
- * The 17 Sep Salt Company recording's shape, scaled down: a pre-service ramp, a
+ * One recorded service's shape, scaled down: a pre-service ramp, a
  * service, and a post-service taper, with the door count still climbing through
  * all three.
  *
@@ -85,7 +85,7 @@ function timeline(overrides: Partial<ServiceTimeline> = {}): ServiceTimeline {
  */
 function attendance(): ServiceAttendance {
   return {
-    serviceKey: "salt:plan-1:2026-09-17",
+    serviceKey: "gathering:plan-1:2026-09-17",
     serviceDate: DAY,
     peakAttendance: 1727,
     peakOccupancy: 1196,
@@ -103,7 +103,7 @@ function attendance(): ServiceAttendance {
 
 function spl(): ServiceSplHistory {
   return {
-    serviceKey: "salt:plan-1:2026-09-17",
+    serviceKey: "gathering:plan-1:2026-09-17",
     serviceDate: DAY,
     metricKey: null,
     items: [
@@ -139,7 +139,7 @@ function mount(props: Partial<ServiceHeaderProps> = {}) {
         timeline: timeline(),
         attendance: attendance(),
         spl: spl(),
-        meta: "Kickoff · The Salt Company · Thu, Sep 17, 2026 · 8:15 PM",
+        meta: "Kickoff · The Gathering · Thu, Sep 17, 2026 · 8:15 PM",
         readOnly: false,
         onBack: noop,
         onEditTimes: noop,

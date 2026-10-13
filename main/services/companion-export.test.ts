@@ -193,7 +193,7 @@ describe("findPairs", () => {
     // action on the START half is what says the pair is about recording.
     const deck = pairs.find((p) => p.base === "Deck 1");
     assert.deepEqual(deck?.on.stateSource, {
-      variable: "MA_HyperDeck_01:status",
+      variable: "Main_HyperDeck_01:status",
       onValue: "Record",
       offValue: "*",
       moduleId: "bmd-hyperdeck",
@@ -422,14 +422,14 @@ describe("parseVariableRef", () => {
   });
 
   test("`<label>:<name>` is a module variable", () => {
-    assert.deepEqual(parseVariableRef("VCR-Overhead-Light:power_state"), {
+    assert.deepEqual(parseVariableRef("Booth-Overhead-Light:power_state"), {
       kind: "module",
-      label: "VCR-Overhead-Light",
+      label: "Booth-Overhead-Light",
       name: "power_state",
     });
-    assert.deepEqual(parseVariableRef("MA_Video_Mac_Mini_OBS:streaming"), {
+    assert.deepEqual(parseVariableRef("Main_Video_Mac_Mini_OBS:streaming"), {
       kind: "module",
-      label: "MA_Video_Mac_Mini_OBS",
+      label: "Main_Video_Mac_Mini_OBS",
       name: "streaming",
     });
   });
@@ -437,13 +437,13 @@ describe("parseVariableRef", () => {
   test("neither half may be something Companion could not have", () => {
     // Both land in a URL path.
     assert.equal(parseVariableRef("../../int:power_state"), null);
-    assert.equal(parseVariableRef("VCR-Light:../../int/export/full"), null);
+    assert.equal(parseVariableRef("Booth-Light:../../int/export/full"), null);
     // A dot is legal in a variable name and not in a connection label.
-    assert.equal(parseVariableRef("VCR.Light:power_state"), null);
+    assert.equal(parseVariableRef("Booth.Light:power_state"), null);
     assert.equal(parseVariableRef("a:b:c"), null);
     assert.equal(parseVariableRef(""), null);
     assert.equal(parseVariableRef("not a name"), null);
-    assert.equal(isCompanionVariableRef("VCR-Overhead-Light:power_state"), true);
+    assert.equal(isCompanionVariableRef("Booth-Overhead-Light:power_state"), true);
     assert.equal(isCompanionVariableRef("state:projectors"), true);
     assert.equal(isCompanionVariableRef("a/b"), false);
   });

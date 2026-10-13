@@ -195,7 +195,7 @@ describe("attachment cache", () => {
     assert.deepEqual(await fs.readFile(file.path), payload);
   });
 
-  // Planning Center's stage-plot attachment id carries a suffix ("84892470-stage").
+  // Planning Center's stage-plot attachment id carries a suffix ("50001234-stage").
   // The cache names the file after the id, so the suffix has to survive the name
   // and the same id has to find the same file on the next request.
   test("a suffixed id is stored under its own name and read back from disk", async (t) => {
@@ -209,20 +209,20 @@ describe("attachment cache", () => {
       return resp(200, payload);
     }) as typeof fetch;
 
-    const first = await getAttachmentFile("84892470-stage", "application/pdf", "2026.10.08 Stage Plot.pdf", async () => "https://example.invalid/signed");
+    const first = await getAttachmentFile("50001234-stage", "application/pdf", "2026.10.08 Stage Plot.pdf", async () => "https://example.invalid/signed");
     assert.ok(first);
-    assert.equal(first.path, path.join(cacheDir, "84892470-stage.pdf"));
+    assert.equal(first.path, path.join(cacheDir, "50001234-stage.pdf"));
     assert.deepEqual(await fs.readFile(first.path), payload);
 
-    const again = await getAttachmentFile("84892470-stage", "application/pdf", "2026.10.08 Stage Plot.pdf", async () => {
+    const again = await getAttachmentFile("50001234-stage", "application/pdf", "2026.10.08 Stage Plot.pdf", async () => {
       throw new Error("a cached attachment must not open a new link");
     });
     assert.equal(again?.path, first.path);
     assert.equal(fetches, 1, "the second request must be served from disk");
 
     // The digits-only id is a different file, not the same one with the suffix dropped.
-    const plain = await getAttachmentFile("84892470", "application/pdf", "other.pdf", async () => "https://example.invalid/signed");
-    assert.equal(plain?.path, path.join(cacheDir, "84892470.pdf"));
+    const plain = await getAttachmentFile("50001234", "application/pdf", "other.pdf", async () => "https://example.invalid/signed");
+    assert.equal(plain?.path, path.join(cacheDir, "50001234.pdf"));
   });
 });
 
@@ -424,15 +424,15 @@ describe("attachment cache and a replaced file", () => {
   });
 
   test("etag names the id and version; If-None-Match matches it, a weak copy of it and *", () => {
-    const e = attachmentEtag("84892470-stage", "t1");
-    assert.equal(e, '"84892470-stage.t1"');
+    const e = attachmentEtag("50001234-stage", "t1");
+    assert.equal(e, '"50001234-stage.t1"');
     assert.equal(attachmentEtag("1", ""), '"1"');
     assert.notEqual(attachmentEtag("1", "t1"), attachmentEtag("1", "t2"));
     assert.equal(etagMatches(e, e), true);
     assert.equal(etagMatches(`W/${e}`, e), true);
     assert.equal(etagMatches(`"other", ${e}`, e), true);
     assert.equal(etagMatches("*", e), true);
-    assert.equal(etagMatches('"84892470-stage.t0"', e), false);
+    assert.equal(etagMatches('"50001234-stage.t0"', e), false);
     assert.equal(etagMatches(undefined, e), false);
     assert.equal(etagMatches("", e), false);
   });

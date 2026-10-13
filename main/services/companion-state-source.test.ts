@@ -31,20 +31,20 @@ import { parseButtons } from "./companion-export.js";
 import { companionExportFixture } from "./fixtures/companion-export.js";
 
 const connections: Record<string, ExportConnection> = {
-  plug: { label: "VCR-Overhead-Light", moduleId: "tplink-kasasmartplug" },
+  plug: { label: "Booth-Overhead-Light", moduleId: "tplink-kasasmartplug" },
   bulb: { label: "Desk-Lamp", moduleId: "tplink-kasasmartbulb" },
-  tv: { label: "MA-Foyer-TV-1", moduleId: "vizio-smartcast" },
-  projector: { label: "MA_HL_Projector", moduleId: "generic-pjlink" },
+  tv: { label: "Lobby-TV-1", moduleId: "vizio-smartcast" },
+  projector: { label: "Main_Projector", moduleId: "generic-pjlink" },
   obs: { label: "Studio-OBS", moduleId: "obs-studio" },
-  deck: { label: "MA_HyperDeck_01", moduleId: "bmd-hyperdeck" },
-  encoder: { label: "UltraEncode01-MA-PGM", moduleId: "magewell-ultrastream" },
-  ptz: { label: "SA-PTZ-Camera", moduleId: "panasonic-cameras" },
-  cine: { label: "MA-CAM-1", moduleId: "red-rcp2" },
+  deck: { label: "Main_HyperDeck_01", moduleId: "bmd-hyperdeck" },
+  encoder: { label: "UltraEncode01-Main-PGM", moduleId: "magewell-ultrastream" },
+  ptz: { label: "PTZ-Camera-1", moduleId: "panasonic-cameras" },
+  cine: { label: "Cine-Cam-1", moduleId: "red-rcp2" },
   mixer: { label: "Mixer", moduleId: "yamaha-rcp" },
   // A video router. Its module publishes no variable for a crosspoint, and the
   // live install carries 69 `crosspoint_connected` feedbacks on it — the biggest
   // population of feedback-only evidence on the box.
-  router: { label: "MA-Router", moduleId: "generic-swp08" },
+  router: { label: "Main-Router", moduleId: "generic-swp08" },
   unlabelled: { label: "", moduleId: "tplink-kasasmartplug" },
 };
 
@@ -59,7 +59,7 @@ describe("inferStateSource, one row per module", () => {
     assert.deepEqual(
       inferStateSource(button([{ definitionId: "powerState", connectionId: "plug" }], []), connections),
       {
-        variable: "VCR-Overhead-Light:power_state",
+        variable: "Booth-Overhead-Light:power_state",
         onValue: "On",
         offValue: "Off",
         moduleId: "tplink-kasasmartplug",
@@ -91,7 +91,7 @@ describe("inferStateSource, one row per module", () => {
     assert.deepEqual(
       inferStateSource(button([{ definitionId: "powerState", connectionId: "tv" }], []), connections),
       {
-        variable: "MA-Foyer-TV-1:power",
+        variable: "Lobby-TV-1:power",
         onValue: "On",
         offValue: "Off",
         moduleId: "vizio-smartcast",
@@ -106,7 +106,7 @@ describe("inferStateSource, one row per module", () => {
         connections,
       ),
       {
-        variable: "MA_HL_Projector:powerState",
+        variable: "Main_Projector:powerState",
         onValue: "On",
         offValue: "Off",
         moduleId: "generic-pjlink",
@@ -207,7 +207,7 @@ describe("a module with more than one row, and the button that picks it", () => 
       assert.deepEqual(
         inferStateSource(button([], [{ definitionId, connectionId: "deck" }]), connections),
         {
-          variable: "MA_HyperDeck_01:status",
+          variable: "Main_HyperDeck_01:status",
           onValue: "Record",
           offValue: "*",
           moduleId: "bmd-hyperdeck",
@@ -226,7 +226,7 @@ describe("a module with more than one row, and the button that picks it", () => 
         ),
         connections,
       )?.variable,
-      "MA_HyperDeck_01:status",
+      "Main_HyperDeck_01:status",
     );
   });
 
@@ -246,7 +246,7 @@ describe("a module with more than one row, and the button that picks it", () => 
     assert.deepEqual(
       inferStateSource(button([], [{ definitionId: "stream", connectionId: "encoder" }]), connections),
       {
-        variable: "UltraEncode01-MA-PGM:stream_status",
+        variable: "UltraEncode01-Main-PGM:stream_status",
         onValue: "Streaming",
         offValue: "*",
         moduleId: "magewell-ultrastream",
@@ -258,7 +258,7 @@ describe("a module with more than one row, and the button that picks it", () => 
     assert.deepEqual(
       inferStateSource(button([], [{ definitionId: "record", connectionId: "encoder" }]), connections),
       {
-        variable: "UltraEncode01-MA-PGM:record_status",
+        variable: "UltraEncode01-Main-PGM:record_status",
         onValue: "Recording",
         offValue: "*",
         moduleId: "magewell-ultrastream",
@@ -275,12 +275,12 @@ describe("a module with more than one row, and the button that picks it", () => 
         ),
         connections,
       ),
-      { variable: "SA-PTZ-Camera:power", onValue: "ON", offValue: "OFF", moduleId: "panasonic-cameras" },
+      { variable: "PTZ-Camera-1:power", onValue: "ON", offValue: "OFF", moduleId: "panasonic-cameras" },
     );
     assert.deepEqual(
       inferStateSource(button([], [{ definitionId: "sdCardRec", connectionId: "ptz" }]), connections),
       {
-        variable: "SA-PTZ-Camera:recording",
+        variable: "PTZ-Camera-1:recording",
         onValue: "ON",
         offValue: "OFF",
         moduleId: "panasonic-cameras",
@@ -303,7 +303,7 @@ describe("a module with more than one row, and the button that picks it", () => 
         button([], [{ definitionId: "toggle_recording", connectionId: "cine" }]),
         connections,
       ),
-      { variable: "MA-CAM-1:recording", onValue: "Recording", offValue: "*", moduleId: "red-rcp2" },
+      { variable: "Cine-Cam-1:recording", onValue: "Recording", offValue: "*", moduleId: "red-rcp2" },
     );
     // An exposure key on the same camera is not a record key.
     assert.equal(
@@ -380,7 +380,7 @@ describe("which connection the inference reads", () => {
       ),
       connections,
     );
-    assert.equal(inferred?.variable, "MA_HL_Projector:powerState");
+    assert.equal(inferred?.variable, "Main_Projector:powerState");
   });
 
   test("with no powerState feedback it is the FIRST action, not any of them", () => {
@@ -394,7 +394,7 @@ describe("which connection the inference reads", () => {
       ),
       connections,
     );
-    assert.equal(inferred?.variable, "MA-Foyer-TV-1:power");
+    assert.equal(inferred?.variable, "Lobby-TV-1:power");
   });
 
   test("a module this does not know infers nothing — never a guessed name", () => {
@@ -477,31 +477,31 @@ describe("through the real parser, on the fixture export", () => {
         "1:0:2 Projectors:powerState",
         "1:2:3 Projectors:powerState",
         "1:3:0 Projectors:powerState",
-        "2:2:0 VCR-Overhead-Light:power_state",
+        "2:2:0 Booth-Overhead-Light:power_state",
         "2:2:1 Desk-Lamp:power_state",
         // The recording key infers now, where it used to infer nothing: the
         // fact it is about has a row of its own rather than being excluded from
         // the streaming one.
         "3:2:0 Studio-OBS:recording",
         "3:2:1 Studio-OBS:streaming",
-        "3:3:0 MA-Foyer-TV-1:power",
-        "5:0:0 MA_HyperDeck_01:status",
-        "5:0:1 UltraEncode01-MA-PGM:record_status",
-        "5:1:0 MA_HyperDeck_01:status",
-        "5:1:1 MA_HyperDeck_01:status",
-        "5:2:0 UltraEncode01-MA-PGM:record_status",
-        "5:2:1 UltraEncode01-MA-PGM:stream_status",
-        "5:3:0 SA-PTZ-Camera:power",
-        "5:3:1 SA-PTZ-Camera:power",
-        "5:3:2 SA-PTZ-Camera:recording",
-        "5:4:0 MA-CAM-1:recording",
+        "3:3:0 Lobby-TV-1:power",
+        "5:0:0 Main_HyperDeck_01:status",
+        "5:0:1 UltraEncode01-Main-PGM:record_status",
+        "5:1:0 Main_HyperDeck_01:status",
+        "5:1:1 Main_HyperDeck_01:status",
+        "5:2:0 UltraEncode01-Main-PGM:record_status",
+        "5:2:1 UltraEncode01-Main-PGM:stream_status",
+        "5:3:0 PTZ-Camera-1:power",
+        "5:3:1 PTZ-Camera-1:power",
+        "5:3:2 PTZ-Camera-1:recording",
+        "5:4:0 Cine-Cam-1:recording",
       ],
     );
   });
 
-  test("the VCR light toggle is the whole case, end to end", () => {
+  test("the booth light toggle is the whole case, end to end", () => {
     assert.deepEqual(at(2, 2, 0)?.stateSource, {
-      variable: "VCR-Overhead-Light:power_state",
+      variable: "Booth-Overhead-Light:power_state",
       onValue: "On",
       offValue: "Off",
       moduleId: "tplink-kasasmartplug",
@@ -511,7 +511,7 @@ describe("through the real parser, on the fixture export", () => {
   test("a macro button on `internal` is found by its feedback and nothing else", () => {
     // Every action is an internal key press. Without the control's own
     // feedbacks[] in the parse this button infers nothing.
-    assert.equal(at(3, 3, 0)?.stateSource?.variable, "MA-Foyer-TV-1:power");
+    assert.equal(at(3, 3, 0)?.stateSource?.variable, "Lobby-TV-1:power");
     assert.deepEqual(at(3, 3, 0)?.drives, []);
   });
 
@@ -600,7 +600,7 @@ describe("a module id that is a key on Object.prototype", () => {
       instances: {
         bad: { label: "Ctor-Box", moduleId: "constructor" },
         worse: { label: "Proto-Box", moduleId: "__proto__" },
-        plug: { label: "VCR-Overhead-Light", moduleId: "tplink-kasasmartplug" },
+        plug: { label: "Booth-Overhead-Light", moduleId: "tplink-kasasmartplug" },
       },
       pages: {
         "1": {
@@ -619,7 +619,7 @@ describe("a module id that is a key on Object.prototype", () => {
     const parsed = parseButtons(doc);
     assert.deepEqual(
       parsed.map((b) => `${b.row}:${b.col} ${b.stateSource?.variable ?? "-"}`),
-      ["0:0 -", "0:1 -", "0:2 VCR-Overhead-Light:power_state"],
+      ["0:0 -", "0:1 -", "0:2 Booth-Overhead-Light:power_state"],
     );
   });
 });

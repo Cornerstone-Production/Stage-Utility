@@ -106,9 +106,9 @@ the plan's items and their songs and arrangements. A file is found by name, so
 the same layout shows each week's file without being re-pointed.
 
 Planning Center gives most attachments an id that is a run of digits; the plan's
-own stage plot comes back with a word on the end (`84892470-stage`). This app
+own stage plot comes back with a word on the end (`50001234-stage`). This app
 accepts an attachment id that is 1 to 20 digits, optionally followed by a hyphen
-and a lowercase word of up to 20 letters (`84892470`, `84892470-stage`), and
+and a lowercase word of up to 20 letters (`50001234`, `50001234-stage`), and
 nothing else. No other Planning Center id takes the suffix, and an id with
 anything else in it is refused before a request is made.
 

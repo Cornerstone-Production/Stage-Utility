@@ -290,7 +290,7 @@ describe("the editor's two boards", () => {
 
   // The DEFAULT side of another service type's board has no plan, so there is no
   // plan row to read a type name off. It used to be named with the LIVE type's
-  // name, which reached the operator as "Saved the Cornerstone Youth default"
+  // name, which reached the operator as "Saved the Youth Night default"
   // after saving a Weekend board, and named the wrong type in the revert and
   // promote confirmations — both of which delete or overwrite a board.
   it("names the service type of a DEFAULT target it is not currently on", async () => {

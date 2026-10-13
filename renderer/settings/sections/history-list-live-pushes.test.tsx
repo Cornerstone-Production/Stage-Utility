@@ -34,15 +34,15 @@ const teardown = installDom();
 
 const DAY = "2026-09-24";
 const iso = (hhmmss: string) => new Date(`${DAY}T${hhmmss}`).toISOString();
-const KEY = "salt:plan-1:2015";
+const KEY = "gathering:plan-1:2015";
 
 /** The second service's own record — still recording (`endedAt: null`), the
  *  state the row is in the whole time this test drives it. */
 function timeline(): ServiceTimeline {
   return {
     serviceKey: KEY,
-    serviceTypeId: "salt",
-    serviceTypeName: "The Salt Company",
+    serviceTypeId: "gathering",
+    serviceTypeName: "The Gathering",
     planId: "plan-1",
     planTitle: "8:15pm",
     seriesTitle: "Kickoff",
@@ -60,8 +60,8 @@ function timeline(): ServiceTimeline {
 function attendance(): ServiceAttendance {
   return {
     serviceKey: KEY,
-    serviceTypeId: "salt",
-    serviceTypeName: "The Salt Company",
+    serviceTypeId: "gathering",
+    serviceTypeName: "The Gathering",
     planId: "plan-1",
     planTitle: "8:15pm",
     seriesTitle: "Kickoff",
@@ -87,7 +87,7 @@ function attendance(): ServiceAttendance {
 function splRecording(): ServiceSplHistory {
   return {
     serviceKey: KEY,
-    serviceTypeId: "salt",
+    serviceTypeId: "gathering",
     planId: "plan-1",
     planTitle: "8:15pm",
     seriesTitle: "Kickoff",

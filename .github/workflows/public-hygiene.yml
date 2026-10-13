@@ -1,0 +1,36 @@
+# Fails a PR that puts a private address, an email, a home path or a private term
+# into a tracked file. This repository is public.
+#
+# Runs on every pull request, docs-only ones included: that is where a real
+# address most often ends up. ci.yml skips docs and Markdown, so this is its own
+# workflow rather than a step there.
+#
+# The private-term list is the PRIVATE_TERMS repository secret. Forks and
+# Dependabot cannot read it; the script says so and checks the generic rules only.
+# The script never prints a term — see scripts/check-public-hygiene.mjs and
+# docs/contributing.md ("Public hygiene").
+
+name: Public hygiene
+
+on:
+  pull_request:
+
+# Least privilege, stated rather than inherited: the repository default is
+# read today, but a settings change should not silently widen every workflow.
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check tracked files for private details
+        env:
+          PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}
+          # A missing secret is an error where it should exist: a PR from a branch
+          # of this repository. A fork, or Dependabot (which reads its own secret
+          # store, not this one), cannot have it, and runs the generic rules only.
+          REQUIRE_TERMS: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && '1' || '' }}
+        run: node scripts/check-public-hygiene.mjs

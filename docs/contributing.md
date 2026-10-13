@@ -242,16 +242,18 @@ PR gate: `coverage.yml` reports it for `beta` weekly, and on demand from the
 Actions tab once the workflow is on `main`.
 
 Not every check runs on every pull request. The secret scan, the commit
-convention check and CodeQL run on all of them, and are required on `beta`.
-The build and tests skip a PR that touches only `docs/` and Markdown;
-dependency review runs only when `package.json` or the lockfile changes; the
-updater survival matrix runs only for the updater, the installers and its own
-scripts; and the Mac output helper's Swift build and tests (`helper-macos.yml`, on a
+convention check and CodeQL run on all of them, and are required on `beta`. The
+public-hygiene check (below) also runs on every one, docs-only included. The
+build and tests skip a PR that touches only `docs/` and Markdown; dependency
+review runs only when `package.json` or the lockfile changes; the updater
+survival matrix runs only for the updater, the installers and its own scripts;
+and the Mac output helper's Swift build and tests (`helper-macos.yml`, on a
 macOS runner) run only when `helper/` changes, or the Xcode selection
-(`.github/actions/select-xcode`) that the release workflow's helper build shares. A push to `beta` or `main` runs the gate once, in the release workflow,
-before it tags, and writes the result to the commit as a `build` status, red or
-green. The release PR from `beta` to `main` therefore shows no CI job of its own:
-its `build` is that status on the `beta` head.
+(`.github/actions/select-xcode`) that the release workflow's helper build shares.
+A push to `beta` or `main` runs the gate once, in the release workflow, before it
+tags, and writes the result to the commit as a `build` status, red or green. The
+release PR from `beta` to `main` therefore shows no CI job of its own: its
+`build` is that status on the `beta` head.
 
 Chain them with `&&`, not `;`. With `;` a failure scrolls past and the commit
 lands anyway — that is how a type error once reached `beta`.
@@ -351,3 +353,74 @@ Update `docs/` in the same commit as the change it describes. An integration get
 page in `docs/integrations/`; a feature that changes operator behavior gets a note
 wherever that behavior is documented. Docs that lag the code are worse than no docs,
 because they are believed.
+
+## Public hygiene
+
+This repository is public, so tracked files carry no real addresses, people or
+places. `node scripts/check-public-hygiene.mjs` reads every file `git ls-files`
+lists (binaries and lockfiles are skipped) and exits 1 on any of:
+
+| Rule | Fails on | Use instead |
+|---|---|---|
+| Private IPv4 | an address in 10/8, 172.16/12, 192.168/16, 100.64/10 (carrier-grade NAT, Tailscale) or 169.254/16 (link-local), outside `192.168.1.x`, `10.0.0.x` and `192.168.0.x`. The cloud-metadata endpoint `169.254.169.254` is allowed by name | `192.168.1.50` for a machine on the LAN; `10.0.0.x` for a second network |
+| Email | an address not at `example.com`, `example.org` or `example.net` (or a subdomain), a reserved TLD (`.example`, `.test`, `.invalid`, `.localhost`) or `users.noreply.github.com`. Three addresses are allowed by name: `noreply@anthropic.com`, `git@github.com` and the RFC 2617 example `testrealm@host.com` | `someone@example.org` |
+| Home path | a macOS, Linux or Windows home-directory path (a Windows one also with doubled backslashes) whose user is not `x`, `op`, `pi`, `someone`, `<someone>`, `youruser` or `Shared` | `/Users/someone/...` |
+| Private term | a case-insensitive substring match against a list the repository keeps secret. A term is also found when it is wrapped over two lines of a comment, or separated by doubled or non-breaking spaces | a generic name: "The Gathering", "Main Room", `Main_Projector` |
+
+### What it prints
+
+One line per finding, `path:line: rule`. For the three generic rules the line
+includes the matched value (`private IPv4 192.168.1.50`). A private-term finding
+prints only `private term #N`, the entry's 1-based position in the list, never the
+term. A term found in a file's name reports line `0`, with the term in the path
+replaced by `***`. A term wrapped over lines is reported on the line where it
+starts.
+
+A line containing `hygiene-allow` is skipped by every rule. Reserve it for a
+genuine exception, with the reason beside it. Each line whose finding was skipped
+this way is listed at the end of the output, under
+`[hygiene] N line(s) skipped by hygiene-allow`, so an exception is never invisible.
+
+### What it protects, and what it does not
+
+The check blocks a merge, not publication. A pushed branch is already public, and
+the history keeps what was pushed: a finding means "fix this before it lands on
+`beta`", and anything already pushed has to be treated as published.
+
+### The term list
+
+The list is the `PRIVATE_TERMS` repository secret in CI. Locally it comes from
+`PRIVATE_TERMS` in the environment and a `.private-terms` file at the repo root
+(git-ignored); environment entries are numbered before the file's.
+
+One term per line, blank lines ignored, matched as a case-insensitive substring.
+Prefer full names and phrases over short words: a short first name also matches
+inside identifiers (`tom` is inside `atomic`).
+
+Create or rotate the secret from a file of terms kept outside the repository:
+
+```sh
+gh secret set PRIVATE_TERMS --repo Cornerstone-Production/Stage-Utility < terms.txt
+```
+
+Setting it again replaces the whole list. Entries are numbered by position, so
+`private term #N` in an older log refers to the list as it was then.
+
+### When there is no list
+
+With no list the check prints `PRIVATE_TERMS not set; checking generic rules
+only` and runs the first three rules. A fork's PR and a Dependabot PR see exactly
+that, because neither can read the repository secret.
+
+The workflow sets `REQUIRE_TERMS=1` for a PR from a branch of this repository
+(not from a fork, and not by Dependabot). With `REQUIRE_TERMS=1` and no list the
+check fails with an error instead, so a deleted or misnamed secret turns every
+such PR red rather than quietly weakening the check.
+
+### An accepted risk
+
+A PR from a branch of this repository runs the version of the script in that
+PR, with the secret in its environment, so it could be edited to print the list.
+That is accepted: only people with write access open such a PR, and they can
+already read the repository's workflows and settings. Forks and Dependabot never
+receive the secret.

@@ -695,7 +695,7 @@ export function ImportPairsDialog({
    * button's own inferred source labelled as such.
    *
    * The inferred one is FIRST and says so. An operator looking at
-   * "VCR-Overhead-Light:power_state (inferred)" can tell at a glance that
+   * "Booth-Overhead-Light:power_state (inferred)" can tell at a glance that
    * nothing has to be built in Companion for it to work, which is the whole
    * point of it being offered.
    */

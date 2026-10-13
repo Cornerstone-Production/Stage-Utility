@@ -252,7 +252,7 @@ describe("a Services URL is written with pcoUrl", () => {
   });
 
   it("pcoAttachmentId is used where an attachment id goes, and nowhere else", () => {
-    // It accepts `84892470-stage`, which pcoId refuses. Allowed by the scan above
+    // It accepts `50001234-stage`, which pcoId refuses. Allowed by the scan above
     // in any position, it would let a suffixed value into a plan id or a service
     // type id with everything green. So each use is listed, as the path text just
     // before it, sorted, one per line: a new use is a line that changes here.

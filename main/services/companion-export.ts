@@ -209,7 +209,7 @@ function feedbackEntriesOf(control: Record<string, unknown>): ControlEntry[] {
 /**
  * Every connection in an export, keyed by its id.
  *
- * The LABEL is what a variable reference names — `$(VCR-Overhead-Light:power_state)`
+ * The LABEL is what a variable reference names — `$(Booth-Overhead-Light:power_state)`
  * — and the module id is what says which variable that connection publishes.
  */
 export function parseConnections(raw: unknown): Record<string, ExportConnection> {
@@ -321,8 +321,8 @@ export function parseButtons(raw: unknown): CompanionButton[] {
  * START/STOP is how a recorder is labelled — "REC START" beside "REC STOP" —
  * and without it the two halves of every deck, encoder and camera recording
  * were offered as two unrelated one-shot cues. `Record`/`Stop` is NOT here on
- * purpose: a lone "Stop" has too many partners, and "MA PGM REC" beside "MA
- * PGM STOP" would pair under one reading and "MA Cam 1 REC" beside a general
+ * purpose: a lone "Stop" has too many partners, and "Main PGM REC" beside "Main
+ * PGM STOP" would pair under one reading and "Main Cam 1 REC" beside a general
  * "STOP ALL" under another.
  *
  * OPEN/CLOSED and OPEN/CLOSE are here despite the warning above about "Open"
@@ -370,12 +370,12 @@ function splitSuffix(label: string): { base: string; suffix: string } | null {
 
 /**
  * A single button's label split into the thing and the direction word on the
- * end of it — `{ base: "VCR Light", word: "on" }` for "VCR Light ON".
+ * end of it — `{ base: "Booth Light", word: "on" }` for "Booth Light ON".
  *
  * For a TOGGLE button, which is one button with no partner and therefore never
  * seen by findPairs: the import names its two cues after the thing, not after
  * whichever word the operator happened to put on the key, or a cue that turns a
- * light off is called `vcr_light_on_off`.
+ * light off is called `booth_light_on_off`.
  *
  * `Toggle` is included here and deliberately NOT in SUFFIXES: it has no
  * opposite, so it can never pair two buttons, and a "Lights Toggle" beside a
@@ -393,11 +393,11 @@ export function splitToggleLabel(label: string): { base: string; word: string } 
 
 /**
  * The base a toggle button's pair is named after: its own cue slug with the
- * direction word taken off the end — `vcr_light_on` -> `vcr_light`.
+ * direction word taken off the end — `booth_light_on` -> `booth_light`.
  *
  * The SLUG is stripped rather than the label re-slugged, so a page
- * disambiguation the slug already carries survives ("stage_vcr_light_on" ->
- * "stage_vcr_light"). The import route names the two rules from this and the
+ * disambiguation the slug already carries survives ("stage_booth_light_on" ->
+ * "stage_booth_light"). The import route names the two rules from this and the
  * dialog shows the operator the same two names before they press Import; a
  * second copy of the rule is how the preview would come to disagree with what
  * is created.
@@ -412,7 +412,7 @@ export function togglePairSlug(slug: string, label: string): string {
  * ON/OFF pairs, matched WITHIN a page.
  *
  * Per page on purpose: "Conf TVs ON" exists on both the main auditorium's page
- * and the south auditorium's, and they are different televisions. Pairing across
+ * and the second auditorium's, and they are different televisions. Pairing across
  * pages would silently cross them, and the operator would only find out by
  * saying the cue out loud during setup.
  */
@@ -509,7 +509,7 @@ export function isSuggestedPair(pair: CompanionPair): boolean {
  *
  * A plain slug of the label is not unique, and this is not hypothetical: the
  * real Companion this was built against has "Conf TVs ON" on the main
- * auditorium's page and again on the south auditorium's, driving different
+ * auditorium's page and again on the second auditorium's, driving different
  * televisions. Two cues cannot share a name — the second would be refused on
  * import and one room would quietly have no cue — so a name used by more than
  * one offer is prefixed with the page.
@@ -528,7 +528,7 @@ export function isSuggestedPair(pair: CompanionPair): boolean {
  * "Projectors", which collides with neither half.
  *
  * Only the CLASHING offers grow a prefix. Naming every cue after its page would
- * make `ma_tvs_pjs_projectors_on` the normal case, which is a thing nobody will
+ * make `main_tvs_pjs_projectors_on` the normal case, which is a thing nobody will
  * say out loud.
  */
 export interface CueSlugs {
@@ -729,7 +729,7 @@ export function isCompanionVariableName(name: string): boolean {
 }
 
 /**
- * What Companion accepts as a CONNECTION LABEL — the name in `$(VCR-Light:power_state)`.
+ * What Companion accepts as a CONNECTION LABEL — the name in `$(Booth-Light:power_state)`.
  *
  * Narrower than a variable name: Companion sanitises a connection label to
  * letters, digits, `_` and `-`, with no dot. Capped for the same reason the
@@ -755,7 +755,7 @@ export type VariableRef =
  * Three spellings, and the bare one is the reason the other two exist:
  *
  *   `custom:projectors_state`        a custom variable, said explicitly
- *   `VCR-Overhead-Light:power_state` a MODULE variable on that connection
+ *   `Booth-Overhead-Light:power_state` a MODULE variable on that connection
  *   `projectors_state`               a custom variable — every binding written
  *                                    before module variables could be named,
  *                                    which must go on meaning what it meant

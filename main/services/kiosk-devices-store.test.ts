@@ -171,8 +171,8 @@ describe("releasing", () => {
 
 describe("recording what a probe saw", () => {
   test("new hardware facts are stored", () => {
-    const after = touch([dev()], "d1", { ip: "192.168.16.61", hostname: "pi-1", now: 1000 });
-    assert.equal(after[0].ip, "192.168.16.61");
+    const after = touch([dev()], "d1", { ip: "192.168.1.50", hostname: "pi-1", now: 1000 });
+    assert.equal(after[0].ip, "192.168.1.50");
     assert.equal(after[0].hostname, "pi-1");
   });
 

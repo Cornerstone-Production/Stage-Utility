@@ -90,7 +90,7 @@ export { STATE_ANY_OTHER };
 export interface StateBinding {
   /**
    * What to read: a custom variable (`projectors_state`, or `custom:` prefixed)
-   * or a module one (`VCR-Overhead-Light:power_state`). See parseVariableRef.
+   * or a module one (`Booth-Overhead-Light:power_state`). See parseVariableRef.
    */
   variable: string;
   /** The value that means on. Compared trimmed, case-sensitively. */
@@ -430,8 +430,8 @@ export function implicitStateBinding(onAction: Rule["action"]): StateBinding | n
 /**
  * Both halves press the SAME Companion button.
  *
- * A toggle button — one button, no OFF partner, "VCR Light ON" that is really
- * "VCR Light" — is imported as a pair whose two cues press it from both
+ * A toggle button — one button, no OFF partner, "Booth Light ON" that is really
+ * "Booth Light" — is imported as a pair whose two cues press it from both
  * directions, because a `script` in Home Assistant is a momentary switch that
  * snaps back and each tap toggles the light again. What tells the two
  * directions apart is the state variable, and nothing else: without one, Home

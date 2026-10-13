@@ -30,7 +30,7 @@ describe("the wire format survives a broadcast port", () => {
   });
 
   test("a reply round-trips", () => {
-    const r = { serverId: "srv-1", name: "FOH — Stage Utility", url: "http://192.168.16.61" };
+    const r = { serverId: "srv-1", name: "FOH — Stage Utility", url: "http://192.168.1.50" };
     assert.deepEqual(decodeReply(encodeReply(r)), r);
   });
 

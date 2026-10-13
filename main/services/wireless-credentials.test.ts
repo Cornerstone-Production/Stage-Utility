@@ -92,12 +92,12 @@ describe("mergeSecrets", () => {
 
   it("keeps the stored password when the form posts back the mask", () => {
     // Editing only the IP must not blank the password.
-    const next = mergeSecrets(SPECTERA, { host: "10.1.1.1", password: MASK }, stored);
+    const next = mergeSecrets(SPECTERA, { host: "10.0.0.2", password: MASK }, stored);
     assert.deepEqual(next, { password: "hunter2" });
   });
 
   it("keeps it when the patch does not mention the field at all", () => {
-    assert.deepEqual(mergeSecrets(SPECTERA, { host: "10.1.1.1" }, stored), { password: "hunter2" });
+    assert.deepEqual(mergeSecrets(SPECTERA, { host: "10.0.0.2" }, stored), { password: "hunter2" });
   });
 
   it("replaces it with a genuinely new value", () => {

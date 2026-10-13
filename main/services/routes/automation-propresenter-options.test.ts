@@ -101,20 +101,20 @@ async function withWarnings<T>(fn: () => Promise<T>): Promise<{ result: T; warni
 
 describe("GET /api/automation/propresenter-instances", () => {
   it("lists the primary even with no extras configured", async () => {
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     const r = await callRoute(automationRoutes, "/api/automation/propresenter-instances");
     assert.equal(r.status, 200);
-    assert.deepEqual(items(r.json), [{ value: "default", label: "MA" }]);
+    assert.deepEqual(items(r.json), [{ value: "default", label: "Main" }]);
   });
 
   it("lists the extras beside it, by id and display name", async () => {
-    propresenterManager.apply("MA", [
-      { id: "chapel", name: "Chapel", host: "127.0.0.1", port: DEAD_PORT, enabled: true },
+    propresenterManager.apply("Main", [
+      { id: "overflow", name: "Overflow", host: "127.0.0.1", port: DEAD_PORT, enabled: true },
     ]);
     const r = await callRoute(automationRoutes, "/api/automation/propresenter-instances");
     assert.deepEqual(items(r.json), [
-      { value: "default", label: "MA" },
-      { value: "chapel", label: "Chapel" },
+      { value: "default", label: "Main" },
+      { value: "overflow", label: "Overflow" },
     ]);
   });
 });
@@ -122,7 +122,7 @@ describe("GET /api/automation/propresenter-instances", () => {
 describe("GET /api/automation/propresenter-macros", () => {
   it("offers the names, with no suffix when there is only one instance", async () => {
     primaryAt(port);
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     const r = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
     assert.equal(r.status, 200);
     assert.deepEqual(items(r.json), [
@@ -133,7 +133,7 @@ describe("GET /api/automation/propresenter-macros", () => {
 
   it("an unreachable ProPresenter yields an EMPTY LIST, not an error", async () => {
     primaryAt(DEAD_PORT);
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     const r = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
     // 200 with nothing in it. A 500 here would close the rule editor for every
     // rule in the app, because the section fetches this on mount.
@@ -143,8 +143,8 @@ describe("GET /api/automation/propresenter-macros", () => {
 
   it("every instance being off is still a 200 with an empty list", async () => {
     primaryAt(DEAD_PORT);
-    propresenterManager.apply("MA", [
-      { id: "chapel", name: "Chapel", host: "127.0.0.1", port: DEAD_PORT, enabled: true },
+    propresenterManager.apply("Main", [
+      { id: "overflow", name: "Overflow", host: "127.0.0.1", port: DEAD_PORT, enabled: true },
     ]);
     const r = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
     assert.equal(r.status, 200);
@@ -154,16 +154,16 @@ describe("GET /api/automation/propresenter-macros", () => {
   it("one instance being off costs its macros, and does NOT mark the rest \"only\"", async () => {
     // GUARD. `instanceCount` counts instances with a target, INCLUDING the one
     // that did not answer — so every macro the reachable machine reported came
-    // back labelled "DOORS (MA only)". That is a positive false statement: it
-    // says the macro does not exist on the chapel machine, when the truth is
-    // that the chapel machine was not asked successfully. An operator reading it
+    // back labelled "DOORS (Main only)". That is a positive false statement: it
+    // says the macro does not exist on the overflow machine, when the truth is
+    // that the overflow machine was not asked successfully. An operator reading it
     // would go and create a macro that is already there.
     //
     // "Only" is a claim about the machines that ANSWERED, and it cannot be made
     // while the set is incomplete — so the suffix is suppressed outright.
     primaryAt(port);
-    propresenterManager.apply("MA", [
-      { id: "chapel", name: "Chapel", host: "127.0.0.1", port: DEAD_PORT, enabled: true },
+    propresenterManager.apply("Main", [
+      { id: "overflow", name: "Overflow", host: "127.0.0.1", port: DEAD_PORT, enabled: true },
     ]);
     const r = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
     assert.equal(r.status, 200);
@@ -183,13 +183,13 @@ describe("GET /api/automation/propresenter-macros", () => {
     // editor renders "Pick one…" and nothing else, and without this there is
     // nothing anywhere on screen or in the payload saying why.
     primaryAt(DEAD_PORT);
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     const r = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
     assert.equal(r.status, 200);
     assert.deepEqual(items(r.json), []);
     assert.deepEqual(
       (r.json as { unreachable?: string[] }).unreachable,
-      ["MA"],
+      ["Main"],
       "the editor has an empty list and nothing to say about it",
     );
   });
@@ -197,8 +197,8 @@ describe("GET /api/automation/propresenter-macros", () => {
   it("a name on both instances carries no suffix", async () => {
     primaryAt(port);
     // Both point at the same stub, so both report the same two macros.
-    propresenterManager.apply("MA", [
-      { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true },
+    propresenterManager.apply("Main", [
+      { id: "overflow", name: "Overflow", host: "127.0.0.1", port, enabled: true },
     ]);
     const r = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
     assert.deepEqual(items(r.json), [
@@ -224,8 +224,8 @@ describe("GET /api/automation/propresenter-macros", () => {
     propresenterService.stop();
     clearMacroCache();
 
-    propresenterManager.apply("MA", [
-      { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true },
+    propresenterManager.apply("Main", [
+      { id: "overflow", name: "Overflow", host: "127.0.0.1", port, enabled: true },
     ]);
     const before = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
     assert.deepEqual(
@@ -235,8 +235,8 @@ describe("GET /api/automation/propresenter-macros", () => {
     );
 
     // One save: pointed at the other machine AND switched off.
-    propresenterManager.apply("MA", [
-      { id: "chapel", name: "Chapel", host: "127.0.0.1", port: DEAD_PORT, enabled: false },
+    propresenterManager.apply("Main", [
+      { id: "overflow", name: "Overflow", host: "127.0.0.1", port: DEAD_PORT, enabled: false },
     ]);
     const after = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
 
@@ -245,7 +245,7 @@ describe("GET /api/automation/propresenter-macros", () => {
       [],
       "the machine the operator stopped using was read anyway, and its macros offered as this instance's",
     );
-    assert.deepEqual((after.json as { unreachable?: string[] }).unreachable, ["Chapel"]);
+    assert.deepEqual((after.json as { unreachable?: string[] }).unreachable, ["Overflow"]);
   });
 
   it("a ProPresenter that was never set up says NOTHING in the log", async () => {
@@ -257,7 +257,7 @@ describe("GET /api/automation/propresenter-macros", () => {
     propresenterService.setTarget(null, null);
     propresenterService.stop();
     clearMacroCache();
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     const r = await withWarnings(() =>
       callRoute(automationRoutes, "/api/automation/propresenter-macros"),
     );
@@ -271,22 +271,22 @@ describe("GET /api/automation/propresenter-macros", () => {
     // unreachable code: a machine that was set up and is off is a real failure
     // and has to leave something for an operator to read.
     primaryAt(DEAD_PORT);
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     const r = await withWarnings(() =>
       callRoute(automationRoutes, "/api/automation/propresenter-macros"),
     );
     const said = macroWarnings(r.warnings);
     assert.equal(said.length, 1, r.warnings.join(" | "));
-    assert.match(said[0], /\[propresenter\] macro list unavailable from MA/);
+    assert.match(said[0], /\[propresenter\] macro list unavailable from Main/);
   });
 
   it("an unconfigured instance does not mark the real one's macros as 'only'", async () => {
     // The primary is set up; the extra was added and left disabled, so it has no
-    // host. Counting it would label every real macro "(MA only)" — true of a
+    // host. Counting it would label every real macro "(Main only)" — true of a
     // machine that is off, a lie about one that does not exist.
     primaryAt(port);
-    propresenterManager.apply("MA", [
-      { id: "chapel", name: "Chapel", host: "", port: 0, enabled: false },
+    propresenterManager.apply("Main", [
+      { id: "overflow", name: "Overflow", host: "", port: 0, enabled: false },
     ]);
     const r = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
     assert.deepEqual(items(r.json), [
@@ -297,7 +297,7 @@ describe("GET /api/automation/propresenter-macros", () => {
 
   it("the value is the NAME, never the uuid", async () => {
     primaryAt(port);
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     const r = await callRoute(automationRoutes, "/api/automation/propresenter-macros");
     // A uuid is per-machine and dies on a re-import; a rule holding one would be
     // dead by Sunday. The stub's uuids are "u-1"/"u-2" precisely so this can say

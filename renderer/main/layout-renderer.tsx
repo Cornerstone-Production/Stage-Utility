@@ -2402,7 +2402,7 @@ function ChargerBattery({
       {bays.map((b) => {
         const bay = all.find((x) => x.id === b.id) ?? null;
         // The connection's name is the operator's own, so it still wins. `name` is
-        // the charger's DEVICE_ID ("MA: 5-8 · Bay 3") and only fills in where the
+        // the charger's DEVICE_ID ("RF: 5-8 · Bay 3") and only fills in where the
         // connection was left unnamed, which used to read "Charger 1 · Bay 3".
         const label =
           b.label ||

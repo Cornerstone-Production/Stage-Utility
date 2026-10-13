@@ -67,7 +67,7 @@ const PCO_ID = /^\d{1,20}$/;
 
 /**
  * An attachment id from `all_attachments`. Almost always a run of digits, but a
- * plan's stage plot comes back with a suffixed id: `84892470-stage`, observed on
+ * plan's stage plot comes back with a suffixed id: `50001234-stage`, observed on
  * a live plan in Oct 2026, listed as a "Plan file". The suffix is a short
  * lowercase word. Only attachment ids take this shape, which is why it is its own
  * check and not a loosening of PCO_ID: a service type or plan id with a suffix is

@@ -69,7 +69,7 @@ describe("/api/pco/attachment on a link Planning Center has already expired", ()
 // is faked, so the id that reaches Planning Center is the one asserted.
 describe("/api/pco/attachment for the plan's stage plot", () => {
   test("serves a file whose Planning Center id is suffixed", async (t) => {
-    const stagePlot = { id: "84892470-stage", filename: "2026.10.08 Stage Plot.pdf", contentType: "application/pdf", sourceLabel: "Plan file" };
+    const stagePlot = { id: "50001234-stage", filename: "2026.10.08 Stage Plot.pdf", contentType: "application/pdf", sourceLabel: "Plan file" };
     mock.method(stageController, "listPlanAttachments", async () => [
       { id: "84892001", filename: "Lyrics.pdf", contentType: "application/pdf", sourceLabel: "Item" },
       stagePlot,
@@ -83,7 +83,7 @@ describe("/api/pco/attachment for the plan's stage plot", () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       requested.push(String(input));
       if (String(input).includes("/open")) {
-        const body = { data: { id: "84892470-stage", type: "Attachment", attributes: { attachment_url: "https://s3.invalid/plot" } } };
+        const body = { data: { id: "50001234-stage", type: "Attachment", attributes: { attachment_url: "https://s3.invalid/plot" } } };
         return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
       }
       return new Response(payload, { status: 200 });
@@ -99,7 +99,7 @@ describe("/api/pco/attachment for the plan's stage plot", () => {
     assert.equal(r.status, 200, `the stage plot was not served: ${r.status} ${r.body}`);
     assert.equal(r.body, payload.toString());
     assert.ok(
-      requested.some((u) => u.endsWith("/plans/21/all_attachments/84892470-stage/open")),
+      requested.some((u) => u.endsWith("/plans/21/all_attachments/50001234-stage/open")),
       `Planning Center was never asked to open the suffixed id: ${requested.join(", ")}`,
     );
   });
@@ -137,11 +137,11 @@ describe("/api/pco/attachment and a file that changes", () => {
   const get = (inm?: string) => callRoute(proxyRoutes, "/api/pco/attachment?match=revisit", inm ? { headers: { "if-none-match": inm } } : {});
 
   test("a 200 carries an ETag, and If-None-Match with it is a 304 with no download", async (t) => {
-    const { seen } = setup(t, "84892470-stage");
+    const { seen } = setup(t, "50001234-stage");
     const first = await get();
     assert.equal(first.status, 200);
     const etag = first.headers["ETag"];
-    assert.match(etag, /^"84892470-stage\.t\d+"$/);
+    assert.match(etag, /^"50001234-stage\.t\d+"$/);
     assert.match(first.headers["Cache-Control"], /max-age=300/);
     assert.equal(seen.downloads, 1);
 

@@ -214,7 +214,7 @@ describe("stateBindingProblem", () => {
     // `<connection label>:<name>` is what Companion answers for at
     // /api/variable/<label>/<name>/value. A pair bound to a kasa plug's own
     // power_state needs no operator-maintained custom variable at all.
-    assert.equal(stateBindingProblem({ stateVariable: "VCR-Overhead-Light:power_state" }), null);
+    assert.equal(stateBindingProblem({ stateVariable: "Booth-Overhead-Light:power_state" }), null);
     assert.equal(stateBindingProblem({ stateVariable: "custom:projectors_state" }), null);
   });
 
@@ -224,7 +224,7 @@ describe("stateBindingProblem", () => {
     assert.match(String(why), /not a Companion variable/);
     // A dot is legal in a variable name and not in a connection label, so this
     // is neither half of anything Companion could answer for.
-    assert.match(String(stateBindingProblem({ stateVariable: "VCR.Light:power" })), /not a Companion/);
+    assert.match(String(stateBindingProblem({ stateVariable: "Booth.Light:power" })), /not a Companion/);
   });
 
   test("on and off values that are the same string are refused", () => {

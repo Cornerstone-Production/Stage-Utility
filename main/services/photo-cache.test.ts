@@ -34,7 +34,7 @@ describe("photo proxy host allowlist", () => {
       "http://192.168.1.1/admin/config",
       "http://10.0.0.5/",
       "http://169.254.169.254/latest/meta-data/",
-      "https://192.168.16.61:8788/api/log",
+      "https://192.168.1.50:8788/api/log",
     ]) {
       assert.equal(isAllowedPhotoUrl(u), false, u);
     }

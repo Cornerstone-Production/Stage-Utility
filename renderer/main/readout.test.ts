@@ -187,9 +187,9 @@ describe("a widget that has been made small", () => {
 describe("a uniform grid of tiles", () => {
   // Home is a grid of same-height tiles. Every card there carries a caption and
   // a sub-line except the clock, which has neither — so it took the whole budget
-  // and rendered at 52px in a row of 35px values. Henry's note, verbatim: "clock
+  // and rendered at 52px in a row of 35px values. The operator's note: the clock
   // on the homepage widget needs to be smaller to match the other widget text
-  // sizing."
+  // sizing.
   test("a caption-less tile gets the SAME value size as a three-line one", () => {
     const three = fitComposition(BOX, true, true, true);
     const bare = fitComposition(BOX, false, false, true);

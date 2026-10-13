@@ -912,9 +912,9 @@ describe("a service type's colour", () => {
   });
 
   test("is the same on Attendance and on Sound", () => {
-    // THE BUG Henry reported. Colours were the palette indexed by the tile
+    // THE BUG an operator reported. Colours were the palette indexed by the tile
     // sort, and the sort is busiest-first, so switching measure re-sorted and
-    // The Salt Company was blue on one and green on the other.
+    // The Gathering was blue on one and green on the other.
     return withTwoTypes(async (view) => {
       const before = colorsFor(view, "evening");
       assert.ok(before.line, "the evening line was not drawn, so this asserts nothing");

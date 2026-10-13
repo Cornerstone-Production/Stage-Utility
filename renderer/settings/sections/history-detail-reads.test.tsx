@@ -57,8 +57,8 @@ const iso = (hhmmss: string) => new Date(`${DAY}T${hhmmss}`).toISOString();
 function service(key: string, planTitle: string, start: string, end: string) {
   const timeline = {
     serviceKey: key,
-    serviceTypeId: "salt",
-    serviceTypeName: "The Salt Company",
+    serviceTypeId: "gathering",
+    serviceTypeName: "The Gathering",
     planId: key.split(":")[1],
     planTitle,
     seriesTitle: "Kickoff",
@@ -73,7 +73,7 @@ function service(key: string, planTitle: string, start: string, end: string) {
   };
   const attendance = {
     serviceKey: key,
-    serviceTypeId: "salt",
+    serviceTypeId: "gathering",
     serviceDate: DAY,
     planTitle,
     startedAt: iso(start),
@@ -97,8 +97,8 @@ function service(key: string, planTitle: string, start: string, end: string) {
   };
   return { key, timeline, attendance, spl };
 }
-const A = service("salt:plan-1:evening", "Evening", "20:15:00", "21:45:00");
-const B = service("salt:plan-2:late", "Late", "22:00:00", "23:00:00");
+const A = service("gathering:plan-1:evening", "Evening", "20:15:00", "21:45:00");
+const B = service("gathering:plan-2:late", "Late", "22:00:00", "23:00:00");
 const BY_KEY = new Map([A, B].map((s) => [s.key, s]));
 
 type DetailRead = "record" | "attendance" | "spl" | "baptisms";

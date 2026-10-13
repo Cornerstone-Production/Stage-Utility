@@ -101,7 +101,7 @@ describe("a split broadcasts the record it closes", () => {
     planId = `plan-${++n}`;
     (stageController as unknown as { getState(): unknown }).getState = () => ({
       serviceTypeId: "75953",
-      serviceTypeName: "The Salt Company",
+      serviceTypeName: "The Gathering",
       planId,
       planTitle: "Split Broadcast",
       planSeriesTitle: null,

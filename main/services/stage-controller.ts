@@ -1221,7 +1221,7 @@ export class StageController {
    * The DEFAULT side of a board has no plan, so there is no plan row to read a
    * type name off — and the type is not necessarily the one the screens are on.
    * Without this, another type's default was named with the LIVE type's name, in
-   * the save toast ("Saved the Cornerstone Youth default" for a Weekend board)
+   * the save toast ("Saved the Youth Night default" for a Weekend board)
    * and in the revert and promote confirmations.
    */
   private cachedTypeName(serviceTypeId: string | null): string | null {

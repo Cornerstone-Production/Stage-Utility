@@ -13,7 +13,7 @@ import { useResyncOn } from "../lib/use-resync-on";
 export const ALL_COLUMNS_LAYOUT_ID = "__all__";
 export const ALL_COLUMNS_SLUG = "all-columns";
 
-/** URL-friendly slug from a name ("The Salt Company" → "the-salt-company"). */
+/** URL-friendly slug from a name ("The Gathering" → "the-gathering"). */
 export function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "x";
 }

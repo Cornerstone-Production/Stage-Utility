@@ -13,7 +13,7 @@ import { copyText } from "../lib/clipboard";
 
 /** Where the Companion module lives. Not in the app's own repo — it ships to
  *  Companion separately, which is exactly why a link is worth having. */
-const MODULE_URL = "https://github.com/Cornerstone-Production/companion-module-cornerstone-stageutility";
+const MODULE_URL = "https://github.com/Cornerstone-Production/companion-module-stageutility-stageutility";
 
 function CopyField({ label, value }: { label: string; value: string }) {
   return (
@@ -98,9 +98,9 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
         <FieldContent>
           <FieldLabel>Bitfocus Companion</FieldLabel>
           <FieldDescription>
-            Add a <span className="text-gray-12 font-medium">Cornerstone Stage Utility</span>{" "}
-            connection in Bitfocus Companion and enter this server&apos;s IP and port below. No
-            password — it works on your local network.
+            Add a connection in Bitfocus Companion — search its connection list for{" "}
+            <span className="text-gray-12 font-medium">Stage Utility</span> — and enter this
+            server&apos;s IP and port below. No password — it works on your local network.
           </FieldDescription>
           {/* The module is the missing half: this panel told you what to type
               and never said where to get the thing you type it into. */}
@@ -112,7 +112,7 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
               rel="noreferrer"
               className="inline-flex items-center gap-1 text-accent hover:underline"
             >
-              companion-module-cornerstone-stageutility
+              companion-module-stageutility-stageutility
               <ExternalLinkIcon className="size-3" />
             </a>
             . Sideload it into Companion, then add the connection.

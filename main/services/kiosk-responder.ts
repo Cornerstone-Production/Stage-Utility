@@ -20,7 +20,7 @@ export interface ResponderOptions {
   serverId: string;
   /** Shown in Devices so a binding is attributable to a named server. */
   serverName: string;
-  /** How a device should reach us, e.g. "http://192.168.16.61". */
+  /** How a device should reach us, e.g. "http://192.168.1.50". */
   url: () => string;
   port?: number;
   /** This machine's MAC addresses, lower case. Read from the network interfaces

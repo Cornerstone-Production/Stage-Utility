@@ -37,11 +37,11 @@ const failure = { category: "error", level: "Connection Failure", message: null 
 describe("parseConnections", () => {
   test("reads the five fields off Companion's own shape", () => {
     const [c] = parseConnections([
-      { id: "abc123", label: "MA_HL_Projector", moduleId: "generic-pjlink", enabled: true, status: good },
+      { id: "abc123", label: "Main_Projector", moduleId: "generic-pjlink", enabled: true, status: good },
     ]);
     assert.deepEqual(c, {
       id: "abc123",
-      label: "MA_HL_Projector",
+      label: "Main_Projector",
       moduleId: "generic-pjlink",
       enabled: true,
       status: { category: "good", level: "ok", message: null },
@@ -57,7 +57,7 @@ describe("parseConnections", () => {
     const [c] = parseConnections([
       {
         id: "x",
-        label: "MA-Dante",
+        label: "Main-Dante",
         moduleId: "audinate-dantecontroller",
         enabled: false,
         status: { category: null, level: null, message: "Disabled" },
@@ -232,7 +232,7 @@ describe("the live install", () => {
     ...Array.from({ length: 30 }, (_, i) => entry(`ok${i}`, "generic-pjlink", true, good)),
     ...Array.from({ length: 6 }, (_, i) => entry(`bulb${i}`, "tplink-kasasmartbulb", true, connecting)),
     ...Array.from({ length: 5 }, (_, i) => entry(`cam${i}`, "red-rcp2", true, connecting)),
-    { id: "tv", label: "SA-HL-Stage-TV", moduleId: "vizio-smartcast", enabled: true, status: failure },
+    { id: "tv", label: "Stage-TV", moduleId: "vizio-smartcast", enabled: true, status: failure },
     ...Array.from({ length: 10 }, (_, i) => entry(`plug${i}`, "tplink-kasasmartplug", true, null)),
     ...Array.from({ length: 32 }, (_, i) => entry(`off${i}`, "vizio-smartcast", false, null)),
   ]);
@@ -254,7 +254,7 @@ describe("the live install", () => {
 
   // Worst first, commonest first, and the group of ONE is named. "1
   // vizio-smartcast" sends an operator to a list of twelve televisions;
-  // "SA-HL-Stage-TV" sends them to the one that is actually down. Six bulbs stay
+  // "Stage-TV" sends them to the one that is actually down. Six bulbs stay
   // a module and a count, because six device names on an hourly line is the
   // noise the grouping exists to avoid.
   test("the log line, worst first, commonest first, naming a group of one", () => {
@@ -262,7 +262,7 @@ describe("the live install", () => {
       connectionDetail(summariseConnections(live)),
       "12 of 52 connection(s) in error, 10 not reporting: " +
         "6 tplink-kasasmartbulb (Connecting), 5 red-rcp2 (Connecting), " +
-        "SA-HL-Stage-TV (Connection Failure), 10 tplink-kasasmartplug (not reporting)",
+        "Stage-TV (Connection Failure), 10 tplink-kasasmartplug (not reporting)",
     );
   });
 });

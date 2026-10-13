@@ -14,7 +14,7 @@ name: Coverage
 
 on:
   schedule:
-    # Mondays 11:00 UTC: early morning in Iowa, after the weekend's merges.
+    # Mondays 11:00 UTC: early morning US Central, after the weekend's merges.
     - cron: "0 11 * * 1"
   workflow_dispatch:
 

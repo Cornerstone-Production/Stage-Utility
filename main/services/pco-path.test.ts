@@ -30,18 +30,18 @@ test("a path part cannot be made outside pco-path.ts", () => {
 });
 
 // Planning Center gives a plan's stage plot an all_attachments id with a word on
-// the end ("84892470-stage", seen on a live plan). Accepting that for an
+// the end ("50001234-stage", seen on a live plan). Accepting that for an
 // attachment must not loosen any other id.
 test("an attachment id takes digits, or digits and one lowercase word", () => {
-  for (const ok of ["31", "84892470", "84892470-stage", "1-a", "1".repeat(20), `1-${"a".repeat(20)}`]) {
+  for (const ok of ["31", "50001234", "50001234-stage", "1-a", "1".repeat(20), `1-${"a".repeat(20)}`]) {
     assert.equal(isPcoAttachmentId(ok), true, ok);
     assert.equal(pcoAttachmentId("attachmentId", ok).value, ok);
   }
   const long = [`1-${"a".repeat(21)}`, "1".repeat(21)];
   for (const bad of [
-    "", "abc", "-stage", "84892470-", "84892470-Stage", "84892470-stage-x", "84892470_stage", "84892470-st4ge",
-    "../x", "84892470-stage/../../x", "84892470/stage", "84892470-stage?x=1", "84892470-stage%2F", " 84892470-stage",
-    "84892470-stage\n", "__proto__", ...long, 84892470, null, undefined, {},
+    "", "abc", "-stage", "50001234-", "50001234-Stage", "50001234-stage-x", "50001234_stage", "50001234-st4ge",
+    "../x", "50001234-stage/../../x", "50001234/stage", "50001234-stage?x=1", "50001234-stage%2F", " 50001234-stage",
+    "50001234-stage\n", "__proto__", ...long, 50001234, null, undefined, {},
   ]) {
     assert.equal(isPcoAttachmentId(bad), false, String(bad));
     assert.throws(() => pcoAttachmentId("attachmentId", bad), PcoUrlRefused);
@@ -49,7 +49,7 @@ test("an attachment id takes digits, or digits and one lowercase word", () => {
 });
 
 test("a suffixed id is an attachment id only: pcoId still refuses it", () => {
-  assert.throws(() => pcoId("planId", "84892470-stage"), PcoUrlRefused);
+  assert.throws(() => pcoId("planId", "50001234-stage"), PcoUrlRefused);
 });
 
 test("the refusal names the parameter and never the value", () => {
@@ -61,7 +61,7 @@ test("the refusal names the parameter and never the value", () => {
 
 test("a checked attachment id builds the URL", () => {
   assert.equal(
-    pcoUrl`/all_attachments/${pcoAttachmentId("attachmentId", "84892470-stage")}/open`,
-    "https://api.planningcenteronline.com/services/v2/all_attachments/84892470-stage/open",
+    pcoUrl`/all_attachments/${pcoAttachmentId("attachmentId", "50001234-stage")}/open`,
+    "https://api.planningcenteronline.com/services/v2/all_attachments/50001234-stage/open",
   );
 });

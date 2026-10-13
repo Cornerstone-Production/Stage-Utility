@@ -31,14 +31,14 @@ const teardown = installDom();
 };
 
 const DAY = "2026-09-17";
-const KEY = "salt:plan-1:evening";
+const KEY = "gathering:plan-1:evening";
 const iso = (hhmmss: string) => new Date(`${DAY}T${hhmmss}`).toISOString();
 
 function timeline() {
   return {
     serviceKey: KEY,
-    serviceTypeId: "salt",
-    serviceTypeName: "The Salt Company",
+    serviceTypeId: "gathering",
+    serviceTypeName: "The Gathering",
     planId: "plan-1",
     planTitle: "Evening",
     seriesTitle: "Kickoff",
@@ -61,7 +61,7 @@ function timeline() {
 function attendance() {
   return {
     serviceKey: KEY,
-    serviceTypeId: "salt",
+    serviceTypeId: "gathering",
     serviceDate: DAY,
     planTitle: "Evening",
     startedAt: iso("19:15:00"),
@@ -100,7 +100,7 @@ function baptisms() {
       startedAt: iso("20:45:00"),
       finishedAt: iso("20:52:00"),
       title: "Evening",
-      serviceTypeId: "salt",
+      serviceTypeId: "gathering",
       planId: "plan-1",
       serviceKey: KEY,
       people: [{ testimonyMs: 120_000, baptizeMs: 60_000 }],
@@ -315,7 +315,7 @@ describe("the History service page", () => {
       startedAt: iso("20:41:00"),
       finishedAt: iso("20:49:00"),
       title: "Evening",
-      serviceTypeId: "salt",
+      serviceTypeId: "gathering",
       planId: "plan-1",
       serviceKey: KEY,
       people: [
@@ -389,7 +389,7 @@ describe("the History service page", () => {
       startedAt: iso("20:41:00"),
       finishedAt: iso("20:49:00"),
       title: "Evening",
-      serviceTypeId: "salt",
+      serviceTypeId: "gathering",
       planId: "plan-1",
       serviceKey: KEY,
       people: [{ testimonyMs: 120_000, baptizeMs: 60_000 }],
@@ -475,7 +475,7 @@ describe("the History service page", () => {
       startedAt: iso("20:41:00"),
       finishedAt: iso("20:49:00"),
       title: "Evening",
-      serviceTypeId: "salt",
+      serviceTypeId: "gathering",
       planId: "plan-1",
       serviceKey: KEY,
       people: [{ testimonyMs: 60_000, baptizeMs: 30_000 }],
@@ -752,7 +752,7 @@ describe("the History service page", () => {
     // place for one. All three on its attendance line had drifted from the
     // card: peak and entries were swapped, and the average was taken over EVERY
     // sample — which is the bug `averageOccupancy` was written to fix, left
-    // behind in this copy. On the 17 Sep recording it printed "Avg in-room 781"
+    // behind in this copy. On one recorded service it printed "Avg in-room 781"
     // for a service whose Lowest was 933.
     const { buildReport } = await import("./service-history-section.js");
     const { averageOccupancy } = await import("./attendance-history-section.js");
@@ -787,7 +787,7 @@ describe("the History service page", () => {
         startedAt: iso("20:45:00"),
         finishedAt: iso("20:47:00"),
         title: "Evening",
-        serviceTypeId: "salt",
+        serviceTypeId: "gathering",
         planId: "plan-1",
         serviceKey: KEY,
         people: [{ testimonyMs: 60_000, baptizeMs: 0 }, { testimonyMs: 50_000, baptizeMs: 0 }],
@@ -814,7 +814,7 @@ describe("the History service page", () => {
         startedAt: iso("20:45:00"),
         finishedAt: iso("20:47:00"),
         title: "Evening",
-        serviceTypeId: "salt",
+        serviceTypeId: "gathering",
         planId: "plan-1",
         serviceKey: KEY,
         people: [{ testimonyMs: 60_000, baptizeMs: 0 }],
@@ -832,10 +832,10 @@ describe("the History service page", () => {
   // attendance-only "no items recorded" row (and an extra Trends point) the
   // instant `rows` recomputed, until the page was reopened.
   test("merging a mis-split service clears the source's row everywhere, not just from the timeline list", async (t) => {
-    const SOURCE_KEY = "salt:plan-2:early";
+    const SOURCE_KEY = "gathering:plan-2:early";
     const sourceTimeline = () => ({
       serviceKey: SOURCE_KEY,
-      serviceTypeId: "salt",
+      serviceTypeId: "gathering",
       serviceTypeName: "Weekend",
       planId: "plan-2",
       planTitle: "Early Service",
@@ -850,7 +850,7 @@ describe("the History service page", () => {
       ],
     });
     const sourceAttendance = () => ({
-      serviceKey: SOURCE_KEY, serviceTypeId: "salt", serviceDate: DAY, planTitle: "Early Service",
+      serviceKey: SOURCE_KEY, serviceTypeId: "gathering", serviceDate: DAY, planTitle: "Early Service",
       startedAt: iso("18:00:00"), endedAt: iso("18:30:00"),
       peakAttendance: 50, peakOccupancy: 40, minOccupancy: 10, totalAttendance: 50,
       lastAttendance: 50, lastOccupancy: 10, attendanceBaseline: 0,

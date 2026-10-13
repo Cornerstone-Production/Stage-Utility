@@ -325,7 +325,7 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
         "key": "username",
         "label": "Resi Email",
         "type": "text",
-        "placeholder": "you@church.org"
+        "placeholder": "you@example.org"
       },
       {
         "key": "password",

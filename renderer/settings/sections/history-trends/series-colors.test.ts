@@ -13,16 +13,16 @@ import { assignColorIndexes, colorForIndex, TREND_COLORS } from "./series-colors
 describe("assigning a colour to a service type", () => {
   test("an assigned type keeps its index however the list is reordered", () => {
     // THE BUG. Colours were `SERIES_COLORS[i]` over a busiest-first sort, so
-    // The Salt Company was blue on Attendance and green on Sound — the sort
+    // The Gathering was blue on Attendance and green on Sound — the sort
     // differs per measure — and a quiet type that had a loud week swapped with
     // its neighbour.
-    const first = assignColorIndexes({}, ["salt", "weekend"]);
-    const reordered = assignColorIndexes(first, ["weekend", "salt"]);
+    const first = assignColorIndexes({}, ["gathering", "weekend"]);
+    const reordered = assignColorIndexes(first, ["weekend", "gathering"]);
     assert.deepEqual(reordered, first, "the assignment moved when the order did");
     // And a type that stops recording, then comes back, comes back the same.
     const without = assignColorIndexes(first, ["weekend"]);
-    const back = assignColorIndexes(without, ["salt", "weekend", "midweek"]);
-    assert.equal(back.salt, first.salt, "a type that missed a range lost its colour");
+    const back = assignColorIndexes(without, ["gathering", "weekend", "midweek"]);
+    assert.equal(back.gathering, first.gathering, "a type that missed a range lost its colour");
     assert.equal(back.weekend, first.weekend);
   });
 

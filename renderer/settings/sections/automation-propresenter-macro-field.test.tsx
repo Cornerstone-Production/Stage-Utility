@@ -77,7 +77,7 @@ let MACRO_UNREACHABLE: string[] | null = null;
   } else if (url.includes("/api/automation/log")) body = { entries: [] };
   else if (url.includes("/api/automation/plan-items")) body = { items: [] };
   else if (url.includes("/api/automation/propresenter-instances")) {
-    body = { items: [{ value: "default", label: "MA" }] };
+    body = { items: [{ value: "default", label: "Main" }] };
   } else if (url.includes("/api/automation/propresenter-macros")) {
     body = MACRO_UNREACHABLE === null
       ? { items: MACRO_ITEMS }
@@ -185,9 +185,9 @@ describe("the ProPresenter macro field", () => {
   });
 
   test("carries the label the route built, including the instance suffix", async () => {
-    MACRO_ITEMS = [{ value: "DOORS", label: "DOORS (MA only)" }];
+    MACRO_ITEMS = [{ value: "DOORS", label: "DOORS (Main only)" }];
     await open();
-    assert.deepEqual(macroOptions(), ["|Pick one…", "DOORS|DOORS (MA only)"]);
+    assert.deepEqual(macroOptions(), ["|Pick one…", "DOORS|DOORS (Main only)"]);
   });
 
   test("a stored macro the booth machine did not report still shows, marked", async () => {
@@ -219,20 +219,20 @@ describe("the ProPresenter macro field", () => {
     // on screen anywhere saying why, so the operator read it as "this app has
     // forgotten my macros".
     MACRO_ITEMS = [];
-    MACRO_UNREACHABLE = ["Chapel"];
+    MACRO_UNREACHABLE = ["Overflow"];
     await open();
     assert.equal(
       optionNotice("propresenter-macros"),
-      "Chapel did not answer. A macro that only lives there is missing from this list.",
+      "Overflow did not answer. A macro that only lives there is missing from this list.",
     );
   });
 
   test("names every instance that did not answer, plural", async () => {
-    MACRO_UNREACHABLE = ["MA", "Chapel"];
+    MACRO_UNREACHABLE = ["Main", "Overflow"];
     await open();
     assert.equal(
       optionNotice("propresenter-macros"),
-      "MA, Chapel did not answer. A macro that only lives there is missing from this list.",
+      "Main, Overflow did not answer. A macro that only lives there is missing from this list.",
     );
   });
 
