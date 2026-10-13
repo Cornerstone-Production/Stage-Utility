@@ -50,7 +50,7 @@ interface SplitViewProps {
  * is the operator's most reliable exit from a console with no chrome.
  *
  * Do not reintroduce it. The reasoning above is the whole of it; the measured
- * write-up is docs/superpowers/research/2026-08-30-console-chrome-free.md,
+ * write-up is docs/research/2026-08-30-console-chrome-free.md,
  * which arrives with PR #385 and is not in this branch's tree yet.
  *
  * The sidebar subtree is wrapped in a SidebarChromeProvider so its items render

@@ -120,6 +120,16 @@ and the failures.
 "No docs needed" and "nothing worth logging" are both legitimate answers. Say
 which you chose, so the next reader knows it was a decision.
 
+## Plans and specs are private
+
+Design specs and implementation plans go in the private
+`Cornerstone-Production/stage-utility-plans` repo, checked out beside this one
+at `../stage-utility-plans` (`specs/`, `plans/`), never under `docs/` here. They
+carry decision notes, mockup links and local paths, and this repo is public.
+`docs/superpowers/` is gitignored so a plan written to a skill's default path
+cannot be committed by accident. Protocol research that code comments cite is
+public reference and lives in `docs/research/`.
+
 ## A fix to something that never shipped says so
 
 Before committing a `fix:` or `perf:`, ask: does the thing I am fixing exist on

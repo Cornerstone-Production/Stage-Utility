@@ -52,17 +52,18 @@ sensource-probe*.json
 # "decisions for you" section, and references to local tooling paths that exist
 # on no other machine.
 #
-# docs/superpowers/ was here and is now TRACKED again: the specs and plans are
-# how a change was decided and how it was carried out, and a reviewer reading a
-# PR should be able to read the plan it implements. They keep their task
-# checkboxes and their agent directive header; that is what they are.
+# Specs and plans live in the private stage-utility-plans repo, not here: they
+# carry decision notes, mockup links and local paths. Ignored so a plan an agent
+# writes to the default location cannot be committed by accident. Protocol
+# research that code cites is public, in docs/research/.
+docs/superpowers/
 docs/design-overhaul/
 DESIGN_TOKENS_PROPOSAL.md
 scripts/survival/.survival-*.log
 
 # .superpowers/ is an agent's own working ledger — which task it is on, which
-# commit each finished at. Unlike docs/superpowers/, it records the WORKING, not
-# the decision, and nothing in a PR review is better for having it.
+# commit each finished at. It records the WORKING, not the decision, and
+# nothing in a PR review is better for having it.
 .superpowers/
 
 # Screenshots taken while driving the app during development.
