@@ -243,7 +243,7 @@ Actions tab once the workflow is on `main`.
 
 Not every check runs on every pull request. The secret scan, the commit
 convention check and CodeQL run on all of them, and are required on `beta`.
-The build and tests skip a PR that touches only `docs/` and Markdown;
+The public-hygiene check (below) also runs on every one, docs-only included. The build and tests skip a PR that touches only `docs/` and Markdown;
 dependency review runs only when `package.json` or the lockfile changes; the
 updater survival matrix runs only for the updater, the installers and its own
 scripts; and the Mac output helper's Swift build and tests (`helper-macos.yml`, on a
@@ -351,3 +351,32 @@ Update `docs/` in the same commit as the change it describes. An integration get
 page in `docs/integrations/`; a feature that changes operator behavior gets a note
 wherever that behavior is documented. Docs that lag the code are worse than no docs,
 because they are believed.
+
+## Public hygiene
+
+This repository is public, so tracked files carry no real addresses, people or
+places. `node scripts/check-public-hygiene.mjs` reads every file `git ls-files`
+lists (binaries and lockfiles are skipped) and exits 1 on any of:
+
+| Rule | Fails on | Use instead |
+|---|---|---|
+| Private IPv4 | a 10/8, 172.16/12 or 192.168/16 address outside `192.168.1.x`, `10.0.0.x` and `192.168.0.x` | `192.168.1.50` for a machine on the LAN; `10.0.0.x` for a second network |
+| Email | an address not at `example.com`, `example.org` or `example.net` (or a subdomain), a reserved TLD (`.example`, `.test`, `.invalid`, `.localhost`) or `users.noreply.github.com`. Three addresses are allowed by name: `noreply@anthropic.com`, `git@github.com` and the RFC 2617 example `testrealm@host.com` | `someone@example.org` |
+| Home path | a macOS, Linux or Windows home-directory path whose user is not `x`, `op`, `pi`, `someone`, `<someone>` or `youruser` | `/Users/someone/...` |
+| Private term | a case-insensitive substring match against a list the repository keeps secret | a generic name: "The Gathering", "Main Room", `Main_Projector` |
+
+A finding prints as `path:line: rule`. A private-term finding prints
+`private term #N` — the entry's 1-based position in the list — and never the
+term; a file name that contains a term is printed with the term replaced by `***`.
+
+The list comes from the `PRIVATE_TERMS` repository secret in CI and, locally, from
+`PRIVATE_TERMS` in the environment and a `.private-terms` file at the repo root
+(git-ignored). One term per line; blank lines are ignored; environment entries are
+numbered before the file's. Choose terms that are not short fragments of ordinary
+words: matching is by substring, so a short first name also matches inside
+identifiers. With no list the check prints `PRIVATE_TERMS not set; checking generic
+rules only` and runs the first three rules, which is what a fork or a Dependabot PR
+sees, since neither can read the secret.
+
+A line containing `hygiene-allow` is skipped by every rule. Reserve it for a genuine
+exception, with the reason beside it.
