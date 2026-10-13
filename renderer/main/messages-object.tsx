@@ -164,7 +164,12 @@ function Feed({
   if (!known || !state || !shown) return null;
   if (shown.length === 0) return <Quiet>No messages for this screen&apos;s groups</Quiet>;
   return (
-    <div style={{ display: "grid", gap: "0.5em", marginTop: "0.54em", minHeight: 0 }}>
+    // `overflow: hidden` is what keeps the list in its own box. The card is a column
+    // of fixed height, so when the messages are taller than what is left this item
+    // shrinks (`minHeight: 0` lets it) and anything still visible overflowing it was
+    // painted over the buttons below. Clipped, the OLDEST message, last in the list,
+    // is the one that gives way.
+    <div style={{ display: "grid", gap: "0.5em", marginTop: "0.54em", minHeight: 0, overflow: "hidden" }}>
       {shown.map((m, i) => (
         <Message key={m.id} m={m} now={now} newest={i === 0} />
       ))}
@@ -218,7 +223,9 @@ function Replies({
   onAnswer: (target: StageMessage, text: string) => void;
 }) {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.46em", marginTop: "auto", paddingTop: "0.46em" }}>
+    // `flexShrink: 0`: the answer buttons keep their whole height and the feed above
+    // gives way, never the other way round.
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.46em", marginTop: "auto", paddingTop: "0.46em", flexShrink: 0 }}>
       <div className="text-fg-faint" style={{ width: "100%", fontSize: "0.58em" }}>
         {target
           ? `Answering: ${target.text}`

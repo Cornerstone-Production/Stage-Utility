@@ -225,6 +225,24 @@ describe("answering from a console", () => {
     assert.ok((c.textContent ?? "").includes("Answering: for the green room"), c.textContent ?? "");
   });
 
+  // jsdom measures nothing, so the overlap itself (the list drawn over the "Answering"
+  // line and the buttons when the card is shorter than its content) is checked in a
+  // browser. What a unit test can hold is the cause: the card is a fixed height column
+  // and the list is allowed to shrink (minHeight 0), so unless it CLIPS its own
+  // overflow its messages paint over the replies, and unless the replies refuse to
+  // shrink they are squeezed instead of the list.
+  test("the list clips its own overflow and the answer row never shrinks, so neither can draw over the other", () => {
+    const c = mount({ state: thread, interactive: true, screen: { outputId: "panel-1", groups: [GREEN] } });
+    const word = (t: string) => [...c.querySelectorAll("span, div")].find((e) => e.textContent === t) as HTMLElement;
+    const list = word("for the green room").parentElement!.parentElement!;
+    assert.equal(list.children.length, 2, "found the list of messages");
+    assert.equal(list.style.overflow, "hidden", "the list can draw outside its own box, over the answer buttons");
+    assert.equal(list.style.minHeight, "0px", "the list cannot shrink to make room");
+    const answers = word("Answering: for the green room").parentElement!;
+    assert.equal(answers.querySelectorAll("button").length, 3, "found the answer row");
+    assert.equal(answers.style.flexShrink, "0", "the answer row can be squeezed under the list");
+  });
+
   test("a wall display shows no buttons and no answering line", () => {
     const c = mount({ state: thread, interactive: false, screen: { outputId: "panel-1", groups: [GREEN] } });
     assert.deepEqual(buttons(c), []);
