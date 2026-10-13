@@ -28,7 +28,11 @@ set -euo pipefail
 
 SERVICE_NAME="stage-utility"
 UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
-PLIST_PATH="/Library/LaunchDaemons/com.cornerstone.${SERVICE_NAME}.plist"
+LAUNCHD_DIR="/Library/LaunchDaemons"
+# Current label first, then the one installers registered before the rename. An
+# install from either era is removed, and a box part-way through a migration has
+# both.
+LAUNCHD_LABELS=("app.stageutility.server" "com.cornerstone.${SERVICE_NAME}")
 LINUX_PREFIX="${STAGE_PREFIX:-/opt/stage-utility}"
 MACOS_PREFIX="${STAGE_PREFIX:-/usr/local/stage-utility}"
 FORMULAE=("stage-utility" "stage-utility-beta")
@@ -62,7 +66,12 @@ need_root() {
 
 FOUND=0
 DATA_DIRS=()
-note_data() { [ -n "${1:-}" ] && DATA_DIRS+=("$1"); }
+note_data() {
+  [ -n "${1:-}" ] || return 0
+  local d
+  for d in ${DATA_DIRS[@]+"${DATA_DIRS[@]}"}; do [ "$d" = "$1" ] && return 0; done
+  DATA_DIRS+=("$1")
+}
 
 # ── Homebrew ──────────────────────────────────────────────────────────────────
 # Deliberately NOT under sudo: brew refuses to run as root, and the agent is
@@ -141,17 +150,31 @@ remove_systemd() {
 # ── macOS: launchd daemon ─────────────────────────────────────────────────────
 remove_launchd() {
   [ "$(uname -s)" = "Darwin" ] || return 0
-  [ -f "$PLIST_PATH" ] || return 0
-  FOUND=1
-  need_root "Removing the launchd daemon"
+  local label plist loaded removed=""
+  for label in "${LAUNCHD_LABELS[@]}"; do
+    plist="${LAUNCHD_DIR}/${label}.plist"
+    # Loaded OR on disk: a plist deleted by hand leaves the job running, and a
+    # job booted out leaves its plist to start again at boot.
+    loaded=""
+    if launchctl print "system/${label}" >/dev/null 2>&1; then loaded=1; fi
+    [ -f "$plist" ] || [ -n "$loaded" ] || continue
+    FOUND=1
+    removed=1
+    need_root "Removing the launchd daemon"
 
-  note_data "$(sed -n 's:.*<key>STAGE_UTILITY_DATA</key><string>\(.*\)</string>.*:\1:p' "$PLIST_PATH" | head -n1)"
-  # bootout first, and it matters on its own: deleting the plist stops it
-  # returning at boot but leaves the running process serving until a restart.
-  log "launchd: stopping com.cornerstone.${SERVICE_NAME}"
-  run launchctl bootout "system/com.cornerstone.${SERVICE_NAME}" 2>/dev/null || true
-  log "launchd: removing ${PLIST_PATH}"
-  run rm -f "$PLIST_PATH"
+    if [ -f "$plist" ]; then
+      note_data "$(sed -n 's:.*<key>STAGE_UTILITY_DATA</key><string>\(.*\)</string>.*:\1:p' "$plist" | head -n1)"
+    fi
+    # bootout first, and it matters on its own: deleting the plist stops it
+    # returning at boot but leaves the running process serving until a restart.
+    log "launchd: stopping ${label}"
+    run launchctl bootout "system/${label}" 2>/dev/null || true
+    if [ -f "$plist" ]; then
+      log "launchd: removing ${plist}"
+      run rm -f "$plist"
+    fi
+  done
+  [ -n "$removed" ] || return 0
   remove_tree "$MACOS_PREFIX"
 }
 
