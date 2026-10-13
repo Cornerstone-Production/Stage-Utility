@@ -34,7 +34,7 @@ let replyGate: Promise<void> | null = null;
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const { toast } = await import("../components/ui/index.js");
 const React = (await import("react")).default;
-const { MessagesObject, groupNames, shownMessages } = await import("./messages-object.js");
+const { MessagesObject, groupBySender, groupNames, shownMessages } = await import("./messages-object.js");
 const { ageLabel } = await import("../lib/age-label.js");
 
 /** What the operator was told: toast.error is spied, not drawn. */
@@ -195,6 +195,41 @@ describe("a message's line", () => {
     }
   });
 
+  test("groupBySender: a run is consecutive messages from one sender, so A, A, B, A is three runs", () => {
+    const from = (n: number, who: string) => msg(n, [GREEN], { from: who });
+    const runs = groupBySender([from(1, "Alex"), from(2, "Alex"), from(3, "Jordan"), from(4, "Alex")]);
+    assert.deepEqual(
+      runs.map((run) => run.map((m) => m.text)),
+      [["message 1", "message 2"], ["message 3"], ["message 4"]],
+    );
+    assert.deepEqual(groupBySender([]), []);
+  });
+
+  test("groupBySender compares senders as they are signed, in any case", () => {
+    const runs = groupBySender([
+      msg(1, [GREEN], { from: "Sam Display" }),
+      msg(2, [GREEN], { from: "sam" }),
+      msg(3, [GREEN], { from: "Sam Screen" }),
+      msg(4, [GREEN], { from: "Sam Jr" }),
+    ]);
+    assert.deepEqual(runs.map((run) => run.length), [3, 1]);
+  });
+
+  test("a run names its sender and time once, from its first message, and the rest sit under it", () => {
+    // Newest first, as the widget lists them: 3 and 2 are from Alex, 1 is from Jordan.
+    const state = stateOf([
+      msg(1, [GREEN], { from: "Jordan", at: NOW - 9 * 60_000 }),
+      msg(2, [GREEN], { from: "Alex", at: NOW - 5 * 60_000 }),
+      msg(3, [GREEN], { from: "Alex Display", at: NOW - 2 * 60_000, replies: [{ id: "r1", at: NOW - 60_000, from: "Booth", text: "Copy" }] }),
+    ]);
+    const c = mount({ state });
+    const headers = [...c.querySelectorAll("small")].map((e) => e.textContent);
+    assert.deepEqual(headers, ["Alex Display · 2 min", "Jordan · 9 min"], "a sender line was repeated inside a run, or the time is not the first message's");
+    const text = c.textContent ?? "";
+    assert.ok(text.indexOf("message 3") < text.indexOf("message 2") && text.indexOf("message 2") < text.indexOf("Jordan"), text);
+    assert.ok(text.includes("Booth: Copy"), "a reply under a message in a run is unaffected");
+  });
+
   test("ageLabel", () => {
     assert.equal(ageLabel(NOW, NOW - 10_000), "now");
     assert.equal(ageLabel(NOW, NOW + 5_000), "now", "a message stamped ahead of the clock is never negative");
@@ -233,12 +268,12 @@ describe("answering from a console", () => {
   // shrink they are squeezed instead of the list.
   test("the list clips its own overflow and the answer row never shrinks, so neither can draw over the other", () => {
     const c = mount({ state: thread, interactive: true, screen: { outputId: "panel-1", groups: [GREEN] } });
-    const word = (t: string) => [...c.querySelectorAll("span, div")].find((e) => e.textContent === t) as HTMLElement;
-    const list = word("for the green room").parentElement!.parentElement!;
-    assert.equal(list.children.length, 2, "found the list of messages");
+    // The card is the heading, the list, then the answer row, in that order.
+    const [heading, list, answers] = [...c.firstElementChild!.children] as HTMLElement[];
+    assert.equal(heading.textContent, "Messages");
+    assert.ok(list.textContent!.includes("for the green room"), "found the list of messages");
     assert.equal(list.style.overflow, "hidden", "the list can draw outside its own box, over the answer buttons");
     assert.equal(list.style.minHeight, "0px", "the list cannot shrink to make room");
-    const answers = word("Answering: for the green room").parentElement!;
     assert.equal(answers.querySelectorAll("button").length, 3, "found the answer row");
     assert.equal(answers.style.flexShrink, "0", "the answer row can be squeezed under the list");
   });

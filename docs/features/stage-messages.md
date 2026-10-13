@@ -198,7 +198,11 @@ with every reply under its message.
 The **Messages** [widget](../reference/widgets.md#control) draws the newest three
 messages sent to Everyone or to a group it follows: the newest large, the older two
 smaller and muted, each with its sender and how long ago above it and the latest
-reply in green below. Ages are counted against the server's clock.
+reply in green below. Consecutive messages from the same sender share one sender
+line, showing the time of the first of them, so a run of three from one person is
+one heading and three messages. Ages are counted against the server's clock.
+When the messages are taller than the widget, the oldest is cut off rather than
+drawn over the reply buttons.
 
 Which groups it follows is its **Groups** setting in the layout editor's inspector:
 

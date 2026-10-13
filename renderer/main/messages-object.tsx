@@ -26,7 +26,7 @@
 
 import { useState, type CSSProperties } from "react";
 
-import { messageReaches, widgetGroups, type MessageGroup, type MessagesState, type StageMessage } from "@main/types/messages";
+import { messageReaches, senderLabel, widgetGroups, type MessageGroup, type MessagesState, type StageMessage } from "@main/types/messages";
 import { invoke } from "../lib/api";
 import { ageLabel } from "../lib/age-label";
 import { reportActionFailure } from "./report-action-failure";
@@ -38,6 +38,24 @@ export const MESSAGES_SHOWN = 3;
 /** The newest messages that reached these groups, newest first. */
 export function shownMessages(state: MessagesState, groups: readonly string[]): StageMessage[] {
   return state.messages.filter((m) => messageReaches(m.to, groups)).slice(-MESSAGES_SHOWN).reverse();
+}
+
+/**
+ * Consecutive messages from the same sender as runs, in the order given: A, A, B, A
+ * is three runs. Senders are compared as they are signed (senderLabel, any case), so
+ * "Sam Display" and "sam" are one sender. A run's header is drawn once, from its
+ * first message; the messages after it sit under it without saying who sent them.
+ */
+export function groupBySender(messages: readonly StageMessage[]): StageMessage[][] {
+  const runs: StageMessage[][] = [];
+  let last = "";
+  for (const m of messages) {
+    const who = senderLabel(m.from).toLowerCase();
+    if (runs.length > 0 && who === last) runs[runs.length - 1].push(m);
+    else runs.push([m]);
+    last = who;
+  }
+  return runs;
 }
 
 /** "Everyone", "Stage or Everyone", "Stage, Booth or Everyone". */
@@ -170,8 +188,9 @@ function Feed({
     // painted over the buttons below. Clipped, the OLDEST message, last in the list,
     // is the one that gives way.
     <div style={{ display: "grid", gap: "0.5em", marginTop: "0.54em", minHeight: 0, overflow: "hidden" }}>
-      {shown.map((m, i) => (
-        <Message key={m.id} m={m} now={now} newest={i === 0} />
+      {groupBySender(shown).map((run) => (
+        // The newest message of all is the large one: the first of the first run.
+        <Run key={run[0].id} run={run} now={now} newest={run[0] === shown[0]} />
       ))}
     </div>
   );
@@ -181,20 +200,40 @@ function Quiet({ children }: { children: string }) {
   return <div className="text-fg-faint" style={{ marginTop: "0.54em", fontSize: "0.81em" }}>{children}</div>;
 }
 
-function Message({ m, now, newest }: { m: StageMessage; now: number; newest: boolean }) {
+/**
+ * A run of messages from one sender: who and when once, from the run's first
+ * message, then each message under it. Only the newest message of all is large; an
+ * older one in the same run is as small as any other older one.
+ */
+function Run({ run, now, newest }: { run: StageMessage[]; now: number; newest: boolean }) {
+  const first = run[0];
+  // The header is as large as the message it heads.
+  const f = newest ? 1 : 0.81;
+  return (
+    <div style={{ overflowWrap: "anywhere" }}>
+      {/* The sender line is as faint on an older message as on the newest, and the
+          reply keeps its green: only the words of an older message are muted. */}
+      <small style={{ display: "block", fontSize: `${0.58 * f}em`, opacity: 0.33, marginBottom: `${0.08 * f}em` }}>
+        {first.from} &middot; {ageLabel(now, first.at)}
+      </small>
+      <div style={{ display: "grid", gap: "0.3em" }}>
+        {run.map((m, i) => (
+          <Message key={m.id} m={m} large={newest && i === 0} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Message({ m, large }: { m: StageMessage; large: boolean }) {
   // Older ones are smaller and muted, and every figure inside is written against
   // the base so they keep the mockup's proportions at either size.
-  const f = newest ? 1 : 0.81;
+  const f = large ? 1 : 0.81;
   const em = (x: number) => `${x / f}em`;
   const reply = m.replies.at(-1);
   return (
-    <div style={{ fontSize: `${f}em`, overflowWrap: "anywhere" }}>
-      {/* The sender line is as faint on an older message as on the newest, and the
-          reply keeps its green: only the words of an older message are muted. */}
-      <small style={{ display: "block", fontSize: em(0.58), opacity: 0.33, marginBottom: em(0.08) }}>
-        {m.from} &middot; {ageLabel(now, m.at)}
-      </small>
-      <span style={{ opacity: newest ? 1 : 0.6 }}>{m.text}</span>
+    <div style={{ fontSize: `${f}em` }}>
+      <span style={{ opacity: large ? 1 : 0.6 }}>{m.text}</span>
       {reply && (
         <span className="text-live-11" style={{ display: "block", fontSize: em(0.62), marginTop: em(0.12) }}>
           {reply.from}: {reply.text}
