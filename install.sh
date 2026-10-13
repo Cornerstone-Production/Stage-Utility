@@ -401,6 +401,18 @@ else
   if [ -f "${LAUNCHD_DIR}/${LEGACY_LAUNCHD_LABEL}.plist" ] \
      || launchctl print "system/${LEGACY_LAUNCHD_LABEL}" >/dev/null 2>&1; then
     log "launchd: migrating ${LEGACY_LAUNCHD_LABEL} to ${LAUNCHD_LABEL}"
+    # The new plist is written from THIS run's settings, so a custom data
+    # directory or port the old one carried is lost unless it is passed again.
+    # Say what the old one had, and where this run differs, before it is gone.
+    LEGACY_PLIST="${LAUNCHD_DIR}/${LEGACY_LAUNCHD_LABEL}.plist"
+    if [ -f "$LEGACY_PLIST" ]; then
+      OLD_DATA="$(sed -n 's:.*<key>STAGE_UTILITY_DATA</key><string>\(.*\)</string>.*:\1:p' "$LEGACY_PLIST" | head -n1)"
+      OLD_PORT="$(sed -n 's:.*<key>STAGE_UTILITY_PORT</key><string>\(.*\)</string>.*:\1:p' "$LEGACY_PLIST" | head -n1)"
+      log "launchd: the old daemon used data directory ${OLD_DATA:-?} and port ${OLD_PORT:-?}"
+      if { [ -n "$OLD_DATA" ] && [ "$OLD_DATA" != "$DATA" ]; } || { [ -n "$OLD_PORT" ] && [ "$OLD_PORT" != "$PORT" ]; }; then
+        warn "This run will use data directory ${DATA} and port ${PORT}, not the old daemon's. Your configuration is still in ${OLD_DATA:-the old data directory}; to keep using it, re-run with STAGE_DATA=${OLD_DATA:-<old path>} STAGE_PORT=${OLD_PORT:-<old port>}."
+      fi
+    fi
     launchctl bootout "system/${LEGACY_LAUNCHD_LABEL}" >/dev/null 2>&1 || true
     for _ in $(seq 1 25); do
       launchctl print "system/${LEGACY_LAUNCHD_LABEL}" >/dev/null 2>&1 || break
@@ -409,8 +421,10 @@ else
     if launchctl print "system/${LEGACY_LAUNCHD_LABEL}" >/dev/null 2>&1; then
       die "Could not stop the old launchd daemon ${LEGACY_LAUNCHD_LABEL}. Run: sudo launchctl bootout system/${LEGACY_LAUNCHD_LABEL}   then re-run this installer."
     fi
-    rm -f "${LAUNCHD_DIR}/${LEGACY_LAUNCHD_LABEL}.plist"
-    log "launchd: removed ${LAUNCHD_DIR}/${LEGACY_LAUNCHD_LABEL}.plist"
+    if [ -f "$LEGACY_PLIST" ]; then
+      rm -f "$LEGACY_PLIST"
+      log "launchd: removed ${LEGACY_PLIST}"
+    fi
   fi
   cat > "${LAUNCHD_DIR}/${LAUNCHD_LABEL}.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
