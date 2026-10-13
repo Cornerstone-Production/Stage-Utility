@@ -51,8 +51,8 @@ export function planLabel(
  * "the Weekend" / "The Gathering" / "the service type".
  *
  * A service type's name is whatever somebody typed into Planning Center, and
- * some of them open with an article — five different strings said "the The Salt
- * Company default". `capital` is for a sentence that starts with it.
+ * some of them open with an article — five different strings said
+ * "the The Gathering default". `capital` is for a sentence that starts with it.
  *
  * ONE copy, because there are five callers: the save toast, the revert
  * confirmation, the promote confirmation, the promote toast and the preview
