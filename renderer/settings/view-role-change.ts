@@ -1,21 +1,17 @@
 // Changing what a view is for changes every screen showing it, so the operator
 // is told which screens before it happens.
 //
-// The server makes the whole change as one rolled-back call (POST
+// The server makes the change as one rolled-back call (POST
 // /api/views/:id/surface); this is the question asked first, and asked again
 // when the server says the screens changed while it was open. A function
 // rather than a few lines in the settings hook so that what it asks, and that
 // declining sends nothing, are driven rather than read off the source.
 
-import { outputMode, surfaceForMode, type ViewSurface } from "@main/types/views";
+import { screensShowing, viewSurface, type ViewSurface } from "@main/types/views";
 import type { StageState } from "@main/types/stage";
 import type { ConfirmOptions } from "../components/ui";
 import type { ApiError } from "../lib/api";
-
-/** "A", "A and B", "A, B and C". */
-function nameList(names: string[]): string {
-  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
+import { listNames, roleQuestionTitle, viewKindLabel } from "./screen-role-confirm";
 
 /** One screen a change would make: the id the server is sent, the name the
  *  operator is shown. */
@@ -25,15 +21,17 @@ export interface ChangedScreen {
 }
 
 /**
- * The screens that showing `viewId` as `surface` would change: the ones whose
- * role does not already match. A screen already as asked is not named, because
- * nothing happens to it.
+ * The screens that making `viewId` a `surface` would change: every screen showing
+ * it, since a screen's role is its view's surface. None when the view already is
+ * one, because nothing happens then.
  */
-export function screensChangedBy(state: Pick<StageState, "outputs"> | undefined, viewId: string, surface: ViewSurface): ChangedScreen[] {
-  return (state?.outputs ?? [])
-    .filter((o) => o.viewId === viewId && surfaceForMode(outputMode(o)) !== surface)
-    .map((o) => ({ id: o.id, name: o.name || o.id }));
+export function screensChangedBy(state: Pick<StageState, "views" | "outputs"> | undefined, viewId: string, surface: ViewSurface): ChangedScreen[] {
+  const view = state?.views.find((v) => v.id === viewId);
+  if (!view || viewSurface(view) === surface) return [];
+  return screensShowing(viewId, state?.outputs ?? []).map((o) => ({ id: o.id, name: o.name || o.id }));
 }
+
+export { expectedSurface } from "./screen-role-confirm";
 
 /** What to ask before changing these screens, or null when there is none to
  *  ask about. `again` says the list changed since the operator was last asked. */
@@ -44,24 +42,18 @@ export function viewRoleQuestion(
   { again = false }: { again?: boolean } = {},
 ): ConfirmOptions | null {
   if (screens.length === 0) return null;
-  const one = screens.length === 1;
-  const names = nameList(screens);
+  const many = screens.length > 1;
+  const names = listNames(screens);
   const lead = again ? "The screens showing it changed while you were deciding. " : "";
-  return surface === "console"
-    ? {
-        title: `Make "${viewName}" a control surface?`,
-        message: lead + (one
-          ? `${names} will become a control surface. Anyone at it can press its buttons.`
-          : `${names} will become control surfaces. Anyone at them can press their buttons.`),
-        confirmLabel: one ? "Make it a control surface" : "Make them control surfaces",
-      }
-    : {
-        title: `Make "${viewName}" a wall display?`,
-        message: lead + (one
-          ? `${names} will become a wall display. Its buttons will stop working.`
-          : `${names} will become wall displays. Their buttons will stop working.`),
-        confirmLabel: one ? "Make it a wall display" : "Make them wall displays",
-      };
+  return {
+    title: roleQuestionTitle(viewName, surface, "view"),
+    message:
+      lead +
+      (surface === "console"
+        ? `Buttons will work on ${names}. Anyone standing at ${many ? "those screens" : "it"} can press them.`
+        : `${names} ${many ? "become" : "becomes"} read-only, and it leaves the sidebar.`),
+    confirmLabel: viewKindLabel(surface),
+  };
 }
 
 /** The screens a 409 `screens-changed` says would change now, or null for any

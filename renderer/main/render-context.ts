@@ -51,16 +51,15 @@ export function layoutEditingLive(ctx: RenderContext): boolean {
 }
 
 /**
- * The context a kiosk page is rendering in, from the Output it is serving.
- *
- * A preview is always `display`: it is a picture of what a screen shows, and a
- * preview whose buttons fired for real would mean the Screens page could
- * advance the service by being looked at.
+ * The context a kiosk page renders in: `panel` on a screen whose view is a
+ * console, `display` on any other. A preview is always `display`: it is a picture
+ * of what a screen shows, and a preview whose buttons fired for real would mean
+ * the Screens page could advance the service by being looked at.
  */
 export function contextForOutput(
-  outputMode: "display" | "panel" | undefined,
+  viewIsConsole: boolean,
   isPreview: boolean,
 ): RenderContext {
   if (isPreview) return "display";
-  return outputMode === "panel" ? "panel" : "display";
+  return viewIsConsole ? "panel" : "display";
 }

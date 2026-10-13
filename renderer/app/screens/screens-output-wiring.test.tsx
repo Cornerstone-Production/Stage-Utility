@@ -169,7 +169,7 @@ async function openSettings(screenName: string): Promise<void> {
   });
 }
 
-const panel = () => within(screen.getByRole("complementary", { name: "Screen settings" }));
+const panel = () => within(screen.getByRole("complementary", { name: "Settings" }));
 const rotation = () => within(panel().getByRole("group", { name: "Rotation" }));
 
 describe("Rotation and Format, from the panel to the card", () => {
@@ -211,15 +211,14 @@ describe("a Not set up yet output, set up as a new screen", () => {
   test("is named for the output, not for the Mac it shares with its siblings", async () => {
     await mountScreens();
     await click(await screen.findByRole("button", { name: "Set up as a new screen" }));
-    await click(panel().getByRole("button", { name: "Next" }));
-    await click(panel().getByRole("button", { name: "Next" }));
     assert.equal((panel().getByLabelText("Name") as HTMLInputElement).value, "SDI 2 · Card A");
+    await click(panel().getByRole("button", { name: "Next" }));
     await click(panel().getByRole("button", { name: "Create screen" }));
     const claims = writes.filter((w) => w.url === "/api/devices/claim");
     assert.deepEqual(claims, [{
       method: "POST",
       url: "/api/devices/claim",
-      body: { deviceId: "n.sdi-2", outputId: null, name: "SDI 2 · Card A", mode: "display" },
+      body: { deviceId: "n.sdi-2", outputId: null, name: "SDI 2 · Card A", newView: "wall" },
     }]);
   });
 });

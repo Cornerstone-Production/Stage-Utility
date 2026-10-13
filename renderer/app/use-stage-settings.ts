@@ -21,7 +21,7 @@
 //     Settings is routes inside the app rather than its own window
 
 import { useState, useEffect } from "react";
-import type { CreateScreenInput } from "@main/types/views";
+import type { CreateScreenInput, ViewSurface } from "@main/types/views";
 import type { Rotation } from "@main/types/output-format";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
@@ -35,7 +35,7 @@ import { changeViewRole } from "../settings/view-role-change";
 import { confirmDiscardSlotEdits, useSlotsTarget } from "../settings/sections/slots-target-pill";
 import { registerTargetGuard } from "../settings/sections/editing-target";
 import { useSlotsPreview } from "../settings/sections/slots-preview-target";
-import type { SectionHandlers } from "../settings/types";
+import type { CreateScreenOutcome, RemoveViewOutcome, SectionHandlers } from "../settings/types";
 import {
   useStageStateQuery,
   useServiceTypes,
@@ -44,6 +44,7 @@ import {
   useLayoutTemplates,
   useSlotPresets,
   useUpdateStatus,
+  QUERY_KEYS,
 } from "./queries";
 import { markUpdatePending } from "./update-lifecycle";
 import { screensListViews } from "@main/services/home-view";
@@ -534,20 +535,37 @@ export function useStageSettings(pinnedViewId?: string) {
     await writeState("views:rename", { id, name }, { fail: "Failed to rename view" });
   }
 
-  async function handleDuplicateView(id: string) {
+  /** Resolves the copy's id, or null when it could not be made (already toasted). */
+  async function handleDuplicateView(id: string): Promise<string | null> {
     try {
-      const next = await ipc<StageState>("views:duplicate", { id });
+      // The answer is the state and the id of the copy this call made.
+      const { viewId, ...next } = await ipc<StageState & { viewId?: string }>("views:duplicate", { id });
       queryClient.setQueryData(["stage:getState"], next);
-      const created = next.views?.[next.views.length - 1];
-      if (created) setSelectedViewId(created.id);
+      if (viewId) setSelectedViewId(viewId);
       toast.success("View duplicated.");
+      return viewId ?? null;
     } catch (err) {
       toast.error(`Failed to duplicate view: ${errorMessage(err)}`);
+      return null;
     }
   }
 
-  async function handleRemoveView(id: string) {
-    await writeState("views:remove", { id }, { fail: "Failed to remove view" });
+  /** Resolves whether the view is gone. A failure is toasted here; the answer is for
+   *  a caller that does more after it (removing a screen AND its view). With
+   *  `ifUnshown`, a screen showing the view is not a failure: the server refuses and
+   *  the screens come back in `shownOn` for the caller to say. */
+  async function handleRemoveView(id: string, opts: { ifUnshown?: boolean } = {}): Promise<RemoveViewOutcome> {
+    try {
+      const next = await ipc<StageState>("views:remove", { id, ...(opts.ifUnshown ? { ifUnshown: true } : {}) });
+      queryClient.setQueryData(["stage:getState"], next);
+      return { removed: true };
+    } catch (err) {
+      const e = err as ApiError;
+      const screens = e.code === "view-shown" && Array.isArray(e.body?.screens) ? (e.body.screens as { id: string; name?: string }[]) : null;
+      if (screens) return { removed: false, shownOn: screens.map((s) => s.name || s.id) };
+      toast.error(`Failed to remove view: ${errorMessage(err)}`);
+      return { removed: false };
+    }
   }
 
   async function handleSetViewKind(id: string, kind: ViewKind) {
@@ -729,8 +747,19 @@ export function useStageSettings(pinnedViewId?: string) {
 
   // ── Outputs (physical screens + routing) ─────────────────────────────
   /**
+   * A refused create or claim, as the outcome the panel shows. The server holds either
+   * to the kind of view the operator was shown; when that changed, the views are read
+   * again so the role line says what the view is now.
+   */
+  function createRefusal(err: unknown): CreateScreenOutcome {
+    const viewChanged = (err as ApiError).code === "surface-changed";
+    if (viewChanged) void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.stageState });
+    return { refused: errorMessage(err), outputId: null, ...(viewChanged ? { viewChanged } : {}) };
+  }
+
+  /**
    * Make a screen from the answers the Screen settings panel collected. Resolves
-   * with the reason it was refused, or null when it was made.
+   * the id of the screen made, or why it was refused.
    *
    * Returned rather than toasted: the panel keeps its answers open after a
    * refusal (a taken friendly link, a view that does not fit) and says why where
@@ -738,13 +767,28 @@ export function useStageSettings(pinnedViewId?: string) {
    * the server validates before it writes and puts back what it made if a later
    * step fails.
    */
-  async function handleCreateScreen(input: CreateScreenInput): Promise<string | null> {
+  async function handleCreateScreen(input: CreateScreenInput): Promise<CreateScreenOutcome> {
     try {
-      const next = await ipc<StageState>("outputs:add", { ...input });
+      // The answer is the state and the id of the screen this call made.
+      const { outputId, ...next } = await ipc<StageState & { outputId?: string }>("outputs:add", { ...input });
       queryClient.setQueryData(["stage:getState"], next);
-      return null;
+      return { refused: null, outputId: outputId ?? null };
     } catch (err) {
-      return errorMessage(err);
+      return createRefusal(err);
+    }
+  }
+
+  /**
+   * Make a screen for a waiting device and bind the device to it, as one call: the
+   * server takes the screen back if the binding fails. The answer is the id of the
+   * screen made, not the state.
+   */
+  async function handleClaimDevice(deviceId: string, input: CreateScreenInput): Promise<CreateScreenOutcome> {
+    try {
+      const claimed = await ipc<{ outputId?: string }>("devices:claim", { deviceId, outputId: null, ...input });
+      return { refused: null, outputId: claimed?.outputId ?? null };
+    } catch (err) {
+      return createRefusal(err);
     }
   }
 
@@ -770,8 +814,13 @@ export function useStageSettings(pinnedViewId?: string) {
 
   /** Optimistic so the controlled <Select> shows the new view at once instead
    *  of snapping back to the cached one while the request is in flight. */
-  async function handleSetOutputView(id: string, viewId: string | null) {
-    await setOutputField("outputs:setView", id, { viewId }, "Failed to route display");
+  async function handleSetOutputView(id: string, viewId: string | null, expectSurface?: ViewSurface) {
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { viewId }) }),
+      () => ipc<StageState>("outputs:setView", { id, viewId, ...(expectSurface ? { expectSurface } : {}) }),
+      "Failed to route display",
+    );
   }
 
   async function handleSetOutputLocked(id: string, locked: boolean) {
@@ -791,25 +840,6 @@ export function useStageSettings(pinnedViewId?: string) {
   /** Put one screen in message groups. The chips under the card's name follow. */
   async function handleSetOutputGroups(id: string, groups: string[]) {
     await setOutputField("outputs:setGroups", id, { groups }, "Failed to update the screen's groups");
-  }
-
-  /**
-   * Change one screen between a wall display and a control surface WITHOUT
-   * changing any other screen. One server call: the copy of a shared view, the
-   * role, the view's kind and the pointing are up to four writes, which the
-   * server orders for its guards and puts back if one fails.
-   *
-   * NOT optimistic. The server refuses some of these (a shared view with neither
-   * a copy nor another view, a view that cannot be a control surface), and an
-   * optimistic flip would show the change happening and then silently undo it.
-   * The refusal is the useful part; it says what to do instead.
-   */
-  async function handleSetOutputRole(
-    id: string,
-    mode: "display" | "panel",
-    opts: { copyView?: boolean; viewId?: string } = {},
-  ): Promise<boolean> {
-    return writeState("outputs:setRole", { id, mode, ...opts }, { fail: "Failed to change the screen's role" });
   }
 
   /** List a control surface's view in the sidebar, or keep it out. Optimistic:
@@ -843,18 +873,17 @@ export function useStageSettings(pinnedViewId?: string) {
   }
 
   /**
-   * Change what a View is for, and EVERY screen showing it: the view card's
-   * deliberate "all of them" path. (One screen's role is handleSetOutputRole,
-   * which never changes another screen.)
+   * Change what a View is for, and with it EVERY screen showing it: the view
+   * card's deliberate "all of them" path. A screen is a control surface when its
+   * view is a console, so the view's surface is the one thing the server writes
+   * (and puts back if it fails). What is left here is the question: when screens
+   * would change, they are named first, declining sends nothing, and the ids of
+   * the screens named go with the call. The server refuses when they are stale,
+   * and changeViewRole asks once more with its list.
    *
-   * ONE server call. The server makes the view and each screen the matching role
-   * in the order its own guards allow and puts back what landed if one fails, so
-   * nothing here orders writes or loops over screens. What is left is the
-   * question: when screens would change, they are named first, declining sends
-   * nothing, and the ids of the screens named go with the call. The server
-   * refuses when they are stale, and changeViewRole asks once more with its list.
-   *
-   * Not optimistic, for the reason handleSetOutputRole gives.
+   * Not optimistic: the server refuses some of these (a view that cannot be a
+   * control surface), and an optimistic flip would show the change happening and
+   * then silently undo it. The refusal is the useful part.
    */
   async function handleSetViewSurface(id: string, surface: "display" | "console") {
     try {
@@ -872,8 +901,9 @@ export function useStageSettings(pinnedViewId?: string) {
     }
   }
 
-  async function handleRemoveOutput(id: string) {
-    await writeState("outputs:remove", { id }, { fail: "Failed to remove display" });
+  /** Resolves whether the screen is gone, for the same reason handleRemoveView does. */
+  async function handleRemoveOutput(id: string): Promise<boolean> {
+    return writeState("outputs:remove", { id }, { fail: "Failed to remove display" });
   }
 
   async function handleReorderOutputs(ids: string[]) {
@@ -941,13 +971,13 @@ export function useStageSettings(pinnedViewId?: string) {
     handleRenamePreset,
     handleOverwritePreset,
     handleCreateScreen,
+    handleClaimDevice,
     handleRenameOutput,
     handleSetOutputView,
     handleSetOutputLocked,
     handleSetOutputHideTopBar,
     handleSetOutputAllowHls,
     handleSetOutputGroups,
-    handleSetOutputRole,
     handleSetOutputTextSize,
     handleSetOutputRotation,
     handleSetOutputVideoMode,

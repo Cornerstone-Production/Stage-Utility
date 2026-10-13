@@ -65,8 +65,8 @@ function card(over: Partial<OutputRowProps> = {}, routed = true) {
     onSetView: noop,
     onRenameView: noop,
     messageGroups: { groups: [], known: true, failed: false },
-    onSetRole: async () => true,
-    onOpenSettings: noop,
+    panelOpen: false,
+    onSelect: noop,
     onRefresh: noop,
     onRemove: noop,
     onRequestNewView: noop,
@@ -118,14 +118,14 @@ describe("the card's menu", () => {
       "—",
       "Screen settings…",
       "—",
-      "Remove display",
+      "Remove display…",
     ]);
   });
 
   test("offers Rename view only when a view is assigned", async () => {
     card({}, false);
     await openMenu();
-    assert.deepEqual(rows(), ["Open display", "Copy URL", "Refresh display", "—", "Screen settings…", "—", "Remove display"]);
+    assert.deepEqual(rows(), ["Open display", "Copy URL", "Refresh display", "—", "Screen settings…", "—", "Remove display…"]);
   });
 
   test("no longer holds any setting", async () => {
@@ -149,7 +149,7 @@ describe("the card's menu", () => {
 
   test("Screen settings… opens THIS screen's panel", async () => {
     let opened = 0;
-    card({ onOpenSettings: () => { opened++; } });
+    card({ onSelect: () => { opened++; } });
     await openMenu();
     await select(screen.getByRole("menuitem", { name: "Screen settings…" }));
     assert.equal(opened, 1);
@@ -158,7 +158,7 @@ describe("the card's menu", () => {
   test("Remove display is still refused for the last screen", async () => {
     card({ canRemove: false });
     await openMenu();
-    assert.equal(screen.getByRole("menuitem", { name: "Remove display" }).getAttribute("aria-disabled"), "true");
+    assert.equal(screen.getByRole("menuitem", { name: "Remove display…" }).getAttribute("aria-disabled"), "true");
   });
 
   test("Copy URL keeps the menu open across the copy, so the plain-HTTP fallback has a selection to copy", async () => {

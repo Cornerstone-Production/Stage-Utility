@@ -1,7 +1,7 @@
 // PATCH /api/outputs/:id on an id that names no output, for every boolean flag
 // the route accepts, and for `name`.
 //
-// setOutputView, setOutputMode and setOutputSlug were already wrapped here in a
+// setOutputView and setOutputSlug were already wrapped here in a
 // try/catch that turns a thrown "not found" into a clean 400 with the reason.
 // setOutputBlackout, setOutputLocked, setOutputHideTopBar and setOutputAllowHls
 // were not: each threw a plain Error the route let escape uncaught, which

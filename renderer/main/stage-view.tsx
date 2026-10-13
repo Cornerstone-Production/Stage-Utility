@@ -14,7 +14,6 @@ import { DisplayServiceCue } from "./servicecue-display";
 import { SplRundownView } from "./spl-rundown-view";
 import { CalendarView } from "./calendar-view";
 import { LayoutRenderer } from "./layout-renderer";
-import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface, KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
@@ -639,7 +638,7 @@ function renderView(
   previewDraftSlots: Slot[] | null,
   own: OwnScreen | null,
 ): ReactNode {
-  const { kind, view: activeView, displayId, isPreview, outputMode, allowHls } = screen;
+  const { kind, view: activeView, displayId, isPreview, interactive, allowHls } = screen;
 
   switch (kind) {
     // Custom-layout views render the visual-editor layout below the same kiosk top
@@ -655,11 +654,11 @@ function renderView(
         <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
           <ScreenTopBar state={state} screen={screen} />
           <div className="flex-1 min-h-0">
-            {/* Controls are live only where the operator deliberately made
-                them so. A screen is a read-only display unless it was set to
-                panel mode, and a "/preview-…" iframe is always a display —
-                otherwise the Screens page could advance the service by being
-                looked at, since every card renders one. */}
+            {/* Controls are live only on a screen whose view is a console. A
+                screen showing anything else is read-only, and a "/preview-…"
+                iframe is always a display — otherwise the Screens page could
+                advance the service by being looked at, since every card renders
+                one. */}
             <LayoutRenderer
               layout={layout}
               // The View this layout belongs to, which seeds the embed chain: an
@@ -668,7 +667,7 @@ function renderView(
               // is. Null would read as "no ancestor" and lose both.
               viewId={activeView?.id ?? null}
               ndiSource={activeView?.ndiSource ?? null}
-              interactive={capabilityLive(contextForOutput(outputMode, isPreview), "control")}
+              interactive={interactive}
               surface={viewSurface(activeView)}
               allowHls={allowHls}
               // Which screen this is and the message groups it is in; null on a
@@ -737,7 +736,7 @@ function renderView(
             // The same answer every control on every surface uses. False on a
             // wall display, so it gets no chevrons and cannot be left on the
             // wrong month by a passer-by.
-            interactive={capabilityLive(contextForOutput(outputMode, isPreview), "control")}
+            interactive={interactive}
           />
         </KioskFrame>
       );

@@ -8,27 +8,34 @@
 // nothing announces it.
 //
 // So the migration reads what is actually there. A View containing a control
-// becomes a console, and the Outputs bound to it become panels. Behaviour is
+// becomes a console, and the screens bound to it are returned as live
+// (`liveScreenIds`; screen-role-migration.ts keeps them live). Behaviour is
 // preserved with no operator action, and what moved is reported so a stray
-// control that pulled a wall display into panel mode can be demoted
+// control that pulled a wall display into a control surface can be demoted
 // deliberately.
 
 import { isControl } from "../types/object-capabilities.js";
-import { viewSurface, outputMode } from "../types/views.js";
+import { screenIsControlSurface, screensShowing, viewSurface } from "../types/views.js";
+import type { StoredOutput } from "./screen-role-migration.js";
 
 export interface MigrationNote {
   viewId: string;
   viewName: string;
   /** The control object types that made this a console, for the log. */
   controls: string[];
-  /** Names of the Outputs pulled to panel mode alongside it. */
+  /** Names of the Outputs now showing it as a control surface. */
   outputs: string[];
 }
 
 export interface MigrationResult {
   views: View[];
-  outputs: Output[];
+  /** The screens, as they were given. */
+  outputs: StoredOutput[];
   changed: MigrationNote[];
+  /** Screens whose view just became a console and which had no stored role of
+   *  their own: they were working control surfaces. A screen that already said
+   *  it was read-only is not in here. */
+  liveScreenIds: Set<string>;
 }
 
 /**
@@ -55,7 +62,7 @@ function controlsIn(objects: readonly LayoutObject[] | undefined): string[] {
 }
 
 /**
- * Assign surfaces and modes, preserving current behaviour.
+ * Assign surfaces, preserving current behaviour.
  *
  * Pure: no I/O, no persistence, no logging. The caller decides what to do with
  * the result, which is what makes this testable against a real layout.
@@ -65,10 +72,10 @@ function controlsIn(objects: readonly LayoutObject[] | undefined): string[] {
  */
 export function migrateSurfaces(
   views: readonly View[],
-  outputs: readonly Output[],
+  outputs: readonly StoredOutput[],
 ): MigrationResult {
   const changed: MigrationNote[] = [];
-  const toPanel = new Set<string>();
+  const liveScreenIds = new Set<string>();
 
   const nextViews = views.map((v) => {
     // Already decided, by a previous run or by the operator. Never re-decide:
@@ -78,8 +85,8 @@ export function migrateSurfaces(
     const controls = controlsIn(v.layout?.objects);
     if (controls.length === 0) return { ...v, surface: "display" as const };
 
-    const bound = outputs.filter((o) => o.viewId === v.id);
-    for (const o of bound) toPanel.add(o.id);
+    const bound = screensShowing(v.id, outputs);
+    for (const o of bound) if (o.mode === undefined) liveScreenIds.add(o.id);
     changed.push({
       viewId: v.id,
       viewName: v.name,
@@ -89,12 +96,8 @@ export function migrateSurfaces(
     return { ...v, surface: "console" as const };
   });
 
-  const nextOutputs = outputs.map((o) =>
-    // Only ever promotes. An Output the operator already set is left alone.
-    toPanel.has(o.id) && o.mode === undefined ? { ...o, mode: "panel" as const } : o,
-  );
-
-  return { views: nextViews, outputs: nextOutputs, changed };
+  // Only ever promotes: a screen that already carried a role is left as it said.
+  return { views: nextViews, outputs: [...outputs], changed, liveScreenIds };
 }
 
 /** Human-readable lines for the server log. Kept beside the migration so the
@@ -103,13 +106,13 @@ export function migrationLog(result: MigrationResult): string[] {
   const lines = result.changed.map(
     (n) =>
       `${n.viewName} — has ${n.controls.join(", ")} -> console` +
-      (n.outputs.length ? ` (screens moved to panel: ${n.outputs.join(", ")})` : " (not on any screen)"),
+      (n.outputs.length ? ` (screens now control surfaces: ${n.outputs.join(", ")})` : " (not on any screen)"),
   );
   const displays = result.views.filter((v) => viewSurface(v) === "display").length;
-  const panels = result.outputs.filter((o) => outputMode(o) === "panel").length;
+  const controlSurfaces = result.outputs.filter((o) => screenIsControlSurface(o, result.views)).length;
   lines.push(
     `${result.changed.length} view${result.changed.length === 1 ? "" : "s"} moved to console, ` +
-      `${displays} left as displays, ${panels} screen${panels === 1 ? "" : "s"} now panels`,
+      `${displays} left as displays, ${controlSurfaces} screen${controlSurfaces === 1 ? "" : "s"} now control surface${controlSurfaces === 1 ? "" : "s"}`,
   );
   return lines;
 }

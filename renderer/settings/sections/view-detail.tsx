@@ -21,7 +21,6 @@ import {
   SelectValue,
   Separator,
   UnsavedBanner,
-  confirm,
   toast,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
@@ -34,6 +33,7 @@ import { SlotsPreviewNote } from "./slots-preview-target";
 import { KIND_LABELS, KIND_ORDER } from "./new-view-dialog";
 import { CalendarSources } from "./calendar-sources";
 import { viewSurface } from "@main/types/views";
+import { deleteView } from "./screen-confirms";
 
 const PREVIEW_ASPECTS = [
   { id: "16:9", label: "16:9 · landscape", ratio: 16 / 9 },
@@ -161,9 +161,10 @@ export function ViewDetail({
             ))}
           </SelectContent>
         </Select>
-        {/* What it is FOR, beside what it IS. Offered only for a custom layout:
-            the built-in kinds have no editable layout, so a console among them
-            would have nowhere to put a control — and the server refuses it too.
+        {/* What it is FOR, beside what it IS. Offered only for a custom layout, the
+            kind with controls to place. A calendar view is made a console from
+            "Make it a control surface" on its card's menu in Screens, and the
+            server refuses a kind with nothing to operate.
 
             Changing this changes every screen showing the view too, after a
             confirm that names them; with none showing it there is nothing to
@@ -179,7 +180,7 @@ export function ViewDetail({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="display">Wall screen</SelectItem>
+              <SelectItem value="display">Wall view</SelectItem>
               <SelectItem value="console">Control surface</SelectItem>
             </SelectContent>
           </Select>
@@ -224,24 +225,7 @@ export function ViewDetail({
           variant="transparent"
           size="small"
           iconOnly
-          onClick={async () => {
-            // Name the outputs that would lose their content. Deleting a view is
-            // not recoverable, and a custom view can be a lot of layout work.
-            const usedBy = (stageState.outputs ?? [])
-              .filter((o) => o.viewId === view.id)
-              .map((o) => o.name || o.id);
-            const inUse =
-              usedBy.length > 0
-                ? ` It is currently shown on ${usedBy.join(", ")}, which will have no view assigned.`
-                : "";
-            const ok = await confirm({
-              title: `Delete "${view.name}"?`,
-              message: `This cannot be undone.${inUse}`,
-              confirmLabel: "Delete view",
-              destructive: true,
-            });
-            if (ok) await handlers.handleRemoveView(view.id);
-          }}
+          onClick={() => void deleteView({ view, outputs: stageState.outputs ?? [], handlers })}
           disabled={!canDelete}
           aria-label="Delete view"
         >
