@@ -1,8 +1,8 @@
 // A held record splits the moment the next service's OPENING item goes live —
 // not only once the ten-minute clock says so.
 //
-// The incident (24 Sep 2026, The Salt Company, one plan, two service times):
-// occurrence 225131089 → 225131091 switched at 00:40:25Z with the 8:15pm
+// The incident (24 Sep 2026, one plan, two service times):
+// occurrence 200000001 → 200000003 switched at 00:40:25Z with the 8:15pm
 // occurrence 35 minutes out, so ensureRecord's overrun hold correctly kept
 // record 1 open. The operator then put Doors — occurrence 1's own opening
 // item — live again on the NEW occurrence at 00:42:51Z, 32 minutes before the
@@ -43,8 +43,8 @@ const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js
 const { splRecorder } = await import("./spl-recorder.js");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
 
-const OCC_1 = "225131089";
-const OCC_2 = "225131091";
+const OCC_1 = "200000001";
+const OCC_2 = "200000003";
 const OCC_1_STARTS = "2026-09-24T23:15:00.000Z";
 const OCC_2_STARTS = "2026-09-25T01:15:25.000Z"; // "next occurrence starts in 35 min" at 00:40:25Z
 
@@ -106,7 +106,7 @@ describe("a held record splits when the next service's OPENING item goes live", 
     planId = `plan-${++n}`; // a fresh key space per case, so no store entry leaks between them
     (stageController as unknown as { getState(): unknown }).getState = () => ({
       serviceTypeId: "75953",
-      serviceTypeName: "The Salt Company",
+      serviceTypeName: "The Gathering",
       planId,
       planTitle: "The Man Who Didn't Risk",
       planSeriesTitle: null,

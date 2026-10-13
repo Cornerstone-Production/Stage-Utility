@@ -143,8 +143,8 @@ describe("the shared /history link", () => {
       };
       const day = "2026-09-17";
       const rec = {
-        serviceKey: "salt:plan-1:evening",
-        serviceTypeId: "salt",
+        serviceKey: "gathering:plan-1:evening",
+        serviceTypeId: "gathering",
         planId: "plan-1",
         planTitle: "Evening",
         seriesTitle: null,
@@ -228,8 +228,8 @@ describe("the shared /history link", () => {
       };
       const day = "2026-09-17";
       const rec = {
-        serviceKey: "salt:plan-1:evening",
-        serviceTypeId: "salt",
+        serviceKey: "gathering:plan-1:evening",
+        serviceTypeId: "gathering",
         planId: "plan-1",
         planTitle: "Evening",
         seriesTitle: null,
@@ -245,7 +245,7 @@ describe("the shared /history link", () => {
         startedAt: `${day}T20:45:00.000Z`,
         finishedAt: `${day}T20:52:00.000Z`,
         title: "Evening",
-        serviceTypeId: "salt",
+        serviceTypeId: "gathering",
         planId: "plan-1",
         serviceKey: rec.serviceKey,
         people: [{ testimonyMs: 120_000, baptizeMs: 60_000 }],

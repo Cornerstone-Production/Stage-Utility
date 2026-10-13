@@ -180,55 +180,55 @@ describe("claiming between slots", () => {
   test("a person ID matches however Planning Center shows it", () => {
     // The API id is the bare number; Planning Center's page URL shows AC + number,
     // and that is what an operator copies. Each of these is the same person.
-    const team = [member("113920177", "Ethan", "Audio - FOH (A1)")];
+    const team = [member("100000001", "Alex", "Audio - FOH (A1)")];
     for (const typed of [
-      "113920177",
-      "AC113920177",
-      "ac113920177",
-      " AC113920177 ",
-      "https://services.planningcenteronline.com/people/AC113920177",
-      "https://people.planningcenteronline.com/people/AC113920177/profile",
+      "100000001",
+      "AC100000001",
+      "ac100000001",
+      " AC100000001 ",
+      "https://services.planningcenteronline.com/people/AC100000001",
+      "https://people.planningcenteronline.com/people/AC100000001/profile",
     ]) {
       const out = resolveSlots([slot("a", { kind: "pco", matchBy: "person", personId: typed })], team, NO_DEVICES);
-      assert.deepEqual(names(out), ["Ethan"], `"${typed}" did not match the person`);
+      assert.deepEqual(names(out), ["Alex"], `"${typed}" did not match the person`);
     }
   });
 
   test("a person ID that is not on the roster, or not an ID, fills nothing", () => {
-    const team = [member("113920177", "Ethan", "Audio - FOH (A1)")];
-    for (const typed of ["1630425", "", "   ", "AC", "Ethan", "1338318035"]) {
+    const team = [member("100000001", "Alex", "Audio - FOH (A1)")];
+    for (const typed of ["100000002", "", "   ", "AC", "Alex", "100000003"]) {
       const out = resolveSlots([slot("a", { kind: "pco", matchBy: "person", personId: typed })], team, NO_DEVICES);
       assert.deepEqual(names(out), [null], `"${typed}" filled the slot`);
     }
   });
 
   test("a person not on the roster fills from the person directory", () => {
-    const people = new Map([["1630425", { name: "Nathan Bong", photoUrl: "https://x/n.jpg" }]]);
-    const out = resolveSlots([slot("a", { kind: "pco", matchBy: "person", personId: "AC1630425" })], [], NO_DEVICES, "whole", people);
-    assert.deepEqual(names(out), ["Nathan Bong"], "an unscheduled person left the slot empty");
+    const people = new Map([["100000002", { name: "Jordan Lee", photoUrl: "https://x/n.jpg" }]]);
+    const out = resolveSlots([slot("a", { kind: "pco", matchBy: "person", personId: "AC100000002" })], [], NO_DEVICES, "whole", people);
+    assert.deepEqual(names(out), ["Jordan Lee"], "an unscheduled person left the slot empty");
     assert.match(out[0]?.photoUrl ?? "", /^https:\/\/x\/n\.jpg/, "the directory's photo was not used");
   });
 
   test("a person on the roster is drawn from the roster, not the directory", () => {
-    const team = [member("113920177", "Ethan (roster)", "Audio - FOH (A1)")];
-    const people = new Map([["113920177", { name: "Ethan (directory)", photoUrl: null }]]);
-    const out = resolveSlots([slot("a", { kind: "pco", matchBy: "person", personId: "113920177" })], team, NO_DEVICES, "whole", people);
-    assert.deepEqual(names(out), ["Ethan (roster)"]);
+    const team = [member("100000001", "Alex (roster)", "Audio - FOH (A1)")];
+    const people = new Map([["100000001", { name: "Alex (directory)", photoUrl: null }]]);
+    const out = resolveSlots([slot("a", { kind: "pco", matchBy: "person", personId: "100000001" })], team, NO_DEVICES, "whole", people);
+    assert.deepEqual(names(out), ["Alex (roster)"]);
   });
 
   test("only by-person IDs the roster lacks are asked of the directory", () => {
-    const team = [member("113920177", "Ethan", "Audio - FOH (A1)")];
+    const team = [member("100000001", "Alex", "Audio - FOH (A1)")];
     const ids = unrosteredPersonIds(
       [
-        slot("a", { kind: "pco", matchBy: "person", personId: "AC113920177" }, 0),
-        slot("b", { kind: "pco", matchBy: "person", personId: " AC1630425 " }, 1),
-        slot("c", { kind: "pco", matchBy: "person", personId: "Nathan" }, 2),
-        slot("d", { kind: "pco", matchBy: "person", personId: "1630425" }, 3),
+        slot("a", { kind: "pco", matchBy: "person", personId: "AC100000001" }, 0),
+        slot("b", { kind: "pco", matchBy: "person", personId: " AC100000002 " }, 1),
+        slot("c", { kind: "pco", matchBy: "person", personId: "Jordan" }, 2),
+        slot("d", { kind: "pco", matchBy: "person", personId: "100000002" }, 3),
         slot("e", pos({ name: "Vocals" }), 4),
       ],
       team,
     );
-    assert.deepEqual(ids, ["1630425"]);
+    assert.deepEqual(ids, ["100000002"]);
   });
 
   test("spacer and empty slots resolve to nothing and claim nobody", () => {

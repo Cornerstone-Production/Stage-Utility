@@ -48,7 +48,7 @@ export function planLabel(
 }
 
 /**
- * "the Weekend" / "The Salt Company" / "the service type".
+ * "the Weekend" / "The Gathering" / "the service type".
  *
  * A service type's name is whatever somebody typed into Planning Center, and
  * some of them open with an article — five different strings said "the The Salt
@@ -64,7 +64,7 @@ export function namedType(serviceTypeName: string | null, capital = false): stri
   return `${capital ? "The" : "the"} ${name}`;
 }
 
-/** "Saved slots for Wed Sep 13 · Cornerstone Youth" / "Saved the … default". */
+/** "Saved slots for Wed Sep 13 · Youth Night" / "Saved the … default". */
 export function savedMessage(side: SlotsTargetSide, label: string, serviceTypeName: string | null): string {
   if (side === "plan") {
     return serviceTypeName ? `Saved slots for ${label} · ${serviceTypeName}` : `Saved slots for ${label}`;

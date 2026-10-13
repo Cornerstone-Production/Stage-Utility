@@ -167,7 +167,7 @@ Two modes, set on the Plan page:
 | Mode | The middle | The arrows |
 |---|---|---|
 | **Within a type** | a dropdown of the active service types | that type's plans, Default first and then each upcoming date |
-| **Upcoming plans** | the date and the type, e.g. "Wed Sep 10 · Cornerstone Youth" | every active type's plans in date order |
+| **Upcoming plans** | the date and the type, e.g. "Wed Sep 10 · Youth Night" | every active type's plans in date order |
 
 In **Upcoming plans** the middle's dropdown lists the next ten plans and a
 **Defaults…** group with each active type's default board. The arrows do not

@@ -31,7 +31,7 @@ function record(serviceKey: string) {
   return {
     serviceKey,
     serviceTypeId: "75953",
-    serviceTypeName: "The Salt Company",
+    serviceTypeName: "The Gathering",
     planId: "909",
     planTitle: "Night of Worship",
     seriesTitle: null,

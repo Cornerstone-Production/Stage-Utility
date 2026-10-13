@@ -56,18 +56,18 @@ const quiet = async (fn: () => Promise<void>) => {
 describe("the person directory", () => {
   it("reads an unknown ID once, however often it is asked", async () => {
     const r = rig();
-    for (let i = 0; i < 5; i++) r.dir.want(["113920177"]);
+    for (let i = 0; i < 5; i++) r.dir.want(["100000001"]);
     assert.equal(r.calls.length, 1, "more than one read for one ID");
   });
 
   it("keeps a person once read, and tells the controller to re-resolve", async () => {
     const r = rig();
-    r.dir.want(["113920177"]);
-    r.calls[0]?.resolve({ name: "Ethan Matthews", photoUrl: null });
+    r.dir.want(["100000001"]);
+    r.calls[0]?.resolve({ name: "Alex Rivera", photoUrl: null });
     await tick();
-    assert.equal(r.dir.people.get("113920177")?.name, "Ethan Matthews");
+    assert.equal(r.dir.people.get("100000001")?.name, "Alex Rivera");
     assert.equal(r.landed(), 1, "a landed person never re-resolved the slots");
-    r.dir.want(["113920177"]);
+    r.dir.want(["100000001"]);
     assert.equal(r.calls.length, 1, "a known person was read again");
   });
 
@@ -105,19 +105,19 @@ describe("the person directory", () => {
 
   it("reads nothing without Planning Center credentials", () => {
     const r = rig({ creds: false });
-    r.dir.want(["113920177"]);
+    r.dir.want(["100000001"]);
     assert.equal(r.calls.length, 0);
   });
 
   it("discards a read that lands after a reset", async () => {
     const r = rig();
-    r.dir.want(["113920177"]);
+    r.dir.want(["100000001"]);
     r.dir.reset();
     r.calls[0]?.resolve({ name: "Old Account", photoUrl: null });
     await tick();
     assert.equal(r.dir.people.size, 0, "a read from before the reset was kept");
     assert.equal(r.landed(), 0);
-    r.dir.want(["113920177"]);
+    r.dir.want(["100000001"]);
     assert.equal(r.calls.length, 2, "the reset ID was not read again");
   });
 });

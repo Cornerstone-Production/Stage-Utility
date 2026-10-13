@@ -355,7 +355,7 @@ export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, 
     // figure uses. This averaged every sample instead, which is the bug that
     // function was written to fix — the arrival ramp and the emptying-room
     // taper are both long and both near-empty, so the mean lands BELOW the
-    // recorded low. On the 17 Sep recording the pasted report said "Avg in-room
+    // recorded low. On one recorded service the pasted report said "Avg in-room
     // 781" for a service whose Lowest was 933, under a card reading 1,164. The
     // card was fixed and this copy drifted on.
     const avgOcc = averageOccupancy(att);

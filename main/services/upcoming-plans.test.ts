@@ -122,7 +122,7 @@ describe("the order the arrows walk", () => {
 });
 
 describe("flattening a service type's plans", () => {
-  const TYPE: ServiceTypeDTO = { id: "st-1", name: "Cornerstone Youth" };
+  const TYPE: ServiceTypeDTO = { id: "st-1", name: "Youth Night" };
 
   it("carries the type onto every row and flags the current plan", () => {
     const w = planWindow(NOW, 60, CHICAGO);
@@ -135,8 +135,8 @@ describe("flattening a service type's plans", () => {
     assert.deepEqual(
       rows.map((r) => [r.serviceTypeId, r.serviceTypeName, r.planId, r.isCurrent]),
       [
-        ["st-1", "Cornerstone Youth", "p1", true],
-        ["st-1", "Cornerstone Youth", "p2", false],
+        ["st-1", "Youth Night", "p1", true],
+        ["st-1", "Youth Night", "p2", false],
       ],
     );
   });

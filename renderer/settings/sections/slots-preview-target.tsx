@@ -110,7 +110,7 @@ export function previewNote(
   if (!resolution || resolution.roster === "live") return null;
   if (resolution.roster === "none") {
     // `namedType` and not "the ${name}": some Planning Center type names open
-    // with an article, and "the The Salt Company default" is a real one.
+    // with an article, and "the The Gathering default" is a real one.
     return { text: `Previewing ${namedType(serviceTypeName)} default — positions only, no plan` };
   }
   if (resolution.roster === "unavailable") {

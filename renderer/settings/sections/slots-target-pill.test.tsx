@@ -157,10 +157,10 @@ describe("labelling", () => {
 
   test("the save message names which board it landed on", () => {
     assert.equal(
-      savedMessage("plan", "Wed Sep 13", "Cornerstone Youth"),
-      "Saved slots for Wed Sep 13 · Cornerstone Youth",
+      savedMessage("plan", "Wed Sep 13", "Youth Night"),
+      "Saved slots for Wed Sep 13 · Youth Night",
     );
-    assert.equal(savedMessage("default", "Wed Sep 13", "Cornerstone Youth"), "Saved the Cornerstone Youth default");
+    assert.equal(savedMessage("default", "Wed Sep 13", "Youth Night"), "Saved the Youth Night default");
   });
 
   test("and still says something without a service type name", () => {
@@ -169,15 +169,15 @@ describe("labelling", () => {
   });
 
   // A service type's name is whatever somebody typed into Planning Center, and
-  // "The Salt Company" is a real one — five strings that named a default board
-  // read "the The Salt Company default".
+  // "The Gathering" is a real one — five strings that named a default board
+  // read "the The Gathering default".
   test("a type name that already opens with an article does not get a second one", () => {
-    assert.equal(namedType("The Salt Company"), "The Salt Company");
+    assert.equal(namedType("The Gathering"), "The Gathering");
     assert.equal(namedType("Weekend"), "the Weekend");
     assert.equal(namedType(null), "the service type");
     assert.equal(
-      savedMessage("default", "Wed Sep 13", "The Salt Company"),
-      "Saved The Salt Company default",
+      savedMessage("default", "Wed Sep 13", "The Gathering"),
+      "Saved The Gathering default",
     );
   });
 

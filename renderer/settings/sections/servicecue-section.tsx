@@ -484,7 +484,7 @@ export function ServiceCueSection() {
  * One color per note category, app-wide.
  *
  * Note categories are fetched per service type, so "Audio" exists separately under
- * Weekend, Youth and Salt Company. Storing the color on a layout would mean setting it
+ * Weekend, Youth and Gathering. Storing the color on a layout would mean setting it
  * once per layout per service type; storing it here means setting Audio once.
  *
  * "Reset" clears the color so the category falls back to its suggestion — it does not

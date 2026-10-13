@@ -52,7 +52,7 @@ before(() => {
   };
   (pcoService as unknown as { getPerson: unknown }).getPerson = async (_a: string, _s: string, id: string) => {
     asked.push(id);
-    return id === "1630425" ? { name: "Nathan Bong", photoUrl: null } : null;
+    return id === "100000002" ? { name: "Jordan Lee", photoUrl: null } : null;
   };
 });
 
@@ -72,21 +72,21 @@ beforeEach(() => {
 
 describe("a by-person slot whose person is not on the plan", () => {
   it("is read from Planning Center, broadcast, and then shows the person", async () => {
-    const board = [personSlot("s1", "AC1630425")];
+    const board = [personSlot("s1", "AC100000002")];
     const first = await stageController.resolveSlotsPreview(board);
-    assert.deepEqual(asked, ["1630425"], "the unrostered person was never read");
+    assert.deepEqual(asked, ["100000002"], "the unrostered person was never read");
     assert.equal(first.slots[0]?.displayName ?? null, null);
     await tick();
     assert.ok(broadcasts > 0, "the person landed but nothing was broadcast");
     const second = await stageController.resolveSlotsPreview(board);
-    assert.equal(second.slots[0]?.displayName, "Nathan Bong", "an unscheduled person never filled the slot");
-    assert.deepEqual(asked, ["1630425"], "the person was read twice");
+    assert.equal(second.slots[0]?.displayName, "Jordan Lee", "an unscheduled person never filled the slot");
+    assert.deepEqual(asked, ["100000002"], "the person was read twice");
   });
 
   it("is not read without Planning Center credentials", async () => {
     ctl.pcoAppId = null;
     ctl.pcoSecret = null;
-    await stageController.resolveSlotsPreview([personSlot("s1", "1630425")]);
+    await stageController.resolveSlotsPreview([personSlot("s1", "100000002")]);
     assert.deepEqual(asked, []);
   });
 
@@ -96,12 +96,12 @@ describe("a by-person slot whose person is not on the plan", () => {
     const refresh = (ctl as unknown as { refreshServiceWindows: unknown }).refreshServiceWindows;
     (ctl as unknown as { refreshServiceWindows: unknown }).refreshServiceWindows = async () => {};
     try {
-      const board = [personSlot("s1", "1630425")];
+      const board = [personSlot("s1", "100000002")];
       await stageController.resolveSlotsPreview(board);
       await tick();
       stageController.setPcoCredentials("other-app", "other-secret");
       await stageController.resolveSlotsPreview(board);
-      assert.deepEqual(asked, ["1630425", "1630425"], "a person read under the old credentials was kept");
+      assert.deepEqual(asked, ["100000002", "100000002"], "a person read under the old credentials was kept");
     } finally {
       (ctl as unknown as { refreshServiceWindows: unknown }).refreshServiceWindows = refresh;
     }
@@ -109,10 +109,10 @@ describe("a by-person slot whose person is not on the plan", () => {
 
   it("is not read when the roster already has them", async () => {
     ctl.teamMembers = [
-      { id: "m1", name: "Nathan (roster)", personId: "1630425", photoUrl: null, teamPositionName: "Audio - MON (M1)", teamName: null, status: "C", notes: null },
+      { id: "m1", name: "Jordan (roster)", personId: "100000002", photoUrl: null, teamPositionName: "Audio - MON (M1)", teamName: null, status: "C", notes: null },
     ];
-    const r = await stageController.resolveSlotsPreview([personSlot("s1", "1630425")]);
-    assert.equal(r.slots[0]?.displayName, "Nathan (roster)");
+    const r = await stageController.resolveSlotsPreview([personSlot("s1", "100000002")]);
+    assert.equal(r.slots[0]?.displayName, "Jordan (roster)");
     assert.deepEqual(asked, []);
   });
 });

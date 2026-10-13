@@ -1,7 +1,7 @@
 // series-colors.ts — one colour per service type, and it does not move.
 //
 // The colours used to be `SERIES_COLORS[i]` over the tile order, and the tile
-// order is busiest-first. So The Salt Company was blue on Attendance and green
+// order is busiest-first. So The Gathering was blue on Attendance and green
 // on Sound, because switching measure re-sorts the tiles; a quiet type that had
 // a loud week swapped colours with its neighbour; and a week where one type did
 // not record shuffled everything below it. A colour that means a different

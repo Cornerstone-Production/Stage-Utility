@@ -350,7 +350,7 @@ reorderable lists; toast + `confirm()` for feedback.
 ## 6. Public-repo neutrality
 
 The app **ships brand-neutral** — the tool's own blue-family accent default, a generic
-mark, and the name "Stage Utility." No org identity is hardcoded (never Cornerstone).
+mark, and the name "Stage Utility." No org identity is hardcoded (never a church or organisation name).
 An org applies its real identity entirely through **Branding**: the **accent** (one hex
 → full ramp) and the **logo** (with a monochrome recolor option). This keeps the public
 repo generic while letting any deployment look like itself.
