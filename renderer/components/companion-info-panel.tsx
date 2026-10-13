@@ -98,9 +98,9 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
         <FieldContent>
           <FieldLabel>Bitfocus Companion</FieldLabel>
           <FieldDescription>
-            Add a <span className="text-gray-12 font-medium">Cornerstone Stage Utility</span>{" "}
-            connection in Bitfocus Companion and enter this server&apos;s IP and port below. No
-            password — it works on your local network.
+            Add a connection in Bitfocus Companion — search its connection list for{" "}
+            <span className="text-gray-12 font-medium">Stage Utility</span> — and enter this
+            server&apos;s IP and port below. No password — it works on your local network.
           </FieldDescription>
           {/* The module is the missing half: this panel told you what to type
               and never said where to get the thing you type it into. */}

@@ -1,8 +1,8 @@
 // pco-person-id.ts — the Planning Center person ID a by-person slot matches on.
 //
-// The API identifies a person by a bare number (113920177). Planning Center's own
-// pages show the same person as AC113920177 in the URL
-// (services.planningcenteronline.com/people/AC113920177), and that is where an
+// The API identifies a person by a bare number (100000001). Planning Center's own
+// pages show the same person as AC100000001 in the URL
+// (services.planningcenteronline.com/people/AC100000001), and that is where an
 // operator copies it from. Compared as typed, the AC form, a pasted URL or a
 // trailing space matched nobody and the slot stayed empty with no explanation.
 // All of them reduce to the number here. Anything else comes back trimmed and

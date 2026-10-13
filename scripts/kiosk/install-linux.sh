@@ -21,7 +21,7 @@ BIN=/usr/local/bin/stage-utility-kiosk
 UNIT=/etc/systemd/system/stage-utility-kiosk.service
 PORT="${STAGE_KIOSK_PORT:-8789}"
 # Optional: skip discovery entirely, for a network where broadcast does not cross
-# a VLAN.  sudo STAGE_SERVER=http://192.168.16.61 sh install-linux.sh
+# a VLAN.  sudo STAGE_SERVER=http://192.168.1.50 sh install-linux.sh
 SERVER="${STAGE_SERVER:-}"
 
 if [ "$(id -u)" -ne 0 ]; then

@@ -456,7 +456,7 @@ const RESI_DESCRIPTOR: IntegrationDescriptor = {
     "Shows whether Resi is streaming, wherever the recording widgets appear. Signs in with your Resi account, because Resi's own API cannot see a stream that started on a schedule.",
   docs: "resi",
   configSchema: [
-    { key: "username", label: "Resi Email", type: "text", placeholder: "you@church.org" },
+    { key: "username", label: "Resi Email", type: "text", placeholder: "you@example.org" },
     { key: "password", label: "Resi Password", type: "password" },
     {
       key: "encoderIds",

@@ -51,23 +51,23 @@ describe("openAttachment's signed-link cache", () => {
 });
 
 // Planning Center issues the plan's stage plot an all_attachments id with a word
-// on the end, "84892470-stage". v1.25.0 refused it, so the stage plot never opened.
+// on the end, "50001234-stage". v1.25.0 refused it, so the stage plot never opened.
 describe("openAttachment's attachment id", () => {
   test("opens a suffixed stage-plot id at exactly that path", async () => {
-    await pcoService.openAttachment("app", "secret", "11", "21", "84892470-stage");
+    await pcoService.openAttachment("app", "secret", "11", "21", "50001234-stage");
     assert.deepEqual(urls, [
-      "https://api.planningcenteronline.com/services/v2/service_types/11/plans/21/all_attachments/84892470-stage/open",
+      "https://api.planningcenteronline.com/services/v2/service_types/11/plans/21/all_attachments/50001234-stage/open",
     ]);
   });
 
   test("still opens a plain numeric id", async () => {
-    await pcoService.openAttachment("app", "secret", "11", "21", "84892470");
-    assert.match(urls[0], /\/all_attachments\/84892470\/open$/);
+    await pcoService.openAttachment("app", "secret", "11", "21", "50001234");
+    assert.match(urls[0], /\/all_attachments\/50001234\/open$/);
   });
 
   test("refuses anything that could leave the path segment, and sends nothing", async () => {
-    const tooLong = `84892470-${"a".repeat(21)}`;
-    for (const bad of ["../x", "84892470-stage/../../x", "abc", "", tooLong, "84892470-stage?x=1"]) {
+    const tooLong = `50001234-${"a".repeat(21)}`;
+    for (const bad of ["../x", "50001234-stage/../../x", "abc", "", tooLong, "50001234-stage?x=1"]) {
       await assert.rejects(
         pcoService.openAttachment("app", "secret", "11", "21", bad),
         PcoUrlRefused,
@@ -87,12 +87,12 @@ describe("openAttachment's attachment id", () => {
 // the disk cache then stored the old bytes under the new version's name.
 describe("openAttachment's signed-link cache and a replaced file", () => {
   test("a new version of the same id gets its own link; the same version is cached", async () => {
-    const v1 = await pcoService.openAttachment("app", "secret", "11", "21", "84892470-stage", { version: "t1000" });
-    const again = await pcoService.openAttachment("app", "secret", "11", "21", "84892470-stage", { version: "t1000" });
+    const v1 = await pcoService.openAttachment("app", "secret", "11", "21", "50001234-stage", { version: "t1000" });
+    const again = await pcoService.openAttachment("app", "secret", "11", "21", "50001234-stage", { version: "t1000" });
     assert.equal(posts, 1);
     assert.equal(again.url, v1.url);
 
-    const v2 = await pcoService.openAttachment("app", "secret", "11", "21", "84892470-stage", { version: "t2000" });
+    const v2 = await pcoService.openAttachment("app", "secret", "11", "21", "50001234-stage", { version: "t2000" });
     assert.equal(posts, 2, "a replaced file was answered from the old file's cached link");
     assert.notEqual(v2.url, v1.url);
   });

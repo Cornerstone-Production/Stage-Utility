@@ -412,7 +412,7 @@ describe("buildHistoryWorkbook: the Baptisms sheet is a real Excel table", () =>
 });
 
 describe("buildHistoryWorkbook: Baptisms sheet", () => {
-  const HOST = "cornerstone.local:8788";
+  const HOST = "stage-utility.local:8788";
 
   /** A finished session, with every field the export reads defaulted so a test
    *  only has to name what it is actually about. */
@@ -526,7 +526,7 @@ describe("buildHistoryWorkbook: Baptisms sheet", () => {
       const { rows } = await sheetOf(buf, "Baptisms");
       assert.equal(rows[0]!["History"], null, `a Host of ${JSON.stringify(host)} reached the link`);
     }
-    for (const host of ["192.168.16.10", "stage.local:8788", "[::1]:8788"]) {
+    for (const host of ["192.168.1.52", "stage.local:8788", "[::1]:8788"]) {
       const buf = await buildHistoryWorkbook({ include: ["baptisms"], host });
       const { rows } = await sheetOf(buf, "Baptisms");
       assert.equal(rows[0]!["History"], `http://${host}/history?service=st1%3Aplan1%3At1`);

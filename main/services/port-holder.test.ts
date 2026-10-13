@@ -133,7 +133,7 @@ describe("describePortHolder", () => {
 // names the program only.
 describe("parseHolderLine", () => {
   test("an lsof line: the command and pid", () => {
-    assert.deepEqual(parseHolderLine("node    43580 hstreuber   12u  IPv6 0x8c0d35a89313ccc8      0t0  TCP *:51935 (LISTEN)"), {
+    assert.deepEqual(parseHolderLine("node    43580 operator   12u  IPv6 0x8c0d35a89313ccc8      0t0  TCP *:51935 (LISTEN)"), {
       kind: "process",
       program: "node",
       pid: 43580,
