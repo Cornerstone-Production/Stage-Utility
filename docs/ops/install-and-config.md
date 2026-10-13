@@ -101,8 +101,10 @@ To pin one exact version instead of "newest on the track", add
 **Re-running the installer upgrades in place — do not uninstall first.** It
 unpacks the new release beside the current one, flips the `current` pointer,
 rewrites the service definition and restarts it, then waits for the server to
-answer before reporting success. Your data directory is untouched, and the
-previous release stays under `releases/` to go back to:
+answer before reporting success. Nothing in the old data directory is deleted, but
+a re-run without your original options (below) registers the service with the
+defaults, which can be a different one. The previous release stays under
+`releases/` to go back to:
 
 ```
 /usr/local/stage-utility/
@@ -115,6 +117,11 @@ The one thing it does not remember is your **options**. They are read from the
 command, not from the existing install, so re-pass any `STAGE_PORT`,
 `STAGE_DATA` or `STAGE_PREFIX` you used originally — otherwise the new service
 is registered with the defaults and will not find data written somewhere else.
+
+On a Mac whose daemon is still registered as `com.cornerstone.stage-utility`, a
+re-run stops that job, removes its plist and registers `com.stageutility.server`
+in its place, printing the data directory and port the old daemon used and
+warning if this run's differ. In-app updates leave the registration as it is.
 
 An install already running does **not** need reinstalling to change track:
 **Settings → Advanced → Update track** switches between main and beta in place,
@@ -188,13 +195,19 @@ sudo userdel stage-utility                # the service account, if unused
 **macOS** (one-line installer)
 
 ```bash
-sudo launchctl bootout system/com.cornerstone.stage-utility   # stop it now
-sudo rm /Library/LaunchDaemons/com.cornerstone.stage-utility.plist
+sudo launchctl bootout system/com.stageutility.server   # stop it now
+sudo rm /Library/LaunchDaemons/com.stageutility.server.plist
 sudo rm -rf /usr/local/stage-utility
 ```
 
 The `bootout` matters on its own: deleting the plist stops it coming back at
 boot, but leaves the running process serving until the machine restarts.
+
+Installs made before the label `com.stageutility.server` was introduced are
+registered as `com.cornerstone.stage-utility`; use that name in the first two
+commands. In-app updates keep an install on whichever label it has. Re-running the
+installer moves an old one to the new label: it stops the old job, deletes its
+plist and registers the new one. `scripts/uninstall.sh` removes whichever it finds.
 
 **Windows** — Administrator PowerShell
 

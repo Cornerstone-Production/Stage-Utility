@@ -59,6 +59,10 @@ process.on("uncaughtException", (err) => {
   // true on launchd, which parks the respawn of a background job that exits
   // ("pended nondemand spawn = inefficient") and leaves the box dark until a
   // human runs kickstart. Same pairing the update and restart paths use.
+  //
+  // The return value (RelaunchPrep) is ignored here on purpose: there is no
+  // operator to tell and no reply to carry it, and a failure to arrange a
+  // relaunch is already on the log as [relaunch] before the process goes.
   exitForRestart(100, 1);
 });
 

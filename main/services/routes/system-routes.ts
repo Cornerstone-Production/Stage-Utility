@@ -10,7 +10,7 @@ import { type RouteCtx, json, error, readBody, readBodyOrEmpty, MAX_CONFIG_BODY_
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
 import { updateNoticesStore } from "../update-notices-store.js";
-import { exitForRestart } from "../update/relaunch.js";
+import { exitForRestart, type RelaunchPrep } from "../update/relaunch.js";
 import { backupScheduler } from "../backup-scheduler.js";
 import { configSnapshot } from "../config-snapshot.js";
 import { splRecorder } from "../spl-recorder.js";
@@ -34,12 +34,31 @@ function serviceActivity(): { active: boolean; reasons: string[] } {
   return { active: reasons.length > 0, reasons };
 }
 
-/** Exit shortly after replying, so the service manager restarts us. On launchd
- *  the exit alone is not enough — it parks KeepAlive respawns ("pended
- *  nondemand spawn = inefficient") — so a detached kickstart rides along. A
- *  config restore once left a Homebrew box dark exactly this way. */
-function scheduleRestart(): void {
-  exitForRestart(1200);
+/** Exit shortly, so the service manager restarts us. On launchd the exit alone
+ *  is not enough — it parks KeepAlive respawns ("pended nondemand spawn =
+ *  inefficient") — so a detached kickstart rides along. A config restore once
+ *  left a Homebrew box dark exactly this way.
+ *
+ *  Called BEFORE the reply is written, and the reply carries what it found: the
+ *  exit is a second and a fifth of a second away, so the operator can still be
+ *  told that this server could not arrange its own relaunch. */
+function scheduleRestart(): RelaunchPrep {
+  return exitForRestart(1200);
+}
+
+/** The body of a response to something that restarts the server. Shape is the
+ *  one clients already read (`ok`, `applied`, `restarting`); `relaunchFailure`
+ *  appears only when the server could not arrange to come back. */
+export function restartResponse(
+  applied: unknown,
+  relaunch: RelaunchPrep,
+): { ok: true; applied: unknown; restarting: true; relaunchFailure?: string } {
+  return {
+    ok: true,
+    applied,
+    restarting: true,
+    ...(relaunch.failure ? { relaunchFailure: relaunch.failure } : {}),
+  };
 }
 
 /** Dated in the app's zone, not the server's clock — see view-routes.exportFilename. */
@@ -218,8 +237,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       const bundle = "bundle" in body ? body.bundle : body;
       try {
         const applied = await configSnapshot.apply(bundle);
-        json(res, { ok: true, applied, restarting: true });
-        scheduleRestart();
+        json(res, restartResponse(applied, scheduleRestart()));
       } catch (err) {
         error(res, errorMessage(err));
       }
@@ -263,8 +281,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     if (method === "POST" && snapRecallMatch) {
       try {
         const applied = await configSnapshot.recall(snapRecallMatch[1]);
-        json(res, { ok: true, applied, restarting: true });
-        scheduleRestart();
+        json(res, restartResponse(applied, scheduleRestart()));
       } catch (err) {
         error(res, errorMessage(err));
       }

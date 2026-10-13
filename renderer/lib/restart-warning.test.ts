@@ -44,4 +44,16 @@ describe("what the operator is told afterwards", () => {
     assert.ok(restartOutcome(false, "Restored.").startsWith("Restored."));
     assert.ok(restartOutcome(true, "Restored.").startsWith("Restored."));
   });
+
+  it("says when a supervised server could not arrange its own relaunch", () => {
+    const msg = restartOutcome(true, "Restored.", "no known launchd job is running this server");
+    assert.match(msg, /could not arrange its own relaunch/);
+    assert.match(msg, /no known launchd job/, "carries the reason");
+    assert.match(msg, /start it again by hand/i);
+    assert.ok(msg.startsWith("Restored."));
+  });
+
+  it("an unsupervised server is told it has stopped, whatever else it was told", () => {
+    assert.match(restartOutcome(false, "Restored.", "anything"), /stopped/i);
+  });
 });

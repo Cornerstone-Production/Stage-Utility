@@ -431,7 +431,7 @@ start — look for a `recovered config` line in the logs.)
 ## Uninstall
 
 - **Linux:** `sudo ./scripts/uninstall.sh` (stops + removes the service).
-- **macOS:** `sudo launchctl bootout system/com.cornerstone.stage-utility`, then delete `/Library/LaunchDaemons/com.cornerstone.stage-utility.plist`.
+- **macOS:** `sudo ./scripts/uninstall.sh`, or by hand `sudo launchctl bootout system/com.stageutility.server` and then delete `/Library/LaunchDaemons/com.stageutility.server.plist`. An install made before this label was introduced is registered as `com.cornerstone.stage-utility` instead (`sudo launchctl bootout system/com.cornerstone.stage-utility`, `/Library/LaunchDaemons/com.cornerstone.stage-utility.plist`); the script removes whichever is present, and re-running the installer moves such an install to the new label.
 - **Windows:** `nssm remove StageUtility confirm` (or delete the scheduled task).
 
 The data directory is never removed automatically — back it up or delete it deliberately.

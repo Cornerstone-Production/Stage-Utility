@@ -225,6 +225,13 @@ export interface UpdateStatus {
    * deliver. See main/services/update/relaunch.ts.
    */
   selfRecovers?: boolean;
+  /**
+   * Present only on the reply to a restart request, and only when this server
+   * could not arrange its own relaunch (macOS launchd: no known job to
+   * kickstart). The exit still happens, and launchd may leave the server
+   * stopped, so the UI says so before it goes.
+   */
+  relaunchFailure?: string;
   branch: string | null;
   /**
    * Where `branch` came from. A packaged install has no branch to read, so the

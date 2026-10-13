@@ -456,11 +456,11 @@ same dispatcher.
 | POST | `/api/update/check` | Ask now. Unlike the scheduled check, this always reports |
 | POST | `/api/update/apply` \| `/api/update/track` | Install / switch between the `main` and `beta` tracks |
 | GET | `/api/update/lock` | `{active, reasons}` — why an update would be refused right now |
-| POST | `/api/update/notices/dismiss` \| `/api/update/restart` \| `/api/update/auto` | Dismiss the post-update dialog / restart / set the automatic-update mode and window |
+| POST | `/api/update/notices/dismiss` \| `/api/update/restart` \| `/api/update/auto` | Dismiss the post-update dialog / restart (the reply is the update status, plus `relaunchFailure` when this server could not arrange its own relaunch on launchd) / set the automatic-update mode and window |
 | GET | `/api/config/export` | The config snapshot as a download. Credentials are excluded |
-| POST | `/api/config/import` | Apply a snapshot, then **restart** |
+| POST | `/api/config/import` | Apply a snapshot, then **restart**. The reply is `{ok, applied, restarting}`, plus `relaunchFailure` (a reason) when this server could not arrange its own relaunch on launchd |
 | GET / POST | `/api/config/snapshots` | List / save a named snapshot on this machine |
-| POST / DELETE | `/api/config/snapshots/:id/recall` \| `/api/config/snapshots/:id` | Apply one (then restart) / delete one |
+| POST / DELETE | `/api/config/snapshots/:id/recall` \| `/api/config/snapshots/:id` | Apply one (then restart, with the same reply as an import) / delete one |
 | GET / POST | `/api/backup/schedule` | The automatic-backup schedule |
 | POST | `/api/backup/run` | Run one now |
 | GET | `/api/archive/export` | The raw sample archive as a zip |
