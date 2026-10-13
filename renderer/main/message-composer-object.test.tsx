@@ -113,6 +113,17 @@ describe("the header", () => {
   });
 });
 
+describe("the text box", () => {
+  // jsdom measures nothing, so the growing itself is for a browser. What can be held
+  // is that no drag handle is offered: the native grip is what looked wrong on the
+  // dark theme, and the box is capped (it scrolls past that), so none is needed.
+  test("has no resize handle, and is capped rather than unbounded", () => {
+    const style = box(mount()).style;
+    assert.equal(style.resize, "none", "the native resize grip is drawn");
+    assert.equal(style.maxHeight, "9em", "the box can grow without bound");
+  });
+});
+
 describe("who a message goes to", () => {
   test("Everyone stands alone; groups add up; pressing a group swaps Everyone out", () => {
     assert.deepEqual(toggleTarget([], EVERYONE), [EVERYONE]);

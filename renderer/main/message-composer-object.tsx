@@ -24,7 +24,7 @@
 // Controls are live only where the surface says so (`interactive`): on a wall
 // display, or in the layout editor's own canvas, it draws and does nothing.
 
-import { useState, type CSSProperties } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
 import {
   ALERT_MS,
@@ -139,6 +139,17 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
   const [alert, setAlert] = useState(false);
   const [sending, setSending] = useState(false);
   const [clearing, setClearing] = useState<string | null>(null);
+  // The text box grows to fit what is in it, to the cap in its style, so it needs no
+  // resize handle. Measured before paint so a quick message does not flash small.
+  const box = useRef<HTMLTextAreaElement>(null);
+  const drawn = state !== null;
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    // scrollHeight leaves the border out and the box is border-box.
+    el.style.height = `${el.scrollHeight + (el.offsetHeight - el.clientHeight)}px`;
+  }, [text, drawn]);
 
   const body = text.trim();
   const targets = state ? liveTargets(to, state.groups) : [];
@@ -260,6 +271,7 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
             )}
 
             <textarea
+              ref={box}
               value={text}
               onChange={(e) => interactive && setText(e.target.value)}
               readOnly={!interactive}
@@ -272,7 +284,11 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
                 width: "100%",
                 boxSizing: "border-box",
                 minHeight: "4.1em",
-                resize: "vertical",
+                // The box grows with what is typed (see `grow`) up to this, then scrolls,
+                // so no drag handle is needed and none is drawn.
+                maxHeight: "9em",
+                overflowY: "auto",
+                resize: "none",
                 borderRadius: "0.48em",
                 padding: "0.55em 0.69em",
               }}
