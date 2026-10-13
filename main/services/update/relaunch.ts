@@ -20,10 +20,8 @@ import * as fs from "node:fs";
 import { APP_ROOT } from "../app-root.js";
 import { detectInstallKind, type InstallKind } from "./install-kind.js";
 import { FORMULA, kickstartLabel, serviceLabel } from "./homebrew-strategy.js";
+import { launchctlProbe, resolveDaemonLabel, type DaemonLabel, type LabelProbe } from "./launchd-label.js";
 import type { SpawnPlan } from "./strategy.js";
-
-/** The label install.sh registers for a macOS tarball install. */
-export const TARBALL_DAEMON_LABEL = "com.cornerstone.stage-utility";
 
 /**
  * What to spawn so this server comes back after it exits — or null where the
@@ -33,13 +31,22 @@ export const TARBALL_DAEMON_LABEL = "com.cornerstone.stage-utility";
  * uses, for the same reasons (see its doc for why `-k -p`, and why it tries gui
  * before system and never fails). The sleep puts the kickstart safely after our
  * own exit; if we are already gone, -k is a no-op.
+ *
+ * A tarball install has no fixed label (see launchd-label.ts), so the caller
+ * says which job it is running as; without one there is nothing safe to kick and
+ * this returns null. prepareRelaunch is the caller that finds out.
  */
-export function relaunchPlan(kind: InstallKind, appRoot: string, platform: NodeJS.Platform): SpawnPlan | null {
+export function relaunchPlan(
+  kind: InstallKind,
+  appRoot: string,
+  platform: NodeJS.Platform,
+  tarballLabel: DaemonLabel | null = null,
+): SpawnPlan | null {
   if (platform !== "darwin") return null;
 
   // A DISCRIMINANT, not a string built from appRoot.
   //
-  // The label has always been one of three module constants -- launchdLabel only
+  // The label has always been one of a few module constants -- launchdKind only
   // ever used appRoot for `.includes()` checks and never put it in the result --
   // but "the value is constant" was three functions away from where it mattered.
   // Returning which-one and picking the literal here means the string that lands
@@ -49,19 +56,59 @@ export function relaunchPlan(kind: InstallKind, appRoot: string, platform: NodeJ
   // appRoot comes from STAGE_UTILITY_ROOT, so CodeQL followed an environment
   // value into a shell string and reported it at medium -- correctly, given what
   // it could see. Types do not help: they are erased before it looks. Only the
-  // dataflow does.
-  const which = launchdKind(kind, appRoot);
-  if (!which) return null;
-  const label =
-    which === "tarball" ? TARBALL_DAEMON_LABEL
-    : which === "beta" ? serviceLabel(FORMULA.beta)
-    : serviceLabel(FORMULA.main);
+  // dataflow does. The same goes for tarballLabel, which resolveDaemonLabel
+  // picks FROM the constants rather than copying out of XPC_SERVICE_NAME.
+  const label = launchdJob(kind, appRoot, tarballLabel);
+  if (!label) return null;
 
   // kill:false — the old instance is exiting on its own. On a box where
   // KeepAlive is NOT parked, launchd may have already relaunched us by the
   // time this fires; -p leaves that healthy successor alone, where -k would
   // kill it mid-boot and start a third.
   return { command: "bash", args: ["-c", `sleep 2; ${kickstartLabel(label, { kill: false })}`], env: {} };
+}
+
+/** What exitForRestart set up, and — when it could not — why not. */
+export interface RelaunchPrep {
+  /** What to spawn; null when nothing is to be kicked. */
+  plan: SpawnPlan | null;
+  /** The launchd job the plan kicks, for the log. */
+  job: string | null;
+  /** Set when a launchd install needed a kick and no job could be found. */
+  failure: string | null;
+}
+
+/**
+ * relaunchPlan plus the work of finding out which job a macOS tarball install is.
+ * Everything that touches the system arrives as an argument, so the decision runs
+ * under test with the real code and a fake launchd.
+ */
+export function prepareRelaunch(
+  kind: InstallKind,
+  appRoot: string,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  probe: LabelProbe = launchctlProbe,
+): RelaunchPrep {
+  let tarballLabel: DaemonLabel | null = null;
+  if (platform === "darwin" && kind === "tarball") {
+    const found = resolveDaemonLabel(env, probe);
+    if (!found.ok) return { plan: null, job: null, failure: found.reason };
+    tarballLabel = found.label;
+  }
+  const plan = relaunchPlan(kind, appRoot, platform, tarballLabel);
+  return { plan, job: plan ? launchdJob(kind, appRoot, tarballLabel) : null, failure: null };
+}
+
+/** The launchd job this install runs as, or null when it is not one. */
+function launchdJob(kind: InstallKind, appRoot: string, tarballLabel: DaemonLabel | null): string | null {
+  const which = launchdKind(kind, appRoot);
+  return (
+    which === "tarball" ? tarballLabel
+    : which === "beta" ? serviceLabel(FORMULA.beta)
+    : which === "main" ? serviceLabel(FORMULA.main)
+    : null
+  );
 }
 
 /**
@@ -94,9 +141,13 @@ function launchdKind(kind: InstallKind, appRoot: string): "tarball" | "beta" | "
  * exit is exactly what gets parked, so a synchronous throw took every display
  * dark with no route back but a shell. A crash still exits non-zero — the
  * supervisor should see a failure — it just no longer exits alone.
+ *
+ * Returns what it arranged. The exit goes ahead whatever it says — a crash must
+ * still exit — so a failure to find the launchd job to kick is reported here and
+ * on the log, never thrown.
  */
-export function exitForRestart(delayMs: number, code = 0): void {
-  scheduleRelaunch();
+export function exitForRestart(delayMs: number, code = 0): RelaunchPrep {
+  const prep = scheduleRelaunch();
   // Say so when nothing is coming. A config restore on a hand-run checkout
   // exited cleanly here and the log simply STOPPED mid-sentence — no error, no
   // stack, no last word — so the only available reading was "it crashed". It
@@ -109,6 +160,7 @@ export function exitForRestart(delayMs: number, code = 0): void {
     );
   }
   setTimeout(() => process.exit(code), delayMs);
+  return prep;
 }
 
 /**
@@ -155,14 +207,26 @@ function supervisorInEnv(env: NodeJS.ProcessEnv): boolean {
 
 /** Spawn the detached kickstart helper (survives our exit); a no-op off macOS
  *  and on unrecognised installs. */
-function scheduleRelaunch(): void {
-  const plan = relaunchPlan(detectInstallKind(process.env, APP_ROOT, fs.existsSync), APP_ROOT, process.platform);
-  if (!plan) return;
-  console.log(`[relaunch] launchd parks KeepAlive respawns — scheduling: ${plan.args.at(-1)}`);
-  const child = spawn(plan.command, plan.args, {
+function scheduleRelaunch(): RelaunchPrep {
+  const prep = prepareRelaunch(
+    detectInstallKind(process.env, APP_ROOT, fs.existsSync),
+    APP_ROOT,
+    process.platform,
+    process.env,
+  );
+  if (prep.failure) {
+    // Loud on purpose: the exit that follows is the one launchd may park, so a
+    // box that cannot name its own job is a box that may stay dark.
+    console.error(`[updater] cannot relaunch this server through launchd: ${prep.failure}`);
+  }
+  if (!prep.plan) return prep;
+  console.log(`[updater] relaunching launchd job ${prep.job}`);
+  console.log(`[relaunch] launchd parks KeepAlive respawns — scheduling: ${prep.plan.args.at(-1)}`);
+  const child = spawn(prep.plan.command, prep.plan.args, {
     detached: true,
     stdio: "ignore",
-    env: { ...process.env, ...plan.env },
+    env: { ...process.env, ...prep.plan.env },
   });
   child.unref();
+  return prep;
 }
