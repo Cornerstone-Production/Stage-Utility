@@ -36,7 +36,8 @@ import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
-const { setupScrollRestoration, storageKey } = await import("@tanstack/router-core");
+const { storageKey } = await import("@tanstack/router-core");
+const { createMemoryHistory, createRootRoute, createRouter } = await import("@tanstack/react-router");
 const React = (await import("react")).default;
 const { render, cleanup, act } = await import("@testing-library/react");
 const { PAGE_SCROLLER_ID, PAGE_SCROLLER_SELECTOR, resetCurrentRoute, scrollPageToTop, useRouteResetKey } =
@@ -80,35 +81,27 @@ function location(href: string, key: string) {
 }
 
 /**
- * The smallest router the real `setupScrollRestoration` will attach to, plus the
- * two events it listens for. Everything it reads is here; nothing is simulated.
+ * A real router with the scroll options under test, driven through its own two
+ * events. It is not rendered: a router built in a browser sets up its scroll
+ * restoration in its constructor, and that subscribes to exactly these events,
+ * so emitting them is a navigation as far as restoration can tell. A stand-in
+ * object would have to spell the library's private scroll state, whose fields
+ * were renamed in a patch release and left a copy here silently inert.
  */
 function harness(selectors: NonNullable<typeof router.options.scrollToTopSelectors> | undefined) {
-  const subscribers: Record<string, ((e: unknown) => void)[]> = {};
-  const here = location("/", "start");
-  const fake = {
-    isServer: false,
-    options: {
-      scrollRestoration: true,
-      scrollToTopSelectors: selectors,
-    },
-    _scroll: { next: true } as Record<string, unknown>,
-    stores: {
-      resolvedLocation: { get: () => here },
-      location: { get: () => here },
-    },
-    subscribe(name: string, fn: (e: unknown) => void) {
-      (subscribers[name] ??= []).push(fn);
-      return () => {};
-    },
-    latestLocation: here,
-  };
-  setupScrollRestoration(fake as never, true);
+  const real = createRouter({
+    routeTree: createRootRoute(),
+    history: createMemoryHistory(),
+    scrollRestoration: true,
+    scrollToTopSelectors: selectors,
+  });
+  const emit = (e: Record<string, unknown>) => (real as unknown as { emit: (e: unknown) => void }).emit(e);
   return {
     /** Leave `from` and arrive at `to`, the way a rail click does. */
     navigate(from: ReturnType<typeof location>, to: ReturnType<typeof location>) {
-      for (const fn of subscribers.onBeforeLoad ?? []) fn({ fromLocation: from });
-      for (const fn of subscribers.onRendered ?? []) fn({ fromLocation: from, toLocation: to });
+      const moved = { fromLocation: from, toLocation: to, pathChanged: true, hrefChanged: true, hashChanged: false };
+      emit({ type: "onBeforeLoad", ...moved });
+      emit({ type: "onRendered", ...moved });
     },
   };
 }
