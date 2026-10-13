@@ -4,7 +4,7 @@
 // PURE. No I/O and no clock: every function takes what it needs, so the whole
 // file is testable against a saved fixture. The three findings encoded here were
 // established by watching a live workspace over 702 samples, not by reading the
-// vendor documentation — see docs/superpowers/research/2026-08-29-provideoplayer.md.
+// vendor documentation — see docs/research/2026-08-29-provideoplayer.md.
 
 import { hasContent } from "../types/pvp.js";
 import type { PvpLayerDTO, PvpLayerState, PvpStatusDTO } from "../types/pvp.js";

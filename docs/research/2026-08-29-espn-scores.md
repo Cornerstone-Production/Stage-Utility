@@ -508,8 +508,7 @@ existing idiom for this and should be reused rather than hand-rolled.
 
 ## 3. How this fits THIS app
 
-Paths below are relative to the repo root
-(`/Users/hstreuber/projects/stage-utility`). Read at commit `56f601d` on branch
+Paths below are relative to the repo root. Read at commit `56f601d` on branch
 `fix/pco-freshness` — note the worktree was **not** on the branch named in the
 session's opening git status, and other agents are editing concurrently, so line
 numbers may drift.

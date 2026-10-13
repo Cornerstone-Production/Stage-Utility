@@ -23,8 +23,7 @@
 //      what a stub can tell apart: the body reports its natural height and the
 //      grid item around it reports the 0 it is leaving.
 //
-// The rendered geometry is verified in a real browser instead, against the
-// checklist in Task 5 step 7 of docs/superpowers/plans/2026-08-29-live-scores.md.
+// The rendered geometry is verified in a real browser instead.
 // What IS guarded here is everything that is pure logic and therefore cannot lie
 // to jsdom: the hold timer, the rev guard, the seed, the stack arithmetic, and
 // which of four things the bar says.

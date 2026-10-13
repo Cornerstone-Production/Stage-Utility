@@ -3,7 +3,7 @@ import type { RevisionedStatus } from "./live.js";
 // scores.ts — the shapes the scores integration speaks.
 //
 // Every field here was observed in a real ESPN response on 2026-08-29; see
-// docs/superpowers/research/2026-08-29-espn-scores.md. Fields the research could
+// docs/research/2026-08-29-espn-scores.md. Fields the research could
 // not observe live are NOT in this file — a DTO field nothing ever fills is a
 // renderer branch that is never exercised.
 
