@@ -322,9 +322,11 @@ export function UpdatesPanel({
 
   async function onRestart() {
     const doRestart = () =>
-      void invoke("update:restart").catch((e) =>
-        window.alert(`Restart failed: ${errorMessage(e)}`),
-      );
+      void invoke<{ relaunchFailure?: string }>("update:restart")
+        .then((r) => {
+          if (r?.relaunchFailure) window.alert(restartOutcome(s?.selfRecovers, "Restarting.", r.relaunchFailure));
+        })
+        .catch((e) => window.alert(`Restart failed: ${errorMessage(e)}`));
     // Locked during a live service / recording, same as self-update — a manual
     // restart interrupts displays too. Overridable for a genuine emergency.
     if (lock?.active) {
@@ -887,8 +889,10 @@ function ConfigSnapshotPanel() {
       confirmLabel: "Recall",
     }))) return;
     try {
-      await invoke("config:recallSnapshot", { id });
-      toast.success(restartOutcome(selfRecovers, "Restored."));
+      const r = await invoke<{ relaunchFailure?: string }>("config:recallSnapshot", { id });
+      const msg = restartOutcome(selfRecovers, "Restored.", r?.relaunchFailure);
+      if (r?.relaunchFailure) toast.error(msg);
+      else toast.success(msg);
     } catch (e) {
       toast.error(`Recall failed: ${errorMessage(e)}`);
     }
@@ -914,8 +918,10 @@ function ConfigSnapshotPanel() {
         message: `This overwrites the current config. ${restartConsequence(selfRecovers)} Secrets aren't included — you'll re-enter API keys/passwords after.`,
         confirmLabel: "Restore",
       })) {
-        await invoke("config:import", { bundle });
-        toast.success(restartOutcome(selfRecovers, "Restored."));
+        const r = await invoke<{ relaunchFailure?: string }>("config:import", { bundle });
+        const msg = restartOutcome(selfRecovers, "Restored.", r?.relaunchFailure);
+        if (r?.relaunchFailure) toast.error(msg);
+        else toast.success(msg);
       }
     } catch (err) {
       toast.error(`Import failed: ${errorMessage(err)}`);

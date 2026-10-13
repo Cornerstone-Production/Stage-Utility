@@ -718,8 +718,8 @@ export class Updater {
     // launchd parks KeepAlive respawns, so exit alone leaves a Homebrew (or
     // macOS tarball) box dark; exitForRestart pairs the exit with the detached
     // kickstart that brings it back.
-    exitForRestart(600);
-    return this.getStatus();
+    const relaunch = exitForRestart(600);
+    return { ...this.getStatus(), ...(relaunch.failure ? { relaunchFailure: relaunch.failure } : {}) };
   }
 
   /** Spawn the detached update/switch script and enter the "updating" phase. */
