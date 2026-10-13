@@ -174,9 +174,10 @@ describe("a message's line", () => {
       ],
     });
     const text = draw({ state: stateOf([m]) });
-    assert.ok(text.includes("Producer console") && text.includes("3 min"), text);
+    // Signed as the sender reads, with a trailing role word dropped (senderLabel).
+    assert.ok(text.includes("Producer · 3 min") && !text.includes("Producer console"), text);
     assert.ok(text.includes("Green room iPad: Walking now"), "the latest reply");
-    assert.ok(!text.includes("Booth console: Copy"), "an earlier reply");
+    assert.ok(!text.includes("Booth: Copy"), "an earlier reply");
     // Same message, a clock a minute later: the age moves with `now`, so it is the
     // injected server clock being read and not the host's.
     assert.ok(draw({ state: stateOf([m]), now: NOW + 60_000 }).includes("4 min"));
@@ -224,7 +225,7 @@ describe("a message's line", () => {
     ]);
     const c = mount({ state });
     const headers = [...c.querySelectorAll("small")].map((e) => e.textContent);
-    assert.deepEqual(headers, ["Alex Display · 2 min", "Jordan · 9 min"], "a sender line was repeated inside a run, or the time is not the first message's");
+    assert.deepEqual(headers, ["Alex · 2 min", "Jordan · 9 min"], "a sender line was repeated inside a run, or the time is not the first message's");
     const text = c.textContent ?? "";
     assert.ok(text.indexOf("message 3") < text.indexOf("message 2") && text.indexOf("message 2") < text.indexOf("Jordan"), text);
     assert.ok(text.includes("Booth: Copy"), "a reply under a message in a run is unaffected");
@@ -261,12 +262,12 @@ describe("answering from a console", () => {
   });
 
   // jsdom measures nothing, so the overlap itself (the list drawn over the "Answering"
-  // line and the buttons when the card is shorter than its content) is checked in a
-  // browser. What a unit test can hold is the cause: the card is a fixed height column
-  // and the list is allowed to shrink (minHeight 0), so unless it CLIPS its own
-  // overflow its messages paint over the replies, and unless the replies refuse to
-  // shrink they are squeezed instead of the list.
-  test("the list clips its own overflow and the answer row never shrinks, so neither can draw over the other", () => {
+  // line and the buttons when the card is shorter than its content) and a message cut
+  // through a line are checked in a browser. What a unit test can hold is the cause:
+  // the card is a fixed height column; the list takes what is left and clips; each
+  // message is its own item of a wrapping column, so one that does not fit WHOLE
+  // wraps out of view instead of being cut; the replies refuse to shrink.
+  test("the list shows only whole messages in its own box, and the answer row never shrinks", () => {
     const c = mount({ state: thread, interactive: true, screen: { outputId: "panel-1", groups: [GREEN] } });
     // The card is the heading, the list, then the answer row, in that order.
     const [heading, list, answers] = [...c.firstElementChild!.children] as HTMLElement[];
@@ -274,6 +275,11 @@ describe("answering from a console", () => {
     assert.ok(list.textContent!.includes("for the green room"), "found the list of messages");
     assert.equal(list.style.overflow, "hidden", "the list can draw outside its own box, over the answer buttons");
     assert.equal(list.style.minHeight, "0px", "the list cannot shrink to make room");
+    assert.equal(list.style.flexWrap, "wrap", "a message that does not fit is cut through a line instead of wrapping out of view");
+    assert.equal(list.style.flexDirection, "column");
+    const items = [...list.children] as HTMLElement[];
+    assert.ok(items.length > 1, "found the messages");
+    for (const item of items) assert.equal(item.style.width, "100%", "a message shares a column with another, so the wrap cannot hide it");
     assert.equal(answers.querySelectorAll("button").length, 3, "found the answer row");
     assert.equal(answers.style.flexShrink, "0", "the answer row can be squeezed under the list");
   });

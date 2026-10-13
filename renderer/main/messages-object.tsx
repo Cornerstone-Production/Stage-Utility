@@ -182,16 +182,31 @@ function Feed({
   if (!known || !state || !shown) return null;
   if (shown.length === 0) return <Quiet>No messages for this screen&apos;s groups</Quiet>;
   return (
-    // `overflow: hidden` is what keeps the list in its own box. The card is a column
-    // of fixed height, so when the messages are taller than what is left this item
-    // shrinks (`minHeight: 0` lets it) and anything still visible overflowing it was
-    // painted over the buttons below. Clipped, the OLDEST message, last in the list,
-    // is the one that gives way.
-    <div style={{ display: "grid", gap: "0.5em", marginTop: "0.54em", minHeight: 0, overflow: "hidden" }}>
-      {groupBySender(shown).map((run) => (
-        // The newest message of all is the large one: the first of the first run.
-        <Run key={run[0].id} run={run} now={now} newest={run[0] === shown[0]} />
-      ))}
+    // The list takes what the card has left (`flex: 1 1 0`, `minHeight: 0`) and
+    // shows only messages that fit WHOLE. Each message is a full-width item of a
+    // column that wraps: one that does not fit moves to a second column, past the
+    // right edge, and `overflow: hidden` hides it. So the oldest messages drop out
+    // one at a time instead of being cut through a line, and nothing is ever drawn
+    // over the answer buttons below.
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        flexWrap: "wrap",
+        alignContent: "flex-start",
+        columnGap: "100vw",
+        flex: "1 1 0",
+        minHeight: 0,
+        overflow: "hidden",
+        marginTop: "0.54em",
+      }}
+    >
+      {groupBySender(shown).flatMap((run, r) =>
+        run.map((m, i) => (
+          // The newest message of all is the large one: the first of the first run.
+          <Item key={m.id} m={m} header={i === 0 ? run[0] : null} gap={r === 0 && i === 0 ? 0 : i === 0 ? 0.5 : 0.3} large={r === 0 && i === 0} now={now} />
+        )),
+      )}
     </div>
   );
 }
@@ -201,26 +216,24 @@ function Quiet({ children }: { children: string }) {
 }
 
 /**
- * A run of messages from one sender: who and when once, from the run's first
- * message, then each message under it. Only the newest message of all is large; an
- * older one in the same run is as small as any other older one.
+ * One message in the list. The first message of a run from one sender carries the
+ * who-and-when line, from that message; the rest of the run sits under it without
+ * repeating it. Only the newest message of all is large; an older one in the same
+ * run is as small as any other older one.
  */
-function Run({ run, now, newest }: { run: StageMessage[]; now: number; newest: boolean }) {
-  const first = run[0];
+function Item({ m, header, gap, large, now }: { m: StageMessage; header: StageMessage | null; gap: number; large: boolean; now: number }) {
   // The header is as large as the message it heads.
-  const f = newest ? 1 : 0.81;
+  const f = large ? 1 : 0.81;
   return (
-    <div style={{ overflowWrap: "anywhere" }}>
+    <div style={{ width: "100%", overflowWrap: "anywhere", marginTop: `${gap}em` }}>
       {/* The sender line is as faint on an older message as on the newest, and the
           reply keeps its green: only the words of an older message are muted. */}
-      <small style={{ display: "block", fontSize: `${0.58 * f}em`, opacity: 0.33, marginBottom: `${0.08 * f}em` }}>
-        {first.from} &middot; {ageLabel(now, first.at)}
-      </small>
-      <div style={{ display: "grid", gap: "0.3em" }}>
-        {run.map((m, i) => (
-          <Message key={m.id} m={m} large={newest && i === 0} />
-        ))}
-      </div>
+      {header && (
+        <small style={{ display: "block", fontSize: `${0.58 * f}em`, opacity: 0.33, marginBottom: `${0.08 * f}em` }}>
+          {senderLabel(header.from)} &middot; {ageLabel(now, header.at)}
+        </small>
+      )}
+      <Message m={m} large={large} />
     </div>
   );
 }
@@ -236,7 +249,7 @@ function Message({ m, large }: { m: StageMessage; large: boolean }) {
       <span style={{ opacity: large ? 1 : 0.6 }}>{m.text}</span>
       {reply && (
         <span className="text-live-11" style={{ display: "block", fontSize: em(0.62), marginTop: em(0.12) }}>
-          {reply.from}: {reply.text}
+          {senderLabel(reply.from)}: {reply.text}
         </span>
       )}
     </div>
