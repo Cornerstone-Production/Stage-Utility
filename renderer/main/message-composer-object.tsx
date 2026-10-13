@@ -33,6 +33,7 @@ import {
   FROM_MAX,
   MESSAGE_MAX,
   isAlertRunning,
+  senderLabel,
   type MessageGroup,
   type MessagesState,
   type StageMessage,
@@ -65,7 +66,7 @@ export function senderName(where: {
     : where.outputId !== null && !where.monitor
       ? where.outputs.find((o) => o.id === where.outputId)?.name
       : where.views.find((v) => v.id === where.embedChain.at(-1))?.name;
-  return (named ?? "").trim().slice(0, FROM_MAX) || DEFAULT_FROM;
+  return senderLabel(named ?? "").slice(0, FROM_MAX) || DEFAULT_FROM;
 }
 
 /**

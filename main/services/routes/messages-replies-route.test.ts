@@ -77,6 +77,8 @@ beforeEach(async () => {
       viewOf("v-own", "Green room iPad", [widget("w-green", [green]), widget("w-none", [])], "display"),
       // The same widget, drawn read-only: the screens below that are displays show it.
       viewOf("v-follow-wall", "Booth wall", [widget("w-follow-wall")], "display"),
+      // Named with a trailing role word, which a reply signs without.
+      viewOf("v-role", "Jordan Console", [widget("w-role", [green])], "display"),
       viewOf("v-elsewhere", "Elsewhere", [{ id: "clock-2", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "clock" } }]),
       viewOf("v-embeds", "Embeds", [{ id: "tile", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "view-embed", viewId: "v-follow" } }]),
       viewOf("v-screen-embeds", "Screen embeds", [{ id: "stile", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "screen-embed", outputId: "panel-1" } }]),
@@ -91,6 +93,7 @@ beforeEach(async () => {
     ],
     outputs: [
       { id: "panel-1", name: "Booth panel", viewId: "v-follow", groups: [booth, stage] },
+      { id: "role-panel", name: "Alex Display", viewId: "v-follow", groups: [booth] },
       { id: "wall", name: "Stage wall", viewId: "v-follow-wall", groups: [stage] },
       { id: "plain", name: "Plain", viewId: "v-follow-wall", groups: [stage] },
       // A real panel in Stage that draws a view with no Messages widget in it: not
@@ -123,6 +126,17 @@ describe("who may answer", () => {
     const r = await reply(m.id, { text: "Walking now", objectId: "w-follow", outputId: "panel-1" });
     assert.equal(r.status, 201, err(r));
     assert.equal((r.json as MessageReply).from, "Booth panel");
+  });
+
+  it("a reply signs without a trailing Display, Screen, Monitor or Console in the name", async () => {
+    const onScreen = await send([booth]);
+    const a = await reply(onScreen.id, { text: "Copy", objectId: "w-follow", outputId: "role-panel" });
+    assert.equal(a.status, 201, err(a));
+    assert.equal((a.json as MessageReply).from, "Alex", "the output's name, signed without Display");
+    const onView = await send([green]);
+    const b = await reply(onView.id, { text: "Copy", objectId: "w-role" });
+    assert.equal(b.status, 201, err(b));
+    assert.equal((b.json as MessageReply).from, "Jordan", "the view's name, signed without Console");
   });
 
   it("Everyone reaches any Messages widget a screen draws, and any with a list of its own", async () => {

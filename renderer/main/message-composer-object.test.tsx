@@ -374,6 +374,18 @@ describe("who it signs as", () => {
     assert.equal(senderName({ ...tile, monitor: false }), "Booth panel", "a composer on the screen itself still signs as the screen");
   });
 
+  test("signs without a trailing role word, the way the server signs a reply", () => {
+    const named = (name: string) => senderName({ home: false, outputId: "x", embedChain: [], outputs: [{ id: "x", name }], views });
+    assert.equal(named("Alex Display"), "Alex");
+    assert.equal(named("Main Screen"), "Main");
+    assert.equal(named("Display"), "Display", "a name that is only the word keeps it");
+    assert.equal(
+      senderName({ home: false, outputId: null, embedChain: ["c"], outputs, views: [{ id: "c", name: "Jordan Console" }] }),
+      "Jordan",
+      "a console's view name too",
+    );
+  });
+
   test("falls back to the server's default rather than sending a blank, and cuts a long name to the limit", () => {
     assert.equal(senderName({ home: false, outputId: "gone", embedChain: ["gone"], outputs, views }), "Operator");
     assert.equal(senderName({ home: false, outputId: null, embedChain: [], outputs, views }), "Operator");

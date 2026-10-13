@@ -44,6 +44,7 @@ import {
   QUICK_REPLY_MAX,
   WIRE_ID,
   messageReaches,
+  senderLabel,
   widgetGroups,
   type MessageGroup,
   type MessageReply,
@@ -452,7 +453,7 @@ export class MessagesService {
       const reply: MessageReply = {
         id: randomBytes(8).toString("hex"),
         at: Date.now(),
-        from: (output?.name ?? widget.viewName).slice(0, FROM_MAX),
+        from: senderLabel(output?.name ?? widget.viewName).slice(0, FROM_MAX),
         text,
       };
       const next = this.messages.map((m) => (m.id === messageId ? { ...m, replies: [...m.replies, reply] } : m));
