@@ -282,7 +282,7 @@ arrives, so a wall of tiles does not read as a wall of dark screens. It is
 not a routing light: what a screen is or is not showing (unrouted, blacked out,
 a deleted view) is named in the body of the tile itself.
 
-On an interactive surface — a console, or a screen set to panel mode — each tile
+On an interactive surface — a console, or a screen showing one — each tile
 carries a small button in its bottom-right corner that expands it to fill the
 window; Escape or the panel's close control brings it back. A wall display draws
 no such control at all, so a tile there cannot be expanded — an overlay a

@@ -55,9 +55,8 @@ const fetchCalls: { url: string; method: string; body: string }[] = [];
 
 const { render, screen, cleanup, fireEvent, act, within } = await import("@testing-library/react");
 const React = (await import("react")).default;
-const { ScreenSettingsPanel, viewsFittingRole } = await import("./screen-settings-panel.js");
+const { ScreenSettingsPanel, viewsOfKind } = await import("./screen-settings-panel.js");
 const { __resetDevicesForTests, refreshDevices } = await import("../../app/screens/use-devices.js");
-const { roleChangeConflict } = await import("@main/types/views");
 type PanelProps = import("./screen-settings-panel.js").ScreenSettingsPanelProps;
 type Actions = import("./screen-settings-panel.js").ScreenPanelActions;
 const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
@@ -82,10 +81,10 @@ const CTL_A: View = { id: "ctl-a", name: "Booth controls", kind: "custom", surfa
 const CTL_B: View = { id: "ctl-b", name: "Stage controls", kind: "custom", surface: "console", createdAt: NOW };
 const VIEWS = [WALL_A, WALL_B, CTL_A, CTL_B];
 
+// A screen is a control surface when the view it shows is a console, so which of
+// these is which is the view's surface, not a field on the screen.
 const MINE: Output = { id: "display-1", name: "Lobby TV", viewId: "wall-a" };
-const OTHER_WALL: Output = { id: "display-2", name: "Hallway TV", viewId: "wall-a" };
-const PANEL_A: Output = { id: "display-3", name: "Booth panel", viewId: "ctl-a", mode: "panel" };
-const PANEL_B: Output = { id: "display-4", name: "Stage panel", viewId: "ctl-a", mode: "panel" };
+const PANEL_A: Output = { id: "display-3", name: "Booth panel", viewId: "ctl-a" };
 
 const GREEN = { id: "g-11111111", name: "Green room" };
 const STAGE = { id: "g-22222222", name: "Stage" };
@@ -102,7 +101,6 @@ function recorder(over: Partial<Actions> = {}): { calls: Call[]; actions: Action
     onRename: rec("rename"),
     onSetSlug: async (...a) => { calls.push(["slug", ...a]); },
     onSetView: rec("view"),
-    onSetRole: async (...a) => { calls.push(["role", ...a]); return true; },
     onSetLocked: rec("locked"),
     onSetHideTopBar: rec("hideTopBar"),
     onSetTextSize: rec("textSize"),
@@ -163,7 +161,7 @@ const choose = async (el: Element, value: string) => { await act(async () => { f
 const type = async (el: Element, value: string) => { await act(async () => { fireEvent.change(el, { target: { value } }); await settle(); }); };
 const sw = (name: string) => screen.getByRole("switch", { name });
 const role = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name}`) });
-/** Answer the confirm dialog the role change opens. */
+/** Answer the confirm dialog that choosing a view of the other kind opens. */
 async function answerConfirm(label: string | null): Promise<void> {
   const dialog = await eventually(() => screen.getByRole("alertdialog"));
   await click(within(dialog).getByRole("button", { name: label ?? "Cancel" }));
@@ -172,10 +170,11 @@ async function answerConfirm(label: string | null): Promise<void> {
 // ── The sections ─────────────────────────────────────────────────────────
 
 describe("edit mode", () => {
-  test("has the seven sections, in the mockup's order", () => {
+  test("has the six sections, in order, and no role to choose: the view decides", () => {
     mount({});
     const headings = [...document.querySelectorAll("h4")].map((h) => h.textContent);
-    assert.deepEqual(headings, ["What this screen is", "What it shows", "Name and address", "On the screen", "Messages", "Video", "Device"]);
+    assert.deepEqual(headings, ["What it shows", "Name and address", "On the screen", "Messages", "Video", "Device"]);
+    assert.equal(screen.queryByRole("group", { name: "What this screen is" }) !== null, false, "a role the screen does not have is offered");
   });
 
   test("says what it is and that changes save as they are made", () => {
@@ -389,37 +388,54 @@ describe("the message groups", () => {
 describe("what it shows", () => {
   const picker = () => screen.getByLabelText("View") as HTMLSelectElement;
   const options = () => [...picker().options].map((o) => o.textContent);
+  const groups = () => [...picker().querySelectorAll("optgroup")].map((g) => [g.label, [...g.querySelectorAll("option")].map((o) => o.textContent)]);
 
-  test("a wall display is offered wall-screen views only, and says so", () => {
+  test("offers views of both kinds, grouped as wall views and control surfaces", () => {
     mount({});
-    assert.deepEqual(options(), ["— Unrouted —", "Lobby loop", "Hallway loop", "+ New wall view…"]);
-    assert.ok(screen.getByText("Wall-display views only."));
+    assert.deepEqual(groups(), [["Wall views", ["Lobby loop", "Hallway loop"]], ["Control surfaces", ["Booth controls", "Stage controls"]]]);
+    assert.equal(options()[0], "— Unrouted —");
   });
 
-  test("a control surface is offered control-surface views only, and says so", () => {
+  test("says in one line what the view makes the screen", () => {
+    mount({});
+    assert.ok(screen.getByText("Wall display: read-only. Buttons draw but do nothing."));
+    cleanup();
     mount({ outputs: [PANEL_A] });
-    assert.deepEqual(options(), ["— Unrouted —", "Booth controls", "Stage controls", "+ New control surface…"]);
-    assert.ok(screen.getByText("Control-surface views only."));
+    assert.ok(screen.getByText("Control surface: its buttons work for anyone at it."));
+    cleanup();
+    mount({ outputs: [{ ...MINE, viewId: null }] });
+    assert.ok(screen.getByText("Shows nothing yet."));
+  });
+
+  test("the new-view entry says which kind it makes: the kind the screen shows", () => {
+    mount({});
+    assert.equal(options().at(-1), "+ New wall view…");
+    cleanup();
+    mount({ outputs: [PANEL_A] });
+    assert.equal(options().at(-1), "+ New control surface…");
   });
 
   test("keeps the view it is already on, so the picker never goes blank", () => {
-    // A control surface on a wall view: allowed by the server, and not a reason
-    // for the picker to show nothing.
     mount({ outputs: [{ ...PANEL_A, viewId: "wall-a" }] });
-    assert.ok(options().includes("Lobby loop"));
     assert.equal(picker().value, "wall-a");
   });
 
-  test("choosing a view routes THIS screen to it", async () => {
+  test("choosing a view of the same kind routes THIS screen to it, asking nothing", async () => {
     const { calls } = mount({});
     await choose(picker(), "wall-b");
-    assert.deepEqual(calls, [["view", "display-1", "wall-b"]]);
+    assert.equal(screen.queryByRole("alertdialog") !== null, false, "a confirm was asked for a change that changes nothing");
+    assert.deepEqual(calls, [["view", "display-1", "wall-b", "display"]]);
+    cleanup();
+    const ctl = mount({ outputs: [PANEL_A] });
+    await choose(picker(), "ctl-b");
+    assert.deepEqual(ctl.calls, [["view", "display-3", "ctl-b", "console"]]);
   });
 
-  test("choosing Unrouted clears it", async () => {
-    const { calls } = mount({});
+  test("choosing Unrouted clears it, asking nothing, even for a control surface", async () => {
+    const { calls } = mount({ outputs: [PANEL_A] });
     await choose(picker(), "__none__");
-    assert.deepEqual(calls, [["view", "display-1", null]]);
+    assert.equal(screen.queryByRole("alertdialog") !== null, false);
+    assert.deepEqual(calls, [["view", "display-3", null]]);
   });
 
   test("the new-view entry asks for a view for THIS screen and routes nothing itself", async () => {
@@ -428,10 +444,13 @@ describe("what it shows", () => {
     assert.deepEqual(calls, [["newView", "display-1"]]);
   });
 
-  test("viewsFittingRole filters by surface and keeps the current one", () => {
-    assert.deepEqual(viewsFittingRole(VIEWS, "panel", null).map((v) => v.id), ["ctl-a", "ctl-b"]);
-    assert.deepEqual(viewsFittingRole(VIEWS, "display", null).map((v) => v.id), ["wall-a", "wall-b"]);
-    assert.deepEqual(viewsFittingRole(VIEWS, "panel", "wall-a").map((v) => v.id), ["wall-a", "ctl-a", "ctl-b"]);
+  test("viewsOfKind: a control surface is a console with something to operate, a wall display a wall view", () => {
+    assert.deepEqual(viewsOfKind(VIEWS, "control").map((v) => v.id), ["ctl-a", "ctl-b"]);
+    assert.deepEqual(viewsOfKind(VIEWS, "wall").map((v) => v.id), ["wall-a", "wall-b"]);
+    const legacy: View = { id: "mics-c", name: "Old slot console", kind: "slots", surface: "console", createdAt: NOW };
+    assert.deepEqual(viewsOfKind([...VIEWS, legacy], "control").map((v) => v.id), ["ctl-a", "ctl-b"], "a console with nothing to operate was offered");
+    const calendar: View = { id: "cal-c", name: "Month console", kind: "calendar", surface: "console", createdAt: NOW };
+    assert.deepEqual(viewsOfKind([...VIEWS, calendar], "control").map((v) => v.id), ["ctl-a", "ctl-b", "cal-c"], "a calendar console, which has chevrons to operate, was not offered");
   });
 });
 
@@ -458,16 +477,14 @@ describe("the sidebar listing", () => {
     assert.deepEqual(calls, [["sidebar", "ctl-a", true]]);
   });
 
-  test("is not offered for a control surface showing a wall view: the sidebar lists consoles", () => {
-    // A panel may show a display view. The sidebar never lists one, so a switch
-    // here would write a flag nothing reads.
+  test("is not offered for a screen on a wall view, or on no view: the sidebar lists consoles", () => {
+    // The sidebar never lists a wall view, so a switch here would write a flag
+    // nothing reads; and with no view there is nothing to write it on.
     mount({ outputs: [{ ...PANEL_A, viewId: "wall-a" }] });
     assert.equal(screen.queryByRole("switch", { name: "List in the sidebar" }) !== null, false, "it is on screen");
-  });
-
-  test("cannot be set before a view is chosen: the listing belongs to the view", () => {
+    cleanup();
     mount({ outputs: [{ ...PANEL_A, viewId: null }] });
-    assert.equal((sw("List in the sidebar") as HTMLButtonElement).disabled, true);
+    assert.equal(screen.queryByRole("switch", { name: "List in the sidebar" }) !== null, false, "it is on screen");
   });
 });
 
@@ -735,187 +752,67 @@ describe("the device of a Mac output helper", () => {
   });
 });
 
-// ── The role ─────────────────────────────────────────────────────────────
+// ── Choosing a view of the other kind ───────────────────────────────────
 
-describe("choosing a role", () => {
-  test("a control surface asks first, and says what changes", async () => {
-    const { calls } = mount({ outputs: [{ ...MINE, viewId: null }] });
-    await click(role("Control surface"));
-    const dialog = await eventually(() => screen.getByRole("alertdialog"));
-    assert.match(dialog.textContent ?? "", /Anyone standing at it can press them/);
-    assert.deepEqual(calls, [], "the role changed before the operator said yes");
-    await answerConfirm("Use as a control surface");
-    assert.deepEqual(calls, [["role", "display-1", "panel", {}]]);
-  });
+describe("choosing a view of the other kind", () => {
+  // The view decides what a screen is, so pointing it at a console makes its
+  // buttons live and pointing it at a wall view switches them off. That is asked
+  // about first, and the answer is a plain routing change: nothing else moves.
+  const picker = () => screen.getByLabelText("View") as HTMLSelectElement;
 
-  test("declining the confirm changes nothing", async () => {
-    const { calls } = mount({ outputs: [{ ...MINE, viewId: null }] });
-    await click(role("Control surface"));
-    await answerConfirm(null);
-    assert.deepEqual(calls, []);
-  });
-
-  test("going back to a wall display asks first, too", async () => {
-    const { calls } = mount({ outputs: [{ ...PANEL_A, viewId: null }] });
-    await click(role("Wall display"));
-    const dialog = await eventually(() => screen.getByRole("alertdialog"));
-    assert.match(dialog.textContent ?? "", /read-only/);
-    await answerConfirm("Make it a display");
-    assert.deepEqual(calls, [["role", "display-3", "display", {}]]);
-  });
-
-  test("the role it already has asks for nothing", async () => {
+  test("a wall display pointed at a console asks first, and says what changes", async () => {
     const { calls } = mount({});
-    await click(role("Wall display"));
-    assert.deepEqual(calls, []);
-    assert.equal(screen.queryByRole("alertdialog") !== null, false, "it is on screen");
+    await choose(picker(), "ctl-b");
+    const dialog = await eventually(() => screen.getByRole("alertdialog"));
+    assert.match(dialog.textContent ?? "", /Make "Lobby TV" a control surface\?/);
+    assert.match(dialog.textContent ?? "", /"Stage controls" is a control surface\. Its buttons will work\. Anyone standing at it can press them/);
+    assert.deepEqual(calls, [], "the screen was routed before the operator said yes");
+    await answerConfirm("Make it a control surface");
+    assert.deepEqual(calls, [["view", "display-1", "ctl-b", "console"]]);
   });
 
-  test("a view only this screen shows goes with it: no prompt, the server flips them together", async () => {
-    const { calls } = mount({ outputs: [MINE, { ...OTHER_WALL, viewId: "wall-b" }] });
-    await click(role("Control surface"));
-    assert.equal(screen.queryByRole("group", { name: "This view is shared" }) !== null, false, "it is on screen");
-    await answerConfirm("Use as a control surface");
-    assert.deepEqual(calls, [["role", "display-1", "panel", {}]]);
-  });
-});
-
-describe("changing the role of a view other screens also show", () => {
-  const prompt = () => screen.getByRole("group", { name: "This view is shared" });
-
-  test("names the other screens and offers a copy, and asks nothing of the server yet", async () => {
-    const { calls } = mount({ outputs: [PANEL_A, PANEL_B] });
-    await click(role("Wall display"));
-    assert.match(prompt().textContent ?? "", /"Booth controls" is also on Stage panel, which stays a control surface\. Changing this screen never changes another one\./);
-    assert.match(prompt().textContent ?? "", /"Booth controls \(wall\)", made as a wall display\. Stage panel keeps the original\./);
-    assert.equal((screen.getByRole("radio", { name: /Use a copy on this screen/ }) as HTMLInputElement).checked, true, "the copy is the default");
-    assert.deepEqual(calls, []);
+  test("sends the kind of view the operator was asked about, not what it is when they answer", async () => {
+    // The server holds the write to this: a view made a wall view while the dialog
+    // was open is refused, rather than a screen going live on what nobody confirmed.
+    const { calls, rerender } = mount({});
+    await choose(picker(), "ctl-b");
+    await eventually(() => screen.getByRole("alertdialog"));
+    await rerender({ views: VIEWS.map((v) => (v.id === "ctl-b" ? { ...v, surface: "display" as const } : v)) });
+    await answerConfirm("Make it a control surface");
+    assert.deepEqual(calls, [["view", "display-1", "ctl-b", "console"]]);
   });
 
-  test("names every screen when there are several", async () => {
-    mount({ outputs: [PANEL_A, PANEL_B, { ...PANEL_B, id: "display-5", name: "Wing panel" }] });
-    await click(role("Wall display"));
-    assert.match(prompt().textContent ?? "", /also on Stage panel, Wing panel, which stay a control surface/);
-  });
-
-  test("Apply uses a copy, after the confirm, and says so to the server", async () => {
-    const { calls } = mount({ outputs: [PANEL_A, PANEL_B] });
-    await click(role("Wall display"));
-    await click(screen.getByRole("button", { name: "Apply" }));
-    await answerConfirm("Make it a display");
-    assert.deepEqual(calls, [["role", "display-3", "display", { copyView: true }]]);
-  });
-
-  test("a wall display made a control surface is offered '(control surface)'", async () => {
-    mount({ outputs: [MINE, OTHER_WALL] });
-    await click(role("Control surface"));
-    assert.match(prompt().textContent ?? "", /"Lobby loop \(control surface\)", made as a control surface\. Hallway TV keeps the original\./);
-  });
-
-  test("choosing a different view offers only views that fit, and not the shared one", async () => {
-    const { calls } = mount({ outputs: [PANEL_A, PANEL_B] });
-    await click(role("Wall display"));
-    await click(screen.getByRole("radio", { name: /Choose a different view/ }));
-    const picker = screen.getByLabelText("A different view") as HTMLSelectElement;
-    assert.deepEqual([...picker.options].map((o) => o.textContent), ["Pick a view…", "Lobby loop", "Hallway loop"]);
-    assert.equal((screen.getByRole("button", { name: "Apply" }) as HTMLButtonElement).disabled, true, "applied with no view picked");
-    await choose(picker, "wall-b");
-    await click(screen.getByRole("button", { name: "Apply" }));
-    await answerConfirm("Make it a display");
-    assert.deepEqual(calls, [["role", "display-3", "display", { viewId: "wall-b" }]]);
-  });
-
-  test("Cancel puts the role cards back and sends nothing", async () => {
-    const { calls } = mount({ outputs: [PANEL_A, PANEL_B] });
-    await click(role("Wall display"));
-    assert.equal(role("Wall display").getAttribute("aria-pressed"), "true", "the chosen role is shown while it waits");
-    await click(screen.getByRole("button", { name: "Cancel" }));
-    assert.equal(screen.queryByRole("group", { name: "This view is shared" }) !== null, false, "it is on screen");
-    assert.equal(role("Control surface").getAttribute("aria-pressed"), "true");
-    assert.deepEqual(calls, []);
-  });
-
-  test("a declined confirm leaves the prompt open", async () => {
-    const { calls } = mount({ outputs: [PANEL_A, PANEL_B] });
-    await click(role("Wall display"));
-    await click(screen.getByRole("button", { name: "Apply" }));
+  test("declining changes nothing", async () => {
+    const { calls } = mount({});
+    await choose(picker(), "ctl-b");
     await answerConfirm(null);
     assert.deepEqual(calls, []);
-    assert.ok(prompt());
+    assert.equal(picker().value, "wall-a", "the picker moved off the view the screen still shows");
   });
 
-  test("when the other screen stops sharing the view, the chosen role stays and Apply makes the plain change", async () => {
-    // The prompt is about other screens. If they move off the view while it is
-    // open, there is nothing left to ask, but the operator's choice still stands:
-    // it must not sit there shown as chosen with nothing written and no way on.
-    const { calls, rerender } = mount({ outputs: [PANEL_A, PANEL_B] });
-    await click(role("Wall display"));
-    assert.ok(prompt());
-    await rerender({ outputs: [PANEL_A, { ...PANEL_B, viewId: "ctl-b" }] });
-    assert.equal(screen.queryByRole("group", { name: "This view is shared" }) !== null, false, "the shared prompt outlived the sharing");
-    assert.equal(role("Wall display").getAttribute("aria-pressed"), "true", "the operator's choice was dropped");
-    assert.match(screen.getByRole("group", { name: "Change the role" }).textContent ?? "", /No other screen shows "Booth controls" now/);
-    await click(screen.getByRole("button", { name: "Apply" }));
-    await answerConfirm("Make it a display");
-    assert.deepEqual(calls, [["role", "display-3", "display", {}]]);
+  test("a control surface pointed at a wall view asks first, too", async () => {
+    const { calls } = mount({ outputs: [PANEL_A] });
+    await choose(picker(), "wall-b");
+    const dialog = await eventually(() => screen.getByRole("alertdialog"));
+    assert.match(dialog.textContent ?? "", /Make "Booth panel" a wall display\?/);
+    assert.match(dialog.textContent ?? "", /read-only/);
+    await answerConfirm("Make it a wall display");
+    assert.deepEqual(calls, [["view", "display-3", "wall-b", "display"]]);
   });
 
-  test("a refused change leaves the prompt open to try again", async () => {
-    const { actions } = recorder({ onSetRole: async () => false });
-    mount({ outputs: [PANEL_A, PANEL_B], actions });
-    await click(role("Wall display"));
-    await click(screen.getByRole("button", { name: "Apply" }));
-    await answerConfirm("Make it a display");
-    assert.ok(prompt(), "the prompt closed on a change that did not land");
+  test("a screen showing nothing, given a console, asks: its buttons would go live", async () => {
+    const { calls } = mount({ outputs: [{ ...MINE, viewId: null }] });
+    await choose(picker(), "ctl-a");
+    await eventually(() => screen.getByRole("alertdialog"));
+    await answerConfirm("Make it a control surface");
+    assert.deepEqual(calls, [["view", "display-1", "ctl-a", "console"]]);
   });
 
-  describe("roleChangeConflict", () => {
-    test("only when the view no longer fits AND another screen shows it, or it cannot take the role", () => {
-      const outs = [PANEL_A, PANEL_B, MINE];
-      assert.ok(roleChangeConflict(PANEL_A, outs, VIEWS, "display"), "a shared console cannot become a wall view");
-      assert.equal(roleChangeConflict(PANEL_A, outs, VIEWS, "panel"), null, "the view already fits");
-      assert.equal(roleChangeConflict(PANEL_A, [PANEL_A, MINE], VIEWS, "display"), null, "nobody else shows it");
-      assert.equal(roleChangeConflict({ ...MINE, viewId: null }, outs, VIEWS, "panel"), null, "no view, nothing to share");
-      const cal: View = { id: "cal-a", name: "Week ahead", kind: "calendar", surface: "display", createdAt: NOW };
-      const alone = roleChangeConflict({ ...MINE, viewId: "cal-a" }, [MINE], [cal], "panel");
-      assert.deepEqual(alone && { others: alone.others, copyName: alone.copyName }, { others: [], copyName: null }, "a calendar view cannot be a console, nor can a copy");
-    });
-  });
-});
-
-describe("a view that cannot be a control surface", () => {
-  // Only a custom view has a layout to put a control on. The server refuses a
-  // calendar view, or a copy of one, as a control surface; the panel must not
-  // offer what it would refuse.
-  const CAL: View = { id: "cal-a", name: "Week ahead", kind: "calendar", surface: "display", createdAt: NOW };
-  const CAL_CONSOLE: View = { id: "cal-c", name: "Old calendar console", kind: "calendar", surface: "console", createdAt: NOW };
-  const views = [...VIEWS, CAL, CAL_CONSOLE];
-  const prompt = () => screen.getByRole("group", { name: /This view/ });
-
-  test("a shared calendar view offers a different view, never a copy", async () => {
-    const { calls } = mount({ views, outputs: [{ ...MINE, viewId: "cal-a" }, { ...OTHER_WALL, viewId: "cal-a" }] });
-    await click(role("Control surface"));
-    assert.match(prompt().textContent ?? "", /"Week ahead" is also on Hallway TV/);
-    assert.match(prompt().textContent ?? "", /only a custom view/i);
-    assert.equal(screen.queryByRole("radio", { name: /Use a copy/ }) !== null, false, "a copy that the server would refuse is offered");
-    await choose(screen.getByLabelText("A different view"), "ctl-b");
-    await click(screen.getByRole("button", { name: "Apply" }));
-    await answerConfirm("Use as a control surface");
-    assert.deepEqual(calls, [["role", "display-1", "panel", { viewId: "ctl-b" }]]);
-  });
-
-  test("a calendar view only this screen shows is not flipped: it asks for a different view", async () => {
-    const { calls } = mount({ views, outputs: [{ ...MINE, viewId: "cal-a" }] });
-    await click(role("Control surface"));
-    assert.match(prompt().textContent ?? "", /"Week ahead"/);
-    assert.equal(screen.queryByRole("alertdialog") !== null, false, "it went straight to the confirm, and the server refuses the flip");
-    assert.deepEqual(calls, []);
-  });
-
-  test("the picker offers a control surface no non-custom console", () => {
-    mount({ views, outputs: [PANEL_A] });
-    const options = [...(screen.getByLabelText("View") as HTMLSelectElement).options].map((o) => o.textContent);
-    assert.equal(options.includes("Old calendar console"), false, `offered: ${options.join(", ")}`);
+  test("a screen showing nothing, given a wall view, asks nothing: it was read-only and stays so", async () => {
+    const { calls } = mount({ outputs: [{ ...MINE, viewId: null }] });
+    await choose(picker(), "wall-b");
+    assert.equal(screen.queryByRole("alertdialog") !== null, false, "a confirm was asked for a change that changes nothing");
+    assert.deepEqual(calls, [["view", "display-1", "wall-b", "display"]]);
   });
 });
 
@@ -954,10 +851,10 @@ describe("guided creation", () => {
     }
   });
 
-  test("creating on step 1 uses every default: a wall display, no view, no name (the server numbers it)", async () => {
+  test("creating on step 1 uses every default: no view, no name (the server numbers it), and no role to send", async () => {
     const { calls } = mount({ target: NEW_TARGET, outputs: [MINE] });
     await click(create());
-    assert.deepEqual(calls, [["create", { mode: "display" }, null], ["close"]]);
+    assert.deepEqual(calls, [["create", {}, null], ["close"]]);
   });
 
   test("closing creates nothing", async () => {
@@ -978,7 +875,7 @@ describe("guided creation", () => {
     await type(screen.getByLabelText("Name"), " Wing ");
     await type(screen.getByLabelText(/Friendly link/), "wing");
     await click(create());
-    assert.deepEqual(calls[0], ["create", { name: "Wing", mode: "panel", newView: true, slug: "wing", showInSidebar: false }, null]);
+    assert.deepEqual(calls[0], ["create", { name: "Wing", newView: "control", slug: "wing", showInSidebar: false }, null]);
   });
 
   test("the sidebar listing is not sent unless the operator moved it", async () => {
@@ -987,7 +884,7 @@ describe("guided creation", () => {
     await click(screen.getByRole("button", { name: "Next" }));
     await choose(screen.getByLabelText("View"), "ctl-b");
     await click(create());
-    assert.deepEqual(calls[0], ["create", { mode: "panel", viewId: "ctl-b" }, null],
+    assert.deepEqual(calls[0], ["create", { viewId: "ctl-b" }, null],
       "an existing console that is hidden must not be re-listed by a screen made for it");
   });
 
@@ -1003,7 +900,7 @@ describe("guided creation", () => {
     assert.equal(sw("List in the sidebar").getAttribute("aria-checked"), "false", "a hidden console reads as listed");
   });
 
-  test("the picker is filtered to the role chosen on step 1", async () => {
+  test("the picker is filtered to the kind chosen on step 1", async () => {
     mount({ target: NEW_TARGET, outputs: [MINE] });
     await click(role("Control surface"));
     await click(screen.getByRole("button", { name: "Next" }));
@@ -1011,7 +908,7 @@ describe("guided creation", () => {
     assert.deepEqual(options, ["— No view yet —", "Booth controls", "Stage controls", "+ New blank view"]);
   });
 
-  test("a view chosen for one role does not follow the screen to the other", async () => {
+  test("a view chosen for one kind does not follow the screen to the other", async () => {
     const { calls } = mount({ target: NEW_TARGET, outputs: [MINE] });
     await click(role("Control surface"));
     await click(screen.getByRole("button", { name: "Next" }));
@@ -1019,7 +916,7 @@ describe("guided creation", () => {
     await click(screen.getByRole("button", { name: "Back" }));
     await click(role("Wall display"));
     await click(create());
-    assert.deepEqual(calls[0], ["create", { mode: "display" }, null], "a console view was sent for a wall display");
+    assert.deepEqual(calls[0], ["create", {}, null], "a console view was sent for a wall display");
   });
 
   test("a refusal stays on screen with its reason, and creates nothing more", async () => {
@@ -1049,7 +946,7 @@ describe("guided creation", () => {
     const { calls } = mount({ target: { kind: "new", device, defaultName: "lobby-pi" }, outputs: [MINE] });
     assert.ok(screen.getByText("Nothing is created until you finish. The device then shows this screen."));
     await click(create());
-    assert.deepEqual(calls[0], ["create", { name: "lobby-pi", mode: "display" }, device]);
+    assert.deepEqual(calls[0], ["create", { name: "lobby-pi" }, device]);
   });
 
   test("a device bound elsewhere while the panel is open is not taken: it says so and Create is off", async () => {

@@ -93,6 +93,7 @@ describe("what the operator set is still there after a restart", () => {
       "planTitle",
       "publicUrl",
       "reconnectSchedule",
+      "screenRolesFromView",
       "serviceTypeId",
       "serviceTypeName",
       "showQr",

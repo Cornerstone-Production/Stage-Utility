@@ -100,8 +100,7 @@ browser. The Chromium line appears there at every panel start.
   before it trusts one. Add the query string —
   [The panel's browser](#the-panels-browser).
 - The URL needs its scheme: `http://`, not `http:`.
-- The screen must be in **panel** mode. A console on a display-mode screen is
-  refused by the server, and a wall layout on a panel draws buttons that do
-  nothing.
+- The screen must show a console, which is what makes it a control surface. A
+  wall layout on a screen draws buttons that do nothing.
 - **Top bar** left on leaves the brand, plan and QR bar taking a quarter of a
   203-pixel strip.

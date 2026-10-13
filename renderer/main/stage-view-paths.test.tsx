@@ -22,7 +22,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { eventually, installDom } from "../test-dom.js";
-import { KIND_DRAWS_TOP_BAR, everyViewKind, type ViewKind } from "@main/types/views";
+import { KIND_DRAWS_TOP_BAR, everyViewKind, viewCanBeControlSurface, type ViewKind } from "@main/types/views";
 
 const teardown = installDom();
 
@@ -514,28 +514,27 @@ describe("StageView says when a previewed View is gone", () => {
   });
 });
 
-describe("StageView keeps controls dead unless the screen is a panel", () => {
+describe("StageView keeps controls dead unless the screen shows a console", () => {
   // The observable is the class, not a click: a `live-controls` object renders
   // the same buttons either way, and what changes is whether a press can reach
   // them. `pointer-events-none` is what the renderer puts there, and it is the
   // one thing standing between a wall screen and the service advancing because
-  // somebody leaned on it.
-  const withControls = (mode?: string) => stageState({
+  // somebody leaned on it. A screen is a control surface exactly when the view it
+  // shows is a console, so the fixture's `surface` is the whole of the switch.
+  const withControls = (surface: "display" | "console" = "display") => stageState({
     views: [{
-      id: "v1", name: "Console", kind: "custom",
+      id: "v1", name: "Console", kind: "custom", surface,
       layout: {
         canvas: { width: 1920, height: 1080, background: null },
         objects: [{ id: "o1", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "live-controls" } }],
       },
     }],
     // An Output at the PREVIEW slug too, and this is load-bearing rather than
-    // tidiness: "a preview of a panel is still inert" loads /preview-v1, so with
-    // only display-1 here the lookup misses whether or not the preview rule
-    // exists, and the test passes with that rule deleted. It was green under
-    // both `isPreview: false` and an unconditional currentDisplay lookup.
+    // tidiness: "a preview of a console is still inert" loads /preview-v1, so it
+    // must be a screen that WOULD be live for the preview rule to be what stops it.
     outputs: [
-      { id: "display-1", name: "Stage left", viewId: "v1", ...(mode ? { mode } : {}) },
-      { id: "preview-v1", name: "Preview", viewId: "v1", ...(mode ? { mode } : {}) },
+      { id: "display-1", name: "Stage left", viewId: "v1" },
+      { id: "preview-v1", name: "Preview", viewId: "v1" },
     ],
     resolvedByOutput: {
       "display-1": resolved({ kind: "custom" }),
@@ -548,25 +547,67 @@ describe("StageView keeps controls dead unless the screen is a panel", () => {
     assert.equal(hasInertControls(c), true, "a wall screen's controls were left live");
   });
 
-  test("a panel's controls are live", async () => {
-    // The Output's mode reaches the renderer through the resolved screen; before
-    // it was carried there, this was the one thing on the `view` arm that no
-    // rendered test covered.
-    const c = await showScreen("/display-1", withControls("panel"));
+  test("a control surface's controls are live: its view is a console", async () => {
+    // Whether the view is a console reaches the renderer through the resolved
+    // screen; this is the one thing on the `view` arm that decides if a press works.
+    const c = await showScreen("/display-1", withControls("console"));
     assert.equal(
       hasInertControls(c),
       false,
-      "a panel's controls were left inert — the Output's mode did not reach the renderer",
+      "a control surface's controls were left inert — the view's surface did not reach the renderer",
     );
   });
 
-  test("a preview of a panel is still inert", async () => {
+  test("a preview of a console is still inert", async () => {
     // A "/preview-…" iframe is always a display: every card on the Screens page
     // renders one, and a preview whose buttons fired would let that page advance
     // the service by being looked at.
-    const c = await showScreen("/preview-v1", withControls("panel"));
+    const c = await showScreen("/preview-v1", withControls("console"));
     assert.equal(hasInertControls(c), true, "a preview's controls were live");
   });
+});
+
+describe("viewCanBeControlSurface is what the arms actually render", () => {
+  // The anti-drift guard for the list of kinds that can be a control surface. Each
+  // kind is rendered as a wall screen and as a control surface, and a kind that
+  // draws something different has controls a screen can operate: pressable
+  // buttons, or objects that are inert on a wall. The two must agree with the
+  // predicate in BOTH directions: a kind with live controls that the predicate
+  // refuses is how a panel lost its buttons on upgrade, and a kind the predicate
+  // allows that draws the same either way is a console that promises nothing.
+  const EXTRAS: Partial<Record<ViewKind, Record<string, unknown>>> = {
+    custom: {
+      layout: {
+        canvas: { width: 1920, height: 1080, background: null },
+        objects: [{ id: "o1", x: 0, y: 0, w: 1, h: 1, z: 0, config: { type: "live-controls" } }],
+      },
+    },
+    script: { serviceCueLayoutId: "sl1" },
+  };
+  /** What a press could reach: buttons on screen and objects the renderer made inert. */
+  const operable = (c: HTMLElement) =>
+    `${c.querySelectorAll("button:not([disabled])").length} buttons, ${c.querySelectorAll(".pointer-events-none").length} inert`;
+
+  for (const kind of everyViewKind(["slots", "dashboard", "stage", "transcription", "custom", "script", "spl-rundown", "calendar"])) {
+    test(`${kind}: a control surface draws something to operate exactly when viewCanBeControlSurface says so`, async () => {
+      const draw = async (surface: "display" | "console") => {
+        const c = await showScreen("/display-1", {
+          ...ofKind(kind, { ...(EXTRAS[kind] ?? {}), surface }),
+          slotsByView: { v1: [slot("Pastor")] },
+        });
+        const seen = operable(c);
+        cleanup();
+        return seen;
+      };
+      const wall = await draw("display");
+      const console_ = await draw("console");
+      assert.equal(
+        wall !== console_,
+        viewCanBeControlSurface({ kind }),
+        `${kind} draws ${wall} on a wall screen and ${console_} on a control surface, and viewCanBeControlSurface says ${viewCanBeControlSurface({ kind })}`,
+      );
+    });
+  }
 });
 
 // ---- the per-display top bar ------------------------------------------------

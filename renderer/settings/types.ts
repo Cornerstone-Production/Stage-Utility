@@ -3,7 +3,7 @@
 import type { DragEndEvent } from "@dnd-kit/core";
 import type { useSensors } from "@dnd-kit/core";
 import type { DeviceChannel } from "@main/types/devices";
-import type { CreateScreenInput } from "@main/types/views";
+import type { CreateScreenInput, ViewSurface } from "@main/types/views";
 import type { Rotation } from "@main/types/output-format";
 
 /**
@@ -101,18 +101,13 @@ export interface SectionHandlers {
    *  reason it was refused, or null when it was made. */
   handleCreateScreen: (input: CreateScreenInput) => Promise<string | null>;
   handleRenameOutput: (id: string, name: string) => Promise<void>;
-  handleSetOutputView: (id: string, viewId: string | null) => Promise<void>;
+  /** `expectSurface` is the kind of view the operator confirmed going live on; the
+   *  server refuses (409) when the view is the other kind by the time it writes. */
+  handleSetOutputView: (id: string, viewId: string | null, expectSurface?: ViewSurface) => Promise<void>;
   handleSetOutputLocked: (id: string, locked: boolean) => Promise<void>;
   handleSetOutputHideTopBar: (id: string, hideTopBar: boolean) => Promise<void>;
   handleSetOutputAllowHls: (id: string, allowHls: boolean) => Promise<void>;
   handleSetOutputGroups: (id: string, groups: string[]) => Promise<void>;
-  /** Change one screen's role without changing any other screen. True when it
-   *  landed; a refusal is already toasted. */
-  handleSetOutputRole: (
-    id: string,
-    mode: "display" | "panel",
-    opts?: { copyView?: boolean; viewId?: string },
-  ) => Promise<boolean>;
   handleSetOutputTextSize: (id: string, textSize: number) => Promise<void>;
   /** Turn a Mac output helper screen's picture by quarter turns. */
   handleSetOutputRotation: (id: string, rotation: Rotation) => Promise<void>;

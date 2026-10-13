@@ -171,29 +171,29 @@ the panel covers the page instead.
 
 | Section | |
 |---|---|
-| **What this screen is** | **Wall display** (read from across the room; buttons draw but do nothing) or **Control surface** (a touch screen whose buttons work for anyone at it). Choosing a control surface asks first. For a control surface showing a console, **List in the sidebar** keeps that console in the sidebar's list, or out of it: see [Consoles](#consoles) |
-| **What it shows** | the view, from the views that fit the role: custom control-surface views for a control surface, wall-screen views for a wall display |
+| **What it shows** | the view, from every view, grouped as **Wall views** and **Control surfaces**. Under the picker one line says what the choice makes the screen: *Control surface: its buttons work for anyone at it.*, *Wall display: read-only. Buttons draw but do nothing.*, or *Shows nothing yet.* For a screen showing a console, **List in the sidebar** keeps that console in the sidebar's list, or out of it: see [Consoles](#consoles) |
 | **Name and address** | the name; the **friendly link** (an alias such as `lobby`, saved with **Save** so a refusal stays on screen: see [Friendly URLs](../display-urls.md#friendly-urls)); and the permanent address, which never changes, with a button that copies it |
 | **On the screen** | **Top bar** (the brand, plan and QR strip along the top), **Lock** (keeps the top bar but removes its links, so the screen cannot be navigated away from) and **Text size** (50 to 300 %, for ServiceCue and readouts). Top bar and Lock are offered only where the view draws a bar; a calendar or a script wall draws none |
 | **Messages** | the [message groups](stage-messages.md#putting-a-screen-in-groups) the screen is in |
 | **Video** | **Use HLS**. Off, the screen plays only WebRTC, and a feed that needs HLS says it can't play there |
 | **Device** | the machine bound to the screen, with its hostname and address, and whether the screen is online. For a plain device the section is read-only: release it from the card. For a screen shown by an output of a [Mac output helper](../kiosk-devices.md#mac-output-helper) it also holds the port and card, **Format** (DeckLink ports), **Rotation**, the output's health (a DeckLink port also its latency) and a **Release** button |
 
-**Changing one screen never changes another.** (Changing what a *view* is for
-is the other way round, and does change every screen showing it: see
-[Consoles](#consoles).) A view can be shown on several
-screens. When you change a screen's role and the view no longer fits it, and
-another screen shows that view, the panel names those screens and offers two
-ways forward. **Use a copy on this screen** (the default) duplicates the view,
-gives the copy the new role and points only this screen at it; the copy is named
-`<view> (control surface)` or `<view> (wall)`, and every other screen keeps the
-original. **Choose a different view** offers only views that fit. A view only
-this screen shows changes with it. If the other screens stop showing the view
-while you decide, the panel says so and **Apply** makes the plain change.
+**The view decides what a screen is.** A screen is a control surface, whose
+buttons work for anyone at it, exactly when the view it shows is a console. It
+is a read-only wall display when it shows any other view, or none. There is no
+role to set on the screen. Choosing a view of the other kind from the picker, on
+the screen's card or in this panel, asks first (*Make "Lobby TV" a control
+surface?*, or *a wall display?*), because the screen's buttons go live or stop;
+declining changes nothing. Pointing a screen at a view changes only that
+screen. Changing what a *view* is for does change every screen showing it: see
+[Consoles](#consoles). **+ New view…** in the picker on a screen's card, and **+ New
+wall view…** or **+ New control surface…** in the screen's panel, make a view of
+the kind the screen shows now. A new control surface is a custom layout.
 
-Only a custom view can be a control surface, so a calendar, script or other
-built-in view is never turned into one, and neither is a copy of it: making a
-screen showing one a control surface asks for a different view instead.
+Only a view with something to operate can be a control surface: a custom view
+(its buttons, faders and fields) or a calendar (its month chevrons, which a wall
+display does not draw). A slot board, dashboard, stage, transcription, script or
+SPL view is never made one.
 
 ### Adding a screen
 
@@ -201,13 +201,14 @@ screen showing one a control surface asks for a different view instead.
 [Kiosk devices](../kiosk-devices.md)), open the same panel in three steps:
 
 1. **What is this screen?** A wall display or a control surface, and for a control
-   surface whether to list it in the sidebar.
-2. **What should it show?** A view that fits the role, none yet, or **New blank
-   view**, which makes an empty view of the right kind named after the screen.
+   surface whether to list it in the sidebar. This chooses which views step 2
+   offers; the screen's role is whatever its view is.
+2. **What should it show?** A view of that kind, none yet, or **New blank
+   view**, which makes an empty view of that kind named after the screen.
 3. **Name it.** The name and an optional friendly link.
 
 **Nothing is created until Create screen**, which is available on every step
-because every step has a default: a wall display, no view, and no name, which
+because every step has a default: no view, and no name, which
 names the screen **Display** and its number (a device is named for its
 hostname). Closing the panel creates nothing. A refusal (a link another screen
 holds, say) leaves the panel open with the reason. A device is claimed by the
@@ -222,10 +223,12 @@ A **console** is a custom view built for someone to touch rather than to watch.
 Its buttons fire; the same layout on a wall display draws them and does nothing.
 
 **Building one.** Screens → **New view** → *Custom Layout*, then pick **A
-control surface you operate** rather than *A wall screen anyone can see*. Only
-custom views can be consoles — the built-in kinds have no layout to put a
-control on. A **cue button** on one fires a cue and shows what its device is
-doing; see [Widgets](../reference/widgets.md#control). A console meant for a
+control surface you operate** rather than *A wall screen anyone can see*. A
+calendar can be a console too, and pages through months on it: the dialog does not
+offer that, so make the calendar view first and choose *Make it a control surface*
+in its card's menu (the card of a view no screen shows). Every other built-in kind
+has nothing to operate. A **cue button** on one fires a cue and shows what its
+device is doing; see [Widgets](../reference/widgets.md#control). A console meant for a
 Ross Ultritouch panel has its own presets and a starter; see
 [Ultritouch](../integrations/ultritouch.md).
 
@@ -241,17 +244,17 @@ points a screen at the view, or away from it, while the confirm is open, you
 are asked again with the screens as they are now, so a screen you were not
 shown is never changed. The whole change is one call: if any part of it fails,
 what already changed is put back and the message says which step failed. A
-view that cannot be a control surface (anything but a custom view) is refused
-with the reason. To change just one screen, use its **What this screen is** in
-[Screen settings](#screen-settings), which never changes another screen.
+view that cannot be a control surface (anything but a custom view or a calendar)
+is refused with the reason. To change what one screen is, point it at a view of the other
+kind in [Screen settings](#screen-settings), which changes no other screen.
 
 **Reaching one.** Every console gets its own row in the sidebar, at
 `/consoles/<view id>`, and the console's own name heads the page. Renaming the
 view in Screens renames both. That row is absent until a console exists, and for a console
 kept out of the sidebar (below). A console can
-also drive a physical screen, but only one whose mode is set to **panel**; the
-server refuses a console view on a screen left in display mode, so a wall cannot
-end up rendering a live button by accident.
+also drive a physical screen: a screen showing a console is a control surface,
+and its buttons work for anyone at it. A screen showing a wall view never has a
+live button.
 
 **Keeping one out of the sidebar.** A console can be kept out of the sidebar's
 list. That suits a console that lives on a stage display as a control surface and

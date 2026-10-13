@@ -61,7 +61,7 @@ import { scrub, scrubError } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 import { Ticker } from "./ticker.js";
 import { viewsDrawnBy } from "./screen-reach.js";
-import { outputMode } from "../types/views.js";
+import { screenIsControlSurface } from "../types/views.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { WriteQueue } from "./write-queue.js";
 
@@ -391,8 +391,8 @@ export class MessagesService {
    * sign as it.
    *   - the widget is found by `objectId` across every view's layout and must be
    *     a Messages widget: 404 otherwise;
-   *   - with an `outputId`, that output must be in panel mode (a wall is
-   *     read-only and draws no buttons) and must DRAW the widget, in its routed
+   *   - with an `outputId`, that output must be a control surface (its
+   *     view is a console; a wall display is read-only and draws no buttons) and must DRAW the widget, in its routed
    *     view or one it embeds: 403 otherwise;
    *   - with no `outputId` (a console in the app, which is no screen) the widget
    *     must have groups of its own: 403 for one that follows a screen;
@@ -429,7 +429,7 @@ export class MessagesService {
       if (outputId !== null) {
         output = (state.outputs ?? []).find((o) => o.id === outputId);
         if (!output) return refuse(403, "that screen does not draw that widget");
-        if (outputMode(output) !== "panel") return refuse(403, `${output.name} is a display, and a display cannot reply`);
+        if (!screenIsControlSurface(output, state.views ?? [])) return refuse(403, `${output.name} is a display, and a display cannot reply`);
         if (!viewsDrawnBy(output, state.views ?? [], state.outputs ?? []).has(widget.viewId)) {
           return refuse(403, "that screen does not draw that widget");
         }

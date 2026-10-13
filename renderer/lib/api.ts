@@ -478,7 +478,6 @@ export type IpcChannel =
   | "outputs:setGroups"
   | "outputs:setHideTopBar"
   | "outputs:setLocked"
-  | "outputs:setRole"
   | "outputs:setRotation"
   | "outputs:setSlug"
   | "outputs:setTextSize"
@@ -1347,7 +1346,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "outputs:setView": {
       const id = p.id as string;
-      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { viewId: p.viewId });
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { viewId: p.viewId, expectSurface: p.expectSurface });
     }
 
     case "outputs:setLocked": {
@@ -1582,17 +1581,6 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "action:invoke":
       return post<T>("/api/action/invoke", p);
-
-    // Change a screen's role without changing any other screen: `copyView` makes a
-    // copy of its view for the new role, `viewId` points it at one that already
-    // fits. The server runs the writes in the order its own guards allow and puts
-    // back what landed if one fails.
-    case "outputs:setRole":
-      return post<T>(`/api/outputs/${encodeURIComponent(String(p.id))}/role`, {
-        mode: p.mode,
-        copyView: p.copyView,
-        viewId: p.viewId,
-      });
 
     case "barItems:set":
       return post<T>("/api/bar-items", p);

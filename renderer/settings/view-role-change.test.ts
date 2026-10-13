@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { StageState } from "@main/types/stage";
-import { changeViewRole, screensChangedBy, viewRoleQuestion } from "./view-role-change";
+import { changeViewRole, expectedSurface, screensChangedBy, viewRoleQuestion } from "./view-role-change";
 
 type Slim = Pick<StageState, "views" | "outputs">;
 const state = {
@@ -19,9 +19,9 @@ const state = {
   ],
   outputs: [
     { id: "display-1", name: "Lobby TV", viewId: "wall-a" },
-    { id: "display-2", name: "Hallway TV", viewId: "wall-a", mode: "display" },
-    { id: "display-3", name: "Booth panel", viewId: "ctl-a", mode: "panel" },
-    { id: "display-4", name: "", viewId: "ctl-a", mode: "panel" },
+    { id: "display-2", name: "Hallway TV", viewId: "wall-a" },
+    { id: "display-3", name: "Booth panel", viewId: "ctl-a" },
+    { id: "display-4", name: "", viewId: "ctl-a" },
     { id: "display-5", name: "Spare", viewId: null },
   ],
 } as unknown as Slim;
@@ -181,5 +181,13 @@ describe("the screens changed while the question was open", () => {
     assert.equal(h.asked.length, 1);
     assert.match(h.asked[0]!.message!, /Spare will become a control surface/);
     assert.deepEqual(h.sentScreens(), [[], ["display-5"]]);
+  });
+});
+
+describe("expectedSurface", () => {
+  it("is the kind of view it was asked about, and nothing for a view that is not there", () => {
+    assert.equal(expectedSurface(state.views, "wall-a"), "display");
+    assert.equal(expectedSurface(state.views, "ctl-a"), "console");
+    assert.equal(expectedSurface(state.views, "gone"), undefined);
   });
 });

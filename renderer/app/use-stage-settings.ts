@@ -21,7 +21,7 @@
 //     Settings is routes inside the app rather than its own window
 
 import { useState, useEffect } from "react";
-import type { CreateScreenInput } from "@main/types/views";
+import type { CreateScreenInput, ViewSurface } from "@main/types/views";
 import type { Rotation } from "@main/types/output-format";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
@@ -770,8 +770,13 @@ export function useStageSettings(pinnedViewId?: string) {
 
   /** Optimistic so the controlled <Select> shows the new view at once instead
    *  of snapping back to the cached one while the request is in flight. */
-  async function handleSetOutputView(id: string, viewId: string | null) {
-    await setOutputField("outputs:setView", id, { viewId }, "Failed to route display");
+  async function handleSetOutputView(id: string, viewId: string | null, expectSurface?: ViewSurface) {
+    await optimistic<StageState>(
+      ["stage:getState"],
+      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { viewId }) }),
+      () => ipc<StageState>("outputs:setView", { id, viewId, ...(expectSurface ? { expectSurface } : {}) }),
+      "Failed to route display",
+    );
   }
 
   async function handleSetOutputLocked(id: string, locked: boolean) {
@@ -791,25 +796,6 @@ export function useStageSettings(pinnedViewId?: string) {
   /** Put one screen in message groups. The chips under the card's name follow. */
   async function handleSetOutputGroups(id: string, groups: string[]) {
     await setOutputField("outputs:setGroups", id, { groups }, "Failed to update the screen's groups");
-  }
-
-  /**
-   * Change one screen between a wall display and a control surface WITHOUT
-   * changing any other screen. One server call: the copy of a shared view, the
-   * role, the view's kind and the pointing are up to four writes, which the
-   * server orders for its guards and puts back if one fails.
-   *
-   * NOT optimistic. The server refuses some of these (a shared view with neither
-   * a copy nor another view, a view that cannot be a control surface), and an
-   * optimistic flip would show the change happening and then silently undo it.
-   * The refusal is the useful part; it says what to do instead.
-   */
-  async function handleSetOutputRole(
-    id: string,
-    mode: "display" | "panel",
-    opts: { copyView?: boolean; viewId?: string } = {},
-  ): Promise<boolean> {
-    return writeState("outputs:setRole", { id, mode, ...opts }, { fail: "Failed to change the screen's role" });
   }
 
   /** List a control surface's view in the sidebar, or keep it out. Optimistic:
@@ -843,18 +829,17 @@ export function useStageSettings(pinnedViewId?: string) {
   }
 
   /**
-   * Change what a View is for, and EVERY screen showing it: the view card's
-   * deliberate "all of them" path. (One screen's role is handleSetOutputRole,
-   * which never changes another screen.)
+   * Change what a View is for, and with it EVERY screen showing it: the view
+   * card's deliberate "all of them" path. A screen is a control surface when its
+   * view is a console, so the view's surface is the one thing the server writes
+   * (and puts back if it fails). What is left here is the question: when screens
+   * would change, they are named first, declining sends nothing, and the ids of
+   * the screens named go with the call. The server refuses when they are stale,
+   * and changeViewRole asks once more with its list.
    *
-   * ONE server call. The server makes the view and each screen the matching role
-   * in the order its own guards allow and puts back what landed if one fails, so
-   * nothing here orders writes or loops over screens. What is left is the
-   * question: when screens would change, they are named first, declining sends
-   * nothing, and the ids of the screens named go with the call. The server
-   * refuses when they are stale, and changeViewRole asks once more with its list.
-   *
-   * Not optimistic, for the reason handleSetOutputRole gives.
+   * Not optimistic: the server refuses some of these (a view that cannot be a
+   * control surface), and an optimistic flip would show the change happening and
+   * then silently undo it. The refusal is the useful part.
    */
   async function handleSetViewSurface(id: string, surface: "display" | "console") {
     try {
@@ -947,7 +932,6 @@ export function useStageSettings(pinnedViewId?: string) {
     handleSetOutputHideTopBar,
     handleSetOutputAllowHls,
     handleSetOutputGroups,
-    handleSetOutputRole,
     handleSetOutputTextSize,
     handleSetOutputRotation,
     handleSetOutputVideoMode,

@@ -111,7 +111,6 @@ function renderRow(struggles: Parameters<typeof OutputRow>[0]["struggles"], lags
         onRenameView: () => {},
         onSetView: () => {},
         messageGroups: { groups: [], known: true, failed: false },
-        onSetRole: async () => true,
         onOpenSettings: () => {},
         onRefresh: () => {},
         onRemove: () => {},

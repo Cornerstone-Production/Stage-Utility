@@ -1144,16 +1144,6 @@ export interface LayoutGroup {
  */
 export type ViewSurface = "display" | "console";
 
-/**
- * How an Output renders.
- *
- * `display` is a read-only wall screen. `panel` is a console pinned chrome-free
- * to a physical screen — which is how a control surface is built. An Output is a
- * display unless deliberately changed, so nothing becomes interactive by
- * accident.
- */
-export type OutputMode = "display" | "panel";
-
 /** A View's surface. Absent means "display": a View written before this field
  *  existed was rendering on a wall screen, and anything unrecognised (a hand
  *  edit, a downgrade) must read as the read-only one rather than the live one. */
@@ -1167,81 +1157,91 @@ export function viewShownInSidebar(v: Pick<View, "showInSidebar">): boolean {
   return v.showInSidebar !== false;
 }
 
-/** What createScreen takes. `mode` absent is the legacy `{ name, viewId }` call. */
+/** The kind of blank view createScreen makes for a screen: a wall view (read-only)
+ *  or a control surface (its buttons work). */
+export type NewViewKind = "wall" | "control";
+
+/** What createScreen takes. */
 export interface CreateScreenInput {
   name?: string;
-  mode?: OutputMode;
-  /** An existing view. Alternative to `newView`. */
+  /** An existing view, of either kind. Alternative to `newView`. */
   viewId?: string | null;
-  /** Make a blank view of the right kind, named after the screen. */
-  newView?: boolean;
+  /** Make a blank custom view of this kind, named after the screen. */
+  newView?: NewViewKind;
   slug?: string;
-  /** Written onto the view the screen shows, for a control surface only. */
+  /** Written onto the view the screen shows, when that view is a control surface. */
   showInSidebar?: boolean;
 }
 
-/** An Output's mode. Absent — or unrecognised — means "display". The safety
- *  property is an explicit opt-in, never an inference. */
-export function outputMode(o: Pick<Output, "mode">): OutputMode {
-  return o.mode === "panel" ? "panel" : "display";
-}
-
-/** The surface of the views a screen of this role shows: a control surface shows
- *  consoles, a wall display shows display views. */
-export function surfaceForMode(mode: OutputMode): ViewSurface {
-  return mode === "panel" ? "console" : "display";
+/** Is this view a console? False for no view. The one spelling of the question,
+ *  for a caller that already holds the view a screen shows. */
+export function viewIsConsole(view: Pick<View, "surface"> | null | undefined): boolean {
+  return view !== null && view !== undefined && viewSurface(view) === "console";
 }
 
 /**
- * Can this view, or a copy of it, be made into what a screen of `mode` shows?
+ * What a screen is, from the view it shows: a "console" (its buttons work for
+ * anyone at it, a control surface) or a read-only "display" wall screen.
  *
- * Any view can be a wall screen. Only a custom view can be a console: it is the
- * only kind with a layout to put a control on, which is why createView makes
- * anything else a display whatever it was asked for, and why the view card does
- * not offer the switch for one. A calendar "console" is a promise nothing keeps.
+ * The view decides: a screen is a control surface exactly when the view it shows
+ * is a console, and a wall display otherwise, including when it shows nothing or
+ * a view that is gone. Every reader, server and renderer, asks this or
+ * {@link screenIsControlSurface}.
  */
-export function viewCanTakeRole(view: Pick<View, "kind">, mode: OutputMode): boolean {
-  return mode === "display" || view.kind === "custom";
-}
-
-/** Does this view already fit a screen of `mode`, with nothing to change? */
-export function viewFitsRole(view: Pick<View, "kind" | "surface">, mode: OutputMode): boolean {
-  return viewSurface(view) === surfaceForMode(mode) && viewCanTakeRole(view, mode);
-}
-
-/** What the copy of a view made for one screen's new role is called. */
-export function copyViewName(view: Pick<View, "name">, mode: OutputMode): string {
-  return `${view.name} (${mode === "panel" ? "control surface" : "wall"})`;
-}
-
-/**
- * Would changing this screen to `mode` change its view in a way that is not this
- * screen's to make? The panel's preview and the server's decision, so the two
- * cannot disagree about when to ask.
- *
- * Null when the change is plain: the screen shows nothing, its view already has
- * the surface the role needs, or only this screen shows the view and the view can
- * take the role (it then changes with the screen). Otherwise:
- *
- *   others    the other screens showing the view, which changing it would change
- *             too. Empty when only this screen shows it but it cannot take the
- *             role at all.
- *   copyName  what a copy made for this screen would be called, or null when a
- *             copy could not take the role either. Then the only way is a
- *             different view.
- */
-export function roleChangeConflict(
-  output: Pick<Output, "id" | "viewId">,
-  outputs: readonly Output[],
-  views: readonly View[],
-  mode: OutputMode,
-): { view: View; others: Output[]; copyName: string | null } | null {
+export function surfaceOfScreen(
+  output: Pick<Output, "viewId">,
+  views: readonly Pick<View, "id" | "surface">[],
+): ViewSurface {
   const view = output.viewId ? views.find((v) => v.id === output.viewId) : undefined;
-  if (!view || viewSurface(view) === surfaceForMode(mode)) return null;
-  const others = outputs.filter((o) => o.id !== output.id && o.viewId === view.id);
-  const convertible = viewCanTakeRole(view, mode);
-  if (others.length === 0 && convertible) return null;
-  return { view, others, copyName: convertible ? copyViewName(view, mode) : null };
+  return viewIsConsole(view) ? "console" : "display";
+}
+
+/** Is this screen a control surface: do its buttons work for anyone at it? */
+export function screenIsControlSurface(
+  output: Pick<Output, "viewId">,
+  views: readonly Pick<View, "id" | "surface">[],
+): boolean {
+  return surfaceOfScreen(output, views) === "console";
+}
+
+/** The screens showing a view, in the order they are listed. */
+export function screensShowing<T extends Pick<Output, "viewId">>(viewId: string, outputs: readonly T[]): T[] {
+  return outputs.filter((o) => o.viewId === viewId);
+}
+
+/**
+ * Can this view be a control surface: does what it draws have anything for
+ * someone at the screen to operate?
+ *
+ * A custom view does (a button, a fader, an editable field on its layout), and so
+ * does a calendar (its month chevrons, which a wall display does not draw). Every
+ * other kind is a finished picture, so a console of one would promise controls
+ * that are not there. `stage-view-paths.test.tsx` renders each kind as a wall
+ * screen and as a control surface and fails when this list and the renderer
+ * disagree. Any view can be a wall view.
+ *
+ * A switch over every kind, not a list of the true ones: the build refuses a new
+ * kind until someone has decided which it is.
+ */
+export function viewCanBeControlSurface(view: Pick<View, "kind">): boolean {
+  switch (view.kind) {
+    case "custom":
+    case "calendar":
+      return true;
+    case "slots":
+    case "dashboard":
+    case "stage":
+    case "transcription":
+    case "script":
+    case "spl-rundown":
+      return false;
+    default: {
+      // A kind read from disk that this build does not know: nothing to operate.
+      const _never: never = view.kind;
+      void _never;
+      return false;
+    }
+  }
 }
 
 /** A physical screen at a URL slug, routed to exactly one View (or none). */
@@ -1254,7 +1254,9 @@ export interface Output {
    *  resolves to the same display. Never used as a storage key, so clearing it
    *  cannot orphan anything. Validated against RESERVED_SLUGS on save. */
   slug?: string;
-  /** The View this screen currently shows, or null when unrouted (renders a placeholder). */
+  /** The View this screen currently shows, or null when unrouted (renders a placeholder).
+   *  This is also what decides whether the screen is a control surface: see
+   *  {@link screenIsControlSurface}. */
   viewId: string | null;
   /** When true, this screen renders a full black "blackout" regardless of its
    *  routed View. Toggling it off restores the View instantly. */
@@ -1267,10 +1269,6 @@ export interface Output {
    *  the bar shows, which is what every screen did before this existed.
    *  Independent of `locked`, which KEEPS the bar and only strips its links. */
   hideTopBar?: boolean;
-  /** How this screen renders. Absent = "display" — read through {@link outputMode}.
-   *  Only a "panel" may be bound to a console View, enforced server-side in
-   *  stage-controller's setOutputView. */
-  mode?: OutputMode;
   /** When false, a Video widget on this screen never plays over HLS — only
    *  WebRTC. A B-frame feed that needs HLS to play at all says it cannot play
    *  here instead. Absent means allowed, which is what every screen did before
