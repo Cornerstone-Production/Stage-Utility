@@ -13,7 +13,10 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 NODE="$(command -v node)"
-LABEL="com.cornerstone.stage-survival-test"
+LABEL="app.stageutility.survival-test"
+# What this test registered before the rename. A run that died then left it
+# loaded in the user's domain, so cleanup removes it too.
+OLD_LABEL="com.cornerstone.stage-survival-test"
 
 # wait_for_spawn / report_no_spawn — shared with run-linux.sh.
 # shellcheck source=scripts/survival/lib.sh
@@ -23,6 +26,7 @@ LOG="$(mktemp)"
 
 cleanup() {
   launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$(id -u)/$OLD_LABEL" >/dev/null 2>&1 || true
   rm -f "$PLIST"
 }
 trap cleanup EXIT
