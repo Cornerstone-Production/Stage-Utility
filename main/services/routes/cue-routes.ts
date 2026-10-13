@@ -672,9 +672,9 @@ async function importButtons(raw: unknown[]): Promise<ImportResult> {
         skipped.push({ name: slug, why: problem });
         continue;
       }
-      // The DIRECTION word comes off the label first — "VCR Light ON" is a
-      // toggle for the VCR light, and a pair named after the whole label would
-      // have an off cue called `vcr_light_on_off`. The slug is stripped the same
+      // The DIRECTION word comes off the label first — "Booth Light ON" is a
+      // toggle for the booth light, and a pair named after the whole label would
+      // have an off cue called `booth_light_on_off`. The slug is stripped the same
       // way rather than re-slugged, so a page disambiguation the offer already
       // carries survives.
       //

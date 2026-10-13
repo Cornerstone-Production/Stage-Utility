@@ -33,8 +33,8 @@ never counted in the context bar's "N disconnected".
 
 ## Setup
 
-**In Companion** — add a **Cornerstone Stage Utility** connection and enter this
-server's IP and port. No password; the API is LAN-only.
+**In Companion** — add a connection (search the connection list for **Stage
+Utility**) and enter this server's IP and port. No password; the API is LAN-only.
 
 The module requires **Companion 4.3.0 or newer**, which is where Companion added
 the v2 connection API the module is built against. On anything older it installs
@@ -232,8 +232,8 @@ it cannot be read at all — but not when it already says on. `<name>_off` mirro
 it. See [Real state](#real-state). A trailing direction word — `ON`, `OFF`,
 `Startup`, `Shutdown`, `START`, `STOP`, `Open`, `Closed`, `Close` or `Toggle` —
 comes off the name first:
-"VCR Light ON" becomes `vcr_light_on` and `vcr_light_off`, not
-`vcr_light_on_off`.
+"Booth Light ON" becomes `booth_light_on` and `booth_light_off`, not
+`booth_light_on_off`.
 
 In Companion, set the variable from the button's own toggle branches — a **Set
 custom variable** action to `on` in the branch that turns the thing on, and one to
@@ -251,7 +251,7 @@ opposite every other press; the generated YAML carries a `# WARNING` comment on 
 the rule's **State variable** field says so, and the server logs:
 
 ```
-[cues] pair vcr_light presses one button with no state variable
+[cues] pair booth_light presses one button with no state variable
 ```
 
 ### When a button moves
@@ -508,7 +508,7 @@ A binding names one of two things:
 | Form | Reads |
 |---|---|
 | `projectors_state`, or `custom:projectors_state` | a Companion **custom variable** — one your own buttons set |
-| `VCR-Overhead-Light:power_state` | a **module variable** — one a connection publishes for itself |
+| `Booth-Overhead-Light:power_state` | a **module variable** — one a connection publishes for itself |
 
 A bare name is a custom variable, so every binding written before module
 variables could be named goes on meaning what it meant.
@@ -742,7 +742,7 @@ command outranks the variable:
   skipped: true}` and presses nothing. The variable is not read at all — nothing
   it could say would change the answer;
 - the **opposite** state presses, whatever the variable reads, because the
-  reading is presumed to be behind. `[cues] vcr_light_off by Home Assistant:
+  reading is presumed to be behind. `[cues] booth_light_off by Home Assistant:
   pressed against a stale reading (off) inside the settle window` says so.
 
 Flipping a switch in Apple Home several times quickly is what this is for: the
@@ -760,8 +760,8 @@ pair, so an integration can show what was asked for instead of a reading it has
 been told is stale. The log says how it ended, once:
 
 ```
-[cues] state of vcr_light_state settled to on after 3 s
-[cues] state of vcr_light_state did not settle within 8 s
+[cues] state of booth_light_state settled to on after 3 s
+[cues] state of booth_light_state did not settle within 8 s
 ```
 
 The generated Home Assistant switch reads `commanded` before `state` for the
@@ -834,7 +834,7 @@ When anything is not ok, the hourly pass writes one line naming the modules and
 Companion's own words for what is wrong:
 
 ```
-[companion] 12 of 52 connection(s) in error, 10 not reporting: 6 tplink-kasasmartbulb (Connecting), 5 red-rcp2 (Connecting), SA-HL-Stage-TV (Connection Failure), 10 tplink-kasasmartplug (not reporting)
+[companion] 12 of 52 connection(s) in error, 10 not reporting: 6 tplink-kasasmartbulb (Connecting), 5 red-rcp2 (Connecting), Stage-TV (Connection Failure), 10 tplink-kasasmartplug (not reporting)
 ```
 
 **Only when it changes**, and never on a clean pass. An install with a fault

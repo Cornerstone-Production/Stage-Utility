@@ -331,7 +331,7 @@ class CompanionApi {
    * Read one variable a MODULE publishes for a connection.
    *
    * `/api/variable/<connection label>/<name>/value`, which is the other half of
-   * what `$(VCR-Overhead-Light:power_state)` means inside Companion. Same
+   * what `$(Booth-Overhead-Light:power_state)` means inside Companion. Same
    * contract as readCustomVariable in every respect — never throws, never
    * caches, three second timeout — because cue-states.ts batches the two
    * together and a binding must not behave differently for having named a

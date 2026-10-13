@@ -45,7 +45,7 @@ const MACROS = [
 /** A SECOND booth machine, with its own macros — the one an operator repoints
  *  the instance at. The whole point is that its list shares no name with the
  *  first, so serving the wrong machine's is unmistakable. */
-const OTHER_MACROS = [{ id: { uuid: "u-9", name: "CHAPEL LIGHTS", index: 0 } }];
+const OTHER_MACROS = [{ id: { uuid: "u-9", name: "OVERFLOW LIGHTS", index: 0 } }];
 
 let server: http.Server;
 let port = 0;
@@ -159,7 +159,7 @@ describe("propresenterService.triggerMacro", () => {
 
   it("URL-encodes the macro name into one path segment", async () => {
     configured();
-    const r = await propresenterService.triggerMacro("SONG INTRO", "MA");
+    const r = await propresenterService.triggerMacro("SONG INTRO", "Main");
     assert.equal(r.ok, true);
     // The bug this pins: an unencoded name is three path segments, and
     // /v1/macro/SONG INTRO/trigger is not a request ProPresenter can route.
@@ -168,24 +168,24 @@ describe("propresenterService.triggerMacro", () => {
 
   it("encodes the other characters a macro name can carry", async () => {
     configured();
-    await propresenterService.triggerMacro("Kids Worship / Pre-Roll", "MA");
+    await propresenterService.triggerMacro("Kids Worship / Pre-Roll", "Main");
     assert.deepEqual(macroPaths(), ["/v1/macro/Kids%20Worship%20%2F%20Pre-Roll/trigger"]);
   });
 
   it("a 404 reads as no such macro, naming the macro and the machine", async () => {
     configured();
     triggerStatus = 404;
-    const r = await propresenterService.triggerMacro("SONG INTRO", "MA");
+    const r = await propresenterService.triggerMacro("SONG INTRO", "Main");
     assert.equal(r.ok, false);
     // "HTTP 404" alone is what wastes the Sunday morning. A renamed or deleted
     // macro has to say so, and say where it was looked for.
-    assert.equal(r.detail, 'no macro called "SONG INTRO" on MA');
+    assert.equal(r.detail, 'no macro called "SONG INTRO" on Main');
   });
 
   it("any other HTTP error is a returned failure, never a throw", async () => {
     configured();
     triggerStatus = 500;
-    const r = await propresenterService.triggerMacro("DOORS", "MA");
+    const r = await propresenterService.triggerMacro("DOORS", "Main");
     assert.equal(r.ok, false);
     assert.match(r.detail, /HTTP 500/);
   });
@@ -199,7 +199,7 @@ describe("propresenterService.triggerMacro", () => {
     point("127.0.0.1", 9);
     propresenterService.stop();
     (propresenterService as unknown as { running: boolean }).running = true;
-    const r = await propresenterService.triggerMacro("DOORS", "MA");
+    const r = await propresenterService.triggerMacro("DOORS", "Main");
     assert.equal(r.ok, false);
     assert.match(r.detail, /127\.0\.0\.1:9/);
     assert.doesNotMatch(r.detail, /switched off/, "the wrong refusal answered");
@@ -214,7 +214,7 @@ describe("propresenterService.triggerMacro", () => {
     point("127.0.0.1", port);
     propresenterService.stop(); // exactly what the apply pass does when disabled
     seen = [];
-    const r = await propresenterService.triggerMacro("DOORS", "MA");
+    const r = await propresenterService.triggerMacro("DOORS", "Main");
     assert.equal(r.ok, false);
     assert.match(r.detail, /switched off/);
     assert.deepEqual(macroPaths(), [], "a switched-off ProPresenter was triggered anyway");
@@ -222,14 +222,14 @@ describe("propresenterService.triggerMacro", () => {
 
   it("an unconfigured ProPresenter fails, and contacts nothing", async () => {
     unconfigured();
-    const r = await propresenterService.triggerMacro("DOORS", "MA");
-    assert.deepEqual(r, { ok: false, detail: "MA is not configured" });
+    const r = await propresenterService.triggerMacro("DOORS", "Main");
+    assert.deepEqual(r, { ok: false, detail: "Main is not configured" });
     assert.deepEqual(macroPaths(), []);
   });
 
   it("a blank macro name fails, and contacts nothing", async () => {
     configured();
-    const r = await propresenterService.triggerMacro("   ", "MA");
+    const r = await propresenterService.triggerMacro("   ", "Main");
     assert.equal(r.ok, false);
     assert.deepEqual(macroPaths(), []);
   });
@@ -339,7 +339,7 @@ describe("propresenterService.listMacros", () => {
     const after = await propresenterService.listMacros();
     assert.deepEqual(
       after.names,
-      ["CHAPEL LIGHTS"],
+      ["OVERFLOW LIGHTS"],
       `the previous machine's macro list survived the reconfigure: ${JSON.stringify(after.names)}`,
     );
   });
@@ -373,7 +373,7 @@ describe("propresenterService.listMacros", () => {
     const next = await propresenterService.listMacros();
     assert.deepEqual(
       next.names,
-      ["CHAPEL LIGHTS"],
+      ["OVERFLOW LIGHTS"],
       `the abandoned read poisoned the cache: ${JSON.stringify(next.names)}`,
     );
   });
@@ -402,17 +402,17 @@ describe("propresenterManager macro routing", () => {
 
   it("a blank instance id is the primary", async () => {
     configured();
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     const r = await propresenterManager.triggerMacro("", "DOORS");
     assert.equal(r.ok, true);
-    assert.equal(r.detail, 'triggered "DOORS" on MA');
+    assert.equal(r.detail, 'triggered "DOORS" on Main');
     assert.deepEqual(macroPaths(), ["/v1/macro/DOORS/trigger"]);
   });
 
   it("the union across instances notes where a name exists on only one", async () => {
     configured();
-    propresenterManager.apply("MA", [
-      { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true },
+    propresenterManager.apply("Main", [
+      { id: "overflow", name: "Overflow", host: "127.0.0.1", port, enabled: true },
     ]);
     const all = await propresenterManager.allMacros();
     assert.equal(all.instanceCount, 2);
@@ -422,16 +422,16 @@ describe("propresenterManager macro routing", () => {
       all.names.map((n) => n.name),
       ["DOORS", "SONG INTRO", "Kids Worship"],
     );
-    for (const n of all.names) assert.deepEqual(n.instances, ["MA", "Chapel"]);
+    for (const n of all.names) assert.deepEqual(n.instances, ["Main", "Overflow"]);
   });
 
   it("one unreachable instance costs its own macros, never the other's", async () => {
     configured();
-    propresenterManager.apply("MA", [
-      { id: "chapel", name: "Chapel", host: "127.0.0.1", port: 9, enabled: true },
+    propresenterManager.apply("Main", [
+      { id: "overflow", name: "Overflow", host: "127.0.0.1", port: 9, enabled: true },
     ]);
     const all = await propresenterManager.allMacros();
-    assert.deepEqual(all.unreachable, ["Chapel"]);
+    assert.deepEqual(all.unreachable, ["Overflow"]);
     assert.deepEqual(
       all.names.map((n) => n.name),
       ["DOORS", "SONG INTRO", "Kids Worship"],
@@ -450,7 +450,7 @@ describe("the propresenter.macro action", () => {
 
   it("simulate contacts ProPresenter not at all", async () => {
     configured();
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     const r = await action.run({ instance: "default", macro: "SONG INTRO" }, { simulate: true });
     assert.deepEqual(r, { ok: true, detail: 'would trigger "SONG INTRO"' });
     // A simulated cue that still dials the booth is a cue that cannot be tested
@@ -460,9 +460,9 @@ describe("the propresenter.macro action", () => {
 
   it("triggers the macro on the chosen instance", async () => {
     configured();
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     const r = await action.run({ instance: "default", macro: "SONG INTRO" }, { simulate: false });
-    assert.deepEqual(r, { ok: true, detail: 'triggered "SONG INTRO" on MA' });
+    assert.deepEqual(r, { ok: true, detail: 'triggered "SONG INTRO" on Main' });
     assert.deepEqual(macroPaths(), ["/v1/macro/SONG%20INTRO/trigger"]);
   });
 
@@ -490,9 +490,9 @@ describe("the propresenter.macro action", () => {
     // other place in the app that names an instance. A rule created through the
     // API without it — a Companion import, Home Assistant — has to work.
     configured();
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     const r = await action.run({ macro: "DOORS" }, { simulate: false });
-    assert.deepEqual(r, { ok: true, detail: 'triggered "DOORS" on MA' });
+    assert.deepEqual(r, { ok: true, detail: 'triggered "DOORS" on Main' });
   });
 
   it("an instance that is no longer configured fails rather than throwing", async () => {
@@ -505,7 +505,7 @@ describe("the propresenter.macro action", () => {
   it("an unreachable ProPresenter fails rather than throwing", async () => {
     point("127.0.0.1", 9);
     propresenterService.stop();
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     const r = await action.run({ instance: "default", macro: "DOORS" }, { simulate: false });
     assert.equal(r.ok, false);
     assert.match(r.detail, /127\.0\.0\.1:9/);
@@ -513,9 +513,9 @@ describe("the propresenter.macro action", () => {
 
   it("a 404 reaches the rule as no-such-macro, not as HTTP 404", async () => {
     configured();
-    propresenterManager.apply("MA", []);
+    propresenterManager.apply("Main", []);
     triggerStatus = 404;
     const r = await action.run({ instance: "default", macro: "SONG INTRO" }, { simulate: false });
-    assert.deepEqual(r, { ok: false, detail: 'no macro called "SONG INTRO" on MA' });
+    assert.deepEqual(r, { ok: false, detail: 'no macro called "SONG INTRO" on Main' });
   });
 });

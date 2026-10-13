@@ -12,7 +12,7 @@
 // has ten custom variables and forty pairs. An earlier comment here said it had
 // none at all, which was wrong.)
 //
-// But the modules already publish it. `$(VCR-Overhead-Light:power_state)` is the
+// But the modules already publish it. `$(Booth-Overhead-Light:power_state)` is the
 // kasa module's own reading of the plug, updated by its 2-second poll, and
 // Companion serves it at /api/variable/<label>/<name>/value. Nothing has to be
 // maintained; the connection just has to be identified.
@@ -71,7 +71,7 @@ export interface InferredStateSource {
 
 /** One connection as the export declares it. */
 export interface ExportConnection {
-  /** The label a variable reference names it by (`VCR-Overhead-Light`). */
+  /** The label a variable reference names it by (`Booth-Overhead-Light`). */
   label: string;
   moduleId: string;
 }
@@ -154,14 +154,14 @@ export const STATE_SOURCES: ReadonlyMap<string, readonly StateRow[]> = new Map<
 >([
   // Both kasa modules answer On/Off on the same variable name.
   ["tplink-kasasmartplug", [
-    { name: "power_state", on: "On", off: "Off", source: "live read, VCR-Overhead-Light" },
+    { name: "power_state", on: "On", off: "Off", source: "live read, Booth-Overhead-Light" },
   ]],
   ["tplink-kasasmartbulb", [
-    { name: "power_state", on: "On", off: "Off", source: "live read, Ethan-Office-Desk-Lamp-Left" },
+    { name: "power_state", on: "On", off: "Off", source: "live read, Office-Desk-Lamp" },
   ]],
-  ["vizio-smartcast", [{ name: "power", on: "On", off: "Off", source: "live read, Box-Foyer-TV" }]],
+  ["vizio-smartcast", [{ name: "power", on: "On", off: "Off", source: "live read, Lobby-TV" }]],
   ["generic-pjlink", [
-    { name: "powerState", on: "On", off: "Off", source: "live read, MA_HL_Projector" },
+    { name: "powerState", on: "On", off: "Off", source: "live read, Main_Projector" },
   ]],
   // A PTZ camera: a real power state, and an SD card recording that is a
   // different fact on the same connection. Both are the module's OFF/ON enum,
@@ -172,14 +172,14 @@ export const STATE_SOURCES: ReadonlyMap<string, readonly StateRow[]> = new Map<
       on: "ON",
       off: "OFF",
       when: ["power"],
-      source: "live read SA-PTZ-Camera/power = ON; src/variables.js v1.2.0 ['power','power',ENUM_OFF_ON]",
+      source: "live read PTZ-Camera-1/power = ON; src/variables.js v1.2.0 ['power','power',ENUM_OFF_ON]",
     },
     {
       name: "recording",
       on: "ON",
       off: "OFF",
       when: ["sdcardrec", "sdrecstate"],
-      source: "live read SA-PTZ-Camera/recording = OFF; src/variables.js v1.2.0 ['recording','recordSD',ENUM_OFF_ON]",
+      source: "live read PTZ-Camera-1/recording = OFF; src/variables.js v1.2.0 ['recording','recordSD',ENUM_OFF_ON]",
     },
   ]],
   // OBS: a stream and a recording on one connection. The install this was built
@@ -198,7 +198,7 @@ export const STATE_SOURCES: ReadonlyMap<string, readonly StateRow[]> = new Map<
       on: "Recording",
       off: STATE_ANY_OTHER,
       when: ["record"],
-      source: "live read MA_Video_Mac_Mini_OBS/recording = Stopped; 3.15.3 index.js sets Recording/Paused/Stopped",
+      source: "live read Main_Video_Mac_Mini_OBS/recording = Stopped; 3.15.3 index.js sets Recording/Paused/Stopped",
     },
   ]],
   // A HyperDeck has no power state at all: `status` is its TRANSPORT, and the
@@ -226,7 +226,7 @@ export const STATE_SOURCES: ReadonlyMap<string, readonly StateRow[]> = new Map<
       on: "Streaming",
       off: STATE_ANY_OTHER,
       when: ["stream"],
-      source: "live read UltraEncode01-MA-PGM/stream_status = Streaming; src/variables.ts v1.0.1 'Streaming' : 'Stream'",
+      source: "live read UltraEncode01-Main-PGM/stream_status = Streaming; src/variables.ts v1.0.1 'Streaming' : 'Stream'",
     },
     {
       name: "record_status",

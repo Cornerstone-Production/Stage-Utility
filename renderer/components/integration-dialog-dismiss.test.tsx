@@ -293,7 +293,7 @@ const instancesSaved = (): { name?: string }[] => {
 describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
   test("Escape raises the confirm and does not close", async () => {
     const o = await openProPresenter();
-    await addInstance("Chapel");
+    await addInstance("Overflow");
 
     fireEvent.keyDown(propSettings(), { key: "Escape" });
     await settle();
@@ -307,7 +307,7 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
     // effect fires, its deregistration cleanup fires, and the effect fires
     // again. Ending clean there would put the guard back to where it was.
     const o = await openProPresenter({}, true);
-    await addInstance("Chapel");
+    await addInstance("Overflow");
 
     fireEvent.keyDown(propSettings(), { key: "Escape" });
     await settle();
@@ -326,7 +326,7 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
     // The seeded row deliberately has NO pollMs — that is what is on disk for
     // every instance saved before this, and the shape the panel must tolerate.
     const o = await openProPresenter({
-      instances: [{ id: "inst-invented-1", name: "Chapel", host: "192.0.2.40", port: 1025 }],
+      instances: [{ id: "inst-invented-1", name: "Overflow", host: "192.0.2.40", port: 1025 }],
     });
 
     // Anchored on the FIELD's own input, not on a div whose text mentions "Poll
@@ -380,7 +380,7 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
 
   test("Save & close writes the sub-panel's rows, then closes", async () => {
     const o = await openProPresenter();
-    await addInstance("Chapel");
+    await addInstance("Overflow");
 
     fireEvent.keyDown(propSettings(), { key: "Escape" });
     await settle();
@@ -390,7 +390,7 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
 
     const rows = instancesSaved();
     assert.equal(rows.length, 1, "Save & close did not write the instance");
-    assert.equal(rows[0].name, "Chapel", "it wrote a row, but not the one that was typed");
+    assert.equal(rows[0].name, "Overflow", "it wrote a row, but not the one that was typed");
     assert.equal(o.closes, 1, "it saved but never closed");
   });
 
@@ -401,7 +401,7 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
     // save again. Driven with a slow reply, since an instant one closes the
     // dialog before a second click is possible.
     const o = await openProPresenter();
-    await addInstance("Chapel");
+    await addInstance("Overflow");
 
     const g = globalThis as unknown as { fetch: (...a: unknown[]) => Promise<unknown> };
     const real = g.fetch;
@@ -441,7 +441,7 @@ describe("dismissing a dialog whose sub-panel holds unsaved rows", () => {
 
   test("Discard closes and writes nothing", async () => {
     const o = await openProPresenter();
-    await addInstance("Chapel");
+    await addInstance("Overflow");
 
     fireEvent.keyDown(propSettings(), { key: "Escape" });
     await settle();

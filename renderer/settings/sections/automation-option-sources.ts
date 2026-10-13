@@ -111,7 +111,7 @@ export interface OptionSourceAnswers {
 /**
  * Why the macro list is short, or undefined when every instance answered.
  *
- * NAMED, not counted: "Chapel did not answer" is something an operator can go
+ * NAMED, not counted: "Overflow did not answer" is something an operator can go
  * and act on and "1 unreachable" is not — the route makes the same argument for
  * sending names in the first place.
  */

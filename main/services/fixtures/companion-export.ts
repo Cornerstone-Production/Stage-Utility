@@ -227,9 +227,9 @@ export function companionExportFixture(): Record<string, unknown> {
       // A smart plug, a smart bulb and OBS — the three shapes the state-source
       // inference reads. The kasa plug is the case the whole thing was built
       // for: one `toggle` action and a `powerState` feedback, which is exactly
-      // what the VCR light on the real install is.
-      "conn-vcr-light": {
-        label: "VCR-Overhead-Light",
+      // what the booth light on the real install is.
+      "conn-booth-light": {
+        label: "Booth-Overhead-Light",
         enabled: true,
         moduleId: "tplink-kasasmartplug",
         moduleInstanceType: "connection",
@@ -245,7 +245,7 @@ export function companionExportFixture(): Record<string, unknown> {
         moduleVersionId: "1.1.0",
       },
       "conn-foyer-tv": {
-        label: "MA-Foyer-TV-1",
+        label: "Lobby-TV-1",
         enabled: true,
         moduleId: "vizio-smartcast",
         moduleInstanceType: "connection",
@@ -263,7 +263,7 @@ export function companionExportFixture(): Record<string, unknown> {
       // Module versions are the ones the real install runs, because that is the
       // version the inference table's values were verified against.
       "conn-deck": {
-        label: "MA_HyperDeck_01",
+        label: "Main_HyperDeck_01",
         // DISABLED, exactly as all three decks are on the real install. A
         // disabled connection still carries its actions in the export, so the
         // inference has everything it needs — and its variables cannot be read,
@@ -274,21 +274,21 @@ export function companionExportFixture(): Record<string, unknown> {
         moduleVersionId: "2.5.0",
       },
       "conn-encoder": {
-        label: "UltraEncode01-MA-PGM",
+        label: "UltraEncode01-Main-PGM",
         enabled: true,
         moduleId: "magewell-ultrastream",
         moduleInstanceType: "connection",
         moduleVersionId: "1.0.1",
       },
       "conn-ptz": {
-        label: "SA-PTZ-Camera",
+        label: "PTZ-Camera-1",
         enabled: true,
         moduleId: "panasonic-cameras",
         moduleInstanceType: "connection",
         moduleVersionId: "1.2.0",
       },
       "conn-cine": {
-        label: "MA-CAM-1",
+        label: "Cine-Cam-1",
         enabled: true,
         moduleId: "red-rcp2",
         moduleInstanceType: "connection",
@@ -369,10 +369,10 @@ export function companionExportFixture(): Record<string, unknown> {
         {
           row: 2,
           col: 0,
-          text: "VCR Light ON",
-          connections: ["conn-vcr-light"],
+          text: "Booth Light ON",
+          connections: ["conn-booth-light"],
           actionDef: "toggle",
-          feedbacks: [{ definitionId: "powerState", connectionId: "conn-vcr-light" }],
+          feedbacks: [{ definitionId: "powerState", connectionId: "conn-booth-light" }],
         },
         // A bulb, whose feedback is `color` and not `powerState` — found only
         // through its first action's connection.

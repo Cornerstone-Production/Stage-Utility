@@ -185,10 +185,10 @@ describe("the shape of the manifest", () => {
   test("a toggle pair says so", async () => {
     // Both halves press ONE key, which is what a state variable is for.
     RULES = [
-      cue("vcr_light_on", { params: { stateVariable: "VCR-Overhead-Light:power_state" } }),
-      cue("vcr_light_off"),
+      cue("booth_light_on", { params: { stateVariable: "Booth-Overhead-Light:power_state" } }),
+      cue("booth_light_off"),
     ];
-    STATES = { vcr_light: { state: "on" } };
+    STATES = { booth_light: { state: "on" } };
     const m = await cueManifest();
     assert.equal(String(m.switches[0]?.toggle), "true");
     assert.equal(m.switches[0]?.state, "on");

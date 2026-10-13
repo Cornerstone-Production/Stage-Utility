@@ -1578,7 +1578,7 @@ describe("importing single buttons", () => {
     const buttons = await offered();
     // Page 1: House Lights ON (an ON with no OFF), Take Screens. The unlabelled
     // button at r3c0 is left out — a cue called nothing cannot be called.
-    // Page 2: VCR Light ON and Desk Lamp Toggle, the two smart-device toggles.
+    // Page 2: Booth Light ON and Desk Lamp Toggle, the two smart-device toggles.
     // Page 3: Cam 1 and Record Toggle on row 0, then Cam 2 on row 1 — Cam 1 and
     // Cam 2 both run nothing, which is what the reconcile's "an empty
     // fingerprint is never searched for" guard needs — then the two OBS
@@ -1591,7 +1591,7 @@ describe("importing single buttons", () => {
       [
         "1:house_lights_on",
         "1:take_screens",
-        "2:vcr_light_on",
+        "2:booth_light_on",
         "2:desk_lamp_toggle",
         "3:cam_1",
         "3:record_toggle",
@@ -2092,7 +2092,7 @@ describe("reconciling a cue's Companion button", () => {
         if (edited) {
           const live = automationEngine.listRules().find((r) => r.id === edited)!;
           await realUpdate(edited, {
-            trigger: { ...live.trigger, params: { ...live.trigger.params, room: "South Auditorium" } },
+            trigger: { ...live.trigger, params: { ...live.trigger.params, room: "Main Room" } },
           });
         }
       }
@@ -2108,7 +2108,7 @@ describe("reconciling a cue's Companion button", () => {
     const after = automationEngine.listRules().find((r) => r.id === edited)!;
     assert.equal(
       String(after.trigger.params.room),
-      "South Auditorium",
+      "Main Room",
       "the reconcile reverted an edit the operator saved while it was running",
     );
     // And the pass still did its own job on that rule.

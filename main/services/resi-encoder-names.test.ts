@@ -53,7 +53,7 @@ const CUSTOMER = "customer-0000";
 const ENC_PRIMARY = "11111111-2222-4333-8444-555555555555";
 const ENC_SECOND = "66666666-7777-4888-8999-aaaaaaaaaaaa";
 const NAME_PRIMARY = "Sanctuary Encoder - Primary";
-const NAME_SECOND = "Chapel Encoder";
+const NAME_SECOND = "Overflow Encoder";
 
 /** A uuid anywhere in the sub-line is the bug, whichever uuid it is. */
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;

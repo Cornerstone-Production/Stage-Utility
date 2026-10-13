@@ -754,7 +754,7 @@ describe("the State variable hint on a toggle pair", () => {
     // The FIELD ITSELF is verified in a browser rather than here: the popover's
     // placement and whether it is legible over the field below it are not
     // things jsdom can see. See the pull request.
-    RULES = [cue("deck_on", { stateVariable: "MA_HyperDeck_01:status", stateOnValue: "Record", stateOffValue: "*" }), cue("deck_off")];
+    RULES = [cue("deck_on", { stateVariable: "Main_HyperDeck_01:status", stateOnValue: "Record", stateOffValue: "*" }), cue("deck_off")];
     CUSTOM_VARIABLES = [];
     await mount();
     await open("deck_on");

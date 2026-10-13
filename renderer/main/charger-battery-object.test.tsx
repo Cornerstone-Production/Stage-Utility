@@ -41,7 +41,7 @@ const BASE_BAY = {
   bay: 7,
   chargerIndex: 1,
   connectionName: "Rack charger",
-  name: "MA: 5-8 · Bay 7",
+  name: "RF: 5-8 · Bay 7",
   online: true,
   battery: null,
   charging: null,
@@ -129,10 +129,10 @@ describe("the bay label", () => {
 
   test("an unnamed connection falls back to the charger's own DEVICE_ID", () => {
     // This is what used to read "Charger 1 · Bay 7" while the unit itself was
-    // called "MA: 5-8".
+    // called "RF: 5-8".
     const text = textFor({ connectionName: null });
     assert.ok(
-      text.includes("MA: 5-8 · Bay 7"),
+      text.includes("RF: 5-8 · Bay 7"),
       `the device's own name went unused. Saw: ${JSON.stringify(text)}`,
     );
   });

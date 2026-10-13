@@ -199,7 +199,7 @@ test("logs the struggling and smoothly-again flips, and only the flips — never
 });
 
 test("a heartbeat whose own record() call clears the sticky flag in its sweep and then re-flags it from the same bad sample logs the clear and the new episode's struggling line, in that order", async (t: TestContext) => {
-  const id = await addRelayFeed("Chapel screen");
+  const id = await addRelayFeed("Overflow screen");
   try {
     // The pair's first-ever struggle, at t=0 — its own "is struggling" line
     // is setup for this test, not part of the sequence under test, so
@@ -221,8 +221,8 @@ test("a heartbeat whose own record() call clears the sticky flag in its sweep an
     await settle();
 
     assert.deepEqual(lines, [
-      `[video] ${OUTPUT_NAME} is playing Chapel screen smoothly again`,
-      `[video] ${OUTPUT_NAME} is struggling with Chapel screen: dropped 51 frames for 1000 decoded, 0 stalls in the last minute`,
+      `[video] ${OUTPUT_NAME} is playing Overflow screen smoothly again`,
+      `[video] ${OUTPUT_NAME} is struggling with Overflow screen: dropped 51 frames for 1000 decoded, 0 stalls in the last minute`,
     ]);
   } finally {
     await videoService.removeFeed(id);

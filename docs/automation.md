@@ -269,18 +269,18 @@ for "idle", because before it runs we do not know that it is idle.
 > not — so the same rule works in both auditoriums, and re-importing a
 > ProPresenter library does not quietly break every rule. The cost is that
 > renaming a macro in ProPresenter stops the rule finding it; the action then
-> fails with `no macro called "SONG INTRO" on MA` rather than a bare 404.
+> fails with `no macro called "SONG INTRO" on Main` rather than a bare 404.
 >
 > The macro dropdown lists what every configured instance reports, so an
 > instance that could not be read simply contributes nothing — the rule editor
 > still opens. When more than one instance is set up and all of them answered, a
-> name only some of them have is marked, `DOORS (MA only)`; while any instance is
+> name only some of them have is marked, `DOORS (Main only)`; while any instance is
 > unreachable the mark is dropped, because "only" is a claim about the machines
 > that answered. A macro already chosen on a rule is always shown, marked, even
 > while the machine that has it is off.
 >
 > A rule whose ProPresenter is **switched off** triggers nothing and says so —
-> `MA is switched off` — rather than dialling the last address the card held.
+> `Main is switched off` — rather than dialling the last address the card held.
 
 > **Send a stage message** and **Clear stage message alerts** are the
 > [stage messages](features/stage-messages.md) feature as automation. Both are
@@ -394,7 +394,7 @@ the trigger and action's own names. A pair shows whenever either half matches.
 | **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
 | **Home Assistant** | on by default. Off keeps the cue out of Home Assistant and Apple Home entirely, leaving it callable by voice and by HTTP. A pair's two halves share one setting, stored on the `_on` half |
-| **State variable** | in **This pair**, for an ON/OFF pair only, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Saved on the `_on` rule. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `VCR-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
+| **State variable** | in **This pair**, for an ON/OFF pair only, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Saved on the `_on` rule. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `Booth-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
 | **Learning** | shown in **This pair** for a pair with no binding whose connections have no verified module row: the app probes them for candidate variables and binds one by watching what moves when you press the pair on and off. **Learn again** forgets what it found and probes again. See [Learning a state source](integrations/companion.md#learning-a-state-source) |
 | **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |
 | **Once per service** | honoured on a call as well as on a trigger: a second call in the same service occurrence is refused `once-per-service` |

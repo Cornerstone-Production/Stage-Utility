@@ -100,7 +100,7 @@ describe("the candidate names", () => {
 
 describe("which connections can be learned", () => {
   const connections: Record<string, ExportConnection> = {
-    plug: { label: "VCR-Light", moduleId: "tplink-kasasmartplug" },
+    plug: { label: "Booth-Light", moduleId: "tplink-kasasmartplug" },
     console: { label: "Yamaha-Rack", moduleId: "yamaha-rcp" },
     monitor: { label: "Smartview", moduleId: "bmd-smartview" },
     nameless: { label: "", moduleId: "yamaha-rcp" },

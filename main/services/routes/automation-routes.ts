@@ -163,7 +163,7 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
             : name,
       })),
       // For the editor to say WHY a list is short or empty. Named instances, not
-      // a count: "Chapel did not answer" is actionable and "1 unreachable" is not.
+      // a count: "Overflow did not answer" is actionable and "1 unreachable" is not.
       unreachable,
     });
     return;

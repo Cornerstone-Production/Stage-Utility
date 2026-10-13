@@ -86,7 +86,7 @@ clears.
 **Storage mode** charges to about 40% and stops. A charger left in it otherwise
 looks like a charger that has given up, so the bays say `storage` while it is on.
 
-Bays are named after the charger's own **Device ID** (its `MA: 5-8` style name,
+Bays are named after the charger's own **Device ID** (its `RF: 5-8` style name,
 set on the unit) where the connection itself has not been named.
 
 ### Battery percentage and time remaining

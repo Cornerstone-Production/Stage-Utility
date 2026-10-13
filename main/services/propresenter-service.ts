@@ -879,7 +879,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
    * as `{ ok: false }`, exactly as reaperService.transport does, so one booth
    * machine that is off cannot stop the engine.
    *
-   * `label` is the instance's display name — the operator picked "MA", not
+   * `label` is the instance's display name — the operator picked "Main", not
    * `inst-2`, and the log line has to say the word they would recognise.
    *
    * The trigger is `GET /v1/macro/<id>/trigger`. A GET that changes state is
@@ -1658,7 +1658,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
 export const propresenterService = new ProPresenterService("default");
 
 // ── Multi-instance manager ────────────────────────────────────────────────────
-// The church runs two auditoriums, each with its own ProPresenter machine. The
+// A site can run two auditoriums, each with its own ProPresenter machine. The
 // PRIMARY instance stays `propresenterService` (channel "propresenter:status",
 // unchanged for built-in views); EXTRA instances are managed here, each on its
 // own channel. A combined snapshot (all instances + their status) is broadcast on

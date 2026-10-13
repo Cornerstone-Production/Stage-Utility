@@ -1579,8 +1579,8 @@ describe("two auditoriums, each on its own stream", () => {
   it("a second instance that is off does not disturb the first", async () => {
     await streaming();
     // Port 9 is discard: nothing listens, which is a booth machine switched off.
-    propresenterManager.apply("MA", [
-      { id: "chapel", name: "Chapel", host: "127.0.0.1", port: 9, enabled: true },
+    propresenterManager.apply("Main", [
+      { id: "overflow", name: "Overflow", host: "127.0.0.1", port: 9, enabled: true },
     ]);
     await sleep(150);
     push(frame(WIRE.slide, { current: { text: "still here", notes: "" }, next: null }));
@@ -1589,7 +1589,7 @@ describe("two auditoriums, each on its own stream", () => {
       () => status().currentSlideText === "still here",
     );
     assert.equal(streams.length, 1, "the primary's stream was dropped by the other instance");
-    assert.equal(propresenterManager.getInstancesDto().status.chapel?.connected, false);
+    assert.equal(propresenterManager.getInstancesDto().status.overflow?.connected, false);
     assert.equal(propresenterManager.getInstancesDto().status.default.connected, true);
   });
 
@@ -1598,10 +1598,10 @@ describe("two auditoriums, each on its own stream", () => {
     // "Streaming from" and the fallback reports "Connected to"; the connecting
     // state for an extra instance still said "Polling", which is the one thing
     // it never does.
-    propresenterManager.apply("MA", [
-      { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true },
+    propresenterManager.apply("Main", [
+      { id: "overflow", name: "Overflow", host: "127.0.0.1", port, enabled: true },
     ]);
-    assert.deepEqual(propresenterManager.getInstancesDto().conn.chapel, {
+    assert.deepEqual(propresenterManager.getInstancesDto().conn.overflow, {
       state: "connecting",
       message: `Connecting to 127.0.0.1:${port}`,
     });
@@ -1609,7 +1609,7 @@ describe("two auditoriums, each on its own stream", () => {
     await until(
       "the stream to replace the connecting message",
       () =>
-        propresenterManager.getInstancesDto().conn.chapel?.message ===
+        propresenterManager.getInstancesDto().conn.overflow?.message ===
         `Streaming from 127.0.0.1:${port}`,
     );
   });
@@ -1623,19 +1623,19 @@ describe("two auditoriums, each on its own stream", () => {
     // a repeat, and the row sat on "Connecting to h:p" with a live, healthy
     // stream under it for the rest of the service. Off and on again is the first
     // thing anybody tries when a row looks wrong.
-    const chapel = { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true };
-    propresenterManager.apply("MA", [chapel]);
+    const overflow = { id: "overflow", name: "Overflow", host: "127.0.0.1", port, enabled: true };
+    propresenterManager.apply("Main", [overflow]);
     await until(
       "the extra instance to come up",
-      () => instConn("chapel")?.message === `Streaming from 127.0.0.1:${port}`,
+      () => instConn("overflow")?.message === `Streaming from 127.0.0.1:${port}`,
     );
 
-    propresenterManager.apply("MA", [{ ...chapel, enabled: false }]);
-    assert.deepEqual(instConn("chapel"), { state: "disconnected", message: null });
+    propresenterManager.apply("Main", [{ ...overflow, enabled: false }]);
+    assert.deepEqual(instConn("overflow"), { state: "disconnected", message: null });
 
-    propresenterManager.apply("MA", [chapel]);
-    await until("the re-enabled row to leave Connecting", () => instConn("chapel")?.state === "connected");
-    assert.deepEqual(instConn("chapel"), {
+    propresenterManager.apply("Main", [overflow]);
+    await until("the re-enabled row to leave Connecting", () => instConn("overflow")?.state === "connected");
+    assert.deepEqual(instConn("overflow"), {
       state: "connected",
       message: `Streaming from 127.0.0.1:${port}`,
     });
@@ -1647,20 +1647,20 @@ describe("two auditoriums, each on its own stream", () => {
     // gets away with that because its configure() restarts unconditionally and
     // the service reports again; this one deliberately does not re-dial an
     // unchanged target, so the optimistic message was never taken back.
-    const chapel = { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true };
-    propresenterManager.apply("MA", [chapel]);
+    const overflow = { id: "overflow", name: "Overflow", host: "127.0.0.1", port, enabled: true };
+    propresenterManager.apply("Main", [overflow]);
     await until(
       "the extra instance to come up",
-      () => instConn("chapel")?.message === `Streaming from 127.0.0.1:${port}`,
+      () => instConn("overflow")?.message === `Streaming from 127.0.0.1:${port}`,
     );
 
     // A save that changes the FALLBACK poll interval, which the stream path does
     // not read and which must not disturb anything.
-    propresenterManager.apply("MA", [{ ...chapel, pollMs: 900 }]);
+    propresenterManager.apply("Main", [{ ...overflow, pollMs: 900 }]);
     await sleep(150);
 
     assert.deepEqual(
-      instConn("chapel"),
+      instConn("overflow"),
       { state: "connected", message: `Streaming from 127.0.0.1:${port}` },
       "a settings save left a live extra instance reading as still connecting",
     );
@@ -1669,8 +1669,8 @@ describe("two auditoriums, each on its own stream", () => {
 
   it("each instance holds its own stream", async () => {
     await streaming();
-    propresenterManager.apply("MA", [
-      { id: "chapel", name: "Chapel", host: "127.0.0.1", port, enabled: true },
+    propresenterManager.apply("Main", [
+      { id: "overflow", name: "Overflow", host: "127.0.0.1", port, enabled: true },
     ]);
     await until("both subscriptions to be held", () => streams.length === 2);
     assert.equal(subscribes().length, 2);
