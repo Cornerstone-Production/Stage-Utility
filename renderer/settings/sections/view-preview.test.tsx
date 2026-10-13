@@ -22,6 +22,12 @@ const { ViewPreview } = await import("./view-preview.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
+// NOT unit-tested here: that the preview's four corners are rounded. The scaled
+// iframe sits on its own compositor layer and the box clips it with a clip-path;
+// jsdom loads no stylesheet and paints nothing, so a test could only read the style
+// string back, which would pass whether or not any corner is clipped. It is checked
+// in a browser, on the Screens tab, with a live preview showing a light top bar.
+
 describe("ViewPreview's iframe", () => {
   test("never takes pointer or wheel input, so clicks and hover land on the card embedding it", () => {
     const { container } = render(React.createElement(ViewPreview, { viewId: "v1" }));
