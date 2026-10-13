@@ -22,6 +22,15 @@ REPO="${STAGE_REPO:-Cornerstone-Production/Stage-Utility}"
 TRACK="${STAGE_TRACK:-main}"
 PORT="${STAGE_PORT:-8788}"
 SERVICE_NAME="stage-utility"
+# The macOS launchd job. Not derived from SERVICE_NAME: that is a fixed string
+# (nothing sets it), and this is a reverse-DNS name in its own right. Installs
+# made before this label existed registered com.cornerstone.${SERVICE_NAME}; an
+# in-app update never rewrites the plist, so those keep it until this script is
+# run again, which migrates them below. The app's updater accepts both
+# (main/services/update/launchd-label.ts).
+LAUNCHD_LABEL="app.stageutility.server"
+LEGACY_LAUNCHD_LABEL="com.cornerstone.${SERVICE_NAME}"
+LAUNCHD_DIR="/Library/LaunchDaemons"
 
 # Colour only for a human at a terminal. When the app drives this the output is
 # redirected to log files, where escape codes are noise that also break grep.
@@ -385,11 +394,29 @@ UNIT
   systemctl restart "${SERVICE_NAME}"
 else
   say "Installing the launchd daemon"
-  cat > "/Library/LaunchDaemons/com.cornerstone.${SERVICE_NAME}.plist" <<PLIST
+  # An install from before the rename is still registered under the old label.
+  # Take it down FIRST: two daemons running one server fight over the port, and
+  # the loser's KeepAlive keeps restarting it. bootout is asynchronous, so wait
+  # for the label to actually go before the new one is loaded.
+  if [ -f "${LAUNCHD_DIR}/${LEGACY_LAUNCHD_LABEL}.plist" ] \
+     || launchctl print "system/${LEGACY_LAUNCHD_LABEL}" >/dev/null 2>&1; then
+    log "launchd: migrating ${LEGACY_LAUNCHD_LABEL} to ${LAUNCHD_LABEL}"
+    launchctl bootout "system/${LEGACY_LAUNCHD_LABEL}" >/dev/null 2>&1 || true
+    for _ in $(seq 1 25); do
+      launchctl print "system/${LEGACY_LAUNCHD_LABEL}" >/dev/null 2>&1 || break
+      sleep 0.2
+    done
+    if launchctl print "system/${LEGACY_LAUNCHD_LABEL}" >/dev/null 2>&1; then
+      die "Could not stop the old launchd daemon ${LEGACY_LAUNCHD_LABEL}. Run: sudo launchctl bootout system/${LEGACY_LAUNCHD_LABEL}   then re-run this installer."
+    fi
+    rm -f "${LAUNCHD_DIR}/${LEGACY_LAUNCHD_LABEL}.plist"
+    log "launchd: removed ${LAUNCHD_DIR}/${LEGACY_LAUNCHD_LABEL}.plist"
+  fi
+  cat > "${LAUNCHD_DIR}/${LAUNCHD_LABEL}.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>com.cornerstone.${SERVICE_NAME}</string>
+  <key>Label</key><string>${LAUNCHD_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
     <string>${PREFIX}/current/node</string>
@@ -407,8 +434,8 @@ else
   <key>KeepAlive</key><true/>
 </dict></plist>
 PLIST
-  launchctl unload "/Library/LaunchDaemons/com.cornerstone.${SERVICE_NAME}.plist" 2>/dev/null || true
-  launchctl load  -w "/Library/LaunchDaemons/com.cornerstone.${SERVICE_NAME}.plist"
+  launchctl unload "${LAUNCHD_DIR}/${LAUNCHD_LABEL}.plist" 2>/dev/null || true
+  launchctl load  -w "${LAUNCHD_DIR}/${LAUNCHD_LABEL}.plist"
 fi
 
 # ── Confirm it is actually serving ────────────────────────────────────────────
@@ -422,7 +449,7 @@ if [ "$OS" = linux ]; then
     die "${SERVICE_NAME} is not enabled at boot; it would not survive a restart."
   fi
 else
-  if launchctl print "system/com.cornerstone.${SERVICE_NAME}" >/dev/null 2>&1; then
+  if launchctl print "system/${LAUNCHD_LABEL}" >/dev/null 2>&1; then
     log "boot: loaded as a launchd daemon - will restart after a power loss"
   else
     warn "The launchd daemon does not appear loaded; it may not survive a restart."
