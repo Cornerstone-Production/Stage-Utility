@@ -29,4 +29,8 @@ jobs:
       - name: Check tracked files for private details
         env:
           PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}
+          # A missing secret is an error where it should exist: a PR from a branch
+          # of this repository. A fork, or Dependabot (which reads its own secret
+          # store, not this one), cannot have it, and runs the generic rules only.
+          REQUIRE_TERMS: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && '1' || '' }}
         run: node scripts/check-public-hygiene.mjs
