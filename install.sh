@@ -28,7 +28,7 @@ SERVICE_NAME="stage-utility"
 # in-app update never rewrites the plist, so those keep it until this script is
 # run again, which migrates them below. The app's updater accepts both
 # (main/services/update/launchd-label.ts).
-LAUNCHD_LABEL="app.stageutility.server"
+LAUNCHD_LABEL="com.stageutility.server"
 LEGACY_LAUNCHD_LABEL="com.cornerstone.${SERVICE_NAME}"
 LAUNCHD_DIR="/Library/LaunchDaemons"
 

@@ -32,7 +32,7 @@ LAUNCHD_DIR="/Library/LaunchDaemons"
 # Current label first, then the one installers registered before the rename. An
 # install from either era is removed, and a box part-way through a migration has
 # both.
-LAUNCHD_LABELS=("app.stageutility.server" "com.cornerstone.${SERVICE_NAME}")
+LAUNCHD_LABELS=("com.stageutility.server" "com.cornerstone.${SERVICE_NAME}")
 LINUX_PREFIX="${STAGE_PREFIX:-/opt/stage-utility}"
 MACOS_PREFIX="${STAGE_PREFIX:-/usr/local/stage-utility}"
 FORMULAE=("stage-utility" "stage-utility-beta")

@@ -188,15 +188,15 @@ sudo userdel stage-utility                # the service account, if unused
 **macOS** (one-line installer)
 
 ```bash
-sudo launchctl bootout system/app.stageutility.server   # stop it now
-sudo rm /Library/LaunchDaemons/app.stageutility.server.plist
+sudo launchctl bootout system/com.stageutility.server   # stop it now
+sudo rm /Library/LaunchDaemons/com.stageutility.server.plist
 sudo rm -rf /usr/local/stage-utility
 ```
 
 The `bootout` matters on its own: deleting the plist stops it coming back at
 boot, but leaves the running process serving until the machine restarts.
 
-Installs made before the label `app.stageutility.server` was introduced are
+Installs made before the label `com.stageutility.server` was introduced are
 registered as `com.cornerstone.stage-utility`; use that name in the first two
 commands. In-app updates keep an install on whichever label it has. Re-running the
 installer moves an old one to the new label: it stops the old job, deletes its

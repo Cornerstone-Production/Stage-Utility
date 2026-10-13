@@ -13,7 +13,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 NODE="$(command -v node)"
-LABEL="app.stageutility.survival-test"
+LABEL="com.stageutility.survival-test"
 # What this test registered before the rename. A run that died then left it
 # loaded in the user's domain, so cleanup removes it too.
 OLD_LABEL="com.cornerstone.stage-survival-test"

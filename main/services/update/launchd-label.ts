@@ -11,7 +11,7 @@
 import { execFileSync } from "node:child_process";
 
 /** The label install.sh registers today. */
-export const DAEMON_LABEL = "app.stageutility.server";
+export const DAEMON_LABEL = "com.stageutility.server";
 
 /** Labels older installers registered. Every one is still live on some Mac. */
 export const LEGACY_DAEMON_LABELS = ["com.cornerstone.stage-utility"] as const;
