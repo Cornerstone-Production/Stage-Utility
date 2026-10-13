@@ -132,6 +132,21 @@ test("a failed Columns save toasts, rather than doing nothing silently", async (
   }
 });
 
+test("deleting a view names a screen that has no name by its id, not as an empty pair of quotes", async () => {
+  const f = stubFetchWithLog(() => ok({}));
+  try {
+    mount(CONSOLE_VIEW, [{ id: "display-7", name: "", viewId: "v1" }, { id: "o2", name: "Stage panel", viewId: "v1" }]);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Delete view" }));
+    await settle();
+    const dialog = text(document.querySelector('[role="alertdialog"]')!);
+    assert.match(dialog, /"display-7" and "Stage panel" show it/);
+    assert.equal(/""/.test(dialog), false, "an unnamed screen was named with empty quotes");
+  } finally {
+    f.restore();
+  }
+});
+
 // Deleting a view un-routes every screen showing it. A control surface's screens
 // were live, so the operator is told its buttons stop working, not only that the
 // screens lose their view.
@@ -144,7 +159,7 @@ test("deleting a console's view says its screens' buttons will stop working; a w
     fireEvent.click(screen.getByRole("button", { name: "Delete view" }));
     await settle();
     const dialog = text(document.querySelector('[role="alertdialog"]')!);
-    assert.match(dialog, /shown on Booth panel, Stage panel, which will have no view assigned, and its buttons will stop working\./);
+    assert.match(dialog, /"Booth panel" and "Stage panel" show it, and will show nothing until you pick another view\. Their buttons stop working\./);
     assert.equal(/Elsewhere/.test(dialog), false, "a screen showing another view was named");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await settle();
@@ -155,7 +170,7 @@ test("deleting a console's view says its screens' buttons will stop working; a w
     fireEvent.click(screen.getByRole("button", { name: "Delete view" }));
     await settle();
     const wall = text(document.querySelector('[role="alertdialog"]')!);
-    assert.match(wall, /which will have no view assigned\./);
+    assert.match(wall, /will show nothing until you pick another view\./);
     assert.equal(/buttons will stop working/.test(wall), false);
   } finally {
     f.restore();

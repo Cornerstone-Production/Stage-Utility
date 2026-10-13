@@ -151,7 +151,7 @@ describe("making a view a control surface", () => {
       await settle();
       const done = start(hook, "wall-a", "console");
       await opened(/Make "Lobby loop" a control surface\?/);
-      assert.match(dialog()!.textContent!, /Lobby TV and Hallway TV will become control surfaces/);
+      assert.match(dialog()!.textContent!, /Buttons will work on "Lobby TV" and "Hallway TV"/);
       assert.deepEqual(f.writes(), [], "a write went out before the operator answered");
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
       await settle();
@@ -184,7 +184,7 @@ describe("making a view a control surface", () => {
       await settle();
       const done = start(hook, "wall-a", "console");
       await opened();
-      fireEvent.click(screen.getByRole("button", { name: "Make them control surfaces" }));
+      fireEvent.click(screen.getByRole("button", { name: "Make it a control surface" }));
       await settle();
       await done;
       assert.deepEqual(f.writes(), [
@@ -203,8 +203,8 @@ describe("making a view a wall display", () => {
       const hook = mountHook(seedState());
       await settle();
       const done = start(hook, "ctl-a", "display");
-      await opened(/Booth panel will become a wall display/);
-      fireEvent.click(screen.getByRole("button", { name: "Make it a wall display" }));
+      await opened(/"Booth panel" becomes read-only/);
+      fireEvent.click(screen.getByRole("button", { name: "Make it a wall view" }));
       await settle();
       await done;
       assert.deepEqual(f.writes(), [
@@ -258,11 +258,11 @@ describe("the screens changed while the dialog was open", () => {
       await settle();
       const done = start(hook, "wall-a", "console");
       await opened();
-      fireEvent.click(screen.getByRole("button", { name: "Make them control surfaces" }));
+      fireEvent.click(screen.getByRole("button", { name: "Make it a control surface" }));
       const again = await opened(/changed while you were deciding/).catch(() => null);
       assert.ok(again, "no second confirm after the 409");
-      assert.match(again.textContent!, /Lobby TV, Hallway TV and Spare will become control surfaces/);
-      fireEvent.click(screen.getByRole("button", { name: "Make them control surfaces" }));
+      assert.match(again.textContent!, /Buttons will work on "Lobby TV", "Hallway TV", "Spare"/);
+      fireEvent.click(screen.getByRole("button", { name: "Make it a control surface" }));
       await settle();
       await done;
       assert.deepEqual(f.writes().map((c) => c.body), [

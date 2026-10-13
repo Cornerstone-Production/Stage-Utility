@@ -22,7 +22,7 @@ process.env.HOME = path.join(TMP, "home");
 const { viewRoutes } = await import("./view-routes.js");
 const { kioskDeviceRoutes } = await import("./kiosk-device-routes.js");
 const { callRoute } = await import("./route-harness.js");
-const { stageController } = await import("../stage-controller.js");
+const { stageController, ViewSurfaceChangedError } = await import("../stage-controller.js");
 const { screenIsControlSurface } = await import("../../types/views.js");
 const { recordSeen, resetKioskPresence } = await import("../kiosk-presence.js");
 const { kioskDevicesStore } = await import("../kiosk-devices-store.js");
@@ -71,6 +71,12 @@ describe("POST /api/outputs — the original { name, viewId } call", () => {
     assert.equal(views().length, 2, "a view was made for a call that did not ask for one");
     const body = r.json as { outputs: Output[] };
     assert.ok(body.outputs.some((o) => o.name === "Cafe TV"), "the answer is not the state");
+  });
+
+  it("answers the id of the screen it made, so a client need not look for it in the state", async () => {
+    const r = await post("/api/outputs", { name: "Cafe TV", viewId: "wall-a" });
+    const made = outputs().find((o) => o.name === "Cafe TV")!;
+    assert.equal((r.json as { outputId: string }).outputId, made.id);
   });
 
   it("with no body at all makes 'Display N' routed nowhere", async () => {
@@ -533,5 +539,202 @@ describe("POST /api/devices/claim — a new screen", () => {
     }
     assert.equal(outputs().some((o) => o.name === "Wing"), false, "the empty screen was left behind");
     assert.equal(views().some((v) => v.name === "Wing"), false, "the view made for it was left behind");
+  });
+});
+
+describe("POST /api/outputs and a claim — expectSurface, the kind the operator was shown", () => {
+  const device = { id: "kiosk-aaaa", macs: ["aa:bb:cc:dd:ee:ff"], hostname: "lobby-pi", os: "linux", ip: "192.0.2.10" };
+  const claim = (body: Record<string, unknown>) => callRoute(kioskDeviceRoutes, "/api/devices/claim", { method: "POST", body: { deviceId: device.id, ...body } });
+  const snapshot = () => JSON.stringify({ views: views(), outputs: outputs() });
+
+  it("a create goes ahead when the view is the kind that was shown", async () => {
+    const r = await post("/api/outputs", { name: "Wing", viewId: "ctl-a", expectSurface: "console" });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(screenIsControlSurface(outputs().find((o) => o.name === "Wing")!, views()), true);
+  });
+
+  it("a create is a 409 naming what the view is now when it is the other kind, and makes nothing", async () => {
+    const before = snapshot();
+    const r = await post("/api/outputs", { name: "Wing", viewId: "wall-a", expectSurface: "console" });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    const j = r.json as { code: string; surface: string; error: string };
+    assert.equal(j.code, "surface-changed");
+    assert.equal(j.surface, "display");
+    assert.match(j.error, /Nothing was changed/);
+    assert.equal(snapshot(), before, "a screen or a view was written");
+  });
+
+  it("is checked in the write turn of the add itself, not only before it", async () => {
+    // What the route's own early check cannot see: the view changed kind after it.
+    const before = snapshot();
+    await assert.rejects(
+      () => stageController.addOutput({ name: "Wing", viewId: "wall-a", expectSurface: "console" }),
+      (err: unknown) => err instanceof ViewSurfaceChangedError && err.surface === "display",
+    );
+    assert.equal(snapshot(), before, "the screen was added before the check");
+  });
+
+  it("a view that changes kind AFTER the early check, before the add, still creates nothing and is a 409", async () => {
+    const real = stageController.addOutput.bind(stageController);
+    const flip = stageController as unknown as { addOutput: unknown };
+    flip.addOutput = async (...args: Parameters<typeof real>) => {
+      ctl.state = { ...ctl.state, views: views().map((v) => (v.id === "ctl-a" ? { ...v, surface: "display" as const } : v)) };
+      return real(...args);
+    };
+    const before = JSON.stringify({ outputs: outputs() });
+    try {
+      const r = await post("/api/outputs", { name: "Wing", viewId: "ctl-a", expectSurface: "console" });
+      assert.equal(r.status, 409, JSON.stringify(r.json));
+      assert.equal((r.json as { surface: string }).surface, "display");
+    } finally {
+      delete (flip as { addOutput?: unknown }).addOutput;
+    }
+    assert.equal(JSON.stringify({ outputs: outputs() }), before, "the screen was added");
+  });
+
+  it("is a 400 without a viewId, with newView, or with a value that is not a kind", async () => {
+    const before = snapshot();
+    for (const body of [
+      { expectSurface: "console" },
+      { viewId: null, expectSurface: "console" },
+      { newView: "control", expectSurface: "console" },
+      { viewId: "ctl-a", newView: "control", expectSurface: "console" },
+      { viewId: "ctl-a", expectSurface: "wall" },
+      { viewId: "ctl-a", expectSurface: null },
+    ]) {
+      const r = await post("/api/outputs", body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.match((r.json as { error: string }).error, /expectSurface/);
+    }
+    assert.equal(snapshot(), before);
+  });
+
+  it("a claim goes ahead when the view is the kind that was shown, and binds the device", async () => {
+    recordSeen(device);
+    const r = await claim({ name: "Wing", viewId: "ctl-a", expectSurface: "console" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const made = outputs().find((o) => o.name === "Wing")!;
+    assert.equal((await kioskDevicesStore.load()).find((d) => d.id === device.id)?.outputId, made.id);
+  });
+
+  it("a claim for a view of the other kind is a 409, makes no screen and leaves the device unbound", async () => {
+    recordSeen(device);
+    const before = snapshot();
+    const r = await claim({ name: "Wing", viewId: "wall-a", expectSurface: "console" });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    assert.equal((r.json as { code: string }).code, "surface-changed");
+    assert.equal(snapshot(), before, "a screen was made for a refused claim");
+    assert.equal((await kioskDevicesStore.load()).length, 0, "the device was bound");
+  });
+
+  it("a claim with a bad combination is a 400 and creates nothing", async () => {
+    recordSeen(device);
+    const before = snapshot();
+    for (const body of [
+      { expectSurface: "console" },
+      { newView: "wall", expectSurface: "display" },
+      { viewId: "ctl-a", expectSurface: "wall" },
+      // Naming a screen to take over AND describing a new one.
+      { outputId: "display-1", viewId: "ctl-a", expectSurface: "console" },
+    ]) {
+      const r = await claim(body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+    }
+    assert.equal(snapshot(), before);
+    assert.equal((await kioskDevicesStore.load()).length, 0);
+  });
+});
+
+describe("DELETE /api/views/:id?ifUnshown=1 — delete a view only if no screen shows it", () => {
+  const del = (url: string) => callRoute(viewRoutes, url, { method: "DELETE" });
+  beforeEach(() => {
+    ctl.state = { ...ctl.state, views: [...views(), { id: "spare", name: "Spare loop", kind: "custom", surface: "display", createdAt: NOW, layout }] as unknown as View[] };
+  });
+
+  it("deletes a view no screen shows", async () => {
+    const r = await del("/api/views/spare?ifUnshown=1");
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(views().some((v) => v.id === "spare"), false);
+  });
+
+  it("is a 409 naming the screens when one shows it, and deletes nothing", async () => {
+    const before = JSON.stringify({ views: views(), outputs: outputs() });
+    const r = await del("/api/views/wall-a?ifUnshown=1");
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    const j = r.json as { code: string; screens: { id: string; name: string }[]; error: string };
+    assert.equal(j.code, "view-shown");
+    assert.deepEqual(j.screens, [{ id: "display-1", name: "Lobby TV" }, { id: "display-2", name: "Hallway TV" }]);
+    assert.match(j.error, /"Lobby TV", "Hallway TV" show it now/);
+    assert.equal(JSON.stringify({ views: views(), outputs: outputs() }), before, "the view was deleted or a screen unrouted");
+  });
+
+  it("without the flag it deletes a shown view and unroutes its screens, as it always did", async () => {
+    const r = await del("/api/views/wall-a");
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(outputs().filter((o) => o.id === "display-1" || o.id === "display-2").map((o) => o.viewId), [null, null]);
+  });
+
+  it("a delete that fails releases the view: it can be pointed at again afterwards", async () => {
+    // The reservation must not outlive the delete. The view's inline slots fail to be
+    // cleaned up, so the delete rejects before the view leaves the state.
+    const inline = {
+      id: "inline-f", name: "Mic wall", kind: "custom", surface: "display", createdAt: NOW,
+      layout: { ...layout, objects: [{ id: "grid-f", x: 0, y: 0, w: 1, h: 1, z: 1, config: { type: "slots-grid", source: "inline" }, style: {} }] },
+    };
+    ctl.state = { ...ctl.state, views: [...views(), inline] as unknown as View[] };
+    const { slotsStore } = await import("../slots-store.js");
+    const store = slotsStore as unknown as { removeDisplay: (id: string) => Promise<unknown> };
+    const real = store.removeDisplay.bind(slotsStore);
+    store.removeDisplay = async () => { throw new Error("disk full"); };
+    try {
+      await assert.rejects(() => stageController.deleteView("inline-f", { ifUnshown: true }), /disk full/);
+    } finally {
+      store.removeDisplay = real;
+    }
+    assert.equal(views().some((v) => v.id === "inline-f"), true, "the view was removed by a delete that failed");
+    const routed = await callRoute(viewRoutes, "/api/outputs/display-1", { method: "PATCH", body: { viewId: "inline-f" } });
+    assert.equal(routed.status, 200, `the view is still reserved after its delete failed: ${JSON.stringify(routed.json)}`);
+  });
+
+  it("a view being deleted cannot be pointed at while its inline slots are cleaned up: not by routing, not by a new screen", async () => {
+    // The window is the await in deleteView before the view leaves the state. A
+    // view with an inline slots grid has one; hold it open and try both writes.
+    const inline = {
+      id: "inline", name: "Mic wall", kind: "custom", surface: "display", createdAt: NOW,
+      layout: { ...layout, objects: [{ id: "grid-1", x: 0, y: 0, w: 1, h: 1, z: 1, config: { type: "slots-grid", source: "inline" }, style: {} }] },
+    };
+    ctl.state = { ...ctl.state, views: [...views(), inline] as unknown as View[] };
+    const { slotsStore } = await import("../slots-store.js");
+    const store = slotsStore as unknown as { removeDisplay: (id: string) => Promise<unknown> };
+    const real = store.removeDisplay.bind(slotsStore);
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    store.removeDisplay = async (id: string) => { await held; return real(id); };
+    const deleting = del("/api/views/inline?ifUnshown=1");
+    try {
+      await new Promise((r) => setTimeout(r, 5));
+      const routed = await callRoute(viewRoutes, "/api/outputs/display-1", { method: "PATCH", body: { viewId: "inline" } });
+      assert.equal(routed.status, 400, JSON.stringify(routed.json));
+      assert.match((routed.json as { error: string }).error, /being deleted/);
+      const made = await post("/api/outputs", { name: "Wing", viewId: "inline" });
+      assert.equal(made.status, 400, JSON.stringify(made.json));
+    } finally {
+      release();
+      store.removeDisplay = real;
+    }
+    assert.equal((await deleting).status, 200);
+    assert.equal(outputs().find((o) => o.id === "display-1")?.viewId, "wall-a", "a screen was pointed at a view that is gone");
+    assert.equal(outputs().some((o) => o.name === "Wing"), false);
+  });
+});
+
+describe("POST /api/views/:id/duplicate — answers the copy it made", () => {
+  it("answers the id of the copy beside the state, so a client need not look for the newest view", async () => {
+    const r = await post("/api/views/wall-a/duplicate", { name: "Lobby loop 2" });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    const made = views().find((v) => v.name === "Lobby loop 2");
+    assert.ok(made, "no copy was made");
+    assert.equal((r.json as { viewId: string }).viewId, made!.id);
+    assert.equal((r.json as { views: View[] }).views.some((v) => v.id === made!.id), true, "the answer is not the state");
   });
 });

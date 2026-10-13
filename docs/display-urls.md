@@ -25,8 +25,8 @@ reaches the same screen. Both addresses work.
 It is an alias, not a rename — the id keeps working, and clearing a slug only
 removes the alias. Nothing is rekeyed, so nothing is lost.
 
-The friendly link is set in the screen's **Screen settings** (or in the last of the
-three steps when adding a screen). Slugs are rejected, with the reason shown
+The friendly link is set in the screen's **Screen settings** (or in the first of the
+two steps when adding a screen). Slugs are rejected, with the reason shown
 beside the field, if they are reserved, start
 with `preview-`, collide with another display's id or slug, or contain anything
 outside `a-z`, `0-9` and `-`.

@@ -22,7 +22,7 @@ import { externKeyed } from "@main/types/extern-keyed";
 const SURFACE_CHOICES: { value: ViewSurface; title: string; hint: string }[] = [
   {
     value: "display",
-    title: "A wall screen anyone can see",
+    title: "A wall view anyone can see",
     hint: "Read-only. Controls never fire, whatever you put on it.",
   },
   {
@@ -76,7 +76,7 @@ export function NewViewDialog({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   /** Called with the new view's id, so a caller can assign or open it. */
-  onCreated?: (id: string) => void;
+  onCreated?: (id: string, name: string) => void;
   /**
    * What the view is FOR, already decided by the caller: a screen's panel asks
    * for "a new control surface" or "a new wall view", and offering the choice
@@ -108,7 +108,8 @@ export function NewViewDialog({
       onConfirm={async () => {
         // A new view is a console only as a custom layout, whatever else can be one
         // (see effectiveKind): any other kind is created as a wall view.
-        const id = await handlers.handleAddView(name.trim(), effectiveKind, effectiveKind === "custom" ? surface : "display");
+        const made = name.trim();
+        const id = await handlers.handleAddView(made, effectiveKind, effectiveKind === "custom" ? surface : "display");
         if (id && effectiveKind === "custom" && startFrom !== "blank") {
           const strip = startFrom.startsWith("ultritouch-") ? (startFrom as UltritouchModel) : null;
           const objects = strip ? ultritouchTemplate(strip) : startFrom === "dashboard" ? dashboardTemplate() : confidenceMonitorTemplate();
@@ -122,7 +123,7 @@ export function NewViewDialog({
         setKind("slots");
         setStartFrom("blank");
         setSurface("display");
-        if (id) onCreated?.(id);
+        if (id) onCreated?.(id, made);
       }}
     >
       <div className="flex flex-col gap-3">

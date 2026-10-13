@@ -11,11 +11,7 @@ import { screensShowing, viewSurface, type ViewSurface } from "@main/types/views
 import type { StageState } from "@main/types/stage";
 import type { ConfirmOptions } from "../components/ui";
 import type { ApiError } from "../lib/api";
-
-/** "A", "A and B", "A, B and C". */
-function nameList(names: string[]): string {
-  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
+import { listNames, roleQuestionTitle, viewKindLabel } from "./screen-role-confirm";
 
 /** One screen a change would make: the id the server is sent, the name the
  *  operator is shown. */
@@ -35,17 +31,7 @@ export function screensChangedBy(state: Pick<StageState, "views" | "outputs"> | 
   return screensShowing(viewId, state?.outputs ?? []).map((o) => ({ id: o.id, name: o.name || o.id }));
 }
 
-/**
- * The kind of view `viewId` is, as the operator saw it: what to send as
- * `expectSurface` after they confirm a screen going live on it. Read from the
- * views the confirm was asked against, never from a fresher copy: the point is
- * that the server refuses when the view changed while the question was open.
- * Undefined for a view that is not there, which sends no expectation.
- */
-export function expectedSurface(views: readonly Pick<View, "id" | "surface">[], viewId: string): ViewSurface | undefined {
-  const view = views.find((v) => v.id === viewId);
-  return view ? viewSurface(view) : undefined;
-}
+export { expectedSurface } from "./screen-role-confirm";
 
 /** What to ask before changing these screens, or null when there is none to
  *  ask about. `again` says the list changed since the operator was last asked. */
@@ -56,24 +42,18 @@ export function viewRoleQuestion(
   { again = false }: { again?: boolean } = {},
 ): ConfirmOptions | null {
   if (screens.length === 0) return null;
-  const one = screens.length === 1;
-  const names = nameList(screens);
+  const many = screens.length > 1;
+  const names = listNames(screens);
   const lead = again ? "The screens showing it changed while you were deciding. " : "";
-  return surface === "console"
-    ? {
-        title: `Make "${viewName}" a control surface?`,
-        message: lead + (one
-          ? `${names} will become a control surface. Anyone at it can press its buttons.`
-          : `${names} will become control surfaces. Anyone at them can press their buttons.`),
-        confirmLabel: one ? "Make it a control surface" : "Make them control surfaces",
-      }
-    : {
-        title: `Make "${viewName}" a wall display?`,
-        message: lead + (one
-          ? `${names} will become a wall display. Its buttons will stop working.`
-          : `${names} will become wall displays. Their buttons will stop working.`),
-        confirmLabel: one ? "Make it a wall display" : "Make them wall displays",
-      };
+  return {
+    title: roleQuestionTitle(viewName, surface, "view"),
+    message:
+      lead +
+      (surface === "console"
+        ? `Buttons will work on ${names}. Anyone standing at ${many ? "those screens" : "it"} can press them.`
+        : `${names} ${many ? "become" : "becomes"} read-only, and it leaves the sidebar.`),
+    confirmLabel: viewKindLabel(surface),
+  };
 }
 
 /** The screens a 409 `screens-changed` says would change now, or null for any

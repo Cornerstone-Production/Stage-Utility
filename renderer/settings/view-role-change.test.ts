@@ -61,8 +61,8 @@ describe("changing a view to a control surface", () => {
     await h.result;
     assert.deepEqual(h.asked, [{
       title: 'Make "Lobby loop" a control surface?',
-      message: "Lobby TV and Hallway TV will become control surfaces. Anyone at them can press their buttons.",
-      confirmLabel: "Make them control surfaces",
+      message: 'Buttons will work on "Lobby TV" and "Hallway TV". Anyone standing at those screens can press them.',
+      confirmLabel: "Make it a control surface",
     }]);
   });
 
@@ -92,28 +92,28 @@ describe("changing a view to a wall display", () => {
     const h = run("ctl-a", "display", true);
     await h.result;
     assert.deepEqual(h.asked, [{
-      title: 'Make "Booth controls" a wall display?',
-      message: "Booth panel and display-4 will become wall displays. Their buttons will stop working.",
-      confirmLabel: "Make them wall displays",
+      title: 'Make "Booth controls" a wall view?',
+      message: '"Booth panel" and "display-4" become read-only, and it leaves the sidebar.',
+      confirmLabel: "Make it a wall view",
     }]);
   });
 
   it("says it in the singular for one screen", () => {
     assert.deepEqual(viewRoleQuestion("Booth controls", "display", ["Booth panel"]), {
-      title: 'Make "Booth controls" a wall display?',
-      message: "Booth panel will become a wall display. Its buttons will stop working.",
-      confirmLabel: "Make it a wall display",
+      title: 'Make "Booth controls" a wall view?',
+      message: '"Booth panel" becomes read-only, and it leaves the sidebar.',
+      confirmLabel: "Make it a wall view",
     });
     assert.equal(
       viewRoleQuestion("Lobby loop", "console", ["Lobby TV"])?.message,
-      "Lobby TV will become a control surface. Anyone at it can press its buttons.",
+      'Buttons will work on "Lobby TV". Anyone standing at it can press them.',
     );
   });
 
   it("lists three or more with commas and a closing and", () => {
     assert.equal(
       viewRoleQuestion("Lobby loop", "console", ["A", "B", "C"])?.message,
-      "A, B and C will become control surfaces. Anyone at them can press their buttons.",
+      'Buttons will work on "A", "B", "C". Anyone standing at those screens can press them.',
     );
   });
 
@@ -158,7 +158,7 @@ describe("the screens changed while the question was open", () => {
     assert.equal(h.asked.length, 2);
     assert.equal(
       h.asked[1]!.message,
-      "The screens showing it changed while you were deciding. Lobby TV, Hallway TV and Spare will become control surfaces. Anyone at them can press their buttons.",
+      'The screens showing it changed while you were deciding. Buttons will work on "Lobby TV", "Hallway TV", "Spare". Anyone standing at those screens can press them.',
     );
     assert.deepEqual(h.sentScreens(), [["display-1", "display-2"], ["display-1", "display-2", "display-5"]]);
   });
@@ -179,7 +179,7 @@ describe("the screens changed while the question was open", () => {
     const h = run("wall-b", "console", true, [screensChanged([{ id: "display-5", name: "Spare" }])]);
     assert.equal(await h.result, true);
     assert.equal(h.asked.length, 1);
-    assert.match(h.asked[0]!.message!, /Spare will become a control surface/);
+    assert.match(h.asked[0]!.message!, /Buttons will work on "Spare"\./);
     assert.deepEqual(h.sentScreens(), [[], ["display-5"]]);
   });
 });

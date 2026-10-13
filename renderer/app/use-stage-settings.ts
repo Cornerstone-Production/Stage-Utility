@@ -35,7 +35,7 @@ import { changeViewRole } from "../settings/view-role-change";
 import { confirmDiscardSlotEdits, useSlotsTarget } from "../settings/sections/slots-target-pill";
 import { registerTargetGuard } from "../settings/sections/editing-target";
 import { useSlotsPreview } from "../settings/sections/slots-preview-target";
-import type { SectionHandlers } from "../settings/types";
+import type { CreateScreenOutcome, RemoveViewOutcome, SectionHandlers } from "../settings/types";
 import {
   useStageStateQuery,
   useServiceTypes,
@@ -44,6 +44,7 @@ import {
   useLayoutTemplates,
   useSlotPresets,
   useUpdateStatus,
+  QUERY_KEYS,
 } from "./queries";
 import { markUpdatePending } from "./update-lifecycle";
 import { screensListViews } from "@main/services/home-view";
@@ -534,20 +535,37 @@ export function useStageSettings(pinnedViewId?: string) {
     await writeState("views:rename", { id, name }, { fail: "Failed to rename view" });
   }
 
-  async function handleDuplicateView(id: string) {
+  /** Resolves the copy's id, or null when it could not be made (already toasted). */
+  async function handleDuplicateView(id: string): Promise<string | null> {
     try {
-      const next = await ipc<StageState>("views:duplicate", { id });
+      // The answer is the state and the id of the copy this call made.
+      const { viewId, ...next } = await ipc<StageState & { viewId?: string }>("views:duplicate", { id });
       queryClient.setQueryData(["stage:getState"], next);
-      const created = next.views?.[next.views.length - 1];
-      if (created) setSelectedViewId(created.id);
+      if (viewId) setSelectedViewId(viewId);
       toast.success("View duplicated.");
+      return viewId ?? null;
     } catch (err) {
       toast.error(`Failed to duplicate view: ${errorMessage(err)}`);
+      return null;
     }
   }
 
-  async function handleRemoveView(id: string) {
-    await writeState("views:remove", { id }, { fail: "Failed to remove view" });
+  /** Resolves whether the view is gone. A failure is toasted here; the answer is for
+   *  a caller that does more after it (removing a screen AND its view). With
+   *  `ifUnshown`, a screen showing the view is not a failure: the server refuses and
+   *  the screens come back in `shownOn` for the caller to say. */
+  async function handleRemoveView(id: string, opts: { ifUnshown?: boolean } = {}): Promise<RemoveViewOutcome> {
+    try {
+      const next = await ipc<StageState>("views:remove", { id, ...(opts.ifUnshown ? { ifUnshown: true } : {}) });
+      queryClient.setQueryData(["stage:getState"], next);
+      return { removed: true };
+    } catch (err) {
+      const e = err as ApiError;
+      const screens = e.code === "view-shown" && Array.isArray(e.body?.screens) ? (e.body.screens as { id: string; name?: string }[]) : null;
+      if (screens) return { removed: false, shownOn: screens.map((s) => s.name || s.id) };
+      toast.error(`Failed to remove view: ${errorMessage(err)}`);
+      return { removed: false };
+    }
   }
 
   async function handleSetViewKind(id: string, kind: ViewKind) {
@@ -729,8 +747,19 @@ export function useStageSettings(pinnedViewId?: string) {
 
   // ── Outputs (physical screens + routing) ─────────────────────────────
   /**
+   * A refused create or claim, as the outcome the panel shows. The server holds either
+   * to the kind of view the operator was shown; when that changed, the views are read
+   * again so the role line says what the view is now.
+   */
+  function createRefusal(err: unknown): CreateScreenOutcome {
+    const viewChanged = (err as ApiError).code === "surface-changed";
+    if (viewChanged) void queryClient.invalidateQueries({ queryKey: QUERY_KEYS.stageState });
+    return { refused: errorMessage(err), outputId: null, ...(viewChanged ? { viewChanged } : {}) };
+  }
+
+  /**
    * Make a screen from the answers the Screen settings panel collected. Resolves
-   * with the reason it was refused, or null when it was made.
+   * the id of the screen made, or why it was refused.
    *
    * Returned rather than toasted: the panel keeps its answers open after a
    * refusal (a taken friendly link, a view that does not fit) and says why where
@@ -738,13 +767,28 @@ export function useStageSettings(pinnedViewId?: string) {
    * the server validates before it writes and puts back what it made if a later
    * step fails.
    */
-  async function handleCreateScreen(input: CreateScreenInput): Promise<string | null> {
+  async function handleCreateScreen(input: CreateScreenInput): Promise<CreateScreenOutcome> {
     try {
-      const next = await ipc<StageState>("outputs:add", { ...input });
+      // The answer is the state and the id of the screen this call made.
+      const { outputId, ...next } = await ipc<StageState & { outputId?: string }>("outputs:add", { ...input });
       queryClient.setQueryData(["stage:getState"], next);
-      return null;
+      return { refused: null, outputId: outputId ?? null };
     } catch (err) {
-      return errorMessage(err);
+      return createRefusal(err);
+    }
+  }
+
+  /**
+   * Make a screen for a waiting device and bind the device to it, as one call: the
+   * server takes the screen back if the binding fails. The answer is the id of the
+   * screen made, not the state.
+   */
+  async function handleClaimDevice(deviceId: string, input: CreateScreenInput): Promise<CreateScreenOutcome> {
+    try {
+      const claimed = await ipc<{ outputId?: string }>("devices:claim", { deviceId, outputId: null, ...input });
+      return { refused: null, outputId: claimed?.outputId ?? null };
+    } catch (err) {
+      return createRefusal(err);
     }
   }
 
@@ -857,8 +901,9 @@ export function useStageSettings(pinnedViewId?: string) {
     }
   }
 
-  async function handleRemoveOutput(id: string) {
-    await writeState("outputs:remove", { id }, { fail: "Failed to remove display" });
+  /** Resolves whether the screen is gone, for the same reason handleRemoveView does. */
+  async function handleRemoveOutput(id: string): Promise<boolean> {
+    return writeState("outputs:remove", { id }, { fail: "Failed to remove display" });
   }
 
   async function handleReorderOutputs(ids: string[]) {
@@ -926,6 +971,7 @@ export function useStageSettings(pinnedViewId?: string) {
     handleRenamePreset,
     handleOverwritePreset,
     handleCreateScreen,
+    handleClaimDevice,
     handleRenameOutput,
     handleSetOutputView,
     handleSetOutputLocked,

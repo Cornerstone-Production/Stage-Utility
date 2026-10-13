@@ -25,7 +25,7 @@ import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
-import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewSurfaceChangedError } from "../stage-controller.js";
+import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewShownError, ViewSurfaceChangedError } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
 import { datedExportFilename } from "../export-filename.js";
@@ -380,8 +380,9 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     if (method === "POST" && viewDuplicateMatch) {
       const body = await readBody(req) as Record<string, unknown>;
       const name = typeof body.name === "string" ? body.name : undefined;
-      const state = await stageController.duplicateView(viewDuplicateMatch[1], name);
-      json(res, state, 201);
+      const { state, view } = await stageController.duplicateView(viewDuplicateMatch[1], name);
+      // The copy this call made, beside the state, as POST /api/outputs answers.
+      json(res, { ...state, viewId: view.id }, 201);
       return;
     }
 
@@ -551,8 +552,18 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // DELETE /api/views/:id
     const viewDeleteMatch = pathname.match(/^\/api\/views\/([^/]+)$/);
     if (method === "DELETE" && viewDeleteMatch) {
-      const state = await stageController.deleteView(viewDeleteMatch[1]);
-      json(res, state);
+      // ?ifUnshown=1: only a view no screen shows. Removing a screen together with its
+      // view sends it, so a screen pointed at the view meanwhile is not left blank.
+      const ifUnshown = url.searchParams.get("ifUnshown") === "1";
+      try {
+        json(res, await stageController.deleteView(viewDeleteMatch[1], { ifUnshown }));
+      } catch (err) {
+        if (err instanceof ViewShownError) {
+          json(res, { error: err.message, code: err.code, screens: err.screens }, 409);
+          return;
+        }
+        throw err;
+      }
       return;
     }
 
@@ -650,8 +661,10 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       try {
-        const { state } = await stageController.createScreen(input);
-        json(res, state, 201);
+        const { state, output } = await stageController.createScreen(input);
+        // The id of the screen THIS call made, as a claim answers: a client that
+        // looked for "the new screen" in the state would find another operator's.
+        json(res, { ...state, outputId: output.id }, 201);
       } catch (err) {
         answerScreenWriteFailure(res, err);
       }

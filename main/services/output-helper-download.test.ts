@@ -385,9 +385,13 @@ describe("fetching the helper from the release", () => {
 
     it("lets a slow transfer finish when it keeps moving, though it takes far longer than the idle limit", { timeout: 5000 }, async (t) => {
       captureConsole(t, "log", "warn");
-      const bytes = publishedFor(6);
-      slowZip(6, 60); // ~360 ms in all against a 150 ms idle limit
-      const r = await make({ zipIdleMs: 150, zipTotalMs: 10_000 }).resolve(ZIP);
+      // ~1.2 s in all against a 400 ms idle limit. Each gap is far inside the
+      // limit, so a loaded machine stalling the event loop for a few hundred ms
+      // still cannot make a moving transfer look idle; the total is still three
+      // times the limit, which is what this proves.
+      const bytes = publishedFor(16);
+      slowZip(16, 75);
+      const r = await make({ zipIdleMs: 400, zipTotalMs: 10_000 }).resolve(ZIP);
       assert.ok(r.ok, JSON.stringify(r));
       assert.deepEqual(await fs.readFile(r.file), bytes);
     });

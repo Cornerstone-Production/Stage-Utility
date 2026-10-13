@@ -34,7 +34,7 @@ export {
   DialogFooter,
 } from "./dialog";
 export { toast, Toaster } from "./toast";
-export { confirm, ConfirmHost, type ConfirmOptions } from "./confirm-dialog";
+export { confirm, confirmWith, ConfirmHost, type ConfirmOptions, type ConfirmResult } from "./confirm-dialog";
 export { EmptyState } from "./empty-state";
 export { ErrorNote } from "./error-note";
 export { Skeleton, SkeletonRows } from "./skeleton";

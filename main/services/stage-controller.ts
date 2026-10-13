@@ -284,6 +284,25 @@ export class ViewScreensChangedError extends Error {
 }
 
 /**
+ * deleteView was told to delete the view only if no screen shows it (the screen
+ * that did was just removed, and the operator ticked "also delete its view"), and a
+ * screen shows it now: it was pointed at the view meanwhile. Nothing is written.
+ * `screens` are the ones showing it, to name to the operator.
+ */
+export class ViewShownError extends Error {
+  readonly code = "view-shown";
+  constructor(
+    readonly viewId: string,
+    readonly screens: { id: string; name: string }[],
+  ) {
+    super(
+      `The view was kept: ${screens.map((s) => `"${s.name}"`).join(", ")} ${screens.length > 1 ? "show" : "shows"} it now. Nothing was changed.`,
+    );
+    this.name = "ViewShownError";
+  }
+}
+
+/**
  * setOutputView was told which kind of view the caller expected (the one the
  * operator confirmed going live on) and the view is the other kind now: it was
  * made a console, or a wall view, while the question was open. Nothing is written.
@@ -3346,9 +3365,11 @@ export class StageController {
     return this.state;
   }
 
-  async duplicateView(id: string, name?: string): Promise<StageState> {
-    await this.copyViewRecord(id, name);
-    return this.state;
+  /** Copy a view. Answers the state and the copy this call made, so a caller need not
+   *  look for "the newest view" in a state another operator may have added to. */
+  async duplicateView(id: string, name?: string): Promise<{ state: StageState; view: View }> {
+    const view = await this.copyViewRecord(id, name);
+    return { state: this.state, view };
   }
 
   /**
@@ -3484,7 +3505,15 @@ export class StageController {
     return this.persistSlots("view", targetViewId, fresh(rows), effective);
   }
 
-  async deleteView(id: string): Promise<StageState> {
+  /**
+   * `ifUnshown`: delete only a view no screen shows. Checked in the same
+   * synchronous turn that reserves the view for deletion, and a view so reserved is
+   * refused to every write that would point a screen at it (setOutputView,
+   * addOutput), so a screen pointed at it while its inline slots are being cleaned
+   * up cannot be left with a view that is gone. ViewShownError, nothing written, when
+   * a screen shows it.
+   */
+  async deleteView(id: string, opts: { ifUnshown?: boolean } = {}): Promise<StageState> {
     if (!this.state.views.find((v) => v.id === id)) {
       throw new Error(`views:delete — view ${id} not found`);
     }
@@ -3495,7 +3524,23 @@ export class StageController {
     if (screensListViews(this.state.views).length <= 1) {
       throw new Error("views:delete — cannot remove the last view");
     }
-    return this.dropView(id);
+    if (opts.ifUnshown) {
+      const showing = screensShowing(id, this.state.outputs);
+      if (showing.length > 0) throw new ViewShownError(id, showing.map((o) => ({ id: o.id, name: o.name || o.id })));
+    }
+    this.viewsBeingDeleted.add(id);
+    try {
+      return await this.dropView(id);
+    } finally {
+      this.viewsBeingDeleted.delete(id);
+    }
+  }
+
+  /** Views whose deletion is under way: no screen may be pointed at one. */
+  private readonly viewsBeingDeleted = new Set<string>();
+
+  private assertViewNotBeingDeleted(viewId: string): void {
+    if (this.viewsBeingDeleted.has(viewId)) throw new Error(`view ${viewId} is being deleted`);
   }
 
   /**
@@ -3598,7 +3643,11 @@ export class StageController {
      *  must already have passed validateSlug against the ids and slugs in use;
      *  only the new id, which does not exist until the allocation below, is
      *  checked here. */
-    fields: Partial<Pick<Output, "name" | "viewId" | "slug">> = {},
+    fields: Partial<Pick<Output, "name" | "viewId" | "slug">> & {
+      /** The kind `viewId` was when the caller asked the operator: checked in the
+       *  same turn as the write, ViewSurfaceChangedError and nothing made if not. */
+      expectSurface?: ViewSurface;
+    } = {},
     /**
      * Told the new screen in the same synchronous turn it enters the state, and
      * BEFORE the write that can fail. For a caller that has to take it back: the
@@ -3609,7 +3658,7 @@ export class StageController {
      */
     onAssigned?: (output: Output) => void,
   ): Promise<{ state: StageState; output: Output }> {
-    const { name, viewId, slug } = fields;
+    const { name, viewId, slug, expectSurface } = fields;
     // One write: the id, the floor that stops it ever coming back, and the
     // outputs list that could not be built until the id existed. The whole
     // read-allocate-write happens inside the settings write queue, so two
@@ -3631,7 +3680,7 @@ export class StageController {
             const verdict = validateSlug(slug, [...this.takenSlugs(), id]);
             if (!verdict.ok) throw new Error(verdict.reason);
           }
-          if (viewId) this.requireViewToShow(viewId);
+          if (viewId) this.assertViewIsExpectedKind(this.requireViewToShow(viewId), expectSurface);
           const created: Output = {
             id,
             name: name?.trim() || `Display ${Number.isFinite(num) ? num : this.state.outputs.length + 1}`,
@@ -3797,9 +3846,8 @@ export class StageController {
         if (viewId !== null && !view) {
           throw new Error(`outputs:setView — view ${viewId} not found`);
         }
-        if (view && opts.expectSurface !== undefined && viewSurface(view) !== opts.expectSurface) {
-          throw new ViewSurfaceChangedError(view.id, opts.expectSurface, viewSurface(view));
-        }
+        if (viewId !== null) this.assertViewNotBeingDeleted(viewId);
+        if (view) this.assertViewIsExpectedKind(view, opts.expectSurface);
         wasControlSurface = screenIsControlSurface(current, this.state.views);
         screenName = current.name || current.id;
       },
@@ -3856,6 +3904,9 @@ export class StageController {
             `rolled back: ${scrub(rolledBack.join(", ") || "nothing")}` +
             (notRolledBack.length > 0 ? `; COULD NOT roll back: ${scrub(notRolledBack.join(", "))}` : ""),
         );
+        // A caller's expectation that did not hold is the caller's to ask again
+        // with, not the server failing part-way: it keeps its own type.
+        if (err instanceof ViewSurfaceChangedError) throw err;
         throw new ScreenWriteError(what, step.label, errorMessage(err), rolledBack, notRolledBack);
       }
     }
@@ -3897,6 +3948,10 @@ export class StageController {
       throw new Error("outputs:add — viewId and newView are alternatives: name an existing view, or ask for a new one");
     }
     const existing = typeof input.viewId === "string" ? this.requireViewToShow(input.viewId) : undefined;
+    if (input.expectSurface !== undefined) {
+      if (!existing) throw new Error("outputs:add — expectSurface is checked against viewId, which must name a view");
+      this.assertViewIsExpectedKind(existing, input.expectSurface);
+    }
     // The listing is written on a control surface's view. Anywhere else there is
     // nothing to write it on, and accepting it would be dropping it silently.
     const showsControlSurface = newView === "control" || viewIsConsole(existing);
@@ -3932,7 +3987,9 @@ export class StageController {
         : []),
       {
         label: "add the screen",
-        run: () => this.addOutput({ name, viewId, slug: slug || undefined }, (made) => { output = made; }),
+        // `expectSurface` again, in addOutput's own turn: the check above costs
+        // nothing when it fails, this one holds against a write that lands between.
+        run: () => this.addOutput({ name, viewId, slug: slug || undefined, ...(existing ? { expectSurface: input.expectSurface } : {}) }, (made) => { output = made; }),
         undo: async () => { if (!output) return false; await this.removeOutput(output.id); },
       },
       // Decided here from the INPUT, not from `viewId`: that is still null while
@@ -3962,6 +4019,13 @@ export class StageController {
     return { state: this.state, output: output!, createdViewId };
   }
 
+  /** Refuse, writing nothing, a view that is not the kind the caller expected. */
+  private assertViewIsExpectedKind(view: View, expectSurface: ViewSurface | undefined): void {
+    if (expectSurface !== undefined && viewSurface(view) !== expectSurface) {
+      throw new ViewSurfaceChangedError(view.id, expectSurface, viewSurface(view));
+    }
+  }
+
   /** The view a screen is about to be pointed at: refused unless it exists and is
    *  not Home. Either kind will do. */
   private requireViewToShow(viewId: string): View {
@@ -3970,6 +4034,7 @@ export class StageController {
     }
     const view = this.state.views.find((v) => v.id === viewId);
     if (!view) throw new Error(`view ${viewId} not found`);
+    this.assertViewNotBeingDeleted(viewId);
     return view;
   }
 

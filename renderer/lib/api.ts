@@ -1285,7 +1285,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "views:remove": {
       const id = p.id as string;
-      return del<T>(`/api/views/${encodeURIComponent(id)}`);
+      return del<T>(`/api/views/${encodeURIComponent(id)}${p.ifUnshown ? "?ifUnshown=1" : ""}`);
     }
 
     // ── Layout templates ──────────────────────────────────────────────────
