@@ -194,7 +194,11 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
         padding: "0.85em 1.1em",
         display: "flex",
         flexDirection: "column",
-        overflow: "hidden",
+        // When the controls are taller than the widget (a short widget, or a large
+        // text scale) the card scrolls rather than clipping: hidden, Send was drawn
+        // below the widget's edge where nobody could press it.
+        overflowX: "hidden",
+        overflowY: "auto",
         textAlign: "left",
         lineHeight: 1.5,
         fontWeight: 400,
