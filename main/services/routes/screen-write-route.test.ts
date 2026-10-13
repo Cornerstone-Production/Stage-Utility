@@ -246,6 +246,33 @@ describe("PATCH /api/outputs/:id — expectSurface", () => {
   });
 });
 
+describe("PATCH /api/views/:id refuses before it writes", () => {
+  const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
+  const wallA = () => views().find((v) => v.id === "wall-a")!;
+  const edited = { ...layout, canvas: { width: 1280, height: 720 } };
+
+  it("a stale layoutRev is a 409 with nothing else in the body written", async () => {
+    const r = await patch("/api/views/wall-a", { name: "Renamed", layout: edited, layoutRev: 5 });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    assert.deepEqual([(r.json as { code: string }).code, (r.json as { currentRev: number }).currentRev], ["layout-conflict", 0]);
+    assert.equal(wallA().name, "Lobby loop", "a field beside the refused layout was applied");
+    assert.deepEqual(wallA().layout, layout);
+  });
+
+  it("an unknown ServiceCue layout is a 400 naming it, with nothing else in the body written", async () => {
+    const r = await patch("/api/views/wall-a", { name: "Renamed", serviceCueLayoutId: "ghost" });
+    assert.equal(r.status, 400, JSON.stringify(r.json));
+    assert.match((r.json as { error: string }).error, /no ServiceCue layout ghost/);
+    assert.equal(wallA().name, "Lobby loop", "a field beside the refused ServiceCue layout was applied");
+  });
+
+  it("a current layoutRev saves the layout and the rest of the body", async () => {
+    const r = await patch("/api/views/wall-a", { name: "Renamed", layout: edited, layoutRev: 0 });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual([wallA().name, wallA().layoutRev], ["Renamed", 1]);
+  });
+});
+
 describe("PATCH /api/views/:id changing a console's kind", () => {
   const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
 

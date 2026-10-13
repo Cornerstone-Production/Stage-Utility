@@ -508,15 +508,15 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, refused);
         return;
       }
+      const cueRefused = hasServiceCueLayout ? await stageController.serviceCueLayoutRefusal(serviceCueLayoutId as string | null) : null;
+      if (cueRefused) {
+        error(res, cueRefused);
+        return;
+      }
       let state = stageController.getState();
-      if (hasName) state = await stageController.renameView(id, body.name as string);
-      // In the order that keeps the view valid at each step: a body making it a
-      // console takes the kind first (a console may only be a kind that can be
-      // one), and a body making it a wall view takes the surface first.
-      if (surface === "console" && hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
-      if (hasSurface) state = await stageController.setViewSurface(id, surface);
-      if (surface !== "console" && hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
-      if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
+      // The layout goes first: its revision check is the one refusal that can only
+      // be decided at the write, so a stale layoutRev must answer 409 before any
+      // other field in the body has landed.
       if (hasLayout) {
         // layoutRev is the revision the editor opened. Present = "only save if
         // nobody else has since"; absent = an explicit overwrite.
@@ -533,6 +533,14 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
           throw err;
         }
       }
+      if (hasName) state = await stageController.renameView(id, body.name as string);
+      // In the order that keeps the view valid at each step: a body making it a
+      // console takes the kind first (a console may only be a kind that can be
+      // one), and a body making it a wall view takes the surface first.
+      if (surface === "console" && hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
+      if (hasSurface) state = await stageController.setViewSurface(id, surface);
+      if (surface !== "console" && hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
+      if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
       if (hasServiceCueLayout) state = await stageController.setViewServiceCueLayout(id, serviceCueLayoutId as string | null);
       if (hasHideChrome) state = await stageController.setViewHideChrome(id, body.hideChrome as boolean);

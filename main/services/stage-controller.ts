@@ -3265,19 +3265,24 @@ export class StageController {
   }
 
   /** Pick which saved ServiceCue column preset a "script" View renders. */
+  /**
+   * Why a view could not be given this ServiceCue layout, or null. Refused rather
+   * than stored: an unknown id renders as ALL columns, which looks like a working
+   * display showing the wrong thing, so failing the write is the only outcome the
+   * operator can act on. For a route that must refuse before it writes anything.
+   */
+  async serviceCueLayoutRefusal(serviceCueLayoutId: string | null): Promise<string | null> {
+    if (!serviceCueLayoutId) return null;
+    const known = await serviceCueLayoutsStore.load();
+    return known.some((l) => l.id === serviceCueLayoutId) ? null : `no ServiceCue layout ${serviceCueLayoutId}`;
+  }
+
   async setViewServiceCueLayout(id: string, serviceCueLayoutId: string | null): Promise<StageState> {
     if (!this.state.views.find((v) => v.id === id)) {
       throw new Error(`views:setServiceCueLayout — view ${id} not found`);
     }
-    // Refused rather than stored: an unknown id renders as ALL columns, which
-    // looks like a working display showing the wrong thing. Failing the write is
-    // the only outcome the operator can act on.
-    if (serviceCueLayoutId) {
-      const known = await serviceCueLayoutsStore.load();
-      if (!known.some((l) => l.id === serviceCueLayoutId)) {
-        throw new Error(`views:setServiceCueLayout — no ServiceCue layout ${serviceCueLayoutId}`);
-      }
-    }
+    const refused = await this.serviceCueLayoutRefusal(serviceCueLayoutId);
+    if (refused) throw new Error(`views:setServiceCueLayout — ${refused}`);
     const views = this.state.views.map((v) => (v.id === id ? { ...v, serviceCueLayoutId } : v));
     console.log(`[stage-controller] setViewServiceCueLayout id=${scrub(id)} → ${scrub(serviceCueLayoutId)}`);
     this.state = { ...this.state, views };
