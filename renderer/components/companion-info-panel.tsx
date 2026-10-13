@@ -13,7 +13,7 @@ import { copyText } from "../lib/clipboard";
 
 /** Where the Companion module lives. Not in the app's own repo — it ships to
  *  Companion separately, which is exactly why a link is worth having. */
-const MODULE_URL = "https://github.com/Cornerstone-Production/companion-module-cornerstone-stageutility";
+const MODULE_URL = "https://github.com/Cornerstone-Production/companion-module-stageutility-stageutility";
 
 function CopyField({ label, value }: { label: string; value: string }) {
   return (
@@ -112,7 +112,7 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
               rel="noreferrer"
               className="inline-flex items-center gap-1 text-accent hover:underline"
             >
-              companion-module-cornerstone-stageutility
+              companion-module-stageutility-stageutility
               <ExternalLinkIcon className="size-3" />
             </a>
             . Sideload it into Companion, then add the connection.

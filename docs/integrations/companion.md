@@ -5,7 +5,7 @@ Drives and reads Stage Utility from [Bitfocus Companion](https://bitfocus.io/com
 from the live service.
 
 The module is a separate repository:
-[companion-module-cornerstone-stageutility](https://github.com/Cornerstone-Production/companion-module-cornerstone-stageutility).
+[companion-module-stageutility-stageutility](https://github.com/Cornerstone-Production/companion-module-stageutility-stageutility).
 
 ## How it connects
 
