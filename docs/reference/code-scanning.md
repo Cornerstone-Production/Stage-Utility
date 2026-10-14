@@ -86,16 +86,15 @@ path beginning `//` or holding `@` cannot move the bearer token to another host.
 
 ## Cached responses
 
-A vendor response is written to disk in two places.
+A vendor response is written to disk in one place: `atomicWrite` in
+`main/services/write-queue.ts`. It writes a uniquely named temp file beside the
+destination and renames it into place, so a reader sees a whole file or none. It
+writes where it is told; the path is the caller's. Two caches call it with
+network data:
 
-- **Planning Center attachments**, `main/services/pco-attachment-cache.ts`, written
-  with `atomicWrite` in `main/services/write-queue.ts`. `atomicWrite` writes a
-  uniquely named temp file beside the destination and renames it into place, so a
-  reader sees a whole file or none. It writes where it is told; the path is the
-  caller's.
-- **Planning Center photos**, `main/services/photo-cache.ts`, written with its own
-  temp file and rename, for the same reason. The URL must be on a Planning Center
-  host (`isAllowedPhotoUrl`) before anything is fetched.
+- **Planning Center attachments**, `main/services/pco-attachment-cache.ts`.
+- **Planning Center photos**, `main/services/photo-cache.ts`. The URL must be on a
+  Planning Center host (`isAllowedPhotoUrl`) before anything is fetched.
 
 What keeps a network value from choosing the path:
 

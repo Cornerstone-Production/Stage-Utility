@@ -10,6 +10,7 @@ import { downscaleAvatarUrl } from "./avatar-geometry.js";
 import { pruneCacheDir } from "./cache-prune.js";
 import { readCapped } from "./capped-download.js";
 import { scrub, scrubError } from "./scrub.js";
+import { atomicWrite } from "./write-queue.js";
 
 // Photos are small; keep ~90 days of them, capped at 250 MB.
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
@@ -107,17 +108,11 @@ async function loadPhoto(photoUrl: string): Promise<string | null> {
     // the next request (or the client's retry) re-attempts.
     const buffer = await fetchPhoto(photoUrl);
     if (!buffer) return null;
-    // Written aside and renamed into place, so the file is either absent or
-    // whole: it is served immutable, and a torn one would be kept for a year.
+    // Written aside and renamed into place (atomicWrite), so the file is either
+    // absent or whole: it is served immutable, and a torn one would be kept for
+    // a year.
     const filePath = path.join(await getCacheDir(), urlToFilename(photoUrl));
-    const tmp = `${filePath}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
-    try {
-      await fs.writeFile(tmp, buffer);
-      await fs.rename(tmp, filePath);
-    } catch (err) {
-      await fs.rm(tmp, { force: true });
-      throw err;
-    }
+    await atomicWrite(filePath, buffer);
     return filePath;
   } catch (err) {
     console.error("[photo-cache] Error caching photo:", scrubError(err));
