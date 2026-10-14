@@ -330,6 +330,10 @@ export function listTrackedFiles(dir) {
   return { root: top, files: raw.split("\0").filter(Boolean) };
 }
 
+
+/** Refuse a symlink at open. Absent on Windows, where the scan is not run. */
+const NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
+
 /**
  * Scan tracked files and return every finding, sorted by file, line, message.
  *
@@ -344,17 +348,27 @@ export function findViolations(root, files, terms, skipped = []) {
   for (const file of files) {
     if (LOCKFILES.has(path.basename(file))) continue;
     const abs = path.join(root, file);
-    let st;
+    // Opened once, and everything after is asked of that one descriptor: checking
+    // the path and then reading the path again is a window in which the file can
+    // be swapped. O_NOFOLLOW refuses a symlink at the open itself.
+    let fd;
     try {
-      st = fs.lstatSync(abs);
+      fd = fs.openSync(abs, fs.constants.O_RDONLY | NOFOLLOW);
     } catch (err) {
       // Tracked but deleted in this working tree: nothing there to read.
       if (err.code === "ENOENT") continue;
+      // A tracked symlink has no content of its own to scan.
+      if (err.code === "ELOOP" || err.code === "EMLINK") continue;
       throw err;
     }
-    // A symlink or a submodule has no content of its own to scan.
-    if (!st.isFile()) continue;
-    const buf = fs.readFileSync(abs);
+    let buf;
+    try {
+      // A submodule is a directory: no content of its own either.
+      if (!fs.fstatSync(fd).isFile()) continue;
+      buf = fs.readFileSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
     if (isBinary(buf)) continue;
     findings.push(...scanText(file, buf.toString("utf8"), prepared, skipped));
   }
