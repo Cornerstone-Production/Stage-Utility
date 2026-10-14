@@ -226,9 +226,12 @@ describe("a file name that contains a term", () => {
 
 describe("what the scan does not read", () => {
   it("skips a tracked symlink, whatever it points at", () => {
-    const outside = path.join(os.tmpdir(), `hygiene-outside-${process.pid}.txt`);
+    // In a directory of its own, made with an unpredictable name, never a fixed
+    // name straight in the shared temp directory.
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "hygiene-outside-"));
+    made.push(outsideDir);
+    const outside = path.join(outsideDir, "outside.txt");
     fs.writeFileSync(outside, `${ip(192, 168, 16, 61)}\n`);
-    made.push(outside);
     const repo = makeRepo({ "real.md": "fine\n" }, { links: { "link.md": outside } });
     assert.deepEqual(scan(repo), []);
   });
