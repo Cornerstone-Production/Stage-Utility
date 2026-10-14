@@ -129,6 +129,10 @@ const REQUEST_FACING = [
   // name the URL, and the URL parser drops a newline before it checks the host,
   // so one with a newline in it is still fetched and still logged.
   "photo-cache.ts",
+  // Its one line names the origin of a request URL a caller built wrongly, and a
+  // credentialed fetch is handed URLs made from a host or id the operator typed
+  // into Settings over HTTP.
+  "pinned-origin.ts",
   "plan-export.ts",
   "routes/archive-routes.ts",
   "routes/automation-routes.ts",
@@ -450,6 +454,9 @@ function requestFacingFiles(): string[] {
     // The URL in `GET /photos?u=` is the caller's own string and is named by each
     // of this file's failure lines. Was excused as UNAUDITED until it was audited.
     path.join(HERE, "photo-cache.ts"),
+    // Its one line names the origin of a request URL built from a host or id the
+    // operator typed into Settings; scrubbed at the logger.
+    path.join(HERE, "pinned-origin.ts"),
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),

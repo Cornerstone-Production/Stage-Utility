@@ -42,7 +42,7 @@ export function pinToOrigin(origin: string, candidate: string, tag: string): str
   rebuilt.search = parsed.search;
   if (parsed.origin !== rebuilt.origin || parsed.username !== "" || parsed.password !== "") {
     console.error(
-      `[${tag}] BUG: a request URL for ${scrub(parsed.origin, 80)} was sent to ${rebuilt.origin} instead. ` +
+      `[${scrub(tag, 20)}] BUG: a request URL for ${scrub(parsed.origin, 80)} was sent to ${scrub(rebuilt.origin, 80)} instead. ` +
         "Whatever built that URL is wrong; the credential stayed on the configured origin.",
     );
   }
