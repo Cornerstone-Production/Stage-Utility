@@ -187,7 +187,9 @@ with every reply under its message.
   screens in those groups over for 30 seconds ([Alerts](#alerts)). **Clear alert**
   on a message in the thread ends one early.
 - The message is signed with the **screen's name** on a screen, the **console's
-  name** on a console in the app, and **Home** on Home.
+  name** on a console in the app, and **Home** on Home. One trailing `Display`,
+  `Screen`, `Monitor` or `Console` is left off, so a screen named `Sam Display`
+  signs as `Sam`; a name that is only that word keeps it.
 - A send that fails keeps what was typed, the groups and the alert switch, and says
   why; the failure is also on `/log` as `[messages]`.
 
@@ -196,7 +198,11 @@ with every reply under its message.
 The **Messages** [widget](../reference/widgets.md#control) draws the newest three
 messages sent to Everyone or to a group it follows: the newest large, the older two
 smaller and muted, each with its sender and how long ago above it and the latest
-reply in green below. Ages are counted against the server's clock.
+reply in green below. Consecutive messages from the same sender share one sender
+line, showing the time of the first of them, so a run of three from one person is
+one heading and three messages. Ages are counted against the server's clock.
+When the messages are taller than the widget, the oldest is cut off rather than
+drawn over the reply buttons.
 
 Which groups it follows is its **Groups** setting in the layout editor's inspector:
 
@@ -245,7 +251,8 @@ so anyone who knows a real panel and a Messages widget that panel draws can stil
 send a reply that is signed as that panel.
 
 The reply is signed with the screen's name, or the name of the view holding the
-widget when it is not on a screen, and appears under the message in the composer's
+widget when it is not on a screen (without a trailing `Display`, `Screen`,
+`Monitor` or `Console`, as a composer signs), and appears under the message in the composer's
 thread and in green under it on every Messages widget showing it. A message cleared
 at midnight cannot be answered, and a message keeps at most 20 replies: the 21st is
 refused with `409` and the reason, so nothing a console sent silently disappears. Each reply, and each refusal with its reason, is

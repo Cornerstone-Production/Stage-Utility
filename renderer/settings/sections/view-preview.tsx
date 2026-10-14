@@ -97,8 +97,15 @@ export function ViewPreview({
   return (
     <div
       ref={boxRef}
-      className="relative w-full overflow-hidden rounded-xl border border-gray-a4 bg-black"
-      style={{ aspectRatio: `${DESIGN_W} / ${designH}` }}
+      className="relative isolate w-full overflow-hidden rounded-xl border border-gray-a4 bg-black"
+      style={{
+        aspectRatio: `${DESIGN_W} / ${designH}`,
+        // The iframe is scaled with a transform, which puts it on its own compositor
+        // layer, and `overflow: hidden` with a radius does not reliably clip such a
+        // layer: the frame's own square corners showed through the rounded box. A
+        // clip-path does clip it. 0.75rem is `rounded-xl`, the radius above.
+        clipPath: "inset(0 round 0.75rem)",
+      }}
     >
       <iframe
         ref={iframeRef}

@@ -26,7 +26,7 @@
 
 import { useState, type CSSProperties } from "react";
 
-import { messageReaches, widgetGroups, type MessageGroup, type MessagesState, type StageMessage } from "@main/types/messages";
+import { messageReaches, senderLabel, widgetGroups, type MessageGroup, type MessagesState, type StageMessage } from "@main/types/messages";
 import { invoke } from "../lib/api";
 import { ageLabel } from "../lib/age-label";
 import { reportActionFailure } from "./report-action-failure";
@@ -38,6 +38,24 @@ export const MESSAGES_SHOWN = 3;
 /** The newest messages that reached these groups, newest first. */
 export function shownMessages(state: MessagesState, groups: readonly string[]): StageMessage[] {
   return state.messages.filter((m) => messageReaches(m.to, groups)).slice(-MESSAGES_SHOWN).reverse();
+}
+
+/**
+ * Consecutive messages from the same sender as runs, in the order given: A, A, B, A
+ * is three runs. Senders are compared as they are signed (senderLabel, any case), so
+ * "Sam Display" and "sam" are one sender. A run's header is drawn once, from its
+ * first message; the messages after it sit under it without saying who sent them.
+ */
+export function groupBySender(messages: readonly StageMessage[]): StageMessage[][] {
+  const runs: StageMessage[][] = [];
+  let last = "";
+  for (const m of messages) {
+    const who = senderLabel(m.from).toLowerCase();
+    if (runs.length > 0 && who === last) runs[runs.length - 1].push(m);
+    else runs.push([m]);
+    last = who;
+  }
+  return runs;
 }
 
 /** "Everyone", "Stage or Everyone", "Stage, Booth or Everyone". */
@@ -164,10 +182,31 @@ function Feed({
   if (!known || !state || !shown) return null;
   if (shown.length === 0) return <Quiet>No messages for this screen&apos;s groups</Quiet>;
   return (
-    <div style={{ display: "grid", gap: "0.5em", marginTop: "0.54em", minHeight: 0 }}>
-      {shown.map((m, i) => (
-        <Message key={m.id} m={m} now={now} newest={i === 0} />
-      ))}
+    // The list takes what the card has left (`flex: 1 1 0`, `minHeight: 0`) and
+    // shows only messages that fit WHOLE. Each message is a full-width item of a
+    // column that wraps: one that does not fit moves to a second column, past the
+    // right edge, and `overflow: hidden` hides it. So the oldest messages drop out
+    // one at a time instead of being cut through a line, and nothing is ever drawn
+    // over the answer buttons below.
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        flexWrap: "wrap",
+        alignContent: "flex-start",
+        columnGap: "100vw",
+        flex: "1 1 0",
+        minHeight: 0,
+        overflow: "hidden",
+        marginTop: "0.54em",
+      }}
+    >
+      {groupBySender(shown).flatMap((run, r) =>
+        run.map((m, i) => (
+          // The newest message of all is the large one: the first of the first run.
+          <Item key={m.id} m={m} header={i === 0 ? run[0] : null} gap={r === 0 && i === 0 ? 0 : i === 0 ? 0.5 : 0.3} large={r === 0 && i === 0} now={now} />
+        )),
+      )}
     </div>
   );
 }
@@ -176,23 +215,41 @@ function Quiet({ children }: { children: string }) {
   return <div className="text-fg-faint" style={{ marginTop: "0.54em", fontSize: "0.81em" }}>{children}</div>;
 }
 
-function Message({ m, now, newest }: { m: StageMessage; now: number; newest: boolean }) {
+/**
+ * One message in the list. The first message of a run from one sender carries the
+ * who-and-when line, from that message; the rest of the run sits under it without
+ * repeating it. Only the newest message of all is large; an older one in the same
+ * run is as small as any other older one.
+ */
+function Item({ m, header, gap, large, now }: { m: StageMessage; header: StageMessage | null; gap: number; large: boolean; now: number }) {
+  // The header is as large as the message it heads.
+  const f = large ? 1 : 0.81;
+  return (
+    <div style={{ width: "100%", overflowWrap: "anywhere", marginTop: `${gap}em` }}>
+      {/* The sender line is as faint on an older message as on the newest, and the
+          reply keeps its green: only the words of an older message are muted. */}
+      {header && (
+        <small style={{ display: "block", fontSize: `${0.58 * f}em`, opacity: 0.33, marginBottom: `${0.08 * f}em` }}>
+          {senderLabel(header.from)} &middot; {ageLabel(now, header.at)}
+        </small>
+      )}
+      <Message m={m} large={large} />
+    </div>
+  );
+}
+
+function Message({ m, large }: { m: StageMessage; large: boolean }) {
   // Older ones are smaller and muted, and every figure inside is written against
   // the base so they keep the mockup's proportions at either size.
-  const f = newest ? 1 : 0.81;
+  const f = large ? 1 : 0.81;
   const em = (x: number) => `${x / f}em`;
   const reply = m.replies.at(-1);
   return (
-    <div style={{ fontSize: `${f}em`, overflowWrap: "anywhere" }}>
-      {/* The sender line is as faint on an older message as on the newest, and the
-          reply keeps its green: only the words of an older message are muted. */}
-      <small style={{ display: "block", fontSize: em(0.58), opacity: 0.33, marginBottom: em(0.08) }}>
-        {m.from} &middot; {ageLabel(now, m.at)}
-      </small>
-      <span style={{ opacity: newest ? 1 : 0.6 }}>{m.text}</span>
+    <div style={{ fontSize: `${f}em` }}>
+      <span style={{ opacity: large ? 1 : 0.6 }}>{m.text}</span>
       {reply && (
         <span className="text-live-11" style={{ display: "block", fontSize: em(0.62), marginTop: em(0.12) }}>
-          {reply.from}: {reply.text}
+          {senderLabel(reply.from)}: {reply.text}
         </span>
       )}
     </div>
@@ -218,7 +275,9 @@ function Replies({
   onAnswer: (target: StageMessage, text: string) => void;
 }) {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.46em", marginTop: "auto", paddingTop: "0.46em" }}>
+    // `flexShrink: 0`: the answer buttons keep their whole height and the feed above
+    // gives way, never the other way round.
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.46em", marginTop: "auto", paddingTop: "0.46em", flexShrink: 0 }}>
       <div className="text-fg-faint" style={{ width: "100%", fontSize: "0.58em" }}>
         {target
           ? `Answering: ${target.text}`

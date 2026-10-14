@@ -24,7 +24,7 @@
 // Controls are live only where the surface says so (`interactive`): on a wall
 // display, or in the layout editor's own canvas, it draws and does nothing.
 
-import { useState, type CSSProperties } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
 import {
   ALERT_MS,
@@ -33,6 +33,7 @@ import {
   FROM_MAX,
   MESSAGE_MAX,
   isAlertRunning,
+  senderLabel,
   type MessageGroup,
   type MessagesState,
   type StageMessage,
@@ -65,7 +66,7 @@ export function senderName(where: {
     : where.outputId !== null && !where.monitor
       ? where.outputs.find((o) => o.id === where.outputId)?.name
       : where.views.find((v) => v.id === where.embedChain.at(-1))?.name;
-  return (named ?? "").trim().slice(0, FROM_MAX) || DEFAULT_FROM;
+  return senderLabel(named ?? "").slice(0, FROM_MAX) || DEFAULT_FROM;
 }
 
 /**
@@ -138,6 +139,17 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
   const [alert, setAlert] = useState(false);
   const [sending, setSending] = useState(false);
   const [clearing, setClearing] = useState<string | null>(null);
+  // The text box grows to fit what is in it, to the cap in its style, so it needs no
+  // resize handle. Measured before paint so a quick message does not flash small.
+  const box = useRef<HTMLTextAreaElement>(null);
+  const drawn = state !== null;
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    // scrollHeight leaves the border out and the box is border-box.
+    el.style.height = `${el.scrollHeight + (el.offsetHeight - el.clientHeight)}px`;
+  }, [text, drawn]);
 
   const body = text.trim();
   const targets = state ? liveTargets(to, state.groups) : [];
@@ -182,7 +194,11 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
         padding: "0.85em 1.1em",
         display: "flex",
         flexDirection: "column",
-        overflow: "hidden",
+        // When the controls are taller than the widget (a short widget, or a large
+        // text scale) the card scrolls rather than clipping: hidden, Send was drawn
+        // below the widget's edge where nobody could press it.
+        overflowX: "hidden",
+        overflowY: "auto",
         textAlign: "left",
         lineHeight: 1.5,
         fontWeight: 400,
@@ -259,6 +275,7 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
             )}
 
             <textarea
+              ref={box}
               value={text}
               onChange={(e) => interactive && setText(e.target.value)}
               readOnly={!interactive}
@@ -271,7 +288,11 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
                 width: "100%",
                 boxSizing: "border-box",
                 minHeight: "4.1em",
-                resize: "vertical",
+                // The box grows with what is typed (see `grow`) up to this, then scrolls,
+                // so no drag handle is needed and none is drawn.
+                maxHeight: "9em",
+                overflowY: "auto",
+                resize: "none",
                 borderRadius: "0.48em",
                 padding: "0.55em 0.69em",
               }}

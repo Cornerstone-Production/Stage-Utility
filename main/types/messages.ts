@@ -112,6 +112,23 @@ export const FROM_MAX = 60;
 /** What a message says it came from when the sender does not say. */
 export const DEFAULT_FROM = "Operator";
 
+/**
+ * A screen's or console's name as a message signs it: without a trailing role
+ * word. "Sam Display" signs as "Sam" and "Main Screen" as "Main", because the
+ * thread already says it is a screen. One trailing `Display`, `Screen`, `Monitor`
+ * or `Console` (a whole word, any case) goes; a name that is nothing but that
+ * word keeps it, so a screen literally named "Display" still signs as something.
+ *
+ * Applied where a `from` is DERIVED (the composer's sender, the server's reply
+ * signature), never to one a caller supplied, so every stored message, reply and
+ * the alert banner agree.
+ */
+export function senderLabel(name: string): string {
+  const trimmed = name.trim();
+  const stripped = trimmed.replace(/\s+(?:display|screen|monitor|console)$/i, "").trim();
+  return stripped === "" ? trimmed : stripped;
+}
+
 export const DEFAULT_QUICK_MESSAGES: readonly string[] = [
   "Walk now",
   "You're on after this song",
