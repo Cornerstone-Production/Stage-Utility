@@ -154,20 +154,39 @@ the screen the Chrome kiosk showed comes back by itself on that display. The Mac
 displays are new outputs under *Not set up yet*. Deleting the file stops the helper doing
 this. With nobody logged in the kiosk is replaced at the next login.
 
-**Removing the helper.** Quit it from its menu bar icon, then, as root:
+**Removing the helper.** `scripts/uninstall.sh` removes it, as root:
 
 ```sh
-launchctl bootout gui/<uid>/com.stageutility.output
-rm -f /Library/LaunchAgents/com.stageutility.output.plist
-rm -rf /Applications/StageUtilityOutput.app
+sudo ./scripts/uninstall.sh --dry-run   # say what it would do, change nothing
+sudo ./scripts/uninstall.sh
 ```
 
-The plist is what starts it at every login, so removing only the app leaves an agent
-trying to launch a missing one. The helper's own state folder,
-`~/Library/Application Support/StageUtilityOutput`, can go too if you do not want
-its settings back. The device id in `/Library/Application Support/StageUtility` stays,
-so installing again keeps the Mac's binding. `install-macos.sh --browser` on a Mac that
-has the helper prints these same commands rather than running them.
+A Mac with no checkout fetches it:
+`curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/scripts/uninstall.sh | sudo bash`
+(`bash -s -- --dry-run` previews). It stops the helper with `launchctl bootout` in
+every account that has it loaded, then removes the LaunchAgent and the app. It also
+removes the Chrome kiosk's agent and launcher where `--browser` installed them, and
+removes the Stage Utility server if one is on the same Mac. A copy of the helper
+opened by hand is not launchd's: the script warns that it is still running and leaves
+it for you to quit from its menu bar icon.
+
+It lists, and does not remove, the Mac's device id and token in
+`/Library/Application Support/StageUtility` and each account's
+`~/Library/Application Support/StageUtilityOutput` (`outputs.json` holds the outputs'
+secret tokens). With the device id kept, installing again keeps the Mac's binding;
+removing it makes the Mac a new device whose screens are claimed again.
+
+It does not put back the sleep and screen saver settings: the installer turned off
+display sleep, system sleep and the screen saver's idle time and password, and does
+not record what they were. The script prints the commands to set them, or set them in
+System Settings > Lock Screen.
+
+By hand, as root: `launchctl bootout gui/<uid>/com.stageutility.output`, then remove
+`/Library/LaunchAgents/com.stageutility.output.plist` and
+`/Applications/StageUtilityOutput.app`. The plist is what starts the helper at every
+login, so removing only the app leaves an agent trying to launch a missing one.
+`install-macos.sh --browser` on a Mac that has the helper prints these same commands
+rather than running them.
 
 **What a person still has to do, once, at the Mac.** macOS does not let a script:
 
