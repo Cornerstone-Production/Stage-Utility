@@ -880,7 +880,10 @@ export function OutputsSection({
   }
 
   return (
-    <div data-flash-id="displays-list" className="flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
+    // No bottom runway here. The one page that renders this, Screens, ends in its
+    // own pb-[50vh], and a second one in here pushed "Not set up yet" half a screen
+    // below the buttons it follows.
+    <div data-flash-id="displays-list" className="flex flex-col gap-4 pt-5 max-sm:pt-4">
       <p className="text-caption1 text-gray-9">
         Each one is a physical screen at its own address. Click one to see its settings.
       </p>

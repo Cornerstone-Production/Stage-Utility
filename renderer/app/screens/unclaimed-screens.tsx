@@ -104,7 +104,7 @@ export function UnclaimedScreens({
     (data.matches[id] ?? []).map((m) => data.bound.find((b) => b.id === m)?.label ?? m).join(", ");
 
   return (
-    <section className="mt-6">
+    <section className="mt-4">
       <header className="mb-2 flex items-center gap-2">
         <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
           Not set up yet
