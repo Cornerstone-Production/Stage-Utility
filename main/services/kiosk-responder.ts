@@ -66,7 +66,9 @@ export function startKioskResponder(opts: ResponderOptions): void {
     const decision = decideProbe(probe, opts.serverId, { scanning: scanning(), bound });
 
     // Listed means somebody could set it up, or it cannot reach its own server.
-    // Which is which is decideProbe's call; this only records it.
+    // Which is which is decideProbe's call; this only records it. A new device is
+    // listed whether or not a page is scanning; answering it is a separate
+    // decision (see rule 4 there).
     if (decision.list === "unclaimed" || decision.list === "elsewhere") {
       recordSeen({
         id: probe.id,

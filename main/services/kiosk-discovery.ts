@@ -168,8 +168,16 @@ export interface ProbeDecision {
  *  3. **A device that names us but is not bound here is unclaimed, and answered**:
  *     released, a restored config, or claimed on an install since wiped. It must
  *     stay answerable so it can be set up again rather than going dark.
- *  4. **Anything else is answered and listed only while SCANNING.** Nothing new
- *     appears unless someone is looking.
+ *  4. **Anything else is LISTED always, and answered only while SCANNING.**
+ *     Listing costs nothing and commits nobody: it is what lets Screens, its
+ *     banner and the sidebar count show a new device the moment anyone looks,
+ *     with no scan to open first. Answering is the commitment. A device binds to
+ *     the first server that answers it, so a server answering every new device
+ *     all the time would race any other Stage Utility on the network for it; it
+ *     answers one while a Screens page is open, which is somebody standing in
+ *     front of this server to set screens up. That answer is also what puts the
+ *     holding screen (id, address, MAC) on the physical screen, which is how an
+ *     operator tells four identical ones apart.
  */
 export function decideProbe(
   probe: DiscoveryProbe,
@@ -181,7 +189,7 @@ export function decideProbe(
   }
   if (opts.bound) return { answer: true, list: "mine" };
   if (probe.boundTo === serverId) return { answer: true, list: "unclaimed" };
-  return opts.scanning ? { answer: true, list: "unclaimed" } : { answer: false, list: "none" };
+  return { answer: opts.scanning, list: "unclaimed" };
 }
 
 /**

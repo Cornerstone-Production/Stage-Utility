@@ -21,6 +21,15 @@ import type { OutputHealth, OutputHealthReport } from "../types/output-health.js
 const TTL_MS = 90_000;
 const SWEEP_MS = 15_000;
 
+/** The most devices listed at once. Every unclaimed device the server hears is
+ *  listed whether or not a page is open, and a broadcast port takes datagrams from
+ *  anything on the LAN, so what a sender can make this Map hold has to be bounded.
+ *  A site's real screens and helper outputs are tens, not hundreds. */
+export const MAX_SEEN = 256;
+/** Whether the full-list warning has been said since the list last had room, so
+ *  a flood is one log line rather than one per datagram. */
+let fullWarned = false;
+
 /** How long a scan stays open when somebody presses the button. Long enough to
  *  walk to a screen and back, short enough that leaving it on is not a habit. */
 export const SCAN_WINDOW_MS = 60_000;
@@ -92,15 +101,39 @@ export function recordSeen(
   d: Omit<SeenDevice, "firstSeen" | "lastSeen">,
   now = Date.now(),
 ): void {
-  const existing = seen.get(d.id);
+  let existing = seen.get(d.id);
+  // Heard again after it had aged out: a new sighting, not a refresh. Treated as
+  // a refresh it would come back into the list with no announcement, because
+  // nothing a person reads would differ from the record kept for it.
+  if (existing && existing.lastSeen < now - TTL_MS) {
+    seen.delete(d.id);
+    existing = undefined;
+  }
   if (!existing) {
+    pruneExpired(now);
+    if (seen.size >= MAX_SEEN) {
+      if (!fullWarned) {
+        fullWarned = true;
+        console.warn(
+          `[kiosk-presence] ${scrub(MAX_SEEN)} devices are already listed, so ${scrub(d.id)} and any others heard until some age out are not`,
+        );
+      }
+      return;
+    }
+    fullWarned = false;
     seen.set(d.id, { ...d, firstSeen: now, lastSeen: now });
-    // One line per output appearing, not per probe: this branch runs once per
-    // sighting and a helper with six outputs is six lines, which is the
-    // operator's evidence that the Mac was heard and what it offered.
+    // One line per device appearing, not per probe: this branch runs once per
+    // sighting, which is the operator's evidence that the screen was heard. A
+    // helper with six outputs is six lines saying what the Mac offered.
+    // Devices are listed with no scan open, so this line is also the only record
+    // of one that was heard and never set up.
     if (d.output) {
       console.log(
         `[output-helper] output seen: ${scrub(d.id)} (${scrub(d.output.kind)} "${scrub(d.output.name)}") on ${scrub(d.hostname ?? d.ip)}`,
+      );
+    } else {
+      console.log(
+        `[kiosk-presence] device seen: ${scrub(d.id)} (${scrub(d.os ?? "unknown OS")}) on ${scrub(d.hostname ?? d.ip)}`,
       );
     }
     ensureSweep();
@@ -167,6 +200,13 @@ export function healthList(now = Date.now()): OutputHealth[] {
 /** Drop what was reported for a device: it was released, or taken over. */
 export function forgetHealth(deviceId: string): void {
   if (health.delete(deviceId)) announce();
+}
+
+/** Drop what has not been heard within the TTL. seenDevices() already hides it;
+ *  this is what lets the Map itself stop growing. */
+function pruneExpired(now: number): void {
+  const cutoff = now - TTL_MS;
+  for (const [id, d] of seen) if (d.lastSeen < cutoff) seen.delete(id);
 }
 
 /** Everything currently heard, freshest first. */
@@ -261,6 +301,7 @@ function ensureSweep(): void {
     // The sweep is what prunes expired scans — see scanning().
     const now = Date.now();
     for (const [holder, until] of scans) if (until <= now) scans.delete(holder);
+    pruneExpired(now);
     // An output that stopped reporting is a failure worth a line: its picture may
     // have frozen, or the helper quit, and a stale reading must not stand in.
     for (const [id, h] of health) {
@@ -284,6 +325,7 @@ export function resetKioskPresence(): void {
   health.clear();
   seen.clear();
   scans.clear();
+  fullWarned = false;
   lastSig = "";
   if (sweepTimer) clearInterval(sweepTimer);
   sweepTimer = null;

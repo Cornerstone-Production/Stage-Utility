@@ -24,10 +24,11 @@ public enum ProbeSchedule {
   ///
   /// Every 2 s until the server answers, as the shell agent does; backing off to
   /// 30 s after ten unanswered ones, as it does, because the server only answers
-  /// an unclaimed device while somebody is scanning and a probe every two seconds
+  /// an unclaimed device while a Screens page is open and a probe every two seconds
   /// for ever is noise. After an answer the probe keeps going every 30 s: the
   /// server lists an unclaimed device for 90 s after its last probe, so stopping
-  /// would make the output vanish from Screens before anyone set it up.
+  /// would make the output vanish from Screens before anyone set it up. An
+  /// unanswered output is listed all the same, which the 30 s rate also keeps alive.
   ///
   /// With no socket to probe from there is nothing to answer, so the slow rate: it
   /// is the rate at which a socket that failed to open is tried again.
