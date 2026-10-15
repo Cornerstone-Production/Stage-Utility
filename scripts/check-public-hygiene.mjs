@@ -129,6 +129,10 @@ export const PLACEHOLDER_USERS = new Set(["x", "op", "someone", "<someone>", "yo
 // string.
 const HOME_PATH = /(?:(?<![\w.~-])\/(?:Users|home)\/|[A-Za-z]:\\{1,2}Users\\{1,2})([^/\\\s"'`:*)\],;|]+)/g;
 
+// A user that is a variable, not a name: `$USER`, `${ME}`, `$(id -un)` or
+// `%USERNAME%`. Code that builds a home path names nobody.
+const VARIABLE_USER = /^(?:\$\{?[A-Za-z_]\w*\}?|\$\(|%[A-Za-z_]\w*%)/;
+
 // ── rule 4: private terms ─────────────────────────────────────────────────────
 
 /**
@@ -246,7 +250,7 @@ function lineFindings(line, prepared) {
     if (!emailAllowed(m[0], m[1])) out.push(`email address ${m[0]}`);
   }
   for (const m of line.matchAll(HOME_PATH)) {
-    if (!PLACEHOLDER_USERS.has(m[1])) out.push(`home path ${m[0]}`);
+    if (!PLACEHOLDER_USERS.has(m[1]) && !VARIABLE_USER.test(m[1])) out.push(`home path ${m[0]}`);
   }
   if (prepared.count > 0) {
     // The matched text is deliberately not in the message: the list is secret.
