@@ -37,10 +37,33 @@
 //    response body echo. `redact()` below is the single choke point, and
 //    everything this module can put in front of an operator goes through it.
 
+import { pinToOrigin } from "./pinned-origin.js";
 import { scrub } from "./scrub.js";
 
 /** Host serving the raw live-occupancy value. */
 const BASE = "https://app.safespace.io/api/raw-data/live-occupancy";
+const ORIGIN = new URL(BASE).origin;
+
+declare const SAFESPACE_URL: unique symbol;
+/** A live-occupancy URL for one space, the only kind the fetch below sends. Made
+ *  only by `safeSpaceUrl`; a plain string does not type-check at the fetch. */
+export type SafeSpaceUrl = string & { readonly [SAFESPACE_URL]: true };
+
+/** The endpoint for `spaceId`. The id is the whole credential, so it is encoded
+ *  into ONE path segment: it cannot add a segment, a query or a host. */
+export function safeSpaceUrl(spaceId: string): SafeSpaceUrl {
+  return `${BASE}/${encodeURIComponent(spaceId)}` as SafeSpaceUrl;
+}
+
+/**
+ * The ONLY request this integration makes. The space id is in the URL, read from
+ * the operator's saved config, so the origin is re-pinned here: the request can
+ * reach app.safespace.io and nothing else.
+ */
+export function safeSpaceFetch(url: SafeSpaceUrl, init: RequestInit): Promise<Response> {
+  return fetch(pinToOrigin(ORIGIN, url, "safespace"), init);
+}
+
 /** SafeSpace answers sub-second; anything past this is a fault, not slowness. */
 const REQUEST_TIMEOUT_MS = 8_000;
 /**
@@ -202,7 +225,7 @@ export class SafeSpaceClient {
     }
     let res: Response;
     try {
-      res = await fetch(`${BASE}/${encodeURIComponent(spaceId)}`, {
+      res = await safeSpaceFetch(safeSpaceUrl(spaceId), {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (err) {
