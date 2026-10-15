@@ -24,6 +24,7 @@ import { useDevices, refreshDevices, describeScreen } from "./use-devices";
 import { cardOf, outputModeLine } from "./output-helpers";
 import { useDisplayPresence } from "./use-display-presence";
 import { groupByMachine, type Machine, type MachineRow } from "./machine-groups";
+import { NOT_SET_UP_ID, panelDeviceOf } from "./not-set-up";
 import type { DeviceOutput, SeenDevice } from "@main/types/kiosk";
 import type { Output } from "@main/types/views";
 import type { PanelDevice } from "../../settings/sections/screen-settings-panel";
@@ -94,17 +95,12 @@ export function UnclaimedScreens({
     }
   }
 
-  // Nothing found and nothing to report: say nothing at all rather than adding
-  // an empty box to a page that already has content. An error is worth a box
-  // even with no rows — it is the reason there are no rows.
-  if (data.seen.length === 0 && !error) return null;
-
   const { machines, plain } = groupByMachine(data.seen, data.bound);
   const lookedLikeNames = (id: string) =>
     (data.matches[id] ?? []).map((m) => data.bound.find((b) => b.id === m)?.label ?? m).join(", ");
 
   return (
-    <section className="mt-4">
+    <section id={NOT_SET_UP_ID} className="mt-4 scroll-mt-4">
       <header className="mb-2 flex items-center gap-2">
         <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
           Not set up yet
@@ -119,6 +115,15 @@ export function UnclaimedScreens({
       </header>
 
       {error && <ErrorNote className="mb-2">{error}</ErrorNote>}
+
+      {/* The server lists a device the moment it hears one, with no scan to
+          start, so an empty section is an answer, not a section still waiting. */}
+      {data.seen.length === 0 && (
+        <div className="rounded-xl border border-dashed border-line px-3.5 py-3.5 text-caption1 text-fg-subtle">
+          Nothing new on the network. This server is always listening: a screen that is switched on appears here, and at
+          the top of this page, without anything to start.
+        </div>
+      )}
 
       {machines.map((m) => (
         <MachineCard
@@ -207,9 +212,7 @@ function DeviceActions({ device, outputs, busy, onSetUpNew, onClaim, describedBy
         size="small"
         disabled={busy}
         aria-describedby={describedBy}
-        // An output is named for itself ("SDI 1 · Card A"), not for the Mac it
-        // shares with its siblings: four screens called booth-mini are no use.
-        onClick={() => onSetUpNew({ id: device.id, hostname: device.hostname, ip: device.ip, name: device.output?.name })}
+        onClick={() => onSetUpNew(panelDeviceOf(device))}
       >
         Set up as a new screen
       </Button>

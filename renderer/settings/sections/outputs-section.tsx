@@ -259,6 +259,10 @@ function MenuCheckboxItem({
   );
 }
 
+/** The `data-flash-id` of one screen's card, so a screen just made can be scrolled
+ *  to and outlined (see flashTarget). */
+export const screenFlashId = (outputId: string): string => `screen-${outputId}`;
+
 /** The views a screen picker lists: Home left out, sorted by name. The cards and
  *  the Screen settings panel offer the same list, so it is built in one place. */
 export function screenPickerViews(views: readonly View[]): View[] {
@@ -350,6 +354,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
     <div
       ref={setNodeRef}
       style={style}
+      data-flash-id={screenFlashId(output.id)}
       onClick={card.onClick}
       className={cn("flex flex-col overflow-hidden rounded-xl border bg-surface shadow-[var(--su-shadow-1)]", card.className)}
     >
@@ -784,7 +789,11 @@ export function OutputsSection({
   onRemoveScreen,
   onDeleteView,
   serviceTypes = [],
+  banner,
 }: Pick<SectionProps, "stageState" | "handlers"> & {
+  /** Something to say above the cards, under the hint: the Screens page's banner
+   *  for screens found that are not set up. */
+  banner?: ReactNode;
   /** The side panel is open and follows the operator: a click on a card moves it. */
   panelOpen: boolean;
   /** What the panel is on, so its card says so. Null when it is closed. */
@@ -887,6 +896,8 @@ export function OutputsSection({
       <p className="text-caption1 text-gray-9">
         Each one is a physical screen at its own address. Click one to see its settings.
       </p>
+
+      {banner}
 
       <DndContext sensors={handlers.sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         {/* A GRID, not a column. Full-width rows made each card a page of its
