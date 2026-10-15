@@ -155,6 +155,7 @@ describe("the address, email and path rules at their edges", () => {
     /* 8 */ `escaped: ${winHome("jdoe", "\\\\")} and ${winHome("jdoe", "\\")}`,
     /* 9 */ `shared: ${unixHome("Users", "Shared")}/Library`,
     /* 10 */ `subdomain only: ${email("jane", "corp.example.org.evil.com")}`,
+    /* 11 */ `variables: ${unixHome("Users", "$" + "{ME}")} ${unixHome("home", "$USER")} ${unixHome("Users", "$" + "(id -un)")} ${winHome("%USERNAME%", "\\")} but ${unixHome("Users", "jdoe")}`,
   ].join("\n");
 
   it("reports exactly these findings", () => {
@@ -169,6 +170,7 @@ describe("the address, email and path rules at their edges", () => {
       `rules.md:8: home path ${winHome("jdoe", "\\")}`,
       `rules.md:8: home path ${winHome("jdoe", "\\\\")}`,
       `rules.md:10: email address ${email("jane", "corp.example.org.evil.com")}`,
+      `rules.md:11: home path ${unixHome("Users", "jdoe")}`,
     ]);
   });
 });
