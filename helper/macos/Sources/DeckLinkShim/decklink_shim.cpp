@@ -117,8 +117,6 @@ IDeckLink *findDevice(const dl_port_id &want) {
 // MARK: Completion callbacks
 
 class DeckLinkCard;
-/// When `card` finished with `frame`, on the host clock (DeckLinkCard::completedAt).
-uint64_t completionTime(DeckLinkCard *card, IDeckLinkVideoFrame *frame);
 
 /// What the driver calls back. Reference counted on its own, because the driver
 /// may hold it a moment after the output is gone; `output` is cleared first.
@@ -148,25 +146,8 @@ class CompletionSink final : public IDeckLinkVideoOutputCallback {
     return left;
   }
 
-  HRESULT ScheduledFrameCompleted(IDeckLinkVideoFrame *frame, BMDOutputFrameCompletionResult result) override {
-    Completion c = Completion::completed;
-    switch (result) {
-      case bmdOutputFrameDisplayedLate:
-        c = Completion::late;
-        break;
-      case bmdOutputFrameDropped:
-        c = Completion::dropped;
-        break;
-      case bmdOutputFrameFlushed:
-        c = Completion::flushed;
-        break;
-      default:
-        break;
-    }
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (output_ != nullptr) output_->completed(frame, c, card_ != nullptr ? completionTime(card_, frame) : 0);
-    return S_OK;
-  }
+  /// Defined after DeckLinkCard, whose completedAt it asks.
+  HRESULT ScheduledFrameCompleted(IDeckLinkVideoFrame *frame, BMDOutputFrameCompletionResult result) override;
 
   HRESULT ScheduledPlaybackHasStopped() override {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -286,7 +267,25 @@ class DeckLinkCard final : public Card {
   bool stopped_ = false;
 };
 
-uint64_t completionTime(DeckLinkCard *card, IDeckLinkVideoFrame *frame) { return card->completedAt(frame); }
+HRESULT CompletionSink::ScheduledFrameCompleted(IDeckLinkVideoFrame *frame, BMDOutputFrameCompletionResult result) {
+  Completion c = Completion::completed;
+  switch (result) {
+    case bmdOutputFrameDisplayedLate:
+      c = Completion::late;
+      break;
+    case bmdOutputFrameDropped:
+      c = Completion::dropped;
+      break;
+    case bmdOutputFrameFlushed:
+      c = Completion::flushed;
+      break;
+    default:
+      break;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (output_ != nullptr) output_->completed(frame, c, card_ != nullptr ? card_->completedAt(frame) : 0);
+  return S_OK;
+}
 
 // MARK: Open outputs and device changes
 
