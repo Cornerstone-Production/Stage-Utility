@@ -29,7 +29,9 @@ export function refreshRate(mode: string | undefined): string | undefined {
 function displayMode(screen: ScreenSize | undefined): string {
   if (!screen) return "";
   const driven = screen.mode?.match(/^(\d+)\s*x\s*(\d+)/i);
-  const size = driven ? `${driven[1]} × ${driven[2]}` : screen.w > 0 && screen.h > 0 ? `${screen.w} × ${screen.h}` : "";
+  let size = "";
+  if (driven) size = `${driven[1]} × ${driven[2]}`;
+  else if (screen.w > 0 && screen.h > 0) size = `${screen.w} × ${screen.h}`;
   return [size, refreshRate(screen.mode)].filter(Boolean).join(" · ");
 }
 
@@ -75,8 +77,9 @@ export function struggleByScreen(
 ): Map<string, OutputStruggle> {
   const out = new Map<string, OutputStruggle>();
   for (const d of bound) {
-    const h = d.output ? health.find((x) => x.deviceId === d.id) : undefined;
-    if (d.output && h?.struggling) out.set(d.outputId, { port: d.output.port, repeated: h.repeated, dropped: h.dropped });
+    if (!d.output) continue;
+    const h = health.find((x) => x.deviceId === d.id);
+    if (h?.struggling) out.set(d.outputId, { port: d.output.port, repeated: h.repeated, dropped: h.dropped });
   }
   return out;
 }
