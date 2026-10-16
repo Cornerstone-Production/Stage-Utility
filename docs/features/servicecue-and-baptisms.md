@@ -15,8 +15,8 @@ Pick a service type from the landing page and it opens at a readable, shareable
 URL (`/servicecue/weekend/audio`) you can pin in its own tab. The clock follows
 the plan's timezone.
 
-Configure it with **Edit column presets** on the ServiceCue page (`/servicecue/presets`), with a live preview. The layouts
-and category roles are this app's own and can be edited before Planning Center
+Configure it with **Edit column presets** on the ServiceCue page (`/servicecue/presets`), with a live
+preview. The layouts and category roles are this app's own and can be edited before Planning Center
 is connected; the preview, which reads a plan, says to connect it. So do the
 landing page, a ServiceCue page and a ServiceCue display, which ask Planning Center
 for nothing until it is connected. A ServiceCue display with no service type
@@ -67,8 +67,10 @@ A layout is a set of columns — Audio, Video, Lighting, and so on. Layouts are
 global: define one and it works across every service type.
 
 Each has per-element toggles for the clock, item time, song key, BPM, time
-signature, arrangement, item notes and total time. A layout saved before the time
-signature switch existed shows it.
+signature, arrangement, item notes and total time, all on until switched off, and
+**Max SPL**, off until switched on: a last column with each item's loudest reading
+from Smaart (`98 dB`, or a dash where none was recorded), which only means something
+while Smaart is connected.
 
 The Item column reads, under the title, `Key E · 128 BPM · 4/4 · Elevation Rhythm`:
 the key chosen on the plan item, then the BPM, time signature and name of its song
@@ -337,9 +339,9 @@ percentage or a delta computed from too little history to mean anything.
 The timer can start itself, since the two ends of a baptism differ:
 
 - **Testimonies** happen during an item named the same thing every week, so a
-  **keyword** finds it, matched on this same tab. Off by default.
+  **keyword** finds it, matched on this same page. Off by default.
 - **Baptisms** happen during whichever songs are on that week, so no keyword can
-  find them. Bind that end **to an item on the plan**, on the same tab.
+  find them. Bind that end **to an item on the plan**, on the same page.
 
 Binding both ends is also more accurate than a manual button. Between testimonies
 and baptisms there are usually several minutes of vows and prayer; started from the
@@ -424,7 +426,7 @@ file the rest of the archive uses. The in-progress state is saved to
 `baptism.json` up to 800ms after a press, and a clean stop, an update's restart
 included, saves it first. A session that `baptism.json` loses — a corrupt file,
 or a crash between a press and its save — is not gone: **Rebuild from raw**, in
-this tab's own header or in History's, replays
+this page's own header or in History's, replays
 it from those rows. The header targets the session it is showing, or the most
 recent past one if none is; it is disabled, with a reason, while that service
 is still recording. The derived record is a cache of what the presses already
@@ -446,7 +448,7 @@ line at once. Past sessions does not list an unsaved session; its rows in
 `baptism.csv` still hold it, if a service was open while it ran.
 
 Each line also has its own **Rebuild from raw**, for that session's own
-service — never whichever session the tab is showing next, which by then may
+service — never whichever session the page is showing next, which by then may
 be a different one. It is disabled, with a reason, while that service is
 still recording, and when the session ran with no service open at all (no
 raw rows exist to rebuild it from). A rebuild clears that line the moment it
@@ -456,7 +458,7 @@ since Finish's own failure means the store never had a copy at all — or by
 Undo followed by another Finish) is the one that failed to save: the store
 already holds that session's earlier, now-stale Finish, so the rebuild can
 only bring it up to date, never add a second copy. Either way, whichever
-route actually wrote it — the note's own button, this tab's header, or
+route actually wrote it — the note's own button, this page's header, or
 History's whole-service Rebuild — clears the line. A rebuild that leaves the
 session exactly as the store already had it — unchanged, or the store's own
 copy is already newer, or the rows and the store disagree — never clears the
