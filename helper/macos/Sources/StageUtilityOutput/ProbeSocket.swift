@@ -25,11 +25,7 @@ final class ProbeSocket {
       Darwin.close(fd)
       throw ProbeSocketError.system("SO_BROADCAST", e)
     }
-    var addr = sockaddr_in()
-    addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-    addr.sin_family = sa_family_t(AF_INET)
-    addr.sin_port = 0
-    addr.sin_addr.s_addr = INADDR_ANY.bigEndian
+    var addr = socketAddress(in_addr(s_addr: INADDR_ANY.bigEndian), port: 0)
     let bound = withUnsafePointer(to: &addr) {
       $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
     }
@@ -71,11 +67,7 @@ final class ProbeSocket {
     guard !closed else { return targets.map { SendFailure(target: $0.label, errno: EBADF) } }
     var failures: [SendFailure] = []
     for target in targets {
-      var addr = sockaddr_in()
-      addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-      addr.sin_family = sa_family_t(AF_INET)
-      addr.sin_port = port.bigEndian
-      addr.sin_addr = target.address
+      var addr = socketAddress(target.address, port: port)
       let sent = data.withUnsafeBytes { bytes in
         withUnsafePointer(to: &addr) {
           $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -179,6 +171,16 @@ enum HardwareAddresses {
     }
     return found.sorted { ($0.name.hasPrefix("en") ? 0 : 1) < ($1.name.hasPrefix("en") ? 0 : 1) }.map { $0.mac }
   }
+}
+
+/// An IPv4 socket address, with `port` in host order.
+private func socketAddress(_ address: in_addr, port: UInt16) -> sockaddr_in {
+  var addr = sockaddr_in()
+  addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+  addr.sin_family = sa_family_t(AF_INET)
+  addr.sin_port = port.bigEndian
+  addr.sin_addr = address
+  return addr
 }
 
 /// Calls `body` with each of the Mac's interface addresses (`getifaddrs`), in the
