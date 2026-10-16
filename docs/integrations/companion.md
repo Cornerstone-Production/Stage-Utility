@@ -389,20 +389,43 @@ alone, and the room named here is offered as the Home Assistant area. A switch
 whose Companion button has gone missing goes **unavailable** rather than
 pretending a press would do something. A pair with a state source reports what
 the gear says and follows it when somebody turns the projector off at the wall;
-without one the switch reads **unknown** and shows separate on and off buttons,
-with a `reason` attribute saying why.
+without one the switch reads **unknown**, turns on `assumed_state` so the card
+shows separate on and off buttons, and a `reason` attribute says why.
+
+Each switch carries `reason`, `state_source` (the Companion variable it reads, or
+`null`), `toggle`, `cue_on` and `cue_off`, `settling`, `last_commanded` and
+`commanded_at`, and `last_result`; a button carries `last_result`. `last_result` is
+what the last call did: `dispatched`, `skipped` (the gear was already there),
+`simulated` or `failed`. **`simulated` means nothing was pressed**: the server's
+automation engine is in simulate mode, so the call succeeds and a warning is logged.
+`failed` is the server answering `200` with `ok: false` (it reached the cue and
+Companion did not answer); the call raises, a warning is logged, and the switch stays
+where the gear left it.
+
+For eight seconds after a command the switch shows the state it was asked for, with
+`assumed_state` on and `settling` true, and lets one contradicting read go by: a read
+that agrees ends the window at once, a contradiction that repeats is believed, and a
+window that lapses with nothing confirmed gives back whatever was last read. This is
+the same [settle window](#the-settle-window) the server keeps.
 
 **No polling.** The integration holds one subscription to the `cues` channel on
 this server's event stream and is pushed both state changes and changes to the
 cue list, so a cue added, renamed or deleted here reaches Home Assistant in
 seconds with nothing to re-paste and nothing to restart. It falls back to
-reading `/api/cues/states` every thirty seconds only while the stream is down.
+reading `/api/cues/states` every thirty seconds (backing off to no more than a
+minute) only while the stream is down, and reads the manifest again the moment the
+stream is back. With the stream down and the fallback failing too, every switch and
+button goes **unavailable** rather than showing what it last heard. Connects and
+disconnects are logged once per change, and an outage past five minutes logs one
+warning.
 
 Two options on the entry, under **Configure**: whether the server's own web
-interface appears in the Home Assistant sidebar, and whether a HomeKit Bridge is
-reloaded when the cue list changes — a bridge only works out what to publish on
-reload, so without that a new cue is missing from the Apple Home app and a
-deleted one shows as *No Response*.
+interface appears in the Home Assistant sidebar (left out, with a log line, when
+Home Assistant is served over HTTPS and cannot frame a plain-HTTP server), and
+whether a HomeKit Bridge is reloaded when the cue list changes — a bridge only works
+out what to publish on reload, so without that a new cue is missing from the Apple
+Home app and a deleted one shows as *No Response*. The reload comes fifteen seconds
+after the cue list stops changing.
 
 #### The generated YAML
 
