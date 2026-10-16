@@ -4,6 +4,46 @@ A slot is one cell on the mic board. It links to a person, optionally binds a
 wireless mic and an IEM pack, and shows a name, photo and live telemetry.
 Slots are edited on a Mic Slots view's own page, opened from Screens.
 
+## The slot editor
+
+The editor is a list of slots in board order, with **Add slot** and **Add spacer**
+under it and **Save slots** at the top. **Unsaved changes** shows beside Save until
+it is pressed, and nothing reaches a screen before that. Drag a row by its grip to
+reorder; a stacked column moves as one.
+
+Each slot row has:
+
+| Control | What it does |
+|---|---|
+| **Channel** | A short reference number for the slot, such as `01`. It is for the operator and is not drawn on the cell |
+| **PCO / Static / Empty** | How the slot is filled: from Planning Center ([below](#linking-a-slot-to-a-person)), a typed label with a colour, or nothing. A static slot has a **Label** (for example *Backup*) and a **Slot colour**, takes no part in Planning Center matching, and can still carry a mic, IEM and charge bar. An empty slot is a blank cell, and has no further options |
+| **Stack** | Puts the slot in the same on-screen column as the slot above it, as rows, for a dual-bay charger two people share. Off for the first slot |
+| Remove | Deletes the slot |
+
+**Options**, collapsed under each slot with a one-line summary of what is set
+(`mic · IEM · charger`):
+
+| Option | What it does |
+|---|---|
+| **Device channel** | The wireless channel this slot's mic is bound to, from the [Wireless](integrations/wireless.md) integration: the cell shows its RF bars and battery. **Offline (manual label)** is for a mic or pack with no network: the cell shows a name pill instead of bars. **None** clears it |
+| **Mic label** | Text shown in place of the frequency. See [Labels](#labels) |
+| **IEM pack** | A second device, on any slot, whose battery shows as a second bar. Same choices as Device channel |
+| **IEM label** | Text under the mic label. See [Labels](#labels) |
+| **Charge bar** | Where the battery bar reads from: **Mic battery (transmitter)**, a **Charger bay** (pick the bay from the chargers the Wireless integration reports, with its level), or **Off** |
+| **Hide RF** | Hides the RF bars and shows only the battery level, for charge-only or IEM slots |
+
+A view of this kind also has **Align to physical chargers**, off by default. On, a
+column's width is set in inches against the monitor's active width (**Display
+width**, 32.25 in to start) so the cells line up with the chargers below them.
+**Charger width** (3.49 in to start) is the width of one column, and a **spacer**
+(**Add spacer**, with its own **Width**) is a blank gap for the space between charger
+banks and the side margins. A stacked column counts once, by its first slot. The
+panel says how many inches are used of the display's and turns red when the row is
+wider. Without it every column, a spacer's included, takes an equal share of the
+width.
+
+**Copy slots from**, above the editor, fills this board from another Mic Slots view.
+
 ## Linking a slot to a person
 
 A slot can be linked **by position**, **by person**, or given a **static** label.
@@ -187,11 +227,16 @@ Switching with unsaved slot edits asks first, the same question leaving the page
 asks. A new tab, or a reload, always opens on the plan the screens are
 following: where the switcher was pointed is never remembered.
 
-### Presets
+### Saved arrangements
 
-Slot presets are global and can be recalled onto any service type. Position names
-are per-service-type, so a slot listing several positions travels better than one
-naming a single position that another type does not define.
+Under the editor, **Saved arrangements** keeps named copies of a board. Type a name
+and **Save** to capture the current slots; each saved row can be renamed in place,
+dragged into order, **Recalled** onto the board being edited, overwritten with the
+current slots (after a confirm), **Exported** as a `.slots.json` file or deleted.
+**Import…** reads such a file. Arrangements are global and can be recalled onto any
+service type. Position names are per-service-type, so a slot listing several
+positions travels better than one naming a single position that another type does
+not define.
 
 ## Labels
 
