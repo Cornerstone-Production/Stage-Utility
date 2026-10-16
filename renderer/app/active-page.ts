@@ -161,13 +161,6 @@ export function consoleHidesChrome(
 export const SHARED_CHROMELESS_PATHS: ReadonlySet<string> = new Set(["/history"]);
 
 /**
- * Does this EXACT path want the shell's chrome hidden, whether that is a
- * shared page or an operator's console?
- *
- * `consoleHidesChrome` stays as it is — other code and tests key off it
- * directly — this just adds the shared-path check beside it.
- */
-/**
  * Is this a shared chromeless page? The router serves `/history/` as the same
  * page as `/history` but reports the pathname with its slash, so one trailing
  * slash is forgiven; `/history/manage` is a different path and is not.
@@ -183,6 +176,13 @@ export function isSharedChromelessPath(pathname: string): boolean {
   return bare === "/servicecue" || /^\/servicecue\/(?!presets$)[^/]+\/[^/]+$/.test(bare);
 }
 
+/**
+ * Does this EXACT path want the shell's chrome hidden, whether that is a
+ * shared page or an operator's console?
+ *
+ * `consoleHidesChrome` stays as it is — other code and tests key off it
+ * directly — this just adds the shared-path check beside it.
+ */
 export function hidesChrome(pathname: string, views: readonly View[] | undefined): boolean {
   return isSharedChromelessPath(pathname) || consoleHidesChrome(pathname, views);
 }
