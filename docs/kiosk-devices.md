@@ -262,11 +262,10 @@ The port is adjustable, because AV gear is fond of odd ports.
   count are filled the moment anyone looks. A device not heard for 90 seconds
   drops out, and at most 256 are listed at once (the log says when it is full).
 - An unclaimed device is **answered** only while a scan is open, which is for as
-  long as a Screens page is open (or a short window after one is pressed). A device
-  binds to the first server that answers it, so a server answering every new device
-  at all times would race any other Stage Utility on the network for it. The answer
-  is also what puts the holding screen, with its id, address and MAC, on the
-  physical screen.
+  long as a Screens page is open. A device binds to the first server that answers
+  it, so a server answering every new device at all times would race any other
+  Stage Utility on the network for it. The answer is also what puts the holding
+  screen, with its id, address and MAC, on the physical screen.
 
 Where broadcast does not cross a VLAN, write the server address into a `server`
 file beside the device id and discovery is skipped.
