@@ -150,73 +150,84 @@ export function LazyPreview({
     };
   }, [visible, forced]);
 
-  return (
-    <div ref={boxRef}>
-      {streaming ? (
-        onExpand && following ? (
-          <div className="group relative">
-            <button
-              type="button"
-              data-retarget
-              aria-label={following.label}
-              onClick={(e) => {
-                // Not a plain click: the card must not also move its panel.
-                if (opensInNewTab(e) && following.onOpenDisplay) {
-                  e.stopPropagation();
-                  following.onOpenDisplay();
-                }
-              }}
-              onAuxClick={(e) => {
-                if (e.button === 1 && following.onOpenDisplay) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  following.onOpenDisplay();
-                }
-              }}
-              className="block w-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} />
-            </button>
-            {/* The way into the editor, as a control of its own: a click on it is
-                its own and does not move the panel. */}
-            <button
-              type="button"
-              onClick={onExpand}
-              title={expandLabel}
-              aria-label={expandLabel}
-              className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-md bg-black/55 text-[#d4d4d4] opacity-0 transition-opacity duration-(--motion-quick) hover:bg-black/75 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus group-hover:opacity-100"
-            >
-              <ExpandIcon className="size-4" strokeWidth={1.75} />
-            </button>
-          </div>
-        ) : onExpand ? (
-          // The preview IS the way in. A scrim plus a centred expand icon on
-          // hover, rather than a permanently-visible affordance: the preview's
-          // job is to show what the screen shows, and chrome sitting on it all
-          // the time competes with that.
+  const preview = <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} />;
+
+  /** The live preview, wrapped for whatever the card does with a click on it. */
+  function streamingPreview() {
+    if (onExpand && following) {
+      return (
+        <div className="group relative">
+          <button
+            type="button"
+            data-retarget
+            aria-label={following.label}
+            onClick={(e) => {
+              // Not a plain click: the card must not also move its panel.
+              if (opensInNewTab(e) && following.onOpenDisplay) {
+                e.stopPropagation();
+                following.onOpenDisplay();
+              }
+            }}
+            onAuxClick={(e) => {
+              if (e.button === 1 && following.onOpenDisplay) {
+                e.preventDefault();
+                e.stopPropagation();
+                following.onOpenDisplay();
+              }
+            }}
+            className="block w-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            {preview}
+          </button>
+          {/* The way into the editor, as a control of its own: a click on it is
+              its own and does not move the panel. */}
           <button
             type="button"
             onClick={onExpand}
             title={expandLabel}
             aria-label={expandLabel}
-            className="group relative block w-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            className="absolute right-1.5 top-1.5 grid size-7 place-items-center rounded-md bg-black/55 text-[#d4d4d4] opacity-0 transition-opacity duration-(--motion-quick) hover:bg-black/75 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus group-hover:opacity-100"
           >
-            <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} />
-            <span
-              className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
-              aria-hidden="true"
-            >
-              {/* A SOLID neutral grey, not white at reduced opacity. Opacity made
-                  it read as faded rather than as a deliberate colour — the icon
-                  should look like an affordance, not like it is disappearing.
-                  #d4d4d4 is strictly R=G=B, per the no-colour-cast rule for
-                  anything sitting on a dark surface. */}
-              <ExpandIcon className="size-7 text-[#d4d4d4]" strokeWidth={1.5} />
-            </span>
+            <ExpandIcon className="size-4" strokeWidth={1.75} />
           </button>
-        ) : (
-          <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} />
-        )
+        </div>
+      );
+    }
+    if (onExpand) {
+      // The preview IS the way in. A scrim plus a centred expand icon on hover,
+      // rather than a permanently-visible affordance: the preview's job is to show
+      // what the screen shows, and chrome sitting on it all the time competes with
+      // that.
+      return (
+        <button
+          type="button"
+          onClick={onExpand}
+          title={expandLabel}
+          aria-label={expandLabel}
+          className="group relative block w-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          {preview}
+          <span
+            className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
+            aria-hidden="true"
+          >
+            {/* A SOLID neutral grey, not white at reduced opacity. Opacity made
+                it read as faded rather than as a deliberate colour — the icon
+                should look like an affordance, not like it is disappearing.
+                #d4d4d4 is strictly R=G=B, per the no-colour-cast rule for
+                anything sitting on a dark surface. */}
+            <ExpandIcon className="size-7 text-[#d4d4d4]" strokeWidth={1.5} />
+          </span>
+        </button>
+      );
+    }
+    return preview;
+  }
+
+  return (
+    <div ref={boxRef}>
+      {streaming ? (
+        streamingPreview()
       ) : (
         <button
           type="button"
