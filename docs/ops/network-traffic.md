@@ -128,13 +128,23 @@ them.
 
 ## Leaving your network
 
-Planning Center, and whatever an embed or external feed points at — a YouTube
-or Resi player reaches its own platform, and an external feed reaches whatever
-address it names. Once, the first time video is switched on with a pull or
-push feed, the server downloads the pinned MediaMTX release from GitHub
-(about 27 MB), unless the archive was placed by hand; see
-[Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch). Every other integration is LAN-only, and so is a pull or
-push feed: its picture passes through Stage Utility's own relay, but never any
-further than the network the encoders and screens are already on. NDI is the
-one path that skips the app entirely — discovered and received peer-to-peer by
-the client.
+What reaches the internet, and when:
+
+| To | Why |
+|---|---|
+| Planning Center | The plan, people, photos, attachments and the live countdown. The one required connection |
+| GitHub | The update check (release metadata and notes), and an update's download. The first time a Mac asks for the output helper, its zip from the release matching this server |
+| SenSource Vea, and SafeSpace | People counts, only while those integrations are on |
+| ESPN | Live scores for followed teams, only while any are followed |
+| YouTube, and Resi | Whether you are live, only while those integrations are on |
+| Wherever an embed or external feed points | A YouTube or Resi player reaches its own platform, and an external feed reaches whatever address it names |
+
+Once, the first time video is switched on with a pull or push feed, the server
+downloads the pinned MediaMTX release from GitHub (about 27 MB), unless the
+archive was placed by hand; see
+[Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch).
+
+Every other integration is LAN-only, and so is a pull or push feed: its picture
+passes through Stage Utility's own relay, but never any further than the network
+the encoders and screens are already on. NDI is the one path that skips the app
+entirely — discovered and received peer-to-peer by the client.
