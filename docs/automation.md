@@ -1,7 +1,7 @@
 # Automation
 
 Rules of the form **when something happens in Stage, do something to a device.**
-Built under **Settings → Automation**.
+Built on the **Automation** page, in the sidebar.
 
 > Rules fire with nobody present. Build every rule with the **Write a log message**
 > action first, watch it through a real service, and only then attach the real

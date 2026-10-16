@@ -36,6 +36,12 @@ never counted in the context bar's "N disconnected".
 **In Companion** — add a connection (search the connection list for **Stage
 Utility**) and enter this server's IP and port. No password; the API is LAN-only.
 
+The module's id is `stageutility-stageutility`. Releases before the repository's
+rename were published as `cornerstone-stageutility`, which the module's manifest
+lists in `legacyIds`. A connection made with one of those releases is switched to
+the new module in Companion, one connection at a time and by hand; nothing
+switches by itself, so every connection to switch is yours to do.
+
 The module requires **Companion 4.3.0 or newer**, which is where Companion added
 the v2 connection API the module is built against. On anything older it installs
 and shows up in the module list, but the connection never starts — Companion
@@ -67,7 +73,7 @@ empty list.
 ## Pressing a button
 
 The automation action **Press a Companion button** presses one button at a page,
-row and column, exactly as a finger would. Build it under Settings → Automation
+row and column, exactly as a finger would. Build it on the Automation page
 and pick the button from the list rather than typing coordinates; the three
 numbers stay visible and editable for a button that is not in the export.
 
@@ -137,7 +143,7 @@ be edited into shape through the editor is visible rather than silent.
 
 ### Tokens
 
-Settings → Automation → **Calling cues** mints one token per caller. The token is
+Automation → **Calling cues** mints one token per caller. The token is
 shown **once** — only a SHA-256 of it is stored — so a lost one is replaced, not
 recovered. Revoke them individually, which is why each has a label.
 
@@ -156,7 +162,7 @@ mitigation there is the same: an ACL on the switch port Companion is on.
 
 ### Importing ON/OFF pairs
 
-Settings → Automation → **Import from Companion…** finds, per page, buttons whose
+Automation → **Import from Companion…** finds, per page, buttons whose
 labels differ only by a trailing direction word — `ON`/`OFF`,
 `Startup`/`Shutdown`, `START`/`STOP` or `Open`/`Closed` (`Open`/`Close` is read
 the same way) — and offers each pair as two cues, `<name>_on` and `<name>_off`.
@@ -271,8 +277,7 @@ is stored too and refreshed whenever the button is confirmed.
 It is checked on startup, whenever you press **Test** on the Companion
 integration, whenever you press **Refresh** in the button picker, and hourly —
 always against the same cached configuration export the picker reads, never a
-second request. Three outcomes, each a pill on the rule's row under Settings →
-Automation:
+second request. Three outcomes, each a pill on the rule's row on the Automation page:
 
 | | |
 |---|---|
@@ -364,7 +369,7 @@ HACS, copy `custom_components/stage_utility` into Home Assistant's
 | | |
 |---|---|
 | **Host** | an address on the network — `192.168.1.50`, `192.168.1.50:8788` or `http://stage-utility:8788`. Leave the scheme and port off and it assumes plain HTTP on 8788, where every install starts |
-| **Cue token** | an `su_…` secret from Settings → Automation → **Calling cues**, shown once when it is minted |
+| **Cue token** | an `su_…` secret from Automation → **Calling cues**, shown once when it is minted |
 
 Setup reads the cue manifest to prove it found a Stage Utility, then calls a cue
 name that cannot exist to prove the token is accepted — a `404` means the token
@@ -454,11 +459,11 @@ so Home Assistant shows what it asked for rather than what the device did.
 Each cue's editor carries a **Home Assistant** switch. Turned off, the cue is
 voice-only: it is left out of `/api/cues/manifest`, out of the generated YAML
 and off the `cues` channel, so no entity is created for it and it appears under
-**Everything else** in the Automations tab. `POST /api/cues/<name>` still fires
+**Everything else** on the Automation page. `POST /api/cues/<name>` still fires
 it, and so does anything already calling it that way.
 
 A hidden pair's state is still read, and still shown on its row in the
-Automations tab — hiding a cue changes which entities Home Assistant is told
+Automation page — hiding a cue changes which entities Home Assistant is told
 to create and nothing else. `GET /api/cues/states` therefore still carries the
 pair, marked `hiddenFromHome: true`; the generated sensor only lifts the pairs
 the YAML listed, which are the shown ones.
@@ -661,7 +666,7 @@ buttons that did the work, or it is the same optimism one system further along.
 
 A pair reads **unknown** when the variable holds something that is neither value,
 when Companion does not have a variable by that name, or when Companion cannot be
-reached. The rule's row in Settings → Automation shows an amber `unknown` pill
+reached. The rule's row on the Automation page shows an amber `unknown` pill
 with the reason, `/api/cues/states` carries it as `reason`, and the log says so
 once per change:
 
@@ -766,8 +771,8 @@ been told is stale. The log says how it ended, once:
 
 The generated Home Assistant switch reads `commanded` before `state` for the
 same reason: templated on the reading alone it flips itself back mid-window, and
-a switch that flips back is an invitation to tap it again. The rules list in
-Settings does the same: a bound pair's pill shows `commanded` while `settling`
+a switch that flips back is an invitation to tap it again. The rules list on
+the Automation page does the same: a bound pair's pill shows `commanded` while `settling`
 is true, never the stale reading underneath it. Re-paste the fragment
 to pick that up.
 
@@ -776,7 +781,7 @@ refused, and a call that was itself skipped all leave the variable as the only
 thing worth comparing against.
 
 If the whole read fails rather than one pair — the server could not answer at all
-— Settings → Automation says so in one line above the rules list and shows no
+— the Automation page says so in one line above the rules list and shows no
 pills, rather than leaving them out silently.
 
 Nothing polls Companion in the background: the variables are read when
@@ -818,12 +823,6 @@ reading it from somewhere else.
 | ok | `good` | up; its variables hold a current value |
 | in error | `error` | Companion cannot reach the device. Its variables either 404 or hold whatever was last seen — neither is current |
 | not reporting | no status, or one this app has not verified | never came up; its variables 404 |
-
-On the install this was built against, the forty enabled connections on modules
-the state table knows read out as: eighteen `good`, every one answering a real
-value; six bulbs and ten plugs answering 404; five cameras answering an empty
-`200`; and one television, `error / Connection Failure`, answering `Off` — the
-value from before Companion lost it.
 
 Connections **disabled** in Companion are not counted. The row's own connected /
 no-clients state still follows the module clients alone — gear behind Companion
@@ -967,7 +966,7 @@ a Companion variable id, and anything else may not resolve.
 Production marks the talkback vocalist in Planning Center by adding a marker to
 their note for that event, alongside the slot number they already use: `4 TB`.
 
-In Stage Utility, under **Settings -> Automation**:
+In Stage Utility, on the **Automation** page:
 
 ```
 When:  Before a rehearsal or service      60 minutes, rehearsal + service

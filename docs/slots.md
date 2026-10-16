@@ -127,7 +127,7 @@ Exporting a view carries the defaults for every service type. Per-plan boards do
 not travel — a plan id means nothing on the far end.
 
 To move one service type's whole setup — every board it has, on every view — use
-the plan export instead: **Settings → Plan → Export plan…**. See
+the plan export instead: **Plan → Export plan…**. See
 [Moving a view between installs](moving-a-view.md#moving-a-plan).
 
 ### Switching plans in the editor

@@ -4,7 +4,7 @@ A per-week stage patch reference: what source lands on which console input, wher
 each output feeds, and — the part volunteers actually need — what changed from the
 standard this week.
 
-Edit it under **Settings → Patch**. Volunteers read it at **`/patch`**, which
+Edit it with **Edit the patch** on the **Patch** page (`/patch/edit`). Volunteers read it at **`/patch`**, which
 follows the live or next Planning Center plan on its own.
 
 ## Sheets

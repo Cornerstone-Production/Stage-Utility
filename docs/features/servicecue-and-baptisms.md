@@ -15,7 +15,7 @@ Pick a service type from the landing page and it opens at a readable, shareable
 URL (`/servicecue/weekend/audio`) you can pin in its own tab. The clock follows
 the plan's timezone.
 
-Configure it under **Settings → ServiceCue**, with a live preview. The layouts
+Configure it with **Edit column presets** on the ServiceCue page (`/servicecue/presets`), with a live preview. The layouts
 and category roles are this app's own and can be edited before Planning Center
 is connected; the preview, which reads a plan, says to connect it. So do the
 landing page, a ServiceCue page and a ServiceCue display, which ask Planning Center
@@ -113,7 +113,7 @@ priority, and you can reorder it.
 A role whose members a service type doesn't define is hidden rather than shown as
 an empty column.
 
-**Managing them:** Settings → ServiceCue → Category roles. Rename, add or remove
+**Managing them:** ServiceCue → Edit column presets → Category roles. Rename, add or remove
 members, reorder. Two diagnostics flag problems you would otherwise notice only by
 absence — categories in no role (which can never appear as a column) and
 categories in more than one (ambiguous, since two columns would claim the note).

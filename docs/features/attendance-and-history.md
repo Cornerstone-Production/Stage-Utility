@@ -1,7 +1,7 @@
 # Attendance and service history
 
 Every service is recorded automatically — attendance, sound levels and item
-timing — and browsable afterwards under **Settings → History**.
+timing — and browsable afterwards under **History** in the sidebar.
 
 ## What gets recorded
 

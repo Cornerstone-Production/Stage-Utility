@@ -27,7 +27,7 @@ the patch sheet variant it is assigned to and your saved slot presets. It is per
 service type, never per date: a per-plan board is one week's exception keyed by a
 Planning Center plan id, and that id means nothing on another machine.
 
-**Export.** Settings → Plan → **Export plan…**, beside *Active Service Types*.
+**Export.** **Plan** → **Export plan…**, beside *Active Service Types*.
 Pick the type and tick what travels:
 
 | | |
