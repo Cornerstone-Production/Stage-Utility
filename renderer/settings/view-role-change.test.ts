@@ -8,7 +8,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { StageState } from "@main/types/stage";
-import { changeViewRole, expectedSurface, screensChangedBy, viewRoleQuestion } from "./view-role-change";
+import { expectedSurface } from "./screen-role-confirm";
+import { changeViewRole, screensChangedBy, viewRoleQuestion } from "./view-role-change";
 
 type Slim = Pick<StageState, "views" | "outputs">;
 const state = {

@@ -31,8 +31,6 @@ export function screensChangedBy(state: Pick<StageState, "views" | "outputs"> | 
   return screensShowing(viewId, state?.outputs ?? []).map((o) => ({ id: o.id, name: o.name || o.id }));
 }
 
-export { expectedSurface } from "./screen-role-confirm";
-
 /** What to ask before changing these screens, or null when there is none to
  *  ask about. `again` says the list changed since the operator was last asked. */
 export function viewRoleQuestion(
