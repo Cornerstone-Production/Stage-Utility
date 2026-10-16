@@ -20,32 +20,61 @@ import * as fs from "node:fs";
 import { APP_ROOT } from "../app-root.js";
 import { detectInstallKind, type InstallKind } from "./install-kind.js";
 import { FORMULA, kickstartLabel, serviceLabel } from "./homebrew-strategy.js";
-import { launchctlProbe, resolveDaemonLabel, type DaemonLabel, type LabelProbe } from "./launchd-label.js";
+import { launchctlProbe, resolveDaemonLabel, type LabelProbe } from "./launchd-label.js";
 import type { SpawnPlan } from "./strategy.js";
 
-/** The kick for one launchd job: what to spawn, and which job that is. */
-interface Kick {
-  plan: SpawnPlan;
-  job: string;
+/** What exitForRestart set up, and — when it could not — why not. */
+export interface RelaunchPrep {
+  /** What to spawn; null when nothing is to be kicked. */
+  plan: SpawnPlan | null;
+  /** The launchd job the plan kicks, for the log. */
+  job: string | null;
+  /** Set when a launchd install needed a kick and no job could be found. */
+  failure: string | null;
+}
+
+/** Nothing to kick, and nothing wrong. */
+function nothingToKick(): RelaunchPrep {
+  return { plan: null, job: null, failure: null };
 }
 
 /**
- * Decide what to kick for this install, or null where the service manager
- * already relaunches reliably (everything that is not launchd, and an install
- * that is not one of ours).
+ * The kick for one launchd job.
  *
  * The command itself is kickstartLabel — the same one the Homebrew update path
  * uses, for the same reasons (see its doc for why `-k -p`, and why it tries gui
  * before system and never fails). The sleep puts the kickstart safely after our
  * own exit; if we are already gone, -k is a no-op.
+ *
+ * kill:false — the old instance is exiting on its own. On a box where
+ * KeepAlive is NOT parked, launchd may have already relaunched us by the
+ * time this fires; -p leaves that healthy successor alone, where -k would
+ * kill it mid-boot and start a third.
  */
-function kickFor(
+function kickPrep(job: string): RelaunchPrep {
+  const script = `sleep 2; ${kickstartLabel(job, { kill: false })}`;
+  return { plan: { command: "bash", args: ["-c", script], env: {} }, job, failure: null };
+}
+
+/**
+ * What to spawn so this server comes back after it exits — a null plan where the
+ * service manager already does that reliably (everything that is not launchd, and
+ * an install that is not one of ours).
+ *
+ * A macOS tarball install has no fixed label (see launchd-label.ts), so this
+ * finds out which job it is running as. When none can be found there is nothing
+ * safe to kick: the plan is null and `failure` says why, never a guess.
+ * Everything that touches the system arrives as an argument, so the decision runs
+ * under test with the real code and a fake launchd.
+ */
+export function prepareRelaunch(
   kind: InstallKind,
   appRoot: string,
   platform: NodeJS.Platform,
-  tarballLabel: DaemonLabel | null,
-): Kick | null {
-  if (platform !== "darwin") return null;
+  env: NodeJS.ProcessEnv,
+  probe: LabelProbe = launchctlProbe,
+): RelaunchPrep {
+  if (platform !== "darwin") return nothingToKick();
 
   // A DISCRIMINANT, not a string built from appRoot.
   //
@@ -59,71 +88,21 @@ function kickFor(
   // appRoot comes from STAGE_UTILITY_ROOT, so CodeQL followed an environment
   // value into a shell string and reported it at medium -- correctly, given what
   // it could see. Types do not help: they are erased before it looks. Only the
-  // dataflow does. The same goes for tarballLabel, which resolveDaemonLabel
+  // dataflow does. The same goes for the tarball label, which resolveDaemonLabel
   // picks FROM the constants rather than copying out of XPC_SERVICE_NAME.
-  const which = launchdKind(kind, appRoot);
-  const job =
-    which === "tarball" ? tarballLabel
-    : which === "beta" ? serviceLabel(FORMULA.beta)
-    : which === "main" ? serviceLabel(FORMULA.main)
-    : null;
-  if (!job) return null;
-
-  // kill:false — the old instance is exiting on its own. On a box where
-  // KeepAlive is NOT parked, launchd may have already relaunched us by the
-  // time this fires; -p leaves that healthy successor alone, where -k would
-  // kill it mid-boot and start a third.
-  return { job, plan: { command: "bash", args: ["-c", `sleep 2; ${kickstartLabel(job, { kill: false })}`], env: {} } };
-}
-
-/**
- * What to spawn so this server comes back after it exits — or null where the
- * service manager already does that reliably.
- *
- * A macOS tarball install has no fixed label (see launchd-label.ts), so the
- * caller must say which job it is running as; there is deliberately no default,
- * so a new call site has to decide. With null there is nothing safe to kick and
- * this returns null. prepareRelaunch is the caller that finds out.
- */
-export function relaunchPlan(
-  kind: InstallKind,
-  appRoot: string,
-  platform: NodeJS.Platform,
-  tarballLabel: DaemonLabel | null,
-): SpawnPlan | null {
-  return kickFor(kind, appRoot, platform, tarballLabel)?.plan ?? null;
-}
-
-/** What exitForRestart set up, and — when it could not — why not. */
-export interface RelaunchPrep {
-  /** What to spawn; null when nothing is to be kicked. */
-  plan: SpawnPlan | null;
-  /** The launchd job the plan kicks, for the log. */
-  job: string | null;
-  /** Set when a launchd install needed a kick and no job could be found. */
-  failure: string | null;
-}
-
-/**
- * relaunchPlan plus the work of finding out which job a macOS tarball install is.
- * Everything that touches the system arrives as an argument, so the decision runs
- * under test with the real code and a fake launchd.
- */
-export function prepareRelaunch(
-  kind: InstallKind,
-  appRoot: string,
-  platform: NodeJS.Platform,
-  env: NodeJS.ProcessEnv,
-  probe: LabelProbe = launchctlProbe,
-): RelaunchPrep {
-  let tarballLabel: DaemonLabel | null = null;
-  if (platform === "darwin" && kind === "tarball") {
-    const found = resolveDaemonLabel(env, probe);
-    if (!found.ok) return { plan: null, job: null, failure: found.reason };
-    tarballLabel = found.label;
+  switch (launchdKind(kind, appRoot)) {
+    case "tarball": {
+      const found = resolveDaemonLabel(env, probe);
+      if (!found.ok) return { plan: null, job: null, failure: found.reason };
+      return kickPrep(found.label);
+    }
+    case "beta":
+      return kickPrep(serviceLabel(FORMULA.beta));
+    case "main":
+      return kickPrep(serviceLabel(FORMULA.main));
+    default:
+      return nothingToKick();
   }
-  const kick = kickFor(kind, appRoot, platform, tarballLabel);
-  return { plan: kick?.plan ?? null, job: kick?.job ?? null, failure: null };
 }
 
 /**

@@ -13,7 +13,7 @@ import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
 import { holdingScreen } from "../kiosk-holding-screen.js";
 import { stageController } from "../stage-controller.js";
 import type { CreateScreenInput } from "../../types/views.js";
-import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, modeRefusal, readCreateScreenBody } from "./screen-write.js";
+import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, readCreateScreenBody, refuseMode } from "./screen-write.js";
 import { errorMessage } from "../errors.js";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -278,11 +278,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     let input: CreateScreenInput | null = null;
     // Whichever way the claim goes: a screen being taken over has its role from
     // its view too, so a `mode` here would be ignored, which is worse than refused.
-    const refusedMode = modeRefusal(body);
-    if (refusedMode) {
-      error(res, refusedMode);
-      return;
-    }
+    if (refuseMode(res, body)) return;
     if (!outputId) {
       // A device that is already bound is not waiting, so it is not set up as a
       // new screen: the panel offering that was opened on a device another

@@ -4,13 +4,12 @@
 // new-screen body can each live in a file of their own without importing the
 // panel back.
 
-import type { ChangeEvent, ReactNode } from "react";
+import type { ChangeEvent, ComponentProps, ReactNode } from "react";
 
 import { Button, Input, Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, Switch, type ButtonProps } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { viewIsConsole, viewSurface, type ViewSurface } from "@main/types/views";
 import { NEW_CONTROL, NEW_WALL, NONE, SURFACE_COPY } from "../screen-role-confirm";
-
 
 /** The views a picker offers, split the way the picker groups them. */
 export function viewGroups(views: readonly View[]): { label: string; views: View[] }[] {
@@ -170,6 +169,17 @@ export function Pill({ tone, children }: { tone: "accent" | "muted"; children: R
   );
 }
 
+/** "Online" or "Offline" with its dot: whether a screen is connected to the thing it
+ *  stands for. It passes its props on, so a Tooltip can wrap it. */
+export function OnlineBadge({ online, ...props }: { online: boolean } & ComponentProps<"span">) {
+  return (
+    <span {...props} className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted">
+      <span className={cn("size-2 rounded-full", online ? "bg-ok-9" : "bg-fg-faint")} />
+      {online ? "Online" : "Offline"}
+    </span>
+  );
+}
+
 /** The one line that says which a screen is: a pill, then what it means. `line`
  *  replaces the sentence where the screen does not exist yet. A view of no kind
  *  (nothing chosen) says only what it says when there is nothing to show. */
@@ -265,6 +275,16 @@ export function PanelFooter({ hint, children }: { hint: string; children?: React
       <span className="min-w-[150px] flex-1 text-caption1 text-fg-subtle">{hint}</span>
       {children}
     </div>
+  );
+}
+
+/** The panel's secondary button: filled, with an edge so it reads on the panel's
+ *  own surface. */
+export function OutlineButton({ children, ...props }: Omit<ButtonProps, "variant" | "size">) {
+  return (
+    <Button type="button" variant="filled" size="medium" className="border border-line-strong" {...props}>
+      {children}
+    </Button>
   );
 }
 

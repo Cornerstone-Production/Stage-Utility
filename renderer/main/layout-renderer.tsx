@@ -1641,18 +1641,19 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     }
     case "scores":
       return <ScoresObject config={c} scores={ctx.scores} known={ctx.scoresKnown} />;
-    case "message-composer":
+    case "message-composer": {
+      const outputs = ctx.state.outputs ?? [];
       return (
         <MessageComposerObject
           state={ctx.messages}
           known={ctx.messagesKnown}
-          outputs={ctx.state.outputs ?? []}
+          outputs={outputs}
           from={senderName({
             home: ctx.home,
             outputId: ctx.screen?.outputId ?? null,
             monitor: ctx.screen?.monitor === true,
             embedChain: ctx.embedChain,
-            outputs: ctx.state.outputs ?? [],
+            outputs,
             views: ctx.state.views ?? [],
           })}
           interactive={ctx.interactive}
@@ -1660,6 +1661,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
           ts={ts}
         />
       );
+    }
     case "messages":
       return (
         <MessagesObject

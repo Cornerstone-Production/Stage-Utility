@@ -201,6 +201,62 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+/**
+ * A saved number, which the settings form may have stored as a number or as the
+ * string it was typed as. NaN when unset, blank or not a number.
+ */
+function configNumber(raw: unknown): number {
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string" && raw.trim()) return parseInt(raw, 10);
+  return NaN;
+}
+
+/** {@link configNumber}, kept only when it is a positive number. */
+function positiveConfigNumber(raw: unknown): number | null {
+  const n = configNumber(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * A host/port target off an integration's config, defaulting the port.
+ *
+ * Only defaults the port when a host was given AND there is a default worth
+ * giving: no host is "not configured", and an integration whose port has no
+ * conventional value (PVP's is whatever its Preferences pane shows) must not be
+ * reported as configured on the strength of a guess.
+ */
+function hostPortOf(
+  cfg: Record<string, unknown>,
+  defaultPort: number | null,
+): { host: string | null; port: number | null } {
+  const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
+  return { host, port: positiveConfigNumber(cfg.port) ?? (host ? defaultPort : null) };
+}
+
+/**
+ * `config` with each of the integration's secret keys set to the mask when a
+ * credential is stored behind it and to "" when there is none, so no secret
+ * ever sits in the state map.
+ *
+ * hasSecretValue, not truthiness: a whitespace-only value already on disk from
+ * an older build would otherwise mask as a stored credential on every surface
+ * that reads this, while every reader that trims saw none.
+ */
+function maskSecrets(
+  id: string,
+  config: Record<string, unknown>,
+  secrets: Record<string, string>,
+): Record<string, unknown> {
+  const masked: Record<string, unknown> = { ...config };
+  for (const key of secretKeysFor(id)) masked[key] = hasSecretValue(secrets[key]) ? MASK : "";
+  return masked;
+}
+
+/** An API token, or a client id and secret: either signs in to SenSource Vea. */
+function hasSensourceCredentials(cfg: SenSourceConfig): boolean {
+  return !!cfg.apiToken || (!!cfg.clientId && !!cfg.clientSecret);
+}
+
 /** Parse the ProPresenter `config.instances` array (extra auditoriums) into typed
  *  configs, tolerating loosely-shaped stored JSON. */
 function parsePropInstances(raw: unknown): PropInstanceConfig[] {
@@ -210,10 +266,8 @@ function parsePropInstances(raw: unknown): PropInstanceConfig[] {
     if (!r || typeof r !== "object") continue;
     const o = r as Record<string, unknown>;
     if (typeof o.id !== "string" || !o.id) continue;
-    const portNum =
-      typeof o.port === "number" ? o.port : typeof o.port === "string" ? parseInt(o.port, 10) : NaN;
-    const pollNum =
-      typeof o.pollMs === "number" ? o.pollMs : typeof o.pollMs === "string" ? parseInt(o.pollMs, 10) : NaN;
+    const portNum = configNumber(o.port);
+    const pollNum = configNumber(o.pollMs);
     out.push({
       id: o.id,
       name: typeof o.name === "string" && o.name.trim() ? o.name : o.id,
@@ -1305,18 +1359,12 @@ class IntegrationManager {
       const enabled = enabledFor(descriptor, settings.integrationEnabled);
       const secrets = await secretsStore.getSecrets(descriptor.id);
 
-      // Merge saved non-secret config with any secret keys (masked).
-      const maskedConfig: Record<string, unknown> = { ...savedConfig };
-      for (const key of secretKeysFor(descriptor.id)) {
-        maskedConfig[key] = hasSecretValue(secrets[key]) ? MASK : "";
-      }
-
       this.states.set(descriptor.id, {
         id: descriptor.id,
         enabled,
         connection: "disconnected",
         message: null,
-        config: maskedConfig,
+        config: maskSecrets(descriptor.id, savedConfig, secrets),
       });
     }
 
@@ -1500,39 +1548,21 @@ class IntegrationManager {
       count > 0 ? `${count} Companion client(s) connected` : null,
       out?.message ?? null,
     ].filter((p): p is string => p !== null);
-    this.setConnectionState(
-      "companion",
-      out?.failed ? "error" : count > 0 ? "connected" : "disconnected",
-      parts.length ? parts.join(". ") : null,
-    );
+    let connection: IntegrationState["connection"] = "disconnected";
+    if (out?.failed) connection = "error";
+    else if (count > 0) connection = "connected";
+    this.setConnectionState("companion", connection, parts.length ? parts.join(". ") : null);
     this.broadcastStates();
   }
 
   /**
-   * Re-apply one integration's connection after its config or its enabled flag
-   * changed.
-   *
-   * A map rather than a ladder because there were TWO ladders -- one in
-   * setConfig, one in setEnabled -- listing the same integrations in the
-   * same order. Adding Resi and YouTube meant remembering both, and an
-   * integration added to only one would save its config and never reconnect, or
-   * reconnect on a toggle and not on a save. Neither failure says which half was
-   * missed.
-   *
-   * planning-center and wireless are NOT here: they do different work in each
-   * caller, so they stay written out where that difference is visible.
-   *
-   * Typed as Record<ConnectionManagedId, …>, so leaving one out is a compile
-   * error rather than an integration that saves and never reconnects. See
-   * CONNECTION_MANAGED_IDS for why the other five are absent.
-   */
-  /**
    * Wire one service's connection reporting, then start or stop it to match the
    * integration's enabled + configured state.
    *
-   * Nine appliers were this same body: attach a listener that forwards to
-   * setConnectionState and broadcasts, read `enabled`, read the config, then
-   * either announce "connecting" and configure, or stop and report disconnected.
+   * Every applier of a dialled service was this same body: attach a listener that
+   * forwards to setConnectionState and broadcasts, read `enabled`, read the
+   * config, then either announce "connecting" and configure, or stop and report
+   * disconnected.
    * The pairing is the part worth having once -- an applier that stopped a
    * service without reporting it disconnected leaves the UI showing a live badge
    * for a service that is not running.
@@ -1566,6 +1596,24 @@ class IntegrationManager {
     }
   }
 
+  /**
+   * Re-apply one integration's connection after its config or its enabled flag
+   * changed.
+   *
+   * A map rather than a ladder because there were TWO ladders -- one in
+   * setConfig, one in setEnabled -- listing the same integrations in the
+   * same order. Adding Resi and YouTube meant remembering both, and an
+   * integration added to only one would save its config and never reconnect, or
+   * reconnect on a toggle and not on a save. Neither failure says which half was
+   * missed.
+   *
+   * planning-center and wireless are NOT here: they do different work in each
+   * caller, so they stay written out where that difference is visible.
+   *
+   * Typed as Record<ConnectionManagedId, …>, so leaving one out is a compile
+   * error rather than an integration that saves and never reconnects. See
+   * CONNECTION_MANAGED_IDS for why the other five are absent.
+   */
   private async applyIntegration(id: string): Promise<void> {
     const appliers: Record<ConnectionManagedId, () => void | Promise<void>> = {
       propresenter: () => this.applyPropresenter(),
@@ -1731,16 +1779,7 @@ class IntegrationManager {
     }
 
     // Rebuild masked config for state.
-    const allSecrets = await secretsStore.getSecrets(id);
-    const maskedConfig: Record<string, unknown> = { ...merged };
-    for (const key of secretKeys) {
-      // isBlankSecret, not truthiness: a whitespace-only value already on disk
-      // from an older build would otherwise mask as a stored credential on every
-      // surface that reads this, while every reader that trims saw none.
-      maskedConfig[key] = hasSecretValue(allSecrets[key]) ? MASK : "";
-    }
-
-    this.states.set(id, { ...state, config: maskedConfig });
+    this.states.set(id, { ...state, config: maskSecrets(id, merged, await secretsStore.getSecrets(id)) });
 
     // Side-effects for specific integrations.
     if (id === "companion") {
@@ -1901,14 +1940,7 @@ class IntegrationManager {
         if (!host || !port) {
           return { ok: false, message: "Host and Port are required" };
         }
-        const result = await propresenterService.test(host, port);
-        this.setConnectionState(
-          "propresenter",
-          result.ok ? "connected" : "error",
-          result.message ?? null,
-        );
-        this.broadcastStates();
-        return result;
+        return this.reportTest("propresenter", await propresenterService.test(host, port));
       }
 
       if (id === "prodcom") {
@@ -1917,10 +1949,7 @@ class IntegrationManager {
           return { ok: false, message: "Host and Port are required" };
         }
         const secrets = await secretsStore.getSecrets("prodcom");
-        const result = await prodcomService.test(host, port, secrets.apiKey ?? null);
-        this.setConnectionState("prodcom", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("prodcom", await prodcomService.test(host, port, secrets.apiKey ?? null));
       }
 
       if (id === "smaart") {
@@ -1929,10 +1958,7 @@ class IntegrationManager {
           return { ok: false, message: "Host and Port are required" };
         }
         const secrets = await secretsStore.getSecrets("smaart");
-        const result = await smaartService.test(host, port, secrets.password ?? null);
-        this.setConnectionState("smaart", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("smaart", await smaartService.test(host, port, secrets.password ?? null));
       }
 
       if (id === "obs") {
@@ -1941,10 +1967,7 @@ class IntegrationManager {
           return { ok: false, message: "Host and Port are required" };
         }
         const secrets = await secretsStore.getSecrets("obs");
-        const result = await obsService.test(host, port, secrets.password ?? null);
-        this.setConnectionState("obs", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("obs", await obsService.test(host, port, secrets.password ?? null));
       }
 
       if (id === "reaper") {
@@ -1952,10 +1975,7 @@ class IntegrationManager {
         if (!host || !port) {
           return { ok: false, message: "Host and Port are required" };
         }
-        const result = await reaperService.test(host, port);
-        this.setConnectionState("reaper", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("reaper", await reaperService.test(host, port));
       }
 
       if (id === "pvp") {
@@ -1967,17 +1987,11 @@ class IntegrationManager {
           };
         }
         const secrets = await secretsStore.getSecrets("pvp");
-        const result = await pvpService.test(host, port, https, secrets.token ?? null);
-        this.setConnectionState("pvp", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("pvp", await pvpService.test(host, port, https, secrets.token ?? null));
       }
 
       if (id === "scores") {
-        const result = await scoresService.test();
-        this.setConnectionState("scores", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("scores", await scoresService.test());
       }
 
       if (id === "resi") {
@@ -1985,28 +1999,19 @@ class IntegrationManager {
         if (!username || !password) {
           return { ok: false, message: "Resi email and password are required" };
         }
-        const result = await resiService.test(username, password);
-        this.setConnectionState("resi", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("resi", await resiService.test(username, password));
       }
 
       if (id === "youtube") {
-        const result = await youtubeService.test(await this.getYouTubeConfig());
-        this.setConnectionState("youtube", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("youtube", await youtubeService.test(await this.getYouTubeConfig()));
       }
 
       if (id === "sensource") {
         const cfg = await this.getSensourceConfig();
-        if (!cfg.apiToken && (!cfg.clientId || !cfg.clientSecret)) {
+        if (!hasSensourceCredentials(cfg)) {
           return { ok: false, message: "Client ID and Secret (or a static token) are required" };
         }
-        const result = await sensourceService.test(cfg);
-        this.setConnectionState("sensource", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("sensource", await sensourceService.test(cfg));
       }
 
       if (id === "ross-tsl") {
@@ -2014,10 +2019,7 @@ class IntegrationManager {
         if (!host || !port) {
           return { ok: false, message: "Switcher Host and TSL Port are required" };
         }
-        const result = await tslService.test(host, port);
-        this.setConnectionState("ross-tsl", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("ross-tsl", await tslService.test(host, port));
       }
 
       if (id === "video") {
@@ -2057,6 +2059,13 @@ class IntegrationManager {
 
   // ── Internals ─────────────────────────────────────────────────────────
 
+  /** Put a Test's answer on the integration's row, and hand it back to the caller. */
+  private reportTest<T extends { ok: boolean; message?: string }>(id: string, result: T): T {
+    this.setConnectionState(id, result.ok ? "connected" : "error", result.message ?? null);
+    this.broadcastStates();
+    return result;
+  }
+
   private setConnectionState(
     id: string,
     connection: IntegrationState["connection"],
@@ -2070,33 +2079,13 @@ class IntegrationManager {
 
   private getPcoRefreshIntervalMs(): number {
     const state = this.states.get("planning-center");
-    const raw = state?.config["refreshIntervalMin"];
-    const min = typeof raw === "string" ? parseInt(raw, 10) : typeof raw === "number" ? raw : NaN;
-    return Number.isFinite(min) && min > 0 ? min * 60 * 1000 : 60 * 60 * 1000;
+    const min = positiveConfigNumber(state?.config["refreshIntervalMin"]) ?? 60;
+    return min * 60 * 1000;
   }
 
   private getPropresenterTarget(): { host: string | null; port: number | null; pollMs: number | null } {
     const cfg = this.states.get("propresenter")?.config ?? {};
-    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    const rawPort = cfg.port;
-    const port =
-      typeof rawPort === "number"
-        ? rawPort
-        : typeof rawPort === "string" && rawPort.trim()
-          ? parseInt(rawPort, 10)
-          : NaN;
-    const rawPoll = cfg.pollMs;
-    const pollMs =
-      typeof rawPoll === "number"
-        ? rawPoll
-        : typeof rawPoll === "string" && rawPoll.trim()
-          ? parseInt(rawPoll, 10)
-          : NaN;
-    return {
-      host,
-      port: Number.isFinite(port) && port > 0 ? port : null,
-      pollMs: Number.isFinite(pollMs) && pollMs > 0 ? pollMs : null,
-    };
+    return { ...hostPortOf(cfg, null), pollMs: positiveConfigNumber(cfg.pollMs) };
   }
 
   /** Start/stop the ProPresenter poller to match enabled + configured state. */
@@ -2152,113 +2141,56 @@ class IntegrationManager {
    * filled-in host is a form half-completed rather than a decision.
    */
   getCompanionTarget(): { host: string; port: number } | null {
-    const cfg = this.states.get("companion")?.config ?? {};
-    const host = typeof cfg.host === "string" ? cfg.host.trim() : "";
-    if (!host) return null;
-    const raw = cfg.port;
-    const port =
-      typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? parseInt(raw, 10) : NaN;
-    return { host, port: Number.isFinite(port) && port > 0 ? port : DEFAULT_COMPANION_PORT };
+    const { host, port } = hostPortOf(this.states.get("companion")?.config ?? {}, DEFAULT_COMPANION_PORT);
+    return host && port ? { host, port } : null;
   }
 
   private getProdcomTarget(): { host: string | null; port: number | null } {
-    const cfg = this.states.get("prodcom")?.config ?? {};
-    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    const rawPort = cfg.port;
-    const port =
-      typeof rawPort === "number"
-        ? rawPort
-        : typeof rawPort === "string" && rawPort.trim()
-          ? parseInt(rawPort, 10)
-          : NaN;
-    return { host, port: Number.isFinite(port) && port > 0 ? port : null };
+    return this.hostPort("prodcom", null);
   }
 
   /** Start/stop the ProdCom transcript stream to match enabled + configured state. */
   private async applyProdcom(): Promise<void> {
-    prodcomService.setConnectionListener((state, message) => {
-      this.setConnectionState("prodcom", state, message);
-      this.broadcastStates();
-    });
-
     // Before the enable check and outside configure(): this decides what leaves
     // the server, not what it connects to, so it applies to a stopped service
     // too and must not drag the stream through a reconnect.
     prodcomService.setRedactSensitive(prodcomRedactionOn(this.states.get("prodcom")?.config));
 
-    const enabled = this.states.get("prodcom")?.enabled ?? false;
-    const { host, port } = this.getProdcomTarget();
-    if (enabled && host && port) {
+    await this.applyService("prodcom", prodcomService, async () => {
+      const { host, port } = this.getProdcomTarget();
+      if (!host || !port) return null;
       const secrets = await secretsStore.getSecrets("prodcom");
-      this.setConnectionState("prodcom", "connecting", `Connecting ${host}:${port}`);
-      prodcomService.configure(host, port, secrets.apiKey ?? null);
-    } else {
-      prodcomService.stop();
-      this.setConnectionState("prodcom", "disconnected", null);
-    }
+      return {
+        connecting: `Connecting ${host}:${port}`,
+        start: () => prodcomService.configure(host, port, secrets.apiKey ?? null),
+      };
+    });
   }
 
+  /** Smaart's standard API port is the default when only a host is given. */
   private getSmaartTarget(): { host: string | null; port: number | null } {
-    const cfg = this.states.get("smaart")?.config ?? {};
-    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    const rawPort = cfg.port;
-    const port =
-      typeof rawPort === "number"
-        ? rawPort
-        : typeof rawPort === "string" && rawPort.trim()
-          ? parseInt(rawPort, 10)
-          : NaN;
-    // Default to Smaart's standard API port when only a host is given.
-    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 26000 : null };
+    return this.hostPort("smaart", 26000);
   }
 
   /** Start/stop the Smaart SPL connection to match enabled + configured state. */
   private async applySmaart(): Promise<void> {
-    smaartService.setConnectionListener((state, message) => {
-      this.setConnectionState("smaart", state, message);
-      this.broadcastStates();
-    });
-
-    const enabled = this.states.get("smaart")?.enabled ?? false;
-    const { host, port } = this.getSmaartTarget();
-    if (enabled && host && port) {
+    await this.applyService("smaart", smaartService, async () => {
+      const { host, port } = this.getSmaartTarget();
+      if (!host || !port) return null;
       const secrets = await secretsStore.getSecrets("smaart");
-      this.setConnectionState("smaart", "connecting", `Connecting ${host}:${port}`);
-      smaartService.configure(host, port, secrets.password ?? null);
-    } else {
-      smaartService.stop();
-      this.setConnectionState("smaart", "disconnected", null);
-    }
+      return {
+        connecting: `Connecting ${host}:${port}`,
+        start: () => smaartService.configure(host, port, secrets.password ?? null),
+      };
+    });
   }
 
-  /**
-   * A host/port target off an integration's config, defaulting the port.
-   *
-   * OBS and REAPER had a copy each, identical but for the default port and the
-   * id they read. Two copies of a parse is two chances for one to stop accepting
-   * a port typed as a string, which is what the settings form sends.
-   */
+  /** A host/port target off an integration's config: see {@link hostPortOf}. */
   private hostPort(
     id: ConnectionManagedId,
     defaultPort: number | null,
   ): { host: string | null; port: number | null } {
-    const cfg = this.states.get(id)?.config ?? {};
-    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    const rawPort = cfg.port;
-    const port =
-      typeof rawPort === "number"
-        ? rawPort
-        : typeof rawPort === "string" && rawPort.trim()
-          ? parseInt(rawPort, 10)
-          : NaN;
-    // Only default the port when a host was given AND there is a default worth
-    // giving: no host is "not configured", and an integration whose port has no
-    // conventional value (PVP's is whatever its Preferences pane shows) must not
-    // be reported as configured on the strength of a guess.
-    return {
-      host,
-      port: Number.isFinite(port) && port > 0 ? port : host && defaultPort != null ? defaultPort : null,
-    };
+    return hostPortOf(this.states.get(id)?.config ?? {}, defaultPort);
   }
 
   /** obs-websocket's standard port. */
@@ -2477,7 +2409,6 @@ class IntegrationManager {
     });
   }
 
-  /** Resolve the SenSource config from non-secret state + the secrets store. */
   /**
    * Resi's credentials, with the real password.
    *
@@ -2550,21 +2481,11 @@ class IntegrationManager {
     await this.test("youtube");
   }
 
+  /** Resolve the SenSource config from non-secret state + the secrets store. */
   private async getSensourceConfig(): Promise<SenSourceConfig> {
-    /** A saved interval field, which the form may have stored as either type. */
-    const seconds = (raw: unknown): number =>
-      typeof raw === "number"
-        ? raw
-        : typeof raw === "string" && raw.trim()
-          ? parseInt(raw, 10)
-          : NaN;
     const cfg = this.states.get("sensource")?.config ?? {};
     const secrets = await secretsStore.getSecrets("sensource");
-    const pollSeconds = seconds(cfg.pollSeconds);
-    const resolvedPollSeconds =
-      Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : SENSOURCE_DEFAULT_POLL_SECONDS;
-    const safeSpacePoll = seconds(cfg.safeSpacePollSeconds);
-    const attendancePoll = seconds(cfg.attendancePollSeconds);
+    const resolvedPollSeconds = positiveConfigNumber(cfg.pollSeconds) ?? SENSOURCE_DEFAULT_POLL_SECONDS;
     return {
       clientId: typeof cfg.clientId === "string" && cfg.clientId.trim() ? cfg.clientId.trim() : null,
       clientSecret: secrets.clientSecret || null,
@@ -2575,8 +2496,7 @@ class IntegrationManager {
       // integration already has an attendance figure, so a fixed fallback faster
       // than an operator's own pollSeconds would have raised their request
       // volume the moment this shipped, for anyone who never opened this card.
-      attendancePollSeconds:
-        Number.isFinite(attendancePoll) && attendancePoll > 0 ? attendancePoll : resolvedPollSeconds,
+      attendancePollSeconds: positiveConfigNumber(cfg.attendancePollSeconds) ?? resolvedPollSeconds,
       locationId:
         typeof cfg.locationId === "string" && cfg.locationId.trim() ? cfg.locationId.trim() : null,
       zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.filter((z): z is string => typeof z === "string") : [],
@@ -2590,82 +2510,54 @@ class IntegrationManager {
       // keeps the invariant "an id implies enabled" true even on a box whose
       // marker never got written.
       safeSpaceEnabled: cfg[SAFESPACE_ENABLED_KEY] === true || !!secrets.safeSpaceId,
-      safeSpacePollSeconds:
-        Number.isFinite(safeSpacePoll) && safeSpacePoll > 0
-          ? safeSpacePoll
-          : SAFESPACE_DEFAULT_POLL_SECONDS,
+      safeSpacePollSeconds: positiveConfigNumber(cfg.safeSpacePollSeconds) ?? SAFESPACE_DEFAULT_POLL_SECONDS,
     };
+  }
+
+  /** The SenSource config, for a picker that needs to sign in: refused when no
+   *  credentials are saved yet. */
+  private async getCredentialedSensourceConfig(): Promise<SenSourceConfig> {
+    const cfg = await this.getSensourceConfig();
+    if (!hasSensourceCredentials(cfg)) throw new Error("Enter and save SenSource credentials first");
+    return cfg;
   }
 
   /** List Vea locations for the settings picker (uses the saved credentials). */
   async getSensourceLocations(): Promise<{ locationId: string; name: string }[]> {
-    const cfg = await this.getSensourceConfig();
-    if (!cfg.apiToken && (!cfg.clientId || !cfg.clientSecret)) {
-      throw new Error("Enter and save SenSource credentials first");
-    }
-    return sensourceService.listLocationsWith(cfg);
+    return sensourceService.listLocationsWith(await this.getCredentialedSensourceConfig());
   }
 
   /** List Vea zones for the settings picker — the reliable scoping mechanism
    *  (the API has no working server-side location/zone filter). */
   async getSensourceZones(): Promise<{ zoneId: string; name: string; locationId: string | null }[]> {
-    const cfg = await this.getSensourceConfig();
-    if (!cfg.apiToken && (!cfg.clientId || !cfg.clientSecret)) {
-      throw new Error("Enter and save SenSource credentials first");
-    }
-    return sensourceService.listZonesWith(cfg);
+    return sensourceService.listZonesWith(await this.getCredentialedSensourceConfig());
   }
 
   /** Start/stop the SenSource poller to match enabled + credentialed state. */
   private async applySensource(): Promise<void> {
-    sensourceService.setConnectionListener((state, message) => {
-      this.setConnectionState("sensource", state, message);
-      this.broadcastStates();
+    await this.applyService("sensource", sensourceService, async () => {
+      const cfg = await this.getSensourceConfig();
+      return hasSensourceCredentials(cfg)
+        ? { connecting: "Authenticating with SenSource Vea", start: () => sensourceService.configure(cfg) }
+        : null;
     });
-
-    const enabled = this.states.get("sensource")?.enabled ?? false;
-    const cfg = await this.getSensourceConfig();
-    const hasCreds = !!cfg.apiToken || (!!cfg.clientId && !!cfg.clientSecret);
-    if (enabled && hasCreds) {
-      this.setConnectionState("sensource", "connecting", "Authenticating with SenSource Vea");
-      sensourceService.configure(cfg);
-    } else {
-      sensourceService.stop();
-      this.setConnectionState("sensource", "disconnected", null);
-    }
   }
 
   /** Resolve the Ross TSL config (host/port + the feed→display-index mappings). */
   private getRossTslConfig(): { host: string | null; port: number | null; feeds: TslFeed[] } {
     const cfg = this.states.get("ross-tsl")?.config ?? {};
-    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    const rawPort = cfg.port;
-    const port =
-      typeof rawPort === "number"
-        ? rawPort
-        : typeof rawPort === "string" && rawPort.trim()
-          ? parseInt(rawPort, 10)
-          : NaN;
     const feeds = Array.isArray(cfg.feeds) ? (cfg.feeds as TslFeed[]) : [];
-    return { host, port: Number.isFinite(port) && port > 0 ? port : null, feeds };
+    return { ...hostPortOf(cfg, null), feeds };
   }
 
   /** Start/stop the Ross TSL sender to match enabled + configured state. */
   private async applyRossTsl(): Promise<void> {
-    tslService.setConnectionListener((state, message) => {
-      this.setConnectionState("ross-tsl", state, message);
-      this.broadcastStates();
+    await this.applyService("ross-tsl", tslService, () => {
+      const { host, port, feeds } = this.getRossTslConfig();
+      return host && port
+        ? { connecting: `Connecting ${host}:${port}`, start: () => tslService.configure(host, port, feeds) }
+        : null;
     });
-
-    const enabled = this.states.get("ross-tsl")?.enabled ?? false;
-    const { host, port, feeds } = this.getRossTslConfig();
-    if (enabled && host && port) {
-      this.setConnectionState("ross-tsl", "connecting", `Connecting ${host}:${port}`);
-      tslService.configure(host, port, feeds);
-    } else {
-      tslService.stop();
-      this.setConnectionState("ross-tsl", "disconnected", null);
-    }
   }
 
   private async getPcoAppId(): Promise<string | null> {

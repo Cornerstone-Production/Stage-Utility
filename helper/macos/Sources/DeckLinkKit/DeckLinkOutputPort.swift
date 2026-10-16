@@ -185,10 +185,7 @@ public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
   @discardableResult
   public func open(videoMode: String?) -> State {
     queue.sync {
-      stopTimers()
-      closeHandle()
-      self.videoMode = videoMode
-      openNow(retrying: false)
+      reopen(videoMode: videoMode)
       return current
     }
   }
@@ -198,13 +195,7 @@ public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
   /// device, enabling its output, the pre-roll) takes tens of milliseconds. The
   /// owner hears how it went from `onOpened` and `onStatus`.
   public func requestOpen(videoMode: String?) {
-    queue.async { [weak self] in
-      guard let self else { return }
-      stopTimers()
-      closeHandle()
-      self.videoMode = videoMode
-      openNow(retrying: false)
-    }
+    queue.async { [weak self] in self?.reopen(videoMode: videoMode) }
   }
 
   /// Try a lost port again now: a device arrived.
@@ -260,6 +251,14 @@ public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
   }
 
   // MARK: On the queue
+
+  /// Close whatever is open and open in `videoMode`: what `open` and `requestOpen` do.
+  private func reopen(videoMode: String?) {
+    stopTimers()
+    closeHandle()
+    self.videoMode = videoMode
+    openNow(retrying: false)
+  }
 
   private enum Attempt {
     case opened(String, Frames)
@@ -446,19 +445,20 @@ public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
   }
 
   private func startPolling() {
-    let timer = DispatchSource.makeTimerSource(queue: queue)
-    timer.schedule(deadline: .now() + pollInterval, repeating: pollInterval)
-    timer.setEventHandler { [weak self] in self?.pollNow() }
-    timer.resume()
-    pollTimer = timer
+    pollTimer = repeatingTimer(every: pollInterval) { [weak self] in self?.pollNow() }
   }
 
   private func startRetrying() {
+    retryTimer = repeatingTimer(every: retryInterval) { [weak self] in self?.retryNow() }
+  }
+
+  /// A timer on `queue` that first fires after `interval` and then every `interval`.
+  private func repeatingTimer(every interval: TimeInterval, _ handler: @escaping () -> Void) -> DispatchSourceTimer {
     let timer = DispatchSource.makeTimerSource(queue: queue)
-    timer.schedule(deadline: .now() + retryInterval, repeating: retryInterval)
-    timer.setEventHandler { [weak self] in self?.retryNow() }
+    timer.schedule(deadline: .now() + interval, repeating: interval)
+    timer.setEventHandler(handler: handler)
     timer.resume()
-    retryTimer = timer
+    return timer
   }
 
   private func stopTimers() {
@@ -541,9 +541,7 @@ public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
   func fakeUnplugAndReopenInOneTurn() {
     queue.sync {
       if let handle { dl_fake_unplug(handle) }
-      stopTimers()
-      closeHandle()
-      openNow(retrying: false)
+      reopen(videoMode: videoMode)
     }
   }
   func fakeClockReadError(us: Int64) { queue.sync { if let handle { dl_fake_clock_read_error(handle, us) } } }

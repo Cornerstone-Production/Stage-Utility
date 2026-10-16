@@ -373,13 +373,11 @@ fetch_to() {
   # ceiling on the whole of it either way.
   speed=""
   if [ "$idle" -gt 0 ]; then speed="--speed-time $idle --speed-limit 1024"; fi
-  if [ "$progress" -eq 1 ]; then
-    # shellcheck disable=SC2086 # $speed is two flags and their values, meant to split
-    HTTP_CODE="$(curl -# -L --connect-timeout 10 --max-time "$max" $speed -o "$dest" -w '%{http_code}' "$url")" || rc=$?
-  else
-    # shellcheck disable=SC2086
-    HTTP_CODE="$(curl -sS -L --connect-timeout 10 --max-time "$max" $speed -o "$dest" -w '%{http_code}' "$url")" || rc=$?
-  fi
+  # A progress bar for the zip; silent, but still saying why it failed, for the rest.
+  output="-sS"
+  if [ "$progress" -eq 1 ]; then output="-#"; fi
+  # shellcheck disable=SC2086 # $output and $speed are flags and their values, meant to split
+  HTTP_CODE="$(curl $output -L --connect-timeout 10 --max-time "$max" $speed -o "$dest" -w '%{http_code}' "$url")" || rc=$?
   if [ "$rc" -ne 0 ]; then
     WHY="could not reach it (curl exit $rc)"
     return 1
@@ -742,8 +740,8 @@ install_helper() {
   stage_app
   # Apart from the device id and token write_state kept or made (a failed install
   # must not cost a Mac its id, so those stay), everything above has changed
-  # nothing on this Mac. The marker is the first other change, and it comes before the helper can possibly launch; see the note on
-  # the Chrome kiosk below.
+  # nothing on this Mac. The marker is the first other change, and it comes before
+  # the helper can possibly launch; see the note on moving off the Chrome kiosk above.
   write_kiosk_marker
   stop_helper_agent
   swap_app

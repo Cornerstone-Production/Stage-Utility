@@ -27,6 +27,9 @@ final class AppModel: ObservableObject {
   @Published private(set) var loginOffer: LoginItem.Offer = .userSwitch(on: false)
   @Published private(set) var launchAtLoginError: String?
   let version: String
+  /// outputs.json was there at launch: false only on a genuine first run. Asked after
+  /// `start()`, `hasFile` would always say yes, as the outputs are recorded there.
+  var hadStateFile: Bool { store.existedAtLoad }
   /// Called when a change in the displays leaves the menu bar covered by an output
   /// that did not cover it before: the icon is hidden, so the window has to come up.
   var onMenuBarCovered: (() -> Void)?
@@ -252,14 +255,16 @@ final class AppModel: ObservableObject {
     for d in outputs {
       let key = d.descriptor.key
       let record = ensureRecord(d.descriptor)
-      if let rt = runtimes[key] {
+      let rt: Runtime
+      if let existing = runtimes[key] {
+        rt = existing
         rt.output = d
         if let screen = d.screen { (rt.sink as? DisplaySink)?.follow(screen) }
       } else {
-        runtimes[key] = Runtime(output: d)
+        rt = Runtime(output: d)
+        runtimes[key] = rt
         Log.notice(.output, "\(d.descriptor.name) (\(d.descriptor.key)): \(record.enabled ? "on" : "off")\(d.descriptor.isMain ? ", main display" : "")")
       }
-      let rt = runtimes[key]!
       if record.enabled, rt.sink == nil { activate(key) }
       if !record.enabled, rt.sink != nil { deactivate(key) }
     }
@@ -294,13 +299,9 @@ final class AppModel: ObservableObject {
   }
 
   func setEnabled(_ key: String, _ on: Bool) {
-    guard runtimes[key] != nil else { return }
-    do {
-      try store.setEnabled(on, key: key)
-    } catch {
-      noteSaveFailure(error)
-    }
-    Log.notice(.output, "\(runtimes[key]!.descriptor.name): turned \(on ? "on" : "off") in the window")
+    guard let rt = runtimes[key] else { return }
+    save { try store.setEnabled(on, key: key) }
+    Log.notice(.output, "\(rt.descriptor.name): turned \(on ? "on" : "off") in the window")
     if on { activate(key) } else { deactivate(key) }
     // Done from the window itself, which is up: nothing to pop.
     wasMenuBarCovered = menuBarCovered
@@ -401,7 +402,7 @@ final class AppModel: ObservableObject {
 
   private func deviceId(_ rt: Runtime) -> String {
     let key = rt.descriptor.key
-    return store.record(for: key)?.deviceId(mac: identity.deviceId, key: key) ?? DeviceIdentity.deviceId(mac: identity.deviceId, key: key)
+    return OutputRecord.deviceId(of: store.record(for: key), mac: identity.deviceId, key: key)
   }
 
   // MARK: Server
@@ -415,11 +416,7 @@ final class AppModel: ObservableObject {
       rt.serverURL = reply.url
       navigate(rt)
     }
-    do {
-      try store.setBoundTo(reply.serverId, key: key)
-    } catch {
-      noteSaveFailure(error)
-    }
+    save { try store.setBoundTo(reply.serverId, key: key) }
     refresh()
   }
 
@@ -518,11 +515,7 @@ final class AppModel: ObservableObject {
         .output,
         "\(port): format \(VideoModes.effective(rt.videoMode)) -> \(VideoModes.effective(format)), from \(screen.name)")
       rt.videoMode = format
-      do {
-        try store.setVideoMode(format, key: rt.descriptor.key)
-      } catch {
-        noteSaveFailure(error)
-      }
+      save { try store.setVideoMode(format, key: rt.descriptor.key) }
       card.setVideoMode(format)
     }
     if screen.rotation != rt.rotation {
@@ -588,6 +581,16 @@ final class AppModel: ObservableObject {
     refresh()
   }
 
+  /// Make a change to the stored outputs. The change is kept in memory whether or not
+  /// the file could be written; a failure is said in the window and the log.
+  private func save(_ change: () throws -> Void) {
+    do {
+      try change()
+    } catch {
+      noteSaveFailure(error)
+    }
+  }
+
   private func noteSaveFailure(_ error: Error) {
     let text = "Output settings could not be saved: \(error.localizedDescription)"
     // The same cause again (every display change retries) is not a new line.
@@ -615,11 +618,15 @@ final class AppModel: ObservableObject {
 
   private func setNote(_ cause: String, _ text: String) {
     noteTable[cause] = text
-    notes = noteTable.sorted { $0.key < $1.key }.map(\.value)
+    publishNotes()
   }
 
   private func clearNote(_ cause: String) {
     noteTable[cause] = nil
+    publishNotes()
+  }
+
+  private func publishNotes() {
     notes = noteTable.sorted { $0.key < $1.key }.map(\.value)
   }
 

@@ -97,9 +97,7 @@ import Testing
     source.rotation = .clockwise90
     let got = Locked<CardFrameCopy?>(nil)
     source.captureNextFrame { got.value = $0 }
-    let port = DeckLinkOutputPort(
-      label: "SDI 1 (virtual)", hardware: .virtual, source: source, retryInterval: 3600, pollInterval: 3600,
-      log: LogLines().write)
+    let port = virtualPort(source, opened: Locked([]))
     port.open(videoMode: "720p59.94")
     try source.present(Self.portraitPage())
     try await eventually { got.value != nil }

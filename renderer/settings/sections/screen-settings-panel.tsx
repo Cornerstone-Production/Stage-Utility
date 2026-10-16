@@ -31,6 +31,7 @@ import { copyText } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
 import { KIND_DRAWS_TOP_BAR, screenIsControlSurface, viewShownInSidebar, viewSurface, type CreateScreenInput, type ViewSurface } from "@main/types/views";
+import { useNameDraft } from "../../lib/use-name-draft";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { NONE, chooseViewForScreen } from "../screen-role-confirm";
 import { useDevices } from "../../app/screens/use-devices";
@@ -42,7 +43,7 @@ import type { OutputHealth } from "@main/types/output-health";
 import type { MessageGroups } from "../../main/use-message-groups";
 import type { CreateScreenOutcome } from "../types";
 import {
-  DangerButton, NameInput, PanelFooter, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
+  DangerButton, NameInput, OnlineBadge, OutlineButton, PanelFooter, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
 } from "./screen-panel-parts";
 import { NewScreenBody, STEP_TITLES, type Step } from "./new-screen-body";
 import { ViewBody } from "./view-settings-body";
@@ -231,6 +232,13 @@ function Stat({ value, label }: { value: string; label: string }) {
   );
 }
 
+/** Why an output's health is blank: the helper is off, has stopped, or has not spoken yet. */
+function noHealthNote(online: boolean, reported: boolean): string {
+  if (!online) return "Offline, so nothing is being reported.";
+  if (reported) return "The helper stopped reporting.";
+  return "No report from the helper yet.";
+}
+
 /**
  * The Device section for a screen shown by one output of a Mac output helper:
  * which port, what it sends, how far it is turned, and how it is doing.
@@ -260,10 +268,7 @@ function OutputDeviceSection({ output, device, online, health, reported, actions
           <div className="truncate text-footnote font-medium text-fg">{who}</div>
           <div className="mt-px text-caption1 text-fg-subtle">{via}</div>
         </div>
-        <span className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted">
-          <span className={cn("size-2 rounded-full", online ? "bg-ok-9" : "bg-fg-faint")} />
-          {online ? "Online" : "Offline"}
-        </span>
+        <OnlineBadge online={online} />
       </div>
 
       {device.output.kind === "decklink" && (
@@ -331,15 +336,7 @@ function OutputDeviceSection({ output, device, online, health, reported, actions
           This output is dropping frames or running late.
         </p>
       )}
-      {!health && (
-        <p className="mt-2 text-caption1 text-fg-subtle">
-          {!online
-            ? "Offline, so nothing is being reported."
-            : reported
-              ? "The helper stopped reporting."
-              : "No report from the helper yet."}
-        </p>
-      )}
+      {!health && <p className="mt-2 text-caption1 text-fg-subtle">{noHealthNote(online, reported)}</p>}
 
       <div className="mt-1.5 flex items-start justify-between gap-3 py-1.5">
         <p className="min-w-0 text-caption1 text-fg-subtle">
@@ -432,8 +429,7 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
   // are about a strip only some kinds draw. An unrouted screen still shows a bar.
   const drawsTopBar = shown ? KIND_DRAWS_TOP_BAR[shown.kind] : true;
 
-  const [name, setName] = useState(output.name);
-  useResyncOn([output.name], () => setName(output.name));
+  const name = useNameDraft(output.name, (renamed) => actions.onRename(output.id, renamed));
   const [draftSize, setDraftSize] = useState<number | null>(null);
 
   /** Choosing a view is choosing what the screen is, so a view of the other kind
@@ -446,12 +442,6 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
       setView: (...choice) => actions.onSetView(output.id, ...choice),
       requestNewView: (surface) => actions.onRequestNewView(output.id, surface),
     });
-  }
-
-  function commitName() {
-    const trimmed = name.trim();
-    if (trimmed && trimmed !== output.name) actions.onRename(output.id, trimmed);
-    else setName(output.name);
   }
 
   const permanent = `${baseUrl}/${encodeURIComponent(output.id)}`;
@@ -470,24 +460,8 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
           <RoleLine surface={shown ? viewSurface(shown) : null} />
           {shown && (
             <div className="mt-2.5 flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="filled"
-                size="medium"
-                className="border border-line-strong"
-                onClick={() => actions.onSelect({ kind: "view", viewId: shown.id })}
-              >
-                View settings →
-              </Button>
-              <Button
-                type="button"
-                variant="filled"
-                size="medium"
-                className="border border-line-strong"
-                onClick={() => actions.onEditLayout(shown.id)}
-              >
-                Edit layout
-              </Button>
+              <OutlineButton onClick={() => actions.onSelect({ kind: "view", viewId: shown.id })}>View settings →</OutlineButton>
+              <OutlineButton onClick={() => actions.onEditLayout(shown.id)}>Edit layout</OutlineButton>
             </div>
           )}
           {/* Only for a console: the sidebar lists consoles, and the listing is
@@ -500,7 +474,7 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
           )}
         </Section>
         <Section title="Name and address">
-          <NameInput id="screen-name" value={name} onChange={setName} onCommit={commitName} />
+          <NameInput id="screen-name" value={name.draft} onChange={name.setDraft} onCommit={name.commit} />
           <SlugField slug={output.slug ?? ""} baseUrl={baseUrl} onSave={(s) => actions.onSetSlug(output.id, s)} />
           <div className="mt-1.5 flex items-start gap-1.5">
             {/* overflow-wrap:anywhere, not break-all: a long URL may still break,
@@ -617,12 +591,31 @@ function EmptyBody({ onAddScreen }: { onAddScreen: () => void }) {
         <PanelRightIcon className="size-[34px] text-fg-subtle" strokeWidth={1.6} aria-hidden="true" />
         <h3 className="mb-1 mt-2.5 text-callout font-semibold text-fg">Select a screen or view</h3>
         <p className="mb-3.5 max-w-[30ch] text-footnote text-fg-muted">Click any card on the left to see its settings here.</p>
-        <Button type="button" variant="filled" size="medium" className="border border-line-strong" onClick={() => onAddScreen()}>
-          + Add a screen
-        </Button>
+        <OutlineButton onClick={() => onAddScreen()}>+ Add a screen</OutlineButton>
       </div>
     </div>
   );
+}
+
+/** What the panel resolves its target to, once a screen or view that is gone is dropped. */
+type ShownTarget =
+  | Extract<PanelTarget, { kind: "new" }>
+  | { kind: "edit"; output: Output; created?: { viewMade: boolean } }
+  | { kind: "view"; view: View }
+  | null;
+
+/** The small line over the panel's title, and the title, for what it is open on. */
+function headingFor(shown: ShownTarget, step: Step): { eyebrow: string; title: string } {
+  switch (shown?.kind) {
+    case "new":
+      return { eyebrow: `New screen · step ${step} of 2`, title: STEP_TITLES[step - 1] };
+    case "edit":
+      return { eyebrow: "Screen settings", title: shown.output.name };
+    case "view":
+      return { eyebrow: "View settings", title: shown.view.name };
+    default:
+      return { eyebrow: "Settings", title: "Nothing selected" };
+  }
 }
 
 export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, messageGroups, actions, onClose }: ScreenSettingsPanelProps) {
@@ -634,7 +627,11 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
   const view = target?.kind === "view" ? views.find((v) => v.id === target.viewId) : undefined;
   // What the target resolves to. A screen or a view that is gone (removed here or
   // from another browser) leaves the panel on nothing rather than on a stale form.
-  const shownTarget = target?.kind === "new" ? target : output ? { kind: "edit" as const, output, created } : view ? { kind: "view" as const, view } : null;
+  let shownTarget: ShownTarget = null;
+  if (target?.kind === "new") shownTarget = target;
+  else if (output) shownTarget = { kind: "edit", output, created };
+  else if (view) shownTarget = { kind: "view", view };
+  const heading = headingFor(shownTarget, step);
 
   return (
     <aside
@@ -654,24 +651,8 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
     >
       <div className="flex items-start gap-3 border-b border-line px-[18px] pb-2.5 pt-3.5">
         <div className="min-w-0 flex-1">
-          <div className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
-            {shownTarget?.kind === "new"
-              ? `New screen · step ${step} of 2`
-              : shownTarget?.kind === "edit"
-                ? "Screen settings"
-                : shownTarget?.kind === "view"
-                  ? "View settings"
-                  : "Settings"}
-          </div>
-          <h3 className="mt-0.5 truncate text-callout font-semibold text-fg">
-            {shownTarget?.kind === "new"
-              ? STEP_TITLES[step - 1]
-              : shownTarget?.kind === "edit"
-                ? shownTarget.output.name
-                : shownTarget?.kind === "view"
-                  ? shownTarget.view.name
-                  : "Nothing selected"}
-          </h3>
+          <div className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">{heading.eyebrow}</div>
+          <h3 className="mt-0.5 truncate text-callout font-semibold text-fg">{heading.title}</h3>
           {shownTarget?.kind === "new" && (
             <div aria-hidden="true" className="mt-2.5 flex max-w-[360px] gap-1.5">
               {STEP_TITLES.map((t, i) => (
@@ -689,7 +670,7 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
           <XIcon className="size-4" />
         </button>
       </div>
-      {shownTarget?.kind === "edit" ? (
+      {shownTarget?.kind === "edit" && (
         <EditBody
           key={shownTarget.output.id}
           output={shownTarget.output}
@@ -701,9 +682,9 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
           canRemove={outputs.length > 1}
           actions={actions}
         />
-      ) : shownTarget?.kind === "view" ? (
-        <ViewBody key={shownTarget.view.id} view={shownTarget.view} outputs={outputs} actions={actions} />
-      ) : shownTarget?.kind === "new" ? (
+      )}
+      {shownTarget?.kind === "view" && <ViewBody key={shownTarget.view.id} view={shownTarget.view} outputs={outputs} actions={actions} />}
+      {shownTarget?.kind === "new" && (
         <NewScreenBody
           key={newScreenKey(shownTarget)}
           target={shownTarget}
@@ -714,9 +695,8 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
           setStep={setStep}
           actions={actions}
         />
-      ) : (
-        <EmptyBody onAddScreen={actions.onAddScreen} />
       )}
+      {!shownTarget && <EmptyBody onAddScreen={actions.onAddScreen} />}
     </aside>
   );
 }

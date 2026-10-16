@@ -48,12 +48,10 @@ export function FoundBanner({ onSetUp }: {
     const name = foundRow(d).name;
     // Undo is the store's, not this component's: the toast outlives the banner
     // when the operator leaves Screens, and Undo must still work then.
-    toast.info(
-      kept
-        ? `Dismissed ${name}. It is still under Not set up yet.`
-        : `Dismissed ${name}. This browser could not remember that, so it will be back after a reload. It is still under Not set up yet.`,
-      { action: { label: "Undo", onSelect: () => restoreFound([d.id]) } },
-    );
+    const forgotten = kept ? "" : " This browser could not remember that, so it will be back after a reload.";
+    toast.info(`Dismissed ${name}.${forgotten} It is still under Not set up yet.`, {
+      action: { label: "Undo", onSelect: () => restoreFound([d.id]) },
+    });
   };
   const seeAll = () =>
     document.getElementById(NOT_SET_UP_ID)?.scrollIntoView?.({ behavior: "smooth", block: "start" });

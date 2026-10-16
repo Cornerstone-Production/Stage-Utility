@@ -114,10 +114,9 @@ import { InlineSlotsEditor } from "../settings/sections/inline-slots-editor";
 import { PlanSwitcher } from "../settings/sections/plan-switcher";
 import { UnsavedWorkProvider, useUnsavedWork } from "../components/unsaved-work";
 import { canvasRowFlexClass } from "./canvas-row-fit";
+import { readHideUnconfigured, writeHideUnconfigured } from "./hide-unconfigured";
 
 // ── object metadata ──────────────────────────────────────────────────────────
-
-const HIDE_UNCONFIGURED_KEY = "layout-hide-unconfigured";
 
 // Deepest allowed object depth (top-level = 0). A container holding objects = 1;
 // a container holding containers holding leaves = 2. Keeps the editor sane.
@@ -126,6 +125,18 @@ const MAX_DEPTH = 2;
 // The canvas occupies the whole coordinate space; top-level objects are fractions of it.
 const CANVAS_FRAC: FracRect = { x: 0, y: 0, w: 1, h: 1 };
 
+/**
+ * Where a new top-level widget of this type starts. A widget with its own
+ * `defaultSize` arrives centred at it; a container a card-sized box; everything
+ * else the old default, to the digit.
+ */
+function startingRect(type: LayoutObjectType): FracRect {
+  const own = LAYOUT_OBJECTS[type].defaultSize;
+  if (own) return { x: (1 - own.w) / 2, y: (1 - own.h) / 2, ...own };
+  if (type === "container") return { x: 0.3, y: 0.32, w: 0.4, h: 0.32 };
+  return { x: 0.35, y: 0.42, w: 0.3, h: 0.16 };
+}
+
 export function makeObject(
   type: LayoutObjectType,
   z: number,
@@ -133,18 +144,10 @@ export function makeObject(
   /** True only on Home, whose grid frames every tile. See defaultStyleFor. */
   hostDrawsFrame = false,
 ): LayoutObject {
-  // A widget with its own `defaultSize` arrives centred at it; a container a
-  // card-sized box; everything else the old default, to the digit.
   // (Top-level adds are snapped to the square grid by the caller via snapRectToGrid.)
-  const own = LAYOUT_OBJECTS[type].defaultSize;
-  const base = own
-    ? { x: (1 - own.w) / 2, y: (1 - own.h) / 2, ...own }
-    : type === "container"
-      ? { x: 0.3, y: 0.32, w: 0.4, h: 0.32 }
-      : { x: 0.35, y: 0.42, w: 0.3, h: 0.16 };
   return {
     id: uid(),
-    ...base,
+    ...startingRect(type),
     ...geom,
     z,
     config: defaultConfig(type),
@@ -1397,9 +1400,7 @@ export function LayoutEditor({
   // so a set-up-but-disconnected integration's objects stay available.
   const configuredIntegrations = useConfiguredIntegrations();
   // Opt-in: hide palette objects whose integration isn't set up (default off).
-  const [hideUnconfigured, setHideUnconfigured] = useState(
-    () => localStorage.getItem(HIDE_UNCONFIGURED_KEY) === "1",
-  );
+  const [hideUnconfigured, setHideUnconfigured] = useState(() => readHideUnconfigured());
 
   // The palette and the right-click menu's "Add object" submenu offer the SAME
   // set, filtered by the same rule. Two lists that could disagree about which
@@ -1439,7 +1440,7 @@ export function LayoutEditor({
   const toggleHideUnconfigured = useCallback(() => {
     setHideUnconfigured((v) => {
       const next = !v;
-      try { localStorage.setItem(HIDE_UNCONFIGURED_KEY, next ? "1" : "0"); } catch { /* ignore */ }
+      writeHideUnconfigured(next);
       return next;
     });
   }, []);

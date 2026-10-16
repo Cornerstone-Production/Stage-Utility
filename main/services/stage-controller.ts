@@ -20,8 +20,9 @@ import {
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
-import { screenIsControlSurface, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
+import { screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
 import { clamp } from "./clamp.js";
+import { plural } from "./plural.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
@@ -218,13 +219,20 @@ export class SlotsNotFoundError extends Error {
 }
 
 /** One write in a multi-write screen change, and how to take it back. */
-export interface ScreenStep {
+interface ScreenStep {
   label: string;
   run: () => Promise<unknown>;
   /** Put the step back. Runs even for the step that failed, so it must be safe
    *  when `run` did nothing: answer `false` then, and it is not reported as
    *  having undone anything. */
   undo?: () => Promise<unknown>;
+}
+
+/** What a failed screen write says about taking its steps back. */
+function undoSummary(rolledBack: readonly string[], notRolledBack: readonly string[]): string {
+  if (notRolledBack.length > 0) return `Part of it could not be undone: ${notRolledBack.join(", ")}.`;
+  if (rolledBack.length > 0) return `Undone: ${rolledBack.join(", ")}.`;
+  return "Nothing was changed.";
 }
 
 /**
@@ -241,23 +249,21 @@ export class ScreenWriteError extends Error {
     readonly rolledBack: string[],
     readonly notRolledBack: string[],
   ) {
-    super(
-      `${what}: could not ${failed} (${reason}). ` +
-        (notRolledBack.length > 0
-          ? `Part of it could not be undone: ${notRolledBack.join(", ")}.`
-          : rolledBack.length > 0
-            ? `Undone: ${rolledBack.join(", ")}.`
-            : "Nothing was changed."),
-    );
+    super(`${what}: could not ${failed} (${reason}). ${undoSummary(rolledBack, notRolledBack)}`);
     this.name = "ScreenWriteError";
   }
 }
 
-export interface CreateScreenResult {
+interface CreateScreenResult {
   state: StageState;
   output: Output;
   /** The view createScreen made, when it made one. */
   createdViewId: string | null;
+}
+
+/** Screens as an error carries them, for the caller to name to the operator. */
+function namedScreens(outputs: readonly Pick<Output, "id" | "name">[]): { id: string; name: string }[] {
+  return outputs.map((o) => ({ id: o.id, name: screenName(o) }));
 }
 
 /**
@@ -758,7 +764,8 @@ export class StageController {
   }
 
   /**
-   * Give every View a surface and every Output a mode, preserving behaviour.
+   * Give every View a surface and take the role an older build stored on every
+   * Output out of the data, preserving behaviour.
    *
    * Applied on BOTH load paths — the stored one and the first-run legacy one —
    * because a migration that runs on only one of two paths is how half an
@@ -803,7 +810,7 @@ export class StageController {
     const needsFlagPatch = !alreadyCleaned || !alreadyRaised || !rolesAlreadyFromView;
     if (cleanedCount > 0) {
       console.log(
-        `[layout-defaults] ${scrub(cleanedCount)} object${scrub(cleanedCount === 1 ? "" : "s")} carried a card ground written by ` +
+        `[layout-defaults] ${scrub(plural(cleanedCount, "object"))} carried a card ground written by ` +
           "the object registry rather than chosen — a translucent one, which let the page read through the " +
           "widget, or the older #191919 card, which left one layout wearing two different cards. Replaced " +
           "with the current opaque card, once. Still editable per object in the layout editor.",
@@ -811,7 +818,7 @@ export class StageController {
     }
     if (raisedCount > 0) {
       console.log(
-        `[layout-defaults] ${scrub(raisedCount)} object${scrub(raisedCount === 1 ? "" : "s")} wore the older 8% card ` +
+        `[layout-defaults] ${scrub(plural(raisedCount, "object"))} wore the older 8% card ` +
           "border; raised to the 10% one every card now gets, once. Still editable per object in the layout editor.",
       );
     }
@@ -908,10 +915,9 @@ export class StageController {
         : [
             ...plan.notes,
             ...reused,
-            `role from view: ${plan.checked} screen${plan.checked === 1 ? "" : "s"} checked, ${plan.changed} changed` +
+            `role from view: ${plural(plan.checked, "screen")} checked, ${plan.changed} changed` +
               (plan.changed > 0
-                ? ` (${plan.consoleViewIds.length} view${plan.consoleViewIds.length === 1 ? "" : "s"} made a control surface, ` +
-                  `${made} cop${made === 1 ? "y" : "ies"} made)`
+                ? ` (${plural(plan.consoleViewIds.length, "view")} made a control surface, ${plural(made, "copy", "copies")} made)`
                 : ""),
           ];
     return { views: nextViews, outputs: nextOutputs, log };
@@ -1572,9 +1578,7 @@ export class StageController {
     calendarSources: CalendarSelection[],
     calendarTags: CalendarSelection[],
   ): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
-      throw new Error(`views:setCalendarFilters — view ${id} not found`);
-    }
+    this.requireView(id, "views:setCalendarFilters");
     const clean = (list: CalendarSelection[]): CalendarSelection[] => {
       const seen = new Set<string>();
       const out: CalendarSelection[] = [];
@@ -1586,17 +1590,11 @@ export class StageController {
       }
       return out;
     };
-    const views = this.state.views.map((v) =>
-      v.id === id ? { ...v, calendarSources: clean(calendarSources), calendarTags: clean(calendarTags) } : v,
-    );
-    console.log(
+    return this.commitViewPatch(
+      id,
+      { calendarSources: clean(calendarSources), calendarTags: clean(calendarTags) },
       `[stage-controller] setViewCalendarFilters id=${scrub(id)} calendars=${scrub(calendarSources.length)} tags=${scrub(calendarTags.length)}`,
     );
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
   }
 
   // ── ServiceCue ──────────────────────────────────────────────────────────
@@ -3133,19 +3131,35 @@ export class StageController {
     return view;
   }
 
-  async renameView(id: string, name: string): Promise<StageState> {
-    const trimmed = name.trim();
-    if (!trimmed) throw new Error("views:rename — name must be non-empty");
-    if (!this.state.views.find((v) => v.id === id)) {
-      throw new Error(`views:rename — view ${id} not found`);
-    }
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, name: trimmed } : v));
-    console.log(`[stage-controller] renameView id=${scrub(id)} name="${scrub(trimmed)}"`);
+  /** The view with this id, or a throw naming the operation (`views:rename`) that asked. */
+  private requireView(id: string, what: string): View {
+    const view = this.state.views.find((v) => v.id === id);
+    if (!view) throw new Error(`${what} — view ${id} not found`);
+    return view;
+  }
+
+  /**
+   * The one write behind every setter that changes fields on a single view: patch
+   * it, log, assign the state, save, recompute, broadcast. The views twin of
+   * commitOutputPatch, for the setters with nothing of their own to do between the
+   * save and the broadcast. The caller has already refused what it refuses and
+   * built `logLine` with scrub() on every value it carries.
+   */
+  private async commitViewPatch(id: string, patch: Partial<View>, logLine: string): Promise<StageState> {
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, ...patch } : v));
+    console.log(scrub(logLine, 400));
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();
     this.broadcast();
     return this.state;
+  }
+
+  async renameView(id: string, name: string): Promise<StageState> {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("views:rename — name must be non-empty");
+    this.requireView(id, "views:rename");
+    return this.commitViewPatch(id, { name: trimmed }, `[stage-controller] renameView id=${scrub(id)} name="${scrub(trimmed)}"`);
   }
 
   /** Change a View's kind (used by the legacy /api/displays kind alias). */
@@ -3166,8 +3180,7 @@ export class StageController {
     /** The caller has told the operator which screens this changes. */
     opts: { screensConfirmed?: boolean } = {},
   ): Promise<StageState> {
-    const view = this.state.views.find((v) => v.id === id);
-    if (!view) throw new Error(`setViewSurface — view ${id} not found`);
+    const view = this.requireView(id, "setViewSurface");
     if (surface === "console" && viewSurface(view) !== "console") this.assertCanBeControlSurface(view);
 
     if (!opts.screensConfirmed) {
@@ -3199,7 +3212,7 @@ export class StageController {
   private surfaceChangeRefusal(view: View, surface: ViewSurface): string | null {
     const shownOn = screensShowing(view.id, this.state.outputs);
     if (viewSurface(view) === surface || shownOn.length === 0) return null;
-    const names = shownOn.map((o) => `"${o.name || o.id}"`).join(", ");
+    const names = shownOn.map((o) => `"${screenName(o)}"`).join(", ");
     const them = shownOn.length === 1 ? "that screen" : "those screens";
     const consequence =
       surface === "console"
@@ -3212,10 +3225,7 @@ export class StageController {
   }
 
   async setViewKind(id: string, kind: ViewKind): Promise<StageState> {
-    const current = this.state.views.find((v) => v.id === id);
-    if (!current) {
-      throw new Error(`views:setKind — view ${id} not found`);
-    }
+    const current = this.requireView(id, "views:setKind");
     // A console is live on every screen showing it, so it may only become a kind
     // that still has something to operate.
     if (viewSurface(current) === "console") this.assertCanBeControlSurface({ ...current, kind });
@@ -3237,34 +3247,25 @@ export class StageController {
 
   /** Assign (or clear) the NDI source a View should show. Empty → null. */
   async setViewNdiSource(id: string, source: string | null): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
-      throw new Error(`views:setNdiSource — view ${id} not found`);
-    }
+    this.requireView(id, "views:setNdiSource");
     const ndiSource = source?.trim() ? source.trim() : null;
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, ndiSource } : v));
-    console.log(`[stage-controller] setViewNdiSource id=${scrub(id)} source=${scrub(ndiSource ?? "(none)")}`);
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitViewPatch(
+      id,
+      { ndiSource },
+      `[stage-controller] setViewNdiSource id=${scrub(id)} source=${scrub(ndiSource ?? "(none)")}`,
+    );
   }
 
   /** Set (or clear) a slots-View's physical-alignment config. */
   async setViewSlotsLayout(id: string, slotsLayout: SlotsLayout | null): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
-      throw new Error(`views:setSlotsLayout — view ${id} not found`);
-    }
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, slotsLayout } : v));
-    console.log(`[stage-controller] setViewSlotsLayout id=${scrub(id)} ${slotsLayout ? `${scrub(slotsLayout.displayWidthIn)}in` : "(off)"}`);
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    this.requireView(id, "views:setSlotsLayout");
+    return this.commitViewPatch(
+      id,
+      { slotsLayout },
+      `[stage-controller] setViewSlotsLayout id=${scrub(id)} ${slotsLayout ? `${scrub(slotsLayout.displayWidthIn)}in` : "(off)"}`,
+    );
   }
 
-  /** Pick which saved ServiceCue column preset a "script" View renders. */
   /**
    * Why a view could not be given this ServiceCue layout, or null. Refused rather
    * than stored: an unknown id renders as ALL columns, which looks like a working
@@ -3277,19 +3278,16 @@ export class StageController {
     return known.some((l) => l.id === serviceCueLayoutId) ? null : `no ServiceCue layout ${serviceCueLayoutId}`;
   }
 
+  /** Pick which saved ServiceCue column preset a "script" View renders. */
   async setViewServiceCueLayout(id: string, serviceCueLayoutId: string | null): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
-      throw new Error(`views:setServiceCueLayout — view ${id} not found`);
-    }
+    this.requireView(id, "views:setServiceCueLayout");
     const refused = await this.serviceCueLayoutRefusal(serviceCueLayoutId);
     if (refused) throw new Error(`views:setServiceCueLayout — ${refused}`);
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, serviceCueLayoutId } : v));
-    console.log(`[stage-controller] setViewServiceCueLayout id=${scrub(id)} → ${scrub(serviceCueLayoutId)}`);
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitViewPatch(
+      id,
+      { serviceCueLayoutId },
+      `[stage-controller] setViewServiceCueLayout id=${scrub(id)} → ${scrub(serviceCueLayoutId)}`,
+    );
   }
 
   /**
@@ -3300,16 +3298,12 @@ export class StageController {
    * time a console was flipped to a display and back.
    */
   async setViewHideChrome(id: string, hideChrome: boolean): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
-      throw new Error(`views:setHideChrome — view ${id} not found`);
-    }
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, hideChrome } : v));
-    console.log(`[stage-controller] setViewHideChrome id=${scrub(id)} → ${scrub(hideChrome ? "HIDDEN" : "shown")}`);
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    this.requireView(id, "views:setHideChrome");
+    return this.commitViewPatch(
+      id,
+      { hideChrome },
+      `[stage-controller] setViewHideChrome id=${scrub(id)} → ${scrub(hideChrome ? "HIDDEN" : "shown")}`,
+    );
   }
 
   /**
@@ -3321,16 +3315,12 @@ export class StageController {
    * console keeps its live controls, its page and its URL.
    */
   async setViewShowInSidebar(id: string, showInSidebar: boolean): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
-      throw new Error(`views:setShowInSidebar — view ${id} not found`);
-    }
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, showInSidebar } : v));
-    console.log(`[stage-controller] setViewShowInSidebar id=${scrub(id)} → ${scrub(showInSidebar ? "listed" : "HIDDEN")}`);
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    this.requireView(id, "views:setShowInSidebar");
+    return this.commitViewPatch(
+      id,
+      { showInSidebar },
+      `[stage-controller] setViewShowInSidebar id=${scrub(id)} → ${scrub(showInSidebar ? "listed" : "HIDDEN")}`,
+    );
   }
 
   /**
@@ -3342,10 +3332,7 @@ export class StageController {
    * save through — that is the deliberate "overwrite anyway" path.
    */
   async setViewLayout(id: string, layout: LayoutDTO, expectedRev?: number): Promise<StageState> {
-    const current = this.state.views.find((v) => v.id === id);
-    if (!current) {
-      throw new Error(`views:setLayout — view ${id} not found`);
-    }
+    const current = this.requireView(id, "views:setLayout");
     const rev = current.layoutRev ?? 0;
     if (expectedRev !== undefined && expectedRev !== rev) {
       throw new LayoutConflictError(id, expectedRev, rev);
@@ -3438,8 +3425,7 @@ export class StageController {
   /** duplicateView, returning the copy — see createViewRecord for why, and for
    *  `onAssigned`. */
   private async copyViewRecord(id: string, name?: string, onAssigned?: (view: View) => void): Promise<View> {
-    const src = this.state.views.find((v) => v.id === id);
-    if (!src) throw new Error(`views:duplicate — view ${id} not found`);
+    const src = this.requireView(id, "views:duplicate");
     const newId = await this.allocateViewId();
     const { copy, cloned } = this.cloneViewRecord(src, newId, name?.trim() || `${src.name} copy`);
     console.log(`[stage-controller] duplicateView ${scrub(id)} → ${scrub(newId)} "${scrub(copy.name)}"`);
@@ -3519,9 +3505,7 @@ export class StageController {
    * a screen shows it.
    */
   async deleteView(id: string, opts: { ifUnshown?: boolean } = {}): Promise<StageState> {
-    if (!this.state.views.find((v) => v.id === id)) {
-      throw new Error(`views:delete — view ${id} not found`);
-    }
+    this.requireView(id, "views:delete");
     // Home does not count. It is seeded on every install and invisible in every
     // list, so counting it turned "you cannot delete your last view" into "you
     // cannot delete Home" — a fresh install reads as 2 views, and deleting the
@@ -3531,7 +3515,7 @@ export class StageController {
     }
     if (opts.ifUnshown) {
       const showing = screensShowing(id, this.state.outputs);
-      if (showing.length > 0) throw new ViewShownError(id, showing.map((o) => ({ id: o.id, name: o.name || o.id })));
+      if (showing.length > 0) throw new ViewShownError(id, namedScreens(showing));
     }
     this.viewsBeingDeleted.add(id);
     try {
@@ -3598,7 +3582,7 @@ export class StageController {
       );
       this.state = { ...this.state, outputs };
       await settingsStore.patch({ outputs });
-      for (const o of stopped) this.logRoleFlip(o.name || o.id, false, undefined);
+      for (const o of stopped) this.logRoleFlip(screenName(o), false, undefined);
     });
     await slotsStore.removeDisplay(id);
     this.rawSlotsByView.delete(id);
@@ -3715,12 +3699,17 @@ export class StageController {
     return { state: this.state, output };
   }
 
+  /** The output with this id, or a throw naming the operation (`outputs:setView`) that asked. */
+  private requireOutput(id: string, what: string): Output {
+    const output = this.state.outputs.find((o) => o.id === id);
+    if (!output) throw new Error(`${what} — output ${id} not found`);
+    return output;
+  }
+
   async renameOutput(id: string, name: string): Promise<StageState> {
     const trimmed = name.trim();
     if (!trimmed) throw new Error("outputs:rename — name must be non-empty");
-    if (!this.state.outputs.find((o) => o.id === id)) {
-      throw new Error(`outputs:rename — output ${id} not found`);
-    }
+    this.requireOutput(id, "outputs:rename");
     return this.commitOutputPatch(
       id,
       { name: trimmed },
@@ -3788,9 +3777,7 @@ export class StageController {
    * that page instead of the display.
    */
   async setOutputSlug(id: string, slug: string): Promise<StageState> {
-    if (!this.state.outputs.find((o) => o.id === id)) {
-      throw new Error(`outputs:slug — output ${id} not found`);
-    }
+    this.requireOutput(id, "outputs:slug");
     const trimmed = slug.trim().toLowerCase();
     return this.commitOutputPatch(
       id,
@@ -3820,9 +3807,7 @@ export class StageController {
    * Companion recall, a script.
    */
   async setOutputView(id: string, viewId: string | null, opts: { expectSurface?: ViewSurface } = {}): Promise<StageState> {
-    if (!this.state.outputs.find((o) => o.id === id)) {
-      throw new Error(`outputs:setView — output ${id} not found`);
-    }
+    this.requireOutput(id, "outputs:setView");
     if (viewId !== null && !this.state.views.find((v) => v.id === viewId)) {
       throw new Error(`outputs:setView — view ${viewId} not found`);
     }
@@ -3839,7 +3824,7 @@ export class StageController {
     // operator before a screen goes live is the client's job; `expectSurface` is
     // how it makes the server hold the answer to what it asked about.
     let wasControlSurface = false;
-    let screenName = id;
+    let flippedScreenName = id;
     const state = await this.commitOutputPatch(
       id,
       { viewId },
@@ -3854,12 +3839,12 @@ export class StageController {
         if (viewId !== null) this.assertViewNotBeingDeleted(viewId);
         if (view) this.assertViewIsExpectedKind(view, opts.expectSurface);
         wasControlSurface = screenIsControlSurface(current, this.state.views);
-        screenName = current.name || current.id;
+        flippedScreenName = screenName(current);
       },
     );
     const view = viewId === null ? undefined : state.views.find((v) => v.id === viewId);
     const isControlSurface = viewIsConsole(view);
-    if (isControlSurface !== wasControlSurface) this.logRoleFlip(screenName, isControlSurface, view?.name);
+    if (isControlSurface !== wasControlSurface) this.logRoleFlip(flippedScreenName, isControlSurface, view?.name);
     return state;
   }
 
@@ -4107,7 +4092,7 @@ export class StageController {
           `[stage-controller] setViewRole view=${scrub(id)} → ${scrub(surface)} not made: the screens changed since the operator was asked ` +
             `(asked about: ${scrub([...shown].join(", ") || "none")}; now: ${scrub(changing.map((o) => o.id).join(", ") || "none")})`,
         );
-        throw new ViewScreensChangedError(id, changing.map((o) => ({ id: o.id, name: o.name || o.id })));
+        throw new ViewScreensChangedError(id, namedScreens(changing));
       }
     }
 
@@ -4124,9 +4109,9 @@ export class StageController {
     }
     console.log(
       `[stage-controller] setViewRole view=${scrub(id)} → ${scrub(surface)}, screens: ` +
-        `${scrub(changing.map((o) => `"${o.name || o.id}"`).join(", ") || "(none)")}`,
+        `${scrub(changing.map((o) => `"${screenName(o)}"`).join(", ") || "(none)")}`,
     );
-    for (const o of changing) this.logRoleFlip(o.name || o.id, surface === "console", view.name);
+    for (const o of changing) this.logRoleFlip(screenName(o), surface === "console", view.name);
     return this.state;
   }
 
@@ -4174,9 +4159,7 @@ export class StageController {
 
   /** Toggle (or set) a full black blackout on an output, independent of its View. */
   async setOutputBlackout(id: string, blackout: boolean): Promise<StageState> {
-    if (!this.state.outputs.find((o) => o.id === id)) {
-      throw new Error(`outputs:setBlackout — output ${id} not found`);
-    }
+    this.requireOutput(id, "outputs:setBlackout");
     return this.commitOutputPatch(
       id,
       { blackout },
@@ -4187,9 +4170,7 @@ export class StageController {
   /** Lock/unlock an output's kiosk chrome (hides the QR/settings + home logo links
    *  so a handed-out display link can't navigate away). */
   async setOutputLocked(id: string, locked: boolean): Promise<StageState> {
-    if (!this.state.outputs.find((o) => o.id === id)) {
-      throw new Error(`outputs:setLocked — output ${id} not found`);
-    }
+    this.requireOutput(id, "outputs:setLocked");
     return this.commitOutputPatch(
       id,
       { locked },
@@ -4201,9 +4182,7 @@ export class StageController {
    *  display: a stage-facing wall wants the strip back, another screen wants the
    *  context. Independent of the lock, which keeps the bar and strips its links. */
   async setOutputHideTopBar(id: string, hideTopBar: boolean): Promise<StageState> {
-    if (!this.state.outputs.find((o) => o.id === id)) {
-      throw new Error(`outputs:setHideTopBar — output ${id} not found`);
-    }
+    this.requireOutput(id, "outputs:setHideTopBar");
     return this.commitOutputPatch(
       id,
       { hideTopBar },
@@ -4215,9 +4194,7 @@ export class StageController {
    *  struggling Pi on WebRTC only, at the cost of any feed that needs HLS
    *  (B-frames) refusing to play here at all. */
   async setOutputAllowHls(id: string, allowHls: boolean): Promise<StageState> {
-    if (!this.state.outputs.find((o) => o.id === id)) {
-      throw new Error(`outputs:setAllowHls — output ${id} not found`);
-    }
+    this.requireOutput(id, "outputs:setAllowHls");
     return this.commitOutputPatch(
       id,
       { allowHls },
@@ -4233,9 +4210,7 @@ export class StageController {
    * whatever else is in the body.
    */
   async setOutputGroups(id: string, groups: unknown): Promise<StageState> {
-    if (!this.state.outputs.find((o) => o.id === id)) {
-      throw new Error(`outputs:setGroups — output ${id} not found`);
-    }
+    this.requireOutput(id, "outputs:setGroups");
     if (!Array.isArray(groups) || !groups.every((g) => typeof g === "string")) {
       throw new Error("outputs:setGroups — groups must be an array of group ids");
     }
@@ -4320,10 +4295,7 @@ export class StageController {
    *  a display opened with `?text=` on every boot would otherwise rewrite the
    *  settings file and log a line each time. */
   async setOutputTextSize(id: string, textSize: unknown): Promise<StageState> {
-    const current = this.state.outputs.find((o) => o.id === id);
-    if (!current) {
-      throw new Error(`outputs:setTextSize — output ${id} not found`);
-    }
+    const current = this.requireOutput(id, "outputs:setTextSize");
     if (!isStorableTextSize(textSize)) {
       throw new Error(`outputs:setTextSize — textSize must be a number from ${MIN_TEXT_SIZE} to ${MAX_TEXT_SIZE}`);
     }
@@ -4343,10 +4315,7 @@ export class StageController {
    * absent.
    */
   async setOutputRotation(id: string, rotation: unknown): Promise<StageState> {
-    const current = this.state.outputs.find((o) => o.id === id);
-    if (!current) {
-      throw new Error(`outputs:setRotation — output ${id} not found`);
-    }
+    const current = this.requireOutput(id, "outputs:setRotation");
     if (!isRotation(rotation)) {
       throw new Error(`outputs:setRotation — rotation must be one of ${ROTATIONS.join(", ")}`);
     }
@@ -4364,10 +4333,7 @@ export class StageController {
    * when the screen already has that mode, the default counting for absent.
    */
   async setOutputVideoMode(id: string, videoMode: unknown): Promise<StageState> {
-    const current = this.state.outputs.find((o) => o.id === id);
-    if (!current) {
-      throw new Error(`outputs:setVideoMode — output ${id} not found`);
-    }
+    const current = this.requireOutput(id, "outputs:setVideoMode");
     if (!isVideoMode(videoMode)) {
       throw new Error(`outputs:setVideoMode — videoMode must be one of ${VIDEO_MODES.join(", ")}`);
     }
@@ -4405,9 +4371,7 @@ export class StageController {
     if (this.state.outputs.length <= 1) {
       throw new Error("outputs:remove — cannot remove the last output");
     }
-    if (!this.state.outputs.find((o) => o.id === id)) {
-      throw new Error(`outputs:remove — output ${id} not found`);
-    }
+    this.requireOutput(id, "outputs:remove");
     console.log(`[stage-controller] removeOutput id=${scrub(id)}`);
     await this.outputWrites.enqueue(async () => {
       const outputs = this.state.outputs.filter((o) => o.id !== id);

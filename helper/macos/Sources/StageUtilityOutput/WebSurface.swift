@@ -37,7 +37,6 @@ protocol WebSurface: AnyObject {
 /// The part of loading that is the same in every engine: the address asked for, the
 /// run of failures, the reload after a wait, and what a 5xx means. The engine calls
 /// the events; this calls `navigate` and the callbacks.
-///
 @MainActor
 final class SurfaceLoader {
   var onLoadResult: (@MainActor (_ failures: Int) -> Void)?

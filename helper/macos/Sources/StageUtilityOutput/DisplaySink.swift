@@ -15,30 +15,15 @@ protocol OutputSink: AnyObject {
   /// Turn the picture, as the screen's `rotation` says.
   func setRotation(_ rotation: Rotation)
   /// Write what the output is showing to `file` as a PNG, turned the way it goes
-  /// out. `completion` gets nil on success, else why not.
+  /// out. `completion` gets what became of it.
   func writeSnapshot(to file: URL, completion: @escaping @MainActor (FrameDumpOutcome) -> Void)
 }
 
 extension OutputSink {
   /// What the engine could not set up, worded for the log and the window.
   var surfaceProblems: [String] { surface.problems }
-}
 
-/// Where a display output's window goes, and what it counts. The page itself, and
-/// everything about loading it, is the `WebSurface`, which knows nothing of windows
-/// or screens, nor which engine draws it.
-@MainActor
-protocol OutputDestination: AnyObject {
-  /// Put the surface's host view where this destination shows it.
-  func attach(_ view: NSView)
-  /// Counters since the last call, as the health post reports them.
-  func takeHealthSample() -> HealthSample
-  /// Turn the picture a quarter, half or three-quarter turn clockwise. A window
-  /// lays the page out at the turned size and turns the view; a card will turn the
-  /// frames it reads.
-  func setRotation(_ rotation: Rotation)
-  /// Stop showing and release whatever the destination holds.
-  func detach()
+  func show(url: URL) { surface.load(url) }
 }
 
 /// An output that is a display: a web surface in a borderless window on one NSScreen.
@@ -55,8 +40,6 @@ final class DisplaySink: OutputSink {
     destination.attach(surface.hostView)
   }
 
-  func show(url: URL) { surface.load(url) }
-
   func stop() {
     surface.stop()
     destination.detach()
@@ -72,6 +55,23 @@ final class DisplaySink: OutputSink {
   func writeSnapshot(to file: URL, completion: @escaping @MainActor (FrameDumpOutcome) -> Void) {
     SnapshotTurn.write(surface, turnedBy: destination.rotation, to: file) { why in
       completion(why.map(FrameDumpOutcome.failed) ?? .written)
+    }
+  }
+}
+
+/// A picture as a PNG file, which every `--dump-frames` picture is.
+enum PNGFile {
+  /// Write `image` to `file` atomically. Nil on success, else why not; `what` names
+  /// the picture in the reason. A nil `image` is one that could not be made.
+  static func write(_ image: CGImage?, to file: URL, called what: String) -> String? {
+    guard let image, let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+      return "could not encode \(what) as a PNG"
+    }
+    do {
+      try png.write(to: file, options: .atomic)
+      return nil
+    } catch {
+      return "could not write \(file.path): \(error.localizedDescription)"
     }
   }
 }
@@ -97,18 +97,7 @@ enum SnapshotTurn {
         DispatchQueue.main.async { MainActor.assumeIsolated { completion(why) } }
       }
       DispatchQueue.global(qos: .utility).async {
-        guard let turned = turned(image, by: rotation),
-          let png = NSBitmapImageRep(cgImage: turned).representation(using: .png, properties: [:])
-        else {
-          done("could not encode the snapshot as a PNG")
-          return
-        }
-        do {
-          try png.write(to: file, options: .atomic)
-          done(nil)
-        } catch {
-          done("could not write \(file.path): \(error.localizedDescription)")
-        }
+        done(PNGFile.write(turned(image, by: rotation), to: file, called: "the snapshot"))
       }
     }
   }

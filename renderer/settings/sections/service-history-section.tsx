@@ -40,6 +40,7 @@ import {
 
   isCountedItem,
 } from "./overview-data";
+import { plural } from "@main/services/plural";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -1899,8 +1900,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             <h3 className="text-body font-semibold text-fg">Recorded services</h3>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span data-list-showing className="text-caption2 text-fg-subtle">
-                Showing {fmtMonth(viewMonth ?? day?.slice(0, 7) ?? null)} · {monthServices.length}
-                {` service${monthServices.length === 1 ? "" : "s"}`}
+                Showing {fmtMonth(viewMonth ?? day?.slice(0, 7) ?? null)} · {plural(monthServices.length, "service")}
               </span>
               <ExportPopover
                 from={expFrom}
@@ -2001,7 +2001,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             // A read that FAILED says so, rather than borrowing the sentence
             // for a service that genuinely recorded no sound.
             const shownFigures = splRow === "error" ? markSoundUnavailable(figures) : figures;
-            const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
+            const itemCount = plural(s.items.length, "item");
             // Not a new ROW_COLUMNS figure \u2014 that grid dashes out anything a
             // row has nothing for, which would put a dash under "Baptized" on
             // every ordinary Sunday. A service with none gains nothing at

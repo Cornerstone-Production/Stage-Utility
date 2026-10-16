@@ -31,7 +31,7 @@
 // copy takes new ids and a slots board) and reports. A second pass over its own
 // output finds nothing, because that output carries no stored role.
 
-import { screensShowing, viewCanBeControlSurface, viewSurface, type ViewSurface } from "../types/views.js";
+import { screenName, screensShowing, viewCanBeControlSurface, viewSurface, type ViewSurface } from "../types/views.js";
 
 /** What the copy of a view made for one screen is called. */
 function copyViewName(view: Pick<View, "name">, surface: ViewSurface): string {
@@ -156,7 +156,7 @@ export function planScreenRoles(
    *  screen just made live) was live, and anything else, including nothing, was
    *  read-only. */
   const wasPanel = (o: StoredOutput): boolean => o.mode === "panel" || liveIds.has(o.id);
-  const label = (o: Output) => `"${o.name || o.id}"`;
+  const label = (o: Output) => `"${screenName(o)}"`;
 
   const copyFor = (view: View, surface: ViewSurface, screen: Output): void => {
     const key = `${view.id}|${surface}`;

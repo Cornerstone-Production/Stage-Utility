@@ -33,6 +33,15 @@ export function errorMessage(err: unknown): string {
 }
 
 /**
+ * A caught value as an Error, for a caller that hands the failure back or
+ * rejects with it: the value itself when it already is one, else an Error
+ * carrying its message.
+ */
+export function toError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(errorMessage(err));
+}
+
+/**
  * A caught FETCH failure, said usefully.
  *
  * Node's own message for every network failure is the word "fetch failed", with

@@ -23,8 +23,6 @@ using namespace dlshim;
 
 namespace {
 
-bool sameIID(REFIID a, CFUUIDBytes b) { return std::memcmp(&a, &b, sizeof(CFUUIDBytes)) == 0; }
-
 /// A CFString from the driver, as UTF-8, released.
 void takeString(CFStringRef s, char *out, size_t outLen) {
   if (outLen > 0) out[0] = 0;
@@ -52,6 +50,16 @@ dl_field fieldOf(BMDFieldDominance d) {
     default:
       return DL_FIELD_UNKNOWN;
   }
+}
+
+/// Whether `output` plays `displayMode` in 8-bit YUV, the only format the helper sends.
+bool playsYUV8(IDeckLinkOutput *output, BMDDisplayMode displayMode) {
+  BMDDisplayMode actual = bmdModeUnknown;
+  bool supported = false;
+  return output->DoesSupportVideoMode(bmdVideoConnectionUnspecified, displayMode, bmdFormat8BitYUV,
+                                      bmdNoVideoOutputConversion, bmdSupportedVideoModeDefault, &actual,
+                                      &supported) == S_OK &&
+         supported;
 }
 
 /// Which port a device is, and whether it can play out at all.
@@ -109,8 +117,6 @@ IDeckLink *findDevice(const dl_port_id &want) {
 // MARK: Completion callbacks
 
 class DeckLinkCard;
-/// When `card` finished with `frame`, on the host clock (DeckLinkCard::completedAt).
-uint64_t completionTime(DeckLinkCard *card, IDeckLinkVideoFrame *frame);
 
 /// What the driver calls back. Reference counted on its own, because the driver
 /// may hold it a moment after the output is gone; `output` is cleared first.
@@ -140,25 +146,8 @@ class CompletionSink final : public IDeckLinkVideoOutputCallback {
     return left;
   }
 
-  HRESULT ScheduledFrameCompleted(IDeckLinkVideoFrame *frame, BMDOutputFrameCompletionResult result) override {
-    Completion c = Completion::completed;
-    switch (result) {
-      case bmdOutputFrameDisplayedLate:
-        c = Completion::late;
-        break;
-      case bmdOutputFrameDropped:
-        c = Completion::dropped;
-        break;
-      case bmdOutputFrameFlushed:
-        c = Completion::flushed;
-        break;
-      default:
-        break;
-    }
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (output_ != nullptr) output_->completed(frame, c, card_ != nullptr ? completionTime(card_, frame) : 0);
-    return S_OK;
-  }
+  /// Defined after DeckLinkCard, whose completedAt it asks.
+  HRESULT ScheduledFrameCompleted(IDeckLinkVideoFrame *frame, BMDOutputFrameCompletionResult result) override;
 
   HRESULT ScheduledPlaybackHasStopped() override {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -278,7 +267,25 @@ class DeckLinkCard final : public Card {
   bool stopped_ = false;
 };
 
-uint64_t completionTime(DeckLinkCard *card, IDeckLinkVideoFrame *frame) { return card->completedAt(frame); }
+HRESULT CompletionSink::ScheduledFrameCompleted(IDeckLinkVideoFrame *frame, BMDOutputFrameCompletionResult result) {
+  Completion c = Completion::completed;
+  switch (result) {
+    case bmdOutputFrameDisplayedLate:
+      c = Completion::late;
+      break;
+    case bmdOutputFrameDropped:
+      c = Completion::dropped;
+      break;
+    case bmdOutputFrameFlushed:
+      c = Completion::flushed;
+      break;
+    default:
+      break;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (output_ != nullptr) output_->completed(frame, c, card_ != nullptr ? card_->completedAt(frame) : 0);
+  return S_OK;
+}
 
 // MARK: Open outputs and device changes
 
@@ -438,12 +445,7 @@ extern "C" dl_port_list *dl_port_list_create(void) {
             m.time_scale = scale;
           }
           m.field = fieldOf(mode->GetFieldDominance());
-          BMDDisplayMode actual = bmdModeUnknown;
-          bool supported = false;
-          m.yuv8 = output->DoesSupportVideoMode(bmdVideoConnectionUnspecified, m.display_mode, bmdFormat8BitYUV,
-                                                bmdNoVideoOutputConversion, bmdSupportedVideoModeDefault, &actual,
-                                                &supported) == S_OK &&
-                   supported;
+          m.yuv8 = playsYUV8(output, m.display_mode);
           port.modes.push_back(m);
           mode->Release();
         }
@@ -515,12 +517,7 @@ Card *enablePort(const dl_port_id &port, uint32_t displayMode, std::string &why,
   g.timeScale = scale;
   mode->Release();
 
-  BMDDisplayMode actual = bmdModeUnknown;
-  bool supported = false;
-  if (out->DoesSupportVideoMode(bmdVideoConnectionUnspecified, displayMode, bmdFormat8BitYUV,
-                                bmdNoVideoOutputConversion, bmdSupportedVideoModeDefault, &actual,
-                                &supported) != S_OK ||
-      !supported) {
+  if (!playsYUV8(out, displayMode)) {
     return fail("the port does not play " + modeCode(displayMode) + " in 8-bit YUV");
   }
   const HRESULT enabled = out->EnableVideoOutput(displayMode, bmdVideoOutputFlagDefault);
@@ -585,8 +582,6 @@ extern "C" int32_t dl_output_take_timings(dl_output *output, dl_frame_timing *ou
   if (output == nullptr || out == nullptr || capacity <= 0) return 0;
   return output->output->takeTimings(out, capacity);
 }
-
-extern "C" uint64_t dl_host_now_ns(void) { return hostNowNs(); }
 
 extern "C" bool dl_watch_devices(dl_devices_changed_fn changed, void *ctx) {
   DeviceWatch::shared().setListener(changed, ctx);

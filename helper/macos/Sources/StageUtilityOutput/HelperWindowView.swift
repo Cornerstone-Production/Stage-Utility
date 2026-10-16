@@ -8,12 +8,16 @@ import SwiftUI
 private enum Palette {
   static let window = Color(red: 0x1e / 255, green: 0x1e / 255, blue: 0x1e / 255)
   static let fg = Color(red: 0xed / 255, green: 0xed / 255, blue: 0xf0 / 255)
-  static let muted = Color(red: 0x9a / 255, green: 0x9a / 255, blue: 0xa2 / 255)
   static let subtle = Color(red: 0x63 / 255, green: 0x63 / 255, blue: 0x6b / 255)
   static let accent = Color(red: 0x6a / 255, green: 0xa6 / 255, blue: 0xdf / 255)
   static let ok = Color(red: 0x86 / 255, green: 0xef / 255, blue: 0xac / 255)
   static let warn = Color(red: 0xff / 255, green: 0xca / 255, blue: 0x16 / 255)
   static let off = Color.white.opacity(0.14)
+}
+
+private extension Text {
+  /// The window's secondary line: status, footer and version.
+  func quiet() -> Text { font(.system(size: 12)).foregroundColor(Palette.subtle) }
 }
 
 /// The mockup's 32 x 19 pill.
@@ -95,8 +99,7 @@ struct HelperWindowView: View {
       HStack(alignment: .center, spacing: 10) {
         VStack(alignment: .leading, spacing: 4) {
           Text(row.title).font(.system(size: 13, weight: .semibold)).foregroundColor(Palette.fg)
-          Text(row.status).font(.system(size: 12)).foregroundColor(Palette.subtle)
-            .fixedSize(horizontal: false, vertical: true)
+          Text(row.status).quiet().fixedSize(horizontal: false, vertical: true)
         }
         Spacer(minLength: 0)
         if row.switchable {
@@ -119,19 +122,18 @@ struct HelperWindowView: View {
         switch model.loginOffer {
         case .installed:
           // The LaunchAgent starts it; a switch here would add a second.
-          Text("Starts at login (installed)").font(.system(size: 12)).foregroundColor(Palette.subtle)
+          Text("Starts at login (installed)").quiet()
         case .unavailable:
-          Text("Open at login is not available with STAGE_UTILITY_OUTPUT_STATE_DIR")
-            .font(.system(size: 12)).foregroundColor(Palette.subtle)
+          Text("Open at login is not available with STAGE_UTILITY_OUTPUT_STATE_DIR").quiet()
         case .userSwitch(let on):
           Toggle("Open at login", isOn: Binding(get: { on }, set: { model.setLaunchAtLogin($0) }))
             .toggleStyle(PillSwitch())
             .labelsHidden()
             .accessibilityLabel("Open at login")
-          Text("Open at login").font(.system(size: 12)).foregroundColor(Palette.subtle)
+          Text("Open at login").quiet()
         }
         Spacer(minLength: 8)
-        Text("v\(model.version)").font(.system(size: 12)).foregroundColor(Palette.subtle)
+        Text("v\(model.version)").quiet()
       }
       // An agent app has no menu to quit from. Not in the mockup, kept small and quiet.
       HStack {
@@ -164,15 +166,7 @@ enum WindowSnapshot {
       return
     }
     DispatchQueue.global(qos: .utility).async {
-      guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
-        Log.error(.app, "could not encode the window as a PNG")
-        return
-      }
-      do {
-        try png.write(to: file, options: .atomic)
-      } catch {
-        Log.error(.app, "could not write \(file.path): \(error.localizedDescription)")
-      }
+      if let why = PNGFile.write(image, to: file, called: "the window") { Log.error(.app, why) }
     }
   }
 }

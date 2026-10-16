@@ -25,11 +25,7 @@ final class ProbeSocket {
       Darwin.close(fd)
       throw ProbeSocketError.system("SO_BROADCAST", e)
     }
-    var addr = sockaddr_in()
-    addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-    addr.sin_family = sa_family_t(AF_INET)
-    addr.sin_port = 0
-    addr.sin_addr.s_addr = INADDR_ANY.bigEndian
+    var addr = socketAddress(in_addr(s_addr: INADDR_ANY.bigEndian), port: 0)
     let bound = withUnsafePointer(to: &addr) {
       $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
     }
@@ -71,11 +67,7 @@ final class ProbeSocket {
     guard !closed else { return targets.map { SendFailure(target: $0.label, errno: EBADF) } }
     var failures: [SendFailure] = []
     for target in targets {
-      var addr = sockaddr_in()
-      addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-      addr.sin_family = sa_family_t(AF_INET)
-      addr.sin_port = port.bigEndian
-      addr.sin_addr = target.address
+      var addr = socketAddress(target.address, port: port)
       let sent = data.withUnsafeBytes { bytes in
         withUnsafePointer(to: &addr) {
           $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -110,19 +102,14 @@ struct ProbeTarget: Equatable, Sendable {
   /// wifi. With none found (no network at all) the limited broadcast and loopback,
   /// so a server on this same Mac still hears the probe.
   static func broadcasts() -> [ProbeTarget] {
-    var list: UnsafeMutablePointer<ifaddrs>?
-    guard getifaddrs(&list) == 0, let first = list else { return fallback }
-    defer { freeifaddrs(list) }
     var found: [ProbeTarget] = []
-    var cursor: UnsafeMutablePointer<ifaddrs>? = first
-    while let ifa = cursor {
-      defer { cursor = ifa.pointee.ifa_next }
-      let flags = Int32(ifa.pointee.ifa_flags)
+    forEachInterface { ifa in
+      let flags = Int32(ifa.ifa_flags)
       guard flags & IFF_UP != 0, flags & IFF_BROADCAST != 0, flags & IFF_LOOPBACK == 0,
-        let dst = ifa.pointee.ifa_dstaddr, dst.pointee.sa_family == sa_family_t(AF_INET)
-      else { continue }
+        let dst = ifa.ifa_dstaddr, dst.pointee.sa_family == sa_family_t(AF_INET)
+      else { return }
       let sin = dst.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
-      let target = ProbeTarget(address: sin.sin_addr, label: "\(String(cString: ifa.pointee.ifa_name)) \(text(sin.sin_addr))")
+      let target = ProbeTarget(address: sin.sin_addr, label: "\(String(cString: ifa.ifa_name)) \(text(sin.sin_addr))")
       if !found.contains(target) { found.append(target) }
     }
     return found.isEmpty ? fallback : found
@@ -161,7 +148,7 @@ struct ProbeTarget: Equatable, Sendable {
     var a = a
     var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
     inet_ntop(AF_INET, &a, &buf, socklen_t(INET_ADDRSTRLEN))
-    return String(decoding: buf.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    return String(nulTerminated: buf)
   }
 }
 
@@ -170,16 +157,11 @@ struct ProbeTarget: Equatable, Sendable {
 /// the first eight), lower-case and colon-separated like the shell agent's.
 enum HardwareAddresses {
   static func current() -> [String] {
-    var list: UnsafeMutablePointer<ifaddrs>?
-    guard getifaddrs(&list) == 0, let first = list else { return [] }
-    defer { freeifaddrs(list) }
     var found: [(name: String, mac: String)] = []
-    var cursor: UnsafeMutablePointer<ifaddrs>? = first
-    while let ifa = cursor {
-      defer { cursor = ifa.pointee.ifa_next }
-      let flags = Int32(ifa.pointee.ifa_flags)
-      guard flags & IFF_LOOPBACK == 0, let addr = ifa.pointee.ifa_addr, addr.pointee.sa_family == sa_family_t(AF_LINK) else { continue }
-      let name = String(cString: ifa.pointee.ifa_name)
+    forEachInterface { ifa in
+      let flags = Int32(ifa.ifa_flags)
+      guard flags & IFF_LOOPBACK == 0, let addr = ifa.ifa_addr, addr.pointee.sa_family == sa_family_t(AF_LINK) else { return }
+      let name = String(cString: ifa.ifa_name)
       let mac: String? = addr.withMemoryRebound(to: sockaddr_dl.self, capacity: 1) { dl in
         guard dl.pointee.sdl_alen == 6 else { return nil }
         let base = UnsafeRawPointer(dl).advanced(by: MemoryLayout<sockaddr_dl>.offset(of: \.sdl_data)! + Int(dl.pointee.sdl_nlen))
@@ -188,5 +170,28 @@ enum HardwareAddresses {
       if let mac, mac != "00:00:00:00:00:00", !found.contains(where: { $0.mac == mac }) { found.append((name, mac)) }
     }
     return found.sorted { ($0.name.hasPrefix("en") ? 0 : 1) < ($1.name.hasPrefix("en") ? 0 : 1) }.map { $0.mac }
+  }
+}
+
+/// An IPv4 socket address, with `port` in host order.
+private func socketAddress(_ address: in_addr, port: UInt16) -> sockaddr_in {
+  var addr = sockaddr_in()
+  addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+  addr.sin_family = sa_family_t(AF_INET)
+  addr.sin_port = port.bigEndian
+  addr.sin_addr = address
+  return addr
+}
+
+/// Calls `body` with each of the Mac's interface addresses (`getifaddrs`), in the
+/// order the system lists them. Nothing is called when the list cannot be read.
+private func forEachInterface(_ body: (ifaddrs) -> Void) {
+  var list: UnsafeMutablePointer<ifaddrs>?
+  guard getifaddrs(&list) == 0 else { return }
+  defer { freeifaddrs(list) }
+  var cursor = list
+  while let ifa = cursor {
+    body(ifa.pointee)
+    cursor = ifa.pointee.ifa_next
   }
 }

@@ -134,8 +134,6 @@ final class CardOutput: OutputSink {
     }
   }()
 
-  func show(url: URL) { surface.load(url) }
-
   func stop() {
     // The port first: it calls the browser from its thread, and `surface.stop()`
     // frees the browser. No fill runs after `close` returns.
@@ -247,19 +245,16 @@ enum CardDump {
   /// A UYVY frame as a PNG. Nil on success, else why not.
   static func write(_ frame: CardFrameCopy, to file: URL) -> String? {
     let rgba = UYVYDecode.rgba(frame.bytes, width: frame.width, height: frame.height, rowBytes: frame.rowBytes)
-    guard !rgba.isEmpty, let provider = CGDataProvider(data: Data(rgba) as CFData),
-      let image = CGImage(
-        width: frame.width, height: frame.height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: frame.width * 4,
-        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
-        provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent),
-      let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
-    else { return "could not encode the card's frame as a PNG" }
-    do {
-      try png.write(to: file, options: .atomic)
-      return nil
-    } catch {
-      return "could not write \(file.path): \(error.localizedDescription)"
-    }
+    let image = rgba.isEmpty ? nil : self.image(rgba: rgba, width: frame.width, height: frame.height)
+    return PNGFile.write(image, to: file, called: "the card's frame")
+  }
+
+  private static func image(rgba: [UInt8], width: Int, height: Int) -> CGImage? {
+    guard let provider = CGDataProvider(data: Data(rgba) as CFData) else { return nil }
+    return CGImage(
+      width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+      provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
   }
 }
 

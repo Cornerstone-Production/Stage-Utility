@@ -9,6 +9,7 @@
 // two machines should be reading the same strip.
 
 import { DataStore } from "./data-store.js";
+import { toError } from "./errors.js";
 
 export interface BarConfig {
   /** Item ids, in display order. Unknown ids are skipped by the renderer, so a
@@ -151,7 +152,7 @@ export const barConfigStore = {
     try {
       await store.save(cache);
     } catch (err) {
-      return err instanceof Error ? err : new Error(String(err));
+      return toError(err);
     }
     return null;
   },

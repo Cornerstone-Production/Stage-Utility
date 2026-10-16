@@ -11,6 +11,7 @@
 // in the move.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readStored, storeFailure, writeStored } from "../../../lib/safe-storage";
 
 /**
  * Who wants to know when a stored key list changes.
@@ -58,23 +59,26 @@ export function useStoredKeysVersion(storageKey: string): number {
  *  one, which is a real choice and reads back as `[]`. Callers that offer a
  *  default only to a browser that has never chosen ask this. */
 export function hasStoredChoice(storageKey: string): boolean {
-  try {
-    return localStorage.getItem(storageKey) != null;
-  } catch {
-    return false;
-  }
+  return readStored(storageKey, (raw) => raw != null, false);
 }
 
 /** Write a starting choice, but only into a browser that has never made one.
  *  Seeds a per-browser preference from the server-side setting it is taking
  *  over from, so nobody's existing selection is lost in the move. */
 export function seedStoredKeys(storageKey: string, keys: string[]): void {
-  try {
-    if (localStorage.getItem(storageKey) != null) return;
-    localStorage.setItem(storageKey, JSON.stringify(keys));
-  } catch {
-    // Private mode or a full quota. The browser simply takes the defaults.
-  }
+  // Private mode or a full quota: the browser simply takes the defaults.
+  if (hasStoredChoice(storageKey)) return;
+  writeStored(storageKey, JSON.stringify(keys));
+}
+
+/** The strings in a stored JSON list, or null when nothing is stored or it is not
+ *  a list. Throws on text that is not JSON; `readStored` turns that into its
+ *  fallback. */
+function parseKeyList(raw: string | null): string[] | null {
+  if (!raw) return null;
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed)) return null;
+  return parsed.filter((k): k is string => typeof k === "string");
 }
 
 /**
@@ -98,18 +102,11 @@ export function readStoredKeys(
   allowed: readonly string[] | null,
   fallback: string[],
 ): string[] {
-  try {
-    const raw = localStorage.getItem(storageKey);
-    if (!raw) return fallback;
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return fallback;
-    const clean = parsed.filter((k): k is string => typeof k === "string" && (allowed == null || allowed.includes(k)));
-    // An EMPTY stored list is a real choice — "show me no figures" — and is kept.
-    // It is only an unreadable or absent value that falls back.
-    return clean;
-  } catch {
-    return fallback;
-  }
+  const stored = readStored(storageKey, parseKeyList, null);
+  if (!stored) return fallback;
+  // An EMPTY stored list is a real choice — "show me no figures" — and is kept.
+  // It is only an unreadable or absent value that falls back.
+  return stored.filter((k) => allowed == null || allowed.includes(k));
 }
 
 /**
@@ -130,22 +127,16 @@ export function readStoredKeys(
  */
 export function addDefaultOnce(storageKey: string, key: string): void {
   const marker = `${storageKey}:added:${key}`;
-  try {
-    if (localStorage.getItem(marker)) return;
-    localStorage.setItem(marker, "1");
-    const raw = localStorage.getItem(storageKey);
-    // Nothing stored = this browser takes the DEFAULTS, which already carry the
-    // key. Writing a list here would freeze today's defaults for them forever.
-    if (!raw) return;
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return;
-    const keys = parsed.filter((k): k is string => typeof k === "string");
-    if (keys.includes(key)) return;
-    localStorage.setItem(storageKey, JSON.stringify([...keys, key]));
-  } catch {
-    // Private mode, a full quota, a hostile profile. The operator keeps the
-    // selection they had; nothing is lost and nothing is silently rewritten.
-  }
+  // Private mode, a full quota, a hostile profile: every step below that fails
+  // ends the run. The operator keeps the selection they had; nothing is lost and
+  // nothing is silently rewritten.
+  if (readStored(marker, (raw) => Boolean(raw), true)) return;
+  if (!writeStored(marker, "1")) return;
+  const keys = readStored(storageKey, parseKeyList, null);
+  // Nothing stored = this browser takes the DEFAULTS, which already carry the
+  // key. Writing a list here would freeze today's defaults for them forever.
+  if (!keys || keys.includes(key)) return;
+  writeStored(storageKey, JSON.stringify([...keys, key]));
 }
 
 /**
@@ -172,13 +163,10 @@ export function useStoredKeys(
   const replace = useCallback(
     (next: string[]): Error | null => {
       setKeys(next);
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(next));
-        notifyStoredKeys(storageKey);
-        return null;
-      } catch (err) {
-        return err instanceof Error ? err : new Error(String(err));
-      }
+      const failure = storeFailure(storageKey, JSON.stringify(next));
+      if (failure) return failure;
+      notifyStoredKeys(storageKey);
+      return null;
     },
     [storageKey],
   );

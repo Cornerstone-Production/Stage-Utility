@@ -35,8 +35,8 @@ export const STALLS_IN_WINDOW = 3;
  *  different things and are named separately on purpose. */
 export const CLEAR_AFTER_MS = 60_000;
 /** A window whose worst `jitterBufferMs` is strictly ABOVE this is lagging:
- *  over a second of delay held inside the screen's own browser. Held for CLEAR_AFTER_MS after the last report over it, the same
- *  hold struggling has. */
+ *  over a second of delay held inside the screen's own browser. Held for
+ *  CLEAR_AFTER_MS after the last report over it, the same hold struggling has. */
 export const LAGGING_MS = 1_000;
 
 /** A heartbeat's own cap — see parseVideoReports(). A screen reports one
@@ -82,7 +82,9 @@ export interface LagPeak {
 
 /** The larger of two figures, null only when both are. */
 function maxOrNull(a: number | null, b: number | null): number | null {
-  return a === null ? b : b === null ? a : Math.max(a, b);
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.max(a, b);
 }
 
 /** The one sentence the Screens card, the `[video]` lagging line and the docs
@@ -304,9 +306,9 @@ function isBadWindow(totals: Totals): boolean {
 }
 
 /** Whether a sticky flag reads true AT `at`, given the last time its own
- *  check was bad — the one place record(), sweep() and snapshot() do this for
- *  BOTH flags (struggling off `lastBadAt`, lagging off `lastLaggingAt`), so
- *  they can never drift on what "held for CLEAR_AFTER_MS" means. */
+ *  check was bad (`Sticky.lastBadAt`) — the one place record(), sweep() and
+ *  snapshot() do this for BOTH flags, so they can never drift on what "held for
+ *  CLEAR_AFTER_MS" means. */
 function isHeldAt(lastBadAt: number | null, at: number): boolean {
   return lastBadAt !== null && at - lastBadAt < CLEAR_AFTER_MS;
 }
@@ -550,7 +552,8 @@ export class PlaybackHealth {
     for (const [outputId, byFeed] of this.pairs) {
       for (const [feedId, pair] of byFeed) {
         if (now - pair.reportedAt >= WINDOW_MS) continue;
-        const totals = sumSamples(this.pruneSamples(pair.samples, now));
+        const inWindow = this.pruneSamples(pair.samples, now);
+        const totals = sumSamples(inWindow);
         // Recomputed fresh, the same way each flag itself always is — never a
         // bare read of the stored episode, which would still show a stale
         // peak for however long it takes the NEXT record() call to notice
@@ -558,7 +561,7 @@ export class PlaybackHealth {
         const struggling = isHeldAt(pair.struggle.lastBadAt, now);
         const lagging = isHeldAt(pair.lag.lastBadAt, now);
         const struggleEpisode = struggling ? pair.struggle.episode : null;
-        const worstJitterMs = worstJitter(this.pruneSamples(pair.samples, now));
+        const worstJitterMs = worstJitter(inWindow);
         out.push({
           outputId,
           feedId,

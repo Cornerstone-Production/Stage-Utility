@@ -35,6 +35,7 @@ import { cn } from "../../../lib/cn";
 import { errorMessage } from "@main/services/errors";
 import { invoke } from "../../../lib/api";
 import { logToServer } from "../../../lib/client-log";
+import { readStored, writeStored } from "../../../lib/safe-storage";
 import { HistoryChart, useStoredKeys, type ChartMilestone, type StripHover } from "../history-chart";
 import { Skeleton, toast } from "../../../components/ui";
 import type { ChartSeries } from "../history-chart/geometry";
@@ -62,6 +63,7 @@ import {
   type TrendMeasure,
   type TrendRecording,
 } from "./trends";
+import { plural } from "@main/services/plural";
 
 /** The range choice, per browser — a view preference, like every other one in
  *  this module. A stored value that is not one of the offered ranges is
@@ -81,34 +83,20 @@ const MEASURES = [
 ];
 
 function storedMeasure(): TrendMeasure {
-  try {
-    return localStorage.getItem(MEASURE_KEY) === "sound" ? "sound" : "attendance";
-  } catch {
-    return "attendance";
-  }
-}
-
-/** Keep a view preference, or carry on without it. Private mode and a full
- *  quota both throw; the choice then holds for this visit and reverts next
- *  time, which is the state the operator was already in. */
-function remember(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    /* nothing is lost */
-  }
+  return readStored<TrendMeasure>(MEASURE_KEY, (raw) => (raw === "sound" ? "sound" : "attendance"), "attendance");
 }
 
 function storedRange(): RangeWeeks {
-  try {
-    const raw = localStorage.getItem(RANGE_KEY) ?? "";
-    // The stored value is the choice's own spelling — "8" or "all" — so a
-    // browser that kept "16" from before All existed still reads as 16.
-    const hit = (RANGE_WEEKS as readonly (number | string)[]).find((w) => String(w) === raw);
-    return (hit as RangeWeeks | undefined) ?? DEFAULT_RANGE_WEEKS;
-  } catch {
-    return DEFAULT_RANGE_WEEKS;
-  }
+  return readStored<RangeWeeks>(
+    RANGE_KEY,
+    (stored) => {
+      // The stored value is the choice's own spelling — "8" or "all" — so a
+      // browser that kept "16" from before All existed still reads as 16.
+      const hit = (RANGE_WEEKS as readonly (number | string)[]).find((w) => String(w) === (stored ?? ""));
+      return (hit as RangeWeeks | undefined) ?? DEFAULT_RANGE_WEEKS;
+    },
+    DEFAULT_RANGE_WEEKS,
+  );
 }
 
 /** Every drawn line on this chart is a PEER — one service type against
@@ -182,7 +170,7 @@ function fmtDayShort(day: string): string {
  * show in full.
  */
 export function basisLabel(priorServices: number): string {
-  return `${priorServices} prior service${priorServices === 1 ? "" : "s"}`;
+  return plural(priorServices, "prior service");
 }
 
 /** Round to a measure's own precision. */
@@ -322,12 +310,14 @@ export function TrendsCard({
 
   function pickRange(next: RangeWeeks) {
     setWeeks(next);
-    remember(RANGE_KEY, String(next));
+    // Private mode and a full quota both refuse: the choice then holds for this
+    // visit and reverts next time, which is the state the operator was already in.
+    writeStored(RANGE_KEY, String(next));
   }
 
   function pickMeasure(next: TrendMeasure) {
     setMeasure(next);
-    remember(MEASURE_KEY, next);
+    writeStored(MEASURE_KEY, next);
   }
 
   const sound = measure === "sound";

@@ -8,6 +8,7 @@
 // The `.dark` class on <html> drives the Radix color scales.
 
 import { useEffect, useState } from "react";
+import { readStored, writeStored } from "./safe-storage";
 
 /** Order is the order they render in the pill. */
 export const THEME_MODES = ["light", "system", "dark"] as const;
@@ -24,15 +25,10 @@ function isThemeMode(v: unknown): v is ThemeMode {
 }
 
 function storedMode(): ThemeMode {
-  try {
-    const raw = localStorage.getItem(THEME_STORAGE_KEY);
-    if (isThemeMode(raw)) return raw;
-  } catch {
-    // localStorage unavailable (private mode etc.) — fall through to system.
-  }
-  // No stored choice means the app has always followed the OS, so an install that
-  // predates this option keeps the behaviour it already had.
-  return "system";
+  // No stored choice — or no storage at all (private mode etc.) — means the app
+  // has always followed the OS, so an install that predates this option keeps the
+  // behaviour it already had.
+  return readStored<ThemeMode>(THEME_STORAGE_KEY, (raw) => (isThemeMode(raw) ? raw : "system"), "system");
 }
 
 export function useTheme() {
@@ -58,11 +54,9 @@ export function useTheme() {
 
   function setMode(next: ThemeMode) {
     setModeState(next);
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, next);
-    } catch {
-      // Theme still applies for this session; it just will not survive a reload.
-    }
+    // When storage refuses, the theme still applies for this session; it just
+    // will not survive a reload.
+    writeStored(THEME_STORAGE_KEY, next);
   }
 
   return { mode, isDark, setMode };

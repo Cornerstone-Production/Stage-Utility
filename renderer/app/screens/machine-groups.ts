@@ -2,10 +2,11 @@
 // machine rather than as look-alikes.
 //
 // The Mac output helper announces one device per output, with the id
-// `<the Mac's device id>.<output key>` and the Mac's hostname. Every one that is still unclaimed is a row under the
-// Mac's header, and every sibling already set up is a dimmed row beside them, so
-// "SDI 1 is Main stage left" reads next to "SDI 2 is not set up". A device with no
-// `output` is not grouped with anything and keeps the list it has always had.
+// `<the Mac's device id>.<output key>` and the Mac's hostname. Every one that is
+// still unclaimed is a row under the Mac's header, and every sibling already set
+// up is a dimmed row beside them, so "SDI 1 is Main stage left" reads next to
+// "SDI 2 is not set up". A device with no `output` is not grouped with anything
+// and keeps the list it has always had.
 
 import type { SeenDevice } from "@main/types/kiosk";
 import type { PublicDevice } from "@main/services/kiosk-devices-store";

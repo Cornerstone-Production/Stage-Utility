@@ -12,10 +12,11 @@
 //                                        built from
 //
 // A reply is checked against the stored layouts and outputs, and answered:
-//   403  the named screen is not a panel, or does not draw that widget (its routed
-//        view or one it embeds); or no screen was named and the widget follows a
-//        screen's groups; or the widget's groups miss every group the message went
-//        to (Everyone always reaches it);
+//   403  the named screen is not a control surface (its view is not a console), or
+//        does not draw that widget (its routed view or one it embeds); or no
+//        screen was named and the widget follows a screen's groups; or the
+//        widget's groups miss every group the message went to (Everyone always
+//        reaches it);
 //   404  no such message (or one cleared at midnight), or no Messages widget with
 //        that id;
 //   409  the message already holds its 20 replies;

@@ -207,7 +207,7 @@ export function summariseConnections(connections: readonly CompanionConnection[]
     total: connections.length,
     enabled: enabled.length,
     ...counts,
-    worst: counts.error > 0 ? "error" : counts.unknown > 0 ? "unknown" : "ok",
+    worst: WORST_FIRST.find((level) => counts[level] > 0) ?? "ok",
     problems,
   };
 }

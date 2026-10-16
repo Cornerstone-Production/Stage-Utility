@@ -6,25 +6,17 @@
 // too — one preference about how much chrome they want, not two.
 
 import { useState } from "react";
+import { readStored, writeStored } from "./safe-storage";
 
 export const SIDEBAR_COLLAPSED_KEY = "settings-sidebar-collapsed";
 
 export function useSidebarCollapsed() {
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  const [collapsed, setCollapsed] = useState(() => readStored(SIDEBAR_COLLAPSED_KEY, (raw) => raw === "1", false));
   function toggle() {
     setCollapsed((prev) => {
       const next = !prev;
-      try {
-        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
-      } catch {
-        // localStorage unavailable — collapse still applies for this session.
-      }
+      // Storage unavailable: the collapse still applies for this session.
+      writeStored(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
       return next;
     });
   }

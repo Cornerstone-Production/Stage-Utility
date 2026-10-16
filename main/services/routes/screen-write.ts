@@ -17,15 +17,18 @@ import { error, json } from "./context.js";
 export const CREATE_SCREEN_FIELDS = ["viewId", "newView", "slug", "showInSidebar", "expectSurface"] as const;
 
 /**
- * Why a `mode` in a body is refused, or null when the body has none. A screen has
- * no role of its own: it is a control surface when the view it shows is a
- * console. Refused rather than ignored, because an ignored field is a script
+ * Answer a body that carries a `mode` with a 400, and say whether it did. A
+ * screen has no role of its own: it is a control surface when the view it shows
+ * is a console. Refused rather than ignored, because an ignored field is a script
  * believing it made a control surface and getting a wall display.
  */
-export function modeRefusal(body: Record<string, unknown>): string | null {
-  return "mode" in body
-    ? 'body.mode is not accepted: a screen takes its role from the view it shows. Point it at a control-surface view, or create it with newView "control" ("wall" for a read-only one)'
-    : null;
+export function refuseMode(res: http.ServerResponse, body: Record<string, unknown>): boolean {
+  if (!("mode" in body)) return false;
+  error(
+    res,
+    'body.mode is not accepted: a screen takes its role from the view it shows. Point it at a control-surface view, or create it with newView "control" ("wall" for a read-only one)',
+  );
+  return true;
 }
 
 /**
@@ -34,7 +37,7 @@ export function modeRefusal(body: Record<string, unknown>): string | null {
  * wrong type is ignored, not refused). The fields added since are strict: one
  * that is present and the wrong type is a 400, not a field quietly dropped.
  *
- * A `mode` is NOT checked here: each route refuses it once, itself (modeRefusal),
+ * A `mode` is NOT checked here: each route refuses it once, itself (refuseMode),
  * because a claim naming an existing screen has no creation body to read.
  *
  * Shape only. What a value MEANS — a view that does not exist, a slug that is

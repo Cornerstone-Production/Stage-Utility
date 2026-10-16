@@ -2,13 +2,10 @@
 // (with its view, if the operator says so) and deleteView. Each is offered from more
 // than one place, so each is one function.
 
-import { screensShowing, viewIsConsole } from "@main/types/views";
+import { screenName, screensShowing, viewIsConsole } from "@main/types/views";
 import { confirm, confirmWith, toast } from "../../components/ui";
 import type { SectionHandlers } from "../types";
 import { listNames } from "../screen-role-confirm";
-
-/** A screen's name, or its id when it has none. */
-const nameOf = (o: Pick<Output, "id" | "name">): string => o.name || o.id;
 
 /** "A shows it" / "A and B show it", for a note naming screens. */
 const showVerb = (screens: readonly unknown[]): string => (screens.length > 1 ? "show" : "shows");
@@ -20,7 +17,7 @@ const showVerb = (screens: readonly unknown[]): string => (screens.length > 1 ? 
  */
 function confirmDeleteView(view: Pick<View, "name" | "surface">, shownOn: readonly Pick<Output, "id" | "name">[]): Promise<boolean> {
   const note = shownOn.length
-    ? `${listNames(shownOn.map(nameOf))} ${showVerb(shownOn)} it, and will show nothing until you pick another view.` +
+    ? `${listNames(shownOn.map(screenName))} ${showVerb(shownOn)} it, and will show nothing until you pick another view.` +
       (viewIsConsole(view) ? ` ${shownOn.length > 1 ? "Their" : "Its"} buttons stop working.` : "")
     : undefined;
   return confirm({
@@ -73,7 +70,7 @@ export async function removeScreen({ output, state, handlers }: {
     title: `Remove "${output.name}"?`,
     message: "Its address and settings go away. This cannot be undone.",
     note: view && !alone
-      ? `Its view, "${view.name}", stays: ${listNames(others.map(nameOf))} also ${showVerb(others)} it.`
+      ? `Its view, "${view.name}", stays: ${listNames(others.map(screenName))} also ${showVerb(others)} it.`
       : undefined,
     checkbox: alone
       ? {

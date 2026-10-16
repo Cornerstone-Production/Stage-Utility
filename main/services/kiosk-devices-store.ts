@@ -16,10 +16,12 @@
 
 import crypto from "node:crypto";
 
+import { sameOutput } from "./kiosk-discovery.js";
 import { announceDevices } from "./kiosk-presence.js";
 import { mergeScreen, sameScreen, screenFrom } from "./kiosk-screen-size.js";
 import type { BoundDevice, DeviceOutput, ScreenSize } from "../types/kiosk.js";
 import { DataStore } from "./data-store.js";
+import { toError } from "./errors.js";
 
 export const kioskDevicesStore = new DataStore<BoundDevice[]>("kiosk-devices.json", [], "config");
 
@@ -190,7 +192,7 @@ export function touch(
     d.os !== (seen.os ?? d.os) ||
     d.ip !== (seen.ip ?? d.ip) ||
     // A probe without `output` leaves the stored one alone.
-    (seen.output !== undefined && JSON.stringify(seen.output) !== JSON.stringify(d.output)) ||
+    (seen.output !== undefined && !sameOutput(seen.output, d.output)) ||
     macs.length !== d.macs.length ||
     macs.some((m, k) => m !== d.macs[k]);
   // lastSeen alone is deliberately not a reason to write: it changes constantly
@@ -286,7 +288,7 @@ export async function recordDisplayScreen(
     );
     return null;
   } catch (err) {
-    return err instanceof Error ? err : new Error(String(err));
+    return toError(err);
   }
 }
 

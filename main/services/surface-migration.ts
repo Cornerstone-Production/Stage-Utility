@@ -15,7 +15,8 @@
 // deliberately.
 
 import { isControl } from "../types/object-capabilities.js";
-import { screenIsControlSurface, screensShowing, viewSurface } from "../types/views.js";
+import { screenIsControlSurface, screenName, screensShowing, viewSurface } from "../types/views.js";
+import { plural } from "./plural.js";
 import type { StoredOutput } from "./screen-role-migration.js";
 
 export interface MigrationNote {
@@ -91,7 +92,7 @@ export function migrateSurfaces(
       viewId: v.id,
       viewName: v.name,
       controls,
-      outputs: bound.map((o) => o.name || o.id),
+      outputs: bound.map(screenName),
     });
     return { ...v, surface: "console" as const };
   });
@@ -111,8 +112,8 @@ export function migrationLog(result: MigrationResult): string[] {
   const displays = result.views.filter((v) => viewSurface(v) === "display").length;
   const controlSurfaces = result.outputs.filter((o) => screenIsControlSurface(o, result.views)).length;
   lines.push(
-    `${result.changed.length} view${result.changed.length === 1 ? "" : "s"} moved to console, ` +
-      `${displays} left as displays, ${controlSurfaces} screen${controlSurfaces === 1 ? "" : "s"} now control surface${controlSurfaces === 1 ? "" : "s"}`,
+    `${plural(result.changed.length, "view")} moved to console, ` +
+      `${displays} left as displays, ${plural(controlSurfaces, "screen now control surface", "screens now control surfaces")}`,
   );
   return lines;
 }

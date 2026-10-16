@@ -9,6 +9,7 @@
 // Modelled on display-presence.ts, which does the same job for kiosk pages.
 
 import { broadcast } from "./broadcaster.js";
+import { sameOutput } from "./kiosk-discovery.js";
 import { mergeScreen, sameScreen } from "./kiosk-screen-size.js";
 import { scrub } from "./scrub.js";
 import { displaySignature, FRESH_TREND, HEALTH_TTL_MS, judge, type HealthTrend } from "./output-health.js";
@@ -88,7 +89,6 @@ export function startScan(holder = "manual", ms = SCAN_WINDOW_MS, now = Date.now
 /** Close a scan early — the button's Stop, or the page unmounting. */
 export function stopScan(holder = "manual"): void {
   if (scans.delete(holder)) announce();
-
 }
 
 /**
@@ -152,8 +152,8 @@ export function recordSeen(
     !!existing.unreachable !== !!d.unreachable ||
     existing.hostname !== d.hostname ||
     // A card reporting new modes, or an output renamed, is a change a person
-    // reads on the row. Compared as JSON: it is a small plain object.
-    JSON.stringify(existing.output) !== JSON.stringify(d.output) ||
+    // reads on the row.
+    !sameOutput(existing.output, d.output) ||
     !sameScreen(existing.screen, screen);
   seen.set(d.id, { ...existing, ...d, screen, lastSeen: now });
   if (changed) announce(now);
@@ -188,13 +188,19 @@ export function recordHealth(
   return latest;
 }
 
+/** Plain code-unit order, not locale order: the same list on every box. */
+function byDeviceId(a: OutputHealth, b: OutputHealth): number {
+  if (a.deviceId < b.deviceId) return -1;
+  return a.deviceId > b.deviceId ? 1 : 0;
+}
+
 /** Health that is still a reading, by device id. */
 export function healthList(now = Date.now()): OutputHealth[] {
   const cutoff = now - HEALTH_TTL_MS;
   return [...health.values()]
     .map((h) => h.latest)
     .filter((h) => h.receivedAt > cutoff)
-    .sort((a, b) => (a.deviceId < b.deviceId ? -1 : a.deviceId > b.deviceId ? 1 : 0));
+    .sort(byDeviceId);
 }
 
 /** Drop what was reported for a device: it was released, or taken over. */
@@ -288,11 +294,6 @@ function announce(now = Date.now()): void {
   if (sig === lastSig) return;
   lastSig = sig;
   broadcast("kiosk:devices", next);
-}
-
-/** Snapshot for a client whose SSE has just opened. */
-export function kioskPresenceSnapshot(): { scanning: boolean; seen: SeenDevice[]; health: OutputHealth[] } {
-  return payload(Date.now());
 }
 
 function ensureSweep(): void {

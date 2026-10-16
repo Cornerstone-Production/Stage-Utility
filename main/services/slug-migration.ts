@@ -28,6 +28,7 @@
 
 import { RESERVED_SLUGS, RESERVED_SLUG_PREFIX, validateSlug } from "./reserved-slugs.js";
 import type { Output } from "../types/stage.js";
+import { screenName } from "../types/views.js";
 
 export interface SlugChange {
   /** The output whose alias moved. Its `/<id>` URL is unaffected. */
@@ -97,7 +98,7 @@ export function migrateReservedSlugs(outputs: readonly Output[]): SlugMigrationR
     others.delete(s);
 
     const to = freeAlternative(s, others);
-    changed.push({ outputId: o.id, outputName: o.name || o.id, from: o.slug!, to });
+    changed.push({ outputId: o.id, outputName: screenName(o), from: o.slug!, to });
     if (to) {
       taken.add(to);
       return { ...o, slug: to };

@@ -40,6 +40,7 @@ import { Sparkline } from "../history-trends/sparkline";
 import { TREND_WINDOW } from "../history-trends/trends";
 import { pctChange, pctLabel, noPriorCaption } from "../history-trends/trends-card";
 import { baptismTrends, type BaptismTrendPoint, type BaptismTrendTile } from "./trends";
+import { plural } from "@main/services/plural";
 
 /** "+4s" · "−3s" · "+5:02" · "0s" — a duration CHANGE, signed and compact
  *  under a minute rather than always "0:04". The three duration tiles compare
@@ -262,7 +263,7 @@ function Tile({
       </div>
       <Sparkline
         values={tile.recent}
-        label={`${label}, the last ${tile.recent.length} service${tile.recent.length === 1 ? "" : "s"}`}
+        label={`${label}, the last ${plural(tile.recent.length, "service")}`}
         color={color}
         width={140}
         height={32}

@@ -239,24 +239,29 @@ function squash(text) {
   };
 }
 
-/** Findings on one line for rules 1-3 and the per-line pass of rule 4. */
+/**
+ * Findings on one line for rules 1-3 and the per-line pass of rule 4. A private
+ * term finding carries `term`, its 1-based position in the list.
+ *
+ * @returns {{ message: string, term?: number }[]}
+ */
 function lineFindings(line, prepared) {
   const out = [];
   for (const m of line.matchAll(PRIVATE_IPV4)) {
     const net = m[0].split(".").slice(0, 3).join(".");
-    if (!PLACEHOLDER_NETS.includes(net) && !ALLOWED_IPV4.has(m[0])) out.push(`private IPv4 ${m[0]}`);
+    if (!PLACEHOLDER_NETS.includes(net) && !ALLOWED_IPV4.has(m[0])) out.push({ message: `private IPv4 ${m[0]}` });
   }
   for (const m of line.matchAll(EMAIL)) {
-    if (!emailAllowed(m[0], m[1])) out.push(`email address ${m[0]}`);
+    if (!emailAllowed(m[0], m[1])) out.push({ message: `email address ${m[0]}` });
   }
   for (const m of line.matchAll(HOME_PATH)) {
-    if (!PLACEHOLDER_USERS.has(m[1]) && !VARIABLE_USER.test(m[1])) out.push(`home path ${m[0]}`);
+    if (!PLACEHOLDER_USERS.has(m[1]) && !VARIABLE_USER.test(m[1])) out.push({ message: `home path ${m[0]}` });
   }
   if (prepared.count > 0) {
     // The matched text is deliberately not in the message: the list is secret.
     const lower = line.toLowerCase();
     prepared.lower.forEach((t, i) => {
-      if (lower.includes(t)) out.push(`private term #${i + 1}`);
+      if (lower.includes(t)) out.push({ message: `private term #${i + 1}`, term: i + 1 });
     });
   }
   return out;
@@ -291,16 +296,15 @@ export function scanText(file, text, prepared, skipped = []) {
   lines.forEach((line, idx) => {
     const n = idx + 1;
     const found = lineFindings(line, prepared);
-    for (const message of found) {
-      const t = /^private term #(\d+)$/.exec(message);
-      if (t) perLine.add(`${t[1]}:${n}`);
+    for (const { term } of found) {
+      if (term !== undefined) perLine.add(`${term}:${n}`);
     }
     if (line.includes(ALLOW_MARKER)) {
       allowedLines.add(n);
       if (found.length > 0) skipped.push({ file: shown, line: n });
       return;
     }
-    for (const message of found) out.push({ file: shown, line: n, message });
+    for (const { message } of found) out.push({ file: shown, line: n, message });
   });
 
   // The whole-file pass: a name wrapped across lines, or with doubled or
@@ -314,13 +318,9 @@ export function scanText(file, text, prepared, skipped = []) {
         const n = squashed.lineAt(at);
         const key = `${i + 1}:${n}`;
         if (perLine.has(key) || reported.has(key)) continue;
-        if (allowedLines.has(n)) {
-          skipped.push({ file: shown, line: n });
-          reported.add(key);
-          continue;
-        }
         reported.add(key);
-        out.push({ file: shown, line: n, message: `private term #${i + 1}` });
+        if (allowedLines.has(n)) skipped.push({ file: shown, line: n });
+        else out.push({ file: shown, line: n, message: `private term #${i + 1}` });
       }
     });
   }
@@ -334,9 +334,14 @@ export function listTrackedFiles(dir) {
   return { root: top, files: raw.split("\0").filter(Boolean) };
 }
 
-
 /** Refuse a symlink at open. Absent on Windows, where the scan is not run. */
 const NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0;
+
+/** Code-unit order, as `<` gives it: the same on every machine, unlike a locale's. */
+function compareText(a, b) {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+}
 
 /**
  * Scan tracked files and return every finding, sorted by file, line, message.
@@ -376,10 +381,7 @@ export function findViolations(root, files, terms, skipped = []) {
     if (isBinary(buf)) continue;
     findings.push(...scanText(file, buf.toString("utf8"), prepared, skipped));
   }
-  return findings.sort(
-    (a, b) =>
-      (a.file < b.file ? -1 : a.file > b.file ? 1 : 0) || a.line - b.line || (a.message < b.message ? -1 : a.message > b.message ? 1 : 0),
-  );
+  return findings.sort((a, b) => compareText(a.file, b.file) || a.line - b.line || compareText(a.message, b.message));
 }
 
 /** `path:line: message`, the one line printed per finding. */

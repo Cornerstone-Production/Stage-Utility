@@ -25,19 +25,17 @@ import { NewViewDialog } from "./new-view-dialog";
 import { ImportLayout } from "./import-layout";
 import { SCREEN_PANEL_ID, type PanelTarget } from "./screen-settings-panel";
 import { NONE, chooseViewForScreen } from "../screen-role-confirm";
-import { Pill, ViewPicker, viewGroups } from "./screen-panel-parts";
+import { OnlineBadge, Pill, ViewPicker, viewGroups } from "./screen-panel-parts";
 import { viewSurface, viewShownInSidebar, screenIsControlSurface, viewCanBeControlSurface, viewIsConsole, type ViewSurface } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
 
 import type { SectionProps } from "../types";
-import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useNameDraft } from "../../lib/use-name-draft";
 import { useSortableRow } from "../../lib/use-sortable-row";
 import { useVideoState } from "../../main/video/use-video-state";
 import { useMessageGroups, type MessageGroups } from "../../main/use-message-groups";
 import { useDisplayPresence } from "../../app/screens/use-display-presence";
-
-
 
 /** ScreenVideoHealth.episode reduced to what the card's warning box needs to
  *  say — computed once in OutputsSection from video:state's `screens` and
@@ -95,13 +93,18 @@ export function struggleSentences(struggle: Omit<ScreenStruggle, "feedId" | "fee
  * The mockup's Home/Screens `.struggle` box, in the app's own warn callout
  * classes — the exact ones the feed editor's own delay warning uses
  * (feed-editor.tsx), so the two surfaces read as one design rather than two
- * shades of amber. Its sentences are struggleSentences()'s.
+ * shades of amber. Every warning under a card's preview is drawn with it.
  */
+function WarnBox({ children }: { children: ReactNode }) {
+  return <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">{children}</p>;
+}
+
+/** A feed this screen is struggling to play. Its sentences are struggleSentences()'s. */
 function ScreenStruggleBox({ struggle }: { struggle: ScreenStruggle }) {
   return (
-    <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+    <WarnBox>
       <span className="font-semibold">Struggling with {struggle.feedName}.</span> {struggleSentences(struggle).join(" ")}
-    </p>
+    </WarnBox>
   );
 }
 
@@ -121,26 +124,25 @@ interface ScreenLag {
  */
 function ScreenLagBox({ lag }: { lag: ScreenLag }) {
   return (
-    <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+    <WarnBox>
       <span className="font-semibold">
         Holding {(lag.holdingMs / 1000).toFixed(1)} s of {lag.feedName} in its own buffer.
       </span>{" "}
       {LAGGING_ADVICE}
-    </p>
+    </WarnBox>
   );
 }
 
 /**
- * The warn box for an output of a Mac output helper that is falling behind: the
- * same callout as the two above, under the preview with them. The figures come
- * from the output's own health report, so it names the port, says what the
- * report shows and what to check.
+ * The warn box for an output of a Mac output helper that is falling behind, under
+ * the preview with the two above. The figures come from the output's own health
+ * report, so it names the port, says what the report shows and what to check.
  */
 function OutputStruggleBox({ struggle }: { struggle: OutputStruggle }) {
   return (
-    <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+    <WarnBox>
       <span className="font-semibold">Struggling on {struggle.port}.</span> {outputStruggleSentences(struggle).join(" ")}
-    </p>
+    </WarnBox>
   );
 }
 
@@ -194,9 +196,6 @@ export interface OutputRowProps {
   onRequestNewView: (surface: ViewSurface) => void;
 }
 
-// One card per display: the name reads as a title, the View it shows is the one
-// prominent control, Open + Lock stay in reach, and the URL sits quietly in the
-// footer. Refresh/Remove tuck into the overflow menu so they don't compete.
 /**
  * Where a screen's icon lives.
  *
@@ -259,6 +258,9 @@ function MenuCheckboxItem({
   );
 }
 
+/** A card's name box: it reads as the card's title until it is focused for renaming. */
+const CARD_NAME_INPUT = "h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0";
+
 /** The `data-flash-id` of one screen's card, so a screen just made can be scrolled
  *  to and outlined (see flashTarget). */
 export const screenFlashId = (outputId: string): string => `screen-${outputId}`;
@@ -317,8 +319,11 @@ function useMenuFocusHandoff() {
   };
 }
 
+// One card per display: the name reads as a title, the View it shows is the one
+// prominent control, and Open stays in reach. Refresh and Remove tuck into the
+// overflow menu so they don't compete; everything that is a setting is in the panel.
 export function OutputRow({ output, views, baseUrl, online, struggles, lags, outputStruggle, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, panelOpen, onSelect, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
-  const [editName, setEditName] = useState(output.name);
+  const name = useNameDraft(output.name, onRename);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   const [renamingView, setRenamingView] = useState(false);
   const [viewName, setViewName] = useState("");
@@ -329,19 +334,6 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
   // (a group deleted since) names nothing and draws nothing; the server takes it
   // off the screen when the group is deleted.
   const screenGroups = messageGroups.groups.filter((g) => output.groups?.includes(g.id));
-
-  useResyncOn([output.name], () => {
-    setEditName(output.name);
-  });
-
-  function handleBlur() {
-    const trimmed = editName.trim();
-    if (trimmed && trimmed !== output.name) {
-      onRename(trimmed);
-    } else {
-      setEditName(output.name);
-    }
-  }
 
   const outputUrl = `${baseUrl}/${encodeURIComponent(output.id)}`;
 
@@ -386,9 +378,9 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           <IconTint itemKey={iconKey} legacyKey={legacyIconKey} icon={MonitorIcon} color={iconColor} label={output.name} />
         </span>
         <Input
-          value={editName}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
-          onBlur={() => { setNameFocused(false); handleBlur(); }}
+          value={name.draft}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => name.setDraft(e.target.value)}
+          onBlur={() => { setNameFocused(false); name.commit(); }}
           onFocus={() => setNameFocused(true)}
           // Claim the gesture ONLY while editing. This field is flex-1, so
           // blocking unconditionally made the entire middle of the header
@@ -404,7 +396,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           // pointerdown version of this guard was inert.
           onMouseDown={(e) => { if (nameFocused) e.stopPropagation(); }}
           onTouchStart={(e) => { if (nameFocused) e.stopPropagation(); }}
-          className="h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0"
+          className={CARD_NAME_INPUT}
           aria-label="Display name"
           // A click here focuses the name for renaming AND moves the panel.
           data-retarget
@@ -415,10 +407,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           </Tooltip>
         )}
         <Tooltip label={online ? "A screen is connected to this display" : "No screen is currently connected"}>
-          <span className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted">
-            <span className={`size-2 rounded-full ${online ? "bg-ok-9" : "bg-fg-faint"}`} />
-            {online ? "Online" : "Offline"}
-          </span>
+          <OnlineBadge online={online} />
         </Tooltip>
 
         {/* Actions only: opening, renaming the view, copying the address,
@@ -674,10 +663,7 @@ function UnassignedViewCard({
   onRemove: () => void;
   onEditLayout?: () => void;
 }) {
-  const [editName, setEditName] = useState(view.name);
-  // Follow a rename that happened elsewhere (a duplicate, an import) without
-  // clobbering what is being typed here.
-  useResyncOn([view.name], () => setEditName(view.name));
+  const name = useNameDraft(view.name, onRename);
   const handoff = useMenuFocusHandoff();
   const isControl = viewIsConsole(view);
   const card = selectableCard(panelOpen, selected, onSelect);
@@ -690,17 +676,13 @@ function UnassignedViewCard({
       <div className="flex items-center gap-2 px-3 pt-2.5">
         <LayoutGridIcon className="size-4 shrink-0 text-accent" aria-hidden="true" />
         <Input
-          value={editName}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
-          onBlur={() => {
-            const next = editName.trim();
-            if (next && next !== view.name) onRename(next);
-            else setEditName(view.name);
-          }}
+          value={name.draft}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => name.setDraft(e.target.value)}
+          onBlur={name.commit}
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
           // A click here focuses the name for renaming AND moves the panel.
           data-retarget
-          className="h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0"
+          className={CARD_NAME_INPUT}
           aria-label="View name"
         />
         <Pill tone={isControl ? "accent" : "muted"}>{isControl ? "control surface" : "wall"}</Pill>

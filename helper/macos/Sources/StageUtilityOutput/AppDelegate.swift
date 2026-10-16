@@ -33,8 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // After start, so launch is decided below and only a LATER change calls this.
     model.onMenuBarCovered = { [weak self] in self?.showWindow() }
     // First run: say hello. Afterwards a menu bar app stays quiet unless asked.
-    let hasState = FileManager.default.fileExists(atPath: paths.userDir.appendingPathComponent("outputs.json").path)
-    if HelperWindowPolicy.opensAtLaunch(showWindowFlag: options.showWindow, hasStateFile: hasState, menuBarCovered: model.menuBarCovered) {
+    if HelperWindowPolicy.opensAtLaunch(
+      showWindowFlag: options.showWindow, hasStateFile: model.hadStateFile, menuBarCovered: model.menuBarCovered)
+    {
       showWindow()
     }
     // A second copy started by hand asks this one to show its window, then exits.

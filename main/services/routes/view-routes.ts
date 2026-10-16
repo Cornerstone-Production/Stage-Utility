@@ -25,11 +25,11 @@ import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
-import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewShownError, ViewSurfaceChangedError } from "../stage-controller.js";
+import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewShownError } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
 import { datedExportFilename } from "../export-filename.js";
-import { answerScreenWriteFailure, modeRefusal, readCreateScreenBody } from "./screen-write.js";
+import { answerScreenWriteFailure, readCreateScreenBody, refuseMode } from "./screen-write.js";
 
 /**
  * An untrusted body value that is a list of `{ id, name }` strings.
@@ -658,11 +658,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // which validates before it writes. A `mode` is refused: the view decides.
     if (method === "POST" && pathname === "/api/outputs") {
       const body = await readBody(req) as Record<string, unknown>;
-      const refusedMode = modeRefusal(body);
-      if (refusedMode) {
-        error(res, refusedMode);
-        return;
-      }
+      if (refuseMode(res, body)) return;
       const input = readCreateScreenBody(body);
       if ("error" in input) {
         error(res, input.error);
@@ -724,11 +720,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasRotation = "rotation" in body;
       const hasVideoMode = "videoMode" in body;
       const hasSlug = typeof body.slug === "string";
-      const refusedMode = modeRefusal(body);
-      if (refusedMode) {
-        error(res, refusedMode);
-        return;
-      }
+      if (refuseMode(res, body)) return;
       // Checked against the view in `viewId`, so it means nothing without one: an
       // ignored field is a caller believing the check ran.
       const expectSurface = body.expectSurface;
@@ -768,13 +760,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         if (hasVideoMode) state = await stageController.setOutputVideoMode(id, body.videoMode);
         if (hasSlug) state = await stageController.setOutputSlug(id, body.slug as string);
       } catch (err) {
-        if (err instanceof ViewSurfaceChangedError) {
-          // The caller has a real choice to make, as with a stale layoutRev: `surface`
-          // is what the view is now, to ask the operator again with.
-          json(res, { error: err.message, code: err.code, surface: err.surface }, 409);
-          return;
-        }
-        error(res, errorMessage(err));
+        answerScreenWriteFailure(res, err);
         return;
       }
       json(res, state);

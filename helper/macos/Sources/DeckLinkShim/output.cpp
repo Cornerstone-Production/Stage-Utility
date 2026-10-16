@@ -12,10 +12,6 @@
 
 namespace dlshim {
 
-namespace {
-bool sameIID(REFIID a, CFUUIDBytes b) { return std::memcmp(&a, &b, sizeof(CFUUIDBytes)) == 0; }
-}  // namespace
-
 void copyReason(const std::string &reason, char *why, size_t whyLen) {
   if (why == nullptr || whyLen == 0) return;
   std::snprintf(why, whyLen, "%s", reason.c_str());

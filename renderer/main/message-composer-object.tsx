@@ -61,11 +61,14 @@ export function senderName(where: {
   outputs: readonly { id: string; name: string }[];
   views: readonly { id: string; name: string }[];
 }): string {
-  const named = where.home
-    ? "Home"
-    : where.outputId !== null && !where.monitor
-      ? where.outputs.find((o) => o.id === where.outputId)?.name
-      : where.views.find((v) => v.id === where.embedChain.at(-1))?.name;
+  let named: string | undefined;
+  if (where.home) {
+    named = "Home";
+  } else if (where.outputId !== null && !where.monitor) {
+    named = where.outputs.find((o) => o.id === where.outputId)?.name;
+  } else {
+    named = where.views.find((v) => v.id === where.embedChain.at(-1))?.name;
+  }
   return senderLabel(named ?? "").slice(0, FROM_MAX) || DEFAULT_FROM;
 }
 
@@ -288,7 +291,7 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
                 width: "100%",
                 boxSizing: "border-box",
                 minHeight: "4.1em",
-                // The box grows with what is typed (see `grow`) up to this, then scrolls,
+                // The box grows with what is typed (the layout effect above) up to this, then scrolls,
                 // so no drag handle is needed and none is drawn.
                 maxHeight: "9em",
                 overflowY: "auto",

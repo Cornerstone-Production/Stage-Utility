@@ -36,6 +36,12 @@ public struct OutputRecord: Codable, Equatable {
   public func deviceId(mac: String, key: String) -> String {
     kioskIdentity == true ? mac : DeviceIdentity.deviceId(mac: mac, key: key)
   }
+
+  /// The id an output goes by, whether or not it has a record yet: a record's own,
+  /// else the one a new record would get.
+  public static func deviceId(of record: OutputRecord?, mac: String, key: String) -> String {
+    record?.deviceId(mac: mac, key: key) ?? DeviceIdentity.deviceId(mac: mac, key: key)
+  }
 }
 
 /// A Mac that was a Chrome kiosk keeps its screen when the helper takes its place.
@@ -74,6 +80,10 @@ public final class OutputStateStore {
   /// written while it is set: the file holds tokens the server has pinned, and a
   /// fresh set written over it would lock every claimed output out.
   public private(set) var readProblem: String?
+  /// Whether the file was there when the store was made: false only on a genuine
+  /// first run. Unlike `hasFile` it does not change when the store saves, so it can
+  /// be asked after the outputs have been recorded.
+  public private(set) var existedAtLoad = false
 
   public struct Unreadable: Error, CustomStringConvertible {
     public var why: String
@@ -92,11 +102,13 @@ public final class OutputStateStore {
     return (0..<24).map { _ in String(format: "%02x", UInt8.random(in: 0...255, using: &generator)) }.joined()
   }
 
+  /// Whether the file is there now.
   public var hasFile: Bool { FileManager.default.fileExists(atPath: file.path) }
 
   /// Missing is a first run. Present and unreadable, or not what it should be, is a
   /// problem to show, and nothing is written until a person has dealt with it.
   private func load() {
+    existedAtLoad = hasFile
     switch FileRead.read(file) {
     case .missing:
       return
@@ -128,10 +140,7 @@ public final class OutputStateStore {
     else {
       return try ensure(key: output.key, defaultEnabled: defaultEnabled(kind: output.kind, isMain: output.isMain))
     }
-    let record = OutputRecord(enabled: true, token: token, boundTo: nil, kioskIdentity: true)
-    records[output.key] = record
-    try save()
-    return record
+    return try add(OutputRecord(enabled: true, token: token, boundTo: nil, kioskIdentity: true), key: output.key)
   }
 
   /// The record for `key`, made on first sight with a new token and the default
@@ -139,32 +148,39 @@ public final class OutputStateStore {
   @discardableResult
   public func ensure(key: String, defaultEnabled: Bool) throws -> OutputRecord {
     if let existing = records[key] { return existing }
-    let record = OutputRecord(enabled: defaultEnabled, token: makeToken(), boundTo: nil)
+    return try add(OutputRecord(enabled: defaultEnabled, token: makeToken(), boundTo: nil), key: key)
+  }
+
+  /// Keep a new record and save. Throws when it cannot be saved; the record is kept
+  /// in memory regardless.
+  private func add(_ record: OutputRecord, key: String) throws -> OutputRecord {
     records[key] = record
     try save()
     return record
   }
 
   public func setEnabled(_ enabled: Bool, key: String) throws {
-    guard var r = records[key], r.enabled != enabled else { return }
-    r.enabled = enabled
-    records[key] = r
-    try save()
+    try update(key, \.enabled, to: enabled)
   }
 
   /// The format a card output's screen set, normalised; nil for the default.
   public func setVideoMode(_ mode: String?, key: String) throws {
-    let mode = VideoModes.normalised(mode)
-    guard var r = records[key], r.videoMode != mode else { return }
-    r.videoMode = mode
-    records[key] = r
-    try save()
+    try update(key, \.videoMode, to: VideoModes.normalised(mode))
   }
 
   public func setBoundTo(_ server: String?, key: String) throws {
-    guard var r = records[key], r.boundTo != server else { return }
-    r.boundTo = server
-    records[key] = r
+    try update(key, \.boundTo, to: server)
+  }
+
+  /// Set one field of `key`'s record and save. Nothing is done for a key with no
+  /// record, or a field that already holds `value`. Throws when it cannot be saved;
+  /// the change is kept in memory regardless.
+  private func update<Value: Equatable>(
+    _ key: String, _ field: WritableKeyPath<OutputRecord, Value>, to value: Value
+  ) throws {
+    guard var record = records[key], record[keyPath: field] != value else { return }
+    record[keyPath: field] = value
+    records[key] = record
     try save()
   }
 

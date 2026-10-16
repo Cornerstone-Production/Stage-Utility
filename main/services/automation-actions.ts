@@ -13,7 +13,7 @@ import { advanceGuard } from "./automation-pco-items.js";
 import { choiceList } from "./automation-param-validation.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { broadcast } from "./broadcaster.js";
-import { companionApi } from "./companion-api.js";
+import { companionApi, coordinateProblem } from "./companion-api.js";
 import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
 import { checkSend, groupNames, messagesService } from "./messages-service.js";
 import { plural } from "./plural.js";
@@ -239,9 +239,8 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
       // URL as a path segment, so "1.5" is a coordinate Companion cannot have and
       // "../.." is a different request altogether. companionApi.press refuses the
       // same shapes for callers that do not come through here.
-      if (![page, row, col].every((n) => Number.isInteger(n) && n >= 0)) {
-        return fail(`p${page} r${row} c${col} is not a Companion coordinate — whole numbers, none negative`);
-      }
+      const problem = coordinateProblem({ page, row, col });
+      if (problem) return fail(problem);
       // The last reconcile could not find this button in Companion's export.
       // REFUSED, not pressed: the coordinates now hold either nothing or
       // somebody else's button, and Companion answers 204 for the first and a

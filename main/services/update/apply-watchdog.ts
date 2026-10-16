@@ -16,6 +16,8 @@
 // church DSL line is not a failure, and a 20-minute apply that is still writing
 // to its log must never be declared dead.
 
+import { plural } from "../plural.js";
+
 /** No progress file change, no log growth, no result, for this long → dead. */
 export const STALL_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -46,6 +48,6 @@ export class ApplyWatchdog {
   /** How long the current silence has lasted, for the operator-facing message. */
   silentFor(now: number): string {
     const min = Math.round((now - this.lastActivityAt) / 60000);
-    return min === 1 ? "1 minute" : `${min} minutes`;
+    return plural(min, "minute");
   }
 }

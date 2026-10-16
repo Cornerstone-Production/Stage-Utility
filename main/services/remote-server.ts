@@ -94,6 +94,7 @@ import { messagesRoutes } from "./routes/messages-routes.js";
 import { messagesService } from "./messages-service.js";
 import { MESSAGES_CHANNEL } from "../types/messages.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
+import { plural } from "./plural.js";
 
 /**
  * Route modules, in dispatch order. Order is load-bearing: a module that
@@ -887,7 +888,7 @@ export class RemoteServer {
     friendly.listen(FRIENDLY_PORT, "0.0.0.0", () => {
       this.friendlyServer = friendly;
       if (this.friendlyRetryTimer) { clearTimeout(this.friendlyRetryTimer); this.friendlyRetryTimer = null; }
-      console.log(`[remote-server] also listening on 0.0.0.0:${FRIENDLY_PORT} (port-free URL)${attempt > 0 ? ` — bound after ${attempt} retr${attempt === 1 ? "y" : "ies"}` : ""}`);
+      console.log(`[remote-server] also listening on 0.0.0.0:${FRIENDLY_PORT} (port-free URL)${attempt > 0 ? ` — bound after ${plural(attempt, "retry", "retries")}` : ""}`);
     });
   }
 

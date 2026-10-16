@@ -65,7 +65,11 @@ export function ScreensRoute() {
     setOpen(false);
     // A half-filled new screen is not kept: closing creates nothing. Nor is the note
     // after one that was made.
-    setPanel((p) => (p?.kind === "new" ? null : p?.kind === "edit" ? { kind: "edit", outputId: p.outputId } : p));
+    setPanel((p) => {
+      if (p?.kind === "new") return null;
+      if (p?.kind === "edit") return { kind: "edit", outputId: p.outputId };
+      return p;
+    });
   }
 
   usePageActions(
@@ -91,7 +95,8 @@ export function ScreensRoute() {
     );
   }
 
-  const outputs = s.stageState.outputs ?? [];
+  const state = s.stageState;
+  const outputs = state.outputs ?? [];
   const newTarget = (device: PanelDevice | null): PanelTarget => ({
     kind: "new",
     device,
@@ -109,15 +114,14 @@ export function ScreensRoute() {
     s.setSelectedViewId(viewId);
     router.navigate({ to: `/screens/${viewId}/edit` as never });
   }
-  const state = s.stageState;
   function requestRemoveScreen(outputId: string) {
     const output = state.outputs?.find((o) => o.id === outputId);
     if (!output) return;
-    void removeScreen({ output, state: { outputs: state.outputs ?? [], views: state.views ?? [] }, handlers: s.handlers });
+    void removeScreen({ output, state: { outputs, views: state.views ?? [] }, handlers: s.handlers });
   }
   function requestDeleteView(viewId: string) {
     const view = state.views?.find((v) => v.id === viewId);
-    if (view) void deleteView({ view, outputs: state.outputs ?? [], handlers: s.handlers });
+    if (view) void deleteView({ view, outputs, handlers: s.handlers });
   }
   const addScreen = () => select(newTarget(null));
   const requestNewView = (outputId: string, surface: ViewSurface) => setNewViewFor({ outputId, surface });
@@ -130,7 +134,7 @@ export function ScreensRoute() {
           // opens on a new screen for the device, and nothing is made until it
           // finishes.
           banner={<FoundBanner onSetUp={(device) => select(newTarget(device))} />}
-          stageState={s.stageState}
+          stageState={state}
           handlers={s.handlers}
           serviceTypes={s.serviceTypes}
           panelOpen={open}
@@ -145,10 +149,9 @@ export function ScreensRoute() {
         {/* Screens found on the network that are not set up yet. Here rather than
             on a tab of their own: this page exists BECAUSE Views and Displays used
             to be separate tabs, and a Kiosks tab recreated that split one level
-            down. */}
-        {/* Claiming "as a new screen" opens the panel instead of creating at once:
-            a spare machine booting must not mint a screen nobody asked for, and a
-            screen made in one click had no say in its view or its name. */}
+            down. Claiming "as a new screen" opens the panel instead of creating at
+            once: a spare machine booting must not mint a screen nobody asked for,
+            and a screen made in one click had no say in its view or its name. */}
         <UnclaimedScreens outputs={outputs} onSetUpNew={(device) => select(newTarget(device))} />
       </div>
       <NewViewDialog
@@ -174,7 +177,7 @@ export function ScreensRoute() {
       />
       {open && (
         <ScreenPanelHost
-          stageState={s.stageState}
+          stageState={state}
           handlers={s.handlers}
           target={panel}
           onClose={close}

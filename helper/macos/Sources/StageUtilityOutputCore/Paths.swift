@@ -85,14 +85,14 @@ public struct MacIdentity: Equatable {
   /// What is on disk, or nil when the Mac has no device id yet. Writes nothing.
   public static func stored(paths: HelperPaths) -> MacIdentity? {
     let r = read(paths)
-    return r.identity
+    return r.hasDeviceId ? r.mac : nil
   }
 
   /// The id this Mac goes by, made and saved on first run when the installer never
   /// wrote one.
   public static func load(paths: HelperPaths, makeId: () -> String = { UUID().uuidString.lowercased() }) -> MacIdentity {
     var r = read(paths)
-    if let identity = r.identity { return identity }
+    if r.hasDeviceId { return r.mac }
     let id = makeId()
     var failure: String?
     if let blocked = r.generatedUnreadable {
@@ -107,10 +107,9 @@ public struct MacIdentity: Equatable {
         failure = "could not save a new device id to \(paths.userDir.path): \(error.localizedDescription)"
       }
     }
-    r.base.deviceId = id
-    r.base.source = .generated
-    r.base.saveError = failure
-    return r.base
+    r.mac.deviceId = id
+    r.mac.saveError = failure
+    return r.mac
   }
 
   /// A file as text: nil when missing or empty. An unreadable one is reported to
@@ -127,7 +126,10 @@ public struct MacIdentity: Equatable {
     }
   }
 
-  private static func read(_ paths: HelperPaths) -> (identity: MacIdentity?, base: MacIdentity, generatedUnreadable: String?) {
+  /// What the folders say about this Mac. Without a device id (`hasDeviceId` false:
+  /// none from the installer, none saved by the helper) `mac` has an empty one, and
+  /// `generatedUnreadable` says why when a saved id exists and could not be read.
+  private static func read(_ paths: HelperPaths) -> (mac: MacIdentity, hasDeviceId: Bool, generatedUnreadable: String?) {
     var problem: String?
     var server: String?
     var serverProblem: String?
@@ -138,25 +140,25 @@ public struct MacIdentity: Equatable {
       }
     }
     let token = text(paths.systemDir, "token", problem: &problem)
-    var base = MacIdentity(
+    var mac = MacIdentity(
       deviceId: "", source: .generated, server: server, serverProblem: serverProblem, installerToken: token, saveError: nil,
       readProblem: nil)
-    base.migratedFromKiosk = FileManager.default.fileExists(
+    mac.migratedFromKiosk = FileManager.default.fileExists(
       atPath: paths.systemDir.appendingPathComponent(KioskMigration.markerFileName).path)
     if let id = text(paths.systemDir, "device-id", problem: &problem) {
-      base.deviceId = id
-      base.source = .installer
-      base.readProblem = problem
-      return (base, base, nil)
+      mac.deviceId = id
+      mac.source = .installer
+      mac.readProblem = problem
+      return (mac, true, nil)
     }
     // Not from the installer. A previous run may already have made one.
     var generatedProblem: String?
     if let id = text(paths.userDir, MacIdentity.generatedFileName, problem: &generatedProblem) {
-      base.deviceId = id
-      base.readProblem = problem
-      return (base, base, nil)
+      mac.deviceId = id
+      mac.readProblem = problem
+      return (mac, true, nil)
     }
-    base.readProblem = problem ?? generatedProblem
-    return (nil, base, generatedProblem)
+    mac.readProblem = problem ?? generatedProblem
+    return (mac, false, generatedProblem)
   }
 }

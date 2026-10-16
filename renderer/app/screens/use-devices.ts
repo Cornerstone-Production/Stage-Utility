@@ -13,6 +13,7 @@ import type { SeenDevice } from "@main/types/kiosk";
 import type { PublicDevice } from "@main/services/kiosk-devices-store";
 import type { OutputHealth } from "@main/types/output-health";
 import { notSetUp } from "./not-set-up";
+import { toError } from "@main/services/errors";
 // One phrasing of a screen size, shared with the holding screen the operator is
 // looking at on the wall — the two must not drift apart.
 export { describeScreen } from "@main/services/kiosk-screen-size";
@@ -84,7 +85,7 @@ function read(): Promise<Error | null> {
       return null;
     })
     .catch((err: unknown): Error => {
-      const error = err instanceof Error ? err : new Error(String(err));
+      const error = toError(err);
       // The sidebar reads this on every page and has nowhere to show an error, so
       // the failure goes to /log: once when a run of failures starts, not once per
       // retry, and again if it recovers and then fails afresh.

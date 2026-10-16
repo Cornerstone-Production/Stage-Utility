@@ -33,7 +33,7 @@ import { reportActionFailure } from "./report-action-failure";
 import type { OwnScreen } from "./stage-screen";
 
 /** How many messages the widget draws. */
-export const MESSAGES_SHOWN = 3;
+const MESSAGES_SHOWN = 3;
 
 /** The newest messages that reached these groups, newest first. */
 export function shownMessages(state: MessagesState, groups: readonly string[]): StageMessage[] {
@@ -137,7 +137,7 @@ export function MessagesObject({ objectId, config, state, known, screen, interac
       >
         Messages
       </div>
-      <Feed groups={groups} state={state} known={known} shown={shown} editing={editing} interactive={interactive} now={now} />
+      <Feed groups={groups} known={known} shown={shown} editing={editing} interactive={interactive} now={now} />
       {answering && (
         <Replies
           target={shown?.[0] ?? null}
@@ -154,7 +154,6 @@ export function MessagesObject({ objectId, config, state, known, screen, interac
 /** What goes under the heading: the messages, or the one quiet line that says why not. */
 function Feed({
   groups,
-  state,
   known,
   shown,
   editing,
@@ -162,7 +161,6 @@ function Feed({
   now,
 }: {
   groups: readonly string[] | null;
-  state: MessagesState | null;
   known: boolean;
   shown: StageMessage[] | null;
   editing: boolean;
@@ -179,7 +177,7 @@ function Feed({
     return interactive ? <Quiet>Choose groups for this widget</Quiet> : null;
   }
   // Not answered yet, or the read failed: neither is "no messages".
-  if (!known || !state || !shown) return null;
+  if (!known || !shown) return null;
   if (shown.length === 0) return <Quiet>No messages for this screen&apos;s groups</Quiet>;
   return (
     // The list takes what the card has left (`flex: 1 1 0`, `minHeight: 0`) and
@@ -202,10 +200,14 @@ function Feed({
       }}
     >
       {groupBySender(shown).flatMap((run, r) =>
-        run.map((m, i) => (
+        run.map((m, i) => {
+          const startsRun = i === 0;
           // The newest message of all is the large one: the first of the first run.
-          <Item key={m.id} m={m} header={i === 0 ? run[0] : null} gap={r === 0 && i === 0 ? 0 : i === 0 ? 0.5 : 0.3} large={r === 0 && i === 0} now={now} />
-        )),
+          const newest = r === 0 && startsRun;
+          let gap = 0.3;
+          if (startsRun) gap = newest ? 0 : 0.5;
+          return <Item key={m.id} m={m} header={startsRun ? m : null} gap={gap} large={newest} now={now} />;
+        }),
       )}
     </div>
   );

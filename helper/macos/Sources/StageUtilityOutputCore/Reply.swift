@@ -27,8 +27,7 @@ public struct DiscoveryReply: Equatable {
       (obj["v"] as? NSNumber)?.intValue == 1,
       let serverId = nonEmpty(obj["serverId"], max: Probe.maxString),
       let url = nonEmpty(obj["url"], max: 512, truncate: false),
-      let parsed = URL(string: url), let scheme = parsed.scheme?.lowercased(),
-      scheme == "http" || scheme == "https", let host = parsed.host, !host.isEmpty,
+      let scheme = URL(string: url)?.scheme?.lowercased(), scheme == "http" || scheme == "https",
       EnrollURL.normalise(server: url) != nil
     else { return nil }
     return DiscoveryReply(serverId: serverId, name: nonEmpty(obj["name"], max: Probe.maxString) ?? serverId, url: url)

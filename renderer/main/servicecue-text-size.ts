@@ -11,6 +11,7 @@
 // so they live in main/types/text-size.ts and are re-exported here.
 import { clampTextSize, DEFAULT_TEXT_SIZE, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "@main/types/text-size";
 export { clampTextSize, DEFAULT_TEXT_SIZE, MAX_TEXT_SIZE, MIN_TEXT_SIZE };
+import { browserStorage, readStored, writeStored, type StorageLike } from "../lib/safe-storage";
 
 export const TEXT_SIZE_STEP = 10;
 
@@ -99,70 +100,42 @@ function legacyKeyFor(key: string): string | null {
   return key.startsWith(KEY_PREFIX) ? `${LEGACY_KEY_PREFIX}${key.slice(KEY_PREFIX.length)}` : null;
 }
 
-export interface SizeStorage {
-  getItem: (key: string) => string | null;
-  setItem: (key: string, value: string) => void;
-}
-
 /** The size remembered under `key`, or null when there is none or storage is
  *  unavailable. Read through parseTextSize, so a hand-edited value cannot put
- *  the rundown outside its range. */
-export function readStoredSize(key: string, storage: SizeStorage | null = browserStorage()): number | null {
-  if (!storage) return null;
-  try {
-    const legacy = legacyKeyFor(key);
-    // The old key only answers when the new one has nothing usable. Nothing is
-    // written here; adoptLegacyStoredSize does that, from an effect.
-    return parseTextSize(storage.getItem(key)) ?? (legacy ? parseTextSize(storage.getItem(legacy)) : null);
-  } catch {
-    // Storage that throws (blocked cookies, a locked-down kiosk profile) is the
-    // same answer as storage with nothing in it: no remembered size.
-    return null;
-  }
+ *  the rundown outside its range. Storage that throws (blocked cookies, a
+ *  locked-down kiosk profile) is the same answer as storage with nothing in it:
+ *  no remembered size. */
+export function readStoredSize(key: string, storage: StorageLike | null = browserStorage()): number | null {
+  const legacy = legacyKeyFor(key);
+  // The old key only answers when the new one has nothing usable. Nothing is
+  // written here; adoptLegacyStoredSize does that, from an effect.
+  return (
+    readStored(key, parseTextSize, null, storage) ??
+    (legacy ? readStored(legacy, parseTextSize, null, storage) : null)
+  );
 }
 
 /**
  * Copy a size remembered under the pre-rename key to the current one, when the
  * current one has none. The old key is left where it is: it is the operator's
- * setting, and it costs nothing to keep. Returns whether it copied.
+ * setting, and it costs nothing to keep. Returns whether it copied. Blocked
+ * storage copies nothing: the size is still read from the old key until a reload.
  *
  * Separate from readStoredSize because a render must not write; the hook calls
  * this from an effect.
  */
-export function adoptLegacyStoredSize(key: string, storage: SizeStorage | null = browserStorage()): boolean {
-  if (!storage) return false;
+export function adoptLegacyStoredSize(key: string, storage: StorageLike | null = browserStorage()): boolean {
   const legacy = legacyKeyFor(key);
   if (!legacy) return false;
-  try {
-    if (parseTextSize(storage.getItem(key)) != null) return false;
-    const size = parseTextSize(storage.getItem(legacy));
-    if (size == null) return false;
-    storage.setItem(key, String(size));
-    return true;
-  } catch {
-    // Blocked storage: the size is still read from the old key until a reload.
-    return false;
-  }
+  if (readStored(key, parseTextSize, null, storage) != null) return false;
+  const size = readStored(legacy, parseTextSize, null, storage);
+  if (size == null) return false;
+  return writeStored(key, String(size), storage);
 }
 
 /** Remember `size`. Returns false when storage refused, which the callers
  *  accept: the size still applies until a reload, and a blocked storage is not
  *  something an operator can act on, so it is not logged. */
-export function writeStoredSize(key: string, size: number, storage: SizeStorage | null = browserStorage()): boolean {
-  if (!storage) return false;
-  try {
-    storage.setItem(key, String(size));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function browserStorage(): SizeStorage | null {
-  try {
-    return typeof localStorage === "undefined" ? null : localStorage;
-  } catch {
-    // Merely touching `localStorage` throws where storage is blocked.
-    return null;
-  }
+export function writeStoredSize(key: string, size: number, storage: StorageLike | null = browserStorage()): boolean {
+  return writeStored(key, String(size), storage);
 }

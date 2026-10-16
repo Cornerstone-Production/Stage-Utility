@@ -46,9 +46,7 @@ enum DisplayEnumerator {
 
   /// `CGDisplayCreateUUIDFromDisplayID`, which survives reboots and re-plugging.
   static func displayUUID(of screen: NSScreen) -> String? {
-    guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
-    let displayID = CGDirectDisplayID(number.uint32Value)
-    guard let unmanaged = CGDisplayCreateUUIDFromDisplayID(displayID) else { return nil }
+    guard let displayID = displayID(of: screen), let unmanaged = CGDisplayCreateUUIDFromDisplayID(displayID) else { return nil }
     return CFUUIDCreateString(nil, unmanaged.takeRetainedValue()) as String?
   }
 
@@ -56,7 +54,12 @@ enum DisplayEnumerator {
   /// without reaching into IOKit paths that change between Macs; every other
   /// display is "Display N".
   static func connector(of screen: NSScreen) -> String? {
+    guard let displayID = displayID(of: screen) else { return nil }
+    return CGDisplayIsBuiltin(displayID) != 0 ? "Built-in" : nil
+  }
+
+  private static func displayID(of screen: NSScreen) -> CGDirectDisplayID? {
     guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
-    return CGDisplayIsBuiltin(CGDirectDisplayID(number.uint32Value)) != 0 ? "Built-in" : nil
+    return CGDirectDisplayID(number.uint32Value)
   }
 }
