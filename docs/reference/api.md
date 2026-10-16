@@ -459,7 +459,7 @@ same dispatcher.
 | POST | `/api/update/notices/dismiss` \| `/api/update/restart` \| `/api/update/auto` | Dismiss the post-update dialog / restart (the reply is the update status, plus `relaunchFailure` when this server could not arrange its own relaunch on launchd) / set the automatic-update mode and window |
 | GET | `/api/config/export` | The config snapshot as a download. Credentials are excluded |
 | POST | `/api/config/import` | Apply a snapshot, then **restart**. The reply is `{ok, applied, restarting}`, plus `relaunchFailure` (a reason) when this server could not arrange its own relaunch on launchd |
-| GET / POST | `/api/config/snapshots` | List / save a named snapshot on this machine |
+| GET / POST | `/api/config/snapshots` | List / save a named snapshot on this machine (`{name}`; saving answers `201`) |
 | POST / DELETE | `/api/config/snapshots/:id/recall` \| `/api/config/snapshots/:id` | Apply one (then restart, with the same reply as an import) / delete one |
 | GET / POST | `/api/backup/schedule` | The automatic-backup schedule |
 | POST | `/api/backup/run` | Run one now |
@@ -482,7 +482,7 @@ recorder is running. Pass `{override: true}` to go anyway.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/devices` | `{scanning, bound, seen, matches, health}`. Device secrets are stripped. A device that is one output of a Mac output helper carries its `output` (`{kind, name, port, modes?}`) in `bound` and `seen`. `health` lists what each helper output last reported, `{deviceId, fps, repeated, dropped, latencyMs?, at, receivedAt, struggling}`, for the ones still reporting; it is never stored |
-| POST | `/api/devices/scan` | Open or close the scan window. `{holder?, stop?}`: a Screens page holds one while it is open. A scan is what makes the server answer a device that is not set up; devices are listed in `seen` whether or not one is open |
+| POST | `/api/devices/scan` | Open or close the scan window. `{holder?, stop?}`: a Screens page holds one while it is open. A scan is what makes the server answer a device that is not set up; devices are listed in `seen` whether or not one is open. Answers `{scanning}` |
 | POST | `/api/devices/claim` | Bind a device to an output. `{deviceId, outputId}` binds it to that screen. With no `outputId` it makes a new screen first, from the same fields as `POST /api/outputs` (`name`, or `newName`, else the device's hostname; `viewId` (with `expectSurface`, which refuses as above with a `409` that makes no screen and binds nothing) or `newView`, `slug`, `showInSidebar`; a `mode` is `400`), validated before anything is written. Binding the device is the last step of making the screen, so a binding that fails puts back everything before it (the screen, a view made for it, a sidebar listing written on an existing view) and answers the same `500` as `POST /api/outputs`. Those fields with an `outputId` are `400`. A device already bound is not made a new screen: with no `outputId` it is `409` naming the screen it shows (moving it is a claim with that screen's `outputId`). Answers `{ok, displaced, outputId}` |
 | POST | `/api/devices/release` | Unbind it. The screen keeps its view and slug |
 | GET | `/api/devices/for-output/:outputId` | Which device drives this screen |
@@ -635,7 +635,16 @@ something to change:
 `rosstalk:targets-changed` · `scores:favourites-changed` ·
 `rosstalk:simulated` · `automation:rules` · `cues` · `cues:all` ·
 `automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` (`{scanning, seen, health}`; the Screens page and the sidebar's count of screens not set up refetch `/api/devices` on each, and a steady output's health does not push one) ·
-`display:refresh` · `settings:allowedServiceTypeIds-changed` · `baptism:rebuilt`
+`display:refresh` · `settings:allowedServiceTypeIds-changed` · `baptism:rebuilt` ·
+`update:notice` · `propresenter:status:<id>`
+
+`update:notice` is `{tag, count}`: a new release has appeared, sent once per
+release and only while a browser is subscribed to it, so a release found
+overnight with nobody connected is announced the next time somebody is. It is
+not replayed on connect. `propresenter:status:<id>` is the status of one
+ProPresenter instance other than the first, in the same shape as
+`propresenter:status`; `propresenter:instances` lists them. Ross TSL and RossTalk
+are outputs and publish no channel.
 
 `baptism:rebuilt` fires once a baptism rebuild — the Baptisms tab's own, a
 save-failure note's, or History's whole-service rebuild — actually writes a
@@ -675,7 +684,7 @@ Either channel having a subscriber starts the five-second read.
 | GET | `/api/log[?since=N]` | `{ lines, reset, latestSeq, checks }`. Same gate. Omit `since` for the whole buffer; pass the previous `latestSeq` to get only what is newer. `reset: true` means replace rather than append — you asked for everything, the buffer rolled past your cursor, or your cursor is above the newest line, which means it came from before a restart (`seq` is per-process and starts again at 1). `checks` is the health snapshot the page draws: version, uptime, app time zone, warning and error counts, and one entry per configured integration |
 | GET | `/enroll?device=…&token=…` | Where a kiosk device asks which screen it is. Redirects to that screen, or shows a holding page |
 | GET | `/kiosk/install-linux.sh` \| `install-macos.sh` \| `install-windows.ps1` | The kiosk agent installers, with this server's address already in them |
-| GET | `/kiosk/StageUtilityOutput-arm64.zip` \| `StageUtilityOutput-x86_64.zip` | The Mac [output helper](../kiosk-devices.md#installing-the-mac-output-helper) for that architecture. Fetched once from the GitHub release matching this server's version, checked against the release's published SHA-256, cached under the data directory and served from there. `404` with the reason when it is not cached and the release cannot be reached; `502` when the download failed its checksum or the size limit |
+| GET | `/kiosk/StageUtilityOutput-arm64.zip` \| `StageUtilityOutput-x86_64.zip` | The Mac [output helper](../kiosk-devices.md#installing-the-mac-output-helper) for that architecture. Fetched once from the GitHub release matching this server's version, checked against the release's published SHA-256, cached under the data directory and served from there. `404` with the reason when it is not cached and the release cannot be reached or has no such file; `502` when the release host answers any other status, or the download fails its checksum or the size limit or does not finish |
 | GET | `/kiosk/StageUtilityOutput-arm64.zip.sha256` \| `StageUtilityOutput-x86_64.zip.sha256` | That zip's SHA-256, one `shasum` line. The installer verifies the zip against it |
 | GET | `/layout-images/:name` \| `/branding-images/:name` | Uploaded images, content-addressed and served immutable |
 | POST | `/api/layout-images` | Store an image and return its URL |
