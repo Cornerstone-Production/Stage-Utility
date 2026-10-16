@@ -375,9 +375,10 @@ export function ParamField({
   // this covers a value that has fallen out of an otherwise-complete one — the
   // exact case Main.dc.html shows for the Command field. Static lists (no
   // optionsFrom) never hit this: a value not in a fixed list IS an issue there.
+  const offers = (v: string): boolean => options.some((o) => o.value === v);
+  const staleNote = (text: string) => <span className="block pt-0.5 text-caption2 text-amber-11">{text}</span>;
   const staleValue =
-    spec.optionsFrom && options.length > 0 && String(value ?? "").trim() !== "" &&
-    !options.some((o) => o.value === String(value))
+    spec.optionsFrom && options.length > 0 && String(value ?? "").trim() !== "" && !offers(String(value))
       ? "No longer offered by the target list: saved as it is. The target may be off."
       : null;
   const shown = attempted ? (issue ?? null) : null;
@@ -411,7 +412,7 @@ export function ParamField({
     const selected = choiceList(value);
     // Saved choices the list no longer has — a group deleted since the rule was
     // written. Kept in the value and said so, as the enum branch does.
-    const stale = spec.optionsFrom && options.length > 0 && selected.some((v) => !options.some((o) => o.value === v));
+    const stale = spec.optionsFrom && options.length > 0 && selected.some((v) => !offers(v));
     return (
       <Row label={spec.label} hint={spec.help}>
         <>
@@ -424,7 +425,7 @@ export function ParamField({
             onChange={(next) => {
               const kept = withExclusiveChoice(next, selected, spec.exclusiveChoice?.value);
               onChange(
-                [...options.filter((o) => kept.includes(o.value)).map((o) => o.value), ...kept.filter((v) => !options.some((o) => o.value === v))].join(","),
+                [...options.filter((o) => kept.includes(o.value)).map((o) => o.value), ...kept.filter((v) => !offers(v))].join(","),
               );
             }}
             // "All" would tick the exclusive choice beside everything else, or
@@ -433,7 +434,7 @@ export function ParamField({
             placeholder={spec.optional ? "Any" : "Pick…"}
             className={invalidClass("w-full", invalid)}
           />
-          {fieldIssue ?? (stale ? <span className="block pt-0.5 text-caption2 text-amber-11">A saved choice is no longer offered: kept as it is.</span> : notice)}
+          {fieldIssue ?? (stale ? staleNote("A saved choice is no longer offered: kept as it is.") : notice)}
         </>
       </Row>
     );
@@ -459,7 +460,7 @@ export function ParamField({
               ))}
             </SelectContent>
           </Select>
-          {fieldIssue ?? (staleValue ? <span className="block pt-0.5 text-caption2 text-amber-11">{staleValue}</span> : notice)}
+          {fieldIssue ?? (staleValue ? staleNote(staleValue) : notice)}
         </>
       </Row>
     );
