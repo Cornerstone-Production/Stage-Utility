@@ -260,7 +260,7 @@ The port is adjustable, because AV gear is fond of odd ports.
 - An **unclaimed** device is always **listed**: the server records every one it
   hears, with no scan to open, so the banner, *Not set up yet* and the sidebar
   count are filled the moment anyone looks. A device not heard for 90 seconds
-  drops out, and at most 256 are listed at once (the log says when it is full).
+  drops out, and the list holds at most 256 unclaimed devices: the first heard are the ones kept, and the log says when it is full.
 - An unclaimed device is **answered** only while a scan is open, which is for as
   long as a Screens page is open. A device binds to the first server that answers
   it, so a server answering every new device at all times would race any other
