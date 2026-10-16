@@ -4,7 +4,7 @@
 // new-screen body can each live in a file of their own without importing the
 // panel back.
 
-import type { ChangeEvent, ReactNode } from "react";
+import type { ChangeEvent, ComponentProps, ReactNode } from "react";
 
 import { Button, Input, Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, Switch, type ButtonProps } from "../../components/ui";
 import { cn } from "../../lib/cn";
@@ -165,6 +165,17 @@ export function Pill({ tone, children }: { tone: "accent" | "muted"; children: R
       )}
     >
       {children}
+    </span>
+  );
+}
+
+/** "Online" or "Offline" with its dot: whether a screen is connected to the thing it
+ *  stands for. It passes its props on, so a Tooltip can wrap it. */
+export function OnlineBadge({ online, ...props }: { online: boolean } & ComponentProps<"span">) {
+  return (
+    <span {...props} className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted">
+      <span className={cn("size-2 rounded-full", online ? "bg-ok-9" : "bg-fg-faint")} />
+      {online ? "Online" : "Offline"}
     </span>
   );
 }

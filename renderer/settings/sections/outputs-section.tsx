@@ -25,7 +25,7 @@ import { NewViewDialog } from "./new-view-dialog";
 import { ImportLayout } from "./import-layout";
 import { SCREEN_PANEL_ID, type PanelTarget } from "./screen-settings-panel";
 import { NONE, chooseViewForScreen } from "../screen-role-confirm";
-import { Pill, ViewPicker, viewGroups } from "./screen-panel-parts";
+import { OnlineBadge, Pill, ViewPicker, viewGroups } from "./screen-panel-parts";
 import { viewSurface, viewShownInSidebar, screenIsControlSurface, viewCanBeControlSurface, viewIsConsole, type ViewSurface } from "@main/types/views";
 import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
@@ -404,10 +404,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           </Tooltip>
         )}
         <Tooltip label={online ? "A screen is connected to this display" : "No screen is currently connected"}>
-          <span className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted">
-            <span className={`size-2 rounded-full ${online ? "bg-ok-9" : "bg-fg-faint"}`} />
-            {online ? "Online" : "Offline"}
-          </span>
+          <OnlineBadge online={online} />
         </Tooltip>
 
         {/* Actions only: opening, renaming the view, copying the address,

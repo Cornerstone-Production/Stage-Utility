@@ -43,7 +43,7 @@ import type { OutputHealth } from "@main/types/output-health";
 import type { MessageGroups } from "../../main/use-message-groups";
 import type { CreateScreenOutcome } from "../types";
 import {
-  DangerButton, NameInput, OutlineButton, PanelFooter, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
+  DangerButton, NameInput, OnlineBadge, OutlineButton, PanelFooter, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
 } from "./screen-panel-parts";
 import { NewScreenBody, STEP_TITLES, type Step } from "./new-screen-body";
 import { ViewBody } from "./view-settings-body";
@@ -268,10 +268,7 @@ function OutputDeviceSection({ output, device, online, health, reported, actions
           <div className="truncate text-footnote font-medium text-fg">{who}</div>
           <div className="mt-px text-caption1 text-fg-subtle">{via}</div>
         </div>
-        <span className="flex shrink-0 items-center gap-1.5 text-caption2 text-fg-muted">
-          <span className={cn("size-2 rounded-full", online ? "bg-ok-9" : "bg-fg-faint")} />
-          {online ? "Online" : "Offline"}
-        </span>
+        <OnlineBadge online={online} />
       </div>
 
       {device.output.kind === "decklink" && (
