@@ -201,6 +201,38 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
+/**
+ * A saved number, which the settings form may have stored as a number or as the
+ * string it was typed as. NaN when unset, blank or not a number.
+ */
+function configNumber(raw: unknown): number {
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string" && raw.trim()) return parseInt(raw, 10);
+  return NaN;
+}
+
+/** {@link configNumber}, kept only when it is a positive number. */
+function positiveConfigNumber(raw: unknown): number | null {
+  const n = configNumber(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * A host/port target off an integration's config, defaulting the port.
+ *
+ * Only defaults the port when a host was given AND there is a default worth
+ * giving: no host is "not configured", and an integration whose port has no
+ * conventional value (PVP's is whatever its Preferences pane shows) must not be
+ * reported as configured on the strength of a guess.
+ */
+function hostPortOf(
+  cfg: Record<string, unknown>,
+  defaultPort: number | null,
+): { host: string | null; port: number | null } {
+  const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
+  return { host, port: positiveConfigNumber(cfg.port) ?? (host ? defaultPort : null) };
+}
+
 /** Parse the ProPresenter `config.instances` array (extra auditoriums) into typed
  *  configs, tolerating loosely-shaped stored JSON. */
 function parsePropInstances(raw: unknown): PropInstanceConfig[] {
@@ -210,10 +242,8 @@ function parsePropInstances(raw: unknown): PropInstanceConfig[] {
     if (!r || typeof r !== "object") continue;
     const o = r as Record<string, unknown>;
     if (typeof o.id !== "string" || !o.id) continue;
-    const portNum =
-      typeof o.port === "number" ? o.port : typeof o.port === "string" ? parseInt(o.port, 10) : NaN;
-    const pollNum =
-      typeof o.pollMs === "number" ? o.pollMs : typeof o.pollMs === "string" ? parseInt(o.pollMs, 10) : NaN;
+    const portNum = configNumber(o.port);
+    const pollNum = configNumber(o.pollMs);
     out.push({
       id: o.id,
       name: typeof o.name === "string" && o.name.trim() ? o.name : o.id,
@@ -2070,33 +2100,13 @@ class IntegrationManager {
 
   private getPcoRefreshIntervalMs(): number {
     const state = this.states.get("planning-center");
-    const raw = state?.config["refreshIntervalMin"];
-    const min = typeof raw === "string" ? parseInt(raw, 10) : typeof raw === "number" ? raw : NaN;
-    return Number.isFinite(min) && min > 0 ? min * 60 * 1000 : 60 * 60 * 1000;
+    const min = positiveConfigNumber(state?.config["refreshIntervalMin"]) ?? 60;
+    return min * 60 * 1000;
   }
 
   private getPropresenterTarget(): { host: string | null; port: number | null; pollMs: number | null } {
     const cfg = this.states.get("propresenter")?.config ?? {};
-    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    const rawPort = cfg.port;
-    const port =
-      typeof rawPort === "number"
-        ? rawPort
-        : typeof rawPort === "string" && rawPort.trim()
-          ? parseInt(rawPort, 10)
-          : NaN;
-    const rawPoll = cfg.pollMs;
-    const pollMs =
-      typeof rawPoll === "number"
-        ? rawPoll
-        : typeof rawPoll === "string" && rawPoll.trim()
-          ? parseInt(rawPoll, 10)
-          : NaN;
-    return {
-      host,
-      port: Number.isFinite(port) && port > 0 ? port : null,
-      pollMs: Number.isFinite(pollMs) && pollMs > 0 ? pollMs : null,
-    };
+    return { ...hostPortOf(cfg, null), pollMs: positiveConfigNumber(cfg.pollMs) };
   }
 
   /** Start/stop the ProPresenter poller to match enabled + configured state. */
@@ -2152,26 +2162,12 @@ class IntegrationManager {
    * filled-in host is a form half-completed rather than a decision.
    */
   getCompanionTarget(): { host: string; port: number } | null {
-    const cfg = this.states.get("companion")?.config ?? {};
-    const host = typeof cfg.host === "string" ? cfg.host.trim() : "";
-    if (!host) return null;
-    const raw = cfg.port;
-    const port =
-      typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() ? parseInt(raw, 10) : NaN;
-    return { host, port: Number.isFinite(port) && port > 0 ? port : DEFAULT_COMPANION_PORT };
+    const { host, port } = hostPortOf(this.states.get("companion")?.config ?? {}, DEFAULT_COMPANION_PORT);
+    return host && port ? { host, port } : null;
   }
 
   private getProdcomTarget(): { host: string | null; port: number | null } {
-    const cfg = this.states.get("prodcom")?.config ?? {};
-    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    const rawPort = cfg.port;
-    const port =
-      typeof rawPort === "number"
-        ? rawPort
-        : typeof rawPort === "string" && rawPort.trim()
-          ? parseInt(rawPort, 10)
-          : NaN;
-    return { host, port: Number.isFinite(port) && port > 0 ? port : null };
+    return this.hostPort("prodcom", null);
   }
 
   /** Start/stop the ProdCom transcript stream to match enabled + configured state. */
@@ -2198,18 +2194,9 @@ class IntegrationManager {
     }
   }
 
+  /** Smaart's standard API port is the default when only a host is given. */
   private getSmaartTarget(): { host: string | null; port: number | null } {
-    const cfg = this.states.get("smaart")?.config ?? {};
-    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    const rawPort = cfg.port;
-    const port =
-      typeof rawPort === "number"
-        ? rawPort
-        : typeof rawPort === "string" && rawPort.trim()
-          ? parseInt(rawPort, 10)
-          : NaN;
-    // Default to Smaart's standard API port when only a host is given.
-    return { host, port: Number.isFinite(port) && port > 0 ? port : host ? 26000 : null };
+    return this.hostPort("smaart", 26000);
   }
 
   /** Start/stop the Smaart SPL connection to match enabled + configured state. */
@@ -2231,34 +2218,12 @@ class IntegrationManager {
     }
   }
 
-  /**
-   * A host/port target off an integration's config, defaulting the port.
-   *
-   * OBS and REAPER had a copy each, identical but for the default port and the
-   * id they read. Two copies of a parse is two chances for one to stop accepting
-   * a port typed as a string, which is what the settings form sends.
-   */
+  /** A host/port target off an integration's config: see {@link hostPortOf}. */
   private hostPort(
     id: ConnectionManagedId,
     defaultPort: number | null,
   ): { host: string | null; port: number | null } {
-    const cfg = this.states.get(id)?.config ?? {};
-    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    const rawPort = cfg.port;
-    const port =
-      typeof rawPort === "number"
-        ? rawPort
-        : typeof rawPort === "string" && rawPort.trim()
-          ? parseInt(rawPort, 10)
-          : NaN;
-    // Only default the port when a host was given AND there is a default worth
-    // giving: no host is "not configured", and an integration whose port has no
-    // conventional value (PVP's is whatever its Preferences pane shows) must not
-    // be reported as configured on the strength of a guess.
-    return {
-      host,
-      port: Number.isFinite(port) && port > 0 ? port : host && defaultPort != null ? defaultPort : null,
-    };
+    return hostPortOf(this.states.get(id)?.config ?? {}, defaultPort);
   }
 
   /** obs-websocket's standard port. */
@@ -2551,20 +2516,9 @@ class IntegrationManager {
   }
 
   private async getSensourceConfig(): Promise<SenSourceConfig> {
-    /** A saved interval field, which the form may have stored as either type. */
-    const seconds = (raw: unknown): number =>
-      typeof raw === "number"
-        ? raw
-        : typeof raw === "string" && raw.trim()
-          ? parseInt(raw, 10)
-          : NaN;
     const cfg = this.states.get("sensource")?.config ?? {};
     const secrets = await secretsStore.getSecrets("sensource");
-    const pollSeconds = seconds(cfg.pollSeconds);
-    const resolvedPollSeconds =
-      Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : SENSOURCE_DEFAULT_POLL_SECONDS;
-    const safeSpacePoll = seconds(cfg.safeSpacePollSeconds);
-    const attendancePoll = seconds(cfg.attendancePollSeconds);
+    const resolvedPollSeconds = positiveConfigNumber(cfg.pollSeconds) ?? SENSOURCE_DEFAULT_POLL_SECONDS;
     return {
       clientId: typeof cfg.clientId === "string" && cfg.clientId.trim() ? cfg.clientId.trim() : null,
       clientSecret: secrets.clientSecret || null,
@@ -2575,8 +2529,7 @@ class IntegrationManager {
       // integration already has an attendance figure, so a fixed fallback faster
       // than an operator's own pollSeconds would have raised their request
       // volume the moment this shipped, for anyone who never opened this card.
-      attendancePollSeconds:
-        Number.isFinite(attendancePoll) && attendancePoll > 0 ? attendancePoll : resolvedPollSeconds,
+      attendancePollSeconds: positiveConfigNumber(cfg.attendancePollSeconds) ?? resolvedPollSeconds,
       locationId:
         typeof cfg.locationId === "string" && cfg.locationId.trim() ? cfg.locationId.trim() : null,
       zoneIds: Array.isArray(cfg.zoneIds) ? cfg.zoneIds.filter((z): z is string => typeof z === "string") : [],
@@ -2590,10 +2543,7 @@ class IntegrationManager {
       // keeps the invariant "an id implies enabled" true even on a box whose
       // marker never got written.
       safeSpaceEnabled: cfg[SAFESPACE_ENABLED_KEY] === true || !!secrets.safeSpaceId,
-      safeSpacePollSeconds:
-        Number.isFinite(safeSpacePoll) && safeSpacePoll > 0
-          ? safeSpacePoll
-          : SAFESPACE_DEFAULT_POLL_SECONDS,
+      safeSpacePollSeconds: positiveConfigNumber(cfg.safeSpacePollSeconds) ?? SAFESPACE_DEFAULT_POLL_SECONDS,
     };
   }
 
@@ -2638,16 +2588,8 @@ class IntegrationManager {
   /** Resolve the Ross TSL config (host/port + the feed→display-index mappings). */
   private getRossTslConfig(): { host: string | null; port: number | null; feeds: TslFeed[] } {
     const cfg = this.states.get("ross-tsl")?.config ?? {};
-    const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    const rawPort = cfg.port;
-    const port =
-      typeof rawPort === "number"
-        ? rawPort
-        : typeof rawPort === "string" && rawPort.trim()
-          ? parseInt(rawPort, 10)
-          : NaN;
     const feeds = Array.isArray(cfg.feeds) ? (cfg.feeds as TslFeed[]) : [];
-    return { host, port: Number.isFinite(port) && port > 0 ? port : null, feeds };
+    return { ...hostPortOf(cfg, null), feeds };
   }
 
   /** Start/stop the Ross TSL sender to match enabled + configured state. */
