@@ -801,13 +801,20 @@ export function useStageSettings(pinnedViewId?: string) {
    * follows the operator's finger, and the cache reconciles to the server's
    * answer, or rolls back with `fail` toasted. For the fields the server refuses
    * only for an id that does not exist or a value out of range. Six handlers
-   * were this, verbatim, each with its own copy to drift.
+   * were this, verbatim, each with its own copy to drift. `alsoSent` is what the
+   * server is told beyond the field itself, which the cache has no use for.
    */
-  function setOutputField(channel: IpcChannel, id: string, patch: Partial<Output>, fail: string): Promise<unknown> {
+  function setOutputField(
+    channel: IpcChannel,
+    id: string,
+    patch: Partial<Output>,
+    fail: string,
+    alsoSent: Record<string, unknown> = {},
+  ): Promise<unknown> {
     return optimistic<StageState>(
       ["stage:getState"],
       (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, patch) }),
-      () => ipc<StageState>(channel, { id, ...patch }),
+      () => ipc<StageState>(channel, { id, ...patch, ...alsoSent }),
       fail,
     );
   }
@@ -815,12 +822,7 @@ export function useStageSettings(pinnedViewId?: string) {
   /** Optimistic so the controlled <Select> shows the new view at once instead
    *  of snapping back to the cached one while the request is in flight. */
   async function handleSetOutputView(id: string, viewId: string | null, expectSurface?: ViewSurface) {
-    await optimistic<StageState>(
-      ["stage:getState"],
-      (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, { viewId }) }),
-      () => ipc<StageState>("outputs:setView", { id, viewId, ...(expectSurface ? { expectSurface } : {}) }),
-      "Failed to route display",
-    );
+    await setOutputField("outputs:setView", id, { viewId }, "Failed to route display", expectSurface ? { expectSurface } : {});
   }
 
   async function handleSetOutputLocked(id: string, locked: boolean) {
