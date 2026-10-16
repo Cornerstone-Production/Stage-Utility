@@ -494,11 +494,9 @@ class CompanionApi {
     // "unavailable" on every 4.x install reads as a fault. Any OTHER failure is
     // said out loud rather than dropped: the export just succeeded, so a
     // connection list that did not is something the operator has not been told.
-    const health = connections.ok
-      ? `, ${connectionSentence(connections.health)}`
-      : connections.unsupported
-        ? ""
-        : `, connection status unavailable: ${connections.reason}`;
+    let health = "";
+    if (connections.ok) health = `, ${connectionSentence(connections.health)}`;
+    else if (!connections.unsupported) health = `, connection status unavailable: ${connections.reason}`;
     return {
       ok: true,
       message:

@@ -1548,11 +1548,10 @@ class IntegrationManager {
       count > 0 ? `${count} Companion client(s) connected` : null,
       out?.message ?? null,
     ].filter((p): p is string => p !== null);
-    this.setConnectionState(
-      "companion",
-      out?.failed ? "error" : count > 0 ? "connected" : "disconnected",
-      parts.length ? parts.join(". ") : null,
-    );
+    let connection: IntegrationState["connection"] = "disconnected";
+    if (out?.failed) connection = "error";
+    else if (count > 0) connection = "connected";
+    this.setConnectionState("companion", connection, parts.length ? parts.join(". ") : null);
     this.broadcastStates();
   }
 
