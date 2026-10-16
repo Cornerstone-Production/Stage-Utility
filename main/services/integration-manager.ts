@@ -233,6 +233,11 @@ function hostPortOf(
   return { host, port: positiveConfigNumber(cfg.port) ?? (host ? defaultPort : null) };
 }
 
+/** An API token, or a client id and secret: either signs in to SenSource Vea. */
+function hasSensourceCredentials(cfg: SenSourceConfig): boolean {
+  return !!cfg.apiToken || (!!cfg.clientId && !!cfg.clientSecret);
+}
+
 /** Parse the ProPresenter `config.instances` array (extra auditoriums) into typed
  *  configs, tolerating loosely-shaped stored JSON. */
 function parsePropInstances(raw: unknown): PropInstanceConfig[] {
@@ -1539,30 +1544,13 @@ class IntegrationManager {
   }
 
   /**
-   * Re-apply one integration's connection after its config or its enabled flag
-   * changed.
-   *
-   * A map rather than a ladder because there were TWO ladders -- one in
-   * setConfig, one in setEnabled -- listing the same integrations in the
-   * same order. Adding Resi and YouTube meant remembering both, and an
-   * integration added to only one would save its config and never reconnect, or
-   * reconnect on a toggle and not on a save. Neither failure says which half was
-   * missed.
-   *
-   * planning-center and wireless are NOT here: they do different work in each
-   * caller, so they stay written out where that difference is visible.
-   *
-   * Typed as Record<ConnectionManagedId, …>, so leaving one out is a compile
-   * error rather than an integration that saves and never reconnects. See
-   * CONNECTION_MANAGED_IDS for why the other five are absent.
-   */
-  /**
    * Wire one service's connection reporting, then start or stop it to match the
    * integration's enabled + configured state.
    *
-   * Nine appliers were this same body: attach a listener that forwards to
-   * setConnectionState and broadcasts, read `enabled`, read the config, then
-   * either announce "connecting" and configure, or stop and report disconnected.
+   * Every applier of a dialled service was this same body: attach a listener that
+   * forwards to setConnectionState and broadcasts, read `enabled`, read the
+   * config, then either announce "connecting" and configure, or stop and report
+   * disconnected.
    * The pairing is the part worth having once -- an applier that stopped a
    * service without reporting it disconnected leaves the UI showing a live badge
    * for a service that is not running.
@@ -1596,6 +1584,24 @@ class IntegrationManager {
     }
   }
 
+  /**
+   * Re-apply one integration's connection after its config or its enabled flag
+   * changed.
+   *
+   * A map rather than a ladder because there were TWO ladders -- one in
+   * setConfig, one in setEnabled -- listing the same integrations in the
+   * same order. Adding Resi and YouTube meant remembering both, and an
+   * integration added to only one would save its config and never reconnect, or
+   * reconnect on a toggle and not on a save. Neither failure says which half was
+   * missed.
+   *
+   * planning-center and wireless are NOT here: they do different work in each
+   * caller, so they stay written out where that difference is visible.
+   *
+   * Typed as Record<ConnectionManagedId, …>, so leaving one out is a compile
+   * error rather than an integration that saves and never reconnects. See
+   * CONNECTION_MANAGED_IDS for why the other five are absent.
+   */
   private async applyIntegration(id: string): Promise<void> {
     const appliers: Record<ConnectionManagedId, () => void | Promise<void>> = {
       propresenter: () => this.applyPropresenter(),
@@ -2172,26 +2178,20 @@ class IntegrationManager {
 
   /** Start/stop the ProdCom transcript stream to match enabled + configured state. */
   private async applyProdcom(): Promise<void> {
-    prodcomService.setConnectionListener((state, message) => {
-      this.setConnectionState("prodcom", state, message);
-      this.broadcastStates();
-    });
-
     // Before the enable check and outside configure(): this decides what leaves
     // the server, not what it connects to, so it applies to a stopped service
     // too and must not drag the stream through a reconnect.
     prodcomService.setRedactSensitive(prodcomRedactionOn(this.states.get("prodcom")?.config));
 
-    const enabled = this.states.get("prodcom")?.enabled ?? false;
-    const { host, port } = this.getProdcomTarget();
-    if (enabled && host && port) {
+    await this.applyService("prodcom", prodcomService, async () => {
+      const { host, port } = this.getProdcomTarget();
+      if (!host || !port) return null;
       const secrets = await secretsStore.getSecrets("prodcom");
-      this.setConnectionState("prodcom", "connecting", `Connecting ${host}:${port}`);
-      prodcomService.configure(host, port, secrets.apiKey ?? null);
-    } else {
-      prodcomService.stop();
-      this.setConnectionState("prodcom", "disconnected", null);
-    }
+      return {
+        connecting: `Connecting ${host}:${port}`,
+        start: () => prodcomService.configure(host, port, secrets.apiKey ?? null),
+      };
+    });
   }
 
   /** Smaart's standard API port is the default when only a host is given. */
@@ -2201,21 +2201,15 @@ class IntegrationManager {
 
   /** Start/stop the Smaart SPL connection to match enabled + configured state. */
   private async applySmaart(): Promise<void> {
-    smaartService.setConnectionListener((state, message) => {
-      this.setConnectionState("smaart", state, message);
-      this.broadcastStates();
-    });
-
-    const enabled = this.states.get("smaart")?.enabled ?? false;
-    const { host, port } = this.getSmaartTarget();
-    if (enabled && host && port) {
+    await this.applyService("smaart", smaartService, async () => {
+      const { host, port } = this.getSmaartTarget();
+      if (!host || !port) return null;
       const secrets = await secretsStore.getSecrets("smaart");
-      this.setConnectionState("smaart", "connecting", `Connecting ${host}:${port}`);
-      smaartService.configure(host, port, secrets.password ?? null);
-    } else {
-      smaartService.stop();
-      this.setConnectionState("smaart", "disconnected", null);
-    }
+      return {
+        connecting: `Connecting ${host}:${port}`,
+        start: () => smaartService.configure(host, port, secrets.password ?? null),
+      };
+    });
   }
 
   /** A host/port target off an integration's config: see {@link hostPortOf}. */
@@ -2442,7 +2436,6 @@ class IntegrationManager {
     });
   }
 
-  /** Resolve the SenSource config from non-secret state + the secrets store. */
   /**
    * Resi's credentials, with the real password.
    *
@@ -2515,6 +2508,7 @@ class IntegrationManager {
     await this.test("youtube");
   }
 
+  /** Resolve the SenSource config from non-secret state + the secrets store. */
   private async getSensourceConfig(): Promise<SenSourceConfig> {
     const cfg = this.states.get("sensource")?.config ?? {};
     const secrets = await secretsStore.getSecrets("sensource");
@@ -2547,42 +2541,33 @@ class IntegrationManager {
     };
   }
 
+  /** The SenSource config, for a picker that needs to sign in: refused when no
+   *  credentials are saved yet. */
+  private async getCredentialedSensourceConfig(): Promise<SenSourceConfig> {
+    const cfg = await this.getSensourceConfig();
+    if (!hasSensourceCredentials(cfg)) throw new Error("Enter and save SenSource credentials first");
+    return cfg;
+  }
+
   /** List Vea locations for the settings picker (uses the saved credentials). */
   async getSensourceLocations(): Promise<{ locationId: string; name: string }[]> {
-    const cfg = await this.getSensourceConfig();
-    if (!cfg.apiToken && (!cfg.clientId || !cfg.clientSecret)) {
-      throw new Error("Enter and save SenSource credentials first");
-    }
-    return sensourceService.listLocationsWith(cfg);
+    return sensourceService.listLocationsWith(await this.getCredentialedSensourceConfig());
   }
 
   /** List Vea zones for the settings picker — the reliable scoping mechanism
    *  (the API has no working server-side location/zone filter). */
   async getSensourceZones(): Promise<{ zoneId: string; name: string; locationId: string | null }[]> {
-    const cfg = await this.getSensourceConfig();
-    if (!cfg.apiToken && (!cfg.clientId || !cfg.clientSecret)) {
-      throw new Error("Enter and save SenSource credentials first");
-    }
-    return sensourceService.listZonesWith(cfg);
+    return sensourceService.listZonesWith(await this.getCredentialedSensourceConfig());
   }
 
   /** Start/stop the SenSource poller to match enabled + credentialed state. */
   private async applySensource(): Promise<void> {
-    sensourceService.setConnectionListener((state, message) => {
-      this.setConnectionState("sensource", state, message);
-      this.broadcastStates();
+    await this.applyService("sensource", sensourceService, async () => {
+      const cfg = await this.getSensourceConfig();
+      return hasSensourceCredentials(cfg)
+        ? { connecting: "Authenticating with SenSource Vea", start: () => sensourceService.configure(cfg) }
+        : null;
     });
-
-    const enabled = this.states.get("sensource")?.enabled ?? false;
-    const cfg = await this.getSensourceConfig();
-    const hasCreds = !!cfg.apiToken || (!!cfg.clientId && !!cfg.clientSecret);
-    if (enabled && hasCreds) {
-      this.setConnectionState("sensource", "connecting", "Authenticating with SenSource Vea");
-      sensourceService.configure(cfg);
-    } else {
-      sensourceService.stop();
-      this.setConnectionState("sensource", "disconnected", null);
-    }
   }
 
   /** Resolve the Ross TSL config (host/port + the feed→display-index mappings). */
@@ -2594,20 +2579,12 @@ class IntegrationManager {
 
   /** Start/stop the Ross TSL sender to match enabled + configured state. */
   private async applyRossTsl(): Promise<void> {
-    tslService.setConnectionListener((state, message) => {
-      this.setConnectionState("ross-tsl", state, message);
-      this.broadcastStates();
+    await this.applyService("ross-tsl", tslService, () => {
+      const { host, port, feeds } = this.getRossTslConfig();
+      return host && port
+        ? { connecting: `Connecting ${host}:${port}`, start: () => tslService.configure(host, port, feeds) }
+        : null;
     });
-
-    const enabled = this.states.get("ross-tsl")?.enabled ?? false;
-    const { host, port, feeds } = this.getRossTslConfig();
-    if (enabled && host && port) {
-      this.setConnectionState("ross-tsl", "connecting", `Connecting ${host}:${port}`);
-      tslService.configure(host, port, feeds);
-    } else {
-      tslService.stop();
-      this.setConnectionState("ross-tsl", "disconnected", null);
-    }
   }
 
   private async getPcoAppId(): Promise<string | null> {
