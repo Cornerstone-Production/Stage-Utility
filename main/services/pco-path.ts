@@ -41,16 +41,16 @@ export class PcoUrlRefused extends Error {
 }
 
 /** Held only by this module, so nothing outside it can make a PcoPathPart. */
-const CHECKED = Symbol("checked by pcoId or pcoSegment");
+const CHECKED = Symbol("checked by pcoId, pcoAttachmentId or pcoSegment");
 
 /** A value that may be written into a `pcoUrl` path. Made only by pcoId,
- *  pcoAttachmentId and pcoSegment: the constructor wants a token no other module holds, and the
- *  private field makes the type nominal, so a plain `{ value }` object does not
- *  pass for one either. */
+ *  pcoAttachmentId and pcoSegment: the constructor wants a token no other
+ *  module holds, and the private field makes the type nominal, so a plain
+ *  `{ value }` object does not pass for one either. */
 export class PcoPathPart {
   readonly #value: string;
   constructor(token: typeof CHECKED, value: string) {
-    if (token !== CHECKED) throw new PcoUrlRefused("a PCO path part is made by pcoId or pcoSegment");
+    if (token !== CHECKED) throw new PcoUrlRefused("a PCO path part is made by pcoId, pcoAttachmentId or pcoSegment");
     this.#value = value;
   }
   get value(): string {
