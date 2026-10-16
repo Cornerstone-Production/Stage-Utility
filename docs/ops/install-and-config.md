@@ -171,7 +171,7 @@ different install method, where it looks like the new method is broken.
 
 ```bash
 sudo ./scripts/uninstall.sh --dry-run   # say what it would do, change nothing
-sudo ./scripts/uninstall.sh             # systemd + launchd + the install tree
+sudo ./scripts/uninstall.sh             # systemd + launchd + the install tree + the Mac output helper
 ./scripts/uninstall.sh --brew           # Homebrew — WITHOUT sudo
 ```
 
@@ -179,6 +179,18 @@ It removes only what is actually present, never touches the data directory, and
 prints where that directory is. Homebrew is separate and unsudoed on purpose:
 brew refuses to run as root, and its agent lives in your own `gui/<uid>` domain,
 which root cannot reach.
+
+On a Mac that shows screens it also removes what `kiosk/install-macos.sh`
+installed: the Stage Utility Output helper (stopped in every logged-in account,
+then `/Library/LaunchAgents/com.stageutility.output.plist` and
+`/Applications/StageUtilityOutput.app`), or the Chrome kiosk's agent and launcher
+from `--browser`. The Mac's device id and token
+(`/Library/Application Support/StageUtility`) and each account's output settings
+(`~/Library/Application Support/StageUtilityOutput`, which holds secret tokens) are
+listed, not removed. The installer turned off display sleep, system sleep and the
+screen saver, and did not record what they were, so the script prints the commands
+to set them again instead of guessing. A helper copy someone opened by hand is not
+launchd's: the script warns that it is still running and leaves it for you to quit.
 
 Without a checkout, the per-method commands below are the same thing by hand.
 

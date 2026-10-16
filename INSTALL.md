@@ -432,6 +432,7 @@ start — look for a `recovered config` line in the logs.)
 
 - **Linux:** `sudo ./scripts/uninstall.sh` (stops + removes the service).
 - **macOS:** `sudo ./scripts/uninstall.sh`, or by hand `sudo launchctl bootout system/com.stageutility.server` and then delete `/Library/LaunchDaemons/com.stageutility.server.plist`. An install made before this label was introduced is registered as `com.cornerstone.stage-utility` instead (`sudo launchctl bootout system/com.cornerstone.stage-utility`, `/Library/LaunchDaemons/com.cornerstone.stage-utility.plist`); the script removes whichever is present, and re-running the installer moves such an install to the new label.
+- **macOS output helper** (or the `--browser` Chrome kiosk): the same `sudo ./scripts/uninstall.sh` stops it in every logged-in account and removes its LaunchAgent and app. On a Mac with no checkout: `curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/scripts/uninstall.sh | sudo bash`, and add `-s -- --dry-run` after `bash` to preview. By hand, see [Removing the helper](docs/kiosk-devices.md#installing-the-mac-output-helper).
 - **Windows:** `nssm remove StageUtility confirm` (or delete the scheduled task).
 
-The data directory is never removed automatically — back it up or delete it deliberately.
+The data directory is never removed automatically — back it up or delete it deliberately. The same goes for a Mac's device id and per-account helper settings, which the script lists. The sleep and screen saver settings the Mac installer changed are not restored, because it does not record them; the script prints the commands to set them.
