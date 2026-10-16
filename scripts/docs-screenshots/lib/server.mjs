@@ -81,10 +81,14 @@ export async function startServer(opts) {
   }
   fs.mkdirSync(dataDir, { recursive: true });
   const settingsFile = path.join(dataDir, "settings.json");
-  if (!fs.existsSync(settingsFile)) {
-    // Discovery on, so the Screens page has a found-devices banner to show, and on
-    // a port nothing real probes.
-    fs.writeFileSync(settingsFile, JSON.stringify({ kioskDiscovery: true, kioskDiscoveryPort: DISCOVERY_PORT }, null, 2));
+  // Discovery on, so the Screens page has a found-devices banner to show, and on
+  // a port nothing real probes. Created exclusively (`wx`) rather than checked and
+  // then written, so there is no gap in which another file could appear; one that
+  // is already there is kept.
+  try {
+    fs.writeFileSync(settingsFile, JSON.stringify({ kioskDiscovery: true, kioskDiscoveryPort: DISCOVERY_PORT }, null, 2), { flag: "wx" });
+  } catch (err) {
+    if (err.code !== "EEXIST") throw err;
   }
   const log = fs.openSync(logFile, "a");
   const child = spawn(
