@@ -109,7 +109,7 @@ final class TimedSource: CardFrameSource {
 
 /// The pictures go out from the first begin frame: the source learns the frame size
 /// from the port's pre-roll, which goes out black.
-func feed(_ source: SurfaceFrameSource, painter: BarsPainter, label: String) -> DispatchQueue {
+func feed(_ source: SurfaceFrameSource, painter: BarsPainter, label: String) {
   let render = DispatchQueue(label: "render \(label)", qos: .userInteractive)
   source.onBeginFrame = { request in
     render.async {
@@ -118,7 +118,6 @@ func feed(_ source: SurfaceFrameSource, painter: BarsPainter, label: String) -> 
       do { try source.present(painter.surface, contentNs: drawn) } catch { print("\(label): could not present: \(error)") }
     }
   }
-  return render
 }
 
 /// Every slot's timing, from each port's once-a-second collection.
@@ -234,7 +233,7 @@ case "bars" where args.count >= 2:
   let source = SurfaceFrameSource(converter: converter)
   let timed = TimedSource(source)
   let painter = BarsPainter(width: cardMode.width, height: cardMode.height)
-  _ = feed(source, painter: painter, label: found.descriptor.name)
+  feed(source, painter: painter, label: found.descriptor.name)
   let port = DeckLinkOutputPort(
     label: found.descriptor.name, hardware: .port(found), source: timed, leads: leads, frames: frames,
     log: printLog)
@@ -251,7 +250,7 @@ case "null":
     let source = SurfaceFrameSource(converter: converter)
     let timed = TimedSource(source)
     let label = "null \(n)"
-    _ = feed(source, painter: BarsPainter(width: 1920, height: 1080), label: label)
+    feed(source, painter: BarsPainter(width: 1920, height: 1080), label: label)
     let port = DeckLinkOutputPort(
       label: label,
       hardware: .softwareClock(width: 1920, height: 1080, frameDuration: 1001, timeScale: 60000, ticksByItself: true),
