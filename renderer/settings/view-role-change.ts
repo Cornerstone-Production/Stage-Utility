@@ -7,7 +7,7 @@
 // rather than a few lines in the settings hook so that what it asks, and that
 // declining sends nothing, are driven rather than read off the source.
 
-import { screensShowing, viewSurface, type ViewSurface } from "@main/types/views";
+import { screenName, screensShowing, viewSurface, type ViewSurface } from "@main/types/views";
 import type { StageState } from "@main/types/stage";
 import type { ConfirmOptions } from "../components/ui";
 import type { ApiError } from "../lib/api";
@@ -28,7 +28,7 @@ export interface ChangedScreen {
 export function screensChangedBy(state: Pick<StageState, "views" | "outputs"> | undefined, viewId: string, surface: ViewSurface): ChangedScreen[] {
   const view = state?.views.find((v) => v.id === viewId);
   if (!view || viewSurface(view) === surface) return [];
-  return screensShowing(viewId, state?.outputs ?? []).map((o) => ({ id: o.id, name: o.name || o.id }));
+  return screensShowing(viewId, state?.outputs ?? []).map((o) => ({ id: o.id, name: screenName(o) }));
 }
 
 /** What to ask before changing these screens, or null when there is none to

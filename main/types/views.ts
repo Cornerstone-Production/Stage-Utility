@@ -1209,6 +1209,12 @@ export function screenIsControlSurface(
   return surfaceOfScreen(output, views) === "console";
 }
 
+/** What an operator calls a screen: its name, else its id. `name` is optional so a
+ *  screen as an error body carries it is accepted too. */
+export function screenName(output: { id: string; name?: string }): string {
+  return output.name || output.id;
+}
+
 /** The screens showing a view, in the order they are listed. */
 export function screensShowing<T extends Pick<Output, "viewId">>(viewId: string, outputs: readonly T[]): T[] {
   return outputs.filter((o) => o.viewId === viewId);

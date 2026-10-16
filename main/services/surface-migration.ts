@@ -15,7 +15,7 @@
 // deliberately.
 
 import { isControl } from "../types/object-capabilities.js";
-import { screenIsControlSurface, screensShowing, viewSurface } from "../types/views.js";
+import { screenIsControlSurface, screenName, screensShowing, viewSurface } from "../types/views.js";
 import { plural } from "./plural.js";
 import type { StoredOutput } from "./screen-role-migration.js";
 
@@ -92,7 +92,7 @@ export function migrateSurfaces(
       viewId: v.id,
       viewName: v.name,
       controls,
-      outputs: bound.map((o) => o.name || o.id),
+      outputs: bound.map(screenName),
     });
     return { ...v, surface: "console" as const };
   });

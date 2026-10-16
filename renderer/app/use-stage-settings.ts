@@ -21,7 +21,7 @@
 //     Settings is routes inside the app rather than its own window
 
 import { useState, useEffect } from "react";
-import type { CreateScreenInput, ViewSurface } from "@main/types/views";
+import { screenName, type CreateScreenInput, type ViewSurface } from "@main/types/views";
 import type { Rotation } from "@main/types/output-format";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
@@ -562,7 +562,7 @@ export function useStageSettings(pinnedViewId?: string) {
     } catch (err) {
       const e = err as ApiError;
       const screens = e.code === "view-shown" && Array.isArray(e.body?.screens) ? (e.body.screens as { id: string; name?: string }[]) : null;
-      if (screens) return { removed: false, shownOn: screens.map((s) => s.name || s.id) };
+      if (screens) return { removed: false, shownOn: screens.map(screenName) };
       toast.error(`Failed to remove view: ${errorMessage(err)}`);
       return { removed: false };
     }

@@ -20,7 +20,7 @@ import {
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
-import { screenIsControlSurface, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
+import { screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
 import { clamp } from "./clamp.js";
 import { plural } from "./plural.js";
 import { randomUUID } from "crypto";
@@ -259,11 +259,6 @@ export interface CreateScreenResult {
   output: Output;
   /** The view createScreen made, when it made one. */
   createdViewId: string | null;
-}
-
-/** What an operator calls a screen: its name, else its id. */
-function screenName(output: Pick<Output, "id" | "name">): string {
-  return output.name || output.id;
 }
 
 /** Screens as an error carries them, for the caller to name to the operator. */
@@ -3829,7 +3824,7 @@ export class StageController {
     // operator before a screen goes live is the client's job; `expectSurface` is
     // how it makes the server hold the answer to what it asked about.
     let wasControlSurface = false;
-    let screenName = id;
+    let flippedScreenName = id;
     const state = await this.commitOutputPatch(
       id,
       { viewId },
@@ -3844,12 +3839,12 @@ export class StageController {
         if (viewId !== null) this.assertViewNotBeingDeleted(viewId);
         if (view) this.assertViewIsExpectedKind(view, opts.expectSurface);
         wasControlSurface = screenIsControlSurface(current, this.state.views);
-        screenName = current.name || current.id;
+        flippedScreenName = screenName(current);
       },
     );
     const view = viewId === null ? undefined : state.views.find((v) => v.id === viewId);
     const isControlSurface = viewIsConsole(view);
-    if (isControlSurface !== wasControlSurface) this.logRoleFlip(screenName, isControlSurface, view?.name);
+    if (isControlSurface !== wasControlSurface) this.logRoleFlip(flippedScreenName, isControlSurface, view?.name);
     return state;
   }
 
