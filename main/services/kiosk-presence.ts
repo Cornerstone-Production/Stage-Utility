@@ -88,7 +88,6 @@ export function startScan(holder = "manual", ms = SCAN_WINDOW_MS, now = Date.now
 /** Close a scan early — the button's Stop, or the page unmounting. */
 export function stopScan(holder = "manual"): void {
   if (scans.delete(holder)) announce();
-
 }
 
 /**
@@ -288,11 +287,6 @@ function announce(now = Date.now()): void {
   if (sig === lastSig) return;
   lastSig = sig;
   broadcast("kiosk:devices", next);
-}
-
-/** Snapshot for a client whose SSE has just opened. */
-export function kioskPresenceSnapshot(): { scanning: boolean; seen: SeenDevice[]; health: OutputHealth[] } {
-  return payload(Date.now());
 }
 
 function ensureSweep(): void {
