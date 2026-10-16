@@ -11,6 +11,7 @@
 // in the move.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toError } from "@main/services/errors";
 
 /**
  * Who wants to know when a stored key list changes.
@@ -177,7 +178,7 @@ export function useStoredKeys(
         notifyStoredKeys(storageKey);
         return null;
       } catch (err) {
-        return err instanceof Error ? err : new Error(String(err));
+        return toError(err);
       }
     },
     [storageKey],

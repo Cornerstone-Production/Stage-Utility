@@ -21,6 +21,7 @@ import { announceDevices } from "./kiosk-presence.js";
 import { mergeScreen, sameScreen, screenFrom } from "./kiosk-screen-size.js";
 import type { BoundDevice, DeviceOutput, ScreenSize } from "../types/kiosk.js";
 import { DataStore } from "./data-store.js";
+import { toError } from "./errors.js";
 
 export const kioskDevicesStore = new DataStore<BoundDevice[]>("kiosk-devices.json", [], "config");
 
@@ -287,7 +288,7 @@ export async function recordDisplayScreen(
     );
     return null;
   } catch (err) {
-    return err instanceof Error ? err : new Error(String(err));
+    return toError(err);
   }
 }
 

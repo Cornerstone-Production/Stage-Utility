@@ -65,6 +65,7 @@ import { viewsDrawnBy } from "./screen-reach.js";
 import { screenIsControlSurface } from "../types/views.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { WriteQueue } from "./write-queue.js";
+import { toError } from "./errors.js";
 
 /** How often the date is compared against the day the thread was last cleared. */
 const CLEAR_CHECK_MS = 60_000;
@@ -285,12 +286,12 @@ export class MessagesService {
     try {
       await this.rollDay();
     } catch (err) {
-      failures.push({ what: "checking the day's thread", error: err instanceof Error ? err : new Error(String(err)) });
+      failures.push({ what: "checking the day's thread", error: toError(err) });
     }
     try {
       await this.healGroupsAtStart();
     } catch (err) {
-      failures.push({ what: "taking unknown groups off the screens", error: err instanceof Error ? err : new Error(String(err)) });
+      failures.push({ what: "taking unknown groups off the screens", error: toError(err) });
     }
     this.clock.arm(CLEAR_CHECK_MS);
     return failures;

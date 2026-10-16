@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { errorMessage, fetchFailureMessage } from "./errors.js";
+import { errorMessage, fetchFailureMessage, toError } from "./errors.js";
 
 describe("fetchFailureMessage", () => {
   test("says the CAUSE, which is the only part that names the errno", () => {
@@ -61,5 +61,20 @@ describe("errorMessage", () => {
     // literal throws, and this runs inside catch blocks.
     const thrown: unknown[] = ["nope", 42, null, undefined, { toString: () => "custom" }, {}, [1, 2], Symbol("odd")];
     for (const value of thrown) assert.equal(errorMessage(value), String(value));
+  });
+});
+
+describe("toError", () => {
+  test("an Error comes back as the same object, so its stack and cause survive", () => {
+    const err = new Error("boom", { cause: "why" });
+    assert.equal(toError(err), err);
+  });
+
+  test("anything else becomes an Error carrying its message", () => {
+    for (const value of ["nope", 42, null, undefined, { toString: () => "custom" }, Symbol("odd")]) {
+      const out = toError(value);
+      assert.ok(out instanceof Error);
+      assert.equal(out.message, errorMessage(value));
+    }
   });
 });

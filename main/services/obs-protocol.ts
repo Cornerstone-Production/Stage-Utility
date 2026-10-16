@@ -19,6 +19,7 @@
 // WebSocket so there is no runtime dependency.
 
 import { createHash } from "node:crypto";
+import { toError } from "./errors.js";
 
 /** op codes used by obs-websocket v5. */
 const OP_HELLO = 0;
@@ -300,7 +301,7 @@ export class ObsWebSocketAdapter implements ObsAdapter {
       } catch (err) {
         this.pending.delete(requestId);
         clearTimeout(timer);
-        reject(err instanceof Error ? err : new Error(String(err)));
+        reject(toError(err));
       }
     });
   }

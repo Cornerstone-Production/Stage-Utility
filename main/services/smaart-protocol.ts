@@ -23,6 +23,7 @@
 // Node 24+ has a global WebSocket (used here) so there is no runtime dependency.
 
 import { clamp } from "./clamp.js";
+import { toError } from "./errors.js";
 
 /** Flattened SPL metric values keyed exactly as Smaart names them. */
 export interface SplMetrics {
@@ -157,7 +158,7 @@ export class ModernSmaartAdapter implements SmaartAdapter {
       try {
         ws = await this.openSocket(path);
       } catch (err) {
-        lastErr = err instanceof Error ? err : new Error(String(err));
+        lastErr = toError(err);
         continue;
       }
 
@@ -306,7 +307,7 @@ export class ModernSmaartAdapter implements SmaartAdapter {
       } catch (err) {
         clearTimeout(timer);
         this.pending.pop();
-        reject(err instanceof Error ? err : new Error(String(err)));
+        reject(toError(err));
       }
     });
   }

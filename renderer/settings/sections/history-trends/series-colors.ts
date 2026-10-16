@@ -12,6 +12,8 @@
 // localStorage read and write are the two thin functions at the bottom, and the
 // write RETURNS its failure rather than swallowing it.
 
+import { toError } from "@main/services/errors";
+
 /**
  * The palette, in the order it is handed out. Theme tokens only — a literal
  * would not follow a theme override, and this file has no way to know which
@@ -108,6 +110,6 @@ export function writeColorAssignment(map: ColorAssignment): Error | null {
     localStorage.setItem(TREND_COLOR_KEY, JSON.stringify(map));
     return null;
   } catch (err) {
-    return err instanceof Error ? err : new Error(String(err));
+    return toError(err);
   }
 }
