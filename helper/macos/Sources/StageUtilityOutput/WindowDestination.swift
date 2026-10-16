@@ -53,9 +53,12 @@ private final class TurnedSurfaceView: NSView {
   }
 }
 
-/// A borderless window at a placement, with the surface's host view as its content.
+/// A borderless window at a placement, with the surface's host view as its content,
+/// and what the window counts. The page itself, and everything about loading it, is
+/// the `WebSurface`, which knows nothing of windows or screens, nor which engine
+/// draws it.
 @MainActor
-final class WindowDestination: NSObject, OutputDestination {
+final class WindowDestination: NSObject {
   private var window: NSWindow?
   private var link: CADisplayLink?
   private var ticks = 0
@@ -88,6 +91,8 @@ final class WindowDestination: NSObject, OutputDestination {
     startLink(on: screen)
   }
 
+  /// Turn the picture a quarter, half or three-quarter turn clockwise: the page is
+  /// laid out at the turned size and the view turned.
   func setRotation(_ new: Rotation) {
     rotation = new
     turned?.rotation = new
@@ -112,6 +117,7 @@ final class WindowDestination: NSObject, OutputDestination {
     if screenChanged || window.screen != new.screen { startLink(on: new.screen) }
   }
 
+  /// Counters since the last call, as the health post reports them.
   func takeHealthSample() -> HealthSample {
     let now = CACurrentMediaTime()
     let elapsed = now - sampleStart

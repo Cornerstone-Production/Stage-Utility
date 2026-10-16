@@ -24,23 +24,6 @@ extension OutputSink {
   var surfaceProblems: [String] { surface.problems }
 }
 
-/// Where a display output's window goes, and what it counts. The page itself, and
-/// everything about loading it, is the `WebSurface`, which knows nothing of windows
-/// or screens, nor which engine draws it.
-@MainActor
-protocol OutputDestination: AnyObject {
-  /// Put the surface's host view where this destination shows it.
-  func attach(_ view: NSView)
-  /// Counters since the last call, as the health post reports them.
-  func takeHealthSample() -> HealthSample
-  /// Turn the picture a quarter, half or three-quarter turn clockwise. A window
-  /// lays the page out at the turned size and turns the view; a card will turn the
-  /// frames it reads.
-  func setRotation(_ rotation: Rotation)
-  /// Stop showing and release whatever the destination holds.
-  func detach()
-}
-
 /// An output that is a display: a web surface in a borderless window on one NSScreen.
 @MainActor
 final class DisplaySink: OutputSink {
