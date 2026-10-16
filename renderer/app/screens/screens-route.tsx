@@ -27,7 +27,9 @@
 import { useRef, useState } from "react";
 import { Loader2Icon, PanelRightIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
-import { OutputsSection } from "../../settings/sections/outputs-section";
+import { OutputsSection, screenFlashId } from "../../settings/sections/outputs-section";
+import { flashTarget } from "../flash";
+import { FoundBanner } from "./found-banner";
 import { NewViewDialog } from "../../settings/sections/new-view-dialog";
 import { assignMadeView } from "../../settings/screen-role-confirm";
 import type { ViewSurface } from "@main/types/views";
@@ -124,6 +126,10 @@ export function ScreensRoute() {
     <div className="pb-[50vh] max-sm:pb-24 lg:flex lg:items-start lg:gap-4">
       <div className="min-w-0 flex-1">
         <OutputsSection
+          // The same call the section's "Set up as a new screen" makes: the panel
+          // opens on a new screen for the device, and nothing is made until it
+          // finishes.
+          banner={<FoundBanner onSetUp={(device) => select(newTarget(device))} />}
           stageState={s.stageState}
           handlers={s.handlers}
           serviceTypes={s.serviceTypes}
@@ -176,8 +182,10 @@ export function ScreensRoute() {
           onAddScreen={addScreen}
           onRequestNewView={requestNewView}
           onCreated={(outputId, viewMade) => {
-            // The panel stays open, on the screen that now exists.
+            // The panel stays open, on the screen that now exists, and its card is
+            // scrolled to and outlined so the operator sees where it went.
             setPanel(outputId ? { kind: "edit", outputId, created: { viewMade } } : null);
+            if (outputId) flashTarget(screenFlashId(outputId));
           }}
           onEditLayout={editLayout}
           onRemoveScreen={requestRemoveScreen}

@@ -197,6 +197,7 @@ as such rather than given a doc link it doesn't need.
 | `[history-edit]` | Merging one recorded service into another: [The service page](../features/attendance-and-history.md#the-service-page) |
 | `[integration-manager]` | Config-key validation, and credentials migrating (or failing to migrate) out of `settings.json`: [When a credential could not be moved out of settings.json](reliability.md#when-a-credential-could-not-be-moved-out-of-settingsjson) |
 | `[kiosk-responder]` | The UDP discovery responder starting, or a socket/reply error: [Discovery](../kiosk-devices.md#discovery) |
+| `[kiosk-presence]` | A device that is not a Mac helper output heard for the first time, or again after it aged out (its id, OS and host), whether or not anyone is on Screens; and the list reaching its 256-device limit, once per time it fills. A helper output logs under `[output-helper] output seen` instead: [Discovery](../kiosk-devices.md#discovery) |
 | `[layout-defaults]` | The one-time card cleanups on load, with a count: a translucent or older card ground folded to the current card, and an 8% card border raised to 10%: [Layout editor](../reference/layout-editor.md) |
 | `[layout-editor]` | Browser-side: the layout editor's own reads (targets, commands, services, files, saved groups) failing, and a saved group failing to save or delete |
 | `[layout-images]` | Orphaned uploaded layout images pruned: [Under load](reliability.md#under-load) |

@@ -16,8 +16,15 @@ process.env.HOME = path.join(TMP, "home");
 
 const { startKioskResponder, stopKioskResponder } = await import("./kiosk-responder.js");
 const { encodeProbe, decodeReply } = await import("./kiosk-discovery.js");
-const { startScan, seenDevices, resetKioskPresence } = await import("./kiosk-presence.js");
+const { startScan, stopScan, seenDevices, resetKioskPresence } = await import("./kiosk-presence.js");
 const { kioskDevicesStore, updateDevices, release } = await import("./kiosk-devices-store.js");
+const { addBroadcastListener } = await import("./broadcaster.js");
+
+/** Every kiosk:devices frame since a test last cleared it. */
+const frames: { seen: { id: string }[] }[] = [];
+addBroadcastListener((channel, payload) => {
+  if (channel === "kiosk:devices") frames.push(payload as (typeof frames)[number]);
+});
 
 const THIS_MAC = "02:00:00:00:00:aa";
 const OTHER_MAC = "02:00:00:00:00:bb";
@@ -103,6 +110,72 @@ describe("a probe carrying this machine's own MAC", () => {
     assert.equal(await answered(2000), true);
     assert.deepEqual(seenDevices().map((d) => d.id), ["wall-pi"]);
     assert.equal(seenDevices()[0].output, undefined);
+  });
+});
+
+// With no page open and no scan running the server still LISTS what it hears, so
+// the Screens banner and the sidebar count are populated when someone looks. It
+// ANSWERS only what is already its own: a device binds to the first server that
+// answers it, so answering every new device would race any other Stage Utility on
+// the network for it.
+describe("an unclaimed device while nothing is scanning", () => {
+  beforeEach(() => stopScan("test"));
+
+  test("is listed, and not answered", async () => {
+    await send({ id: "new-pi", macs: [OTHER_MAC], hostname: "pi" });
+    assert.equal(await answered(400), false, "the server answered a device nobody has set up, with no scan open");
+    assert.deepEqual(seenDevices().map((d) => d.id), ["new-pi"], "a device heard with no scan open was not listed");
+  });
+
+  test("is answered once somebody is looking, and listed throughout", async () => {
+    await send({ id: "new-pi", macs: [OTHER_MAC], hostname: "pi" });
+    assert.equal(await answered(300), false);
+    startScan("page");
+    await send({ id: "new-pi", macs: [OTHER_MAC], hostname: "pi" });
+    assert.equal(await answered(2000), true, "an open Screens page did not get the device answered");
+    assert.deepEqual(seenDevices().map((d) => d.id), ["new-pi"]);
+  });
+
+  test("is answered at its very next probe once it is set up, and then not listed", async () => {
+    // Set up -> claim -> the device's next probe: how a screen picks up its
+    // binding when nothing was answering it.
+    await send({ id: "new-pi", macs: [OTHER_MAC], hostname: "pi" });
+    assert.equal(await answered(300), false);
+    await updateDevices(() => [{ id: "new-pi", token: "t", outputId: "display-1", macs: [OTHER_MAC] }]);
+    await send({ id: "new-pi", macs: [OTHER_MAC], hostname: "pi" });
+    assert.equal(await answered(2000), true, "a claimed device was not answered at its next probe");
+    assert.equal(decodeReply(replies[0])?.serverId, "srv-test");
+    assert.deepEqual(seenDevices().map((d) => d.id), [], "a claimed device stayed in the not-set-up list");
+  });
+
+  test("one that names this server is answered and listed", async () => {
+    // Released, a restored config, or claimed on an install since wiped.
+    await send({ id: "was-ours", macs: [OTHER_MAC], boundTo: "srv-test" });
+    assert.equal(await answered(2000), true);
+    assert.deepEqual(seenDevices().map((d) => d.id), ["was-ours"]);
+  });
+
+  test("one set up on another server after it was listed leaves the list at once, announced once", async () => {
+    // Heard unclaimed, then claimed on a second server: its next probe says so.
+    // Left alone it would sit here for the rest of its 90 s.
+    await send({ id: "taken-pi", macs: [OTHER_MAC], hostname: "pi" });
+    const listedBy = Date.now() + 2000;
+    while (seenDevices().length === 0 && Date.now() < listedBy) await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(seenDevices().map((d) => d.id), ["taken-pi"]);
+    frames.length = 0;
+    await send({ id: "taken-pi", macs: [OTHER_MAC], hostname: "pi", boundTo: "srv-other" });
+    const goneBy = Date.now() + 2000;
+    while (seenDevices().length > 0 && Date.now() < goneBy) await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(seenDevices().map((d) => d.id), [], "a device claimed elsewhere stayed in the list");
+    assert.equal(frames.length, 1, `${frames.length} frames announced the departure`);
+    assert.deepEqual(frames[0].seen, []);
+    assert.equal(await answered(200), false);
+  });
+
+  test("one bound to another server is neither answered nor listed", async () => {
+    await send({ id: "theirs", macs: [OTHER_MAC], boundTo: "srv-other" });
+    assert.equal(await answered(400), false);
+    assert.deepEqual(seenDevices().map((d) => d.id), []);
   });
 });
 

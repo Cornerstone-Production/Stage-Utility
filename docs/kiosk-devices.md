@@ -8,9 +8,9 @@ Nothing on the device knows which display it is. The server decides that, once,
 when you set it up on the **Screens** page.
 
 There is no separate page for them. A device that has been heard but not set up
-is a screen you have not finished configuring, so it appears under *Not set up
-yet* at the bottom of Screens, and once it is set up it becomes a line on that
-screen's own card.
+is a screen you have not finished configuring, so it appears in a banner at the
+top of Screens and under *Not set up yet*, below the cards, and once it is set up
+it becomes a line on that screen's own card.
 
 ## Setting one up
 
@@ -33,8 +33,11 @@ On a Mac the same command installs the [Mac output helper](#installing-the-mac-o
 instead of a browser. The Chrome kiosk is still there for a Mac the helper cannot
 run on: add `-s -- --browser` after `sh`.
 
-**3. Set it up.** Open **Screens** and look under *Not set up yet* — being on
-that page is itself the scan. The new device offers two things:
+**3. Set it up.** Open **Screens**. A screen that has been heard and not set up
+is named in a banner at the top of the page, with **Set up** beside it, and again
+under *Not set up yet*, which sits directly below the cards. Having the page open
+is also what gets the device answered (see [Discovery](#discovery)). Under *Not
+set up yet* the new device offers two things:
 
 | | |
 |---|---|
@@ -42,6 +45,10 @@ that page is itself the scan. The new device offers two things:
 | **Use for an existing screen** | Binds it to a screen that already exists — the hardware-swap case. |
 
 The screen redirects itself; you do not have to walk to it.
+
+**Dismiss** on the banner hides one device from the banner in that browser; it
+stays under *Not set up yet*, and **Show dismissed** brings it back. Screens in the
+sidebar shows how many devices are not set up, from any page.
 
 Nothing is created just because a device was heard. A spare machine booting
 mid-service would otherwise mint a screen nobody asked for, and deleting it
@@ -269,9 +276,15 @@ The port is adjustable, because AV gear is fond of odd ports.
 
 - A device bound to **this** server is always answered, so a display re-finds its
   server after an IP change with nobody present.
-- An **unclaimed** device is only recorded while a scan is open — pressed in
-  Screens, held for as long as that page is open, or a short window every few
-  minutes.
+- An **unclaimed** device is always **listed**: the server records every one it
+  hears, with no scan to open, so the banner, *Not set up yet* and the sidebar
+  count are filled the moment anyone looks. A device not heard for 90 seconds
+  drops out, and the list holds at most 256 unclaimed devices: the first heard are the ones kept, and the log says when it is full.
+- An unclaimed device is **answered** only while a scan is open, which is for as
+  long as a Screens page is open. A device binds to the first server that answers
+  it, so a server answering every new device at all times would race any other
+  Stage Utility on the network for it. The answer is also what puts the holding
+  screen, with its id, address and MAC, on the physical screen.
 
 Where broadcast does not cross a VLAN, write the server address into a `server`
 file beside the device id and discovery is skipped.

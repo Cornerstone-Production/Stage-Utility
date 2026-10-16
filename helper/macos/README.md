@@ -239,7 +239,8 @@ can list the output as *bound elsewhere*.
 *If the server is gone for good and an output must move to another:* quit the helper,
 remove that output's `"boundTo"` line from `outputs.json` (and nothing else; its token
 stays), and start it. It announces itself unbound and appears under *Not set up yet* on
-whichever server is scanning. Until then it will not follow another server.
+every server that hears it, and is answered by the one whose Screens page is open. Until
+then it will not follow another server.
 
 ## Health
 

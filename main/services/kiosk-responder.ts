@@ -66,7 +66,9 @@ export function startKioskResponder(opts: ResponderOptions): void {
     const decision = decideProbe(probe, opts.serverId, { scanning: scanning(), bound });
 
     // Listed means somebody could set it up, or it cannot reach its own server.
-    // Which is which is decideProbe's call; this only records it.
+    // Which is which is decideProbe's call; this only records it. A new device is
+    // listed whether or not a page is scanning; answering it is a separate
+    // decision (see rule 4 there).
     if (decision.list === "unclaimed" || decision.list === "elsewhere") {
       recordSeen({
         id: probe.id,
@@ -79,6 +81,12 @@ export function startKioskResponder(opts: ResponderOptions): void {
         screen: probe.mode ? { w: 0, h: 0, mode: probe.mode } : undefined,
         output: probe.output,
       });
+    }
+    if (decision.list === "none") {
+      // Heard, and not ours to show. If it WAS listed (it was unclaimed a moment
+      // ago and has since been set up on another server) it leaves the list now,
+      // not when its last sighting ages out 90 s later.
+      forgetSeen(probe.id);
     }
     if (decision.list === "mine") {
       // Keep the stored hardware facts current.

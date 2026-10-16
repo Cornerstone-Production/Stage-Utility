@@ -33,6 +33,11 @@ done. Dismiss it and it stays dismissed.
 | Services | **Plan**, **History**, **Baptisms** |
 | Settings | **Integrations**, **Messages**, **Branding**, **Advanced** |
 
+**Screens** carries a number when devices have been heard on the network that are
+not set up, from any page, and it goes when they are set up or stop being heard.
+It counts the devices the banner on [Screens](#adding-a-screen) names, dismissed
+ones included.
+
 Consoles you have built get a row each, above the groups — see
 [Consoles](#consoles). The running version sits at the foot of the sidebar. Drag
 its right edge to resize it, or collapse it to icons; on a phone it becomes a
@@ -241,9 +246,18 @@ editor.
 
 ### Adding a screen
 
-**Add a screen** (the tile, or the button in the empty panel), and a waiting
-device's **Set up as a new screen** (see [Kiosk devices](../kiosk-devices.md)),
-open the same panel in two steps:
+A screen found on the network that is not set up is named in a banner at the top
+of the page, one row per device with **Set up**, and again under **Not set up
+yet** below the cards. **Set up** opens the panel below for that device. Once the
+screen is made, its card is scrolled to and outlined. **Dismiss** hides a device
+from the banner in this browser only, with an **Undo**; it stays under *Not set up
+yet*, and **Show dismissed** brings the hidden ones back. A device that is set up
+or stops being heard leaves the banner by itself, and Screens in the sidebar shows
+how many devices are not set up, from any page.
+
+**Add a screen** (the tile, or the button in the empty panel), **Set up** in the
+banner, and a waiting device's **Set up as a new screen** (see
+[Kiosk devices](../kiosk-devices.md)), open the same panel in two steps:
 
 1. **Name it.** The name and an optional friendly link.
 2. **What should it show?** Four choices: **a new wall view** called after the

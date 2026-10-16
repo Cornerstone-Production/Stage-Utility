@@ -108,7 +108,7 @@ final class OutputDiscovery {
     let wait = ProbeSchedule.interval(unanswered: unanswered, answered: answered, socketOpen: link.socketOpen)
     DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: work)
     if !answered, unanswered == 10 {
-      Log.notice(.discovery, "\(label): no answer after 10 probes; probing every 30 s (the server answers an unclaimed output only while Screens is scanning)")
+      Log.notice(.discovery, "\(label): no answer after 10 probes; probing every 30 s (the server lists an unclaimed output at once but answers it only while a Screens page is open, or once it is set up)")
     }
   }
 

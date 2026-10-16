@@ -4,7 +4,7 @@ import { describe, test, beforeEach, afterEach, mock } from "node:test";
 import {
   scanning, startScan, stopScan, recordSeen, seenDevices, forgetSeen,
   resetKioskPresence, rememberScreen, rememberSecret, SCAN_WINDOW_MS,
-  recordHealth, healthList, forgetHealth,
+  recordHealth, healthList, forgetHealth, MAX_SEEN,
 } from "./kiosk-presence.js";
 import { HEALTH_TTL_MS } from "./output-health.js";
 import { addBroadcastListener } from "./broadcaster.js";
@@ -105,6 +105,105 @@ describe("devices heard", () => {
     const d = seenDevices(t0)[0];
     assert.equal(d.boundTo, "srv-other");
     assert.equal(d.unreachable, true);
+  });
+});
+
+// Devices are listed with no scan open, so anything on the LAN that can send a
+// datagram can add to this list. What it may hold, and what is said about it, are
+// bounded and logged.
+describe("a list that is always open", () => {
+  const T0 = 1_000_000;
+  const lines: string[] = [];
+  const warnings: string[] = [];
+  const realLog = console.log;
+  const realWarn = console.warn;
+  const frames: { seen: { id: string }[] }[] = [];
+  let listening = false;
+  beforeEach(() => {
+    lines.length = 0;
+    warnings.length = 0;
+    frames.length = 0;
+    console.log = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
+    console.warn = (...a: unknown[]) => { warnings.push(a.map(String).join(" ")); };
+    if (!listening) {
+      listening = true;
+      addBroadcastListener((channel, payload) => {
+        if (channel === "kiosk:devices") frames.push(payload as (typeof frames)[number]);
+      });
+    }
+  });
+  afterEach(() => {
+    console.log = realLog;
+    console.warn = realWarn;
+  });
+
+  const SEEN = "[kiosk-presence] device seen:";
+
+  test("a device heard for the first time says so once, with no scan open", () => {
+    assert.equal(scanning(T0), false);
+    recordSeen(dev("pi-1", { os: "Linux", hostname: "lobby-pi" }), T0);
+    recordSeen(dev("pi-1", { os: "Linux", hostname: "lobby-pi" }), T0 + 30_000);
+    recordSeen(dev("pi-1", { os: "Linux", hostname: "lobby-pi" }), T0 + 60_000);
+    assert.deepEqual(lines.filter((l) => l.startsWith(SEEN)), [`${SEEN} pi-1 (Linux) on lobby-pi`]);
+  });
+
+  test("a device heard again after it aged out is a new sighting: said, and the page is told", () => {
+    // Treated as a refresh it would rejoin the list silently, because nothing a
+    // person reads would differ from the record kept for it. Between its 90 s TTL
+    // and the sweep that prunes it the record is still there, and anything else
+    // being announced in that window tells the page it is gone.
+    mock.timers.enable({ apis: ["setInterval", "Date"], now: T0 });
+    try {
+      recordSeen(dev("pi-1", { os: "Linux" }), T0);
+      recordSeen(dev("pi-2", { os: "Linux" }), T0 + 80_000);
+      // A change to a device already listed announces without pruning anything.
+      recordSeen(dev("pi-2", { os: "Linux", ip: "192.168.1.60" }), T0 + 95_000);
+      assert.deepEqual(frames.at(-1)?.seen.map((d) => d.id), ["pi-2"], "pi-1 had not aged out of the page's list");
+      const before = frames.length;
+      recordSeen(dev("pi-1", { os: "Linux" }), T0 + 100_000);
+      assert.ok(frames.length > before, "the page was not told it was back");
+      assert.deepEqual(frames.at(-1)?.seen.map((d) => d.id).sort(), ["pi-1", "pi-2"]);
+      assert.equal(lines.filter((l) => l.startsWith(`${SEEN} pi-1`)).length, 2, `lines: ${lines.join(" | ")}`);
+    } finally {
+      mock.timers.reset();
+    }
+  });
+
+  test("the list holds MAX_SEEN devices and says once, not per datagram, that it is full", () => {
+    for (let i = 0; i < MAX_SEEN; i++) recordSeen(dev(`flood-${i}`), T0);
+    assert.equal(seenDevices(T0).length, MAX_SEEN);
+    for (let i = 0; i < 50; i++) recordSeen(dev(`over-${i}`), T0 + 1_000);
+    assert.equal(seenDevices(T0 + 1_000).length, MAX_SEEN, "the list grew past its bound");
+    assert.equal(seenDevices(T0 + 1_000).some((d) => d.id.startsWith("over-")), false);
+    assert.equal(warnings.length, 1, `warned ${warnings.length} times: ${warnings.join(" | ")}`);
+    assert.match(warnings[0], /^\[kiosk-presence\] 256 devices are already listed/);
+  });
+
+  test("a device already listed is still refreshed when the list is full", () => {
+    for (let i = 0; i < MAX_SEEN; i++) recordSeen(dev(`flood-${i}`), T0);
+    recordSeen(dev("flood-0", { ip: "192.168.1.99" }), T0 + 1_000);
+    assert.equal(seenDevices(T0 + 1_000).find((d) => d.id === "flood-0")?.ip, "192.168.1.99");
+  });
+
+  test("the full warning is said again the next time the list fills, not once per process", () => {
+    const fill = (prefix: string, at: number, n: number) => {
+      for (let i = 0; i < n; i++) recordSeen(dev(`${prefix}-${i}`), at);
+    };
+    fill("a", T0, MAX_SEEN);
+    recordSeen(dev("over-1"), T0 + 1_000); // full: the first warning
+    // Everything ages out, one new device finds room, and the list fills again.
+    recordSeen(dev("late"), T0 + 100_000);
+    fill("b", T0 + 100_000, MAX_SEEN - 1);
+    assert.equal(seenDevices(T0 + 100_000).length, MAX_SEEN);
+    recordSeen(dev("over-2"), T0 + 101_000); // full again: the second
+    recordSeen(dev("over-3"), T0 + 101_000); // but not a third
+    assert.equal(warnings.length, 2, `${warnings.length} warnings: ${warnings.join(" | ")}`);
+  });
+
+  test("room returns as devices age out", () => {
+    for (let i = 0; i < MAX_SEEN; i++) recordSeen(dev(`flood-${i}`), T0);
+    recordSeen(dev("late"), T0 + 100_000);
+    assert.deepEqual(seenDevices(T0 + 100_000).map((d) => d.id), ["late"], "an aged-out device still held a place");
   });
 });
 
@@ -381,5 +480,29 @@ describe("the sweep timer", () => {
     // lastSeen is T0, a device is kept while it is no more than 90 s old, so it
     // is still listed at the 90 s step and gone from the 105 s one.
     assert.deepEqual(announcedAt, [7 * STEP], "the page was never told the device aged out");
+  });
+
+  test("forgets a device that aged out and stops when nothing is left to do, so the next one starts it afresh", () => {
+    // seenDevices() already hides an expired device, so the Map's own contents are
+    // not visible from outside. What is: the sweep stops itself only when the Map
+    // is empty, and a stopped sweep is started again by the next sighting, which
+    // is a second setInterval. A sweep that left the expired device in the Map
+    // would never stop, and the next sighting would find it still running.
+    const real = globalThis.setInterval;
+    let started = 0;
+    globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
+      started += 1;
+      return real(...args);
+    }) as typeof setInterval;
+    try {
+      recordSeen(dev("d1"), T0);
+      assert.equal(started, 1, "the first sighting did not start the sweep");
+      for (let elapsed = STEP; elapsed <= 8 * STEP; elapsed += STEP) mock.timers.tick(STEP);
+      assert.deepEqual(seenDevices(Date.now()).map((d) => d.id), []);
+      recordSeen(dev("d2"), Date.now());
+      assert.equal(started, 2, "the sweep was still running: the expired device was never dropped from its list");
+    } finally {
+      globalThis.setInterval = real;
+    }
   });
 });

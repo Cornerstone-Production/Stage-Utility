@@ -482,7 +482,7 @@ recorder is running. Pass `{override: true}` to go anyway.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/devices` | `{scanning, bound, seen, matches, health}`. Device secrets are stripped. A device that is one output of a Mac output helper carries its `output` (`{kind, name, port, modes?}`) in `bound` and `seen`. `health` lists what each helper output last reported, `{deviceId, fps, repeated, dropped, latencyMs?, at, receivedAt, struggling}`, for the ones still reporting; it is never stored |
-| POST | `/api/devices/scan` | Open or close the scan window |
+| POST | `/api/devices/scan` | Open or close the scan window. `{holder?, stop?}`: a Screens page holds one while it is open. A scan is what makes the server answer a device that is not set up; devices are listed in `seen` whether or not one is open |
 | POST | `/api/devices/claim` | Bind a device to an output. `{deviceId, outputId}` binds it to that screen. With no `outputId` it makes a new screen first, from the same fields as `POST /api/outputs` (`name`, or `newName`, else the device's hostname; `viewId` (with `expectSurface`, which refuses as above with a `409` that makes no screen and binds nothing) or `newView`, `slug`, `showInSidebar`; a `mode` is `400`), validated before anything is written. Binding the device is the last step of making the screen, so a binding that fails puts back everything before it (the screen, a view made for it, a sidebar listing written on an existing view) and answers the same `500` as `POST /api/outputs`. Those fields with an `outputId` are `400`. A device already bound is not made a new screen: with no `outputId` it is `409` naming the screen it shows (moving it is a claim with that screen's `outputId`). Answers `{ok, displaced, outputId}` |
 | POST | `/api/devices/release` | Unbind it. The screen keeps its view and slug |
 | GET | `/api/devices/for-output/:outputId` | Which device drives this screen |
@@ -634,7 +634,7 @@ something to change:
 `wireless:connections-changed` · `osc:targets-changed` ·
 `rosstalk:targets-changed` · `scores:favourites-changed` ·
 `rosstalk:simulated` · `automation:rules` · `cues` · `cues:all` ·
-`automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` (`{scanning, seen, health}`; the Screens page refetches `/api/devices` on each, and a steady output's health does not push one) ·
+`automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` (`{scanning, seen, health}`; the Screens page and the sidebar's count of screens not set up refetch `/api/devices` on each, and a steady output's health does not push one) ·
 `display:refresh` · `settings:allowedServiceTypeIds-changed` · `baptism:rebuilt`
 
 `baptism:rebuilt` fires once a baptism rebuild — the Baptisms tab's own, a

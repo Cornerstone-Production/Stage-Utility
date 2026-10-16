@@ -92,6 +92,9 @@ describe("what this server answers", () => {
   });
 
   test("an unclaimed device is answered only while scanning", () => {
+    // Answering is the commitment: a device binds to the first server that
+    // answers it, so a server that answered every new device at all times would
+    // race any other Stage Utility on the network for it.
     assert.equal(decideProbe(probe(), ME, { scanning: false, bound: false }).answer, false);
     assert.equal(decideProbe(probe(), ME, { scanning: true, bound: false }).answer, true);
   });
@@ -125,9 +128,12 @@ describe("what this server shows", () => {
     assert.equal(d.answer, false, "showing it is not the same as serving it");
   });
 
-  test("nothing new appears unless someone is looking", () => {
-    assert.equal(decideProbe(probe(), ME, { scanning: false, bound: false }).list, "none");
-    assert.equal(decideProbe(probe(), ME, { scanning: true, bound: false }).list, "unclaimed");
+  test("a new device is listed whether or not anyone is looking", () => {
+    // Listing is what lets the sidebar count and the Screens banner show a device
+    // the moment someone looks, with no scan to open first. It answers nothing.
+    for (const scanning of [false, true]) {
+      assert.equal(decideProbe(probe(), ME, { scanning, bound: false }).list, "unclaimed", `scanning=${scanning}`);
+    }
   });
 
   test("our own bound device is not offered as something to claim", () => {
@@ -165,6 +171,39 @@ describe("what this server shows", () => {
     assert.equal(d.list, "unclaimed");
     assert.equal(d.answer, true);
   });
+});
+
+// The whole policy as one table, so a change to any cell is a visible edit rather
+// than a missing assertion. One entry per line.
+describe("the decision table", () => {
+  const ME = "srv-me";
+  type Case = {
+    name: string;
+    probe: Partial<Parameters<typeof encodeProbe>[0]>;
+    scanning: boolean;
+    bound: boolean;
+    want: ReturnType<typeof decideProbe>;
+  };
+  const CASES: Case[] = [
+    { name: "unbound, not scanning", probe: {}, scanning: false, bound: false, want: { answer: false, list: "unclaimed" } },
+    { name: "unbound, scanning", probe: {}, scanning: true, bound: false, want: { answer: true, list: "unclaimed" } },
+    { name: "bound here, not scanning", probe: { boundTo: ME }, scanning: false, bound: true, want: { answer: true, list: "mine" } },
+    { name: "bound here, scanning", probe: { boundTo: ME }, scanning: true, bound: true, want: { answer: true, list: "mine" } },
+    { name: "bound here, probe not yet carrying it", probe: {}, scanning: false, bound: true, want: { answer: true, list: "mine" } },
+    { name: "names us, no record, not scanning", probe: { boundTo: ME }, scanning: false, bound: false, want: { answer: true, list: "unclaimed" } },
+    { name: "names us, no record, scanning", probe: { boundTo: ME }, scanning: true, bound: false, want: { answer: true, list: "unclaimed" } },
+    { name: "bound elsewhere, not scanning", probe: { boundTo: "srv-other" }, scanning: false, bound: false, want: { answer: false, list: "none" } },
+    { name: "bound elsewhere, scanning", probe: { boundTo: "srv-other" }, scanning: true, bound: false, want: { answer: false, list: "none" } },
+    { name: "unreachable elsewhere, not scanning", probe: { boundTo: "srv-other", unreachable: true }, scanning: false, bound: false, want: { answer: false, list: "elsewhere" } },
+    { name: "unreachable elsewhere, scanning", probe: { boundTo: "srv-other", unreachable: true }, scanning: true, bound: false, want: { answer: false, list: "elsewhere" } },
+    { name: "held here but now naming another server", probe: { boundTo: "srv-other" }, scanning: true, bound: true, want: { answer: false, list: "none" } },
+  ];
+
+  for (const c of CASES) {
+    test(c.name, () => {
+      assert.deepEqual(decideProbe(probe(c.probe), ME, { scanning: c.scanning, bound: c.bound }), c.want);
+    });
+  }
 });
 
 // The Mac output helper announces one device per output, each probe carrying an
