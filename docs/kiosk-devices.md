@@ -178,8 +178,9 @@ A Mac with no checkout fetches it:
 (`bash -s -- --dry-run` previews). It stops the helper with `launchctl bootout` in
 every account that has it loaded, then removes the LaunchAgent and the app. It also
 removes the Chrome kiosk's agent and launcher where `--browser` installed them, and
-removes the Stage Utility server if one is on the same Mac. A copy of the helper
-opened by hand is not launchd's: the script warns that it is still running and leaves
+removes the Stage Utility server if one is on the same Mac (its launchd daemon,
+`com.stageutility.server`, or `com.cornerstone.stage-utility` from an install that
+predates that label). A copy of the helper opened by hand is not launchd's: the script warns that it is still running and leaves
 it for you to quit from its menu bar icon.
 
 It lists, and does not remove, the Mac's device id and token in
