@@ -175,6 +175,12 @@ is in the sidebar. Its menu has **View settings…**, *Make it a wall view* or
 *Make it a control surface*, *Duplicate view*, *Delete view…* and, for a console,
 **Show in the sidebar**.
 
+Under the cards: **New view** (pick what the view shows: Mic Slots, Dashboard,
+Stage, Transcription, ServiceCue, SPL Rundown, Calendar or a Custom Layout, and for
+a custom layout whether it is a wall view or a control surface), **Import layout…**
+(see [Moving a view](../moving-a-view.md)) and **Refresh all**, which reloads every
+connected display.
+
 ### The settings panel
 
 A panel docks beside the cards, so a card and its preview stay in view while a
