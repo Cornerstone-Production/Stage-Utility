@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { prepareRelaunch, relaunchPlan, scheduleRelaunch, type RelaunchDeps } from "./relaunch.js";
-import { DAEMON_LABEL, KNOWN_DAEMON_LABELS, LEGACY_DAEMON_LABELS, type LabelProbe } from "./launchd-label.js";
+import { prepareRelaunch, scheduleRelaunch, type RelaunchDeps } from "./relaunch.js";
+import { DAEMON_LABEL, KNOWN_DAEMON_LABELS, LEGACY_DAEMON_LABELS, type DaemonLabel, type LabelProbe } from "./launchd-label.js";
+import type { InstallKind } from "./install-kind.js";
+import type { SpawnPlan } from "./strategy.js";
 import { FORMULA } from "./homebrew-strategy.js";
 
 // The regression this guards: "restart" meant exit(0) and let the service
@@ -13,9 +15,20 @@ import { FORMULA } from "./homebrew-strategy.js";
 const BETA_KEG = `/opt/homebrew/Cellar/${FORMULA.beta}/1.10.0-beta.28/libexec`;
 const MAIN_KEG = `/opt/homebrew/Cellar/${FORMULA.main}/1.9.5/libexec`;
 
-describe("relaunchPlan", () => {
+/**
+ * The plan prepareRelaunch makes for an install whose launchd job is `label`, or
+ * for a macOS tarball install where no job can be found when `label` is null.
+ * The label reaches prepareRelaunch the way production gives it one: in
+ * XPC_SERVICE_NAME, with launchd otherwise reporting nothing loaded.
+ */
+function planFor(kind: InstallKind, appRoot: string, platform: NodeJS.Platform, label: DaemonLabel | null): SpawnPlan | null {
+  const env = { XPC_SERVICE_NAME: label ?? "0" };
+  return prepareRelaunch(kind, appRoot, platform, env, () => "not-loaded").plan;
+}
+
+describe("the plan prepareRelaunch makes", () => {
   it("kickstarts the beta formula's label on a Homebrew beta install", () => {
-    const p = relaunchPlan("homebrew", BETA_KEG, "darwin", null);
+    const p = planFor("homebrew", BETA_KEG, "darwin", null);
     assert.ok(p, "must plan a relaunch on launchd");
     // Every kick target, extracted — not substring absence, which "-beta"
     // containing "stage-utility" would satisfy under any quoting change.
@@ -25,13 +38,13 @@ describe("relaunchPlan", () => {
   });
 
   it("matches the formula on a path segment, so main cannot win inside the beta keg's name", () => {
-    const p = relaunchPlan("homebrew", MAIN_KEG, "darwin", null);
+    const p = planFor("homebrew", MAIN_KEG, "darwin", null);
     assert.ok(p!.args.join(" ").includes(`homebrew.mxcl.${FORMULA.main}`));
   });
 
   it("kickstarts whichever daemon label the caller resolved on a macOS tarball install", () => {
     for (const label of KNOWN_DAEMON_LABELS) {
-      const p = relaunchPlan("tarball", "/usr/local/stage-utility/current", "darwin", label);
+      const p = planFor("tarball", "/usr/local/stage-utility/current", "darwin", label);
       const targets = [...p!.args.join(" ").matchAll(/-p "[^"]*\/([^"]+)"/g)].map((m) => m[1]);
       assert.equal(targets.length, 2, "exactly the gui and system domains");
       for (const t of targets) assert.equal(t, label);
@@ -39,14 +52,14 @@ describe("relaunchPlan", () => {
   });
 
   it("a macOS tarball install with no resolved label plans nothing rather than kicking a guess", () => {
-    assert.equal(relaunchPlan("tarball", "/usr/local/stage-utility/current", "darwin", null), null);
+    assert.equal(planFor("tarball", "/usr/local/stage-utility/current", "darwin", null), null);
   });
 
   it("demands the spawn WITHOUT killing: -p only, both domains, never fatal", () => {
     // -p is "start if not running": if KeepAlive already relaunched the server
     // (a box where launchd did not park it), the healthy successor is left
     // alone. -k here would kill it mid-boot and start a third instance.
-    const s = relaunchPlan("homebrew", BETA_KEG, "darwin", null)!.args.join(" ");
+    const s = planFor("homebrew", BETA_KEG, "darwin", null)!.args.join(" ");
     assert.match(s, /kickstart -p "gui\/\$\(id -u\)\//, "gui domain for brew services as a user");
     assert.match(s, /kickstart -p "system\//, "system domain for a root daemon");
     assert.ok(!s.includes("-k"), "must not kill a successor KeepAlive already started");
@@ -54,7 +67,7 @@ describe("relaunchPlan", () => {
   });
 
   it("sleeps past our own exit before kicking", () => {
-    const script = relaunchPlan("tarball", "/usr/local/stage-utility/current", "darwin", DAEMON_LABEL)!.args.at(-1)!;
+    const script = planFor("tarball", "/usr/local/stage-utility/current", "darwin", DAEMON_LABEL)!.args.at(-1)!;
     assert.match(script, /^sleep [0-9]/);
   });
 
@@ -65,15 +78,15 @@ describe("relaunchPlan", () => {
     // only thing that can make it null is the platform / kind itself. Without
     // the label the tarball cases returned null for want of one, and deleting
     // the platform check left this green.
-    assert.equal(relaunchPlan("tarball", "/opt/stage-utility/current", "linux", DAEMON_LABEL), null);
-    assert.equal(relaunchPlan("tarball", "C:\\Program Files\\Stage Utility\\current", "win32", DAEMON_LABEL), null);
-    assert.equal(relaunchPlan("homebrew", BETA_KEG, "linux", DAEMON_LABEL), null);
-    assert.equal(relaunchPlan("git", "/Users/x/stage-utility", "darwin", DAEMON_LABEL), null);
-    assert.equal(relaunchPlan("unknown", "/somewhere", "darwin", DAEMON_LABEL), null);
+    assert.equal(planFor("tarball", "/opt/stage-utility/current", "linux", DAEMON_LABEL), null);
+    assert.equal(planFor("tarball", "C:\\Program Files\\Stage Utility\\current", "win32", DAEMON_LABEL), null);
+    assert.equal(planFor("homebrew", BETA_KEG, "linux", DAEMON_LABEL), null);
+    assert.equal(planFor("git", "/Users/x/stage-utility", "darwin", DAEMON_LABEL), null);
+    assert.equal(planFor("unknown", "/somewhere", "darwin", DAEMON_LABEL), null);
   });
 
   it("an unrecognisable keg path plans nothing rather than kicking a guessed label", () => {
-    assert.equal(relaunchPlan("homebrew", "/weird/place/libexec", "darwin", null), null);
+    assert.equal(planFor("homebrew", "/weird/place/libexec", "darwin", null), null);
   });
 });
 

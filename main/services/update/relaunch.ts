@@ -84,24 +84,6 @@ function kickFor(
   return { job, plan: { command: "bash", args: ["-c", `sleep 2; ${kickstartLabel(job, { kill: false })}`], env: {} } };
 }
 
-/**
- * What to spawn so this server comes back after it exits — or null where the
- * service manager already does that reliably.
- *
- * A macOS tarball install has no fixed label (see launchd-label.ts), so the
- * caller must say which job it is running as; there is deliberately no default,
- * so a new call site has to decide. With null there is nothing safe to kick and
- * this returns null. prepareRelaunch is the caller that finds out.
- */
-export function relaunchPlan(
-  kind: InstallKind,
-  appRoot: string,
-  platform: NodeJS.Platform,
-  tarballLabel: DaemonLabel | null,
-): SpawnPlan | null {
-  return kickFor(kind, appRoot, platform, tarballLabel)?.plan ?? null;
-}
-
 /** What exitForRestart set up, and — when it could not — why not. */
 export interface RelaunchPrep {
   /** What to spawn; null when nothing is to be kicked. */
@@ -113,7 +95,12 @@ export interface RelaunchPrep {
 }
 
 /**
- * relaunchPlan plus the work of finding out which job a macOS tarball install is.
+ * What to spawn so this server comes back after it exits — a null plan where the
+ * service manager already does that reliably.
+ *
+ * A macOS tarball install has no fixed label (see launchd-label.ts), so this
+ * finds out which job it is running as. When none can be found there is nothing
+ * safe to kick: the plan is null and `failure` says why, never a guess.
  * Everything that touches the system arrives as an argument, so the decision runs
  * under test with the real code and a fake launchd.
  */
