@@ -23,8 +23,6 @@ using namespace dlshim;
 
 namespace {
 
-bool sameIID(REFIID a, CFUUIDBytes b) { return std::memcmp(&a, &b, sizeof(CFUUIDBytes)) == 0; }
-
 /// A CFString from the driver, as UTF-8, released.
 void takeString(CFStringRef s, char *out, size_t outLen) {
   if (outLen > 0) out[0] = 0;

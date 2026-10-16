@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cstdint>
 #include <condition_variable>
+#include <cstring>
 #include <deque>
 #include <mutex>
 #include <thread>
@@ -77,6 +78,9 @@ struct CardFrame {
 
 /// mach_absolute_time in nanoseconds: the host clock every time here is on.
 uint64_t hostNowNs();
+
+/// Whether the interface id a driver asks about is `b`.
+inline bool sameIID(REFIID a, CFUUIDBytes b) { return std::memcmp(&a, &b, sizeof(CFUUIDBytes)) == 0; }
 
 /// Where a card's playback is, kept on the host clock: one stream time and the host
 /// time it went to air, and the mode's rate through it.
