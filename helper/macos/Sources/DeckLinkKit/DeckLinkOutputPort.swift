@@ -185,10 +185,7 @@ public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
   @discardableResult
   public func open(videoMode: String?) -> State {
     queue.sync {
-      stopTimers()
-      closeHandle()
-      self.videoMode = videoMode
-      openNow(retrying: false)
+      reopen(videoMode: videoMode)
       return current
     }
   }
@@ -198,13 +195,7 @@ public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
   /// device, enabling its output, the pre-roll) takes tens of milliseconds. The
   /// owner hears how it went from `onOpened` and `onStatus`.
   public func requestOpen(videoMode: String?) {
-    queue.async { [weak self] in
-      guard let self else { return }
-      stopTimers()
-      closeHandle()
-      self.videoMode = videoMode
-      openNow(retrying: false)
-    }
+    queue.async { [weak self] in self?.reopen(videoMode: videoMode) }
   }
 
   /// Try a lost port again now: a device arrived.
@@ -260,6 +251,14 @@ public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
   }
 
   // MARK: On the queue
+
+  /// Close whatever is open and open in `videoMode`: what `open` and `requestOpen` do.
+  private func reopen(videoMode: String?) {
+    stopTimers()
+    closeHandle()
+    self.videoMode = videoMode
+    openNow(retrying: false)
+  }
 
   private enum Attempt {
     case opened(String, Frames)
@@ -541,9 +540,7 @@ public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
   func fakeUnplugAndReopenInOneTurn() {
     queue.sync {
       if let handle { dl_fake_unplug(handle) }
-      stopTimers()
-      closeHandle()
-      openNow(retrying: false)
+      reopen(videoMode: videoMode)
     }
   }
   func fakeClockReadError(us: Int64) { queue.sync { if let handle { dl_fake_clock_read_error(handle, us) } } }
