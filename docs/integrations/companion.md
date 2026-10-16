@@ -113,7 +113,7 @@ snapshot, no schedule reaches it.
 | `202` | this cue is set to **Ask twice**. `{confirm, expiresInSec}`; call again within 30 s with `?confirm=<token>`, or in the body. A confirmation is **single use** and lapses after 30 s — replaying one is answered with a fresh confirmation, never a second press |
 | `401` | no token, or a revoked one |
 | `404` | no cue by that name |
-| `409` | refused. `{error, reason}`; `error` is a sentence to read out, like *"The Gospel Way is live"* |
+| `409` | refused. `{error, reason}`; `error` is a sentence to read out, like *"Sunday Service is live"* |
 
 | `reason` | |
 |---|---|

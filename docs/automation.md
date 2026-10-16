@@ -334,7 +334,7 @@ for an install that cannot run a custom integration.
 **For setup and teardown, not for cues during a service.** Turning the projectors
 on before a rehearsal, turning the foyer televisions off after. Every cue imported
 from Companion carries the **no service is live** condition, and refuses with a
-sentence — *"The Gospel Way is live"* — while a service is running or about to
+sentence — *"Sunday Service is live"* — while a service is running or about to
 start, and when Planning Center cannot be read.
 
 A cue's editor has an **Allowed during a service** switch that is the same

@@ -72,7 +72,7 @@ signature, arrangement, item notes and total time, all on until switched off, an
 from Smaart (`98 dB`, or a dash where none was recorded), which only means something
 while Smaart is connected.
 
-The Item column reads, under the title, `Key E · 128 BPM · 4/4 · Elevation Rhythm`:
+The Item column reads, under the title, `Key E · 128 BPM · 4/4 · Main Arrangement`:
 the key chosen on the plan item, then the BPM, time signature and name of its song
 arrangement in Planning Center. Anything the arrangement does not set is left out.
 That line is drawn in the Branding accent lifted toward white, so it stays legible

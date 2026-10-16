@@ -171,7 +171,7 @@ the service type, the plan and the current item can never land there.
 
 ### Measured
 
-On a plan called "Carry The Light" under a service type called "Weekend Service",
+On a plan called "Sample Plan" under a service type called "Weekend Service",
 in both themes. `strip` is the room the bar actually has, which is narrower than
 the window once the sidebar is open.
 
