@@ -52,6 +52,16 @@ dl_field fieldOf(BMDFieldDominance d) {
   }
 }
 
+/// Whether `output` plays `displayMode` in 8-bit YUV, the only format the helper sends.
+bool playsYUV8(IDeckLinkOutput *output, BMDDisplayMode displayMode) {
+  BMDDisplayMode actual = bmdModeUnknown;
+  bool supported = false;
+  return output->DoesSupportVideoMode(bmdVideoConnectionUnspecified, displayMode, bmdFormat8BitYUV,
+                                      bmdNoVideoOutputConversion, bmdSupportedVideoModeDefault, &actual,
+                                      &supported) == S_OK &&
+         supported;
+}
+
 /// Which port a device is, and whether it can play out at all.
 bool readPortId(IDeckLink *device, dl_port_id *id, bool *plays) {
   *id = dl_port_id{};
@@ -436,12 +446,7 @@ extern "C" dl_port_list *dl_port_list_create(void) {
             m.time_scale = scale;
           }
           m.field = fieldOf(mode->GetFieldDominance());
-          BMDDisplayMode actual = bmdModeUnknown;
-          bool supported = false;
-          m.yuv8 = output->DoesSupportVideoMode(bmdVideoConnectionUnspecified, m.display_mode, bmdFormat8BitYUV,
-                                                bmdNoVideoOutputConversion, bmdSupportedVideoModeDefault, &actual,
-                                                &supported) == S_OK &&
-                   supported;
+          m.yuv8 = playsYUV8(output, m.display_mode);
           port.modes.push_back(m);
           mode->Release();
         }
@@ -513,12 +518,7 @@ Card *enablePort(const dl_port_id &port, uint32_t displayMode, std::string &why,
   g.timeScale = scale;
   mode->Release();
 
-  BMDDisplayMode actual = bmdModeUnknown;
-  bool supported = false;
-  if (out->DoesSupportVideoMode(bmdVideoConnectionUnspecified, displayMode, bmdFormat8BitYUV,
-                                bmdNoVideoOutputConversion, bmdSupportedVideoModeDefault, &actual,
-                                &supported) != S_OK ||
-      !supported) {
+  if (!playsYUV8(out, displayMode)) {
     return fail("the port does not play " + modeCode(displayMode) + " in 8-bit YUV");
   }
   const HRESULT enabled = out->EnableVideoOutput(displayMode, bmdVideoOutputFlagDefault);
