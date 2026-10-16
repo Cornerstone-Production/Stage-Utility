@@ -871,22 +871,53 @@ timer and nothing is read. The log says which:
 ## What the module exposes
 
 **Actions** — PCO Live next/previous, refresh lineup, jump to next plan, set plan,
-set service type, set plan mode, route a view to an output, blackout an output,
-refresh displays, apply a preset, show/hide the QR code, and ten actions for the
-baptism timer: Start, Advance, Mark baptized, Start baptisms, Next, Pause/resume,
-Undo, Finish, Reset, Set workflow.
+set service type, set plan mode (auto or manual), route a view to an output,
+blackout an output (on, off or toggle), reload kiosk displays, apply a slot preset,
+show, hide or toggle the connect QR code, ten actions for the baptism timer (Start,
+Advance, Mark baptized, Start baptisms, Next, Pause/resume, Undo, Finish, Reset, Set
+workflow), and three for stage messages (below).
 
-**Feedbacks** — countdown overtime, mic battery low, mic offline, ProPresenter
-disconnected, plan in manual mode, output showing a given view, output blacked
-out, occupancy over a threshold, captions idle, a people-count text feedback
-that writes the count onto a button, and three for the baptism timer: phase
-colour (always on), paused, running.
+**Feedbacks** — boolean unless noted:
 
-**Variables** — plan and series title, service type, plan mode, ProPresenter
-current/next item and slide position, PCO countdown label and seconds, mics
-online and total, lowest battery and its channel, last caption text and speaker,
-people attendance and occupancy (with per-zone variables), last sync time. Plus
-one pair per automation signal — see below.
+| Feedback | True when |
+|---|---|
+| Service is live (PCO Live) | an item is running, or counting down to the start, or either, by its **Counts as live** option |
+| PCO countdown is in overtime | the countdown has gone negative |
+| Mic battery low / Mic offline or RF dropout | a channel's battery is low, or a channel (or any) has dropped |
+| ProPresenter disconnected | the integration is not connected |
+| Plan mode is Manual | the plan is in manual mode |
+| Output is showing a specific View / Output is blacked out | the chosen output shows the view, or is blacked out |
+| People occupancy over threshold | the in-room count, total or one zone's, is at or above a number you set |
+| Set button text to people count | *advanced*: writes the count (or a zone's) onto the button, with a prefix and suffix |
+| OBS is recording / streaming / on virtual cam | the chosen OBS output is active |
+| REAPER is recording | REAPER is rolling |
+| Streaming platform is live | Resi, YouTube or either is live |
+| Recorder / streaming platform disconnected | the chosen one of OBS, REAPER, Resi or YouTube is not connected |
+| Captions idle | no caption line has arrived for the number of seconds you set |
+| ProVideoPlayer now-layer is playing a video / remaining time at or under threshold | the now-layer is playing, or has the seconds you set or fewer left |
+| Baptism phase colour (*advanced*) / paused / running | the timer's phase colours the button, or it is paused, or a clock is counting |
+| Alert running | a stage message alert is running, for any group or one |
+| Automation signal equals / failed to resolve | see [Signals](#signals) |
+
+**Variables** — plan, series and service type; the plan mode; ProPresenter current
+and next item and the slide index and count; whether a service is live (`service_live`,
+`live_mode` as `item`, `preservice` or `none`) and the live item's title; PCO countdown
+label and `mm:ss`; mics online and total, lowest battery and its channel; last caption
+text and speaker; people attendance, occupancy, connected, updated and zone count, with
+a name, attendance and occupancy per zone; last sync time. One connected, active or
+live variable per integration for OBS (recording, streaming, virtual camera, record
+duration), REAPER (recording, transport position), Resi and YouTube (live, name,
+live-for time), and ProVideoPlayer (connected, now-layer state, layer, cue, next cue,
+media name with and without its extension, clip duration, elapsed and remaining in
+seconds and as `m:ss`). Plus one pair per automation signal — see below.
+
+**Presets** — ready-made buttons in seven categories: **Live Control** (PCO Live next
+with the countdown, previous, refresh lineup), **Routing & Displays** (reload displays,
+blackout, set manual mode), **Monitoring & Alarms** (mic battery, mic offline,
+ProPresenter status), **Recording & Streaming** (OBS, REAPER, on air),
+**ProVideoPlayer** (now playing, remaining-time alarm), **Baptisms** (readouts for
+testimony, live clock, people baptized and session time, and advance, back, pause and
+finish keys) and **Messages**. Each already carries its action and feedback.
 
 **Baptism timer** — `baptism_phase` (`idle`/`armed`/`testimony`/`baptism`),
 `baptism_segment` (the running testimony or baptism clock), `baptism_testimony`
