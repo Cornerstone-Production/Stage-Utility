@@ -30,8 +30,8 @@ address already in it, is under *Setting up a screen* on the same card — click
 | Windows (elevated) | `irm http://<server>/kiosk/install-windows.ps1 \| iex` |
 
 On a Mac the same command installs the [Mac output helper](#installing-the-mac-output-helper)
-instead of a browser. The Chrome kiosk is still there for a Mac the helper cannot
-run on: add `-s -- --browser` after `sh`.
+instead of a browser. For a Mac the helper cannot run on, `-s -- --browser` after
+`sh` installs a Chrome kiosk instead.
 
 **3. Set it up.** Open **Screens**. A screen that has been heard and not set up
 is named in a banner at the top of the page, with **Set up** beside it, and again
@@ -46,9 +46,14 @@ set up yet* the new device offers two things:
 
 The screen redirects itself; you do not have to walk to it.
 
-**Dismiss** on the banner hides one device from the banner in that browser; it
-stays under *Not set up yet*, and **Show dismissed** brings it back. Screens in the
-sidebar shows how many devices are not set up, from any page.
+**Dismiss** on the banner hides one device from the banner, in that browser only:
+nothing changes on the server, the device stays under *Not set up yet*, and the
+toast offers **Undo**. **Show dismissed** brings every dismissed device back, and
+**See all below** scrolls to *Not set up yet*. A dismissal is remembered for 30
+days. A device that is set up is no longer dismissed, so if it is released later it
+is named again. The **Screens** entry in the sidebar carries a count of the devices
+not set up, from any page. A device that is set up on another server is listed under
+*Not set up yet* but is not counted.
 
 Nothing is created just because a device was heard. A spare machine booting
 mid-service would otherwise mint a screen nobody asked for, and deleting it
@@ -272,7 +277,9 @@ server does not need SSH.
 ## Discovery
 
 The device broadcasts a probe on **UDP 8789** and the server answers it unicast.
-The port is adjustable, because AV gear is fond of odd ports.
+The port is adjustable, because AV gear is fond of odd ports: `kioskDiscoveryPort`
+in the server's `settings.json` (default 8789), and `STAGE_KIOSK_PORT` for the
+installer on the device.
 
 - A device bound to **this** server is always answered, so a display re-finds its
   server after an IP change with nobody present.
@@ -388,7 +395,7 @@ rotation for a monitor on its side (`rotation`, 0 unless changed). They are
 written through `PATCH /api/outputs/:id`, are in every backup, and the helper
 reads its output's record from `GET /api/outputs`. The helper applies rotation to
 every output and opens each DeckLink port in its Format; see
-[Running the helper](#running-the-helper-beta) and the [API](reference/api.md).
+[Running the helper](#running-the-helper) and the [API](reference/api.md).
 
 **Health.** Each output reports every ten seconds, authenticated by the device's
 own secret, and the server keeps the latest in memory only. It is shown with the
@@ -407,7 +414,7 @@ dropped) and what to check. A reading that stops being refreshed is dropped afte
 yet; after one was dropped, that it stopped reporting; and for a screen no page is
 showing, that it is offline.
 
-### Running the helper (beta)
+### Running the helper
 
 Build it with `helper/macos/build-app.sh --arch arm64` (or `x86_64`; macOS 14 or later,
 and the Command Line Tools are enough). That downloads the pinned Chromium Embedded
