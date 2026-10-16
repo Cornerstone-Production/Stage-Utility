@@ -40,6 +40,9 @@ import type { SectionProps } from "../types";
 import { restartConsequence, restartOutcome } from "../../lib/restart-warning";
 import { useUpdateStatus } from "../../app/queries";
 
+/** What a call that restarts the server answers: why it could not arrange its own relaunch, if it could not. */
+type RestartAnswer = { relaunchFailure?: string };
+
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const ANY_DAY = "any";
 
@@ -322,7 +325,7 @@ export function UpdatesPanel({
 
   async function onRestart() {
     const doRestart = () =>
-      void invoke<{ relaunchFailure?: string }>("update:restart")
+      void invoke<RestartAnswer>("update:restart")
         .then((r) => {
           if (r?.relaunchFailure) window.alert(restartOutcome(s?.selfRecovers, "Restarting.", r.relaunchFailure));
         })
@@ -862,6 +865,13 @@ function ConfigSnapshotPanel() {
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["config:listSnapshots"] });
 
+  /** Say a restore was accepted: as an error when the server could not arrange its own relaunch. */
+  function toastRestored(answer: RestartAnswer | undefined) {
+    const message = restartOutcome(selfRecovers, "Restored.", answer?.relaunchFailure);
+    if (answer?.relaunchFailure) toast.error(message);
+    else toast.success(message);
+  }
+
   function download() {
     // The export route sets Content-Disposition: attachment, so this downloads
     // without navigating away.
@@ -889,10 +899,7 @@ function ConfigSnapshotPanel() {
       confirmLabel: "Recall",
     }))) return;
     try {
-      const r = await invoke<{ relaunchFailure?: string }>("config:recallSnapshot", { id });
-      const msg = restartOutcome(selfRecovers, "Restored.", r?.relaunchFailure);
-      if (r?.relaunchFailure) toast.error(msg);
-      else toast.success(msg);
+      toastRestored(await invoke<RestartAnswer>("config:recallSnapshot", { id }));
     } catch (e) {
       toast.error(`Recall failed: ${errorMessage(e)}`);
     }
@@ -918,10 +925,7 @@ function ConfigSnapshotPanel() {
         message: `This overwrites the current config. ${restartConsequence(selfRecovers)} Secrets aren't included — you'll re-enter API keys/passwords after.`,
         confirmLabel: "Restore",
       })) {
-        const r = await invoke<{ relaunchFailure?: string }>("config:import", { bundle });
-        const msg = restartOutcome(selfRecovers, "Restored.", r?.relaunchFailure);
-        if (r?.relaunchFailure) toast.error(msg);
-        else toast.success(msg);
+        toastRestored(await invoke<RestartAnswer>("config:import", { bundle }));
       }
     } catch (err) {
       toast.error(`Import failed: ${errorMessage(err)}`);
