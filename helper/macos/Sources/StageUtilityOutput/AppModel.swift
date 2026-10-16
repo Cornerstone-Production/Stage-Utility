@@ -295,11 +295,7 @@ final class AppModel: ObservableObject {
 
   func setEnabled(_ key: String, _ on: Bool) {
     guard runtimes[key] != nil else { return }
-    do {
-      try store.setEnabled(on, key: key)
-    } catch {
-      noteSaveFailure(error)
-    }
+    save { try store.setEnabled(on, key: key) }
     Log.notice(.output, "\(runtimes[key]!.descriptor.name): turned \(on ? "on" : "off") in the window")
     if on { activate(key) } else { deactivate(key) }
     // Done from the window itself, which is up: nothing to pop.
@@ -415,11 +411,7 @@ final class AppModel: ObservableObject {
       rt.serverURL = reply.url
       navigate(rt)
     }
-    do {
-      try store.setBoundTo(reply.serverId, key: key)
-    } catch {
-      noteSaveFailure(error)
-    }
+    save { try store.setBoundTo(reply.serverId, key: key) }
     refresh()
   }
 
@@ -518,11 +510,7 @@ final class AppModel: ObservableObject {
         .output,
         "\(port): format \(VideoModes.effective(rt.videoMode)) -> \(VideoModes.effective(format)), from \(screen.name)")
       rt.videoMode = format
-      do {
-        try store.setVideoMode(format, key: rt.descriptor.key)
-      } catch {
-        noteSaveFailure(error)
-      }
+      save { try store.setVideoMode(format, key: rt.descriptor.key) }
       card.setVideoMode(format)
     }
     if screen.rotation != rt.rotation {
@@ -586,6 +574,16 @@ final class AppModel: ObservableObject {
       }
     }
     refresh()
+  }
+
+  /// Make a change to the stored outputs. The change is kept in memory whether or not
+  /// the file could be written; a failure is said in the window and the log.
+  private func save(_ change: () throws -> Void) {
+    do {
+      try change()
+    } catch {
+      noteSaveFailure(error)
+    }
   }
 
   private func noteSaveFailure(_ error: Error) {
