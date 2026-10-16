@@ -35,8 +35,7 @@ done. Dismiss it and it stays dismissed.
 
 **Screens** carries a number when devices have been heard on the network that are
 not set up, from any page, and it goes when they are set up or stop being heard.
-It counts the devices the banner on [Screens](#adding-a-screen) names, dismissed
-ones included.
+It counts the devices the banner on [Screens](#adding-a-screen) names, dismissed ones included, and not a device set up on another server.
 
 Consoles you have built get a row each, above the groups — see
 [Consoles](#consoles). The running version sits at the foot of the sidebar. Drag
@@ -79,9 +78,9 @@ name you gave it in Screens is the name on the page and in the sidebar.
 The page's own controls — Home's **Edit widgets**, for one — sit at the right of
 the same band.
 
-**The one-line description of what a page is for is a tooltip now.** A single
-44px band has no second line to print it on, so hovering the page's name shows
-it. Every page still has one.
+**The one-line description of what a page is for is a tooltip.** A single 44px
+band has no second line to print it on, so hovering the page's name shows it.
+Every page has one.
 
 Pages you reach from inside another page — the layout editor, a ServiceCue
 rundown, the patch editor — draw their own heading instead, so the bar shows no
@@ -92,6 +91,8 @@ name for them; on a phone the top bar names the section they belong to.
 Home is a grid of widgets you build yourself, out of the same registry every
 other surface draws from — anything you can put on a wall you can put here. See
 [Widgets](../reference/widgets.md) for what each one shows.
+
+![Home during a service: the live item and its countdown, screens online, wireless summary, the clock and recent services](../images/home-dashboard.png)
 
 **Editing.** The pencil at the right of the context bar turns on edit mode. Each tile then
 gains a size picker, a visibility select, a remove button and a drag handle, and
@@ -155,6 +156,8 @@ shows. The card keeps what an operator changes while working: its name, the view
 it shows, the colour and icon, the message groups it is in, and the way into its
 layout. Its menu (the vertical dots) is actions only:
 
+![The Screens page: a live preview card per screen, the banner naming screens found on the network, and the sidebar count](../images/screens-overview.png)
+
 | Item | |
 |---|---|
 | **Open display** | opens the screen's address in its own tab |
@@ -174,6 +177,12 @@ a pill for what it is (*wall* or *control surface*) and, for a console, whether 
 is in the sidebar. Its menu has **View settings…**, *Make it a wall view* or
 *Make it a control surface*, *Duplicate view*, *Delete view…* and, for a console,
 **Show in the sidebar**.
+
+Under the cards: **New view** (pick what the view shows: Mic Slots, Dashboard,
+Stage, Transcription, ServiceCue, SPL Rundown, Calendar or a Custom Layout, and for
+a custom layout whether it is a wall view or a control surface), **Import layout…**
+(see [Moving a view](../moving-a-view.md)) and **Refresh all**, which reloads every
+connected display.
 
 ### The settings panel
 
@@ -298,6 +307,8 @@ the message names the screen that shows it now.
 
 A **console** is a custom view built for someone to touch rather than to watch.
 Its buttons fire; the same layout on a wall display draws them and does nothing.
+
+![A console page: the message composer with groups, quick messages and the day's thread, beside a live copy of a wall](../images/messages-composer.png)
 
 **Building one.** Screens → **New view** → *Custom Layout*, then pick **A
 control surface you operate** rather than *A wall view anyone can see*. A

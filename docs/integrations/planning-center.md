@@ -13,6 +13,8 @@ an `X-PCO-API-Version` header (see [API version](#api-version)). The client
 (`pco-service.ts`) flattens JSON:API responses into slim DTOs and caches by
 volatility:
 
+![The Plan page: plan selection, the active service types and the pre-service checklist settings](../images/plan-selection.png)
+
 - **LONG (15 min):** near-static per service day — service types, note
   categories, team positions, plan service times.
 - **MEDIUM (3 min, or 45 s inside a service window):** still-editable plan
@@ -226,7 +228,7 @@ A plan's **notes** — the ones a team lead writes at the top of a plan and file
 under a note category — can be read as a pre-service checklist and ticked off on
 Home. The list is authored in Planning Center; nothing is typed into Stage.
 
-**Choosing what feeds it:** Settings → Plan → **Pre-service checklist**. Pick note
+**Choosing what feeds it:** **Plan** → **Pre-service checklist**. Pick note
 categories, teams, or both. A note matching *either* is included. Nothing chosen
 means no checklist — it never fills itself with every note on the plan.
 
@@ -247,8 +249,8 @@ one shows in the other. On a wall display the list shows but cannot be ticked.
 **Ticks** are stored in Stage only; Planning Center never sees them. They are
 keyed to the row's wording, so adding or reordering lines in the note leaves
 existing ticks on their own rows, and rewording a row clears its tick. Each plan
-gets its own ticks, so the next service starts with a clean list. Settings → Plan
-→ **Clear ticks** starts the current plan over.
+gets its own ticks, so the next service starts with a clean list. **Plan** →
+**Clear ticks** starts the current plan over.
 
 Teams, not positions: `PlanNote` has no position relationship, so a note can be
 narrowed to Production but not to a single position within it.

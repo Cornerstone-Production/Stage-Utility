@@ -3,11 +3,6 @@
 Sends RossTalk commands to Ross Video gear — custom controls and switching on a
 **Carbonite** switcher, routing and salvos on an **Ultrix** router.
 
-Both Ross integrations share one **Ross** card on the Integrations page. That is a
-visual grouping only: each keeps its own id, enable switch, config and connection
-state, so layout buttons and automation actions referencing either one are
-unaffected.
-
 Distinct from the [Ross MultiViewer (TSL UMD)](ross-tsl.md) integration, which writes
 *text* onto multiviewer tiles. RossTalk issues *commands*; it cannot set tile text.
 
@@ -76,8 +71,8 @@ more.
 
 ## Setup
 
-**On the device:** enable RossTalk. On a Carbonite it is under the network/comms setup;
-the default device address is `192.168.0.123`. Note the IP; the port is 7788.
+**On the device:** enable RossTalk. On a Carbonite it is under the network/comms setup.
+Note the device's IP address; the port is 7788.
 
 **In Stage:** Settings → Integrations → **RossTalk (Carbonite / Ultrix)** → **Add
 target** → name it, set host and port, choose **Carbonite switcher** or **Ultrix

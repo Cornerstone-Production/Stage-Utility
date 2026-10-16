@@ -3,9 +3,12 @@
 ## Commit convention
 
 Stage Utility uses [Conventional Commits](https://www.conventionalcommits.org/).
-This is not a new imposition — an audit of the last 200 commits found **every
-non-merge commit already followed it**. Writing it down turns a habit into
-something CI can check and the release tooling can read.
+CI checks every subject and the release tooling reads the types, so the convention
+decides the version number.
+
+`node scripts/check-commit-subjects.mjs [base]` runs the same check locally over
+the commits since `base` (default `origin/beta`), naming each subject that does
+not conform.
 
 ### Format
 
@@ -14,8 +17,9 @@ type(scope): subject
 ```
 
 - **type** — required, from the table below.
-- **scope** — optional, lower-case, the area touched. Two areas can be joined with
-  `+` (`feat(history+servicecue):`), as this repo already does. Scopes in use:
+- **scope** — optional, lower-case, the area touched, written from `a-z`, `0-9`,
+  `.`, `+`, `/` and `-`: no spaces and no commas. Two areas can be joined with
+  `+` (`feat(history+servicecue):`). Scopes in use:
   `design`, `patch`, `history`, `servicecue`, `attendance`, `integrations`, `sse`,
   `recorders`, `layout`, `layout-editor`, `advanced`, `server`, `pco`, `updater`,
   `types`, `rosstalk`.
@@ -45,6 +49,9 @@ explaining *why* in the body is worth keeping.
 | `ci` | CI configuration | none |
 | `chore` | Anything else with no user impact | none |
 | `revert` | Reverts a previous commit | matches what it reverts |
+
+Those ten are the whole list: `style:` and any other type fails the check.
+`git revert`'s own `Revert "<original subject>"` form is accepted as written.
 
 ### Breaking changes
 
@@ -77,14 +84,8 @@ you write are the ones that count** — the PR title is not what gets released f
 
 ### Trailers
 
-Commits made with Claude Code carry:
-
-```
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_…
-```
-
-These are informational and do not affect the release level.
+Commits carry no tool or session attribution. The one trailer the tooling reads
+is `Beta-only: true`, below.
 
 #### `Beta-only: true`
 
@@ -231,7 +232,9 @@ npm run lint && npm run type-check && npm test && npm run build
 ```
 
 CI runs the same four, plus `npm audit --audit-level=high`. Lint is clean; a new
-warning is yours to fix.
+warning is yours to fix. Two cheap checks run on every pull request and are worth
+running first: `node scripts/check-public-hygiene.mjs` (see
+[Public hygiene](#public-hygiene)) and `node scripts/check-commit-subjects.mjs`.
 
 CI runs them side by side rather than one after another: lint, type-check, build
 and the audit in one job, and the test suite split across four more with
@@ -242,8 +245,11 @@ PR gate: `coverage.yml` reports it for `beta` weekly, and on demand from the
 Actions tab once the workflow is on `main`.
 
 Not every check runs on every pull request. The secret scan, the commit
-convention check, CodeQL and the public-hygiene check (below) run on all of
-them, docs-only included. No check is a required status check on `beta` or
+convention check and the public-hygiene check (below) run on all of them,
+docs-only included. CodeQL is GitHub's default setup, configured in the
+repository's settings rather than by a workflow file: the extended query suite
+for JavaScript/TypeScript and the workflows themselves, on a weekly schedule and
+on pull requests (see [Code scanning](reference/code-scanning.md)). No check is a required status check on `beta` or
 `main`: the release workflow pushes its version bump to both directly, which a
 required check would refuse, so a merge is gated by review of a green PR. The
 build and tests skip a PR that touches only `docs/` and Markdown; dependency
@@ -377,6 +383,9 @@ prints only `private term #N`, the entry's 1-based position in the list, never t
 term. A term found in a file's name reports line `0`, with the term in the path
 replaced by `***`. A term wrapped over lines is reported on the line where it
 starts.
+
+A home path whose user is a variable (`$USER`, `${ME}`, `$(id -un)`,
+`%USERNAME%`) names nobody and is not flagged.
 
 A line containing `hygiene-allow` is skipped by every rule. Reserve it for a
 genuine exception, with the reason beside it. Each line whose finding was skipped

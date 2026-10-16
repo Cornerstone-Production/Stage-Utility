@@ -17,7 +17,9 @@ Orientation for working in the codebase.
 │   │   │                      #   the recorders, the stores, encryption, broadcaster
 │   │   ├── routes/            # One module per slice of the HTTP surface
 │   │   ├── archive/           # Raw-sample CSVs: write, read, export, import
-│   │   └── update/            # Track detection, install kind, per-kind strategies
+│   │   ├── video/             # The video relay (MediaMTX) and feed state
+│   │   └── update/            # Track detection, install kind, per-kind strategies,
+│   │                          #   launchd label and relaunch
 │   ├── providers/wireless/    # Shure (ULX-D/Axient/PSM/SBC) + Sennheiser
 │   │                          #   (ewG4/EW-DX/Spectera) drivers + registry
 │   └── types/                 # Backend type contracts (views.ts: View/Output/LayoutDTO…)
@@ -33,8 +35,14 @@ Orientation for working in the codebase.
 │   └── lib/api.ts             # REST + SSE client
 ├── public/                    # App icon, web manifest, and a fallback remote page
 ├── packaging/homebrew/        # The Homebrew formula
-├── scripts/                   # Install and update scripts, the kiosk agent
-│                              #   installers, release tooling, hardware probes
+├── helper/macos/              # The Mac output helper (Swift)
+├── .github/                   # CI and release workflows, shared actions
+├── scripts/                   # Install, update and uninstall scripts, the kiosk
+│   │                          #   agent installers, release tooling, the
+│   │                          #   public-hygiene and commit-subject checks
+│   └── survival/              # The updater survival test, per platform
+├── docs/                      # These docs
+├── install.sh, install.ps1    # The one-line installers
 └── INSTALL.md                 # Server deployment guide
 ```
 

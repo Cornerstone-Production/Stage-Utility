@@ -33,9 +33,7 @@ everybody: the one above a desktop page, and the one a phone shows.
 | **Streaming** | Whether Resi, YouTube or OBS is live, and for how long. |
 | **Live scores** | A followed team's score while its game is being played. Click it for the full card. |
 
-The service type and the plan are two items, so either can go on the bar without
-the other. A bar saved when they were one item keeps both, side by side, exactly
-as it drew them.
+The service type and the plan are two items, so either can go on the bar without the other.
 
 An unconfigured bar shows the service type, the plan, the current item, and the
 live state and timer.
@@ -109,9 +107,7 @@ arrangements: the one above a desktop page, and the one a phone shows. They are
 chosen independently, and both are shared — one desktop bar and one phone bar for
 everybody, like the rest of this app's config.
 
-**A phone follows the desktop bar until you give it a set of its own.** Nothing
-changes on upgrade, and nothing changes the first time you open the Phone tab —
-it shows what the phone is already showing. The first change you make there is
+**A phone follows the desktop bar until you give it a set of its own.** Opening the Phone tab changes nothing — it shows what the phone is already showing. The first change you make there is
 what splits the two apart; **Follow the desktop bar** puts them back together.
 
 "A phone" means **narrower than 640px**, the same width at which the sidebar
@@ -175,13 +171,12 @@ the service type, the plan and the current item can never land there.
 
 ### Measured
 
-On a plan called "Carry The Light" under a service type called "Weekend Service",
+On a plan called "Sample Plan" under a service type called "Weekend Service",
 in both themes. `strip` is the room the bar actually has, which is narrower than
 the window once the sidebar is open.
 
 Five arrangements: the service type on its own, the plan on its own, the two of
-them together, the bar an install upgrading into this change carries — the clock,
-the service type, the plan, the current item and the timer — and every item at
+them together, the bar an install that predates the Phone set carries — the clock, the service type, the plan, the current item and the timer — and every item at
 once.
 
 | Window | strip | Type alone | Plan alone | Both | The upgraded bar | Everything |
@@ -221,7 +216,7 @@ it gives up is words the ladder was built to give up.
 
 **Settings → Advanced → Server → Clock format**, beside the time
 zone. It sets how *every* clock in the app reads — the context bar, service
-times in History and the Overview, the rundown, the automation log, and stage
+times in History and Home's Recent services card, the rundown, the automation log, and stage
 displays.
 
 A **clock object** in a custom layout that has been set to 12h or 24h explicitly
@@ -259,4 +254,4 @@ The bar is one row at every width. A Flexible space on a phone has very little
 slack to eat, but it still decides which side of the strip a group sits on, and
 a Space still separates at the same width it has anywhere else.
 
-A bar arranged before spacers existed keeps the left/right split it already had.
+

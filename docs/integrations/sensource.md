@@ -202,10 +202,10 @@ down with it.
 
 `attendance-recorder.ts` folds the live counts into a per-service record: it samples
 every 30 s, keeps running peak/min/last, and broadcasts the open record on
-**`attendance:history`** every 5 s so the History tab updates during a service rather
+**`attendance:history`** every 5 s so the History page updates during a service rather
 than only after it.
 
-On the History **Overview**, the attendance trend chart includes the service that is
+On Home's **Recent services** card, the attendance trend chart includes the service that is
 recording — its point is drawn hollow and its tooltip reads "recording", because that
 weekend total is a partial that keeps climbing. Every computed stat (average, peak,
 trend direction) is taken over finished services only; folding a partial peak into a

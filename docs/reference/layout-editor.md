@@ -13,16 +13,16 @@ edge and remembers the width; double-click the edge to reset it. Whatever the
 width, every row fits inside it, stacking its controls when it gets narrow,
 and the panel never scrolls sideways.
 
+![The layout editor on a wall layout: the canvas, the layers list and the inspector](../images/layout-editor.png)
+
 | | |
 |---|---|
 | **Content** | what this widget shows — the channel a mic tile reads, the mode OBS status watches, the text of a text object. Different for every widget type, and absent for the ones that have nothing to choose |
 | **Look** | how it is drawn — surface, tint, font size and weight, colour, alignment, corner radius, border. The same controls for every widget |
 | **Place** | where it sits — position, size, and how it behaves when the window is not the shape it was designed for |
 
-The split is worth knowing because it tells you where to look: anything that
-changes the NUMBER is in Content, anything that changes how the number is DRAWN
-is in Look. They used to be one list, and on a widget with a dozen settings the
-one you wanted was wherever it happened to have been added.
+The split tells you where to look: anything that changes the NUMBER is in
+Content, anything that changes how the number is DRAWN is in Look.
 
 **Content is hidden entirely** on a widget with nothing to configure — a clock
 showing the time needs no source — rather than left as an empty heading.
@@ -37,6 +37,8 @@ A custom view can start blank or from a built-in layout. **Screens → New view 
 a row of unbound cue buttons and a countdown on that panel's canvas. Every
 template is built as ordinary editable objects rather than a fixed rendering —
 so it is a starting point you take apart, not a mode.
+
+![A lobby screen built in the layout editor: a heading, the clock, the countdown and a line of text](../images/wall-lobby.png)
 
 Inside the editor, **Replace** does the same thing to a layout that already
 exists, and lists your **saved layouts** underneath. **Save as layout**, on the
@@ -222,7 +224,7 @@ behind           sub-line: the qualifier
 
 All three sizes come from the **widget's own height**, so a readout is legible at
 whatever size you place it — a dashboard tile and a wall both work without
-setting a font size. The stored font size no longer governs the value.
+setting a font size. The value's size is never the stored font size.
 
 Only the caption and sub-line a widget actually has are drawn; a clock with
 neither gets a value that fills the box.
@@ -247,8 +249,7 @@ The caption and sub-line have pixel floors — they stop shrinking rather than
 becoming decoration — so a small widget gives them proportionally more room and
 its value proportionally less. That is why the editor draws in the design
 canvas' pixels whatever the fit is: it is a scale model of the screen, not a
-render at the size of your editor pane, and a small widget in a responsive
-layout used to compose differently in the two.
+render at the size of your editor pane, so a small widget composes the same in both.
 
 ## Editing a console in place
 
@@ -332,20 +333,15 @@ changing the surface afterwards keeps it rather than resolving it back to a tint
 
 Surface, colour, radius, border, font and alignment. That is the whole list.
 
-Elevation, opacity, padding, text shadow and max-lines used to be here and are
-gone — from the model, not just from the panel. They were five ways to make a
-widget look slightly wrong: a drop shadow under a card on a black wall is
-invisible, an opacity below one is a legibility problem waiting for a service,
-and the stored padding was what made small widgets clip, because the readout
-composition draws its own. How a widget uses the space it is given is the
-composition's job.
+Elevation, opacity, padding, text shadow and max-lines are not part of the model.
+A drop shadow under a card on a black wall is invisible, an opacity below one is a
+legibility problem waiting for a service, and stored padding makes small widgets
+clip, because the readout composition draws its own. How a widget uses the space
+it is given is the composition's job.
 
-Every card wears `#141414` with a 10% hairline. Objects created before the
-surface list was cut down wear an older card, `#191919`, and some wear an 8%
-hairline from before every card border was the same; a layout built across both
-reads as some widgets having a border and others not. Each is folded into the
-current card once, on load, and the server logs how many under
-`[layout-defaults]`. A ground you picked yourself is never touched; an 8% border
+Every card wears `#141414` with a 10% hairline. An older layout may hold the
+earlier card, `#191919`, or an 8% hairline; each is folded into the current card
+once, on load, and the server logs how many under `[layout-defaults]`. A ground you picked yourself is never touched; an 8% border
 is raised on that one pass whoever set it, and any border set afterwards stays.
 
 ## Picking a colour
@@ -387,23 +383,18 @@ It replaces the style rather than merging into it, so hand-tuned fields are
 genuinely cleared. Position, size, configuration and the responsive settings are
 left alone, and it can be undone.
 
-Cards are **opaque**. They used to be a few percent white, which looks the same on
-a bare canvas but does not cover anything — a widget over a transcript let the
-text read straight through it, which looks exactly like a broken layer order.
-**Glass**, under Style, is the deliberate see-through look if you want one.
+Cards are **opaque**, so a widget over a transcript covers it. **Glass**, under
+Style, is the deliberate see-through look if you want one.
 
-## What changed on your existing layouts
+## Existing layouts
 
-**Card grounds become opaque**, as described above — once, on the first start
-after upgrading, and never again. The server logs what it changed, under
-`[layout-defaults]`. It is an ordinary style field afterwards: change it on any
-object and it stays changed.
+A translucent card ground is made opaque once, on the first start that finds one,
+and the server logs what it changed under `[layout-defaults]`. It is an ordinary
+style field afterwards: change it on any object and it stays changed.
 
-Readouts created before the left default also carry a centre alignment nobody
-picked. That is left alone rather than cleared: the file cannot tell a default
-apart from a decision, and a pass that cleared it also cleared the alignments
-operators had set — on every restart, which is every update. Set one of those
-widgets to whatever you want; it will stay.
+A readout created before alignment defaulted to left may carry a centre alignment
+nobody picked. It is left alone, because the file cannot tell a default apart from
+a decision. Set the widget to whatever you want; it will stay.
 
 ## The inspector's width
 

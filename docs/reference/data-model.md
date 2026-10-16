@@ -99,7 +99,7 @@ would be in the way of the thing consoles are for. It carries its own ground
 rather than the page's, because a console's canvas is dark whatever theme the app
 is wearing.
 
-Home is edited in the Home tab itself, with the pencil in the header. In edit
+Home is edited on Home itself, with the pencil in the header. In edit
 mode each tile gains a size picker, a visibility select, a remove button and a
 drag handle, and **Add widget** offers the whole object registry.
 
@@ -334,6 +334,60 @@ A group's `id` is `g-` and eight hex characters, issued by the server and never
 changed, so renaming a group moves nothing that points at it. A message's `id` is
 sixteen hex characters. A message holds `to` (group ids, or `["everyone"]`), `text`,
 `alert` and `alertUntil`, `clearedAt`, `from` and its `replies`.
+
+## Stored data
+
+Everything the app persists is a file in the data directory, and every file
+declares itself as **config** (the operator's work: carried by a config snapshot
+and every backup) or **runtime** (an observation of what happened on this machine:
+never restored). Credentials, caches and logs are neither; they are listed in
+[Reliability and data](../ops/reliability.md#where-your-data-lives), with what each
+class means for backups.
+
+| File | Class | Holds |
+|---|---|---|
+| `attendance-history.json` | runtime | Attendance recordings, one file per service in a folder of the same name |
+| `automation-log.json` | runtime | The Activity log |
+| `automation-rules.json` | config | [Automation](../automation.md) rules and cues |
+| `automation-settings.json` | config | Simulate and disarm |
+| `baptism-triggers.json` | config | Which plan items start the baptism timer's phases, per plan |
+| `baptism.json` | runtime | The baptism timer's live state and its saved sessions |
+| `bar-config.json` | config | The [context bar](../features/context-bar.md)'s items and order |
+| `checklist-ticks.json` | runtime | Which checklist rows are ticked, per plan |
+| `history-milestones.json` | config | The dated marks on the Trends chart |
+| `kiosk-devices.json` | config | Which device drives which screen |
+| `layout-groups.json` | config | Reusable object groups for the layout editor |
+| `layout-templates.json` | config | Saved custom layouts |
+| `messages.json` | runtime | The day's [stage messages](#stage-messages) |
+| `messaging.json` | config | Stage-message groups, quick messages and quick replies |
+| `notes.json` | config | What was typed into notes and checklist objects, keyed by object |
+| `osc-targets.json` | config | [OSC](../integrations/osc.md) targets |
+| `patch.json` | config | The [patch sheet](../patch-sheet/README.md) |
+| `presets.json` | config | Slot presets |
+| `rosstalk-settings.json` | config | The RossTalk simulate switch |
+| `rosstalk-targets.json` | config | [RossTalk](../integrations/rosstalk.md) targets |
+| `saved-colors.json` | config | Colours kept from the colour picker |
+| `scores-favourites.json` | config | Followed teams |
+| `servicecue-config.json` | config | Which service types the ServiceCue landing shows |
+| `servicecue-layouts.json` | config | ServiceCue column layouts |
+| `servicecue-roles.json` | config | ServiceCue category roles |
+| `service-timeline.json` | runtime | Per-item timing recordings, one file per service in a folder of the same name |
+| `settings.json` | config | Service type and plan mode, screens, integration settings (not credentials), branding, schedules, time zone |
+| `signals.json` | runtime | The values the Companion module reads |
+| `slots.json` | config | [Slot](#slots) sets, by view or object id |
+| `spl-history.json` | runtime | Sound-level recordings, one file per service in a folder of the same name |
+| `stream-starts.json` | runtime | When each streaming platform was first seen live |
+| `update-notices.json` | runtime | Which release has been announced |
+| `video-feeds.json` | config | [Video feeds](../integrations/video-feeds.md) and the relay's ports |
+| `video-seen.json` | runtime | When each feed was last confirmed live |
+| `views.json` | config | Views and their layouts |
+| `wireless-connections.json` | config | Receiver and charger connections (not their passwords) |
+
+The three recordings are keyed stores: the name in the table is the legacy
+single-document file a pre-split install may still hold, and the live data is the
+folder beside it (`attendance-history/`, `service-timeline/`, `spl-history/`).
+Uploaded logos and layout images are files in `branding-images/` and
+`layout-images/`, named by content hash and carried by a config snapshot.
 
 ## How state reaches a screen
 

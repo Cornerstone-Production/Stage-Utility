@@ -49,6 +49,8 @@ leaves it unchanged, and saving an empty value clears it.
 **On the gear:** give each receiver / charger a static IP and enable its network
 control / telemetry (Shure networked gear uses TCP 2202).
 
+![The Wireless Gear dialog with two connected receivers](../images/integrations-wireless.png)
+
 **In Stage:** Settings → Integrations → **Wireless Gear** → enable the master
 toggle → **Add connection** → pick the provider, name it, and enter Device IP,
 TCP Port, and Number of Channels → enable it → **Test connection**. The global

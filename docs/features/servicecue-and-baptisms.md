@@ -11,12 +11,14 @@ rundowns under it render without the app's sidebar and header, for a stage
 tablet; the same launcher with the chrome is **ServiceCue** in the sidebar, at
 `/servicecue/manage`.
 
+![The ServiceCue landing page: each service type with its column preset, ready to open](../images/servicecue-picker.png)
+
 Pick a service type from the landing page and it opens at a readable, shareable
 URL (`/servicecue/weekend/audio`) you can pin in its own tab. The clock follows
 the plan's timezone.
 
-Configure it under **Settings → ServiceCue**, with a live preview. The layouts
-and category roles are this app's own and can be edited before Planning Center
+Configure it with **Edit column presets** on the ServiceCue page (`/servicecue/presets`), with a live
+preview. The layouts and category roles are this app's own and can be edited before Planning Center
 is connected; the preview, which reads a plan, says to connect it. So do the
 landing page, a ServiceCue page and a ServiceCue display, which ask Planning Center
 for nothing until it is connected. A ServiceCue display with no service type
@@ -26,6 +28,8 @@ selected says that instead.
 
 The same table renders in three places, from one implementation — so a column set
 you define once looks identical wherever it shows up:
+
+![A ServiceCue rundown on a screen with the live item highlighted and Audio and Band note columns](../images/wall-servicecue.png)
 
 | | Follows | Columns from |
 |---|---|---|
@@ -66,11 +70,15 @@ view.
 A layout is a set of columns — Audio, Video, Lighting, and so on. Layouts are
 global: define one and it works across every service type.
 
-Each has per-element toggles for the clock, item time, song key, BPM, time
-signature, arrangement, item notes and total time. A layout saved before the time
-signature switch existed shows it.
+![The ServiceCue page for a Weekend plan with the Audio column preset](../images/servicecue-rundown.png)
 
-The Item column reads, under the title, `Key E · 128 BPM · 4/4 · Elevation Rhythm`:
+Each has per-element toggles for the clock, item time, song key, BPM, time
+signature, arrangement, item notes and total time, all on until switched off, and
+**Max SPL**, off until switched on: a last column with each item's loudest reading
+from Smaart (`98 dB`, or a dash where none was recorded), which only means something
+while Smaart is connected.
+
+The Item column reads, under the title, `Key E · 128 BPM · 4/4 · Main Arrangement`:
 the key chosen on the plan item, then the BPM, time signature and name of its song
 arrangement in Planning Center. Anything the arrangement does not set is left out.
 That line is drawn in the Branding accent lifted toward white, so it stays legible
@@ -113,7 +121,7 @@ priority, and you can reorder it.
 A role whose members a service type doesn't define is hidden rather than shown as
 an empty column.
 
-**Managing them:** Settings → ServiceCue → Category roles. Rename, add or remove
+**Managing them:** ServiceCue → Edit column presets → Category roles. Rename, add or remove
 members, reorder. Two diagnostics flag problems you would otherwise notice only by
 absence — categories in no role (which can never appear as a column) and
 categories in more than one (ambiguous, since two columns would claim the note).
@@ -310,6 +318,8 @@ In grouped mode, someone who has testified but has not yet been baptized shows
 a dash under Baptism rather than `0:00`, which would otherwise claim a baptism
 that has not happened yet took no time.
 
+![Baptisms: past sessions with their counts and times, and the trends across recent baptism services](../images/baptisms-sessions.png)
+
 A **Past sessions** card lists every finished session, newest first: the
 service and date, then how many were baptized, the average testimony and
 baptism length, and the total. An average whose own group never happened at
@@ -337,9 +347,9 @@ percentage or a delta computed from too little history to mean anything.
 The timer can start itself, since the two ends of a baptism differ:
 
 - **Testimonies** happen during an item named the same thing every week, so a
-  **keyword** finds it, matched on this same tab. Off by default.
+  **keyword** finds it, matched on this same page. Off by default.
 - **Baptisms** happen during whichever songs are on that week, so no keyword can
-  find them. Bind that end **to an item on the plan**, on the same tab.
+  find them. Bind that end **to an item on the plan**, on the same page.
 
 Binding both ends is also more accurate than a manual button. Between testimonies
 and baptisms there are usually several minutes of vows and prayer; started from the
@@ -363,7 +373,7 @@ something to fire on: the keyword only matches an item that exists, and per-plan
 bindings only exist on plans you set them on. So the setting can stay on all year.
 
 Keep the keyword specific — plain "baptism" would catch a "Baptism class signup"
-announcement where "baptism stories" would not. The Baptisms tab states, for the
+announcement where "baptism stories" would not. The Baptisms page states, for the
 plan currently loaded, which item will start each phase or that nothing will.
 
 ## Armed, then running
@@ -424,7 +434,7 @@ file the rest of the archive uses. The in-progress state is saved to
 `baptism.json` up to 800ms after a press, and a clean stop, an update's restart
 included, saves it first. A session that `baptism.json` loses — a corrupt file,
 or a crash between a press and its save — is not gone: **Rebuild from raw**, in
-this tab's own header or in History's, replays
+this page's own header or in History's, replays
 it from those rows. The header targets the session it is showing, or the most
 recent past one if none is; it is disabled, with a reason, while that service
 is still recording. The derived record is a cache of what the presses already
@@ -446,7 +456,7 @@ line at once. Past sessions does not list an unsaved session; its rows in
 `baptism.csv` still hold it, if a service was open while it ran.
 
 Each line also has its own **Rebuild from raw**, for that session's own
-service — never whichever session the tab is showing next, which by then may
+service — never whichever session the page is showing next, which by then may
 be a different one. It is disabled, with a reason, while that service is
 still recording, and when the session ran with no service open at all (no
 raw rows exist to rebuild it from). A rebuild clears that line the moment it
@@ -456,7 +466,7 @@ since Finish's own failure means the store never had a copy at all — or by
 Undo followed by another Finish) is the one that failed to save: the store
 already holds that session's earlier, now-stale Finish, so the rebuild can
 only bring it up to date, never add a second copy. Either way, whichever
-route actually wrote it — the note's own button, this tab's header, or
+route actually wrote it — the note's own button, this page's header, or
 History's whole-service Rebuild — clears the line. A rebuild that leaves the
 session exactly as the store already had it — unchanged, or the store's own
 copy is already newer, or the rows and the store disagree — never clears the

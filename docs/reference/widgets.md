@@ -2,6 +2,8 @@
 
 Every widget the app can draw, what it shows, and where that number comes from.
 
+![A wall display built from widgets: mic slots, countdown, clock, messages, service order and status tiles](../images/wall-stage-wall.png)
+
 Widgets are one registry used by every surface. The same **Clock** is a Home tile,
 a stage-display readout and a console button — so anything here can go anywhere,
 and a widget added to the app appears in all of them at once. Where a widget looks
@@ -42,8 +44,8 @@ See also [Layout editor](layout-editor.md) for placement, sizing and styling, an
 
 **Clock** follows the app-wide 12/24-hour setting unless you set one on the widget
 itself — a clock deliberately put on a wall in 24-hour does not flip when someone
-changes their preference in the app. **Seconds** and **AM/PM** are separate
-switches.
+changes their preference in the app. **Seconds** (on by default) and **AM/PM** (on
+by default, and only offered in 12-hour format) are separate switches.
 
 ## PCO / service
 
@@ -62,8 +64,9 @@ switches.
 | **Embedded screen** | What another screen is showing, following its routing | This app |
 | **Service order (legacy)** | The plan as a running list with the live item marked | Planning Center |
 
-**Recent services** draws the same attendance trend the History tab does.
-Right-click it — or tap and hold it — for **SPL trend line** — the service level
+**Recent services** shows the active service type's average attendance, peak,
+length and start time, and — when its tile is tall enough — an attendance trend
+like the Trends card on **History**. Right-click it — or tap and hold it — for **SPL trend line** — the service level
 for each date, behind the attendance curve on its own dB scale — and **Metric**,
 which picks the Smaart metric it plots. See
 [Attendance and history](../features/attendance-and-history.md).
@@ -78,7 +81,7 @@ began — left running from an earlier session, e.g. an operator who forgot to
 advance PCO Live after a previous service — does not count toward pacing: it is
 carried into the record with its start clamped to the moment recording opened,
 so it cannot backdate the readout by hours or days. An operator can also reset
-pacing mid-service (**Settings → History**, or the console's live controls,
+pacing mid-service (on **History**, from the live service's page, or the console's live controls,
 while a service is recording): items before the reset stop counting and the
 baseline moves to the reset instant, which is the tool for "this item ran long,
 stop holding it against the rest of the service" without touching the recording
@@ -342,7 +345,7 @@ effect on a pinned tile, whose caption is always the layer's own name.
 already counts down — the value slot, the progress bar and (in the normal
 composition) the sub line all read exactly as they do for a clip. PVP's API never
 reports a still's duration, so the hold comes from **Still hold (seconds)**, a
-per-widget number that appears once this is on; left alone it follows the PVP
+per-widget number from 1 to 3600 that appears once this is on; left alone it follows the PVP
 integration card's own Image Duration default, and editing it pins the widget to
 its own number. It is off by default and
 per-widget on purpose: a still's Duration is set at import and stored on every
@@ -576,7 +579,7 @@ A wall display draws no buttons.
 | **Container** | Groups other widgets so they move and scale together |
 | **Shape** | A rectangle or circle, for dividing up a screen |
 | **Image** | A picture from a file or a URL |
-| **Logo** | Your church logo, from Branding |
+| **Logo** | Your logo, from Branding |
 
 **Logo** follows Branding rather than carrying its own file, so changing the logo
 once changes every screen. See [Layout editor](layout-editor.md) for containers.
@@ -644,6 +647,61 @@ lacking WebRTC or HLS support for the feed's address, or this screen's own
 **Use HLS** switch (its Screen settings, on Screens) turned off for a feed that
 needs HLS to play at all.
 
+## Settings reference
+
+What the inspector's **Content** section offers for each widget, with the default
+a new widget starts from. A widget with nothing to configure shows no Content
+section at all. Any widget that carries a **Caption** (the line above its value)
+lets you change it, and emptying it removes the caption. Where a widget follows a
+ProPresenter machine and more than one is connected, a **ProPresenter** picker
+chooses which; with one, it is not shown.
+
+| Widget | Settings |
+|---|---|
+| **Text** | **Text** |
+| **Clock** | **Format** 12h or 24h (follows the app setting until chosen), **Seconds**, **AM/PM** |
+| **PCO countdown** | **Amber warning** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5, and it still goes red on overrun), **Hide when idle** (off: draws a dash) |
+| **Service pacing** | **Ahead color** and **Behind color** (green and red until changed, each with a Reset), **Projected end time** (off), **Show ahead/behind label** (off), **Show dash when idle** (on) |
+| **Section chip** | **Which**: Current, Next, or Next section (skips arrangement breaks) |
+| **ProPresenter timer** | **Timer name** (blank follows the first timer ProPresenter reports), **Color on overrun** (on), **Show timer name** (on), **Hide when idle** (off) |
+| **Slide progress** | **Display**: fraction (`3 / 12`, the default), left, percent or bar; **Show 'slides' label** (off, not offered for the bar) |
+| **Service order (legacy)** | **Scroll**: Follow live (the default) or Static, **Fit to height** (on), **Highlight live** (on), **Show length** (off), **Notes shown** (every note category, once a plan with notes is loaded) |
+| **Embedded view** | **View** (any other view; a view cannot contain itself and nesting stops after three levels), **Show the view's header** (off), **Follow the live item** (on) |
+| **Embedded screen** | **Screen**, **Show the screen's name** (on), **Show a status dot** (on, offered while the name shows) |
+| **Plan file** | **Match** (a filename substring, `stage plot` by default), a picker of the files on the current plan, **PDF page** (1 to 99), **Trim white**, **Background** (keep, black or transparent) and **Crop %** for each edge (0 to 95) |
+| **Mic slots** | **Source**: Define here (its own slots, edited below the canvas) or Embed a view (a slots view) |
+| **Wireless summary** | **Online count** (on), **Lowest battery** (on), **Time remaining** (off), **Show label** (off) and its **Label** (`Mics`) |
+| **Mic channel** | **Channel** (Auto uses the first), **RF signal** (on), **Battery %** (on), **Time remaining** (off), **Frequency** (on), **Audio level** (off), **Show channel name** (on) |
+| **Charger battery** | **Battery %** and **Charging** (on to start), **Cycles**, **Health**, **Temp** (off), and the **Bays** to list, each with an optional name |
+| **SPL meter** | **Meter** (Auto uses the first), **Metric** (Auto uses the meter's default), **Show metric name** (off), **Peak hold** (off), **Color thresholds** (off; when on, **Amber ≥** 95 and **Red ≥** 100 dB, each 0 to 140) |
+| **People counter** | **Count** (in room now, peak, lowest or average attendance today, peak in room or peak attendance or total entries this service, total entries for the day), **Zone** (only for *In room* and *Total entries (day)*; the building total by default), **Show label** (on) and **Label** |
+| **People summary** | One switch per figure (in room, peak attendance, peak in room this service, peak attendance this service, entries this service, entries today, capacity, average, average service, versus average, lowest); In room, Peak att. and Entries (day) are on to start. **Layout**: Row or Stacked. **Show labels** (on) |
+| **People graph** | **Count** (Attendance or In room), **Show value** (on) and **Label**, **Source** Live or Recorded (with **Service**, *Most recent* by default), **Plan-item markers** (on), **Hover tooltip** (on), **Kiosk live/recorded toggle** (off) |
+| **Transcription** | **Mode**, **Lines**, **Channels shown**: see [Transcription](#transcription) |
+| **Baptism timer** | **Show** one of nine fields (see [Baptisms](#baptisms)), **Show label** (on) and **Label** |
+| **Record status** | **Recorder** (any, OBS only or REAPER only), **Recording text**, **Idle text**, **Offline text** (blank uses `RECORDING`, `STANDBY` and `NO RECORDER`), **Fill red while recording** (on), **Hide when idle** (off) |
+| **OBS status** | **Show** (Recording, Streaming or Virtual camera), **Active text**, **Idle text**, **Offline text**, **Fill red when active** (on), **Show timecode** (off; recording only), **Hide when idle** (off) |
+| **REAPER status** | **Recording text**, **Idle text**, **Offline text**, **Fill red when recording** (on), **Show position** (off), **Hide when idle** (off) |
+| **Streaming status** | **Platform** (Any, Resi or YouTube), **Fill green when live** (on), **Show elapsed** (on), **Hide when idle** (off) |
+| **Integration status** | **Integration** (First available, or one), **Show label** (on) and **Label** |
+| **Live scores** | **Game** (any followed team, or one), **Show sport detail** (on) |
+| **ProVideoPlayer layers**, **ProVideoPlayer now** | See [ProVideoPlayer](#provideoplayer) |
+| **OSC button** | **Target**, **Label**, **Address**, **Arguments** (int, float, string, true or false, in order), **Feedback** (off; when on, **Watch address**, **Active when =** and **Active color**) |
+| **RossTalk button** | **Target**, **Command** and its parameters, **Label** |
+| **Action button** | **Action**, its parameters, **Label**: see [Control](#control) |
+| **Cue button** | **Cue**, **Label** (blank uses the cue's name), **Show device** (on) |
+| **Messages** | **Groups**: see [Control](#control) |
+| **Checklist**, **Notes** | Nothing beyond the look; their content is typed into the widget |
+| **Shape** | **Shape**: Rect or Ellipse |
+| **Logo** | **Empty logo** (off): the empty-slot image from Branding instead of the logo |
+| **Image** | A file, or a URL |
+| **Video** | **Feed**, **Fit**, **Show feed name**, **When the feed is offline**: see [Video](#video) |
+
+On Home, the settings a tile supports (a clock's seconds, a status tile's hide
+and fill switches, a scores tile's game and the like) are also on its
+right-click menu; see [Home tiles and wall widgets](#home-tiles-and-wall-widgets).
+Home's own cards (Readiness, Next service, Screens online and the rest) carry no
+settings: only a size, when they show, and remove.
 ---
 
 ## Home tiles and wall widgets

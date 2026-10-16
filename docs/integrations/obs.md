@@ -82,7 +82,7 @@ request error, so without it a cue called twice would be a red line in the
 Activity log over a recording that is running perfectly well. With OBS
 disconnected the action fails with `OBS is not connected` and sends nothing.
 
-**Those three pairs are already built.** While OBS is switched on in Settings,
+**Those three pairs are already built.** While OBS is switched on under Settings → Integrations,
 Stage Utility offers `obs_record_on` / `obs_record_off`, `obs_stream_on` /
 `obs_stream_off` and `obs_virtual_cam_on` / `obs_virtual_cam_off` as
 [built-in cues](../automation.md#built-in-cues) — a switch in Home Assistant, a

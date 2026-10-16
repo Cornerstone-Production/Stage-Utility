@@ -43,7 +43,7 @@ note the **port shown there**. Leave *Use HTTPS Connection* off (see below). If
 **In Stage:** Settings → Integrations → **ProVideoPlayer** →
 enter the **Host** and the **Network API Port** — prefilled with 50742, PVP's
 usual port, so check it against what the preferences pane shows and change it if
-yours differs — paste the **API Token** if you use one, set **Image duration** to
+yours differs — leave **Use HTTPS** off unless PVP's *Use HTTPS Connection* is on and its certificate is one this machine trusts (see below), paste the **API Token** if you use one, set **Image duration** to
 match Preferences → Import → Image Duration, enable it, and **Test connection**. A
 successful test names how many layers PVP has and how many are showing something.
 
@@ -175,9 +175,9 @@ refuses one before sending it.
 **Cues are addressed through a playlist.** `POST /trigger/playlist/{playlist}/cue/{cue}`
 takes either names or positions and works with both. The bare
 `POST /trigger/cue/{cue}` form takes a **position only** — a cue name there is
-rejected outright with HTTP 400. An earlier reading that most addressing forms
-did nothing was a measurement error: the state was read back within the same
-second as the request, before PVP had applied it.
+rejected outright with HTTP 400. PVP applies a command a moment after it answers, so the state is read back
+only after a short wait; a read within the same second as the request shows the old
+state.
 
 **Firing a cue confirms that the cue MOVED, not just that it is named.** The cue
 name PVP reports is residual, so a cue that has already played on a layer stays
@@ -216,3 +216,19 @@ auto-advances, the cue can change on its own between the command and the
 read-back, so a trigger that did nothing could be confirmed by an advance that
 would have happened anyway. The confirmation is strong on a layer that does not
 auto-advance and only suggestive on one that does.
+
+## What the log says
+
+Under `[pvp]` on `/log`:
+
+- `[pvp] polling <host>:<port>` when the integration starts (never the token)
+- `[pvp] <host>:<port> unreachable (…) — backing off quietly`, once per outage; the card
+  reads *Can't reach …* and every layer widget goes to its offline state until a poll
+  answers
+- `[pvp] playlist tree unavailable (…) — the next-cue line will stay blank` and
+  `[pvp] playlist refresh failed (…) — the next-cue line may be stale`, when the
+  playlist read fails; layers keep updating
+- `[pvp] image duration N ignored, using 20` when **Image duration** is outside 1–3600
+
+Actions that drive PVP are recorded in the Activity log, a command PVP accepted and
+ignored as a failure with the reason.

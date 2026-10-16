@@ -62,25 +62,25 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | GET  | `/api/plans/upcoming?days=…` | Every allowed service type's plans from the last 7 days to `days` ahead (whole days; default 60, capped at 365, and anything that is not a whole day above zero takes the default), sorted by date, each with `{serviceTypeId, serviceTypeName, planId, title, sortDate, dates, isCurrent}`. Cached for five minutes, or thirty seconds when a service type could not be read (it is left out and logged, and asked for again at the next refresh); `cacheAgeMs` and the `X-Plans-Cache-Age-Ms` header say how old the list is. Always `200` — when Planning Center cannot be reached the body carries `unavailable` with the reason, and the last good list if there is one |
 | GET  | `/api/pco/attachments` | Files on the active plan (plan + item level) |
 | GET  | `/api/pco/attachment?match=…` | Stream the active plan's file matching a filename substring (proxied + cached). The `200` carries an `ETag` naming the attachment id and its version (`updated_at`, else size), and `If-None-Match` with it is a `304` with no body and no download; `Cache-Control: private, max-age=300`. `404` when none matches, when Planning Center is not configured, or when no plan is selected; `502` when Planning Center will not give the file up; `500` when reading the plan's attachment list throws, or when the cached file is still missing after being looked up a second time (a newer version of the file was written while this one was being read) |
-| POST | `/api/service-type` | Set active service type |
-| POST | `/api/plan` | Set active plan |
+| POST | `/api/service-type` | Set the active service type: `{id}` (`400` without one). Answers the state |
+| POST | `/api/plan` | Set the active plan: `{id}` (`400` without one). Answers the state |
 | POST | `/api/plan/next` | Jump to the next plan (auto mode) |
-| POST | `/api/plan/mode` | Set `auto` / `manual` |
+| POST | `/api/plan/mode` | `{mode: "auto" \| "manual"}`; anything else is `400`. Answers the state |
 | POST | `/api/refresh` | Re-fetch from Planning Center |
-| POST | `/api/live/next` | PCO Services Live: go to the next item (like PCO's timer) |
+| POST | `/api/live/next` | PCO Services Live: go to the next item (like PCO's timer). Answers `{ok: true}` |
 | POST | `/api/live/previous` | PCO Services Live: go to the previous item |
 | GET | `/api/pco/live` | Planning Center Live's current item and mode, fetched from Planning Center on each call — the payload the `pco:live` channel pushes. `null` with no credentials or no plan selected |
-| POST | `/api/allowed-service-types` | Set the allowlist |
+| POST | `/api/allowed-service-types` | Set the allowlist: `{ids: string[]}` (`400` when `ids` is not an array). Answers the state |
 | POST | `/api/plan-switcher-mode` | How the slot editors' plan switcher steps (`{mode: "within-type" \| "upcoming"}`). Editor-only — it changes nothing the screens follow |
-| POST | `/api/slots` | Save a display's slots (`{slots, displayId?}`) |
+| POST | `/api/slots` | Save a display's slots (`{slots, displayId?}`; `400` when `slots` is not an array, `404` for a `displayId` that names no display, and the primary display when it is omitted) |
 | POST | `/api/show-qr` | Toggle the connect QR on the display |
 
 **Views, displays & layouts**
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/views` | List views |
-| POST | `/api/views` | Create a view (`{name, kind, surface?}`) — `201`. `surface: "console"` is honoured for a custom view or a calendar; any other kind is created as a display |
-| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `serviceCueLayoutId` (also read as `scriptViewLayoutId`), `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), `showInSidebar` (boolean — `false` keeps a console out of the operator app's sidebar list; it still opens at `/consoles/:id`; absent means listed; a non-boolean is `400`), or `calendarSources` + `calendarTags` (both together, else `400`). Converting a bound view with `surface` here is refused, naming the screens; `POST /api/views/:id/surface` is the call that changes the view and its screens together. A console's `kind` may change only to one that can be a control surface (a custom layout or a calendar); another is `400` with the reason. The body is judged as it will be once all of it is applied: `surface: "display"` beside a `kind` takes any kind, and `surface: "console"` beside a `kind` needs one that can be a control surface. Every `kind` and `surface` refusal is decided before the first write, so a refused body writes nothing, a `name` beside it included. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit. Every refusal is decided before the first write, so a refused body (a stale `layoutRev`, an unknown `serviceCueLayoutId`, a kind or surface refused as above) writes nothing, a `name` beside it included |
+| POST | `/api/views` | Create a view (`{name, kind, surface?}`) — `201`, answering the state. A missing or unrecognised `kind` makes a slots view. `surface: "console"` is honoured for a custom view or a calendar; any other kind is created as a display |
+| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `serviceCueLayoutId` (also read as `scriptViewLayoutId`), `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), `showInSidebar` (boolean — `false` keeps a console out of the operator app's sidebar list; it still opens at `/consoles/:id`; absent means listed; a non-boolean is `400`), or `calendarSources` + `calendarTags` (both together, each an array of `{id, name}` strings, else `400`). Converting a bound view with `surface` here is refused, naming the screens; `POST /api/views/:id/surface` is the call that changes the view and its screens together. A console's `kind` may change only to one that can be a control surface (a custom layout or a calendar); another is `400` with the reason. The body is judged as it will be once all of it is applied: `surface: "display"` beside a `kind` takes any kind, and `surface: "console"` beside a `kind` needs one that can be a control surface. Every `kind` and `surface` refusal is decided before the first write, so a refused body writes nothing, a `name` beside it included. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit. Every refusal is decided before the first write, so a refused body (a stale `layoutRev`, an unknown `serviceCueLayoutId`, a kind or surface refused as above) writes nothing, a `name` beside it included |
 | POST | `/api/views/:id/slots` | Save a slots-view's slots (`{slots, target?}`) |
 | POST | `/api/views/resolve-slots` | Resolve a slot set without saving it — what the editor previews with. Body `{ slots, target? }`, where `target` is `{ serviceTypeId, planId }` and `planId: null` names the type's default board. Answers `{ slots, roster, reason? }`; `roster` is `live`, `plan`, `none` (a default board, resolved against nobody) or `unavailable` (Planning Center could not be read, and `reason` says why) |
 | POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines (`{slots, target?}`) |
@@ -88,31 +88,31 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | DELETE | `/api/views/:id/slots/override/:planId` | Revert that plan to the default. `404` when the plan had no board of its own. Also `/api/layout-objects/:id/slots/override/:planId` |
 | POST | `/api/views/:id/slots/promote` | Make a plan's board the service type's default (`{planId}`), clearing the plan's own. `404` when it had none. Also `/api/layout-objects/:id/slots/promote` |
 | POST | `/api/views/:id/surface` | Change what a view is for, and with it every screen showing it, in one call: a screen is a control surface exactly when its view is a console, so the view's surface is the one thing written. Body `{surface: "display"\|"console", screens?}`; a `surface` that is neither, or a `screens` that is not an array of screen ids, is `400`. `screens` is the ids of the screens the caller showed the operator before they agreed (`[]` when it asked nothing): when they are not, as a set, the screens showing the view now, nothing is written and the answer is `409 {error, code: "screens-changed", screens: [{id, name}]}` with the list as it is now, to ask again with. Without `screens`, every screen showing the view changes, whatever is there: the call for a script. A view already as asked changes nothing and is not an error. Only a custom view or a calendar may become a console (the only kinds with something to operate), and Home and an unknown view are refused: `400` with the reason, nothing written. Answers the state. A failure puts the view back, with the same `500` shape as `POST /api/outputs`. `PATCH /api/views/:id` with `surface` is the narrower call and refuses a view that screens are showing, in either direction, naming them |
-| POST | `/api/views/:id/duplicate` | Duplicate a view. `201`, answering the state plus `viewId`, the id of the copy this call made |
-| GET | `/api/views/:id/export` | Download the view and anything it embeds as one file |
+| POST | `/api/views/:id/duplicate` | Duplicate a view, optionally under `{name}`. `201`, answering the state plus `viewId`, the id of the copy this call made |
+| GET | `/api/views/:id/export` | Download the view and anything it embeds as one file, `stage-utility-view-<name>-<date>.json` (`404` for an unknown view) |
 | POST | `/api/views/import` | Merge an exported view or plan in; returns what landed and what needs rebinding. Body is the bundle, or `{bundle, serviceTypeId?, onClash?}` to land a plan export under a chosen service type (`onClash` is `keep`, the default, or `replace`) |
-| GET | `/api/plans/export?serviceTypeId=…[&slots=type\|all&patch=1\|0&presets=1\|0]` | Download one service type's setup as one file — its slot boards, the views and layouts holding them, optionally the patch variant it is assigned to and the slot presets. `slots=all` also carries other types' boards on those views. Missing or unknown type, a bad flag, or Planning Center not being configured, is `400` |
+| GET | `/api/plans/export?serviceTypeId=…[&slots=type\|all&patch=1\|0&presets=1\|0]` (defaults: `slots=type`, `patch=1`, `presets=0`) | Download one service type's setup as one file — its slot boards, the views and layouts holding them, optionally the patch variant it is assigned to and the slot presets. `slots=all` also carries other types' boards on those views. Missing or unknown type, a bad flag, or Planning Center not being configured, is `400` |
 | GET | `/api/plans/export/preview?serviceTypeId=…[&slots=type\|all]` | What that file would contain at that scope, for the export dialog's counts. `400` as above |
 | POST | `/api/views/:id/copy-slots` | Copy slots from another view onto one board (`{fromViewId, target?}`) |
-| POST | `/api/views/reorder` | Reorder views |
+| POST | `/api/views/reorder` | Reorder views: `{ids: string[]}` (`400` when `ids` is not an array) |
 | DELETE | `/api/views/:id` | Delete a view. Screens showing it are left with no view; each one that was a control surface is read-only from then on, and the server logs a `[screens]` line for it. `?ifUnshown=1` deletes the view only if no screen shows it, checked in the same turn that reserves the view for deletion (from then on no screen can be pointed at it, by routing or by a new screen, until the delete is done): when one does, nothing is written and the answer is `409 {error, code: "view-shown", screens: [{id, name}]}`. The Screens page sends it when a screen is removed together with its view |
 | GET | `/api/outputs` | List physical displays |
 | POST | `/api/outputs` | Add a display — `201`, answering the state plus `outputId`, the id of the screen this call made. `{name?, viewId?, expectSurface?, newView?, slug?, showInSidebar?}`. `viewId` names an existing view of either kind; the screen is a control surface when it is a console and a read-only wall display otherwise, and with no view it shows nothing yet. `newView` (`"wall"` or `"control"`, instead of `viewId`) makes a blank custom view of that kind, named after the screen. `expectSurface` (`"display"` or `"console"`, only with a `viewId`) is the kind of that view the operator was shown, checked in the same turn as the add: when the view is the other kind, nothing is made (no screen, no view write) and the answer is `409 {error, code: "surface-changed", surface}` with what the view is now; it is `400` with `newView`, without a `viewId`, or when it is not one of the two kinds. `showInSidebar` is written on the view a control surface shows, so it needs `newView: "control"` or a `viewId` naming a console; sent without one it is `400`, not ignored. A `mode` is `400`: a screen takes its role from the view it shows. Everything is validated before anything is written: a missing view, Home, a taken or reserved slug, `viewId` with `newView`, or a field of the wrong type is `400` with the reason and creates nothing. A write that fails part-way is rolled back, and the `500` says which step failed (`failed`) and what was and was not undone (`rolledBack`, `notRolledBack`) |
 | PATCH | `/api/outputs/:id` | Set `name`, `viewId` (routing), `blackout`, `locked`, `hideTopBar` (show or hide this display's kiosk top bar), `allowHls` (whether a Video widget here may play over HLS; `false` keeps it on WebRTC only), `groups` (the [message groups](../features/stage-messages.md) this display is in, an array of group ids; every id must name a group in `/api/messaging`, and an unknown id is `400` naming it (a body that is not a list of ids is `400` too); stored deduplicated, in the groups' own order, and carried to every client as `resolvedByOutput[<id>].groups`, `[]` while it is in none), `textSize` (the ServiceCue text size this display shows, a number from 50 to 300, kept per display and carried to every client as `resolvedByOutput[<id>].textSize`, `null` while none is kept; another value is `400`), `rotation` (`0`, `90`, `180` or `270`, how far the [Mac output helper](../kiosk-devices.md#mac-output-helper) turns this screen's picture; absent means `0`; another value is `400`), `videoMode` (a mode name from the accepted list, `1080i50` through `720p60`, what a DeckLink port sends this screen in; absent means `1080p59.94`; any other string is `400` naming the list; both are fields of each entry in `GET /api/outputs`, which is where the helper reads them, and are not in `resolvedByOutput`), `slug` (`""` clears; validated against the reserved list — see [Display URLs](../display-urls.md)). A `viewId` of either kind is accepted: pointing a screen at a console makes it a control surface, and at any other view makes it read-only. `expectSurface` (`"display"` or `"console"`, sent with a `viewId`) is the kind of view the caller believes it is routing to, and is checked in the same turn as the write: when the view is the other kind, nothing in the body is written (the view is routed before any other field, so a `name` beside it does not land alone) and the answer is `409 {error, code: "surface-changed", surface}` with what the view is now. The Screens page sends it after the operator confirms a screen going live (or stopping), so a view changed while the question was open is not routed to on the strength of the old answer. Without it the write is allowed, which is what Companion's route action and scripts do; it is `400` when it is not one of the two kinds, or comes without a `viewId` naming a view. Whenever a write changes whether a screen's buttons work the server logs a `[screens]` line. A `mode` is `400` with the reason (a screen takes its role from the view it shows); no field of an entry in `GET /api/outputs` is a role. An id naming no display is also `400` with the reason, for every field |
-| POST | `/api/outputs/reorder` | Reorder displays |
+| POST | `/api/outputs/reorder` | Reorder displays: `{ids: string[]}` (`400` when `ids` is not an array) |
 | DELETE | `/api/outputs/:id` | Remove a display |
-| POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`) — what a console control does. Needs a cue bearer token unless the request is a same-origin browser request |
-| POST | `/api/notes` | Save a notes/checklist object's content (`{objectId, content}`) |
+| POST | `/api/action/invoke` | Run an automation action (`{actionId, params?}`; `400` without a string `actionId`) — what a console control does. Always `200 {ok, detail}`: an unknown action or one that fails is `ok: false` with the reason, and is logged on `[action]`. Needs a cue bearer token unless the request is a same-origin browser request |
+| POST | `/api/notes` | Save a notes/checklist object's content (`{objectId, content}`, `content` an object; `400` otherwise). The write is awaited, so a failed save is a failed request |
 | GET | `/api/messages` | The [stage messages](../features/stage-messages.md) state, the snapshot `messages:state` also carries: `{rev, serverNow, groups, quickMessages, quickReplies, messages, alerts}`. `serverNow` is the server's clock in milliseconds when the snapshot was built; `messages` is today's, oldest first; `alerts` is every message whose alert is still running, newest first |
 | POST | `/api/messages` | Send a message: `{to, text, alert?, from?}`. `to` is group ids from `/api/messaging`, or exactly `["everyone"]`; `text` is 1–280 characters once trimmed; `alert` (default `false`) holds the screens for 30 seconds; `from` (default `"Operator"`) is 1–60 characters. `201` with the message; the server stamps `id`, `at` and `alertUntil`, and a body cannot choose them. A body that breaks a rule is `400` with the reason |
 | POST | `/api/messages/:id/clear-alert` | End a running alert early (`{from?}` names who did). `200` with the state, also for an alert that is already over; `404` for an id nobody issued, `400` for one that is not a message id |
 | POST | `/api/messages/:id/replies` | Answer a message from a [Messages widget](../features/stage-messages.md#replies-and-who-may-answer): `{text, objectId, outputId?}`. `text` is 1–60 characters once trimmed; `objectId` is the widget, found in the stored layouts (containers included), and `outputId` the screen it is drawn on when it is on one. `201` with the reply `{id, at, from, text}`. `from` is the server's: the screen's name, else the name of the view holding the widget; the body cannot set it. `403` when `outputId` names a screen that is not a control surface (its view is not a console) or does not draw that widget (in its routed view, or one that view embeds), when `outputId` is omitted and the widget has no groups of its own, or when the widget's groups (its own list, else the screen's) do not include a group the message went to and it was not sent to Everyone; this keeps honest clients honest and is not authentication, as the app has no logins; `409` when the message already has 20 replies, `404` for an unknown message (or one cleared at midnight), or an `objectId` that is not a Messages widget; `400` with the reason for a message id, `objectId` or `outputId` of the wrong shape, or text that breaks a rule |
 | GET / PUT | `/api/messaging` | The groups (`{id, name}`), quick messages and quick replies, and the `version` they are at. `PUT` replaces all three — `{version, groups, quickMessages, quickReplies}`, `version` being the one the body was built from and a new group carrying no `id` — answers `200` with what is stored (at the next `version`), `409` with code `config-changed` when `version` is not the stored one (another window saved first; nothing is changed, so reload and make the change again), and `400` with the reason for a body with no `version` or past a limit: 20 groups of 1–40 characters, names unique without regard to case and never `Everyone`; 24 quick messages of 1–280; 12 quick replies of 1–60; a group `id` the server never issued. A group left out of the body is deleted and comes off every screen that held it; if that last step fails the config is still saved and the answer is `500` with code `groups-not-cleared`, and the next `PUT` retries it, built from a fresh `GET`'s `version` (the `500` carries none, and a `PUT` with the old version is `409`) |
 | POST | `/api/bar-items` | Set the context bar's items and order. `{items}` for the desktop bar, `{mobileItems}` for the phone's own set (empty = follow the desktop bar). Either may be omitted and is then left as it stands |
-| GET / POST | `/api/layout-templates` | List / save a custom-layout template |
-| PATCH / DELETE | `/api/layout-templates/:id` | Update / delete a template |
-| GET / POST | `/api/layout-groups` | List / save a reusable object group (`{name, object}`) |
-| DELETE | `/api/layout-groups/:id` | Delete a group |
+| GET / POST | `/api/layout-templates` | List / save a custom-layout template (`{name, layout}`, `layout` an object with an `objects` array and a canvas with numeric `width` and `height`; `400` otherwise). Saving answers `201` with the list |
+| PATCH / DELETE | `/api/layout-templates/:id` | Update (`{name?, layout?}`, at least one) / delete a template. Both answer the list |
+| GET / POST | `/api/layout-groups` | List / save a reusable object group (`{name, object}`; `201`, answering the list) |
+| DELETE | `/api/layout-groups/:id` | Delete a group. Answers the list |
 
 **`target` on a slot write.** Optional, and picks which of a service type's two
 boards the write lands on. Read by `POST /api/views/:id/slots`, `POST
@@ -134,7 +134,7 @@ See [Mic slots](../slots.md#defaults-and-this-week).
 clients that want a flat list. `POST /api/displays/refresh` reloads connected
 screens (`{id?}`; omit it for all of them). `GET /api/displays/presence` returns
 `{connected: [outputId], rev}` — the screens with a browser attached, which each
-display page reports by heartbeat to `POST /api/displays/presence`. The same set
+display page reports by heartbeat to `POST /api/displays/presence` (`{outputId, …}`, or `{outputId, leaving: true}` when the page closes; answers `{ok}`, false without an `outputId`). The same set
 rides the `displays:presence` SSE channel; `rev` is what lets a client tell a
 stale read from a fresh one.
 
@@ -157,30 +157,35 @@ Connected dot, the screen-size read) still lands. A report naming a feed id
 this build no longer holds is dropped on its own, without refusing the
 others. See [Health from the screens](../integrations/video-feeds.md#health-from-the-screens).
 
-**Presets** — `GET /api/presets`, `POST /api/presets` (snapshot the current
-slots under a name), `POST /api/presets/import`, `POST /api/presets/reorder`,
-`POST /api/presets/:id/apply` (onto a view or display, taking the same optional
-`target` as a slot save), `PATCH /api/presets/:id`
-(rename, replace its slots, or overwrite it from a display) and
-`DELETE /api/presets/:id`.
+**Presets** — every route answers the list of presets unless noted.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/presets` | List |
+| POST | `/api/presets` | Snapshot the current slots under a name: `{name, viewId?}` (`displayId` is read when `viewId` is absent; with neither, the primary display). `400` for a blank name |
+| POST | `/api/presets/import` | Add one from data: `{name, slots}` |
+| POST | `/api/presets/reorder` | `{ids: string[]}` |
+| POST | `/api/presets/:id/apply` | Write it onto a view: `{viewId, target?}` (`displayId` is read when `viewId` is absent), taking the same optional `target` as a slot save. Answers the state plus `appliedViewId`, the view that was written. `404` or `400` as a slot save refuses |
+| PATCH | `/api/presets/:id` | `{name?}` renames; `{slots}` replaces its slots, or `{overwriteFromDisplayId}` overwrites it from that view's current slots |
+| DELETE | `/api/presets/:id` | Delete |
 
 **Integrations & wireless**
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/integrations` | Integration states |
-| POST | `/api/integrations/:id/config` | Update config (secrets encrypted) |
-| POST | `/api/integrations/:id/enabled` | Enable / disable |
+| GET | `/api/integrations` | `{descriptors, states}`: each integration's settings schema, and its connection state |
+| POST | `/api/integrations/:id/config` | Update config: `{config: {…}}` (`400` when `config` is not an object). Secrets are encrypted. Answers the integration's state |
+| POST | `/api/integrations/:id/enabled` | Enable / disable: `{enabled: boolean}`. Answers the integration's state |
 | POST | `/api/integrations/:id/test` | Test a connection |
 | POST | `/api/integrations/youtube/connect` | Start a device-flow attempt using the SAVED client ID and secret. `409` with `{error: "Save the client ID and secret first"}` when either is blank or mode is not `oauth`. Otherwise the status below |
 | GET | `/api/integrations/youtube/connect` | `{status: "idle" \| "pending" \| "connected" \| "error", userCode?, verificationUrl?, expiresAt?, message?, channelTitle?}` — never the device code. Open, like every other read in this app: any LAN reader can see a pending `userCode` while an attempt is running, which is acceptable because the code only grants read-only YouTube access and is only good for a few minutes |
-| DELETE | `/api/integrations/youtube/connect` | Cancels a pending attempt, or clears a stale error back to idle. `{disconnect: true}` in the body instead clears the stored refresh token and channel title and stops the service |
+| DELETE | `/api/integrations/youtube/connect` | Cancels a pending attempt, or clears a stale error back to idle. `{disconnect: true}` in the body instead clears the stored refresh token and channel title and stops the service. Answers the status above |
 | GET | `/api/wireless/providers` | Available device drivers |
-| GET / POST | `/api/wireless/connections` | List / add a device connection |
-| PATCH / DELETE | `/api/wireless/connections/:id` | Update / remove a connection |
+| GET / POST | `/api/wireless/connections` | List / add a device connection (`{name?, providerId?}`; adding answers `201` with the list) |
+| PATCH / DELETE | `/api/wireless/connections/:id` | Update (`{name?, providerId?, enabled?, config?}`) / remove a connection. Both answer the list |
 | POST | `/api/wireless/connections/:id/test` | Test a device connection |
 | GET | `/api/integrations/wireless/channels` | Bindable channels — `{id, label, deviceType}` per configured channel, whether or not it has ever reported. For pickers; `deviceType` is what lets one offer mics without charger bays |
 | GET | `/api/integrations/wireless/statuses` | Live telemetry — full `DeviceStatus` per RF channel (RF, battery, runtime, frequency, audio). Chargers excluded. For widgets |
-| GET / POST | `/api/wireless/meter-rate` | Get / set the polling interval |
+| GET / POST | `/api/wireless/meter-rate` | Get / set the polling interval, `{ms}`; `POST` takes a non-negative number (`400` otherwise) |
 
 `PATCH /api/wireless/connections/:id` also accepts `POST`, and takes either the
 fields themselves or `{patch: {…}}`. The same is true of `/api/osc/targets/:id`.
@@ -189,39 +194,39 @@ fields themselves or `{patch: {…}}`. The same is true of `/api/osc/targets/:id
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET / POST | `/api/osc/targets` | List / add a target |
-| PATCH / DELETE | `/api/osc/targets/:id` | Update / remove |
+| GET / POST | `/api/osc/targets` | List / add a target (`{name?}`; adding answers `201` with the list) |
+| PATCH / DELETE | `/api/osc/targets/:id` | Update (`{name?, enabled?, config?}`) / remove. Both answer the list |
 | POST | `/api/osc/targets/:id/test` | Send a probe. UDP, so this proves the packet left, not that it arrived |
-| POST | `/api/osc/send` | `{targetId, address, args?}` — what an OSC button fires |
+| POST | `/api/osc/send` | `{targetId, address, args?}` — what an OSC button fires (`400` without a string `targetId` and `address`, or when the send fails) |
 | GET | `/api/osc/feedback` | The latest value seen per `targetId::address` |
-| GET / POST | `/api/osc/feedback-port` | The UDP port incoming feedback is listened for on |
+| GET / POST | `/api/osc/feedback-port` | The UDP port incoming feedback is listened for on, `{port}`; `POST` takes `{port}` (a number, or a string that reads as one) |
 
 **RossTalk** — the entry point for a layout button, Companion and automation
 alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET / POST | `/api/rosstalk/targets` | List (`{targets, simulate}`) / add |
-| PATCH / DELETE | `/api/rosstalk/targets/:id` | Update / remove |
+| GET / POST | `/api/rosstalk/targets` | List (`{targets, simulate}`) / add (`{name?}`; `201`, answering the list) |
+| PATCH / DELETE | `/api/rosstalk/targets/:id` | Update (the fields themselves in the body) / remove. Both answer the list |
 | POST | `/api/rosstalk/targets/:id/test` | Open the socket and send nothing |
 | GET | `/api/rosstalk/commands?family=carbonite\|ultrix` | The commands that family accepts, with their parameters |
-| GET / POST | `/api/rosstalk/simulate` | The global simulate switch (**on** out of the box) |
-| POST | `/api/rosstalk/send` | `{targetId, commandId, params}` or `{targetId, raw}`. Answers with the line that was sent — or would have been. A rejected command is `400` with the reason |
+| GET / POST | `/api/rosstalk/simulate` | The global simulate switch (**on** out of the box): `{simulate}`; `POST` takes `{simulate: boolean}` |
+| POST | `/api/rosstalk/send` | `{targetId, commandId, params}` or `{targetId, raw}` (`400` without a string `targetId`). Answers with the line that was sent — or would have been. A rejected command is `400` with the reason |
 
 **Automation** — see [Automation](../automation.md).
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/automation/registry` | Every trigger, condition and action this build offers |
-| GET | `/api/automation/plan-items` | The current plan's items, for the item pickers |
-| GET | `/api/automation/propresenter-instances` | Every ProPresenter a rule can address, as `{value, label}` |
+| GET | `/api/automation/registry` | Every trigger, condition and action this build offers: `{triggers, conditions, actions}`, each `{id, label, params, help}` (a trigger also carries its `channel`) |
+| GET | `/api/automation/plan-items` | The current plan's items, for the item pickers: `{items: [{value, label, dueAt, exact}]}`, `value` the item's title. Empty, never an error, with no plan loaded |
+| GET | `/api/automation/propresenter-instances` | Every ProPresenter a rule can address, as `{items: [{value, label}]}` |
 | GET | `/api/automation/propresenter-macros` | Macro names across every configured instance, unioned: `{items, unreachable}`. Empty, never an error, when one is unreachable, and `unreachable` names the instances that did not answer. A name only some instances have is labelled `DOORS (Main only)` — but only while every instance answered, since "only" is a claim about the machines that did |
-| GET / POST | `/api/automation/rules` | List (`{rules, settings}`, each rule carrying its own `issues` — see below) / create a rule |
-| PATCH / DELETE | `/api/automation/rules/:id` | Update / delete |
+| GET / POST | `/api/automation/rules` | List (`{rules, settings}`, each rule carrying its own `issues` — see below) / create a rule (`{name, trigger, action, …}`; `400` without those three, or for a duplicate or malformed cue name) |
+| PATCH / DELETE | `/api/automation/rules/:id` | Update / delete. `PATCH` answers the rule with its `issues`, and `400` for an unknown id or a refused cue name; `DELETE` answers the list of rules |
 | POST | `/api/automation/rules/:id/run` | Run the action once, now: [Run by hand](../automation.md#run-by-hand). Body `{confirmed?: boolean}`. Bypasses the trigger, conditions, cooldown, once-per-service and the rule's own switch; honours simulate and the disarm switch. `200 {outcome: "fired" \| "simulated" \| "failed", detail}` (an action that fails is still `200`, outcome `failed`), `404` unknown rule, `409` disarmed, `428` a confirm-before-running rule without `confirmed: true`, `401` with no same-origin Origin and no bearer token. Built-in cues can be run by their id |
-| GET / POST | `/api/automation/settings` | `simulate` and `disarmed` |
-| GET / DELETE | `/api/automation/log` | Read / clear the Activity log |
-| POST | `/api/automation/rules/import-pairs` | Create cues from Companion. `{pairs}` makes two per ON/OFF pair, `{buttons}` makes one per single button; either key, or both, in one request. A button carrying `stateVariable` is a [toggle](../integrations/companion.md#toggle-buttons) and makes a PAIR instead — two cues pressing that one button, bound on the `_on` half. `stateVariable` on a pair binds its `_on` half the same way; a pair sent without one whose connections have no verified row has its source [learned](../integrations/companion.md#learning-a-state-source) instead. Answers `{created, skipped}`; a name already in use is skipped, never overwritten |
+| GET / POST | `/api/automation/settings` | `{simulate, disarmed}`; `POST` takes either or both, as booleans, and answers the settings |
+| GET / DELETE | `/api/automation/log` | Read (`{entries}`) / clear (`{ok: true}`) the Activity log |
+| POST | `/api/automation/rules/import-pairs` | Create cues from Companion. `{pairs}` makes two per ON/OFF pair, `{buttons}` makes one per single button; either key, or both, in one request. A button carrying `stateVariable` is a [toggle](../integrations/companion.md#toggle-buttons) and makes a PAIR instead — two cues pressing that one button, bound on the `_on` half. `stateVariable` on a pair binds its `_on` half the same way; a pair sent without one whose connections have no verified row has its source [learned](../integrations/companion.md#learning-a-state-source) instead. Answers `{created, skipped}`; a name already in use is skipped, never overwritten. `400` with neither key. Every imported cue carries a 3-second cooldown |
 
 A rule's **issues** — see [Needs setup](../automation.md#needs-setup) — are an
 array of `{step, index?, key, label, message}`: `step` is `"trigger"`,
@@ -233,11 +238,12 @@ read — never stored on the rule.
 POST and PATCH validate the same way and answer the rule itself with `issues`
 attached — the same shape GET's list items carry, not a wrapper — so a script
 reading the rule off the response is unaffected (POST is `201`). A save with
-issues never fails: it writes the rule with `enabled: false`
-regardless of what was asked, and reports why. The one refusal is a request
-whose *entire* content is turning a rule with issues ON — `patch: {enabled:
-true}` and nothing else, which is what the rules list's switch sends — refused
-`409` with `{error, code: "invalid-params", issues}` and nothing written. A rule
+issues does not fail: it writes the rule with `enabled: false`
+regardless of what was asked, and reports why. There are two refusals, both
+`409` with `{error, code: "invalid-params", issues}` and nothing written: a
+`PATCH` whose *entire* content is turning a rule with issues ON (`{enabled:
+true}` and nothing else, which is what the rules list's switch sends), and a
+`POST` that creates a rule with issues and asks for `enabled: true`. A rule
 already enabled with issues (predates this build, or arrived from a restore) is
 untouched by GET, by init, and by any write that does not go through this route
 — see [Needs setup](../automation.md#needs-setup) for why that matters.
@@ -247,25 +253,25 @@ untouched by GET, by init, and by any write that does not go through this route
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/api/cues/:name` | Run the cue. `:name` is the cue's current name or any of its former names (see [When a button is renamed](../integrations/companion.md#when-a-button-is-renamed)); a current name always wins. `200` dispatched — `{ok, detail}`, plus `state` (`on`, `off` or `unknown`) when the cue is half of a pair with a **State variable**, and `{detail: "already on", skipped: true}` when the variable already says what the call asked for and nothing was pressed. Within eight seconds of a press the last COMMAND is what a repeat is compared against rather than the variable, which lags it: the same state is `{detail: "already on (just pressed)", skipped: true}` and carries no `state`, the opposite presses whatever the variable reads (see [The settle window](../integrations/companion.md#the-settle-window)). `202` confirm required (`?confirm=…` to complete), `401` no token (a same-origin browser, such as a cue button on a console, needs none and is logged as `console`), `404` unknown, `409` refused with `{error, reason}`. `reason: "button-missing"` means the Companion button it presses is no longer in the export — nothing was pressed |
-| GET / POST | `/api/cues/tokens` | List callers (never a hash) / mint one (`{label}`). The secret is returned once and never again |
-| DELETE | `/api/cues/tokens/:id` | Revoke one caller |
+| POST | `/api/cues/:name` | Run the cue. `:name` is the cue's current name or any of its former names (see [When a button is renamed](../integrations/companion.md#when-a-button-is-renamed)); a current name always wins. `200` dispatched — `{ok, detail}`, plus `state` (`on`, `off` or `unknown`) when the cue is half of a pair with a **State variable**, and `{detail: "already on", skipped: true}` when the variable already says what the call asked for and nothing was pressed. Within eight seconds of a press the last COMMAND is what a repeat is compared against rather than the variable, which lags it: the same state is `{detail: "already on (just pressed)", skipped: true}` and carries no `state`, the opposite presses whatever the variable reads (see [The settle window](../integrations/companion.md#the-settle-window)). `202` confirm required (`?confirm=…`, or `confirm` in a JSON body, to complete), `401` no token (a same-origin browser, such as a cue button on a console, needs none and is logged as `console`), `404` unknown, `409` refused with `{error, reason}`. `reason: "button-missing"` means the Companion button it presses is no longer in the export — nothing was pressed |
+| GET / POST | `/api/cues/tokens` | List callers, `{tokens}` (never a hash) / mint one (`{label}`, `400` without one). Minting answers `201 {token, secret}`: the secret is returned once and never again |
+| DELETE | `/api/cues/tokens/:id` | Revoke one caller. Answers `{ok, tokens}`, or `404` for an id nobody holds |
 | GET | `/api/cues/home-assistant.yaml` | The Home Assistant fragment for every cue — `text/yaml; charset=utf-8`, not JSON, with `Content-Disposition: attachment; filename="stage_utility.yaml"` so it downloads as a fixed name |
-| GET | `/api/cues/manifest` | Every cue as JSON, for an integration rather than a pasted config: `{version, server: {name, lanUrl}, switches, buttons}`. `version` goes up on any rule change and is the only thing worth comparing about it. A `switch` is an ON/OFF pair — `{id, name, room, on, off, toggle, state, reason?, settling?, commanded?, stateSource?, available}`, `state` one of `on`, `off`, `unknown`; `stateSource` is the Companion variable the state is read from, or an `app:<source>` such as `app:reaper.recording` for a pair Stage Utility answers for itself — treat it as opaque; `settling: true` with `commanded` (`on`/`off`) means a press was dispatched for that pair in the last eight seconds and `state` may still be from before it — show `commanded`, not `state`; a `button` is a lone cue — `{id, name, room, cue, available}`; a cue named `<base>_on` or `<base>_off` whose partner does not exist is neither, and is omitted from both lists, exactly as it is from the generated YAML. A cue whose Companion button has gone missing is listed with `available: false`, never dropped; a cue whose **Home Assistant** switch is off is omitted entirely, and a hidden pair omits both halves rather than exposing them as buttons. `?all=1` lists hidden cues too, each carrying `hiddenFromHome: true`, for the app's own cue buttons; an integration must not pass it. Open read; state comes from the same five-second cached read as `/api/cues/states`. Pairs with the [`cues`](#channels) channel |
+| GET | `/api/cues/manifest` | Every cue as JSON, for an integration rather than a pasted config: `{version, server: {name, lanUrl}, switches, buttons}`. `version` goes up on any rule change and is the only thing worth comparing about it. A `switch` is an ON/OFF pair — `{id, name, room, on, off, toggle, state, reason?, settling?, commanded?, stateSource?, available}`, `state` one of `on`, `off`, `unknown`; `stateSource` is the Companion variable the state is read from, or an `app:<source>` such as `app:reaper.recording` for a pair Stage Utility answers for itself — treat it as opaque; `settling: true` with `commanded` (`on`/`off`) means a press was dispatched for that pair in the last eight seconds and `state` may still be from before it — show `commanded`, not `state`; a `button` is a lone cue — `{id, name, room, cue, available}`; a cue named `<base>_on` or `<base>_off` whose partner does not exist is neither, and is omitted from both lists, exactly as it is from the generated YAML. A switch or button the app ships rather than the operator made carries `builtin: true` (an integration can ignore it), and a switch may carry `tone: "live"` (ON means on air or recording). A cue whose Companion button has gone missing is listed with `available: false`, never dropped; a cue whose **Home Assistant** switch is off is omitted entirely, and a hidden pair omits both halves rather than exposing them as buttons. `?all=1` lists hidden cues too, each carrying `hiddenFromHome: true`, for the app's own cue buttons; an integration must not pass it. Open read; state comes from the same five-second cached read as `/api/cues/states`. Pairs with the [`cues`](#channels) channel |
 | GET | `/api/cues/states` | What each bound ON/OFF pair's device is actually doing: `{ok, checkedAt, states}`, `states` keyed by the pair's base — `{on, off, variable, value, state, reason?, settling?, commanded?}` with `state` one of `on`, `off`, `unknown`. `settling: true` with `commanded` (`on`/`off`) means a press was dispatched for that pair in the last eight seconds and `value` may still be from before it — Companion polls the device on its own interval (see [The settle window](../integrations/companion.md#the-settle-window)); that one variable is re-read every second until it agrees. `ok` is false when any pair is unknown. Open read. Reads the bound sources on demand, in parallel, and serves the whole answer for 5 seconds — a Companion variable (custom, or a module's own), or an `app:<source>` this app answers itself, such as `app:reaper.recording` off the REAPER transport poll; only pairs with a **State variable** are in it, and an install with none reads nothing at all. A pair whose **Home Assistant** switch is off is still here, carrying `hiddenFromHome: true` — the app's own rules page reads this route for every pair's state, and the generated Home Assistant sensor lifts only the bases the YAML listed, which are the shown ones. The [`cues`](#channels) channel drops those rows |
 
 **Companion** — reading the connected Companion's own configuration.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/companion/buttons` | Every pressable button (`{ok, buttons}`). Each carries `page`, `pageId`, `pageName`, `row`, `col`, `label`, `drives` and `actionIds` — the page's opaque id and the button's sorted action ids are its identity, and survive being renumbered or dragged to another key. Answers `200` with `{ok: false, reason}` when Companion is unreachable, so a picker can say which |
+| GET | `/api/companion/buttons` | Every pressable button (`{ok, buttons, cachedAt}`). Each carries `page`, `pageId`, `pageName`, `row`, `col`, `label`, `drives` and `actionIds` — the page's opaque id and the button's sorted action ids are its identity, and survive being renumbered or dragged to another key. Answers `200` with `{ok: false, reason}` when Companion is unreachable, so a picker can say which |
 | POST | `/api/companion/buttons/refresh` | Drop the five-minute cache, re-read, and re-check every cue's button against it. `{ok, buttons, cachedAt, reconcile}`, where `reconcile` is `{applied, failed}` — `failed` names each cue whose new status could not be saved (`{ruleId, label, detail}`). Answers `ok: false` when any status failed to save, or `{ok: false, reason, buttons: []}` when Companion could not be read at all |
-| GET | `/api/companion/pairs` | The import dialog's whole offer: `{ok, pairs, buttons, customVariables}` — ON/OFF pairs, the labelled buttons that are not half of one, and the names of Companion's custom variables (what a pair's state can be bound to; empty on an install with none) — each offer with its proposed cue name and whether that name (or any cue's former name) already exists. A pair carries `stateSource` (the verified module variable its button drives, or `null`) and `learnable: true` when nothing in the table covers it and its state source will instead be [learned](../integrations/companion.md#learning-a-state-source) from a press. One request, because deciding which buttons are unpaired needs the pairs, and because the two lists' proposed names are disambiguated against each other. Answers `200` with `{ok: false, reason, pairs: []}` when Companion is unreachable — no `buttons` key |
+| GET | `/api/companion/pairs` | The import dialog's whole offer: `{ok, pairs, buttons, customVariables}` — ON/OFF pairs, the labelled buttons that are not half of one, and the names of Companion's custom variables (what a pair's state can be bound to; empty on an install with none) — each offer with its proposed cue name (`slug`) and whether that name (or any cue's former name) already exists (`exists`). A pair also carries `suggested`, true when its buttons drive a utility device such as a projector or a light and the dialog ticks it by default; single buttons are never suggested. A pair carries `stateSource` (the verified module variable its button drives, or `null`) and `learnable: true` when nothing in the table covers it and its state source will instead be [learned](../integrations/companion.md#learning-a-state-source) from a press. One request, because deciding which buttons are unpaired needs the pairs, and because the two lists' proposed names are disambiguated against each other. Answers `200` with `{ok: false, reason, pairs: []}` when Companion is unreachable — no `buttons` key |
 
 **ProPresenter & ProdCom**
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/propresenter/thumbnail?k=…` | Live slide thumbnail (JPEG proxy; `k` cache-busts per slide) |
+| GET | `/api/propresenter/thumbnail?k=…&i=…` | Live slide thumbnail (JPEG proxy; `k` cache-busts per slide, and `i` picks the ProPresenter instance, the primary when absent or `default`). Sixteen thumbnails are kept so screens showing one slide share a fetch. `503` when ProPresenter is not connected or has no active slide, `502` when it will not give the image; never cacheable (`no-store`) |
 | GET | `/api/propresenter/status` \| `/api/propresenter/instances` | Latest slide/timer state / every configured instance |
 | GET | `/api/prodcom/transcript` | Recent transcript buffer (backfill for a freshly-loaded Captions display). Text that matched a ProdCom keyword marked sensitive is already replaced with asterisks; such a line carries `redactions`, the number of hidden runs. Never gated — a display carries no token |
 | GET | `/api/prodcom/transcript/raw` | The same buffer with nothing hidden, for reviewing what a keyword covered up. Token-gated by `STAGE_UTILITY_LOG_TOKEN`, exactly like `/api/log`: unset means open, set means `?token=…` or a `401` |
@@ -281,8 +287,8 @@ untouched by GET, by init, and by any write that does not go through this route
 | GET | `/api/spl/history/:key` | One record, by key — the recorder's own live copy when that service is the one currently recording (so a record too new for the persist debounce, or mid resume-rebuild, still answers), else the stored one |
 | GET | `/api/spl/history/:key/series?metric=…&bucketSec=5` | The record's raw samples, down-sampled for a chart. `404` when the service has no raw rows |
 | GET | `/api/spl/summary` | One row per recording: per Smaart metric, the service-level `leq`, its loudest single reading `max`, and the sample `count`. Either figure may be null; a metric with neither is left out. A recording made before per-metric stats existed is reported under its own `metricKey`, from the per-item fields. What the Trends chart's sound measure plots, so a year of recordings is one request rather than one per service |
-| GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw |
-| GET / POST | `/api/spl/trend` | Whether History's attendance trend also draws the SPL trend line, and which metric it plots (`{shown, metric}`) |
+| GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw: `{metrics}`, server-wide; `POST` takes `{metrics: string[]}` |
+| GET / POST | `/api/spl/trend` | A stored `{shown, metric}` preference for an SPL line on an attendance trend. Nothing in the app reads it; the Recent services widget keeps its own `showSpl` and `splMetric` settings |
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (ServiceCue / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
 | GET | `/api/pco/checklist-sources` | Note categories + team names this service type offers (settings picker) |
@@ -295,17 +301,17 @@ untouched by GET, by init, and by any write that does not go through this route
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/people/count` | Live building occupancy (SenSource) |
-| GET | `/api/sensource/locations` \| `/api/sensource/zones` | Pickers for the SenSource config |
-| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one / live attendance record. `?summary=1` on the list leaves each finished record's `samples` out, for a page that shows only its stored figures; a record still recording keeps them. One record answers the recorder's live copy when that service is recording, else the stored one |
-| GET | `/api/service-timeline` \| `/:key` \| `/current` | List / one / live per-item timing record. One record answers the recorder's live copy when that service is recording, else the stored one |
+| GET | `/api/sensource/locations` \| `/api/sensource/zones` | Pickers for the SenSource config. `502` with the reason when Vea cannot be read |
+| GET | `/api/attendance/history` \| `/history/:key` \| `/history/current` | List / one (`null` for a key nothing recorded) / live attendance record. `?summary=1` on the list leaves each finished record's `samples` out, for a page that shows only its stored figures; a record still recording keeps them. One record answers the recorder's live copy when that service is recording, else the stored one |
+| GET | `/api/service-timeline` \| `/:key` \| `/current` | List / one (`null` for a key nothing recorded) / live per-item timing record (`null` with none recording). One record answers the recorder's live copy when that service is recording, else the stored one |
 | GET | `/api/obs/status` \| `/api/reaper/status` | Whether that recorder is rolling, and for how long |
 | GET | `/api/pvp/status` | ProVideoPlayer layer state — what is on each layer, and how far in |
 | GET | `/api/resi/status` \| `/api/youtube/status` | Whether that platform is live, and since when |
 | GET | `/api/scores/status` | Followed teams' live scores + the last scoring change |
-| GET \| POST | `/api/scores/favourites` | Read / replace the followed teams |
-| GET | `/api/scores/teams?league=<id>` | One league's teams, for the picker |
-| GET | `/api/baptism` \| `/api/baptism/sessions` | Live baptism state / saved sessions (+ start/next/baptized actions) |
-| GET | `/api/baptism/lane?serviceKey=<key>` | One service's session lane: each testimony and baptism in real time, from its raw rows |
+| GET \| POST | `/api/scores/favourites` | Read / replace the followed teams: `{favourites: [{league, teamId, …}]}` (`400` when it is not an array). Entries naming a league this build does not know, or with no team id, are dropped |
+| GET | `/api/scores/teams?league=<id>` | One league's teams, for the picker. `400` for an unknown league, `502` when ESPN cannot be read |
+| GET | `/api/baptism` \| `/api/baptism/sessions` | Live baptism state / saved sessions (the timer's actions are below) |
+| GET | `/api/baptism/lane?serviceKey=<key>` | One service's session lane: each testimony and baptism in real time, from its raw rows (`400` without `serviceKey`) |
 
 **The SPL series**
 
@@ -351,14 +357,14 @@ thing.
 | Method | Path | Purpose |
 |--------|------|---------|
 | DELETE | `/api/service-timeline/:key` \| `/api/attendance/history/:key` \| `/api/spl/history/:key` | Delete the recording. Any of the three deletes **all three**; the response is `{ deleted, records }` naming what was removed |
-| GET | `/api/history/live?serviceKey=<key>` | Read-only: `{ live }`, whether any recorder is actively writing this key right now — the same check `assertNotLive` refuses on for the routes in this section that edit a recording (not every route here checks it — milestones and `/api/log/client` never do, and Reset pacing requires the opposite, a LIVE service). A client asks this before offering an action the server would otherwise 409, rather than guessing from a record it already holds |
-| POST | `/api/history/window` | Move a recording's start/end, trimming items and samples outside it |
-| POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples |
+| GET | `/api/history/live?serviceKey=<key>` | Read-only (`400` without `serviceKey`): `{ live }`, whether any recorder is actively writing this key right now — the same check `assertNotLive` refuses on for the routes in this section that edit a recording (not every route here checks it — milestones and `/api/log/client` never do, and Reset pacing requires the opposite, a LIVE service). A client asks this before offering an action the server would otherwise 409, rather than guessing from a record it already holds |
+| POST | `/api/history/window` | Move a recording's start/end, trimming items and samples outside it: `{serviceKey, startedAt?, endedAt?}`, ISO strings (`400` without a string `serviceKey`). Answers `{ok: true}` |
+| POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples: `{serviceKey}`. Answers `{ok: true}` |
 | POST | `/api/history/rebuild` | Recompute the timing, SPL, attendance and baptism summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timeline, spl, attendance, baptism, baptismDetail?, failed }`, each of the first four `{ rebuilt, items, missing }`; `409` while the service is recording or when there are no raw rows at all — both carry a body of `{ error, code }`, `code` being `"live"` for the first and `"no-raw-rows"` for the second (see `/api/baptism/rebuild` below) — `500` for any other failure (no detail in the body — the reason is on the server's own log) |
-| POST | `/api/history/item-counted` | Override whether one item counts toward the service timers |
+| POST | `/api/history/item-counted` | Override whether one item counts toward the service timers: `{serviceKey, itemId, counted}`. Answers `{ok: true}` |
 | POST | `/api/history/item-times` | Correct one run of one item's recorded start/end. `{ serviceKey, itemId, sequence, startedAt?, endedAt? }` — ISO strings, `null` clears that override, an absent field leaves it alone. Answers the updated record with the correction applied |
-| POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included |
-| POST | `/api/log/client` | `{ tag, message }` — one line onto the server log, so a browser-side failure reaches [`/log`](../ops/updates-and-logs.md). `tag` is a short lower-case word (`history`), written as `[history] …` at `warn`. Both fields are scrubbed, and a client is cut off after ten lines a minute with `429` — the cut-off writes one line of its own, so a throttled browser does not read as one that stopped failing |
+| POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included. Answers `{ok: true, …}` with what each of the three stores did |
+| POST | `/api/log/client` | `{ tag, message }` — one line onto the server log, so a browser-side failure reaches [`/log`](../ops/updates-and-logs.md). `tag` is a short lower-case word (`history`), written as `[history] …` at `warn`. Both fields are scrubbed, the message is cut at 300 characters, a bad `tag` or a blank `message` is `400`, a success answers `{ok: true}`, and a client is cut off after ten lines a minute with `429` — the cut-off writes one line of its own, so a throttled browser does not read as one that stopped failing |
 | GET | `/api/history/milestones` | The operator's dated marks for the Trends chart |
 | POST | `/api/history/milestones` | Add or replace one. `{ date, label, serviceTypeId? }`, plus `id` to replace. `400` with the reason for a `date` that is not a real `YYYY-MM-DD` day, a blank or over-60-character `label`, or a `serviceTypeId` nothing has recorded — each would store a mark nobody would ever see. Answers the whole list |
 | DELETE | `/api/history/milestones/:id` | Remove one. Answers the whole list, or `404` when there is no such id |
@@ -414,8 +420,11 @@ Companion) that should not have to track phase to drive the timer forward. The
 operator panel itself calls it only while armed ("First person in"); once a
 phase is running the panel already knows which specific action applies and
 calls that one directly. `GET` and `POST /api/baptism/triggers` read
-and set which plan items start each phase, and
-`DELETE /api/baptism/sessions/:id` removes one saved session.
+and set which plan items start each phase, for one plan: `?planId=…` on the read, and
+`{planId, testimonyItemId, baptismItemId}` on the write (`planId` may also come in the
+query; `400` when it is in neither). The read answers what is stored for that plan, or
+`{}`. `DELETE /api/baptism/sessions/:id` removes one saved session and answers
+`{deleted}`.
 
 `GET /api/baptism/lane?serviceKey=<key>` answers `{ spans }`, each
 `{ kind: "testimony"|"baptism", person, startedAt, endedAt }`, oldest first,
@@ -452,20 +461,20 @@ same dispatcher.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/update/status` \| `/api/update/notices` | Where the updater is / the notice waiting to be shown |
+| GET | `/api/update/status` \| `/api/update/notices` | Where the updater is / `{justUpdated}`, the notice waiting to be shown (`null` once dismissed) |
 | POST | `/api/update/check` | Ask now. Unlike the scheduled check, this always reports |
-| POST | `/api/update/apply` \| `/api/update/track` | Install / switch between the `main` and `beta` tracks |
+| POST | `/api/update/apply` \| `/api/update/track` | Install / switch tracks (`{branch: "main" \| "beta"}`; `400` without a string `branch`). Either takes `{override: true}`, below |
 | GET | `/api/update/lock` | `{active, reasons}` — why an update would be refused right now |
-| POST | `/api/update/notices/dismiss` \| `/api/update/restart` \| `/api/update/auto` | Dismiss the post-update dialog / restart (the reply is the update status, plus `relaunchFailure` when this server could not arrange its own relaunch on launchd) / set the automatic-update mode and window |
-| GET | `/api/config/export` | The config snapshot as a download. Credentials are excluded |
-| POST | `/api/config/import` | Apply a snapshot, then **restart**. The reply is `{ok, applied, restarting}`, plus `relaunchFailure` (a reason) when this server could not arrange its own relaunch on launchd |
-| GET / POST | `/api/config/snapshots` | List / save a named snapshot on this machine |
+| POST | `/api/update/notices/dismiss` \| `/api/update/restart` \| `/api/update/auto` | Dismiss the post-update dialog (`{ok: true}`) / restart (the reply is the update status, plus `relaunchFailure` when this server could not arrange its own relaunch on launchd) / set the automatic-update mode and window (see Settings above) |
+| GET | `/api/config/export` | The config snapshot as a download, `stage-utility-config-<date>.json`, the date in the app time zone. Credentials are excluded |
+| POST | `/api/config/import` | Apply a snapshot (the bundle itself, or `{bundle}`), then **restart**. The reply is `{ok, applied, restarting}`, plus `relaunchFailure` (a reason) when this server could not arrange its own relaunch on launchd |
+| GET / POST | `/api/config/snapshots` | List / save a named snapshot on this machine (`{name}`; saving answers `201`) |
 | POST / DELETE | `/api/config/snapshots/:id/recall` \| `/api/config/snapshots/:id` | Apply one (then restart, with the same reply as an import) / delete one |
-| GET / POST | `/api/backup/schedule` | The automatic-backup schedule |
-| POST | `/api/backup/run` | Run one now |
+| GET / POST | `/api/backup/schedule` | The automatic-backup schedule. `POST` takes any of `{enabled, includeArchive, destination, intervalDays, keep}` |
+| POST | `/api/backup/run` | Run one now. Answers the schedule, with `lastError` set when the run failed |
 | GET | `/api/archive/export` | The raw sample archive as a zip |
 | POST | `/api/archive/inspect` | Read a zip and report what it holds. Writes nothing |
-| POST | `/api/archive/import` | Apply it. `X-Archive-Mode: skip\|merge\|replace` decides what happens to services recorded differently here |
+| POST | `/api/archive/import` | Apply it. `X-Archive-Mode: skip\|merge\|replace` decides what happens to services recorded differently here (`skip` when absent or anything else) |
 
 The import answers what it did and, separately, what it could not do:
 `rawFilesFailed` names archive members it could not write, and
@@ -482,18 +491,35 @@ recorder is running. Pass `{override: true}` to go anyway.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/devices` | `{scanning, bound, seen, matches, health}`. Device secrets are stripped. A device that is one output of a Mac output helper carries its `output` (`{kind, name, port, modes?}`) in `bound` and `seen`. `health` lists what each helper output last reported, `{deviceId, fps, repeated, dropped, latencyMs?, at, receivedAt, struggling}`, for the ones still reporting; it is never stored |
-| POST | `/api/devices/scan` | Open or close the scan window. `{holder?, stop?}`: a Screens page holds one while it is open. A scan is what makes the server answer a device that is not set up; devices are listed in `seen` whether or not one is open |
+| POST | `/api/devices/scan` | Open or close the scan window. `{holder?, stop?}`: a Screens page holds one while it is open. A scan is what makes the server answer a device that is not set up; devices are listed in `seen` whether or not one is open. Answers `{scanning}` |
 | POST | `/api/devices/claim` | Bind a device to an output. `{deviceId, outputId}` binds it to that screen. With no `outputId` it makes a new screen first, from the same fields as `POST /api/outputs` (`name`, or `newName`, else the device's hostname; `viewId` (with `expectSurface`, which refuses as above with a `409` that makes no screen and binds nothing) or `newView`, `slug`, `showInSidebar`; a `mode` is `400`), validated before anything is written. Binding the device is the last step of making the screen, so a binding that fails puts back everything before it (the screen, a view made for it, a sidebar listing written on an existing view) and answers the same `500` as `POST /api/outputs`. Those fields with an `outputId` are `400`. A device already bound is not made a new screen: with no `outputId` it is `409` naming the screen it shows (moving it is a claim with that screen's `outputId`). Answers `{ok, displaced, outputId}` |
 | POST | `/api/devices/release` | Unbind it. The screen keeps its view and slug |
 | GET | `/api/devices/for-output/:outputId` | Which device drives this screen |
 | POST | `/api/devices/:id/health` | An output helper reports how one output is doing, every ten seconds: `{fps, repeated, dropped, latencyMs?, at}`. `fps` is frames per second over the window (0 to 1000); `repeated` the percent of that window's frames that repeated the one before because the page was late (0 to 100); `dropped` the whole number of frames the card has dropped since the output opened (cumulative, so a lower number than last time means it was reopened); `latencyMs` optional, a DeckLink output's measured delay from render to air in milliseconds (a number from 0 to 10000; `null` or absent until the helper has one, and then absent from the stored reading and from `GET /api/devices`; any other value is `400` naming the field); it is shown in Screen settings and is not part of the struggling rule; `at` the helper's own clock in ms since the epoch, which the server does not trust: a report is dated by when it arrives. Authenticated by the device's own secret, the one `/enroll` checks, sent in the `x-device-token` header, not by the same-origin rule a browser is held to. An id this server holds no binding for, a binding that has no secret pinned yet, and a missing or wrong secret are all `401`, so the route does not say which ids exist; a body that is not a report is `400` naming the field. Answers `{ok}`. A reading older than 60 seconds is dropped |
 
-**Settings toggles** — one `POST` each, all returning the updated `StageState`:
-`/api/timezone`, `/api/hour-cycle`, `/api/public-url`, `/api/reconnect-schedule`,
-`/api/taper-window`, `/api/checklist-sources`, `/api/kiosk-discovery`,
-`/api/baptism-auto-start`, `/api/ndi-enabled`, `/api/onboarding-dismissed`,
-`/api/saved-colors`, `/api/icon-color`, `/api/icon-glyph`,
-`/api/caption-colors`, `/api/caption-colors/follow-prodcom`.
+**Settings** — one `POST` each, all answering the updated `StageState`. A body of
+the wrong shape is `400` with the reason unless noted.
+
+| Path | Body |
+|---|---|
+| `/api/show-qr` | `{show: boolean}` |
+| `/api/onboarding-dismissed` | `{dismissed: boolean}` |
+| `/api/ndi-enabled` | `{enabled: boolean}` |
+| `/api/kiosk-discovery` | `{enabled: boolean}` — whether the server answers devices looking for one |
+| `/api/public-url` | `{url: string \| null}` — the address used for the connect QR and display links; blank or `null` clears it |
+| `/api/timezone` | `{timezone: string \| null}` — an IANA zone, or `null` (blank) to follow the host clock; an unknown zone is `400` |
+| `/api/hour-cycle` | `{hourCycle: "12h" \| "24h"}` |
+| `/api/reconnect-schedule` | any of `{enabled, leadMin, tailMin, dormantMin}`, the numbers rounded and clamped (lead and tail 0–1440, dormant 1–1440 minutes) |
+| `/api/taper-window` | any of `{preMin, postMin}`, whole minutes clamped to 0–240 |
+| `/api/update/auto` | any of `{mode: "manual" \| "auto-install" \| "auto-full", dayOfWeek: 0–6 \| null, hour: 0–23}`; out-of-range numbers are clamped, and `null` is any day |
+| `/api/baptism-auto-start` | `{enabled?: boolean, testimonyKeyword?: string}`, at least one; the keyword is cut at 80 characters |
+| `/api/saved-colors` | `{color: string, keep: boolean}` — save (`true`) or forget (`false`) one colour |
+| `/api/icon-color` | `{key, color}` — `color` is `#rrggbb`, or `""` to clear. `key` names a screen or page |
+| `/api/icon-glyph` | `{key, glyph}` — an icon name (a letter, then letters and digits, up to 64), or `""` to clear |
+| `/api/caption-colors` | `{channel, color}` — a hex colour for one transcription channel; anything else, or `null`, reverts it to automatic. Answers the state unchanged for a blank `channel` |
+| `/api/caption-colors/follow-prodcom` | `{on: boolean}` — whether a channel with no colour of its own follows ProdCom's |
+| `/api/checklist-sources` | `{categories?, teams?}`, below |
+| `/api/bar-items` | `{items?, mobileItems?}`, above |
 
 `/api/checklist-sources` takes `{categories}` and `{teams}` — plan-note category
 and team names, not ids. Either may be omitted and is then left as it stands; a
@@ -508,11 +534,11 @@ neither is a 400.
 | GET | `/api/video/feeds` | `{feeds}` |
 | PATCH | `/api/video/ports` | Saves the relay's six ports and restarts it if it is running. Body: `{rtmp, srt, webrtcUdp, webrtcHttp, hls, api}`, every value a whole number from 1024 to 65535 and all six different — `400` naming the rule otherwise. `200` with `{ports}` |
 | POST | `/api/video/feeds` | Add a feed. `{name, source}`; `201` with `{feed}`. `400` with the reason for a body that fails validation — a name that is not 1 to 60 characters of text, a kind this build does not offer, an address carrying a username or password |
-| PATCH | `/api/video/feeds/:id` | Update a feed. Any field omitted from the body keeps its current value; a field present is validated as on POST |
-| DELETE | `/api/video/feeds/:id` | Remove a feed. A layout still pointed at it keeps the binding and renders it as offline |
+| PATCH | `/api/video/feeds/:id` | Update a feed; answers `{feed}`. Any field omitted from the body keeps its current value; a field present is validated as on POST. `404` for an unknown id |
+| DELETE | `/api/video/feeds/:id` | Remove a feed (`{ok: true}`, or `404` for an unknown id). A layout still pointed at it keeps the binding and renders it as offline |
 | GET | `/api/video/feeds/:id/usage` | `{layouts}` — every layout with a Video widget bound to this feed, for the editor's used-by line and the delete confirmation |
 | GET | `/api/video/feeds/:id/push?protocol=srt\|rtmp\|whip` | A push feed's paste-ready address: `{protocol, address, password}`. `?protocol` previews another protocol with the SAME stored password, without saving anything; omitted or invalid falls back to the feed's own saved protocol. `404` for an unknown id or a feed that is not `push`; `403` for a cross-origin browser request (unlike every other GET here, this one answers a live secret) |
-| POST | `/api/video/feeds/:id/push/new-password` | Replaces the feed's publish password, reconciles the relay, and kicks whoever is currently publishing so the old password stops working at once. `{protocol, address, password, applied, kicked}` — `applied` is false only if a running relay's reconcile itself failed; `kicked` is `"dropped"` once a connected publisher actually was, `"none"` if nobody was publishing or no relay was running to ask, and `"failed"` only if a publisher was there and dropping it did not work |
+| POST | `/api/video/feeds/:id/push/new-password` | Replaces the feed's publish password (`404` for an unknown id or a feed that is not `push`), reconciles the relay, and kicks whoever is currently publishing so the old password stops working at once. `{protocol, address, password, applied, kicked}` — `applied` is false only if a running relay's reconcile itself failed; `kicked` is `"dropped"` once a connected publisher actually was, `"none"` if nobody was publishing or no relay was running to ask, and `"failed"` only if a publisher was there and dropping it did not work |
 | GET | `/api/video/export?feeds=a,b&ports=1&passwords=1` | The feeds as a download, `stage-utility-video-feeds-<date>.json`: `{kind: "stage-utility-video-feeds", version, appVersion, createdAt, source, feeds: [{id, name, source, password?}], ports?}`. Feeds keep their ids. `feeds` is a comma-separated list of ids (omitted: every feed); `ports=1` adds the relay ports; `passwords=1` adds each pull feed's camera password and push feed's publish password, as stored (none is made for the file). `400` naming the reason for an unknown id or a flag that is not `1`, `0`, `true` or `false`; `403` for a cross-origin browser request with `passwords=1`. See [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | POST | `/api/video/import/preview` | Body is the file. Compares each feed in it with this server's without writing anything: `{server, createdAt, hasPasswords, feeds: [{id, name, kind, status, differences, error?, filePassword?, here}], absent, ports?}`. `status` is `new`, `same`, `differs` or `invalid` (a feed this build cannot take; `error` says why). `differences` is `[{field, here, file}]` for `name`, `kind`, `url`, `username`, `protocol`, `player` or `ref`, and `{field: "password"}` with no values. `filePassword` is true when the file carries a password for that feed (the password itself is never returned). `absent` names this server's feeds the file lacks; `ports` is `{file, here, same}` and present only when the file carries ports. `400` for a file of the wrong kind or version, with `feeds` not a list, a bad or repeated id, or unusable ports. Accepts up to 64 MB |
 | POST | `/api/video/import` | `{bundle, choices?, expect?, ports?}`: lands the file's feeds under their own ids. `choices` maps a feed id to `replace` (the default) or `keep` for a feed that differs; `expect` maps a feed id to the `here` fingerprint the preview gave it (this server's feed under that id as the review saw it, `""` for none, keyed per server process and never a hash of a password); a feed edited, added, deleted or given a new password here since, is skipped with "Changed on this server since the review. Review the file again." rather than written, and a caller that sends no `expect` still gets that check against what was there when the import started. `ports: true` also saves the file's relay ports. Never removes a feed and never changes the Video feeds switch. Passwords go to the secrets store, never to the feed file. `200` with `{added, addedIds, replaced, kept, same, skipped: [{name, reason}], newPushPasswords, passwordsWritten, portsApplied, portsError?}` (feed names); `newPushPasswords` names push feeds that got a new publish password because the file had none. `400` as for the preview or for a malformed `choices`, `expect` or `ports`. A secret that cannot be written undoes the whole import and answers `500`. Accepts up to 64 MB |
@@ -536,9 +562,9 @@ starts, before it has been given the feed.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/branding/source?target=app\|empty\|avatar` | Original (un-cropped) logo, empty-slot image or default avatar |
-| POST | `/api/branding` | Update app name, accent colour, logos and their crops |
+| POST | `/api/branding` | Update branding; any of `{name, monochrome, accentColor, logo, logoOriginal, emptyLogo, emptyLogoOriginal, avatar, avatarOriginal, logoCrop, emptyLogoCrop, avatarCrop}`. `accentColor` is `#rrggbb` or `null`; each image is an `image/` data URL (under about 1.5 MB) or `null` to clear; each crop is `{scale, x, y}` or `null`. Anything else is `400` naming the field. Up to 24 MB of body. Answers the state |
 | GET | `/api/events` | Multiplexed Server-Sent Events stream — see [Channels](#channels) |
-| POST | `/api/events/subscribe` | Set the channels a connection wants (`{cid, channels}`) |
+| POST | `/api/events/subscribe` | Set the channels a connection wants (`{cid, channels: string[]}`). Answers `{ok}`, false when either is missing, in which case nothing changes |
 | GET | `/api/events/poll?cid=&since=` | The same channels, collected by polling — see [Polling](#polling) |
 
 ## Channels
@@ -635,9 +661,18 @@ something to change:
 `rosstalk:targets-changed` · `scores:favourites-changed` ·
 `rosstalk:simulated` · `automation:rules` · `cues` · `cues:all` ·
 `automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` (`{scanning, seen, health}`; the Screens page and the sidebar's count of screens not set up refetch `/api/devices` on each, and a steady output's health does not push one) ·
-`display:refresh` · `settings:allowedServiceTypeIds-changed` · `baptism:rebuilt`
+`display:refresh` · `settings:allowedServiceTypeIds-changed` · `baptism:rebuilt` ·
+`update:notice` · `propresenter:status:<id>`
 
-`baptism:rebuilt` fires once a baptism rebuild — the Baptisms tab's own, a
+`update:notice` is `{tag, count}`: a new release has appeared, sent once per
+release and only while a browser is subscribed to it, so a release found
+overnight with nobody connected is announced the next time somebody is. It is
+not replayed on connect. `propresenter:status:<id>` is the status of one
+ProPresenter instance other than the first, in the same shape as
+`propresenter:status`; `propresenter:instances` lists them. Ross TSL and RossTalk
+are outputs and publish no channel.
+
+`baptism:rebuilt` fires once a baptism rebuild — the Baptisms page's own, a
 save-failure note's, or History's whole-service rebuild — actually writes a
 session, and when a History merge moves sessions onto the service it keeps:
 `{serviceKey, ids}`, `ids` naming the sessions added, updated or moved.
@@ -669,17 +704,17 @@ Either channel having a subscriber starts the five-second read.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/photos?u=…[&s=N]` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy. `s` is the longest side the photo is drawn at, in device pixels, rounded up to 128, 192, 256, 384, 512 or 768; it scales `u`'s geometry down, never up, and anything else is ignored. See [Photos](../integrations/planning-center.md#photos) |
+| GET | `/photos?u=…[&s=N]` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy (`400` without `u`, `404` for a photo it will not serve, `500` for a failed read). The `200` is `public, max-age=31536000, immutable`, except a full-size photo standing in for a smaller one Planning Center would not give, which is `no-cache`. `s` is the longest side the photo is drawn at, in device pixels, rounded up to 128, 192, 256, 384, 512 or 768; it scales `u`'s geometry down, never up, and anything else is ignored. See [Photos](../integrations/planning-center.md#photos) |
 | GET | `/log` | The server's recent output, as a page, with a health strip and level/source filters. Token-gated when `STAGE_UTILITY_LOG_TOKEN` is set |
 | GET | `/logs` | Redirects to `/log`, query string intact. Same gate, checked before the redirect — an unauthorised request is a 401, never a 302 into one |
 | GET | `/api/log[?since=N]` | `{ lines, reset, latestSeq, checks }`. Same gate. Omit `since` for the whole buffer; pass the previous `latestSeq` to get only what is newer. `reset: true` means replace rather than append — you asked for everything, the buffer rolled past your cursor, or your cursor is above the newest line, which means it came from before a restart (`seq` is per-process and starts again at 1). `checks` is the health snapshot the page draws: version, uptime, app time zone, warning and error counts, and one entry per configured integration |
 | GET | `/enroll?device=…&token=…` | Where a kiosk device asks which screen it is. Redirects to that screen, or shows a holding page |
 | GET | `/kiosk/install-linux.sh` \| `install-macos.sh` \| `install-windows.ps1` | The kiosk agent installers, with this server's address already in them |
-| GET | `/kiosk/StageUtilityOutput-arm64.zip` \| `StageUtilityOutput-x86_64.zip` | The Mac [output helper](../kiosk-devices.md#installing-the-mac-output-helper) for that architecture. Fetched once from the GitHub release matching this server's version, checked against the release's published SHA-256, cached under the data directory and served from there. `404` with the reason when it is not cached and the release cannot be reached; `502` when the download failed its checksum or the size limit |
+| GET | `/kiosk/StageUtilityOutput-arm64.zip` \| `StageUtilityOutput-x86_64.zip` | The Mac [output helper](../kiosk-devices.md#installing-the-mac-output-helper) for that architecture. Fetched once from the GitHub release matching this server's version, checked against the release's published SHA-256, cached under the data directory and served from there. `404` with the reason when it is not cached and the release cannot be reached or has no such file; `502` when the release host answers any other status, or the download fails its checksum or the size limit or does not finish |
 | GET | `/kiosk/StageUtilityOutput-arm64.zip.sha256` \| `StageUtilityOutput-x86_64.zip.sha256` | That zip's SHA-256, one `shasum` line. The installer verifies the zip against it |
 | GET | `/layout-images/:name` \| `/branding-images/:name` | Uploaded images, content-addressed and served immutable |
 | POST | `/api/layout-images` | Store an image and return its URL |
-| GET | `/api/history/export` | The service report as a spreadsheet (`?from=&to=&include=…`) |
+| GET | `/api/history/export` | The service report as a spreadsheet (`?from=&to=&include=…`, `include` a comma-separated choice of `services`, `attendance`, `items`, `spl` and `baptisms`; names it does not know are ignored) |
 
 Everything else is the app itself: `/<display id>` and `/<slug>` render a
 screen, and the operator pages render the app — see

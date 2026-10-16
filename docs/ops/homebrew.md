@@ -36,8 +36,9 @@ The one-line installer registers a **system** service that starts at boot,
 before anyone logs in, and can serve on port 80. That is what a stage machine or
 a Pi wants.
 
-Homebrew runs it as a **user** agent that starts at login, on port 8788 only.
-That suits a laptop or a workstation where the app is one of several things you
+Homebrew runs it as a **user** agent that starts at login, on port 8788 and on
+port 80 only where that account is allowed to bind it (the log says when it is
+not). That suits a laptop or a workstation where the app is one of several things you
 run, and where `brew upgrade` alongside everything else is convenient.
 
 ## Upgrading from the terminal
@@ -102,8 +103,8 @@ itself. Switching tracks works the same way. The app never writes into the keg �
 it runs `brew update && brew upgrade` for you — so Homebrew stays the source of
 truth and `brew info` keeps telling the truth.
 
-Getting there took fixing four separate faults, all of which a plain
-`brew upgrade` still has, and two of which are invisible:
+A plain `brew upgrade` has four faults, two of them invisible, and the app works
+around each:
 
 | | |
 |---|---|
@@ -112,7 +113,7 @@ Getting there took fixing four separate faults, all of which a plain
 | launchd **parks** a start issued outside a foreground session — brew reports success, nothing runs | forced with `kickstart -k -p` |
 | `brew cleanup` deletes the keg the update script is *running from*, after which every `brew` command fails | the script runs from a directory the update cannot delete |
 
-The restart no longer depends on `brew upgrade`'s exit code either: brew stops
+The restart does not depend on `brew upgrade`'s exit code either: brew stops
 the service *before* it can fail, so a brew that swaps the keg and then exits
 non-zero has already darkened the box and still owes the restart.
 This is the one place that reliably can: on macOS the server itself runs as a

@@ -17,6 +17,8 @@ Up to 20 groups, each name 1–40 characters, unique without regard to case.
 
 **Settings → Messages** holds the groups and the two lists of one-press text:
 
+![Settings → Messages: groups, quick messages and quick replies](../images/messages-settings.png)
+
 - **Groups.** Add one, rename it (click the name, type, press Enter), or remove
   it. Removing asks first and says how many screens are in it ("Remove Green
   room? 2 screens are in it…"); those screens are taken out of it, and messages
@@ -59,6 +61,8 @@ A message is a short piece of text addressed to one or more groups, or to
 Everyone. It is 1–280 characters once trimmed, has a sender (a name, not an
 account: it defaults to `Operator`, at most 60 characters), and may be an
 **alert**.
+
+![The message composer on a console: groups, quick messages, the day's thread with replies](../images/messages-composer.png)
 
 It is sent with `POST /api/messages` and read back with `GET /api/messages`. The
 server stamps the id and the time; a body cannot choose either. A message that
@@ -143,6 +147,8 @@ widget needed. A console open in the operator app is not a kiosk screen and draw
 no banner; its Messages and Message composer widgets show the messages and the
 alert in the thread.
 
+![A stage message alert drawn across the bottom of a wall display](../images/messages-alert.png)
+
 The banner is the word **Alert** and the message large and white on a deep red
 banner across the bottom (3% in from each side, 4% up), with a bar along its foot
 that runs down to nothing as the 30 seconds do. It rises into place when it
@@ -190,6 +196,10 @@ with every reply under its message.
   name** on a console in the app, and **Home** on Home. One trailing `Display`,
   `Screen`, `Monitor` or `Console` is left off, so a screen named `Sam Display`
   signs as `Sam`; a name that is only that word keeps it.
+- The text box grows with what is typed, up to about nine lines, then scrolls; it
+  has no resize handle. When the composer's controls are taller than the widget (a
+  short widget, or a large text scale) the widget scrolls, so **Send** stays
+  reachable.
 - A send that fails keeps what was typed, the groups and the alert switch, and says
   why; the failure is also on `/log` as `[messages]`.
 
@@ -201,8 +211,12 @@ smaller and muted, each with its sender and how long ago above it and the latest
 reply in green below. Consecutive messages from the same sender share one sender
 line, showing the time of the first of them, so a run of three from one person is
 one heading and three messages. Ages are counted against the server's clock.
-When the messages are taller than the widget, the oldest is cut off rather than
-drawn over the reply buttons.
+When the messages are taller than the widget, the oldest ones that do not fit
+whole are left out: a message is never cut through a line or drawn over the reply
+buttons. A sender is shown as it is signed, so a derived `Sam Display` reads `Sam`
+here too.
+
+![A stage panel's Messages widget: each reply under its message, and the quick-reply buttons](../images/messages-panel.png)
 
 Which groups it follows is its **Groups** setting in the layout editor's inspector:
 

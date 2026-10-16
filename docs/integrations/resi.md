@@ -33,9 +33,15 @@ on it.
 
 | | |
 |---|---|
-| **Live** | any watched encoder reports `started` |
+| **Live** | any watched encoder is streaming: its status is `started`, its operational state is not a stop, and it has reported within the last 10 minutes |
 | **Off air** | Resi is reachable and no watched encoder is streaming |
 | **—** | Resi is not set up, or cannot be reached |
+
+Resi does not clear an encoder's `started` when it stops reporting, so a record that
+says `started` while its operational state says stop, or that has not refreshed for
+10 minutes, is not counted as live: an encoder that finished last night does not
+read Live. The status is asked for every 15 seconds while a screen or rule is
+reading it and every two minutes otherwise.
 
 Two things are read, from two places. The encoder status list is the live state
 and carries nothing else — no encoder name and no start time. Resi's broadcast
@@ -64,8 +70,9 @@ the honest answer: the app has no way to know how long it has been going, and a
 clock started at first sight would time how long the integration had been
 running, not the broadcast. The clock returns for the next stream.
 
-A broadcast whose scheduled end has passed is not used to time a stream running
-now, so last week's service cannot supply today's clock.
+A broadcast is only matched while now is inside its scheduled window, plus 15
+minutes for a broadcast that runs past its scheduled end, so last week's service
+cannot supply today's clock.
 
 ## On a screen
 
@@ -116,3 +123,19 @@ whatever your own cue does, and this is the truthful answer about what came of
 it. A Resi this app cannot reach reads unknown, for the same reason the trigger
 does not fire. See [State from Stage
 Utility](../automation.md#state-from-stage-utility).
+
+## What the log says
+
+Under `[resi]` on `/log`:
+
+- `[resi] polling encoder status` when the integration starts
+- `[resi] status unavailable (…) — backing off quietly`, once per outage. The card
+  reads *Can't reach Resi*, the readout goes to **—**, and a rejected sign-in is
+  dropped so the next attempt signs in again
+- `[resi] broadcast list unavailable (…) — encoder names fall back to ids and the elapsed
+  clock to what we observed`, and `[resi] broadcast list readable again — …` when it
+  returns
+- Test connection reports how many encoders it found and how many are live
+
+`RESI_DEBUG=1` logs one encoder record in full, once per connection; leave it off outside
+a debugging session.
