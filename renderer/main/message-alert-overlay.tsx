@@ -92,8 +92,9 @@ function Alerts({ alerts, groups }: { alerts: readonly StageMessage[] | undefine
 
 /** How much of the alert is left, 1 down to 0, from its own length. */
 function alertLeft(a: StageMessage, now: number): number {
-  const length = (a.alertUntil ?? 0) - a.at;
-  return length > 0 ? clamp(((a.alertUntil ?? 0) - now) / length, 0, 1) : 0;
+  const until = a.alertUntil ?? 0;
+  const length = until - a.at;
+  return length > 0 ? clamp((until - now) / length, 0, 1) : 0;
 }
 
 function Banner({ candidates }: { candidates: readonly StageMessage[] }) {
