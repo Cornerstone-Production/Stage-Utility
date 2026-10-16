@@ -35,8 +35,7 @@ done. Dismiss it and it stays dismissed.
 
 **Screens** carries a number when devices have been heard on the network that are
 not set up, from any page, and it goes when they are set up or stop being heard.
-It counts the devices the banner on [Screens](#adding-a-screen) names, dismissed
-ones included.
+It counts the devices the banner on [Screens](#adding-a-screen) names, dismissed ones included, and not a device set up on another server.
 
 Consoles you have built get a row each, above the groups — see
 [Consoles](#consoles). The running version sits at the foot of the sidebar. Drag
