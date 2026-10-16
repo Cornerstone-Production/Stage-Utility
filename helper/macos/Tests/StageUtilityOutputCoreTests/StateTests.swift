@@ -189,6 +189,20 @@ func withTempDir<T>(_ body: (URL) throws -> T) rethrows -> T {
     }
   }
 
+  /// The helper decides whether to open its window "on a first run" after it has
+  /// recorded its outputs, which is what makes the file. The answer has to be the one
+  /// from before: `hasFile` is true by then on every Mac, and the window never opened.
+  @Test func aFirstRunStaysAFirstRunOnceTheOutputsAreRecorded() throws {
+    try withTempDir { dir in
+      let store = OutputStateStore(directory: dir)
+      #expect(!store.existedAtLoad)
+      try store.ensure(key: "k", defaultEnabled: true)
+      #expect(store.hasFile)
+      #expect(!store.existedAtLoad)
+      #expect(OutputStateStore(directory: dir).existedAtLoad)
+    }
+  }
+
   /// The token is the output's identity to the server once claimed; a new one on
   /// every sighting would lock the screen out.
   @Test func theTokenIsMadeOnceAndEnsureNeverChangesAChoice() throws {

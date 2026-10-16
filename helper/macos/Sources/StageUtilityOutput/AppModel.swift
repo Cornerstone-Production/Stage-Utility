@@ -27,6 +27,9 @@ final class AppModel: ObservableObject {
   @Published private(set) var loginOffer: LoginItem.Offer = .userSwitch(on: false)
   @Published private(set) var launchAtLoginError: String?
   let version: String
+  /// outputs.json was there at launch: false only on a genuine first run. Asked after
+  /// `start()`, `hasFile` would always say yes, as the outputs are recorded there.
+  var hadStateFile: Bool { store.existedAtLoad }
   /// Called when a change in the displays leaves the menu bar covered by an output
   /// that did not cover it before: the icon is hidden, so the window has to come up.
   var onMenuBarCovered: (() -> Void)?

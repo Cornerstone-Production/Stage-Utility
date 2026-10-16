@@ -80,6 +80,10 @@ public final class OutputStateStore {
   /// written while it is set: the file holds tokens the server has pinned, and a
   /// fresh set written over it would lock every claimed output out.
   public private(set) var readProblem: String?
+  /// Whether the file was there when the store was made: false only on a genuine
+  /// first run. Unlike `hasFile` it does not change when the store saves, so it can
+  /// be asked after the outputs have been recorded.
+  public private(set) var existedAtLoad = false
 
   public struct Unreadable: Error, CustomStringConvertible {
     public var why: String
@@ -98,11 +102,13 @@ public final class OutputStateStore {
     return (0..<24).map { _ in String(format: "%02x", UInt8.random(in: 0...255, using: &generator)) }.joined()
   }
 
+  /// Whether the file is there now.
   public var hasFile: Bool { FileManager.default.fileExists(atPath: file.path) }
 
   /// Missing is a first run. Present and unreadable, or not what it should be, is a
   /// problem to show, and nothing is written until a person has dealt with it.
   private func load() {
+    existedAtLoad = hasFile
     switch FileRead.read(file) {
     case .missing:
       return
