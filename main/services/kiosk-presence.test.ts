@@ -185,6 +185,21 @@ describe("a list that is always open", () => {
     assert.equal(seenDevices(T0 + 1_000).find((d) => d.id === "flood-0")?.ip, "192.168.1.99");
   });
 
+  test("the full warning is said again the next time the list fills, not once per process", () => {
+    const fill = (prefix: string, at: number, n: number) => {
+      for (let i = 0; i < n; i++) recordSeen(dev(`${prefix}-${i}`), at);
+    };
+    fill("a", T0, MAX_SEEN);
+    recordSeen(dev("over-1"), T0 + 1_000); // full: the first warning
+    // Everything ages out, one new device finds room, and the list fills again.
+    recordSeen(dev("late"), T0 + 100_000);
+    fill("b", T0 + 100_000, MAX_SEEN - 1);
+    assert.equal(seenDevices(T0 + 100_000).length, MAX_SEEN);
+    recordSeen(dev("over-2"), T0 + 101_000); // full again: the second
+    recordSeen(dev("over-3"), T0 + 101_000); // but not a third
+    assert.equal(warnings.length, 2, `${warnings.length} warnings: ${warnings.join(" | ")}`);
+  });
+
   test("room returns as devices age out", () => {
     for (let i = 0; i < MAX_SEEN; i++) recordSeen(dev(`flood-${i}`), T0);
     recordSeen(dev("late"), T0 + 100_000);
@@ -465,5 +480,29 @@ describe("the sweep timer", () => {
     // lastSeen is T0, a device is kept while it is no more than 90 s old, so it
     // is still listed at the 90 s step and gone from the 105 s one.
     assert.deepEqual(announcedAt, [7 * STEP], "the page was never told the device aged out");
+  });
+
+  test("forgets a device that aged out and stops when nothing is left to do, so the next one starts it afresh", () => {
+    // seenDevices() already hides an expired device, so the Map's own contents are
+    // not visible from outside. What is: the sweep stops itself only when the Map
+    // is empty, and a stopped sweep is started again by the next sighting, which
+    // is a second setInterval. A sweep that left the expired device in the Map
+    // would never stop, and the next sighting would find it still running.
+    const real = globalThis.setInterval;
+    let started = 0;
+    globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
+      started += 1;
+      return real(...args);
+    }) as typeof setInterval;
+    try {
+      recordSeen(dev("d1"), T0);
+      assert.equal(started, 1, "the first sighting did not start the sweep");
+      for (let elapsed = STEP; elapsed <= 8 * STEP; elapsed += STEP) mock.timers.tick(STEP);
+      assert.deepEqual(seenDevices(Date.now()).map((d) => d.id), []);
+      recordSeen(dev("d2"), Date.now());
+      assert.equal(started, 2, "the sweep was still running: the expired device was never dropped from its list");
+    } finally {
+      globalThis.setInterval = real;
+    }
   });
 });
