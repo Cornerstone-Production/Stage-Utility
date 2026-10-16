@@ -388,7 +388,7 @@ channel count. The key is stored encrypted (secret key `apiKey`). **Hide
 sensitive keywords** is on by default; see
 [Sensitive keywords](#sensitive-keywords).
 
-**On a layout:** add object → **transcription strip**. Options: latest-line vs.
+**On a layout:** add object → **Transcription** (the transcription strip). Options: latest-line vs.
 multi-speaker scrolling feed, max lines, and hide specific channels by name.
 
 ## Caption colors
