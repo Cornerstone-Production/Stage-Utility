@@ -161,7 +161,7 @@ struct ProbeTarget: Equatable, Sendable {
     var a = a
     var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
     inet_ntop(AF_INET, &a, &buf, socklen_t(INET_ADDRSTRLEN))
-    return String(decoding: buf.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    return String(nulTerminated: buf)
   }
 }
 
