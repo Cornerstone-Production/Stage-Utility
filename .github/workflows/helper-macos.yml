@@ -17,6 +17,9 @@ on:
   pull_request:
     paths:
       - "helper/**"
+      # InstallerContractTests.swift reads this script, so a change to it alone
+      # must still run the guard.
+      - "scripts/kiosk/install-macos.sh"
       - ".github/workflows/helper-macos.yml"
       - ".github/actions/select-xcode/**"
   # Lets a specific commit be verified on demand.

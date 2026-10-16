@@ -70,9 +70,14 @@ function stubs(log: string, commands: Record<string, string>): string {
 }
 
 describe("the helper's CI workflow runs for every pull request that touches the helper", () => {
-  it("is triggered by pull requests on the helper or this workflow, and by hand, nothing else", () => {
+  it("is triggered by pull requests on the helper, the installer script its tests read, or this workflow, and by hand, nothing else", () => {
     assert.deepEqual(Object.keys(doc.on).sort(), ["pull_request", "workflow_dispatch"]);
-    assert.deepEqual(doc.on.pull_request?.paths, ["helper/**", ".github/workflows/helper-macos.yml", ".github/actions/select-xcode/**"]);
+    assert.deepEqual(doc.on.pull_request?.paths, [
+      "helper/**",
+      "scripts/kiosk/install-macos.sh",
+      ".github/workflows/helper-macos.yml",
+      ".github/actions/select-xcode/**",
+    ]);
   });
 
   it("reads the repository and nothing else", () => {
