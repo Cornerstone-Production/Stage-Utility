@@ -114,11 +114,9 @@ import { InlineSlotsEditor } from "../settings/sections/inline-slots-editor";
 import { PlanSwitcher } from "../settings/sections/plan-switcher";
 import { UnsavedWorkProvider, useUnsavedWork } from "../components/unsaved-work";
 import { canvasRowFlexClass } from "./canvas-row-fit";
-import { writeStored } from "../lib/safe-storage";
+import { readHideUnconfigured, writeHideUnconfigured } from "./hide-unconfigured";
 
 // ── object metadata ──────────────────────────────────────────────────────────
-
-const HIDE_UNCONFIGURED_KEY = "layout-hide-unconfigured";
 
 // Deepest allowed object depth (top-level = 0). A container holding objects = 1;
 // a container holding containers holding leaves = 2. Keeps the editor sane.
@@ -1402,9 +1400,7 @@ export function LayoutEditor({
   // so a set-up-but-disconnected integration's objects stay available.
   const configuredIntegrations = useConfiguredIntegrations();
   // Opt-in: hide palette objects whose integration isn't set up (default off).
-  const [hideUnconfigured, setHideUnconfigured] = useState(
-    () => localStorage.getItem(HIDE_UNCONFIGURED_KEY) === "1",
-  );
+  const [hideUnconfigured, setHideUnconfigured] = useState(() => readHideUnconfigured());
 
   // The palette and the right-click menu's "Add object" submenu offer the SAME
   // set, filtered by the same rule. Two lists that could disagree about which
@@ -1444,7 +1440,7 @@ export function LayoutEditor({
   const toggleHideUnconfigured = useCallback(() => {
     setHideUnconfigured((v) => {
       const next = !v;
-      writeStored(HIDE_UNCONFIGURED_KEY, next ? "1" : "0");
+      writeHideUnconfigured(next);
       return next;
     });
   }, []);
