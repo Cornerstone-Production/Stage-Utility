@@ -17,6 +17,11 @@ bookmark meant for it. View ids work the same way.
 The root address also answers the legacy `/?display=<id>` query form. It still
 selects the display; `/<id>` is the one to use.
 
+A [kiosk device](kiosk-devices.md) does not open a display's address. It opens
+`/enroll?device=<device id>&token=<secret>`, the one URL that never changes, and the
+server redirects it to the screen it is bound to, or shows a holding screen until it
+is set up. `enroll` is reserved for that reason.
+
 ## Friendly URLs
 
 A display can also carry a **slug**: set `left-mic` on `display-1` and `/left-mic`
