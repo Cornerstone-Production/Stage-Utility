@@ -44,7 +44,7 @@ public struct Options: Equatable {
     var o = Options()
     var problems: [String] = []
     if let p = environment["STAGE_KIOSK_PORT"], !p.isEmpty {
-      if let n = UInt16(p), n > 0 { o.discoveryPort = n } else { problems.append("STAGE_KIOSK_PORT is not a port: \(p)") }
+      if let n = port(p) { o.discoveryPort = n } else { problems.append("STAGE_KIOSK_PORT is not a port: \(p)") }
     }
     var i = 1
     func value(_ flag: String) -> String? {
@@ -58,7 +58,7 @@ public struct Options: Equatable {
         if let v = value("--dump-frames") { o.dumpFramesDir = URL(fileURLWithPath: v, isDirectory: true) }
       case "--discovery-port":
         if let v = value("--discovery-port") {
-          if let n = UInt16(v), n > 0 { o.discoveryPort = n } else { problems.append("--discovery-port is not a port: \(v)") }
+          if let n = port(v) { o.discoveryPort = n } else { problems.append("--discovery-port is not a port: \(v)") }
         }
       case "--virtual-sdi":
         if let v = value("--virtual-sdi") {
@@ -102,6 +102,12 @@ public struct Options: Equatable {
       problems.append(problem)
     }
     return (o, problems)
+  }
+
+  /// A UDP port number, 1 to 65535.
+  private static func port(_ text: String) -> UInt16? {
+    guard let n = UInt16(text), n > 0 else { return nil }
+    return n
   }
 }
 
