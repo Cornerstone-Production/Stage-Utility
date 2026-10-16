@@ -82,7 +82,9 @@ export interface LagPeak {
 
 /** The larger of two figures, null only when both are. */
 function maxOrNull(a: number | null, b: number | null): number | null {
-  return a === null ? b : b === null ? a : Math.max(a, b);
+  if (a === null) return b;
+  if (b === null) return a;
+  return Math.max(a, b);
 }
 
 /** The one sentence the Screens card, the `[video]` lagging line and the docs

@@ -227,6 +227,13 @@ export interface ScreenStep {
   undo?: () => Promise<unknown>;
 }
 
+/** What a failed screen write says about taking its steps back. */
+function undoSummary(rolledBack: readonly string[], notRolledBack: readonly string[]): string {
+  if (notRolledBack.length > 0) return `Part of it could not be undone: ${notRolledBack.join(", ")}.`;
+  if (rolledBack.length > 0) return `Undone: ${rolledBack.join(", ")}.`;
+  return "Nothing was changed.";
+}
+
 /**
  * A multi-step screen write (createScreen) that failed part-way, or setViewRole
  * when its one write failed.
@@ -241,14 +248,7 @@ export class ScreenWriteError extends Error {
     readonly rolledBack: string[],
     readonly notRolledBack: string[],
   ) {
-    super(
-      `${what}: could not ${failed} (${reason}). ` +
-        (notRolledBack.length > 0
-          ? `Part of it could not be undone: ${notRolledBack.join(", ")}.`
-          : rolledBack.length > 0
-            ? `Undone: ${rolledBack.join(", ")}.`
-            : "Nothing was changed."),
-    );
+    super(`${what}: could not ${failed} (${reason}). ${undoSummary(rolledBack, notRolledBack)}`);
     this.name = "ScreenWriteError";
   }
 }
