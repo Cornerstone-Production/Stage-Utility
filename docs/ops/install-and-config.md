@@ -153,7 +153,8 @@ removes it. Step-by-step per platform is in [INSTALL.md](../../INSTALL.md).
 
 On macOS or a Linux workstation, [Homebrew](homebrew.md) is a supported
 alternative: it runs the app as a user agent that starts at login (port 8788),
-rather than a system service that starts at boot. Updates work from
+rather than a system service that starts at boot; port 80 is served only where
+that account may bind it. Updates work from
 **Settings → Advanced** the same way.
 
 ## Uninstalling

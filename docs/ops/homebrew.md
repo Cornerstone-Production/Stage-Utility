@@ -36,8 +36,9 @@ The one-line installer registers a **system** service that starts at boot,
 before anyone logs in, and can serve on port 80. That is what a stage machine or
 a Pi wants.
 
-Homebrew runs it as a **user** agent that starts at login, on port 8788 only.
-That suits a laptop or a workstation where the app is one of several things you
+Homebrew runs it as a **user** agent that starts at login, on port 8788 and on
+port 80 only where that account is allowed to bind it (the log says when it is
+not). That suits a laptop or a workstation where the app is one of several things you
 run, and where `brew upgrade` alongside everything else is convenient.
 
 ## Upgrading from the terminal
@@ -102,8 +103,8 @@ itself. Switching tracks works the same way. The app never writes into the keg â
 it runs `brew update && brew upgrade` for you â€” so Homebrew stays the source of
 truth and `brew info` keeps telling the truth.
 
-Getting there took fixing four separate faults, all of which a plain
-`brew upgrade` still has, and two of which are invisible:
+A plain `brew upgrade` has four faults, two of them invisible, and the app works
+around each:
 
 | | |
 |---|---|
