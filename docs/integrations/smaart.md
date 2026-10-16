@@ -28,8 +28,7 @@ by the SPL history recorder (independent of whether any display is watching).
 **In Smaart:** Options → Preferences → API → enable the API (default port 26000);
 set a password only if you want authentication.
 
-**In Stage:** Settings → Integrations → **Smaart (SPL)** → enter the **Host** and
-**Port**, optionally the **API Password**, enable it, and **Test connection** (it
+**In Stage:** Settings → Integrations → **Smaart (SPL)** → enter the **Smaart Host** and **API Port**, optionally the **API Password**, enable it, and **Test connection** (it
 reports the app version and how many calibrated inputs it found). The password is
 stored encrypted on this machine.
 
@@ -37,10 +36,11 @@ stored encrypted on this machine.
 (`deviceName::channelName`) and metric key; optional peak-hold shows the highest
 value seen for that meter/metric.
 
-**On History:** the attendance trend can draw a second line — each date's service
-level, energy-averaged across the plan items. Right-click the chart — or tap and
-hold it — to switch it on and choose the metric. See
-[Attendance and history](../features/attendance-and-history.md).
+**On Home, Recent services:** the widget's attendance trend can draw a second
+line — each date's service level, energy-averaged across the plan items.
+Right-click the widget — or tap and hold it — and tick **SPL trend line**; **Metric**
+chooses the reading. See
+[Attendance and history](../features/attendance-and-history.md#recent-services-on-home).
 
 **On Home:** add widget → **Sound level**. It reads whichever meter is loudest;
 right-click the tile — or tap and hold it — and use **Meter** to pin one
