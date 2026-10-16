@@ -768,7 +768,8 @@ export class StageController {
   }
 
   /**
-   * Give every View a surface and every Output a mode, preserving behaviour.
+   * Give every View a surface and take the role an older build stored on every
+   * Output out of the data, preserving behaviour.
    *
    * Applied on BOTH load paths — the stored one and the first-run legacy one —
    * because a migration that runs on only one of two paths is how half an
