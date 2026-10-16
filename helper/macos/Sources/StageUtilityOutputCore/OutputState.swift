@@ -134,10 +134,7 @@ public final class OutputStateStore {
     else {
       return try ensure(key: output.key, defaultEnabled: defaultEnabled(kind: output.kind, isMain: output.isMain))
     }
-    let record = OutputRecord(enabled: true, token: token, boundTo: nil, kioskIdentity: true)
-    records[output.key] = record
-    try save()
-    return record
+    return try add(OutputRecord(enabled: true, token: token, boundTo: nil, kioskIdentity: true), key: output.key)
   }
 
   /// The record for `key`, made on first sight with a new token and the default
@@ -145,32 +142,39 @@ public final class OutputStateStore {
   @discardableResult
   public func ensure(key: String, defaultEnabled: Bool) throws -> OutputRecord {
     if let existing = records[key] { return existing }
-    let record = OutputRecord(enabled: defaultEnabled, token: makeToken(), boundTo: nil)
+    return try add(OutputRecord(enabled: defaultEnabled, token: makeToken(), boundTo: nil), key: key)
+  }
+
+  /// Keep a new record and save. Throws when it cannot be saved; the record is kept
+  /// in memory regardless.
+  private func add(_ record: OutputRecord, key: String) throws -> OutputRecord {
     records[key] = record
     try save()
     return record
   }
 
   public func setEnabled(_ enabled: Bool, key: String) throws {
-    guard var r = records[key], r.enabled != enabled else { return }
-    r.enabled = enabled
-    records[key] = r
-    try save()
+    try update(key, \.enabled, to: enabled)
   }
 
   /// The format a card output's screen set, normalised; nil for the default.
   public func setVideoMode(_ mode: String?, key: String) throws {
-    let mode = VideoModes.normalised(mode)
-    guard var r = records[key], r.videoMode != mode else { return }
-    r.videoMode = mode
-    records[key] = r
-    try save()
+    try update(key, \.videoMode, to: VideoModes.normalised(mode))
   }
 
   public func setBoundTo(_ server: String?, key: String) throws {
-    guard var r = records[key], r.boundTo != server else { return }
-    r.boundTo = server
-    records[key] = r
+    try update(key, \.boundTo, to: server)
+  }
+
+  /// Set one field of `key`'s record and save. Nothing is done for a key with no
+  /// record, or a field that already holds `value`. Throws when it cannot be saved;
+  /// the change is kept in memory regardless.
+  private func update<Value: Equatable>(
+    _ key: String, _ field: WritableKeyPath<OutputRecord, Value>, to value: Value
+  ) throws {
+    guard var record = records[key], record[keyPath: field] != value else { return }
+    record[keyPath: field] = value
+    records[key] = record
     try save()
   }
 
