@@ -59,6 +59,23 @@ final class DisplaySink: OutputSink {
   }
 }
 
+/// A picture as a PNG file, which every `--dump-frames` picture is.
+enum PNGFile {
+  /// Write `image` to `file` atomically. Nil on success, else why not; `what` names
+  /// the picture in the reason. A nil `image` is one that could not be made.
+  static func write(_ image: CGImage?, to file: URL, called what: String) -> String? {
+    guard let image, let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+      return "could not encode \(what) as a PNG"
+    }
+    do {
+      try png.write(to: file, options: .atomic)
+      return nil
+    } catch {
+      return "could not write \(file.path): \(error.localizedDescription)"
+    }
+  }
+}
+
 /// A display output's snapshot comes from the page, drawn upright at the size the
 /// page laid out at. The window shows it turned; the dump should show what the
 /// window shows. (A card output's dump is its frame, already turned: `CardDump`.)
@@ -80,18 +97,7 @@ enum SnapshotTurn {
         DispatchQueue.main.async { MainActor.assumeIsolated { completion(why) } }
       }
       DispatchQueue.global(qos: .utility).async {
-        guard let turned = turned(image, by: rotation),
-          let png = NSBitmapImageRep(cgImage: turned).representation(using: .png, properties: [:])
-        else {
-          done("could not encode the snapshot as a PNG")
-          return
-        }
-        do {
-          try png.write(to: file, options: .atomic)
-          done(nil)
-        } catch {
-          done("could not write \(file.path): \(error.localizedDescription)")
-        }
+        done(PNGFile.write(turned(image, by: rotation), to: file, called: "the snapshot"))
       }
     }
   }

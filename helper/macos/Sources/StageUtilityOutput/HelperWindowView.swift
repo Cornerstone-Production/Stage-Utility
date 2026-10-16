@@ -164,15 +164,7 @@ enum WindowSnapshot {
       return
     }
     DispatchQueue.global(qos: .utility).async {
-      guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
-        Log.error(.app, "could not encode the window as a PNG")
-        return
-      }
-      do {
-        try png.write(to: file, options: .atomic)
-      } catch {
-        Log.error(.app, "could not write \(file.path): \(error.localizedDescription)")
-      }
+      if let why = PNGFile.write(image, to: file, called: "the window") { Log.error(.app, why) }
     }
   }
 }
