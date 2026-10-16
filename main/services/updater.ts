@@ -41,6 +41,7 @@ import { ApplyWatchdog } from "./update/apply-watchdog.js";
 import { exitForRestart, selfRecovers } from "./update/relaunch.js";
 
 import { broadcast } from "./broadcaster.js";
+import { plural } from "./plural.js";
 import { latestOnTrack, newerThan } from "./release-tags.js";
 import { appendUpdateLog, updateLogPath } from "./update-log.js";
 
@@ -802,7 +803,7 @@ export class Updater {
     this.logEvent(
       `${checkout ? "switching to" : "applying update on"} ${branch} — ` +
         `${this.status.currentTag ?? this.status.currentSha ?? "?"} -> ${tag ?? this.status.latestSha ?? "tip"}` +
-        ` (${this.status.behind} commit${this.status.behind === 1 ? "" : "s"})`,
+        ` (${plural(this.status.behind, "commit")})`,
     );
     // The strategy decides what runs; this stays the only place that spawns.
     const plan = strategy.plan({

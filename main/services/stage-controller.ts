@@ -22,6 +22,7 @@ import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
 import { screenIsControlSurface, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
 import { clamp } from "./clamp.js";
+import { plural } from "./plural.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
@@ -814,7 +815,7 @@ export class StageController {
     const needsFlagPatch = !alreadyCleaned || !alreadyRaised || !rolesAlreadyFromView;
     if (cleanedCount > 0) {
       console.log(
-        `[layout-defaults] ${scrub(cleanedCount)} object${scrub(cleanedCount === 1 ? "" : "s")} carried a card ground written by ` +
+        `[layout-defaults] ${scrub(plural(cleanedCount, "object"))} carried a card ground written by ` +
           "the object registry rather than chosen — a translucent one, which let the page read through the " +
           "widget, or the older #191919 card, which left one layout wearing two different cards. Replaced " +
           "with the current opaque card, once. Still editable per object in the layout editor.",
@@ -822,7 +823,7 @@ export class StageController {
     }
     if (raisedCount > 0) {
       console.log(
-        `[layout-defaults] ${scrub(raisedCount)} object${scrub(raisedCount === 1 ? "" : "s")} wore the older 8% card ` +
+        `[layout-defaults] ${scrub(plural(raisedCount, "object"))} wore the older 8% card ` +
           "border; raised to the 10% one every card now gets, once. Still editable per object in the layout editor.",
       );
     }
@@ -919,10 +920,9 @@ export class StageController {
         : [
             ...plan.notes,
             ...reused,
-            `role from view: ${plan.checked} screen${plan.checked === 1 ? "" : "s"} checked, ${plan.changed} changed` +
+            `role from view: ${plural(plan.checked, "screen")} checked, ${plan.changed} changed` +
               (plan.changed > 0
-                ? ` (${plan.consoleViewIds.length} view${plan.consoleViewIds.length === 1 ? "" : "s"} made a control surface, ` +
-                  `${made} cop${made === 1 ? "y" : "ies"} made)`
+                ? ` (${plural(plan.consoleViewIds.length, "view")} made a control surface, ${plural(made, "copy", "copies")} made)`
                 : ""),
           ];
     return { views: nextViews, outputs: nextOutputs, log };
