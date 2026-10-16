@@ -27,7 +27,7 @@ endpoints are public and unauthenticated.
 
 ## Choosing teams
 
-**Settings → Integrations → Information → Live scores.** "Add a team" asks for a
+**Settings → Integrations → Live scores.** "Add a team" asks for a
 sport first, then lists that sport's teams with a search box over them, by name
 or abbreviation. Eight leagues are offered:
 
@@ -70,10 +70,7 @@ cards are out of the tab order and out of the screen reader's reading — Tab go
 straight past to the next bar item. Open it and each card becomes a control:
 Tab reaches them and Enter or Space brings one to the front.
 
-It **floats over the page** rather than pushing it down. Nothing below the bar
-moves when a score arrives, and the page underneath stays where you left it —
-opening the panel on Screens used to slide the whole grid of cards down the
-screen. Only the panel itself takes a press; the empty space beside it belongs to
+It **floats over the page** rather than pushing it down. Nothing below the bar moves when a score arrives, and the page underneath stays where you left it, so a grid of cards on Screens does not slide down when the panel opens. Only the panel itself takes a press; the empty space beside it belongs to
 the page, so a click there reaches what it looks like it will reach and closes
 the panel on the way.
 
