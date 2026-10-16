@@ -2,6 +2,8 @@
 
 Every widget the app can draw, what it shows, and where that number comes from.
 
+![A wall display built from widgets: mic slots, countdown, clock, messages, service order and status tiles](../images/wall-stage-wall.png)
+
 Widgets are one registry used by every surface. The same **Clock** is a Home tile,
 a stage-display readout and a console button — so anything here can go anywhere,
 and a widget added to the app appears in all of them at once. Where a widget looks

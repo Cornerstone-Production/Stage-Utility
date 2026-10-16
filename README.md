@@ -61,6 +61,8 @@ slot grid, a tech dashboard, a stage/confidence screen, full-screen captions, or
 a layout you design yourself by dragging clocks, timers, slide text and mic grids
 onto a canvas.
 
+![Home during a service: the live item and its countdown, screens online, wireless summary, the clock and recent services](docs/images/home-dashboard.png)
+
 Views and displays are separate on purpose. Build a view once and point as many
 screens at it as you like; change the view and every screen follows. A
 phone-friendly remote runs on the same network, so someone on the floor can
@@ -104,6 +106,8 @@ enabled independently.
 | **Automation** | Rules of the form "when something happens in Stage, do something to a device", and cues that Companion, Home Assistant or a console button call by name. Simulate mode is on by default. [Automation](docs/automation.md) |
 | **Companion and Home Assistant** | A Bitfocus Companion module drives and reads Stage; cues reach Home Assistant, and through it Apple Home, as switches that report what the gear is doing. [Companion](docs/integrations/companion.md) |
 | **Running it** | Install with one line, update from inside the app, take config snapshots and automatic backups, and read the server's log at `/log`. [Install and config](docs/ops/install-and-config.md), [Updates and logs](docs/ops/updates-and-logs.md) |
+
+![A stage wall display: mic slots with wireless telemetry, countdown, clock, stage messages with replies and the service order](docs/images/wall-stage-wall.png)
 
 ## Install it
 

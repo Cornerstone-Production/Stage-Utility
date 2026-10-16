@@ -282,6 +282,8 @@ The port is adjustable, because AV gear is fond of odd ports: `kioskDiscoveryPor
 in the server's `settings.json` (default 8789), and `STAGE_KIOSK_PORT` for the
 installer on the device.
 
+![The Screens page with two screens found on the network, each offered Set up or Dismiss, and the count beside Screens in the sidebar](images/screens-overview.png)
+
 - A device bound to **this** server is always answered, so a display re-finds its
   server after an IP change with nobody present.
 - An **unclaimed** device is always **listed**: the server records every one it

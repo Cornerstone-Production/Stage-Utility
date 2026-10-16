@@ -17,6 +17,8 @@ Built on the **Automation** page, in the sidebar.
 | **Cooldown** | seconds before this rule may fire again (default 30) |
 | **Once per service** | fire at most once per service occurrence |
 
+![The Automation page: simulate mode, the Home Assistant cues and the other rules, each with a Run button](images/automation-rules.png)
+
 Triggers fire on **change**, not on state. Stage's channels carry snapshots — the
 live plan re-broadcasts constantly, the people counter reports the same number
 every poll — so a trigger compares the previous snapshot with the new one.

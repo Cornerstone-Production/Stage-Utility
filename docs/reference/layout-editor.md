@@ -13,6 +13,8 @@ edge and remembers the width; double-click the edge to reset it. Whatever the
 width, every row fits inside it, stacking its controls when it gets narrow,
 and the panel never scrolls sideways.
 
+![The layout editor on a wall layout: the canvas, the layers list and the inspector](../images/layout-editor.png)
+
 | | |
 |---|---|
 | **Content** | what this widget shows — the channel a mic tile reads, the mode OBS status watches, the text of a text object. Different for every widget type, and absent for the ones that have nothing to choose |
@@ -35,6 +37,8 @@ A custom view can start blank or from a built-in layout. **Screens → New view 
 a row of unbound cue buttons and a countdown on that panel's canvas. Every
 template is built as ordinary editable objects rather than a fixed rendering —
 so it is a starting point you take apart, not a mode.
+
+![A lobby screen built in the layout editor: a heading, the clock, the countdown and a line of text](../images/wall-lobby.png)
 
 Inside the editor, **Replace** does the same thing to a layout that already
 exists, and lists your **saved layouts** underneath. **Save as layout**, on the

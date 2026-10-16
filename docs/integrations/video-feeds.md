@@ -327,6 +327,8 @@ the end of the list, marked "Not saved", that follows the name and address as
 they are typed; it goes away on **Cancel** or when another feed is selected,
 and **Save** replaces it with the real feed.
 
+![The Video feeds page: pulled cameras, pushed encoders and the feed editor](../images/video-feeds.png)
+
 The editor shows the feed's live picture, its **Name** and **Source**, and the
 fields for that source, each with its label above it. A new feed's **Name**
 and **Address** start empty, with "New feed" and "rtsp://" as placeholders;

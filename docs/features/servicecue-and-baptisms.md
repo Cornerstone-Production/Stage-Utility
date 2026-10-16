@@ -11,6 +11,8 @@ rundowns under it render without the app's sidebar and header, for a stage
 tablet; the same launcher with the chrome is **ServiceCue** in the sidebar, at
 `/servicecue/manage`.
 
+![The ServiceCue landing page: each service type with its column preset, ready to open](../images/servicecue-picker.png)
+
 Pick a service type from the landing page and it opens at a readable, shareable
 URL (`/servicecue/weekend/audio`) you can pin in its own tab. The clock follows
 the plan's timezone.
@@ -26,6 +28,8 @@ selected says that instead.
 
 The same table renders in three places, from one implementation — so a column set
 you define once looks identical wherever it shows up:
+
+![A ServiceCue rundown on a screen with the live item highlighted and Audio and Band note columns](../images/wall-servicecue.png)
 
 | | Follows | Columns from |
 |---|---|---|
@@ -65,6 +69,8 @@ view.
 
 A layout is a set of columns — Audio, Video, Lighting, and so on. Layouts are
 global: define one and it works across every service type.
+
+![The ServiceCue page for a Weekend plan with the Audio column preset](../images/servicecue-rundown.png)
 
 Each has per-element toggles for the clock, item time, song key, BPM, time
 signature, arrangement, item notes and total time, all on until switched off, and
@@ -311,6 +317,8 @@ split bar showing how much of each person's time was testimony versus baptism.
 In grouped mode, someone who has testified but has not yet been baptized shows
 a dash under Baptism rather than `0:00`, which would otherwise claim a baptism
 that has not happened yet took no time.
+
+![Baptisms: past sessions with their counts and times, and the trends across recent baptism services](../images/baptisms-sessions.png)
 
 A **Past sessions** card lists every finished session, newest first: the
 service and date, then how many were baptized, the average testimony and

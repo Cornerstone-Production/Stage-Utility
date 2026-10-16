@@ -13,6 +13,8 @@ an `X-PCO-API-Version` header (see [API version](#api-version)). The client
 (`pco-service.ts`) flattens JSON:API responses into slim DTOs and caches by
 volatility:
 
+![The Plan page: plan selection, the active service types and the pre-service checklist settings](../images/plan-selection.png)
+
 - **LONG (15 min):** near-static per service day — service types, note
   categories, team positions, plan service times.
 - **MEDIUM (3 min, or 45 s inside a service window):** still-editable plan

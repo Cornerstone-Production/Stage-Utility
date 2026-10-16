@@ -60,6 +60,8 @@ volunteer highlight.
 (`Source → Snake B/1 → SD 1.11 in 12 → Console 12`), then the full patch grouped by
 device with collapsible headers, a filter, and a **Changes only** toggle.
 
+![The volunteer patch sheet: this week's changes from the standard patch, then each input with its signal path](../images/patch-sheet.png)
+
 It updates live, without a reload.
 
 ## Bulk entry

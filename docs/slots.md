@@ -11,6 +11,8 @@ under it and **Save slots** at the top. **Unsaved changes** shows beside Save un
 it is pressed, and nothing reaches a screen before that. Drag a row by its grip to
 reorder; a stacked column moves as one.
 
+![The mic board editor with slots linked to Planning Center positions and wireless channels](images/slots-editor.png)
+
 Each slot row has:
 
 | Control | What it does |

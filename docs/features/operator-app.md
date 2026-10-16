@@ -92,6 +92,8 @@ Home is a grid of widgets you build yourself, out of the same registry every
 other surface draws from — anything you can put on a wall you can put here. See
 [Widgets](../reference/widgets.md) for what each one shows.
 
+![Home during a service: the live item and its countdown, screens online, wireless summary, the clock and recent services](../images/home-dashboard.png)
+
 **Editing.** The pencil at the right of the context bar turns on edit mode. Each tile then
 gains a size picker, a visibility select, a remove button and a drag handle, and
 **Add widget** offers the whole registry. The tick finishes.
@@ -153,6 +155,8 @@ an edited Home alone.
 shows. The card keeps what an operator changes while working: its name, the view
 it shows, the colour and icon, the message groups it is in, and the way into its
 layout. Its menu (the vertical dots) is actions only:
+
+![The Screens page: a live preview card per screen, the banner naming screens found on the network, and the sidebar count](../images/screens-overview.png)
 
 | Item | |
 |---|---|
@@ -303,6 +307,8 @@ the message names the screen that shows it now.
 
 A **console** is a custom view built for someone to touch rather than to watch.
 Its buttons fire; the same layout on a wall display draws them and does nothing.
+
+![A console page: the message composer with groups, quick messages and the day's thread, beside a live copy of a wall](../images/messages-composer.png)
 
 **Building one.** Screens → **New view** → *Custom Layout*, then pick **A
 control surface you operate** rather than *A wall view anyone can see*. A

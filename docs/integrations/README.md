@@ -4,6 +4,8 @@ Every integration is optional and configured under **Settings → Integrations**
 where each shows its own connection state. Most also drive a custom-layout object
 you can place on a screen.
 
+![Settings → Integrations: the connected integrations above, the ones not set up below](../images/integrations-overview.png)
+
 **Planning Center is the exception** — it supplies the plan, the people and the
 countdown, so the app needs it.
 
