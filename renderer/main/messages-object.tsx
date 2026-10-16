@@ -33,7 +33,7 @@ import { reportActionFailure } from "./report-action-failure";
 import type { OwnScreen } from "./stage-screen";
 
 /** How many messages the widget draws. */
-export const MESSAGES_SHOWN = 3;
+const MESSAGES_SHOWN = 3;
 
 /** The newest messages that reached these groups, newest first. */
 export function shownMessages(state: MessagesState, groups: readonly string[]): StageMessage[] {

@@ -42,7 +42,7 @@ export async function releaseDevice(deviceId: string, screenName: string): Promi
 /** What the strip says an output of a Mac output helper is: the Mac, the port
  *  and what it is sending. A DeckLink port sends the mode the screen is set to;
  *  a display runs at whatever the Mac drives it at. */
-export function outputSummary(device: PublicDevice & { output: DeviceOutput }, videoMode: string | undefined): string {
+function outputSummary(device: PublicDevice & { output: DeviceOutput }, videoMode: string | undefined): string {
   const { output } = device;
   const mode = outputModeLine(output, videoMode, device.screen);
   return [device.hostname || device.label || "Set up on a device", output.port, mode].filter(Boolean).join(" · ");

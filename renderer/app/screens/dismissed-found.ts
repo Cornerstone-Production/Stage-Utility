@@ -18,7 +18,7 @@ import { useSyncExternalStore } from "react";
 export const DISMISSED_KEY = "stage-utility-screens-dismissed-found";
 
 /** How long a dismissal is kept. */
-export const DISMISSED_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const DISMISSED_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type Dismissed = ReadonlyMap<string, number>;
 
@@ -27,7 +27,7 @@ export type Dismissed = ReadonlyMap<string, number>;
  * something unreadable: a banner that cannot remember must still draw. `ok` says
  * whether storage could be read at all.
  */
-export function readDismissed(now = Date.now()): { entries: Dismissed; ok: boolean } {
+function readDismissed(now = Date.now()): { entries: Dismissed; ok: boolean } {
   let raw: string | null;
   try {
     raw = localStorage.getItem(DISMISSED_KEY);
