@@ -10,7 +10,7 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 import { Button, ErrorNote } from "../../components/ui";
 import { useDevices } from "../../app/screens/use-devices";
 import { viewIsConsole, viewSurface, type CreateScreenInput, type NewViewKind } from "@main/types/views";
-import { ChoiceCard, NameInput, PanelFooter, RoleLine, Section, SlugInput, ViewPicker, viewGroups } from "./screen-panel-parts";
+import { ChoiceCard, NameInput, OutlineButton, PanelFooter, RoleLine, Section, SlugInput, ViewPicker, viewGroups } from "./screen-panel-parts";
 import type { PanelTarget, ScreenPanelActions } from "./screen-settings-panel";
 
 export type Step = 1 | 2;
@@ -166,9 +166,9 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
       <PanelFooter hint={hint}>
         <span className="flex gap-2">
           {step > 1 && (
-            <Button type="button" variant="filled" size="medium" className="border border-line-strong" onClick={() => setStep(1)} disabled={busy}>
+            <OutlineButton onClick={() => setStep(1)} disabled={busy}>
               Back
-            </Button>
+            </OutlineButton>
           )}
           {step === 1 ? (
             <Button type="button" variant="accent" size="medium" onClick={() => setStep(2)} disabled={busy}>

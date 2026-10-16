@@ -42,7 +42,7 @@ import type { OutputHealth } from "@main/types/output-health";
 import type { MessageGroups } from "../../main/use-message-groups";
 import type { CreateScreenOutcome } from "../types";
 import {
-  DangerButton, NameInput, PanelFooter, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
+  DangerButton, NameInput, OutlineButton, PanelFooter, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
 } from "./screen-panel-parts";
 import { NewScreenBody, STEP_TITLES, type Step } from "./new-screen-body";
 import { ViewBody } from "./view-settings-body";
@@ -470,24 +470,8 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
           <RoleLine surface={shown ? viewSurface(shown) : null} />
           {shown && (
             <div className="mt-2.5 flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="filled"
-                size="medium"
-                className="border border-line-strong"
-                onClick={() => actions.onSelect({ kind: "view", viewId: shown.id })}
-              >
-                View settings →
-              </Button>
-              <Button
-                type="button"
-                variant="filled"
-                size="medium"
-                className="border border-line-strong"
-                onClick={() => actions.onEditLayout(shown.id)}
-              >
-                Edit layout
-              </Button>
+              <OutlineButton onClick={() => actions.onSelect({ kind: "view", viewId: shown.id })}>View settings →</OutlineButton>
+              <OutlineButton onClick={() => actions.onEditLayout(shown.id)}>Edit layout</OutlineButton>
             </div>
           )}
           {/* Only for a console: the sidebar lists consoles, and the listing is
@@ -617,9 +601,7 @@ function EmptyBody({ onAddScreen }: { onAddScreen: () => void }) {
         <PanelRightIcon className="size-[34px] text-fg-subtle" strokeWidth={1.6} aria-hidden="true" />
         <h3 className="mb-1 mt-2.5 text-callout font-semibold text-fg">Select a screen or view</h3>
         <p className="mb-3.5 max-w-[30ch] text-footnote text-fg-muted">Click any card on the left to see its settings here.</p>
-        <Button type="button" variant="filled" size="medium" className="border border-line-strong" onClick={() => onAddScreen()}>
-          + Add a screen
-        </Button>
+        <OutlineButton onClick={() => onAddScreen()}>+ Add a screen</OutlineButton>
       </div>
     </div>
   );

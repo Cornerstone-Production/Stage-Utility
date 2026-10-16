@@ -11,7 +11,6 @@ import { cn } from "../../lib/cn";
 import { viewIsConsole, viewSurface, type ViewSurface } from "@main/types/views";
 import { NEW_CONTROL, NEW_WALL, NONE, SURFACE_COPY } from "../screen-role-confirm";
 
-
 /** The views a picker offers, split the way the picker groups them. */
 export function viewGroups(views: readonly View[]): { label: string; views: View[] }[] {
   return [
@@ -265,6 +264,16 @@ export function PanelFooter({ hint, children }: { hint: string; children?: React
       <span className="min-w-[150px] flex-1 text-caption1 text-fg-subtle">{hint}</span>
       {children}
     </div>
+  );
+}
+
+/** The panel's secondary button: filled, with an edge so it reads on the panel's
+ *  own surface. */
+export function OutlineButton({ children, ...props }: Omit<ButtonProps, "variant" | "size">) {
+  return (
+    <Button type="button" variant="filled" size="medium" className="border border-line-strong" {...props}>
+      {children}
+    </Button>
   );
 }
 

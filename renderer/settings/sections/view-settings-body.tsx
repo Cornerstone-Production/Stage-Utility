@@ -11,7 +11,7 @@ import { Button } from "../../components/ui";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { screensShowing, viewCanBeControlSurface, viewShownInSidebar, viewSurface, type ViewSurface } from "@main/types/views";
 import { SURFACE_COPY } from "../screen-role-confirm";
-import { ChoiceCard, DangerButton, NameInput, PanelFooter, Section, SidebarRow } from "./screen-panel-parts";
+import { ChoiceCard, DangerButton, NameInput, OutlineButton, PanelFooter, Section, SidebarRow } from "./screen-panel-parts";
 import type { PanelTarget, ScreenPanelActions } from "./screen-settings-panel";
 
 /** What the view body does to the outside world. */
@@ -110,15 +110,7 @@ export function ViewBody({ view, outputs, actions }: { view: View; outputs: Outp
                 Edit layout
               </Button>
             )}
-            <Button
-              type="button"
-              variant="filled"
-              size="medium"
-              className="border border-line-strong"
-              onClick={() => actions.onDuplicateView(view.id)}
-            >
-              Duplicate
-            </Button>
+            <OutlineButton onClick={() => actions.onDuplicateView(view.id)}>Duplicate</OutlineButton>
           </div>
         </Section>
       </div>
