@@ -123,7 +123,7 @@ irm https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/
 
 Nothing to clone and no Node to install: the download carries its own runtime.
 The installers verify the download, register an auto-starting service, and print
-the address to open. After that it updates itself from **Settings -> Advanced**.
+the address to open. After that it updates itself from **Settings → Advanced**.
 
 On a Mac or Linux workstation you can use [Homebrew](docs/ops/homebrew.md)
 instead — a user agent that starts at login rather than a system service.

@@ -62,8 +62,9 @@ switches.
 | **Embedded screen** | What another screen is showing, following its routing | This app |
 | **Service order (legacy)** | The plan as a running list with the live item marked | Planning Center |
 
-**Recent services** draws the same attendance trend the History tab does.
-Right-click it — or tap and hold it — for **SPL trend line** — the service level
+**Recent services** shows the active service type's average attendance, peak,
+length and start time, and — when its tile is tall enough — an attendance trend
+like the Trends card on **History**. Right-click it — or tap and hold it — for **SPL trend line** — the service level
 for each date, behind the attendance curve on its own dB scale — and **Metric**,
 which picks the Smaart metric it plots. See
 [Attendance and history](../features/attendance-and-history.md).
@@ -78,7 +79,7 @@ began — left running from an earlier session, e.g. an operator who forgot to
 advance PCO Live after a previous service — does not count toward pacing: it is
 carried into the record with its start clamped to the moment recording opened,
 so it cannot backdate the readout by hours or days. An operator can also reset
-pacing mid-service (**Settings → History**, or the console's live controls,
+pacing mid-service (on **History**, from the live service's page, or the console's live controls,
 while a service is recording): items before the reset stop counting and the
 baseline moves to the reset instant, which is the tool for "this item ran long,
 stop holding it against the rest of the service" without touching the recording

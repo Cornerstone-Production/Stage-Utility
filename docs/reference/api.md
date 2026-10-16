@@ -282,7 +282,7 @@ untouched by GET, by init, and by any write that does not go through this route
 | GET | `/api/spl/history/:key/series?metric=…&bucketSec=5` | The record's raw samples, down-sampled for a chart. `404` when the service has no raw rows |
 | GET | `/api/spl/summary` | One row per recording: per Smaart metric, the service-level `leq`, its loudest single reading `max`, and the sample `count`. Either figure may be null; a metric with neither is left out. A recording made before per-metric stats existed is reported under its own `metricKey`, from the per-item fields. What the Trends chart's sound measure plots, so a year of recordings is one request rather than one per service |
 | GET / POST | `/api/spl/visible-metrics` | Which SPL metrics the history charts draw |
-| GET / POST | `/api/spl/trend` | Whether History's attendance trend also draws the SPL trend line, and which metric it plots (`{shown, metric}`) |
+| GET / POST | `/api/spl/trend` | A stored `{shown, metric}` preference for an SPL line on an attendance trend. Nothing in the app reads it; the Recent services widget keeps its own `showSpl` and `splMetric` settings |
 | GET | `/api/pco/plan-items` | Ordered plan items + note categories (ServiceCue / SPL Rundown) |
 | GET | `/api/pco/checklist` | The active plan's checklist, read from its plan notes, with ticks applied |
 | GET | `/api/pco/checklist-sources` | Note categories + team names this service type offers (settings picker) |
@@ -646,7 +646,7 @@ ProPresenter instance other than the first, in the same shape as
 `propresenter:status`; `propresenter:instances` lists them. Ross TSL and RossTalk
 are outputs and publish no channel.
 
-`baptism:rebuilt` fires once a baptism rebuild — the Baptisms tab's own, a
+`baptism:rebuilt` fires once a baptism rebuild — the Baptisms page's own, a
 save-failure note's, or History's whole-service rebuild — actually writes a
 session, and when a History merge moves sessions onto the service it keeps:
 `{serviceKey, ids}`, `ids` naming the sessions added, updated or moved.
