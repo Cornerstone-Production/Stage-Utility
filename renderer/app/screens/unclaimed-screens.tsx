@@ -167,16 +167,7 @@ export function UnclaimedScreens({
                   <div className="text-caption1 text-fg-muted">
                     {[d.os, d.ip, describeScreen(d.screen), dismissed.has(d.id) && DISMISSED_NOTE].filter(Boolean).join(" · ")}
                   </div>
-                  {d.boundTo && (
-                    <div className="mt-1 text-caption1 text-warn-11">
-                      Set up on another server, which it cannot reach.
-                    </div>
-                  )}
-                  {looksLike && (
-                    <div className="mt-1 text-caption1 text-warn-11">
-                      Looks like {looksLike} — same MAC address.
-                    </div>
-                  )}
+                  <DeviceWarnings device={d} looksLike={looksLike} className="mt-1" />
                   <div className="mt-0.5 truncate font-mono text-caption2 text-fg-subtle">
                     {d.id}
                     {d.macs[0] ? ` · ${d.macs[0]}` : ""}
@@ -196,6 +187,23 @@ export function UnclaimedScreens({
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * What a listed device says is off about it: it belongs to a server this one
+ * cannot reach, or it shares a MAC with a screen already set up. `looksLike` is
+ * empty for an output of a Mac output helper, whose siblings share its MAC and
+ * are not what it might be replacing (see /api/devices).
+ */
+function DeviceWarnings({ device, looksLike, className }: { device: SeenDevice; looksLike: string; className?: string }) {
+  return (
+    <>
+      {device.boundTo && (
+        <div className={cn("text-caption1 text-warn-11", className)}>Set up on another server, which it cannot reach.</div>
+      )}
+      {looksLike && <div className={cn("text-caption1 text-warn-11", className)}>Looks like {looksLike} — same MAC address.</div>}
+    </>
   );
 }
 
@@ -359,14 +367,7 @@ function OutputRow({ row, outputs, connected, busy, lookedLikeNames, onSetUpNew,
       <div className="min-w-0">
         <b id={titleId} className="block truncate text-footnote font-semibold text-fg">{output.name}</b>
         <span className="block truncate text-caption1 text-fg-subtle">{[outputLine(output, d), dismissed.has(d.id) && DISMISSED_NOTE].filter(Boolean).join(" · ")}</span>
-        {d.boundTo && (
-          <span className="block text-caption1 text-warn-11">Set up on another server, which it cannot reach.</span>
-        )}
-        {/* Only ever a device that is not itself an output: its siblings share
-            its MAC and are not what it might be replacing. See /api/devices. */}
-        {looksLike && (
-          <span className="block text-caption1 text-warn-11">Looks like {looksLike} — same MAC address.</span>
-        )}
+        <DeviceWarnings device={d} looksLike={looksLike} />
       </div>
       <div className="max-sm:col-span-full">
         <DeviceActions
