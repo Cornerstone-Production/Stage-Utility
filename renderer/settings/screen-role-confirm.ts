@@ -63,7 +63,7 @@ export const viewKindLabel = (surface: ViewSurface): string => (surface === "con
  * it, which is not something to do by misclick, and making it a wall display
  * switches them off.
  */
-export async function confirmRole(screenName: string, becomes: ViewSurface, viewName: string): Promise<boolean> {
+async function confirmRole(screenName: string, becomes: ViewSurface, viewName: string): Promise<boolean> {
   const live = becomes === "console";
   return confirm({
     title: roleQuestionTitle(screenName, becomes, "screen"),
@@ -74,16 +74,21 @@ export async function confirmRole(screenName: string, becomes: ViewSurface, view
   });
 }
 
+/** Would showing a view of kind `becomes` change what the screen is? */
+function changesRole(output: Output, views: readonly View[], becomes: ViewSurface): boolean {
+  return (becomes === "console") !== screenIsControlSurface(output, views);
+}
+
 /**
  * Pointing a screen at a view is also choosing what the screen is. Asks when that
  * changes it (the view is of the other kind than the screen shows now) and says
  * whether to go ahead. A view of the kind the screen already shows asks nothing.
  */
-export async function confirmViewKind(output: Output, views: readonly View[], viewId: string): Promise<boolean> {
+async function confirmViewKind(output: Output, views: readonly View[], viewId: string): Promise<boolean> {
   const picked = views.find((v) => v.id === viewId);
   if (!picked) return true;
   const becomes = viewSurface(picked);
-  if ((becomes === "console") === screenIsControlSurface(output, views)) return true;
+  if (!changesRole(output, views, becomes)) return true;
   return confirmRole(output.name, becomes, picked.name);
 }
 
@@ -118,6 +123,6 @@ export async function chooseViewForScreen({ output, views, value, setView, reque
 export async function assignMadeView({ output, views, made, setView }: ScreenChoice & {
   made: { id: string; name: string; surface: ViewSurface };
 }): Promise<void> {
-  if ((made.surface === "console") !== screenIsControlSurface(output, views) && !(await confirmRole(output.name, made.surface, made.name))) return;
+  if (changesRole(output, views, made.surface) && !(await confirmRole(output.name, made.surface, made.name))) return;
   setView(made.id, made.surface);
 }
