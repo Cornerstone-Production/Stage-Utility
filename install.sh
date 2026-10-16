@@ -31,6 +31,8 @@ SERVICE_NAME="stage-utility"
 LAUNCHD_LABEL="com.stageutility.server"
 LEGACY_LAUNCHD_LABEL="com.cornerstone.${SERVICE_NAME}"
 LAUNCHD_DIR="/Library/LaunchDaemons"
+LAUNCHD_PLIST="${LAUNCHD_DIR}/${LAUNCHD_LABEL}.plist"
+LEGACY_PLIST="${LAUNCHD_DIR}/${LEGACY_LAUNCHD_LABEL}.plist"
 
 # Colour only for a human at a terminal. When the app drives this the output is
 # redirected to log files, where escape codes are noise that also break grep.
@@ -347,6 +349,9 @@ if [ -n "${STAGE_NO_SERVICE:-}" ]; then
 fi
 
 # ── Register the service ──────────────────────────────────────────────────────
+# The value of one environment key in a launchd plist, or nothing.
+plist_env() { sed -n "s:.*<key>$1</key><string>\(.*\)</string>.*:\1:p" "$2" | head -n1; }
+
 if [ "$OS" = linux ]; then
   command -v systemctl >/dev/null || die "systemd not found. Re-run with STAGE_NO_SERVICE=1 and start it yourself."
   say "Installing the systemd service"
@@ -398,16 +403,14 @@ else
   # Take it down FIRST: two daemons running one server fight over the port, and
   # the loser's KeepAlive keeps restarting it. bootout is asynchronous, so wait
   # for the label to actually go before the new one is loaded.
-  if [ -f "${LAUNCHD_DIR}/${LEGACY_LAUNCHD_LABEL}.plist" ] \
-     || launchctl print "system/${LEGACY_LAUNCHD_LABEL}" >/dev/null 2>&1; then
+  if [ -f "$LEGACY_PLIST" ] || launchctl print "system/${LEGACY_LAUNCHD_LABEL}" >/dev/null 2>&1; then
     log "launchd: migrating ${LEGACY_LAUNCHD_LABEL} to ${LAUNCHD_LABEL}"
     # The new plist is written from THIS run's settings, so a custom data
     # directory or port the old one carried is lost unless it is passed again.
     # Say what the old one had, and where this run differs, before it is gone.
-    LEGACY_PLIST="${LAUNCHD_DIR}/${LEGACY_LAUNCHD_LABEL}.plist"
     if [ -f "$LEGACY_PLIST" ]; then
-      OLD_DATA="$(sed -n 's:.*<key>STAGE_UTILITY_DATA</key><string>\(.*\)</string>.*:\1:p' "$LEGACY_PLIST" | head -n1)"
-      OLD_PORT="$(sed -n 's:.*<key>STAGE_UTILITY_PORT</key><string>\(.*\)</string>.*:\1:p' "$LEGACY_PLIST" | head -n1)"
+      OLD_DATA="$(plist_env STAGE_UTILITY_DATA "$LEGACY_PLIST")"
+      OLD_PORT="$(plist_env STAGE_UTILITY_PORT "$LEGACY_PLIST")"
       log "launchd: the old daemon used data directory ${OLD_DATA:-?} and port ${OLD_PORT:-?}"
       if { [ -n "$OLD_DATA" ] && [ "$OLD_DATA" != "$DATA" ]; } || { [ -n "$OLD_PORT" ] && [ "$OLD_PORT" != "$PORT" ]; }; then
         warn "This run will use data directory ${DATA} and port ${PORT}, not the old daemon's. Your configuration is still in ${OLD_DATA:-the old data directory}; to keep using it, re-run with STAGE_DATA=${OLD_DATA:-<old path>} STAGE_PORT=${OLD_PORT:-<old port>}."
@@ -426,7 +429,7 @@ else
       log "launchd: removed ${LEGACY_PLIST}"
     fi
   fi
-  cat > "${LAUNCHD_DIR}/${LAUNCHD_LABEL}.plist" <<PLIST
+  cat > "$LAUNCHD_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -448,11 +451,10 @@ else
   <key>KeepAlive</key><true/>
 </dict></plist>
 PLIST
-  launchctl unload "${LAUNCHD_DIR}/${LAUNCHD_LABEL}.plist" 2>/dev/null || true
-  launchctl load  -w "${LAUNCHD_DIR}/${LAUNCHD_LABEL}.plist"
+  launchctl unload "$LAUNCHD_PLIST" 2>/dev/null || true
+  launchctl load  -w "$LAUNCHD_PLIST"
 fi
 
-# ── Confirm it is actually serving ────────────────────────────────────────────
 # ── Will it come back by itself? ──────────────────────────────────────────────
 # Registering a service and having it start at boot are different things. This
 # checks the second one, because the first is what an installer usually proves.
@@ -470,6 +472,7 @@ else
   fi
 fi
 
+# ── Confirm it is actually serving ────────────────────────────────────────────
 say "Waiting for it to come up"
 for _ in $(seq 1 30); do
   sleep 1
