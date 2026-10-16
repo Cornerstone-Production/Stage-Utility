@@ -61,12 +61,20 @@ function kickFor(
   // it could see. Types do not help: they are erased before it looks. Only the
   // dataflow does. The same goes for tarballLabel, which resolveDaemonLabel
   // picks FROM the constants rather than copying out of XPC_SERVICE_NAME.
-  const which = launchdKind(kind, appRoot);
-  const job =
-    which === "tarball" ? tarballLabel
-    : which === "beta" ? serviceLabel(FORMULA.beta)
-    : which === "main" ? serviceLabel(FORMULA.main)
-    : null;
+  let job: string | null;
+  switch (launchdKind(kind, appRoot)) {
+    case "tarball":
+      job = tarballLabel;
+      break;
+    case "beta":
+      job = serviceLabel(FORMULA.beta);
+      break;
+    case "main":
+      job = serviceLabel(FORMULA.main);
+      break;
+    default:
+      job = null;
+  }
   if (!job) return null;
 
   // kill:false — the old instance is exiting on its own. On a box where
