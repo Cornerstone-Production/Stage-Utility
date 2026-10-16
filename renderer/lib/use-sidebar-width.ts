@@ -5,6 +5,7 @@
 // the width you chose, rather than resetting it.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readStored, writeStored } from "./safe-storage";
 
 export const SIDEBAR_WIDTH_KEY = "stage-sidebar-width";
 
@@ -62,14 +63,9 @@ export function usePanelWidth(opts: PanelWidthOptions): SidebarWidth {
     (px: number) => (!Number.isFinite(px) ? defaultWidth : Math.min(max, Math.max(min, Math.round(px)))),
     [defaultWidth, min, max],
   );
-  const [width, setWidth] = useState<number>(() => {
-    try {
-      const raw = localStorage.getItem(storageKey);
-      return raw === null ? defaultWidth : clamp(Number(raw));
-    } catch {
-      return defaultWidth;
-    }
-  });
+  const [width, setWidth] = useState<number>(() =>
+    readStored(storageKey, (raw) => (raw === null ? defaultWidth : clamp(Number(raw))), defaultWidth),
+  );
   const [dragging, setDragging] = useState(false);
 
   // The live width during a drag lives in a ref and is written to state once per
@@ -79,11 +75,9 @@ export function usePanelWidth(opts: PanelWidthOptions): SidebarWidth {
   const pending = useRef<number | null>(null);
 
   const persist = useCallback((px: number) => {
-    try {
-      localStorage.setItem(storageKey, String(px));
-    } catch {
-      // Width still applies for this session; it just will not survive a reload.
-    }
+    // When storage refuses, the width still applies for this session; it just
+    // will not survive a reload.
+    writeStored(storageKey, String(px));
   }, [storageKey]);
 
   // A drag that ends while the component is unmounting must not leave a frame

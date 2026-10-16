@@ -7,6 +7,7 @@
 // must not stop the page from drawing.
 
 import { useState } from "react";
+import { readStored, writeStored } from "../../lib/safe-storage";
 
 export const PANEL_OPEN_KEY = "stage-utility-screens-panel";
 
@@ -14,13 +15,10 @@ export const PANEL_OPEN_KEY = "stage-utility-screens-panel";
  *  narrow to dock the panel beside the cards starts with it closed: there it is
  *  an overlay, and one open on arrival would cover the page. */
 function initial(): boolean {
-  try {
-    const stored = localStorage.getItem(PANEL_OPEN_KEY);
-    if (stored === "1") return true;
-    if (stored === "0") return false;
-  } catch {
-    // Storage unavailable: fall through to the default.
-  }
+  // Storage unavailable reads as nothing stored: fall through to the default.
+  const stored = readStored(PANEL_OPEN_KEY, (raw) => raw, null);
+  if (stored === "1") return true;
+  if (stored === "0") return false;
   return typeof window.matchMedia !== "function" || window.matchMedia("(min-width: 1024px)").matches;
 }
 
@@ -28,11 +26,8 @@ export function usePanelOpen(): [boolean, (open: boolean) => void] {
   const [open, setOpenState] = useState(initial);
   function setOpen(next: boolean) {
     setOpenState(next);
-    try {
-      localStorage.setItem(PANEL_OPEN_KEY, next ? "1" : "0");
-    } catch {
-      // Not kept; the panel still opens and closes for this visit.
-    }
+    // Not kept when storage refuses; the panel still opens and closes for this visit.
+    writeStored(PANEL_OPEN_KEY, next ? "1" : "0");
   }
   return [open, setOpen];
 }

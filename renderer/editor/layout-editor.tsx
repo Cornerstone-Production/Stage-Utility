@@ -114,6 +114,7 @@ import { InlineSlotsEditor } from "../settings/sections/inline-slots-editor";
 import { PlanSwitcher } from "../settings/sections/plan-switcher";
 import { UnsavedWorkProvider, useUnsavedWork } from "../components/unsaved-work";
 import { canvasRowFlexClass } from "./canvas-row-fit";
+import { writeStored } from "../lib/safe-storage";
 
 // ── object metadata ──────────────────────────────────────────────────────────
 
@@ -1443,7 +1444,7 @@ export function LayoutEditor({
   const toggleHideUnconfigured = useCallback(() => {
     setHideUnconfigured((v) => {
       const next = !v;
-      try { localStorage.setItem(HIDE_UNCONFIGURED_KEY, next ? "1" : "0"); } catch { /* ignore */ }
+      writeStored(HIDE_UNCONFIGURED_KEY, next ? "1" : "0");
       return next;
     });
   }, []);

@@ -12,7 +12,7 @@
 // localStorage read and write are the two thin functions at the bottom, and the
 // write RETURNS its failure rather than swallowing it.
 
-import { toError } from "@main/services/errors";
+import { readStored, storeFailure } from "../../../lib/safe-storage";
 
 /**
  * The palette, in the order it is handed out. Theme tokens only — a literal
@@ -87,29 +87,25 @@ export function colorForIndex(index: number): string {
  * screen, not operator data.
  */
 export function readColorAssignment(): ColorAssignment {
-  try {
-    const raw = localStorage.getItem(TREND_COLOR_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out: ColorAssignment = {};
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof v === "number" && Number.isFinite(v)) out[k] = Math.trunc(v);
-    }
-    return out;
-  } catch {
-    return {};
-  }
+  return readStored<ColorAssignment>(
+    TREND_COLOR_KEY,
+    (raw) => {
+      if (!raw) return {};
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      const out: ColorAssignment = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === "number" && Number.isFinite(v)) out[k] = Math.trunc(v);
+      }
+      return out;
+    },
+    {},
+  );
 }
 
 /** Persist an assignment. Returns the failure rather than swallowing it: the
  *  caller logs it, so an operator whose colours move every reload has a
  *  `[history]` line saying why. */
 export function writeColorAssignment(map: ColorAssignment): Error | null {
-  try {
-    localStorage.setItem(TREND_COLOR_KEY, JSON.stringify(map));
-    return null;
-  } catch (err) {
-    return toError(err);
-  }
+  return storeFailure(TREND_COLOR_KEY, JSON.stringify(map));
 }

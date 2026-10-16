@@ -14,6 +14,7 @@
 // array of ids; those read as dismissed now.
 
 import { useSyncExternalStore } from "react";
+import { readStored, removeStored, writeStored } from "../../lib/safe-storage";
 
 export const DISMISSED_KEY = "stage-utility-screens-dismissed-found";
 
@@ -28,19 +29,21 @@ export type Dismissed = ReadonlyMap<string, number>;
  * whether storage could be read at all.
  */
 function readDismissed(now = Date.now()): { entries: Dismissed; ok: boolean } {
-  let raw: string | null;
-  try {
-    raw = localStorage.getItem(DISMISSED_KEY);
-  } catch {
-    return { entries: new Map(), ok: false };
-  }
+  return readStored<{ entries: Dismissed; ok: boolean }>(DISMISSED_KEY, (raw) => ({ entries: parseDismissed(raw, now), ok: true }), {
+    entries: new Map<string, number>(),
+    ok: false,
+  });
+}
+
+/** The stored text as dismissals, aged. Empty for nothing stored or something unreadable. */
+function parseDismissed(raw: string | null, now: number): Dismissed {
   const entries = new Map<string, number>();
-  if (!raw) return { entries, ok: true };
+  if (!raw) return entries;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { entries, ok: true };
+    return entries;
   }
   const keep = (id: string, at: number) => {
     if (now - at < DISMISSED_TTL_MS) entries.set(id, at);
@@ -53,19 +56,14 @@ function readDismissed(now = Date.now()): { entries: Dismissed; ok: boolean } {
       if (typeof at === "number" && Number.isFinite(at)) keep(id, at);
     }
   }
-  return { entries, ok: true };
+  return entries;
 }
 
 /** Keep the dismissals. Whether they were kept: false is a browser that will not
  *  remember them. */
 function writeDismissed(entries: Dismissed): boolean {
-  try {
-    if (entries.size === 0) localStorage.removeItem(DISMISSED_KEY);
-    else localStorage.setItem(DISMISSED_KEY, JSON.stringify(Object.fromEntries(entries)));
-    return true;
-  } catch {
-    return false;
-  }
+  if (entries.size === 0) return removeStored(DISMISSED_KEY);
+  return writeStored(DISMISSED_KEY, JSON.stringify(Object.fromEntries(entries)));
 }
 
 let cache: Dismissed | null = null;

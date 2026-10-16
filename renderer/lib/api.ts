@@ -7,6 +7,7 @@
 // (port 8788), so all paths here are relative.
 
 import { errorMessage } from "@main/services/errors";
+import { readStored } from "./safe-storage";
 import { monotonicNow, serverClock } from "./server-clock";
 import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
 
@@ -1849,15 +1850,12 @@ function reportChannels(): void {
 // stops) is what closed it and what makes defaulting this on safe.
 //
 //   Opt out: localStorage.setItem("stage:sharedSse", "0")  (then reload)
+const SHARED_SSE_KEY = "stage:sharedSse";
 let sharedSse = (() => {
   // The worker exists to SHARE one EventSource across tabs. On the polling
   // transport there is no stream to share, so it would open one nobody reads.
   if (POLL_TRANSPORT) return false;
-  try {
-    return typeof SharedWorker !== "undefined" && localStorage.getItem("stage:sharedSse") !== "0";
-  } catch {
-    return false;
-  }
+  return typeof SharedWorker !== "undefined" && readStored(SHARED_SSE_KEY, (raw) => raw !== "0", false);
 })();
 
 /** Wrappers added to the direct stream while the worker is unavailable, so a
@@ -2019,9 +2017,8 @@ function scheduleWorkerRetry(): void {
     workerRetryTimer = null;
     workerRetryDelayMs = Math.min(workerRetryDelayMs * 2, WORKER_RETRY_MAX_MS);
     if (typeof SharedWorker === "undefined") return; // nothing to go back to
-    try {
-      if (localStorage.getItem("stage:sharedSse") === "0") return; // opted out
-    } catch { /* storage unavailable — keep trying */ }
+    // Storage unavailable reads as not opted out: keep trying.
+    if (!readStored(SHARED_SSE_KEY, (raw) => raw !== "0", true)) return;
     sharedSse = true;
     if (!ensureWorker()) return; // ensureWorker already fell back and rescheduled
     console.log("[api] shared SSE worker recovered — moving this tab back onto it");
