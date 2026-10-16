@@ -37,8 +37,6 @@ import { useVideoState } from "../../main/video/use-video-state";
 import { useMessageGroups, type MessageGroups } from "../../main/use-message-groups";
 import { useDisplayPresence } from "../../app/screens/use-display-presence";
 
-
-
 /** ScreenVideoHealth.episode reduced to what the card's warning box needs to
  *  say — computed once in OutputsSection from video:state's `screens` and
  *  `feeds`, never read off VideoState directly in OutputRow, so a test can
@@ -95,13 +93,18 @@ export function struggleSentences(struggle: Omit<ScreenStruggle, "feedId" | "fee
  * The mockup's Home/Screens `.struggle` box, in the app's own warn callout
  * classes — the exact ones the feed editor's own delay warning uses
  * (feed-editor.tsx), so the two surfaces read as one design rather than two
- * shades of amber. Its sentences are struggleSentences()'s.
+ * shades of amber. Every warning under a card's preview is drawn with it.
  */
+function WarnBox({ children }: { children: ReactNode }) {
+  return <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">{children}</p>;
+}
+
+/** A feed this screen is struggling to play. Its sentences are struggleSentences()'s. */
 function ScreenStruggleBox({ struggle }: { struggle: ScreenStruggle }) {
   return (
-    <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+    <WarnBox>
       <span className="font-semibold">Struggling with {struggle.feedName}.</span> {struggleSentences(struggle).join(" ")}
-    </p>
+    </WarnBox>
   );
 }
 
@@ -121,26 +124,25 @@ interface ScreenLag {
  */
 function ScreenLagBox({ lag }: { lag: ScreenLag }) {
   return (
-    <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+    <WarnBox>
       <span className="font-semibold">
         Holding {(lag.holdingMs / 1000).toFixed(1)} s of {lag.feedName} in its own buffer.
       </span>{" "}
       {LAGGING_ADVICE}
-    </p>
+    </WarnBox>
   );
 }
 
 /**
- * The warn box for an output of a Mac output helper that is falling behind: the
- * same callout as the two above, under the preview with them. The figures come
- * from the output's own health report, so it names the port, says what the
- * report shows and what to check.
+ * The warn box for an output of a Mac output helper that is falling behind, under
+ * the preview with the two above. The figures come from the output's own health
+ * report, so it names the port, says what the report shows and what to check.
  */
 function OutputStruggleBox({ struggle }: { struggle: OutputStruggle }) {
   return (
-    <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+    <WarnBox>
       <span className="font-semibold">Struggling on {struggle.port}.</span> {outputStruggleSentences(struggle).join(" ")}
-    </p>
+    </WarnBox>
   );
 }
 
@@ -194,9 +196,6 @@ export interface OutputRowProps {
   onRequestNewView: (surface: ViewSurface) => void;
 }
 
-// One card per display: the name reads as a title, the View it shows is the one
-// prominent control, Open + Lock stay in reach, and the URL sits quietly in the
-// footer. Refresh/Remove tuck into the overflow menu so they don't compete.
 /**
  * Where a screen's icon lives.
  *
@@ -317,6 +316,9 @@ function useMenuFocusHandoff() {
   };
 }
 
+// One card per display: the name reads as a title, the View it shows is the one
+// prominent control, and Open stays in reach. Refresh and Remove tuck into the
+// overflow menu so they don't compete; everything that is a setting is in the panel.
 export function OutputRow({ output, views, baseUrl, online, struggles, lags, outputStruggle, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, panelOpen, onSelect, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
   const name = useNameDraft(output.name, onRename);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
