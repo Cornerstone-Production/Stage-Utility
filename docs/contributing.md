@@ -245,8 +245,11 @@ PR gate: `coverage.yml` reports it for `beta` weekly, and on demand from the
 Actions tab once the workflow is on `main`.
 
 Not every check runs on every pull request. The secret scan, the commit
-convention check, CodeQL and the public-hygiene check (below) run on all of
-them, docs-only included. No check is a required status check on `beta` or
+convention check and the public-hygiene check (below) run on all of them,
+docs-only included. CodeQL is GitHub's default setup, configured in the
+repository's settings rather than by a workflow file: the extended query suite
+for JavaScript/TypeScript and the workflows themselves, on a weekly schedule and
+on pull requests (see [Code scanning](reference/code-scanning.md)). No check is a required status check on `beta` or
 `main`: the release workflow pushes its version bump to both directly, which a
 required check would refuse, so a merge is gated by review of a green PR. The
 build and tests skip a PR that touches only `docs/` and Markdown; dependency
