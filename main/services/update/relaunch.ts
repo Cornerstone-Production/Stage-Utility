@@ -20,69 +20,8 @@ import * as fs from "node:fs";
 import { APP_ROOT } from "../app-root.js";
 import { detectInstallKind, type InstallKind } from "./install-kind.js";
 import { FORMULA, kickstartLabel, serviceLabel } from "./homebrew-strategy.js";
-import { launchctlProbe, resolveDaemonLabel, type DaemonLabel, type LabelProbe } from "./launchd-label.js";
+import { launchctlProbe, resolveDaemonLabel, type LabelProbe } from "./launchd-label.js";
 import type { SpawnPlan } from "./strategy.js";
-
-/** The kick for one launchd job: what to spawn, and which job that is. */
-interface Kick {
-  plan: SpawnPlan;
-  job: string;
-}
-
-/**
- * Decide what to kick for this install, or null where the service manager
- * already relaunches reliably (everything that is not launchd, and an install
- * that is not one of ours).
- *
- * The command itself is kickstartLabel — the same one the Homebrew update path
- * uses, for the same reasons (see its doc for why `-k -p`, and why it tries gui
- * before system and never fails). The sleep puts the kickstart safely after our
- * own exit; if we are already gone, -k is a no-op.
- */
-function kickFor(
-  kind: InstallKind,
-  appRoot: string,
-  platform: NodeJS.Platform,
-  tarballLabel: DaemonLabel | null,
-): Kick | null {
-  if (platform !== "darwin") return null;
-
-  // A DISCRIMINANT, not a string built from appRoot.
-  //
-  // The label has always been one of a few module constants -- launchdKind only
-  // ever used appRoot for `.includes()` checks and never put it in the result --
-  // but "the value is constant" was three functions away from where it mattered.
-  // Returning which-one and picking the literal here means the string that lands
-  // in a `bash -c` command is written in this file, at the point it is used.
-  //
-  // That is worth having on its own, and it is also what static analysis needs.
-  // appRoot comes from STAGE_UTILITY_ROOT, so CodeQL followed an environment
-  // value into a shell string and reported it at medium -- correctly, given what
-  // it could see. Types do not help: they are erased before it looks. Only the
-  // dataflow does. The same goes for tarballLabel, which resolveDaemonLabel
-  // picks FROM the constants rather than copying out of XPC_SERVICE_NAME.
-  let job: string | null;
-  switch (launchdKind(kind, appRoot)) {
-    case "tarball":
-      job = tarballLabel;
-      break;
-    case "beta":
-      job = serviceLabel(FORMULA.beta);
-      break;
-    case "main":
-      job = serviceLabel(FORMULA.main);
-      break;
-    default:
-      job = null;
-  }
-  if (!job) return null;
-
-  // kill:false — the old instance is exiting on its own. On a box where
-  // KeepAlive is NOT parked, launchd may have already relaunched us by the
-  // time this fires; -p leaves that healthy successor alone, where -k would
-  // kill it mid-boot and start a third.
-  return { job, plan: { command: "bash", args: ["-c", `sleep 2; ${kickstartLabel(job, { kill: false })}`], env: {} } };
-}
 
 /** What exitForRestart set up, and — when it could not — why not. */
 export interface RelaunchPrep {
@@ -94,9 +33,33 @@ export interface RelaunchPrep {
   failure: string | null;
 }
 
+/** Nothing to kick, and nothing wrong. */
+function nothingToKick(): RelaunchPrep {
+  return { plan: null, job: null, failure: null };
+}
+
+/**
+ * The kick for one launchd job.
+ *
+ * The command itself is kickstartLabel — the same one the Homebrew update path
+ * uses, for the same reasons (see its doc for why `-k -p`, and why it tries gui
+ * before system and never fails). The sleep puts the kickstart safely after our
+ * own exit; if we are already gone, -k is a no-op.
+ *
+ * kill:false — the old instance is exiting on its own. On a box where
+ * KeepAlive is NOT parked, launchd may have already relaunched us by the
+ * time this fires; -p leaves that healthy successor alone, where -k would
+ * kill it mid-boot and start a third.
+ */
+function kickPrep(job: string): RelaunchPrep {
+  const script = `sleep 2; ${kickstartLabel(job, { kill: false })}`;
+  return { plan: { command: "bash", args: ["-c", script], env: {} }, job, failure: null };
+}
+
 /**
  * What to spawn so this server comes back after it exits — a null plan where the
- * service manager already does that reliably.
+ * service manager already does that reliably (everything that is not launchd, and
+ * an install that is not one of ours).
  *
  * A macOS tarball install has no fixed label (see launchd-label.ts), so this
  * finds out which job it is running as. When none can be found there is nothing
@@ -111,14 +74,35 @@ export function prepareRelaunch(
   env: NodeJS.ProcessEnv,
   probe: LabelProbe = launchctlProbe,
 ): RelaunchPrep {
-  let tarballLabel: DaemonLabel | null = null;
-  if (platform === "darwin" && kind === "tarball") {
-    const found = resolveDaemonLabel(env, probe);
-    if (!found.ok) return { plan: null, job: null, failure: found.reason };
-    tarballLabel = found.label;
+  if (platform !== "darwin") return nothingToKick();
+
+  // A DISCRIMINANT, not a string built from appRoot.
+  //
+  // The label has always been one of a few module constants -- launchdKind only
+  // ever used appRoot for `.includes()` checks and never put it in the result --
+  // but "the value is constant" was three functions away from where it mattered.
+  // Returning which-one and picking the literal here means the string that lands
+  // in a `bash -c` command is written in this file, at the point it is used.
+  //
+  // That is worth having on its own, and it is also what static analysis needs.
+  // appRoot comes from STAGE_UTILITY_ROOT, so CodeQL followed an environment
+  // value into a shell string and reported it at medium -- correctly, given what
+  // it could see. Types do not help: they are erased before it looks. Only the
+  // dataflow does. The same goes for the tarball label, which resolveDaemonLabel
+  // picks FROM the constants rather than copying out of XPC_SERVICE_NAME.
+  switch (launchdKind(kind, appRoot)) {
+    case "tarball": {
+      const found = resolveDaemonLabel(env, probe);
+      if (!found.ok) return { plan: null, job: null, failure: found.reason };
+      return kickPrep(found.label);
+    }
+    case "beta":
+      return kickPrep(serviceLabel(FORMULA.beta));
+    case "main":
+      return kickPrep(serviceLabel(FORMULA.main));
+    default:
+      return nothingToKick();
   }
-  const kick = kickFor(kind, appRoot, platform, tarballLabel);
-  return { plan: kick?.plan ?? null, job: kick?.job ?? null, failure: null };
 }
 
 /**
