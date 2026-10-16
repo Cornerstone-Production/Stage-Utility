@@ -613,11 +613,15 @@ final class AppModel: ObservableObject {
 
   private func setNote(_ cause: String, _ text: String) {
     noteTable[cause] = text
-    notes = noteTable.sorted { $0.key < $1.key }.map(\.value)
+    publishNotes()
   }
 
   private func clearNote(_ cause: String) {
     noteTable[cause] = nil
+    publishNotes()
+  }
+
+  private func publishNotes() {
     notes = noteTable.sorted { $0.key < $1.key }.map(\.value)
   }
 
