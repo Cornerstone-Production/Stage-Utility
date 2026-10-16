@@ -16,13 +16,13 @@ import StageUtilityOutputCore
 /// window and the log that nothing can be drawn and why.
 @MainActor
 enum CEFEngine {
-  enum State {
+  private enum State {
     case notStarted
     case ready(UnsafePointer<su_cef_api>)
     case failed(String)
   }
 
-  private(set) static var state = State.notStarted
+  private static var state = State.notStarted
   private static var onReady: [() -> Void] = []
   private static var contextReady = false
 
@@ -37,7 +37,7 @@ enum CEFEngine {
   }
 
   /// The host inside the app bundle.
-  static var hostPath: String {
+  private static var hostPath: String {
     (Bundle.main.privateFrameworksPath ?? Bundle.main.bundlePath + "/Contents/Frameworks") + "/libStageUtilityCEFHost.dylib"
   }
 
