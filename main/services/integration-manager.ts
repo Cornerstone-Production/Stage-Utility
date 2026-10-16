@@ -233,6 +233,25 @@ function hostPortOf(
   return { host, port: positiveConfigNumber(cfg.port) ?? (host ? defaultPort : null) };
 }
 
+/**
+ * `config` with each of the integration's secret keys set to the mask when a
+ * credential is stored behind it and to "" when there is none, so no secret
+ * ever sits in the state map.
+ *
+ * hasSecretValue, not truthiness: a whitespace-only value already on disk from
+ * an older build would otherwise mask as a stored credential on every surface
+ * that reads this, while every reader that trims saw none.
+ */
+function maskSecrets(
+  id: string,
+  config: Record<string, unknown>,
+  secrets: Record<string, string>,
+): Record<string, unknown> {
+  const masked: Record<string, unknown> = { ...config };
+  for (const key of secretKeysFor(id)) masked[key] = hasSecretValue(secrets[key]) ? MASK : "";
+  return masked;
+}
+
 /** An API token, or a client id and secret: either signs in to SenSource Vea. */
 function hasSensourceCredentials(cfg: SenSourceConfig): boolean {
   return !!cfg.apiToken || (!!cfg.clientId && !!cfg.clientSecret);
@@ -1340,18 +1359,12 @@ class IntegrationManager {
       const enabled = enabledFor(descriptor, settings.integrationEnabled);
       const secrets = await secretsStore.getSecrets(descriptor.id);
 
-      // Merge saved non-secret config with any secret keys (masked).
-      const maskedConfig: Record<string, unknown> = { ...savedConfig };
-      for (const key of secretKeysFor(descriptor.id)) {
-        maskedConfig[key] = hasSecretValue(secrets[key]) ? MASK : "";
-      }
-
       this.states.set(descriptor.id, {
         id: descriptor.id,
         enabled,
         connection: "disconnected",
         message: null,
-        config: maskedConfig,
+        config: maskSecrets(descriptor.id, savedConfig, secrets),
       });
     }
 
@@ -1767,16 +1780,7 @@ class IntegrationManager {
     }
 
     // Rebuild masked config for state.
-    const allSecrets = await secretsStore.getSecrets(id);
-    const maskedConfig: Record<string, unknown> = { ...merged };
-    for (const key of secretKeys) {
-      // isBlankSecret, not truthiness: a whitespace-only value already on disk
-      // from an older build would otherwise mask as a stored credential on every
-      // surface that reads this, while every reader that trims saw none.
-      maskedConfig[key] = hasSecretValue(allSecrets[key]) ? MASK : "";
-    }
-
-    this.states.set(id, { ...state, config: maskedConfig });
+    this.states.set(id, { ...state, config: maskSecrets(id, merged, await secretsStore.getSecrets(id)) });
 
     // Side-effects for specific integrations.
     if (id === "companion") {
