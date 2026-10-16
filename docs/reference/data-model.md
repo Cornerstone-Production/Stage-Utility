@@ -99,7 +99,7 @@ would be in the way of the thing consoles are for. It carries its own ground
 rather than the page's, because a console's canvas is dark whatever theme the app
 is wearing.
 
-Home is edited in the Home tab itself, with the pencil in the header. In edit
+Home is edited on Home itself, with the pencil in the header. In edit
 mode each tile gains a size picker, a visibility select, a remove button and a
 drag handle, and **Add widget** offers the whole object registry.
 

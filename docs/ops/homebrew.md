@@ -113,7 +113,7 @@ around each:
 | launchd **parks** a start issued outside a foreground session — brew reports success, nothing runs | forced with `kickstart -k -p` |
 | `brew cleanup` deletes the keg the update script is *running from*, after which every `brew` command fails | the script runs from a directory the update cannot delete |
 
-The restart no longer depends on `brew upgrade`'s exit code either: brew stops
+The restart does not depend on `brew upgrade`'s exit code either: brew stops
 the service *before* it can fail, so a brew that swaps the keg and then exits
 non-zero has already darkened the box and still owes the restart.
 This is the one place that reliably can: on macOS the server itself runs as a
