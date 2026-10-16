@@ -125,8 +125,9 @@ await integrationManager.init();
 await baptismTimerService.init();
 // Stage messages: load the day's thread, clear it if the date has moved on while
 // the server was off, take unknown groups off the screens, and start the
-// once-a-minute check. Failures come back rather than being thrown: a data directory that cannot be written must not stop
-// the server coming up and blank every screen.
+// once-a-minute check. Failures come back rather than being thrown: a data
+// directory that cannot be written must not stop the server coming up and blank
+// every screen.
 for (const { what, error } of await messagesService.start()) {
   console.error(`[messages] ${what} at start-up failed:`, scrubError(error));
 }
