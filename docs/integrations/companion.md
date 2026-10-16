@@ -36,11 +36,10 @@ never counted in the context bar's "N disconnected".
 **In Companion** — add a connection (search the connection list for **Stage
 Utility**) and enter this server's IP and port. No password; the API is LAN-only.
 
-The module's id is `stageutility-stageutility`. Releases before the repository's
-rename were published as `cornerstone-stageutility`, which the module's manifest
-lists in `legacyIds`. A connection made with one of those releases is switched to
-the new module in Companion, one connection at a time and by hand; nothing
-switches by itself, so every connection to switch is yours to do.
+The module's id is `stageutility-stageutility`, and its manifest lists the earlier id
+`cornerstone-stageutility` in `legacyIds`. A connection made under the earlier id is
+switched to this module in Companion, one connection at a time and by hand; nothing
+switches by itself.
 
 The module requires **Companion 4.3.0 or newer**, which is where Companion added
 the v2 connection API the module is built against. On anything older it installs
