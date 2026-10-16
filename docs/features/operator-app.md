@@ -79,9 +79,9 @@ name you gave it in Screens is the name on the page and in the sidebar.
 The page's own controls — Home's **Edit widgets**, for one — sit at the right of
 the same band.
 
-**The one-line description of what a page is for is a tooltip now.** A single
-44px band has no second line to print it on, so hovering the page's name shows
-it. Every page still has one.
+**The one-line description of what a page is for is a tooltip.** A single 44px
+band has no second line to print it on, so hovering the page's name shows it.
+Every page has one.
 
 Pages you reach from inside another page — the layout editor, a ServiceCue
 rundown, the patch editor — draw their own heading instead, so the bar shows no
