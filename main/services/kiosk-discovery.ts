@@ -33,6 +33,11 @@ export const MAX_DATAGRAM = 2048;
 const str = (v: unknown, max = MAX_STR): string | undefined =>
   typeof v === "string" && v.length > 0 ? v.slice(0, max) : undefined;
 
+/** A list off the wire: each entry a bounded string, blanks dropped, at most
+ *  `maxItems` kept. Anything that is not an array is an empty list. */
+const strList = (v: unknown, maxItems: number, maxLen = MAX_STR): string[] =>
+  Array.isArray(v) ? v.map((m) => str(m, maxLen)).filter((m): m is string => !!m).slice(0, maxItems) : [];
+
 export function encodeProbe(p: DiscoveryProbe): string {
   return JSON.stringify({
     [MAGIC]: PROBE,
@@ -64,9 +69,7 @@ function decodeOutput(v: unknown): DeviceOutput | undefined {
   const name = str(o.name);
   const port = str(o.port);
   if (!kind || !name || !port) return undefined;
-  const modes = Array.isArray(o.modes)
-    ? o.modes.map((m) => str(m, MAX_MODE_LEN)).filter((m): m is string => !!m).slice(0, MAX_MODES)
-    : [];
+  const modes = strList(o.modes, MAX_MODES, MAX_MODE_LEN);
   return modes.length > 0 ? { kind, name, port, modes } : { kind, name, port };
 }
 
@@ -93,15 +96,13 @@ export function decodeProbe(buf: Buffer | string): DiscoveryProbe | null {
   const output = decodeOutput(o.output);
   return {
     id,
-    macs: Array.isArray(o.macs)
-      ? o.macs.map((m) => str(m)).filter((m): m is string => !!m).slice(0, MAX_MACS)
-      : [],
+    macs: strList(o.macs, MAX_MACS),
     hostname: str(o.hostname),
     os: str(o.os),
     boundTo: str(o.boundTo),
     unreachable: o.unreachable === true,
     // "1920x1080" — bounded like everything else off the wire.
-    mode: str(o.mode, 32),
+    mode: str(o.mode, MAX_MODE_LEN),
     ...(output && { output }),
   };
 }
