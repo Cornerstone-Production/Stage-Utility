@@ -202,10 +202,14 @@ function Feed({
       }}
     >
       {groupBySender(shown).flatMap((run, r) =>
-        run.map((m, i) => (
+        run.map((m, i) => {
+          const startsRun = i === 0;
           // The newest message of all is the large one: the first of the first run.
-          <Item key={m.id} m={m} header={i === 0 ? run[0] : null} gap={r === 0 && i === 0 ? 0 : i === 0 ? 0.5 : 0.3} large={r === 0 && i === 0} now={now} />
-        )),
+          const newest = r === 0 && startsRun;
+          let gap = 0.3;
+          if (startsRun) gap = newest ? 0 : 0.5;
+          return <Item key={m.id} m={m} header={startsRun ? m : null} gap={gap} large={newest} now={now} />;
+        }),
       )}
     </div>
   );
