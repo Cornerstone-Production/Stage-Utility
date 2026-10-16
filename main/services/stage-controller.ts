@@ -260,6 +260,16 @@ export interface CreateScreenResult {
   createdViewId: string | null;
 }
 
+/** What an operator calls a screen: its name, else its id. */
+function screenName(output: Pick<Output, "id" | "name">): string {
+  return output.name || output.id;
+}
+
+/** Screens as an error carries them, for the caller to name to the operator. */
+function namedScreens(outputs: readonly Pick<Output, "id" | "name">[]): { id: string; name: string }[] {
+  return outputs.map((o) => ({ id: o.id, name: screenName(o) }));
+}
+
 /**
  * setViewRole was told which screens the operator was shown before they agreed,
  * and they are not the screens it would change now: another operator or a
@@ -3201,7 +3211,7 @@ export class StageController {
   private surfaceChangeRefusal(view: View, surface: ViewSurface): string | null {
     const shownOn = screensShowing(view.id, this.state.outputs);
     if (viewSurface(view) === surface || shownOn.length === 0) return null;
-    const names = shownOn.map((o) => `"${o.name || o.id}"`).join(", ");
+    const names = shownOn.map((o) => `"${screenName(o)}"`).join(", ");
     const them = shownOn.length === 1 ? "that screen" : "those screens";
     const consequence =
       surface === "console"
@@ -3514,7 +3524,7 @@ export class StageController {
     }
     if (opts.ifUnshown) {
       const showing = screensShowing(id, this.state.outputs);
-      if (showing.length > 0) throw new ViewShownError(id, showing.map((o) => ({ id: o.id, name: o.name || o.id })));
+      if (showing.length > 0) throw new ViewShownError(id, namedScreens(showing));
     }
     this.viewsBeingDeleted.add(id);
     try {
@@ -3581,7 +3591,7 @@ export class StageController {
       );
       this.state = { ...this.state, outputs };
       await settingsStore.patch({ outputs });
-      for (const o of stopped) this.logRoleFlip(o.name || o.id, false, undefined);
+      for (const o of stopped) this.logRoleFlip(screenName(o), false, undefined);
     });
     await slotsStore.removeDisplay(id);
     this.rawSlotsByView.delete(id);
@@ -4091,7 +4101,7 @@ export class StageController {
           `[stage-controller] setViewRole view=${scrub(id)} → ${scrub(surface)} not made: the screens changed since the operator was asked ` +
             `(asked about: ${scrub([...shown].join(", ") || "none")}; now: ${scrub(changing.map((o) => o.id).join(", ") || "none")})`,
         );
-        throw new ViewScreensChangedError(id, changing.map((o) => ({ id: o.id, name: o.name || o.id })));
+        throw new ViewScreensChangedError(id, namedScreens(changing));
       }
     }
 
@@ -4108,9 +4118,9 @@ export class StageController {
     }
     console.log(
       `[stage-controller] setViewRole view=${scrub(id)} → ${scrub(surface)}, screens: ` +
-        `${scrub(changing.map((o) => `"${o.name || o.id}"`).join(", ") || "(none)")}`,
+        `${scrub(changing.map((o) => `"${screenName(o)}"`).join(", ") || "(none)")}`,
     );
-    for (const o of changing) this.logRoleFlip(o.name || o.id, surface === "console", view.name);
+    for (const o of changing) this.logRoleFlip(screenName(o), surface === "console", view.name);
     return this.state;
   }
 
