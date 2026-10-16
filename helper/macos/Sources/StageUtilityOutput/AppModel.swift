@@ -252,14 +252,16 @@ final class AppModel: ObservableObject {
     for d in outputs {
       let key = d.descriptor.key
       let record = ensureRecord(d.descriptor)
-      if let rt = runtimes[key] {
+      let rt: Runtime
+      if let existing = runtimes[key] {
+        rt = existing
         rt.output = d
         if let screen = d.screen { (rt.sink as? DisplaySink)?.follow(screen) }
       } else {
-        runtimes[key] = Runtime(output: d)
+        rt = Runtime(output: d)
+        runtimes[key] = rt
         Log.notice(.output, "\(d.descriptor.name) (\(d.descriptor.key)): \(record.enabled ? "on" : "off")\(d.descriptor.isMain ? ", main display" : "")")
       }
-      let rt = runtimes[key]!
       if record.enabled, rt.sink == nil { activate(key) }
       if !record.enabled, rt.sink != nil { deactivate(key) }
     }
@@ -294,9 +296,9 @@ final class AppModel: ObservableObject {
   }
 
   func setEnabled(_ key: String, _ on: Bool) {
-    guard runtimes[key] != nil else { return }
+    guard let rt = runtimes[key] else { return }
     save { try store.setEnabled(on, key: key) }
-    Log.notice(.output, "\(runtimes[key]!.descriptor.name): turned \(on ? "on" : "off") in the window")
+    Log.notice(.output, "\(rt.descriptor.name): turned \(on ? "on" : "off") in the window")
     if on { activate(key) } else { deactivate(key) }
     // Done from the window itself, which is up: nothing to pop.
     wasMenuBarCovered = menuBarCovered
