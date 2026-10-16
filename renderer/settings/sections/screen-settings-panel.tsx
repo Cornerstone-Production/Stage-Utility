@@ -601,6 +601,27 @@ function EmptyBody({ onAddScreen }: { onAddScreen: () => void }) {
   );
 }
 
+/** What the panel resolves its target to, once a screen or view that is gone is dropped. */
+type ShownTarget =
+  | Extract<PanelTarget, { kind: "new" }>
+  | { kind: "edit"; output: Output; created?: { viewMade: boolean } }
+  | { kind: "view"; view: View }
+  | null;
+
+/** The small line over the panel's title, and the title, for what it is open on. */
+function headingFor(shown: ShownTarget, step: Step): { eyebrow: string; title: string } {
+  switch (shown?.kind) {
+    case "new":
+      return { eyebrow: `New screen · step ${step} of 2`, title: STEP_TITLES[step - 1] };
+    case "edit":
+      return { eyebrow: "Screen settings", title: shown.output.name };
+    case "view":
+      return { eyebrow: "View settings", title: shown.view.name };
+    default:
+      return { eyebrow: "Settings", title: "Nothing selected" };
+  }
+}
+
 export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, messageGroups, actions, onClose }: ScreenSettingsPanelProps) {
   const [step, setStep] = useState<Step>(1);
   // A different new screen (another device) starts again at its first step.
@@ -610,7 +631,11 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
   const view = target?.kind === "view" ? views.find((v) => v.id === target.viewId) : undefined;
   // What the target resolves to. A screen or a view that is gone (removed here or
   // from another browser) leaves the panel on nothing rather than on a stale form.
-  const shownTarget = target?.kind === "new" ? target : output ? { kind: "edit" as const, output, created } : view ? { kind: "view" as const, view } : null;
+  let shownTarget: ShownTarget = null;
+  if (target?.kind === "new") shownTarget = target;
+  else if (output) shownTarget = { kind: "edit", output, created };
+  else if (view) shownTarget = { kind: "view", view };
+  const heading = headingFor(shownTarget, step);
 
   return (
     <aside
@@ -630,24 +655,8 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
     >
       <div className="flex items-start gap-3 border-b border-line px-[18px] pb-2.5 pt-3.5">
         <div className="min-w-0 flex-1">
-          <div className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
-            {shownTarget?.kind === "new"
-              ? `New screen · step ${step} of 2`
-              : shownTarget?.kind === "edit"
-                ? "Screen settings"
-                : shownTarget?.kind === "view"
-                  ? "View settings"
-                  : "Settings"}
-          </div>
-          <h3 className="mt-0.5 truncate text-callout font-semibold text-fg">
-            {shownTarget?.kind === "new"
-              ? STEP_TITLES[step - 1]
-              : shownTarget?.kind === "edit"
-                ? shownTarget.output.name
-                : shownTarget?.kind === "view"
-                  ? shownTarget.view.name
-                  : "Nothing selected"}
-          </h3>
+          <div className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">{heading.eyebrow}</div>
+          <h3 className="mt-0.5 truncate text-callout font-semibold text-fg">{heading.title}</h3>
           {shownTarget?.kind === "new" && (
             <div aria-hidden="true" className="mt-2.5 flex max-w-[360px] gap-1.5">
               {STEP_TITLES.map((t, i) => (
@@ -665,7 +674,7 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
           <XIcon className="size-4" />
         </button>
       </div>
-      {shownTarget?.kind === "edit" ? (
+      {shownTarget?.kind === "edit" && (
         <EditBody
           key={shownTarget.output.id}
           output={shownTarget.output}
@@ -677,9 +686,9 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
           canRemove={outputs.length > 1}
           actions={actions}
         />
-      ) : shownTarget?.kind === "view" ? (
-        <ViewBody key={shownTarget.view.id} view={shownTarget.view} outputs={outputs} actions={actions} />
-      ) : shownTarget?.kind === "new" ? (
+      )}
+      {shownTarget?.kind === "view" && <ViewBody key={shownTarget.view.id} view={shownTarget.view} outputs={outputs} actions={actions} />}
+      {shownTarget?.kind === "new" && (
         <NewScreenBody
           key={newScreenKey(shownTarget)}
           target={shownTarget}
@@ -690,9 +699,8 @@ export function ScreenSettingsPanel({ target, outputs, views, baseUrl, online, m
           setStep={setStep}
           actions={actions}
         />
-      ) : (
-        <EmptyBody onAddScreen={actions.onAddScreen} />
       )}
+      {!shownTarget && <EmptyBody onAddScreen={actions.onAddScreen} />}
     </aside>
   );
 }
