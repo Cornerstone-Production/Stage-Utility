@@ -126,7 +126,7 @@ function wireId(value: unknown, must: string): string {
  * the id of the widget it is pressed on, and the screen that widget is on when
  * there is one. Shapes only; who may answer is decided against the stored layouts.
  */
-export function checkReply(input: ReplyInput): { text: string; objectId: string; outputId: string | null } {
+function checkReply(input: ReplyInput): { text: string; objectId: string; outputId: string | null } {
   const text = checkedText(input.text, "a reply", QUICK_REPLY_MAX);
   const objectId = wireId(input.objectId, "objectId must be the id of the Messages widget the reply is pressed on");
   const outputId =

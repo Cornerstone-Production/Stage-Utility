@@ -219,7 +219,7 @@ export class SlotsNotFoundError extends Error {
 }
 
 /** One write in a multi-write screen change, and how to take it back. */
-export interface ScreenStep {
+interface ScreenStep {
   label: string;
   run: () => Promise<unknown>;
   /** Put the step back. Runs even for the step that failed, so it must be safe
@@ -254,7 +254,7 @@ export class ScreenWriteError extends Error {
   }
 }
 
-export interface CreateScreenResult {
+interface CreateScreenResult {
   state: StageState;
   output: Output;
   /** The view createScreen made, when it made one. */
