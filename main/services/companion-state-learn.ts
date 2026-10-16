@@ -43,6 +43,7 @@
 
 import { isCompanionVariableRef } from "./companion-export.js";
 import { STATE_SOURCES } from "./companion-state-source.js";
+import { plural } from "./plural.js";
 
 /**
  * The variable names worth asking a connection about.
@@ -504,7 +505,7 @@ export function gaveUpLog(base: string): string {
  */
 export function learningHint(candidates: readonly string[]): string {
   return (
-    `Learning: watching ${candidates.length} candidate${candidates.length === 1 ? "" : "s"}; ` +
+    `Learning: watching ${plural(candidates.length, "candidate")}; ` +
     `press the pair on and off once to bind`
   );
 }

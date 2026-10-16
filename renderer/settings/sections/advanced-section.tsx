@@ -39,6 +39,7 @@ import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
 import { restartConsequence, restartOutcome } from "../../lib/restart-warning";
 import { useUpdateStatus } from "../../app/queries";
+import { plural } from "@main/services/plural";
 
 /** What a call that restarts the server answers: why it could not arrange its own relaunch, if it could not. */
 type RestartAnswer = { relaunchFailure?: string };
@@ -425,7 +426,7 @@ export function UpdatesPanel({
                 : available > 0
                   ? s.tagBased && s.targetTag
                     ? `${s.targetTag} available`
-                    : `${available} update${available === 1 ? "" : "s"} available`
+                    : `${plural(available, "update")} available`
                   : "Up to date"}
             </FieldLabel>
             <FieldDescription>
@@ -441,7 +442,7 @@ export function UpdatesPanel({
                       nothing pending changes what the app does, but Update still
                       works if you want the version number to line up. */}
                   {!s.tagBased && behindNews === 0 && behind > 0
-                    ? ` A version bump is pending (${behind} commit${behind === 1 ? "" : "s"}) — nothing user-facing.`
+                    ? ` A version bump is pending (${plural(behind, "commit")}) — nothing user-facing.`
                     : ""}
                 </>
               ) : (
@@ -530,7 +531,7 @@ export function UpdatesPanel({
             ) : null}
             {!updating && available === 0 && !awaiting && unreleased > 0 ? (
               <p className="mt-1 text-caption2 text-gray-9">
-                {unreleased} commit{unreleased === 1 ? "" : "s"} merged since {s?.targetTag} and not yet
+                {plural(unreleased, "commit")} merged since {s?.targetTag} and not yet
                 released. Updates arrive once the release build passes.
               </p>
             ) : null}
@@ -983,7 +984,7 @@ function ConfigSnapshotPanel() {
                   <div className="flex-1 min-w-0">
                     <p className="truncate text-caption1 text-gray-12">{s.name}</p>
                     <p className="text-caption2 text-gray-9">
-                      {new Date(s.createdAt).toLocaleString()} · v{s.appVersion} · {s.fileCount} file{s.fileCount === 1 ? "" : "s"}
+                      {new Date(s.createdAt).toLocaleString()} · v{s.appVersion} · {plural(s.fileCount, "file")}
                     </p>
                   </div>
                   <Button variant="filled" size="small" onClick={() => recall(s.id, s.name)}>

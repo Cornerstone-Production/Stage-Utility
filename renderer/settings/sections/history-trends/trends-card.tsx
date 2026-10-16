@@ -62,6 +62,7 @@ import {
   type TrendMeasure,
   type TrendRecording,
 } from "./trends";
+import { plural } from "@main/services/plural";
 
 /** The range choice, per browser — a view preference, like every other one in
  *  this module. A stored value that is not one of the offered ranges is
@@ -182,7 +183,7 @@ function fmtDayShort(day: string): string {
  * show in full.
  */
 export function basisLabel(priorServices: number): string {
-  return `${priorServices} prior service${priorServices === 1 ? "" : "s"}`;
+  return plural(priorServices, "prior service");
 }
 
 /** Round to a measure's own precision. */

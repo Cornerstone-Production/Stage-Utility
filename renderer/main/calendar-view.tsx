@@ -31,6 +31,7 @@ import { useCorrectedNow } from "./use-corrected-now";
 import { zonedDateKey } from "@main/services/app-timezone";
 import { MAX_MONTH_OFFSET } from "@main/services/calendar-grid";
 import type { CalendarDay, CalendarEventDTO, CalendarGrid } from "@main/types/calendar";
+import { plural } from "@main/services/plural";
 
 /** Sunday first, matching the grid the server builds. */
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -458,7 +459,7 @@ export function CalendarMonth({
             // it was that the caller SAYS so. Counting it and drawing nothing
             // would be the silent absence this feature is written against.
             <span className="ml-auto text-caption2 text-warn-11">
-              {`${grid.unplaceable} event${grid.unplaceable === 1 ? "" : "s"} had no usable time and could not be drawn`}
+              {`${plural(grid.unplaceable, "event")} had no usable time and could not be drawn`}
             </span>
           ) : (
             total === 0 && (

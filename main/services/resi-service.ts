@@ -46,6 +46,7 @@ import { scrub } from "./scrub.js";
 import type { StreamStatusDTO } from "../types/stage.js";
 import { StatusIntegration } from "./integration-base.js";
 import { streamStartStore } from "./stream-start-store.js";
+import { plural } from "./plural.js";
 
 const API = "https://central.resi.io/api/v3";
 const API_V2 = "https://central.resi.io/api_v2.svc";
@@ -355,7 +356,7 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
       const live = encoders.filter(encoderIsLive).length;
       return {
         ok: true,
-        message: `Connected to Resi — ${encoders.length} encoder${encoders.length === 1 ? "" : "s"}, ${live} streaming`,
+        message: `Connected to Resi — ${plural(encoders.length, "encoder")}, ${live} streaming`,
       };
     } catch (err) {
       return { ok: false, message: errorMessage(err) };

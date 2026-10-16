@@ -10,6 +10,7 @@ import { RundownTable } from "../../main/rundown-table";
 import { resolveServiceCueSpec, computeClocks, buildServiceCueColumns, totalLengthSec, fmtTotal } from "../../main/servicecue-columns";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { plural } from "@main/services/plural";
 
 // crypto.randomUUID is undefined in an insecure (plain-HTTP) context, which prod
 // is served over — fall back so layout creation never throws there.
@@ -468,7 +469,7 @@ export function ServiceCueSection() {
       {/* Roles last and collapsed: set up once, rarely revisited. */}
       <Collapsible
         label={<span className="text-callout font-semibold text-fg">Category roles</span>}
-        summary={`${roles.length} role${roles.length === 1 ? "" : "s"}`}
+        summary={plural(roles.length, "role")}
         className="rounded-xl border border-gray-a5 bg-gray-a2 px-3 py-2"
       >
         <RolesPanel roles={roles} categories={noteCats} categoriesFailed={failed.has("noteCats")} onChange={saveRoles} />

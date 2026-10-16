@@ -27,6 +27,7 @@
 // value is checked against a static option list, and against `exclusiveChoice`.
 
 import type { ParamDef } from "../types/automation.js";
+import { plural } from "./plural.js";
 
 export interface ParamIssue {
   key: string;
@@ -47,7 +48,7 @@ export interface RuleIssue extends ParamIssue {
 /** "1 field needs attention" / "4 fields need attention" — the rule editor's
  *  footer and the rules list's refusal toast share this exact wording. */
 export function fieldsNeedAttention(n: number): string {
-  return n === 1 ? "1 field needs attention" : `${n} fields need attention`;
+  return plural(n, "field needs attention", "fields need attention");
 }
 
 /** A number param's own default: 0, pulled into its declared [min, max] — never

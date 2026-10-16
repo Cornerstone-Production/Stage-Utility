@@ -40,6 +40,7 @@ import { logReadFailure } from "../../lib/client-log";
 import { VideoObject } from "../../main/video/video-object";
 import { bFramesSentence, isObsWhipFeed } from "./b-frames-copy";
 import { SIDE_PANE } from "./side-pane";
+import { plural } from "@main/services/plural";
 
 const KIND_LABEL: Record<VideoSourceKind, string> = {
   pull: "Pull from a device (RTSP, SRT, HLS)",
@@ -160,8 +161,7 @@ function pictureFor(feedId: string | null): { o: LayoutObject; config: Extract<L
 /** "Used by 2 layouts: Stage confidence, Home." — or 1 layout, or none. */
 export function usedBy(layouts: readonly { name: string }[]): string {
   if (layouts.length === 0) return "Not used by any layout.";
-  const noun = layouts.length === 1 ? "layout" : "layouts";
-  return `Used by ${layouts.length} ${noun}: ${layouts.map((l) => l.name).join(", ")}.`;
+  return `Used by ${plural(layouts.length, "layout")}: ${layouts.map((l) => l.name).join(", ")}.`;
 }
 
 export interface FeedEditorProps {

@@ -46,6 +46,7 @@ import { automationRegistryQuery } from "../../lib/automation-registry";
 import { Button, Collapsible, Input, Separator, Switch, toast } from "../../components/ui";
 import { formatClock } from "../../lib/clock-format";
 import { CueAccessCard, CueButtonStatus, ImportPairsDialog } from "./companion-cues";
+import { plural } from "@main/services/plural";
 
 /**
  * One row in a section: a pair, or a single rule.
@@ -189,7 +190,7 @@ function NeedsSetupBadge({ issues }: { issues: RuleIssue[] }) {
       title={joinWithAnd(issues.map((i) => i.label))}
       className="inline-flex shrink-0 items-center rounded-md border border-amber-7 bg-amber-3 px-1.5 py-0.5 text-caption2 font-medium text-amber-11"
     >
-      Needs setup: {issues.length} field{issues.length === 1 ? "" : "s"}
+      Needs setup: {plural(issues.length, "field")}
     </span>
   );
 }
@@ -383,7 +384,7 @@ function RuleRow({
   const needsSetup = issues.length > 0;
 
   const summary = `When ${trigger?.label ?? rule.trigger.id}` +
-    (rule.conditions.length ? ` · if ${rule.conditions.length} condition${rule.conditions.length > 1 ? "s" : ""}` : "") +
+    (rule.conditions.length ? ` · if ${plural(rule.conditions.length, "condition")}` : "") +
     ` · then ${action?.label ?? rule.action.id}`;
 
   return (

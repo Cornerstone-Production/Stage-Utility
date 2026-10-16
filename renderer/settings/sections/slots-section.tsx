@@ -41,6 +41,7 @@ import { useSortableRow } from "../../lib/use-sortable-row";
 import { SlotsTargetPill } from "./slots-target-pill";
 import { PlanSwitcher } from "./plan-switcher";
 import { errorMessage } from "@main/services/errors";
+import { plural } from "@main/services/plural";
 
 // ---- slot row (sortable) ----------------------------------------------------
 
@@ -374,7 +375,7 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, sharesWith, onCh
           </div>
           {sharesWith > 0 && (
             <p className="text-caption2 text-gray-9">
-              Shares people with {sharesWith} other slot{sharesWith === 1 ? "" : "s"} configured
+              Shares people with {plural(sharesWith, "other slot")} configured
               identically — each fills with a different person, in board order.
             </p>
           )}

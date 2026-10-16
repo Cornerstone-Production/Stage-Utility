@@ -8,6 +8,7 @@ import { isCrossOrigin } from "../http-origin.js";
 import { scrub } from "../scrub.js";
 import { videoService } from "../video/video-service.js";
 import { PUSH_PROTOCOLS, type PushProtocol } from "../../types/video.js";
+import { plural } from "../plural.js";
 
 function isPushProtocol(v: string | null): v is PushProtocol {
   return v !== null && (PUSH_PROTOCOLS as readonly string[]).includes(v);
@@ -50,7 +51,7 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
     }
     // The count and the two flags only; never a password, and no feed name.
     const n = r.bundle.feeds.length;
-    const summary = `exported ${n} feed${n === 1 ? "" : "s"}${passwords ? ", with passwords" : ""}${ports ? ", with relay ports" : ""}`;
+    const summary = `exported ${plural(n, "feed")}${passwords ? ", with passwords" : ""}${ports ? ", with relay ports" : ""}`;
     console.log(`[video-export] ${scrub(summary)}`);
     res.writeHead(200, {
       "content-type": "application/json; charset=utf-8",

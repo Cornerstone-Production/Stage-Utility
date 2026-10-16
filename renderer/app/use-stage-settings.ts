@@ -48,6 +48,7 @@ import {
 } from "./queries";
 import { markUpdatePending } from "./update-lifecycle";
 import { screensListViews } from "@main/services/home-view";
+import { plural } from "@main/services/plural";
 
 /**
  * `ids` in the order given, then anything not named, in its existing order.
@@ -317,7 +318,7 @@ export function useStageSettings(pinnedViewId?: string) {
       if (status.canUpdate === false) {
         toast.error(status.updateBlockedReason ?? "In-app updates are not available for this install.");
       } else if (status.error) toast.error(`Update check failed: ${status.error}`);
-      else if (status.behind > 0) toast.success(`${status.behind} update${status.behind === 1 ? "" : "s"} available.`);
+      else if (status.behind > 0) toast.success(`${plural(status.behind, "update")} available.`);
       else toast.success("You're up to date.");
     } catch (err) {
       toast.error(`Update check failed: ${errorMessage(err)}`);

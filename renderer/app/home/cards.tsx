@@ -56,6 +56,7 @@ import { Readout } from "../../main/readout";
 import { useScoresStatus } from "../../main/use-scores-state";
 import { inkFor } from "../../main/score-ink";
 import { emptyReason, pickGame } from "../../main/scores-object";
+import { plural } from "@main/services/plural";
 
 /**
  * The same set as a VALUE, so a renderer can ask before it starts matching.
@@ -137,7 +138,7 @@ function TrendArrow({ trend }: { trend: Trend | null }) {
   return (
     <span
       className={cn("inline-flex items-center gap-0.5 text-caption1", trendColor(trend.tone))}
-      title={`vs the previous ${trend.priorCount} service${trend.priorCount === 1 ? "" : "s"}`}
+      title={`vs the previous ${plural(trend.priorCount, "service")}`}
     >
       <Icon className="size-3" strokeWidth={2.5} />
       {trend.pct != null && `${Math.abs(Math.round(trend.pct * 100))}%`}

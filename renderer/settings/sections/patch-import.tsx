@@ -8,6 +8,7 @@ import { invoke } from "../../lib/api";
 // byte. Its local copies quoted `/[",\n]/` and missed \r, so a value with a
 // bare carriage return came back as two rows.
 import { encodeRows, parseTable } from "@main/services/csv";
+import { plural } from "@main/services/plural";
 
 type FieldKey = "index" | "label" | "mic" | "phantom" | "console" | "from";
 const FIELDS: { key: FieldKey; label: string; required?: boolean }[] = [
@@ -158,7 +159,7 @@ export function PatchImport({
     }
 
     onChange(Array.from(next.values()));
-    toast.success(`Imported ${added} ${added === 1 ? "channel" : "channels"}`);
+    toast.success(`Imported ${plural(added, "channel")}`);
     onClose();
   }
 

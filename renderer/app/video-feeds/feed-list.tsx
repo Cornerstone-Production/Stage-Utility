@@ -11,6 +11,7 @@ import { Button } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { formatClock } from "../../lib/clock-format";
 import { bFramesSentence, isObsWhipFeed } from "./b-frames-copy";
+import { plural } from "@main/services/plural";
 
 /**
  * The row's pill: its text, its tint and its dot, or null for a feed this
@@ -180,7 +181,7 @@ export function feedMeta(feed: VideoFeedView, screens: readonly ScreenVideoHealt
     }
   }
   const onScreens = new Set(screens.filter((sc) => sc.feedId === feed.id).map((sc) => sc.outputId)).size;
-  if (onScreens > 0) meta.push(`On ${onScreens} screen${onScreens === 1 ? "" : "s"}`);
+  if (onScreens > 0) meta.push(`On ${plural(onScreens, "screen")}`);
   return meta;
 }
 

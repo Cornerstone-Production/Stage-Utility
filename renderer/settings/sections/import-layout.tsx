@@ -32,6 +32,7 @@ import { cn } from "../../lib/cn";
 import { collectRefsFrom } from "@main/services/view-refs";
 import type { ViewBundle, ImportReport, UnresolvableRef } from "@main/types/view-bundle";
 import type { ServiceTypeDTO } from "@main/types/pco";
+import { plural } from "@main/services/plural";
 
 /** What the review screen shows, derived from the file alone. */
 interface Review {
@@ -256,7 +257,7 @@ export function ImportLayout({ serviceTypes = [], currentServiceTypeId = null }:
               <Group title="Comes with it">
                 {pending.slotSets > 0 && (
                   plan
-                    ? <Row label="Slot rows" sub={`${pending.boards} board${pending.boards === 1 ? "" : "s"}, ${pending.rows} row${pending.rows === 1 ? "" : "s"}`} tag={String(pending.slotSets)} />
+                    ? <Row label="Slot rows" sub={`${plural(pending.boards, "board")}, ${plural(pending.rows, "row")}`} tag={String(pending.slotSets)} />
                     : <Row label="Slot rows" sub="every service type" tag={String(pending.slotSets)} />
                 )}
                 {pending.patchVariants.map((p) => (
@@ -304,7 +305,7 @@ export function ImportLayout({ serviceTypes = [], currentServiceTypeId = null }:
               Cancel
             </Button>
             <Button variant="accent" size="small" onClick={() => void confirm()} disabled={busy}>
-              Import {pending.bundle.views.length} view{pending.bundle.views.length === 1 ? "" : "s"}
+              Import {plural(pending.bundle.views.length, "view")}
             </Button>
           </footer>
         </section>
@@ -432,7 +433,7 @@ function ImportResult({ report, nameOfType, onClose }: {
     <section className="mt-3 basis-full overflow-hidden rounded-xl border border-line-strong bg-surface">
       <header className="border-b border-line px-4 py-3">
         <h3 className="text-callout font-semibold text-fg">
-          Imported {report.views.length} view{report.views.length === 1 ? "" : "s"}
+          Imported {plural(report.views.length, "view")}
         </h3>
       </header>
       <div className="flex flex-col gap-3 px-4 py-3">
@@ -446,7 +447,7 @@ function ImportResult({ report, nameOfType, onClose }: {
             />
             <Row
               label="Slot boards"
-              sub={`${report.slotBoards} board${report.slotBoards === 1 ? "" : "s"}, ${report.slotRows} row${report.slotRows === 1 ? "" : "s"}`}
+              sub={`${plural(report.slotBoards, "board")}, ${plural(report.slotRows, "row")}`}
             />
           </Group>
         )}
