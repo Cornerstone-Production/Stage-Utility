@@ -134,6 +134,11 @@ class Refusal extends Error {
   }
 }
 
+/** Where the helper's cached releases live: one directory per version. */
+function cacheRoot(dataDir: string): string {
+  return path.join(dataDir, "cache", "output-helper");
+}
+
 export class OutputHelperDownloads {
   /** One flight per file name. A Map, not an object: the key is request-derived. */
   private readonly inflight = new Map<string, Promise<Resolution>>();
@@ -181,12 +186,8 @@ export class OutputHelperDownloads {
     await pruneOutputHelperCache(this.deps.dataDir(), version);
   }
 
-  private root(): string {
-    return path.join(this.deps.dataDir(), "cache", "output-helper");
-  }
-
   private versionDir(version: string): string {
-    return path.join(this.root(), version);
+    return path.join(cacheRoot(this.deps.dataDir()), version);
   }
 
   /** One flight per version and file: a request that arrives mid-update for the
@@ -384,7 +385,7 @@ export class OutputHelperDownloads {
  * remove.
  */
 export async function pruneOutputHelperCache(dataDir: string, keepVersion: string): Promise<{ removed: string[]; failed: string[] }> {
-  const root = path.join(dataDir, "cache", "output-helper");
+  const root = cacheRoot(dataDir);
   const removed: string[] = [];
   const failed: string[] = [];
   let entries: string[] = [];
