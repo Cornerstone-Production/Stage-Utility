@@ -64,6 +64,17 @@ and never the values.
 A box upgrading from a build that kept a credential in `settings.json` moves it
 into the secret store on the next start, and says how many it moved on `/log`.
 
+A stored credential is only ever sent to its own vendor. Planning Center,
+SenSource (its token host and its Vea API host separately), SafeSpace and
+ProVideoPlayer each make credentialed requests through one function that fixes the
+request onto the vendor's origin (for ProVideoPlayer, the host and port you
+configured). Planning Center refuses a request URL it cannot place on its own host.
+For the others, a URL that would have gone anywhere else is sent to the vendor's
+origin instead, and a `BUG:` line on `/log` under the integration's tag
+(`[sensource]`, `[safespace]`, `[pvp]`) names the origins, never a path. The
+functions and their origins are listed in
+[Code scanning](../reference/code-scanning.md#credentialed-requests).
+
 ## Adding a new integration
 
 REAPER is the cleanest end-to-end template for a polling integration — see
@@ -158,9 +169,9 @@ declares itself with `addChannelDemandSource`.
 ### The snapshot version
 
 A status channel broadcasts only when its value changes, and a display hydrates
-with a one-shot read alongside it. If the push landed first, the older read used
-to overwrite it — and with no further broadcast until the next real change, the
-wrong value stood for as long as the building stayed quiet.
+with a one-shot read alongside it. If the push lands first, an older read must not
+overwrite it: with no further broadcast until the next real change, the wrong value
+would stand for as long as the building stayed quiet.
 
 So every status snapshot carries `rev`, a counter the integration advances only
 when a frame actually goes out. The hydrate read (`getLatest()`) and the pushed
