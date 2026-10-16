@@ -447,7 +447,7 @@ button, at `POST /api/cues/<name>` — without anything being saved. They are no
 on the Automation page, they are not in a config export, and they cannot be
 edited or deleted.
 
-Switches, listed while the integration is switched on in Settings:
+Switches, listed while the integration is switched on under Settings → Integrations:
 
 | Cue | What it does | State |
 |---|---|---|
@@ -651,7 +651,7 @@ act:
   nothing. The row says so.
 - **Disarm all** — while disarmed the button is disabled, and the server refuses
   the request with `409` and the reason.
-- **Confirm before running** — a rule with that switch on needs a second press
+- **Ask twice** — a cue with that switch on needs a second press
   within five seconds: the first turns the button into **Run it?**, and it lapses
   back if nobody presses again. The server also refuses such a rule with `428`
   unless the request says `confirmed: true`, so a stray API call cannot skip the
@@ -670,12 +670,12 @@ the rule's last-fired time, so a later automatic fire inside the cooldown is
 suppressed. It does not use up **once per service**.
 
 **Test** in the editor's footer is the same run, by the same route, for the saved
-rule: it respects simulate and disarm, and asks first when the rule is marked
-confirm before running.
+rule: it respects simulate and disarm, and asks first when the rule is set to
+**Ask twice**.
 
 A pair's row has one Run button per half, **Run on** and **Run off**, stacked on
 a narrow screen. Each runs its own rule exactly as above: it asks first when that
-half is marked confirm before running (the other half is not armed by it), is
+half is set to **Ask twice** (the other half is not armed by it), is
 disabled while disarmed, and reports under the row on its own line, prefixed
 *On:* or *Off:*.
 
