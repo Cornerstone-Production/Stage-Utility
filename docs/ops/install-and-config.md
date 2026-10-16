@@ -46,7 +46,7 @@ Options for the one-line installers:
 | `STAGE_DATA=/srv/stage` | put config and history somewhere else |
 | `STAGE_PREFIX=/opt/stage` | install to a different prefix |
 | `STAGE_USER=svc` | the account the service runs as — Linux and macOS only. Default `stage-utility` on Linux (created if it does not exist), `root` on macOS |
-| `STAGE_NO_SERVICE=1` | install the files, register nothing |
+| `STAGE_NO_SERVICE=1` | install the files, register nothing — Linux and macOS only |
 
 **Where they go matters.** In a `curl … | sudo bash` pipeline, a variable placed
 at the front is set for `curl`, not for the shell that runs the script — the
@@ -327,9 +327,9 @@ npm run server     # backend on :8788
 npm run dev        # Vite with hot reload on :3000
 ```
 
-Then open `http://localhost:3000/` for the display picker, or
+Then open `http://localhost:3000/` for Home, or
 `http://localhost:3000/settings`. Vite proxies the API and image paths to the
-backend.
+backend, on `STAGE_UTILITY_PORT` when that is set.
 
 ## Configure
 
@@ -418,3 +418,26 @@ Per-integration debug logging: `PP_DEBUG`, `PRODCOM_DEBUG`, `RESI_DEBUG`,
 
 The `STAGE_*` variables in the installer table further up are read by the
 installer scripts only, not by the server.
+
+**Set by the supervisor, read by the server.** `INVOCATION_ID` and
+`JOURNAL_STREAM` (systemd) and `XPC_SERVICE_NAME` (launchd) are how the server
+tells that a service manager started it, so it knows whether a deliberate restart
+will be followed by a relaunch. Nothing to set.
+
+**Kiosk installers.** The scripts a screen runs (`/kiosk/install-*`) read their
+own variables, set on the command line of the machine being set up:
+
+| | |
+|---|---|
+| `STAGE_SERVER` | Pin the device to one server's address, for a network where discovery does not reach it. All three installers |
+| `STAGE_KIOSK_PORT` | The UDP port the device broadcasts its discovery probe to. Default `8789` |
+| `STAGE_KIOSK_UID` | Linux only: the numeric id of the account the kiosk browser runs as. Default `1000` |
+| `STAGE_DOWNLOAD_FROM` | macOS only: the server to fetch the output helper from for this run only. See [Installing the Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper) |
+
+**Tooling and tests.** `STAGE_UTILITY_TEST_RELEASE_BASE` points the Mac output
+helper download at a test server instead of GitHub's releases, and the server
+logs a notice when it is set. `STAGE_UTILITY_RELEASE_NOTES_DIR` redirects where
+the release-notes script looks for notes. `PRIVATE_TERMS` and `REQUIRE_TERMS` are
+read by the public-hygiene check in CI, described in
+[Contributing](../contributing.md#public-hygiene). None of these has a use in
+running an install.

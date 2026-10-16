@@ -163,6 +163,10 @@ message)` (or the `useFailedReads` hook that wraps it), and the line reaches
 subsystem's own bookkeeping — nothing an operator would search for — is marked
 as such rather than given a doc link it doesn't need.
 
+A `BUG:` line is the app reporting a mistake in its own code, not in your setup:
+the request still went to the right place, and the line names only origins, never
+a path or a credential. If you see one, report it.
+
 | Tag | What writes it |
 |---|---|
 | `[action]` | A control's or Companion press refused by the action registry, and why: [Actions](../automation.md#actions) |
@@ -198,6 +202,7 @@ as such rather than given a doc link it doesn't need.
 | `[integration-manager]` | Config-key validation, and credentials migrating (or failing to migrate) out of `settings.json`: [When a credential could not be moved out of settings.json](reliability.md#when-a-credential-could-not-be-moved-out-of-settingsjson) |
 | `[kiosk-responder]` | The UDP discovery responder starting, or a socket/reply error: [Discovery](../kiosk-devices.md#discovery) |
 | `[kiosk-presence]` | A device that is not a Mac helper output heard for the first time, or again after it aged out (its id, OS and host), whether or not anyone is on Screens; and the list reaching its 256-device limit, once per time it fills. A helper output logs under `[output-helper] output seen` instead: [Discovery](../kiosk-devices.md#discovery) |
+| `[last-update]` | The tail of `update.log` replayed at start-up, so the run that ended in this restart is readable: [Diagnosing a failed (or slow) update](#diagnosing-a-failed-or-slow-update) |
 | `[layout-defaults]` | The one-time card cleanups on load, with a count: a translucent or older card ground folded to the current card, and an 8% card border raised to 10%: [Layout editor](../reference/layout-editor.md) |
 | `[layout-editor]` | Browser-side: the layout editor's own reads (targets, commands, services, files, saved groups) failing, and a saved group failing to save or delete |
 | `[layout-images]` | Orphaned uploaded layout images pruned: [Under load](reliability.md#under-load) |
@@ -215,7 +220,7 @@ as such rather than given a doc link it doesn't need.
 | `[plans]` | The upcoming-plans list refreshing or failing, and the plan switcher's mode: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
 | `[prodcom]` | Connection state, transcript source (websocket vs. SSE fallback), and idle/heartbeat timeouts: [ProdCom](../integrations/prodcom.md) |
 | `[propresenter]` | Macro triggers and their failures, and unsupported status endpoints: [ProPresenter](../integrations/propresenter.md) |
-| `[pvp]` | Polling state, and playlist-tree fetch failures: [ProVideoPlayer](../integrations/provideoplayer.md) |
+| `[pvp]` | Polling state, and playlist-tree fetch failures. Also `BUG: a request URL for <origin> was sent to <origin> instead`, written when a request URL had to be moved back onto the configured ProVideoPlayer host (see [Code scanning](../reference/code-scanning.md#credentialed-requests)): [ProVideoPlayer](../integrations/provideoplayer.md) |
 | `[reaper]` | Polling state, and transport command results: [Reaper](../integrations/reaper.md) |
 | `[reconcile]` | Orphaned open recordings (attendance, SPL, service timeline) closed at boot: [What gets recorded](../features/attendance-and-history.md#what-gets-recorded) |
 | `[reconnect]` | The switch into or out of service-window-aware backoff: [Winding down between services](reliability.md#winding-down-between-services) |
@@ -226,9 +231,10 @@ as such rather than given a doc link it doesn't need.
 | `[routes]` | An HTTP handler attempting a second reply after one was already sent — internal plumbing, not an operator signal |
 | `[scores]` | Followed teams, and ESPN reachability: [Scores](../integrations/scores.md) |
 | `[screens]` | Server-side. A one-time pass on the first start after an upgrade that takes the role an older build stored on each screen out of the data: one line for each screen it had to do something for (kept read-only behind a wall copy of a console, or kept live by making its view a console or giving it a control-surface copy, either of which is kept out of the sidebar and given the `contain` fit its layout had), `reused the copy left by an interrupted upgrade: "<name>"` for a copy a start that died part-way had already saved, then `role from view: N screens checked, M changed`, and nothing when no screen carries a stored role: [The view decides what a screen is](../reference/data-model.md#surfaces-displays-and-consoles). And one line whenever a write changes whether a screen's buttons work, from routing a screen to another view, from changing what a view is for, or from deleting a view a control surface was showing: `"Lobby TV" is now a control surface (shows "Booth controls")`, or `… is now read-only (shows …)` (`shows nothing` after a delete). Browser-side, the Screens page failing to start, renew or stop its scan for displays on the network: [Kiosk devices](../kiosk-devices.md) |
+| `[safespace]` | `BUG: a request URL for <origin> was sent to <origin> instead`, written when a SafeSpace request had to be moved back onto SafeSpace's own host. Never carries a path, which is the credential: [Code scanning](../reference/code-scanning.md#safespace) |
 | `[secrets]` | `secrets.bin` unreadable, or a credential save failing: [When a credential will not save](reliability.md#when-a-credential-will-not-save) |
 | `[sennheiser:<id>]` | A Sennheiser wireless connection's protocol trace, only under `SENNHEISER_DEBUG`: [Wireless](../integrations/wireless.md) |
-| `[sensource]` | Poll cadence for occupancy and SafeSpace, and an idle consumer waking the poller: [SenSource](../integrations/sensource.md) |
+| `[sensource]` | Poll cadence for occupancy and SafeSpace, and an idle consumer waking the poller. Also `BUG: a request URL for <origin> was sent to <origin> instead`, written when a token or API request had to be moved back onto SenSource's own host: [SenSource](../integrations/sensource.md) |
 | `[server]` | Process-level boot and shutdown: the data directory in use, unhandled rejections, and uncaught exceptions |
 | `[service-recorder]` | The shared logic all three service recordings share: whether a live-service boundary was held or split, and why, and an item already on air before a record opened not taken as its opening item: [Back-to-back services on one plan](../features/attendance-and-history.md#back-to-back-services-on-one-plan) |
 | `[service-timeline]` | The recorded rundown timing: items going live again, and pacing reset by an operator: [What gets recorded](../features/attendance-and-history.md#what-gets-recorded) |
@@ -297,6 +303,11 @@ data dir (`~/.stage-utility/`), and its tail is replayed into `/log` at startup,
 tagged `[last-update]`. After an update you can open `/log` and see the whole
 run: apply start (from→to SHA, commits behind), each phase (pull / install /
 build / restarting), success or FAILED, and the git/npm output.
+
+Inside it, the update script's own narration is prefixed `[update]`, and a
+Homebrew run writes `[brew] run starting <time>` before the output of `brew` and
+`launchctl`. Only the `[update]` lines are copied into `/log` while the update
+runs; the rest stays in the file.
 
 `update.log` is **hard-capped at 128 KB** — trimmed to the last 128 KB on every
 append and at startup (always at a line boundary), and each run only appends a
