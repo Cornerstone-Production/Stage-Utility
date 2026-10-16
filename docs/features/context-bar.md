@@ -216,7 +216,7 @@ it gives up is words the ladder was built to give up.
 
 **Settings → Advanced → Server → Clock format**, beside the time
 zone. It sets how *every* clock in the app reads — the context bar, service
-times in History and the Overview, the rundown, the automation log, and stage
+times in History and Home's Recent services card, the rundown, the automation log, and stage
 displays.
 
 A **clock object** in a custom layout that has been set to 12h or 24h explicitly
