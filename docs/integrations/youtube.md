@@ -137,9 +137,10 @@ actually going out.
 ## Quota
 
 A Google project gets 10,000 API units a day. A check costs 1 unit on OAuth and
-2 on the public path, and Stage Utility polls quickly while someone is watching a
-screen and slowly otherwise, on the same service-aware schedule the other
-integrations use — a normal week lands near 2,000 units.
+2 on the public path. Stage Utility polls every 20 seconds while a screen or rule is
+reading the status and every 5 minutes otherwise (slower again outside the service
+window, like the other integrations): an hour of watching costs 180 units on OAuth
+or 360 on the public path, and an idle day 288 or 576.
 
 The viewer count and the scheduled start are free: both arrive inside a response
 the poll already makes.
@@ -203,3 +204,15 @@ the `_on` half. There is no action here that starts a broadcast — the pair is
 whatever your own cue does, and this is the truthful answer about what came of
 it. A YouTube this app cannot reach reads unknown, never off. See [State from
 Stage Utility](../automation.md#state-from-stage-utility).
+
+## What the log says
+
+Under `[youtube]` on `/log`:
+
+- `[youtube] polling live status (public channel)`, or `(OAuth) — no viewer count on
+  this path, and a missed scheduled start is not visible until the broadcast is live`,
+  when the integration starts
+- `[youtube] <reason> — backing off quietly`, once per outage; the card shows the reason
+  and the readout goes to **—**. A quota error waits half an hour before the next check
+  rather than retrying
+- the `[youtube] connect:` and `disconnected` lines above
