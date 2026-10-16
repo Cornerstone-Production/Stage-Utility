@@ -16,6 +16,11 @@ private enum Palette {
   static let off = Color.white.opacity(0.14)
 }
 
+private extension Text {
+  /// The window's secondary line: status, footer and version.
+  func quiet() -> Text { font(.system(size: 12)).foregroundColor(Palette.subtle) }
+}
+
 /// The mockup's 32 x 19 pill.
 private struct PillSwitch: ToggleStyle {
   func makeBody(configuration: Configuration) -> some View {
@@ -95,8 +100,7 @@ struct HelperWindowView: View {
       HStack(alignment: .center, spacing: 10) {
         VStack(alignment: .leading, spacing: 4) {
           Text(row.title).font(.system(size: 13, weight: .semibold)).foregroundColor(Palette.fg)
-          Text(row.status).font(.system(size: 12)).foregroundColor(Palette.subtle)
-            .fixedSize(horizontal: false, vertical: true)
+          Text(row.status).quiet().fixedSize(horizontal: false, vertical: true)
         }
         Spacer(minLength: 0)
         if row.switchable {
@@ -119,19 +123,18 @@ struct HelperWindowView: View {
         switch model.loginOffer {
         case .installed:
           // The LaunchAgent starts it; a switch here would add a second.
-          Text("Starts at login (installed)").font(.system(size: 12)).foregroundColor(Palette.subtle)
+          Text("Starts at login (installed)").quiet()
         case .unavailable:
-          Text("Open at login is not available with STAGE_UTILITY_OUTPUT_STATE_DIR")
-            .font(.system(size: 12)).foregroundColor(Palette.subtle)
+          Text("Open at login is not available with STAGE_UTILITY_OUTPUT_STATE_DIR").quiet()
         case .userSwitch(let on):
           Toggle("Open at login", isOn: Binding(get: { on }, set: { model.setLaunchAtLogin($0) }))
             .toggleStyle(PillSwitch())
             .labelsHidden()
             .accessibilityLabel("Open at login")
-          Text("Open at login").font(.system(size: 12)).foregroundColor(Palette.subtle)
+          Text("Open at login").quiet()
         }
         Spacer(minLength: 8)
-        Text("v\(model.version)").font(.system(size: 12)).foregroundColor(Palette.subtle)
+        Text("v\(model.version)").quiet()
       }
       // An agent app has no menu to quit from. Not in the mockup, kept small and quiet.
       HStack {
