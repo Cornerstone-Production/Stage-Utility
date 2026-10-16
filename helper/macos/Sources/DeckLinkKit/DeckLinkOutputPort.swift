@@ -445,19 +445,20 @@ public final class DeckLinkOutputPort: CardSink, @unchecked Sendable {
   }
 
   private func startPolling() {
-    let timer = DispatchSource.makeTimerSource(queue: queue)
-    timer.schedule(deadline: .now() + pollInterval, repeating: pollInterval)
-    timer.setEventHandler { [weak self] in self?.pollNow() }
-    timer.resume()
-    pollTimer = timer
+    pollTimer = repeatingTimer(every: pollInterval) { [weak self] in self?.pollNow() }
   }
 
   private func startRetrying() {
+    retryTimer = repeatingTimer(every: retryInterval) { [weak self] in self?.retryNow() }
+  }
+
+  /// A timer on `queue` that first fires after `interval` and then every `interval`.
+  private func repeatingTimer(every interval: TimeInterval, _ handler: @escaping () -> Void) -> DispatchSourceTimer {
     let timer = DispatchSource.makeTimerSource(queue: queue)
-    timer.schedule(deadline: .now() + retryInterval, repeating: retryInterval)
-    timer.setEventHandler { [weak self] in self?.retryNow() }
+    timer.schedule(deadline: .now() + interval, repeating: interval)
+    timer.setEventHandler(handler: handler)
     timer.resume()
-    retryTimer = timer
+    return timer
   }
 
   private func stopTimers() {
