@@ -232,6 +232,13 @@ function Stat({ value, label }: { value: string; label: string }) {
   );
 }
 
+/** Why an output's health is blank: the helper is off, has stopped, or has not spoken yet. */
+function noHealthNote(online: boolean, reported: boolean): string {
+  if (!online) return "Offline, so nothing is being reported.";
+  if (reported) return "The helper stopped reporting.";
+  return "No report from the helper yet.";
+}
+
 /**
  * The Device section for a screen shown by one output of a Mac output helper:
  * which port, what it sends, how far it is turned, and how it is doing.
@@ -332,15 +339,7 @@ function OutputDeviceSection({ output, device, online, health, reported, actions
           This output is dropping frames or running late.
         </p>
       )}
-      {!health && (
-        <p className="mt-2 text-caption1 text-fg-subtle">
-          {!online
-            ? "Offline, so nothing is being reported."
-            : reported
-              ? "The helper stopped reporting."
-              : "No report from the helper yet."}
-        </p>
-      )}
+      {!health && <p className="mt-2 text-caption1 text-fg-subtle">{noHealthNote(online, reported)}</p>}
 
       <div className="mt-1.5 flex items-start justify-between gap-3 py-1.5">
         <p className="min-w-0 text-caption1 text-fg-subtle">
