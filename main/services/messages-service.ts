@@ -420,7 +420,9 @@ export class MessagesService {
       if (!message) return refuse(404, "no message has that id (it may have been cleared at midnight)");
 
       const state = stageController.getState();
-      const widget = findMessagesWidget(state.views ?? [], objectId);
+      const views = state.views ?? [];
+      const outputs = state.outputs ?? [];
+      const widget = findMessagesWidget(views, objectId);
       if (!widget) return refuse(404, "no Messages widget has that id");
 
       // The screen it says it is on, if it says. The app has no logins, so this is
@@ -428,10 +430,10 @@ export class MessagesService {
       // request has to name a real panel that really draws this widget.
       let output: Output | undefined;
       if (outputId !== null) {
-        output = (state.outputs ?? []).find((o) => o.id === outputId);
+        output = outputs.find((o) => o.id === outputId);
         if (!output) return refuse(403, "that screen does not draw that widget");
-        if (!screenIsControlSurface(output, state.views ?? [])) return refuse(403, `${output.name} is a display, and a display cannot reply`);
-        if (!viewsDrawnBy(output, state.views ?? [], state.outputs ?? []).has(widget.viewId)) {
+        if (!screenIsControlSurface(output, views)) return refuse(403, `${output.name} is a display, and a display cannot reply`);
+        if (!viewsDrawnBy(output, views, outputs).has(widget.viewId)) {
           return refuse(403, "that screen does not draw that widget");
         }
       } else if (!widget.groups) {
