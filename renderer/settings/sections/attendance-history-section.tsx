@@ -73,7 +73,7 @@ export function perServiceAttendance(v: number, samples: AttendanceSample[]): nu
  * across EVERY sample and subtracted the first. That runs the door count on
  * through the post-service taper, so it answered "how many people came in at
  * any point around this service" — which is not a figure an operator wants
- * under any label. On the 17 Sep Salt Company recording it read 2,061 against
+ * under any label. On one recorded service it read 2,061 against
  * a recorded 1,727.
  *
  * Every other surface in the app already reads the stored field: the

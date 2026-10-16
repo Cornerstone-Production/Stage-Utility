@@ -49,6 +49,8 @@ leaves it unchanged, and saving an empty value clears it.
 **On the gear:** give each receiver / charger a static IP and enable its network
 control / telemetry (Shure networked gear uses TCP 2202).
 
+![The Wireless Gear dialog with two connected receivers](../images/integrations-wireless.png)
+
 **In Stage:** Settings → Integrations → **Wireless Gear** → enable the master
 toggle → **Add connection** → pick the provider, name it, and enter Device IP,
 TCP Port, and Number of Channels → enable it → **Test connection**. The global
@@ -86,7 +88,7 @@ clears.
 **Storage mode** charges to about 40% and stops. A charger left in it otherwise
 looks like a charger that has given up, so the bays say `storage` while it is on.
 
-Bays are named after the charger's own **Device ID** (its `MA: 5-8` style name,
+Bays are named after the charger's own **Device ID** (its `RF: 5-8` style name,
 set on the unit) where the connection itself has not been named.
 
 ### Battery percentage and time remaining

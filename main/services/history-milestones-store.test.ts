@@ -24,7 +24,7 @@ fs.writeFileSync(
     // Parses in JavaScript and lands on 2 or 3 March. The round trip is what
     // catches it.
     { id: "b", date: "2026-02-31", label: "Two services", serviceTypeId: null },
-    { id: "c", date: "sometime in the spring", label: "Kickoff", serviceTypeId: "salt" },
+    { id: "c", date: "sometime in the spring", label: "Kickoff", serviceTypeId: "gathering" },
     // Not an object at all. Kept in the file like the others, and — this is the
     // fix — NAMED in the log rather than skipped in silence.
     "just a string",

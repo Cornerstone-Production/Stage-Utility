@@ -4,7 +4,7 @@ A per-week stage patch reference: what source lands on which console input, wher
 each output feeds, and — the part volunteers actually need — what changed from the
 standard this week.
 
-Edit it under **Settings → Patch**. Volunteers read it at **`/patch`**, which
+Edit it with **Edit the patch** on the **Patch** page (`/patch/edit`). Volunteers read it at **`/patch`**, which
 follows the live or next Planning Center plan on its own.
 
 ## Sheets
@@ -55,10 +55,12 @@ volunteer highlight.
 
 ## The volunteer view
 
-`/patch` leads with **what changed** — each showing old to new, tagged *Re-patch* or
-*Unused*. Below that is a legend showing the resolved chain as connected nodes
+`/patch` leads with **what changed** — each with a note: *was `<old label>`*, *new*,
+*re-patched* or *unused this week*. Below that is a legend showing the resolved chain as connected nodes
 (`Source → Snake B/1 → SD 1.11 in 12 → Console 12`), then the full patch grouped by
 device with collapsible headers, a filter, and a **Changes only** toggle.
+
+![The volunteer patch sheet: this week's changes from the standard patch, then each input with its signal path](../images/patch-sheet.png)
 
 It updates live, without a reload.
 

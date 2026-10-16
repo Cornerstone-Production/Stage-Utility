@@ -31,7 +31,7 @@ const VIEWS = [
 describe("which routes paint their own surface", () => {
   it("the rundown does", () => {
     assert.equal(isFullBleedPath("/servicecue/weekend/audio", VIEWS), true);
-    assert.equal(isFullBleedPath("/servicecue/cornerstone-youth/full", VIEWS), true);
+    assert.equal(isFullBleedPath("/servicecue/youth-night/full", VIEWS), true);
   });
 
   it("and so does a console — the rule generalises rather than replacing it", () => {

@@ -32,29 +32,41 @@ A view also declares what it is **for**, alongside its kind:
 
 | | Display | Console |
 |---|---|---|
-| Where it renders | a screen at its own URL | the app, or a screen set to panel mode |
+| Where it renders | a screen at its own URL | the app, or a screen at its own URL as a control surface |
 | Controls | never fire | live |
 | Editing (notes, checklists) | read-only | live |
 | Drill-down | no | in the app only |
 | Audience | anyone walking past | the operator |
 
-A screen has a matching **mode**. It is a read-only `display` unless deliberately
-set to `panel` — the way a control surface is built. Only a panel may show a console
-view, and that rule is enforced by the server, not just the picker: a wall screen
-cannot end up rendering a live button by accident.
+A screen has no role of its own: **the view decides.** A screen is a control
+surface, whose buttons work for anyone at it, exactly when the view it shows is a
+console, and a read-only wall display when it shows any other view or none. Either
+kind of view can be shown on any screen; the server refuses nothing here, and the
+Screens page asks before a screen goes live.
 
-Converting a view that screens are currently showing is refused, naming those
-screens, rather than silently unbinding them.
+Changing the surface of a view that screens are showing changes those screens, so
+the plain `PATCH /api/views/:id` refuses it, naming the screens, and
+`POST /api/views/:id/surface` is the call that does it, with the screens listed
+first.
 
-Only **custom** views can be consoles: the built-in kinds have no editable layout,
-so there is nowhere to put a control.
+Only a view with something to operate can be a console: a **custom** view, and a
+**calendar** (its month chevrons are live on a console and absent on a wall
+display). The other kinds are finished pictures with nowhere to put a control. A
+calendar console opens at `/consoles/<view id>` like any other and shows the
+calendar.
 
 A console can also ask the app to get out of its way. See
 [Running a console without the app's chrome](../features/operator-app.md#running-a-console-without-the-apps-chrome).
 The flag is stored on the view, so it follows the console to every phone that
 opens it, and it is carried by a duplicate and by an exported view bundle. It is
-a different thing from a screen's **Hide top bar**, which is per screen and hides
+a different thing from a screen's **Top bar** switch, which is per screen and hides
 the *display's* bar in a different page altogether.
+
+A console can also be kept out of the operator app's sidebar. The flag is
+`showInSidebar`, absent meaning listed, and it changes only the list: the console
+keeps its live controls, its page at `/consoles/<view id>` and its title, and the
+**Open** link on a screen's card still opens that screen. It is stored on the view and travels the
+same way the chrome flag does, in a duplicate and in an exported view bundle.
 
 ### Home
 
@@ -87,7 +99,7 @@ would be in the way of the thing consoles are for. It carries its own ground
 rather than the page's, because a console's canvas is dark whatever theme the app
 is wearing.
 
-Home is edited in the Home tab itself, with the pencil in the header. In edit
+Home is edited on Home itself, with the pencil in the header. In edit
 mode each tile gains a size picker, a visibility select, a remove button and a
 drag handle, and **Add widget** offers the whole object registry.
 
@@ -135,9 +147,24 @@ alone.
 ### Upgrading an existing install
 
 Nothing has to be done by hand. On first start, any view containing a button
-becomes a console and the screens showing it become panels, so a control surface that
-worked before still works. What moved is written to the log, so a stray control
-left on a wall display years ago can be spotted and set back deliberately.
+becomes a console, so the screens showing it are control surfaces and a control
+surface that worked before still works. What moved is written to the log, so a
+stray control left on a wall display years ago can be spotted and set back
+deliberately.
+
+An install that stored a role on each screen has it taken out on the first start
+(or the first start after a restore of such a backup), without changing what any
+screen does. A screen that was read-only never becomes live: one that was set to
+a wall display but showed a console now shows a wall copy of it, named `<view>
+(wall)`. A screen whose buttons worked keeps them: the view it showed (a custom view or a
+calendar) becomes a console when only such screens showed it, and otherwise those
+screens share a control-surface copy, `<view> (control surface)`. A view of any
+other kind has no controls to keep, so only the role is dropped. A view the
+upgrade makes a console, and each control-surface copy it makes, is kept out of
+the [operator app's sidebar](../features/operator-app.md#consoles) (`showInSidebar:
+false`; **Show in the sidebar** puts it back), and a layout with no fit of its
+own gets `canvas.fit: "contain"`, the fit it had on a wall screen, so the panel
+does not change shape. Each is a `[screens]` line in the log, saying so.
 
 ## What a display shows
 
@@ -174,20 +201,33 @@ placeholder screens (loading, unrouted, empty, not configured, view missing)
 draw a bar whatever the routing says, because there is no content yet to fill
 the panel.
 
-A **locked** display (set on Screens) strips the escape hatches a kiosk
-otherwise shows. Its only effect is on the bar, so the Screens card offers it
-only where there is a bar to strip. A display with its **top bar hidden** (also
-set on Screens) draws no top bar at all — no brand, plan context or QR — and its
+A **locked** display (set in its Screen settings) strips the escape hatches a kiosk
+otherwise shows. Its only effect is on the bar, so the panel offers it
+only where there is a bar to strip. A display with its **top bar hidden** (the
+**Top bar** switch off, also in Screen settings) draws no top bar at all — no brand, plan context or QR — and its
 content fills the strip instead; the two are independent, since a lock keeps the
 bar and only removes its links.
 
-A display's **Use HLS on this screen** switch (also set on Screens,
+A display's **Use HLS** switch (also in Screen settings,
 `Output.allowHls`, on by default) is independent of both: it decides whether a
 Video widget here may fall back to HLS at all. Off, a feed that needs HLS
 (its device sends B-frames, or an unsupported codec) shows **This screen
 can't play video** instead of falling back, while every other screen with the
 switch on keeps playing it. See
 [Video feeds](../integrations/video-feeds.md#the-device-pushes-to-stage-utility).
+
+A screen shown by the [Mac output helper](../kiosk-devices.md#mac-output-helper)
+has two more fields, kept on the `Output` like the settings above and carried by
+every config export and backup with the rest of `settings.json`:
+
+| Field | Values | Absent means |
+| --- | --- | --- |
+| `rotation` | `0`, `90`, `180` or `270`: quarter turns the helper applies before the picture leaves, for a monitor mounted on its side | `0` |
+| `videoMode` | A mode name from the list in `main/types/output-format.ts` (`1080p59.94`, `1080i50`, `720p60` and the like), what a DeckLink port sends | `1080p59.94` |
+
+A browser showing the screen ignores both. The helper reads its output's record
+from `GET /api/outputs`, and applies `rotation` to every output and `videoMode`
+to DeckLink outputs, the ports it drives.
 
 A **preview** — the live thumbnail on a Screens card, at `/preview-<viewId>` —
 renders the previewed view directly, regardless of what is actually routed to
@@ -198,7 +238,7 @@ that output, and answers the four per-screen settings differently:
 | Blackout | Ignored | The Screens page would be a grid of black rectangles. |
 | Lock | Ignored | The preview lives inside the console, whose navigation must keep working. |
 | Hidden top bar | **Honoured** | Purely visual, and showing what the screen will look like is what the card is for. |
-| Use HLS on this screen | Ignored (always on) | A settings-page card is not the real screen, and must not refuse to play a feed the wall it stands in for can play fine. |
+| Use HLS | Ignored (always on) | A settings-page card is not the real screen, and must not refuse to play a feed the wall it stands in for can play fine. |
 
 The hidden top bar is honoured only when the preview knows which screen it
 stands in for. The route names a *view*, and two screens can show one view with
@@ -272,6 +312,82 @@ object box fitted to its aspect ratio.
 **Layout templates** are named custom layouts saved to a reusable library. **Slot
 presets** snapshot a slot arrangement by name. Both are global and can be recalled
 onto any view or service type.
+
+## Stage messages
+
+A producer sends a short message to one or more **groups** of screens, or to
+**Everyone**. This is what is stored.
+
+Two stores, split by whose work they are:
+
+| File | Class | Holds |
+|---|---|---|
+| `messaging.json` | config | The groups (`{ id, name }`), the quick messages and the quick replies, and a `version` that goes up by one on every save (a file without one reads as 0). A save must carry the version it was built from, so a window that has not seen another window's change cannot overwrite it. Carried by every backup. |
+| `messages.json` | runtime | The day's messages and `lastClearedDate`. Not restored from a backup: a message is an observation about one day. |
+
+A screen is in any number of groups: `Output.groups` holds their ids, in the
+groups' own order, and is empty or absent when the screen is in none. **Everyone** is
+built in and is not stored; it reaches every screen whether the screen is in a
+group or not. Deleting a group takes its id off every screen that held it.
+
+A group's `id` is `g-` and eight hex characters, issued by the server and never
+changed, so renaming a group moves nothing that points at it. A message's `id` is
+sixteen hex characters. A message holds `to` (group ids, or `["everyone"]`), `text`,
+`alert` and `alertUntil`, `clearedAt`, `from` and its `replies`.
+
+## Stored data
+
+Everything the app persists is a file in the data directory, and every file
+declares itself as **config** (the operator's work: carried by a config snapshot
+and every backup) or **runtime** (an observation of what happened on this machine:
+never restored). Credentials, caches and logs are neither; they are listed in
+[Reliability and data](../ops/reliability.md#where-your-data-lives), with what each
+class means for backups.
+
+| File | Class | Holds |
+|---|---|---|
+| `attendance-history.json` | runtime | Attendance recordings, one file per service in a folder of the same name |
+| `automation-log.json` | runtime | The Activity log |
+| `automation-rules.json` | config | [Automation](../automation.md) rules and cues |
+| `automation-settings.json` | config | Simulate and disarm |
+| `baptism-triggers.json` | config | Which plan items start the baptism timer's phases, per plan |
+| `baptism.json` | runtime | The baptism timer's live state and its saved sessions |
+| `bar-config.json` | config | The [context bar](../features/context-bar.md)'s items and order |
+| `checklist-ticks.json` | runtime | Which checklist rows are ticked, per plan |
+| `history-milestones.json` | config | The dated marks on the Trends chart |
+| `kiosk-devices.json` | config | Which device drives which screen |
+| `layout-groups.json` | config | Reusable object groups for the layout editor |
+| `layout-templates.json` | config | Saved custom layouts |
+| `messages.json` | runtime | The day's [stage messages](#stage-messages) |
+| `messaging.json` | config | Stage-message groups, quick messages and quick replies |
+| `notes.json` | config | What was typed into notes and checklist objects, keyed by object |
+| `osc-targets.json` | config | [OSC](../integrations/osc.md) targets |
+| `patch.json` | config | The [patch sheet](../patch-sheet/README.md) |
+| `presets.json` | config | Slot presets |
+| `rosstalk-settings.json` | config | The RossTalk simulate switch |
+| `rosstalk-targets.json` | config | [RossTalk](../integrations/rosstalk.md) targets |
+| `saved-colors.json` | config | Colours kept from the colour picker |
+| `scores-favourites.json` | config | Followed teams |
+| `servicecue-config.json` | config | Which service types the ServiceCue landing shows |
+| `servicecue-layouts.json` | config | ServiceCue column layouts |
+| `servicecue-roles.json` | config | ServiceCue category roles |
+| `service-timeline.json` | runtime | Per-item timing recordings, one file per service in a folder of the same name |
+| `settings.json` | config | Service type and plan mode, screens, integration settings (not credentials), branding, schedules, time zone |
+| `signals.json` | runtime | The values the Companion module reads |
+| `slots.json` | config | [Slot](#slots) sets, by view or object id |
+| `spl-history.json` | runtime | Sound-level recordings, one file per service in a folder of the same name |
+| `stream-starts.json` | runtime | When each streaming platform was first seen live |
+| `update-notices.json` | runtime | Which release has been announced |
+| `video-feeds.json` | config | [Video feeds](../integrations/video-feeds.md) and the relay's ports |
+| `video-seen.json` | runtime | When each feed was last confirmed live |
+| `views.json` | config | Views and their layouts |
+| `wireless-connections.json` | config | Receiver and charger connections (not their passwords) |
+
+The three recordings are keyed stores: the name in the table is the legacy
+single-document file a pre-split install may still hold, and the live data is the
+folder beside it (`attendance-history/`, `service-timeline/`, `spl-history/`).
+Uploaded logos and layout images are files in `branding-images/` and
+`layout-images/`, named by content hash and carried by a config snapshot.
 
 ## How state reaches a screen
 

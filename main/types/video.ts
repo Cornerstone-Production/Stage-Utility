@@ -118,6 +118,14 @@ export interface VideoFeedView {
  * backwards (a fresh session replacing the one being sampled) contributes a
  * zero delta rather than a negative one. `width`/`height` are the frame's
  * current size, never a delta.
+ *
+ * `jitterBufferMs` is the WebRTC-only receive-delay figure, in milliseconds,
+ * measured over this report's interval: how long the average frame waited in
+ * the browser's own jitter buffer. It says whether a lagging picture's delay
+ * is held by the screen itself or lives upstream. Null when the browser could
+ * not measure it (a WebRTC report without the needed stats); absent on an HLS
+ * report, which never can, and on a report from a page older than the figure.
+ * The server reads absent as null.
  */
 export interface VideoPlaybackReport {
   feedId: string;
@@ -127,6 +135,7 @@ export interface VideoPlaybackReport {
   stalls: number;
   width: number;
   height: number;
+  jitterBufferMs?: number | null;
 }
 
 /**
@@ -153,6 +162,15 @@ export interface ScreenVideoHealth {
   droppedInWindow: number;
   decodedInWindow: number;
   stallsInWindow: number;
+  /** Sticky, like `struggling` and separate from it — a pair can be either,
+   *  both or neither: the window's worst `jitterBufferMs` went over 1000 ms,
+   *  held for CLEAR_AFTER_MS after the last sample that did. The screen's own
+   *  browser is holding that much delay, so look at its network or decoding. */
+  lagging: boolean;
+  /** The worst `jitterBufferMs` any report in the window carried, or null when
+   *  none carried one (HLS, or a browser that does not report it). A window
+   *  figure, so as of the last re-read like the totals above. */
+  jitterBufferMsInWindow: number | null;
   /** The frame's current size, as of the pair's last report — never a delta,
    *  same as VideoPlaybackReport's own width/height. */
   width: number;
@@ -183,6 +201,13 @@ export interface ScreenVideoHealth {
     width: number;
     height: number;
   } | null;
+  /**
+   * The worst `jitterBufferMs` since `lagging` last turned true — what the card
+   * and the `[video]` lagging line read, for the same reason `episode` exists:
+   * the live window's figures age out from under a flag that is still holding.
+   * Null while not lagging.
+   */
+  laggingEpisode: { jitterBufferMs: number } | null;
 }
 
 /**

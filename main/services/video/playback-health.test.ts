@@ -9,8 +9,10 @@ import {
   classifyWindow,
   CLEAR_AFTER_MS,
   DROPPED_FRACTION,
+  LAGGING_MS,
   MAX_COUNT_PER_REPORT,
   MAX_DIMENSION,
+  MAX_LAG_MS,
   MAX_REPORTS,
   MAX_SAMPLES_PER_PAIR,
   parseVideoReports,
@@ -25,6 +27,8 @@ test("the constants this window is built from", () => {
   assert.equal(DROPPED_FRACTION, 0.05);
   assert.equal(STALLS_IN_WINDOW, 3);
   assert.equal(CLEAR_AFTER_MS, 60_000);
+  assert.equal(LAGGING_MS, 1_000);
+  assert.equal(MAX_LAG_MS, 600_000);
 });
 
 test("classifyWindow: which of the two thresholds a window's totals cross", () => {
@@ -399,6 +403,199 @@ test("two widgets on one screen reporting the same feed id are folded into one p
   assert.equal(snap[0]!.struggling, true, "the folded total (51 of 1000) is over the line even though neither report alone was");
 });
 
+// ── lagging: the receive-delay figure and its own sticky flag ──────────────
+
+const LAG_T0 = 1_000_000;
+
+test("lagging: a window figure of exactly 1000 ms is not lagging, 1001 is", () => {
+  const at = new PlaybackHealth();
+  at.record("out1", [report({ jitterBufferMs: 1000 })], LAG_T0);
+  assert.equal(at.snapshot(LAG_T0)[0]?.lagging, false, "exactly 1000 is not OVER the line");
+
+  const over = new PlaybackHealth();
+  over.record("out1", [report({ jitterBufferMs: 1001 })], LAG_T0);
+  assert.equal(over.snapshot(LAG_T0)[0]?.lagging, true, "1001 is");
+});
+
+test("lagging: a null figure (HLS, an old page, a browser that cannot measure) is never lagging", () => {
+  const h = new PlaybackHealth();
+  h.record("out1", [report({ via: "hls", jitterBufferMs: null }), report({ feedId: "feed-2" })], LAG_T0);
+  for (const e of h.snapshot(LAG_T0)) {
+    assert.equal(e.lagging, false);
+    assert.equal(e.jitterBufferMsInWindow, null);
+    assert.equal(e.laggingEpisode, null);
+  }
+});
+
+test("lagging and struggling are separate flags: a pair can be either, both or neither", () => {
+  const h = new PlaybackHealth();
+  h.record("out1", [report({ feedId: "neither", jitterBufferMs: 150 })], LAG_T0);
+  h.record("out1", [report({ feedId: "lag-only", jitterBufferMs: 2500 })], LAG_T0);
+  h.record("out1", [report({ feedId: "struggle-only", dropped: 200 })], LAG_T0);
+  h.record("out1", [report({ feedId: "both", dropped: 200, jitterBufferMs: 3000 })], LAG_T0);
+  const by = new Map(h.snapshot(LAG_T0).map((e) => [e.feedId, e]));
+  assert.deepEqual([by.get("neither")!.struggling, by.get("neither")!.lagging], [false, false]);
+  assert.deepEqual([by.get("lag-only")!.struggling, by.get("lag-only")!.lagging], [false, true]);
+  assert.deepEqual([by.get("struggle-only")!.struggling, by.get("struggle-only")!.lagging], [true, false]);
+  assert.deepEqual([by.get("both")!.struggling, by.get("both")!.lagging], [true, true]);
+});
+
+test("lagging: the window carries the worst figure, ignoring reports that carried none", () => {
+  const h = new PlaybackHealth();
+  h.record("out1", [report({ jitterBufferMs: 300 })], LAG_T0);
+  h.record("out1", [report({ jitterBufferMs: 800 })], LAG_T0 + 10_000);
+  h.record("out1", [report({ jitterBufferMs: null })], LAG_T0 + 20_000);
+  assert.equal(h.snapshot(LAG_T0 + 20_000)[0]!.jitterBufferMsInWindow, 800, "a report with no figure does not erase the worst");
+
+  // The 800 report ages out; only the one without a figure is left.
+  h.record("out1", [report({ jitterBufferMs: null })], LAG_T0 + 71_000);
+  assert.equal(h.snapshot(LAG_T0 + 71_000)[0]!.jitterBufferMsInWindow, null, "no report left in the window carried one");
+});
+
+test("lagging: held for 60 s after the last report over the line, cleared exactly at 60 s", () => {
+  const h = new PlaybackHealth();
+  h.record("out1", [report({ jitterBufferMs: 1500 })], LAG_T0);
+  h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0 + CLEAR_AFTER_MS - 1);
+  assert.equal(h.snapshot(LAG_T0 + CLEAR_AFTER_MS - 1)[0]?.lagging, true, "one ms short of 60 s is still lagging");
+  h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0 + CLEAR_AFTER_MS);
+  assert.equal(h.snapshot(LAG_T0 + CLEAR_AFTER_MS)[0]?.lagging, false, "60 s since the last report over the line clears it");
+});
+
+test("lagging: clean reports do not re-arm the clock while the bad one is still in the window — it clears 60 s after the LAST bad report", () => {
+  const h = new PlaybackHealth();
+  h.record("out1", [report({ jitterBufferMs: 4000 })], LAG_T0);
+  for (let t = 10_000; t <= 50_000; t += 10_000) h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0 + t);
+  assert.equal(h.snapshot(LAG_T0 + 50_000)[0]?.lagging, true, "sanity: still held inside the 60 s");
+  // The window max is still 4000 at 59 s, so a clock re-armed off the
+  // window (not the report) would keep this lagging well past 60 s.
+  h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0 + 60_000);
+  assert.equal(h.snapshot(LAG_T0 + 60_000)[0]?.lagging, false);
+});
+
+test("lagging: clears by elapsed time with no further record() — snapshot() and tick() both say so", () => {
+  const h = new PlaybackHealth();
+  h.record("out1", [report({ jitterBufferMs: 1500 })], LAG_T0);
+  // A clean keep-alive so the PAIR is still held at +60 s (a lone pair ages
+  // out at exactly the moment its flag clears).
+  h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0 + 30_000);
+  assert.equal(h.snapshot(LAG_T0 + CLEAR_AFTER_MS - 1)[0]?.lagging, true);
+  const cleared = h.snapshot(LAG_T0 + CLEAR_AFTER_MS)[0]!;
+  assert.equal(cleared.lagging, false, "the clear needs no heartbeat to notice it");
+  assert.equal(cleared.laggingEpisode, null);
+  assert.equal(h.tick(LAG_T0 + CLEAR_AFTER_MS)[0]?.lagging, false);
+  assert.equal(h.laggingEpisodeIdFor("out1", "feed-1"), null, "tick() swept the stored episode too");
+});
+
+test("lagging: nextExpiryAt names the moment a lagging flag would clear, ahead of the pair ageing out", () => {
+  const h = new PlaybackHealth();
+  h.record("out1", [report({ jitterBufferMs: 1500 })], LAG_T0);
+  h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0 + 30_000);
+  // reportedAt is now LAG_T0 + 30 s, so the pair ages out at +90 s, but the
+  // flag clears at +60 s.
+  assert.equal(h.nextExpiryAt(LAG_T0 + 30_000), LAG_T0 + CLEAR_AFTER_MS);
+});
+
+test("lagging episode: seeded at the flip with the window's worst, rises with a worse figure, ignores a milder one", () => {
+  const h = new PlaybackHealth();
+  h.record("out1", [report({ jitterBufferMs: 1200 })], LAG_T0);
+  assert.deepEqual(h.snapshot(LAG_T0)[0]!.laggingEpisode, { jitterBufferMs: 1200 });
+
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1100 })], LAG_T0 + 10_000), false, "a milder report is not a change");
+  assert.deepEqual(h.snapshot(LAG_T0 + 10_000)[0]!.laggingEpisode, { jitterBufferMs: 1200 });
+
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1900 })], LAG_T0 + 20_000), true, "a worse figure moves the peak, and that is a change");
+  assert.deepEqual(h.snapshot(LAG_T0 + 20_000)[0]!.laggingEpisode, { jitterBufferMs: 1900 });
+});
+
+test("lagging episode: a peak creeping inside one displayed tenth of a second is not a change; a whole tenth is", () => {
+  const h = new PlaybackHealth();
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1001 })], LAG_T0), true, "the flip");
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1002 })], LAG_T0 + 1_000), false, "1002 reads 1.0 s like 1001");
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1040 })], LAG_T0 + 2_000), false, "1040 still reads 1.0 s");
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1100 })], LAG_T0 + 3_000), true, "1100 reads 1.1 s");
+  assert.deepEqual(h.snapshot(LAG_T0 + 3_000)[0]!.laggingEpisode, { jitterBufferMs: 1100 });
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1140 })], LAG_T0 + 4_000), false, "still under the next tenth");
+});
+
+test("lagging episode: survives the bad report leaving the live window while the flag holds, and starts fresh the next time", () => {
+  const h = new PlaybackHealth();
+  h.record("out1", [report({ jitterBufferMs: 5000 })], LAG_T0);
+  h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0 + 30_000);
+  h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0 + 59_000);
+  const mid = h.snapshot(LAG_T0 + 59_000)[0]!;
+  assert.equal(mid.lagging, true);
+  assert.equal(mid.laggingEpisode?.jitterBufferMs, 5000);
+
+  // Clears, and a NEW episode after it seeds from its own window only.
+  h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0 + 61_000);
+  assert.equal(h.snapshot(LAG_T0 + 61_000)[0]!.laggingEpisode, null);
+  h.record("out1", [report({ jitterBufferMs: 1300 })], LAG_T0 + 71_000);
+  assert.deepEqual(h.snapshot(LAG_T0 + 71_000)[0]!.laggingEpisode, { jitterBufferMs: 1300 }, "never the old 5000");
+});
+
+test("lagging episode identity: a peak rising keeps the id, a clear and re-flag inside one record() call mints a new one", () => {
+  const h = new PlaybackHealth();
+  h.record("out1", [report({ jitterBufferMs: 1200 })], LAG_T0);
+  const id = h.laggingEpisodeIdFor("out1", "feed-1");
+  assert.notEqual(id, null);
+  h.record("out1", [report({ jitterBufferMs: 3000 })], LAG_T0 + 10_000);
+  assert.equal(h.laggingEpisodeIdFor("out1", "feed-1"), id, "same episode, worse peak");
+
+  // 60 s on, the sweep clears the flag and the same report re-arms it.
+  h.record("out1", [report({ jitterBufferMs: 1300 })], LAG_T0 + 10_000 + CLEAR_AFTER_MS);
+  const next = h.laggingEpisodeIdFor("out1", "feed-1");
+  assert.notEqual(next, null);
+  assert.notEqual(next, id, "a genuinely new episode");
+
+  const struggle = new PlaybackHealth();
+  struggle.record("out1", [report({ dropped: 200, jitterBufferMs: 1200 })], LAG_T0);
+  assert.notEqual(struggle.episodeIdFor("out1", "feed-1"), struggle.laggingEpisodeIdFor("out1", "feed-1"), "the two kinds never share an id");
+});
+
+test("lagging: record()'s changed flag — a flip is a change, a healthy pair's own figures moving is not", () => {
+  const h = new PlaybackHealth();
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0), true, "a pair appearing");
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 700 })], LAG_T0 + 10_000), false, "a window figure climbing under the line publishes nothing");
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 1500 })], LAG_T0 + 20_000), true, "crossing the line does");
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0 + 30_000), false, "a clean report inside the hold does not");
+  assert.equal(h.record("out1", [report({ jitterBufferMs: 100 })], LAG_T0 + 80_000), true, "the flag clearing by time does");
+});
+
+test("lagging: two widgets on one feed fold to the worse figure, whichever is listed first, never a sum", () => {
+  // The FIRST widget carries the larger figure and the second a smaller one or
+  // none: a fold that keeps the last report's value (or sums) reads
+  // differently from the max.
+  const h = new PlaybackHealth();
+  h.record("out1", [report({ feedId: "shared", jitterBufferMs: 700 }), report({ feedId: "shared", jitterBufferMs: 600 })], LAG_T0);
+  const e = h.snapshot(LAG_T0)[0]!;
+  assert.equal(e.jitterBufferMsInWindow, 700, "700 and 600 are not 1300, and not the last one's 600");
+  assert.equal(e.lagging, false, "a sum over the line would have said lagging");
+
+  const withNone = new PlaybackHealth();
+  withNone.record("out1", [report({ feedId: "shared", jitterBufferMs: 800 }), report({ feedId: "shared", jitterBufferMs: null })], LAG_T0);
+  assert.equal(withNone.snapshot(LAG_T0)[0]!.jitterBufferMsInWindow, 800, "a later widget with no figure does not erase the first one's");
+
+  const other = new PlaybackHealth();
+  other.record("out1", [report({ feedId: "shared", jitterBufferMs: 100 }), report({ feedId: "shared", jitterBufferMs: 300 })], LAG_T0);
+  assert.equal(other.snapshot(LAG_T0)[0]!.jitterBufferMsInWindow, 300, "the larger later one wins where it is the larger");
+
+  const third = new PlaybackHealth();
+  third.record("out1", [report({ feedId: "shared", jitterBufferMs: null }), report({ feedId: "shared", jitterBufferMs: 150 }), report({ feedId: "shared", jitterBufferMs: 600 })], LAG_T0);
+  assert.equal(third.snapshot(LAG_T0)[0]!.jitterBufferMsInWindow, 600, "a figure first seen on a later widget, and a larger one after that, both count");
+});
+
+test("lagging: a burst of heartbeats at the sample cap still carries the worst figure, even when it landed in the sample the cap merges into", () => {
+  const h = new PlaybackHealth();
+  for (let i = 0; i < MAX_SAMPLES_PER_PAIR + 10; i++) {
+    // The 900 arrives once the pair is AT the cap, so it merges into the
+    // newest held sample, and later (lower) reports merge on top of it.
+    const spike = i === MAX_SAMPLES_PER_PAIR + 1;
+    h.record("out1", [report({ jitterBufferMs: spike ? 900 : 100 })], LAG_T0 + i);
+  }
+  assert.equal(h.samplesHeld("out1", "feed-1"), MAX_SAMPLES_PER_PAIR);
+  assert.equal(h.snapshot(LAG_T0 + 100)[0]?.jitterBufferMsInWindow, 900);
+});
+
 test("Maps, not property lookups — an outputId or feedId shaped like a prototype key is just another key, not a pollution vector", () => {
   const h = new PlaybackHealth();
   const now = 1_000_000;
@@ -413,7 +610,7 @@ test("Maps, not property lookups — an outputId or feedId shaped like a prototy
 
 test("parseVideoReports accepts a well-formed array", () => {
   const parsed = parseVideoReports([{ feedId: "f1", via: "webrtc", decoded: 10, dropped: 1, stalls: 0, width: 1920, height: 1080 }]);
-  assert.deepEqual(parsed, [{ feedId: "f1", via: "webrtc", decoded: 10, dropped: 1, stalls: 0, width: 1920, height: 1080 }]);
+  assert.deepEqual(parsed, [{ feedId: "f1", via: "webrtc", decoded: 10, dropped: 1, stalls: 0, width: 1920, height: 1080, jitterBufferMs: null }]);
 });
 
 test("parseVideoReports refuses a non-array body", () => {
@@ -476,4 +673,19 @@ test("parseVideoReports refuses more than MAX_REPORTS entries, and accepts exact
   assert.equal(parseVideoReports(Array.from({ length: 500 }, () => one)), null, "500 entries must be refused whole");
   assert.equal(parseVideoReports(Array.from({ length: MAX_REPORTS }, () => one))?.length, MAX_REPORTS);
   assert.equal(parseVideoReports(Array.from({ length: MAX_REPORTS + 1 }, () => one)), null);
+});
+
+test("parseVideoReports: the receive-delay figures are absent-or-null as null, a number as itself", () => {
+  const good = { feedId: "f1", via: "webrtc" as const, decoded: 1, dropped: 0, stalls: 0, width: 1, height: 1 };
+  assert.deepEqual(parseVideoReports([good])?.[0], { ...good, jitterBufferMs: null }, "a page older than the figures");
+  assert.deepEqual(parseVideoReports([{ ...good, jitterBufferMs: null }])?.[0], { ...good, jitterBufferMs: null });
+  assert.deepEqual(parseVideoReports([{ ...good, jitterBufferMs: 123.4 }])?.[0], { ...good, jitterBufferMs: 123.4 });
+});
+
+test("parseVideoReports refuses a receive-delay figure that is negative, not a number, non-finite, or over MAX_LAG_MS", () => {
+  const good = { feedId: "f1", via: "webrtc" as const, decoded: 1, dropped: 0, stalls: 0, width: 1, height: 1 };
+  assert.equal(parseVideoReports([{ ...good, jitterBufferMs: MAX_LAG_MS }])?.length, 1, "the cap itself is accepted");
+  for (const bad of [-1, "800", NaN, Infinity, MAX_LAG_MS + 1, {}, true]) {
+    assert.equal(parseVideoReports([good, { ...good, jitterBufferMs: bad }]), null, `${String(bad)} refuses the whole array`);
+  }
 });

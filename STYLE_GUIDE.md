@@ -311,7 +311,7 @@ adapts to surrounding text color) or full-color `<img>`.
 
 ## 5. The Settings / Admin world
 
-**Shell** (`settings-view.tsx` + `SplitView` / `Sidebar`): a two-pane split — a sidebar
+**Shell** (`renderer/app/shell.tsx` + `SplitView` / `Sidebar`): a two-pane split — a sidebar
 (`bg-surface border-r border-line`, expanded / collapsed icon rail, persisted) over a
 scrolling content pane; on mobile a top bar + hamburger drawer. The nav is **grouped**
 via `SidebarGroupLabel` (Content / Output / Identity / System) with quiet uppercase
@@ -350,7 +350,7 @@ reorderable lists; toast + `confirm()` for feedback.
 ## 6. Public-repo neutrality
 
 The app **ships brand-neutral** — the tool's own blue-family accent default, a generic
-mark, and the name "Stage Utility." No org identity is hardcoded (never Cornerstone).
+mark, and the name "Stage Utility." No org identity is hardcoded (never a church or organisation name).
 An org applies its real identity entirely through **Branding**: the **accent** (one hex
 → full ramp) and the **logo** (with a monochrome recolor option). This keeps the public
 repo generic while letting any deployment look like itself.
@@ -367,8 +367,8 @@ repo generic while letting any deployment look like itself.
 | Accent picker | `renderer/settings/sections/branding-section.tsx` |
 | Kiosk views | `renderer/main/*` (`stage-display-view.tsx`, `dashboard-view.tsx`, …) |
 | Custom-layout renderer + style system | `renderer/main/layout-renderer.tsx`, `main/types/stage.ts` (`LayoutStyle`) |
-| Card/surface presets | `renderer/settings/sections/layout-editor.tsx` |
-| Settings shell + sections | `renderer/settings/settings-view.tsx`, `renderer/settings/sections/*` |
+| Card/surface presets | `renderer/main/layout-objects.ts` (`CARD_PRESETS`); the editor is `renderer/editor/layout-editor.tsx` |
+| App shell + pages | `renderer/app/shell.tsx`, `renderer/app/*`, `renderer/settings/sections/*` |
 | Slot/panel kiosk components | `renderer/components/slots-columns.tsx`, `slot-panel.tsx`, `status-strip.tsx`, `brand-logo.tsx` |
 | Class helper | `renderer/lib/cn.ts` |
 

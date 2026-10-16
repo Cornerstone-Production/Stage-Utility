@@ -35,6 +35,7 @@ import {
   SelectValue,
   Switch,
 } from "../../components/ui";
+import { plural } from "@main/services/plural";
 
 /** The query string the Download anchor points at — the checklist, verbatim. */
 export function planExportHref(
@@ -130,7 +131,7 @@ export function ExportPlanDialog({
               />
               <Line
                 label="Mic slots"
-                sub={`${data.boards} board${data.boards === 1 ? "" : "s"}, ${data.rows} row${data.rows === 1 ? "" : "s"}`}
+                sub={`${plural(data.boards, "board")}, ${plural(data.rows, "row")}`}
               >
                 <ButtonGroup role="group" aria-label="Which service types' boards travel">
                   <Button
@@ -166,7 +167,7 @@ export function ExportPlanDialog({
               </Line>
               <Line
                 label="Slot presets"
-                sub={`${data.presets} saved arrangement${data.presets === 1 ? "" : "s"} — global, not this type's`}
+                sub={`${plural(data.presets, "saved arrangement")} — global, not this type's`}
               >
                 <Switch
                   checked={presets}

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { resolveScreen, type ScreenInput } from "./stage-screen.js";
+import { ownScreen, resolveScreen, type ScreenInput } from "./stage-screen.js";
 
 // ---- fixtures ---------------------------------------------------------------
 
@@ -21,6 +21,7 @@ function resolvedOutput(over: Partial<ResolvedOutput> = {}): ResolvedOutput {
     locked: false,
     hideTopBar: false,
     allowHls: true,
+    groups: [],
     textSize: null,
     ...over,
   };
@@ -461,7 +462,7 @@ describe("the view kind", () => {
       locked: false,
       hideTopBar: false,
       isPreview: false,
-      outputMode: undefined,
+      interactive: false,
       allowHls: true,
       textSize: null,
     });
@@ -501,26 +502,36 @@ describe("the view kind", () => {
     assert.equal(noPco.k, "unknown-kind");
   });
 
-  test("carries the output's mode, and never a preview's", () => {
-    // The custom arm turns this into `contextForOutput(mode, isPreview)`, which
-    // decides whether a button on a wall screen actually fires. It rides along
-    // with the screen because it comes from the same `outputs.find` the display
-    // name does — looked up twice, the preview rule gets remembered once.
-    const panel = resolveScreen(input({
-      state: stageState({
-        outputs: [{ id: "display-1", name: "Console", viewId: "v1", mode: "panel" }] as unknown as Output[],
-      }),
+  test("is interactive when its view is a console: that is what makes a screen a control surface", () => {
+    // Every arm that draws a control reads `interactive`, which decides whether a
+    // button on the screen actually fires. It is read from the view the arm
+    // renders, not from anything stored on the screen, so what is drawn and
+    // whether it works cannot disagree.
+    const consoleView = { id: "v1", name: "Booth", kind: "custom", surface: "console", layout: { canvas: { width: 1920 }, objects: [] } };
+    const wallView = { ...consoleView, surface: "display" };
+    const showing = (view: object) => resolveScreen(input({
+      state: stageState({ views: [view] as unknown as View[], resolvedByOutput: { "display-1": resolvedOutput({ kind: "custom" }) } }),
     }));
-    assert.equal(panel.k === "view" && panel.outputMode, "panel");
+    const onConsole = showing(consoleView);
+    assert.equal(onConsole.k === "view" && onConsole.interactive, true);
+    const onWall = showing(wallView);
+    assert.equal(onWall.k === "view" && onWall.interactive, false);
+    // A view with no surface written is a wall view: nothing is live by inference.
+    const { surface: _unset, ...legacy } = consoleView;
+    const onLegacy = showing(legacy);
+    assert.equal(onLegacy.k === "view" && onLegacy.interactive, false);
+  });
 
+  test("a preview of a console is never interactive: a picture of a screen must not fire its buttons", () => {
     const preview = resolveScreen(input({
       displayId: "preview-v1",
       previewViewId: "v1",
       state: stageState({
-        outputs: [{ id: "preview-v1", name: "Not a screen", viewId: "v1", mode: "panel" }] as unknown as Output[],
+        views: [{ id: "v1", name: "Booth", kind: "custom", surface: "console", layout: { canvas: { width: 1920 }, objects: [] } }] as unknown as View[],
       }),
     }));
-    assert.equal(preview.k === "view" && preview.outputMode, undefined);
+    assert.equal(preview.k === "view" && preview.isPreview, true);
+    assert.equal(preview.k === "view" && preview.interactive, false);
   });
 
   test("carries the output's own allowHls, but a preview always reads allowed", () => {
@@ -544,6 +555,30 @@ describe("the view kind", () => {
       }),
     }));
     assert.equal(preview.k === "view" && preview.allowHls, true, "a preview must always read HLS as allowed");
+  });
+
+  test("a real screen is its own id and message groups; a preview is no screen and has none", () => {
+    // What a Messages widget follows, and what the alert overlay draws for. A
+    // Screens-card iframe is a picture of another screen: if it answered for that
+    // screen's groups, looking at the Screens page would draw alerts into every
+    // thumbnail and offer replies for groups the thumbnail is not in.
+    const groups = ["g-00000001", "g-00000002"];
+    const state = stageState({
+      resolvedByOutput: { "display-1": resolvedOutput({ groups }), "preview-v1": resolvedOutput({ groups }) },
+    });
+    assert.deepEqual(ownScreen({ state, displayId: "display-1", previewViewId: null }), { outputId: "display-1", groups });
+    assert.equal(
+      ownScreen({ state, displayId: "preview-v1", previewViewId: "v1" }),
+      null,
+      "a preview answered for a screen's groups",
+    );
+  });
+
+  test("ownScreen: a page whose id matches no output is a screen in no group, and a preview is none", () => {
+    const state = stageState();
+    assert.deepEqual(ownScreen({ state, displayId: "nowhere", previewViewId: null }), { outputId: "nowhere", groups: [] });
+    assert.equal(ownScreen({ state, displayId: "preview-v1", previewViewId: "v1" }), null);
+    assert.deepEqual(ownScreen({ state: null, displayId: "display-1", previewViewId: null }), { outputId: "display-1", groups: [] });
   });
 
   test("a preview of a View that no longer exists says so, instead of drawing slots", () => {

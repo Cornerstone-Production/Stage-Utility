@@ -40,6 +40,7 @@ import {
 
   isCountedItem,
 } from "./overview-data";
+import { plural } from "@main/services/plural";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -355,7 +356,7 @@ export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, 
     // figure uses. This averaged every sample instead, which is the bug that
     // function was written to fix — the arrival ramp and the emptying-room
     // taper are both long and both near-empty, so the mean lands BELOW the
-    // recorded low. On the 17 Sep recording the pasted report said "Avg in-room
+    // recorded low. On one recorded service the pasted report said "Avg in-room
     // 781" for a service whose Lowest was 933, under a card reading 1,164. The
     // card was fixed and this copy drifted on.
     const avgOcc = averageOccupancy(att);
@@ -1899,8 +1900,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             <h3 className="text-body font-semibold text-fg">Recorded services</h3>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span data-list-showing className="text-caption2 text-fg-subtle">
-                Showing {fmtMonth(viewMonth ?? day?.slice(0, 7) ?? null)} · {monthServices.length}
-                {` service${monthServices.length === 1 ? "" : "s"}`}
+                Showing {fmtMonth(viewMonth ?? day?.slice(0, 7) ?? null)} · {plural(monthServices.length, "service")}
               </span>
               <ExportPopover
                 from={expFrom}
@@ -2001,7 +2001,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             // A read that FAILED says so, rather than borrowing the sentence
             // for a service that genuinely recorded no sound.
             const shownFigures = splRow === "error" ? markSoundUnavailable(figures) : figures;
-            const itemCount = `${s.items.length} item${s.items.length === 1 ? "" : "s"}`;
+            const itemCount = plural(s.items.length, "item");
             // Not a new ROW_COLUMNS figure \u2014 that grid dashes out anything a
             // row has nothing for, which would put a dash under "Baptized" on
             // every ordinary Sunday. A service with none gains nothing at

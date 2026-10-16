@@ -238,6 +238,150 @@ export async function settle(): Promise<void> {
   });
 }
 
+/** How long a test waits for something asynchronous to appear, in ms. */
+export const WAIT_TIMEOUT_MS = 5000;
+
+// The real clock and timer, taken when this module loads. A test that mocks
+// timers or Date.now afterwards must not be able to stop a wait from polling or
+// from giving up, which Testing Library's own waitFor cannot promise: it polls
+// with setInterval, and a mocked one never fires.
+const realSetTimeout = globalThis.setTimeout;
+const realNow = Date.now.bind(Date);
+
+/**
+ * Wait until `check` stops throwing, then return what it returned.
+ *
+ * For asserting that something PRESENT arrived after a fetch, a server answer or
+ * a re-render. A fixed number of `settle()` calls is a guess about how many
+ * macrotask turns that chain takes; on a laptop the guess holds and on a CI
+ * runner it does not, and the assertion then reads a half-built page. This waits
+ * for the thing itself:
+ *
+ *   await eventually(() => assert.ok(screen.getByText("Saved")));
+ *   const button = await eventually(() => screen.getByRole("button", { name: "Add" }));
+ *
+ * It looks at once, then every 10 ms, each gap spent inside act() so React's work
+ * is flushed. `check` may be async. The timeout costs nothing when the thing arrives; it only bounds
+ * how long a real failure takes to report, and the failure is `check`'s own last
+ * error, not a bare timeout.
+ *
+ * A failing check's assert builds its message from its operands, so a check
+ * must not hand a DOM node to `assert.equal`: node:assert inspects it and, on a
+ * jsdom tree, does not finish. Coerce to a boolean or a string first
+ * (`=== null`, `!!`, `.textContent`).
+ *
+ * Not for absence. "Nothing was written" or "no dialog opened" cannot be waited
+ * into being true: the wait passes at the first instant it is, and proves
+ * nothing about a moment later. Those keep a `settle()` and then assert.
+ *
+ * Nor for "exactly one". It returns at the first look that passes, so a second
+ * write behind the first would go unseen; wait for the first, then assert the
+ * count plainly.
+ *
+ * The import is inside the function because Testing Library binds to `document`
+ * when it loads, so a file must import it after installDom, and this module is
+ * imported before.
+ */
+export async function eventually<T>(check: () => T, timeout: number = WAIT_TIMEOUT_MS): Promise<Awaited<T>> {
+  const { act } = await import("@testing-library/react");
+  const deadline = realNow() + timeout;
+  for (;;) {
+    try {
+      // `check` may be async (it may open a tooltip, say, to read it): a rejection
+      // is a failed look like a throw is.
+      return await check();
+    } catch (err) {
+      if (realNow() >= deadline) throw err;
+    }
+    await act(async () => {
+      await new Promise((resolve) => realSetTimeout(resolve, 10));
+    });
+  }
+}
+
+/** A fetch stub's own tally of the reads it was asked for and the answers a caller took. */
+export interface ReadLedger {
+  /** A read has started. */
+  begin: () => void;
+  /** The answer to a read. It counts as taken the first time its body is read. */
+  answer: <R extends { json: () => Promise<unknown>; text: () => Promise<string> }>(res: R) => R;
+  /** A read that failed before it could be answered; nobody is going to take it. */
+  failed: () => void;
+  /** Reads begun whose answer has not been taken. */
+  pending: () => number;
+  /** For eventually(): throws unless every read begun has been taken. */
+  landed: () => void;
+  /** Start again, for a test that installs a fresh stub. */
+  reset: () => void;
+}
+
+/**
+ * Count what a fetch stub has been asked, and what its callers have taken.
+ *
+ * A test that flips what the stub answers, or ends, while a read is still on its
+ * way is wrong in a way that depends on the machine: the late answer lands in the
+ * next step (a good answer after a failure ends its streak, so the failure logs
+ * twice), or in the next test (a clock reading it never asked for), or after the
+ * DOM has gone ("window is not defined", failing the file with every test green).
+ * The cure is to wait for the reads that were begun, not for a number of turns:
+ *
+ *   const reads = readLedger();
+ *   globalThis.fetch = async (url) => {
+ *     reads.begin();
+ *     return reads.answer(ok(body));
+ *   };
+ *   ...
+ *   await eventually(reads.landed);
+ *
+ * "Taken" is when a caller reads the body, which is after any delay between the
+ * stub and the caller, so the tally cannot say a read has landed before the page
+ * has it. Leave the live-update subscription out (isPlumbing): nobody waits on it.
+ */
+export function readLedger(): ReadLedger {
+  let begun = 0;
+  let taken = 0;
+  return {
+    begin: () => void (begun += 1),
+    answer(res) {
+      let counted = false;
+      const take = () => {
+        if (!counted) taken += 1;
+        counted = true;
+      };
+      const { json, text } = res;
+      return { ...res, json: async () => (take(), json()), text: async () => (take(), text()) };
+    },
+    failed: () => void (taken += 1),
+    pending: () => begun - taken,
+    landed() {
+      if (begun !== taken) throw new Error(`${begun - taken} read(s) still on their way`);
+    },
+    reset() {
+      begun = 0;
+      taken = 0;
+    },
+  };
+}
+
+/**
+ * Whether a request is the live-update stream's own traffic rather than
+ * something the component under test did.
+ *
+ * api.ts reports a client's channel set with `POST /api/events/subscribe`, on a
+ * 200 ms debounce that fires after every subscribe AND unsubscribe, so one lands
+ * whenever a component mounts, unmounts or a previous test's cleanup runs. On a
+ * laptop that is usually between tests; on a slow runner it lands mid-test. A
+ * fetch stub that records "every request that is not a GET" as the component's
+ * writes then counts it, and one that hands out scripted replies in write order
+ * gives it a reply meant for the real write.
+ *
+ * Answer these apart (200 `{}`), never record them as writes, never let them take
+ * a scripted reply:
+ *
+ *   if (isPlumbing(url)) return ok({});
+ */
+export const isPlumbing = (url: string): boolean => url.startsWith("/api/events");
+
 /**
  * The whole body of a component test file's final `after()` hook.
  *

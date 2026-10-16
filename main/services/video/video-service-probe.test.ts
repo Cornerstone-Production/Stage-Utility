@@ -12,6 +12,7 @@ import { beforeEach, test, type TestContext } from "node:test";
 
 import { captureConsole } from "../fixtures/capture-console.js";
 import { fakeRelay } from "../fixtures/fake-relay.js";
+import { within } from "../fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-probe-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -55,9 +56,10 @@ const readyPath = (name: string): RelayPath => ({
   readers: 1,
 });
 
-const settle = async (): Promise<void> => {
-  for (let i = 0; i < 30; i++) await new Promise((resolve) => setImmediate(resolve));
-};
+/** Every camera-check round the last call started has landed. A round reads
+ *  the feed file and the secrets store, so no fixed count of event-loop turns
+ *  covers it under load. */
+const settle = (): Promise<void> => within(videoService.whenProbesIdle(), "the camera-check rounds to land");
 
 /** A feed the service owns, with the password in the real secrets store. */
 async function addPull(name: string, url: string, username = "admin", password = PASSWORD): Promise<string> {

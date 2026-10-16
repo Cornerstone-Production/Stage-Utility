@@ -12,6 +12,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { KNOWN_DAEMON_LABELS } from "./launchd-label.js";
 import { selfRecovers } from "./relaunch.js";
 import type { InstallKind } from "./install-kind.js";
 
@@ -56,8 +57,11 @@ describe("a supervisor in the environment beats the file layout", () => {
     assert.equal(selfRecovers("git", { JOURNAL_STREAM: "8:12345" }), true);
   });
 
-  it("a git checkout under launchd self-recovers", () => {
-    assert.equal(selfRecovers("git", { XPC_SERVICE_NAME: "com.cornerstone.stage-utility" }), true);
+  it("a git checkout under launchd self-recovers, under either daemon label", () => {
+    // Installs made before the label rename keep the old one, so both are live.
+    for (const label of KNOWN_DAEMON_LABELS) {
+      assert.equal(selfRecovers("git", { XPC_SERVICE_NAME: label }), true, label);
+    }
   });
 
   it("XPC_SERVICE_NAME=0 does NOT count", () => {

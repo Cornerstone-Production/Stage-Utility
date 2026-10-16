@@ -50,6 +50,7 @@ import { cueLive } from "./cue-live.js";
 import { parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
+import { plural } from "./plural.js";
 
 /** Why a call was refused. Each maps to one sentence the caller can speak. */
 export type CueBlockReason =
@@ -662,7 +663,7 @@ class AutomationEngine {
     if (last !== undefined && rule.cooldownSec > 0) {
       const remaining = Math.ceil((last + rule.cooldownSec * 1000 - now) / 1000);
       if (remaining > 0) {
-        return blocked("cooldown", `${wanted} just ran — try again in ${remaining} second${remaining === 1 ? "" : "s"}`);
+        return blocked("cooldown", `${wanted} just ran — try again in ${plural(remaining, "second")}`);
       }
     }
 

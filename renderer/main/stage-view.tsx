@@ -14,12 +14,12 @@ import { DisplayServiceCue } from "./servicecue-display";
 import { SplRundownView } from "./spl-rundown-view";
 import { CalendarView } from "./calendar-view";
 import { LayoutRenderer } from "./layout-renderer";
-import { capabilityLive, contextForOutput } from "./render-context";
 import { viewSurface, KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
 import { isPreviewSlug, previewOutputId, previewViewIdFromSlug } from "./preview-url";
-import { resolveScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
+import { ownScreen, resolveScreen, type OwnScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
+import { MessageAlertOverlay } from "./message-alert-overlay";
 import { anyPlaying, drainReportsInTime, onAnyPlayingChange, VIDEO_HEARTBEAT_MS } from "./video/playback-reports";
 
 // Resolve which display this kiosk window is showing. Prefers the clean path
@@ -588,6 +588,10 @@ export function StageView() {
   // instead of leaving it dark.
   if (!state) return <KioskError message="State is unavailable." />;
 
+  // Which screen this page is, worked out once for what it draws and for the alert
+  // over it. Null on a preview, which is a picture of a screen and not one.
+  const own = ownScreen({ state, displayId, previewViewId });
+
   const body = ((): ReactNode => {
     switch (screen.k) {
       case "unrouted":
@@ -599,7 +603,7 @@ export function StageView() {
       case "empty":
         return <KioskEmpty state={state} screen={screen} />;
       case "view":
-        return renderView(screen, state, previewViewId, previewDraftSlots);
+        return renderView(screen, state, previewViewId, previewDraftSlots, own);
       default: {
         const _never: never = screen;
         void _never;
@@ -608,7 +612,15 @@ export function StageView() {
     }
   })();
 
-  return <StageErrorBoundary>{body}</StageErrorBoundary>;
+  // A stage-message alert draws over whatever this screen shows, whatever the
+  // layout or the kind. Drawn below the blackout return above, so a blacked-out
+  // screen stays black.
+  return (
+    <>
+      <StageErrorBoundary>{body}</StageErrorBoundary>
+      {own && <MessageAlertOverlay groups={own.groups} />}
+    </>
+  );
 }
 
 /**
@@ -624,8 +636,9 @@ function renderView(
   state: StageState,
   previewViewId: string | null,
   previewDraftSlots: Slot[] | null,
+  own: OwnScreen | null,
 ): ReactNode {
-  const { kind, view: activeView, displayId, isPreview, outputMode, allowHls } = screen;
+  const { kind, view: activeView, displayId, isPreview, interactive, allowHls } = screen;
 
   switch (kind) {
     // Custom-layout views render the visual-editor layout below the same kiosk top
@@ -641,11 +654,11 @@ function renderView(
         <div className="flex flex-col h-[100dvh] overflow-hidden kiosk-surface pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
           <ScreenTopBar state={state} screen={screen} />
           <div className="flex-1 min-h-0">
-            {/* Controls are live only where the operator deliberately made
-                them so. A screen is a read-only display unless it was set to
-                panel mode, and a "/preview-…" iframe is always a display —
-                otherwise the Screens page could advance the service by being
-                looked at, since every card renders one. */}
+            {/* Controls are live only on a screen whose view is a console. A
+                screen showing anything else is read-only, and a "/preview-…"
+                iframe is always a display — otherwise the Screens page could
+                advance the service by being looked at, since every card renders
+                one. */}
             <LayoutRenderer
               layout={layout}
               // The View this layout belongs to, which seeds the embed chain: an
@@ -654,9 +667,12 @@ function renderView(
               // is. Null would read as "no ancestor" and lose both.
               viewId={activeView?.id ?? null}
               ndiSource={activeView?.ndiSource ?? null}
-              interactive={capabilityLive(contextForOutput(outputMode, isPreview), "control")}
+              interactive={interactive}
               surface={viewSurface(activeView)}
               allowHls={allowHls}
+              // Which screen this is and the message groups it is in; null on a
+              // preview, which is a picture of a screen and not one.
+              screen={own}
             />
           </div>
         </div>
@@ -720,7 +736,7 @@ function renderView(
             // The same answer every control on every surface uses. False on a
             // wall display, so it gets no chevrons and cannot be left on the
             // wrong month by a passer-by.
-            interactive={capabilityLive(contextForOutput(outputMode, isPreview), "control")}
+            interactive={interactive}
           />
         </KioskFrame>
       );

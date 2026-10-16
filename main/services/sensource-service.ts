@@ -112,10 +112,47 @@ import { Ticker, type TickOutcome } from "./ticker.js";
 import type { PeopleCountDTO, PeopleHistoryPoint, PeopleZoneCount } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { StatusIntegration } from "./integration-base.js";
+import { pinToOrigin } from "./pinned-origin.js";
 
 
 const AUTH_URL = "https://auth.sensourceinc.com/oauth/token";
 const API_BASE = "https://vea.sensourceinc.com/api";
+const AUTH_ORIGIN = new URL(AUTH_URL).origin;
+const API_ORIGIN = new URL(API_BASE).origin;
+
+declare const SENSOURCE_AUTH_URL: unique symbol;
+declare const SENSOURCE_API_URL: unique symbol;
+/** The token endpoint, the only URL the client id and secret are sent to. Made
+ *  only by `senSourceAuthUrl`; a plain string does not type-check at the fetch. */
+export type SenSourceAuthUrl = string & { readonly [SENSOURCE_AUTH_URL]: true };
+/** A Vea API URL, the only kind the bearer token is sent to. Made only by
+ *  `senSourceApiUrl`. */
+export type SenSourceApiUrl = string & { readonly [SENSOURCE_API_URL]: true };
+
+export function senSourceAuthUrl(): SenSourceAuthUrl {
+  return AUTH_URL as SenSourceAuthUrl;
+}
+
+/** `path` is the code's own, with a leading slash and any query already encoded. */
+export function senSourceApiUrl(path: string): SenSourceApiUrl {
+  return `${API_BASE}${path}` as SenSourceApiUrl;
+}
+
+/**
+ * The ONLY request to Vea's token host: it carries the API client id and secret.
+ * The origin is re-pinned here, at the point the credential is attached, so it
+ * holds even if a future caller hands over a URL that went around the brand. The
+ * other fetch in this file is `veaFetch`, for the API host; the guard in
+ * pinned-fetch-sites.test.ts lists both.
+ */
+export function senSourceAuthFetch(url: SenSourceAuthUrl, init: RequestInit): Promise<Response> {
+  return fetch(pinToOrigin(AUTH_ORIGIN, url, "sensource"), init);
+}
+
+/** The ONLY request to the Vea API host: it carries the bearer token. */
+export function veaFetch(url: SenSourceApiUrl, init: RequestInit): Promise<Response> {
+  return fetch(pinToOrigin(API_ORIGIN, url, "sensource"), init);
+}
 const REQUEST_TIMEOUT_MS = 15000;
 /** Refresh the token this far before it actually expires. */
 const TOKEN_SKEW_MS = 60_000;
@@ -1686,7 +1723,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
   private async exchangeToken(clientId: string, clientSecret: string): Promise<string> {
     let res: Response;
     try {
-      res = await fetch(AUTH_URL, {
+      res = await senSourceAuthFetch(senSourceAuthUrl(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1795,7 +1832,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
   private async apiGet<T>(path: string, carry?: { auth: string; tokenId: number }): Promise<T> {
     const auth = carry?.auth ?? (await this.authHeader());
     const tokenId = carry?.tokenId ?? (this.cfg?.apiToken ? 0 : this.tokenGen);
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await veaFetch(senSourceApiUrl(path), {
       headers: { "Content-Type": "application/json", Authorization: auth },
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });

@@ -42,6 +42,11 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed(
   "action-button": ["control"],
   // A cue with its state on it. A control on a panel; a readout on a wall.
   "cue-button": ["control"],
+  // The stage messages for a screen's groups: a readout on a wall, and on a panel
+  // or console the quick replies are live buttons.
+  messages: ["readout", "control"],
+  // Sends messages and ends alerts: only a control, with nothing to read on a wall.
+  "message-composer": ["control"],
 
   // ── Editable. These hold the operator's own work product. ───────────────
   notes: ["editable"],

@@ -4,6 +4,8 @@ Every integration is optional and configured under **Settings → Integrations**
 where each shows its own connection state. Most also drive a custom-layout object
 you can place on a screen.
 
+![Settings → Integrations: the connected integrations above, the ones not set up below](../images/integrations-overview.png)
+
 **Planning Center is the exception** — it supplies the plan, the people and the
 countdown, so the app needs it.
 
@@ -64,6 +66,17 @@ and never the values.
 A box upgrading from a build that kept a credential in `settings.json` moves it
 into the secret store on the next start, and says how many it moved on `/log`.
 
+A stored credential is only ever sent to its own vendor. Planning Center,
+SenSource (its token host and its Vea API host separately), SafeSpace and
+ProVideoPlayer each make credentialed requests through one function that fixes the
+request onto the vendor's origin (for ProVideoPlayer, the host and port you
+configured). Planning Center refuses a request URL it cannot place on its own host.
+For the others, a URL that would have gone anywhere else is sent to the vendor's
+origin instead, and a `BUG:` line on `/log` under the integration's tag
+(`[sensource]`, `[safespace]`, `[pvp]`) names the origins, never a path. The
+functions and their origins are listed in
+[Code scanning](../reference/code-scanning.md#credentialed-requests).
+
 ## Adding a new integration
 
 REAPER is the cleanest end-to-end template for a polling integration — see
@@ -85,8 +98,9 @@ REAPER is the cleanest end-to-end template for a polling integration — see
 4. SSE hydrate + `GET /api/<id>/status` in `remote-server.ts`; in `api.ts`, an
    `invoke` case and its `IpcChannel` member (skip either and `tsc` fails).
 5. Live hook `renderer/main/use-<id>-state.ts`, built on `useStatusChannel`;
-   layout object render case + inspector; `object-integration.ts` mapping; a place
-   in `CATEGORY_ORDER` in `integrations-panel.tsx`.
+   layout object render case + inspector, with the object's `integration` field in
+   `layout-objects.ts` (it dims the palette entry until the integration is set up);
+   a place in `CATEGORY_ORDER` in `integrations-panel.tsx`.
 
 Settings → Integrations is a grid of cards, one per integration, showing its name,
 what it is pointed at and its connection. All of them are on the page at all
@@ -158,9 +172,9 @@ declares itself with `addChannelDemandSource`.
 ### The snapshot version
 
 A status channel broadcasts only when its value changes, and a display hydrates
-with a one-shot read alongside it. If the push landed first, the older read used
-to overwrite it — and with no further broadcast until the next real change, the
-wrong value stood for as long as the building stayed quiet.
+with a one-shot read alongside it. If the push lands first, an older read must not
+overwrite it: with no further broadcast until the next real change, the wrong value
+would stand for as long as the building stayed quiet.
 
 So every status snapshot carries `rev`, a counter the integration advances only
 when a frame actually goes out. The hydrate read (`getLatest()`) and the pushed

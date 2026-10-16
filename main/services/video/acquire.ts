@@ -13,13 +13,13 @@
 // only "is a runnable file on disk, and how did it get there."
 
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
 
 import { getUserDataPath } from "../app-paths.js";
+import { commitPart, downloadWatchdog, sha256OfFile, streamToPart, type DownloadTimeouts } from "../capped-download.js";
 import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
 import { ASSETS, MEDIAMTX_DOWNLOAD_BYTES, MEDIAMTX_VERSION, assetFor, downloadUrlFor, type MediaMtxAsset } from "./mediamtx-pin.js";
@@ -39,49 +39,7 @@ const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
  *  idle: MAX_DOWNLOAD_BYTES bounds the size, this bounds the time. */
 const DOWNLOAD_TOTAL_TIMEOUT_MS = 60 * 60 * 1000;
 
-/** The timer functions the watchdog uses, injectable so a test can see which
- *  timers are live. */
-interface WatchdogTimers {
-  setTimeout: (fn: () => void, ms: number) => NodeJS.Timeout;
-  clearTimeout: (timer: NodeJS.Timeout) => void;
-}
-
-interface DownloadTimeouts {
-  idleMs: number;
-  totalMs: number;
-  /** Replaces the global timer functions; for tests. */
-  timers?: WatchdogTimers;
-}
-
 const DEFAULT_DOWNLOAD_TIMEOUTS: DownloadTimeouts = { idleMs: DOWNLOAD_IDLE_TIMEOUT_MS, totalMs: DOWNLOAD_TOTAL_TIMEOUT_MS };
-
-/** An abort signal that fires after `idleMs` without a `touch()`, or after
- *  `totalMs` outright, carrying the reason as its Error. `stop()` clears both
- *  timers. Both are unref'd as well, so a `stop()` that was missed can never
- *  hold the process open for the length of the ceiling (an hour). */
-function downloadWatchdog({ idleMs, totalMs, timers }: DownloadTimeouts): { signal: AbortSignal; touch: () => void; stop: () => void } {
-  const t = timers ?? { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (timer) => clearTimeout(timer) };
-  const controller = new AbortController();
-  const abort = (why: string): void => controller.abort(new Error(why));
-  const totalTimer = t.setTimeout(() => abort(`still going after ${totalMs / 1000} s`), totalMs);
-  totalTimer.unref();
-  let idleTimer: NodeJS.Timeout | null = null;
-  const clearIdle = (): void => {
-    if (idleTimer) t.clearTimeout(idleTimer);
-    idleTimer = null;
-  };
-  const touch = (): void => {
-    clearIdle();
-    idleTimer = t.setTimeout(() => abort(`no data for ${idleMs / 1000} s`), idleMs);
-    idleTimer.unref();
-  };
-  const stop = (): void => {
-    t.clearTimeout(totalTimer);
-    clearIdle();
-  };
-  touch();
-  return { signal: controller.signal, touch, stop };
-}
 
 export function relayDir(): string {
   return path.join(getUserDataPath(), "video-relay");
@@ -140,12 +98,6 @@ async function usableBinary(exePath: string): Promise<boolean> {
   }
 }
 
-async function sha256OfFile(filePath: string): Promise<string> {
-  const hash = createHash("sha256");
-  for await (const chunk of fs.createReadStream(filePath)) hash.update(chunk as Buffer);
-  return hash.digest("hex");
-}
-
 type DownloadResult = { ok: true } | { ok: false; reason: string };
 
 /** Streams the response to `<archive>.part` and refuses past
@@ -162,13 +114,13 @@ async function downloadToPart(
 ): Promise<DownloadResult> {
   const watchdog = downloadWatchdog(timeouts);
   try {
-    return await streamToPart(url, partPath, fetchImpl, onProgress, totalHint, watchdog);
+    return await fetchToPart(url, partPath, fetchImpl, onProgress, totalHint, watchdog);
   } finally {
     watchdog.stop();
   }
 }
 
-async function streamToPart(
+async function fetchToPart(
   url: string,
   partPath: string,
   fetchImpl: typeof fetch,
@@ -188,30 +140,18 @@ async function streamToPart(
   const declared = Number(response.headers.get("content-length"));
   const total = Number.isFinite(declared) && declared > 0 ? declared : totalHint;
 
-  const file = await fsp.open(partPath, "w");
-  const reader = response.body.getReader();
-  let received = 0;
   try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      received += value.byteLength;
-      if (received > MAX_DOWNLOAD_BYTES) {
-        // Cancels the stream so the transfer stops rather than running to
-        // completion in the background.
-        await reader.cancel().catch(() => {});
-        return { ok: false, reason: `download of ${url} exceeded ${MAX_DOWNLOAD_BYTES} bytes; refused` };
-      }
-      await file.write(value);
-      watchdog.touch();
-      onProgress?.(received, total);
-    }
+    const written = await streamToPart(response.body, partPath, {
+      maxBytes: MAX_DOWNLOAD_BYTES,
+      onChunk: (_chunk, received) => {
+        watchdog.touch();
+        onProgress?.(received, total);
+      },
+    });
+    if (!written.ok) return { ok: false, reason: `download of ${url} exceeded ${MAX_DOWNLOAD_BYTES} bytes; refused` };
     return { ok: true };
   } catch (err) {
     return { ok: false, reason: `download of ${url} failed: ${errorMessage(err)}` };
-  } finally {
-    reader.releaseLock();
-    await file.close();
   }
 }
 
@@ -468,6 +408,6 @@ async function ensureAsset(asset: MediaMtxAsset, downloadsDir: string, opts: Ens
       assetName: asset.name,
     };
   }
-  await fsp.rename(partPath, archivePath);
+  await commitPart(partPath, archivePath);
   return extractAndFinish(archivePath, downloadsDir, versionDir, asset, exePath, extract);
 }

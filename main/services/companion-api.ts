@@ -121,6 +121,16 @@ export interface PressLocation {
   col: number;
 }
 
+/**
+ * Why a location cannot be a Companion coordinate, or null when it can: whole
+ * numbers, none negative. One check for the automation action and for press(),
+ * so the two cannot come to accept different shapes.
+ */
+export function coordinateProblem(loc: PressLocation): string | null {
+  if ([loc.page, loc.row, loc.col].every((n) => Number.isInteger(n) && n >= 0)) return null;
+  return `p${loc.page} r${loc.row} c${loc.col} is not a Companion coordinate — whole numbers, none negative`;
+}
+
 export interface PressResult {
   ok: boolean;
   /** HTTP status, or null when the request never got an answer. */
@@ -185,13 +195,8 @@ class CompanionApi {
     // is a button that cannot exist; a negative or non-numeric one would be
     // pasted into the path. Refused here as well as in the automation action,
     // because this is what every caller reaches Companion through.
-    if (![loc.page, loc.row, loc.col].every((n) => Number.isInteger(n) && n >= 0)) {
-      return {
-        ok: false,
-        status: null,
-        detail: `p${loc.page} r${loc.row} c${loc.col} is not a Companion coordinate — whole numbers, none negative`,
-      };
-    }
+    const problem = coordinateProblem(loc);
+    if (problem) return { ok: false, status: null, detail: problem };
     const where = `p${loc.page} r${loc.row} c${loc.col}`;
     // Inside the try, like the other two: getTarget reaches the config store,
     // and a rejection out of a method the engine calls stops the engine.
@@ -331,7 +336,7 @@ class CompanionApi {
    * Read one variable a MODULE publishes for a connection.
    *
    * `/api/variable/<connection label>/<name>/value`, which is the other half of
-   * what `$(VCR-Overhead-Light:power_state)` means inside Companion. Same
+   * what `$(Booth-Overhead-Light:power_state)` means inside Companion. Same
    * contract as readCustomVariable in every respect — never throws, never
    * caches, three second timeout — because cue-states.ts batches the two
    * together and a binding must not behave differently for having named a
@@ -489,11 +494,9 @@ class CompanionApi {
     // "unavailable" on every 4.x install reads as a fault. Any OTHER failure is
     // said out loud rather than dropped: the export just succeeded, so a
     // connection list that did not is something the operator has not been told.
-    const health = connections.ok
-      ? `, ${connectionSentence(connections.health)}`
-      : connections.unsupported
-        ? ""
-        : `, connection status unavailable: ${connections.reason}`;
+    let health = "";
+    if (connections.ok) health = `, ${connectionSentence(connections.health)}`;
+    else if (!connections.unsupported) health = `, connection status unavailable: ${connections.reason}`;
     return {
       ok: true,
       message:

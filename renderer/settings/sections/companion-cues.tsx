@@ -64,6 +64,7 @@ import {
   toast,
 } from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
+import { plural } from "@main/services/plural";
 
 // ── Shapes the server sends ───────────────────────────────────────────────────
 
@@ -171,7 +172,7 @@ export function relativeSince(iso: string | null, nowMs: number): string {
   let best = units[0]!;
   for (const unit of units) if (secs >= unit[0]) best = unit;
   const n = Math.round(secs / best[0]);
-  return `${n} ${best[1]}${n === 1 ? "" : "s"} ago`;
+  return `${plural(n, best[1])} ago`;
 }
 
 /** The pill's words, PURE — one place, so the row and the editor cannot disagree. */
@@ -507,8 +508,8 @@ function ButtonPickerDialog({
  */
 export function importFooterLabel(pairs: number, buttons: number): string {
   const parts: string[] = [];
-  if (pairs > 0) parts.push(`${pairs} pair${pairs === 1 ? "" : "s"}`);
-  if (buttons > 0) parts.push(`${buttons} button${buttons === 1 ? "" : "s"}`);
+  if (pairs > 0) parts.push(plural(pairs, "pair"));
+  if (buttons > 0) parts.push(plural(buttons, "button"));
   return parts.length === 0 ? "Import" : `Import ${parts.join(" and ")}`;
 }
 
@@ -695,7 +696,7 @@ export function ImportPairsDialog({
    * button's own inferred source labelled as such.
    *
    * The inferred one is FIRST and says so. An operator looking at
-   * "VCR-Overhead-Light:power_state (inferred)" can tell at a glance that
+   * "Booth-Overhead-Light:power_state (inferred)" can tell at a glance that
    * nothing has to be built in Companion for it to work, which is the whole
    * point of it being offered.
    */
@@ -740,7 +741,7 @@ export function ImportPairsDialog({
         { pairs: send, buttons: sendButtons },
       );
       // Both halves reported. "12 created" alone hides the four that clashed.
-      if (r.created.length) toast.success(`Created ${r.created.length} cue${r.created.length === 1 ? "" : "s"}`);
+      if (r.created.length) toast.success(`Created ${plural(r.created.length, "cue")}`);
       if (r.skipped.length) toast.error(`Skipped ${r.skipped.length}: ${r.skipped.map((s) => s.name).join(", ")}`);
       if (!r.created.length && !r.skipped.length) toast.error("Nothing was selected");
       onImported();
@@ -1080,7 +1081,7 @@ export function CueAccessCard() {
   return (
     <Collapsible
       label="Calling cues"
-      summary={`${tokens.length} token${tokens.length === 1 ? "" : "s"}`}
+      summary={plural(tokens.length, "token")}
       className="su-card px-4 py-2.5"
     >
       <div className="flex flex-col gap-2 pt-2">

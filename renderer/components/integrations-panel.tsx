@@ -711,10 +711,11 @@ export function IntegrationDialog({
                     placeholder={field.placeholder ?? ""}
                     // w-80, where a number or a select still gets w-44. What goes
                     // in here is an email, a host, a channel or a token, and 176px
-                    // cut `hstreuber@cornerstonelife.com` 31px short — an ordinary
-                    // work address, scrolled out of sight in the field an operator
-                    // is trying to check. 320px holds a 44-character address with
-                    // room; the row had 470px going spare to give it.
+                    // cut a long address such as `firstname.lastname@example.org`
+                    // short — an ordinary work address, scrolled out of sight in the
+                    // field an operator is trying to check. 320px holds a
+                    // 44-character address with room; the row had 470px going spare
+                    // to give it.
                     className="w-80 max-sm:w-full"
                     aria-label={field.label}
                   />

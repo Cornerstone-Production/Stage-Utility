@@ -20,15 +20,16 @@ import {
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
-import { isLayoutShape } from "../../types/views.js";
+import { isLayoutShape, type ViewSurface } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
-import { LayoutConflictError, SlotsNotFoundError, stageController } from "../stage-controller.js";
+import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewShownError } from "../stage-controller.js";
 import type { CalendarSelection } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
 import { datedExportFilename } from "../export-filename.js";
+import { answerScreenWriteFailure, readCreateScreenBody, refuseMode } from "./screen-write.js";
 
 /**
  * An untrusted body value that is a list of `{ id, name }` strings.
@@ -379,8 +380,9 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     if (method === "POST" && viewDuplicateMatch) {
       const body = await readBody(req) as Record<string, unknown>;
       const name = typeof body.name === "string" ? body.name : undefined;
-      const state = await stageController.duplicateView(viewDuplicateMatch[1], name);
-      json(res, state, 201);
+      const { state, view } = await stageController.duplicateView(viewDuplicateMatch[1], name);
+      // The copy this call made, beside the state, as POST /api/outputs answers.
+      json(res, { ...state, viewId: view.id }, 201);
       return;
     }
 
@@ -411,6 +413,38 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // POST /api/views/:id/surface — { surface: "display" | "console", screens?:
+    // string[] }. Change what a view is for AND every screen showing it,
+    // together, as one call that is undone if it fails part-way: see
+    // stageController.setViewRole. `screens` is the screen ids the operator was
+    // shown; when they are no longer the screens it would change, a 409 carries
+    // the list as it is now, the way a stale layoutRev does. PATCH
+    // /api/views/:id with { surface } is the other call and still REFUSES a view
+    // that screens are showing, naming them. The checks here are the body's shape.
+    const viewSurfaceMatch = pathname.match(/^\/api\/views\/([^/]+)\/surface$/);
+    if (method === "POST" && viewSurfaceMatch) {
+      const body = await readBody(req) as Record<string, unknown>;
+      if (body.surface !== "display" && body.surface !== "console") {
+        error(res, 'body.surface ("display"|"console") required');
+        return;
+      }
+      const { screens } = body;
+      if (screens !== undefined && !(Array.isArray(screens) && screens.every((s) => typeof s === "string"))) {
+        error(res, "body.screens must be an array of screen ids");
+        return;
+      }
+      try {
+        json(res, await stageController.setViewRole(viewSurfaceMatch[1], body.surface, { screens: screens as string[] | undefined }));
+      } catch (err) {
+        if (err instanceof ViewScreensChangedError) {
+          json(res, { error: err.message, code: err.code, screens: err.screens }, 409);
+          return;
+        }
+        answerScreenWriteFailure(res, err);
+      }
+      return;
+    }
+
     // PATCH /api/views/:id — { name? } and/or { kind? } and/or { ndiSource? } and/or { layout? }
     const viewPatchMatch = pathname.match(/^\/api\/views\/([^/]+)$/);
     if (method === "PATCH" && viewPatchMatch) {
@@ -435,6 +469,14 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const serviceCueLayoutId = "serviceCueLayoutId" in body ? body.serviceCueLayoutId : body.scriptViewLayoutId;
       const hasServiceCueLayout = serviceCueLayoutId === null || typeof serviceCueLayoutId === "string";
       const hasHideChrome = typeof body.hideChrome === "boolean";
+      const hasShowInSidebar = typeof body.showInSidebar === "boolean";
+      // Present but not a boolean is a client error, not "nothing to change": a
+      // request that also names something valid would otherwise save the rest and
+      // quietly drop this, and the console stays listed with no word said.
+      if ("showInSidebar" in body && !hasShowInSidebar) {
+        error(res, "body.showInSidebar must be a boolean");
+        return;
+      }
       // Both calendar lists move together — a picker change sends the pair, so a
       // request carrying one and not the other is a client that has lost half its
       // state, not a partial update to honour.
@@ -451,24 +493,30 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       // as anything reading the code — or analysing it — can tell.
       const surface = body.surface === "console" ? "console" : body.surface === "display" ? "display" : null;
       const hasSurface = surface !== null;
-      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasServiceCueLayout && !hasSurface && !hasHideChrome && !calendarFilters) {
-        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.serviceCueLayoutId (string|null), body.hideChrome (boolean), or body.calendarSources + body.calendarTags (arrays) required");
+      if (!hasName && !hasKind && !hasNdiSource && !hasLayout && !hasSlotsLayout && !hasServiceCueLayout && !hasSurface && !hasHideChrome && !hasShowInSidebar && !calendarFilters) {
+        error(res, "body.name (string), body.kind, body.ndiSource (string|null), body.layout (object), body.slotsLayout (object|null), body.surface (\"display\"|\"console\"), body.serviceCueLayoutId (string|null), body.hideChrome (boolean), body.showInSidebar (boolean), or body.calendarSources + body.calendarTags (arrays) required");
+        return;
+      }
+      // Every refusal the kind and the surface can raise is decided here, before
+      // the first write, so a rename beside a refused body does not land alone. The
+      // view is judged as it will be once the whole body is applied.
+      const refused = stageController.viewPatchRefusal(id, {
+        ...(hasKind ? { kind: body.kind as ViewKind } : {}),
+        ...(hasSurface ? { surface } : {}),
+      });
+      if (refused) {
+        error(res, refused);
+        return;
+      }
+      const cueRefused = hasServiceCueLayout ? await stageController.serviceCueLayoutRefusal(serviceCueLayoutId as string | null) : null;
+      if (cueRefused) {
+        error(res, cueRefused);
         return;
       }
       let state = stageController.getState();
-      if (hasName) state = await stageController.renameView(id, body.name as string);
-      // Refused with its reason: converting a bound View names the screens it
-      // would strand rather than silently unbinding them.
-      if (hasSurface) {
-        try {
-          state = await stageController.setViewSurface(id, surface);
-        } catch (err) {
-          error(res, errorMessage(err));
-          return;
-        }
-      }
-      if (hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
-      if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
+      // The layout goes first: its revision check is the one refusal that can only
+      // be decided at the write, so a stale layoutRev must answer 409 before any
+      // other field in the body has landed.
       if (hasLayout) {
         // layoutRev is the revision the editor opened. Present = "only save if
         // nobody else has since"; absent = an explicit overwrite.
@@ -485,9 +533,18 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
           throw err;
         }
       }
+      if (hasName) state = await stageController.renameView(id, body.name as string);
+      // In the order that keeps the view valid at each step: a body making it a
+      // console takes the kind first (a console may only be a kind that can be
+      // one), and a body making it a wall view takes the surface first.
+      if (surface === "console" && hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
+      if (hasSurface) state = await stageController.setViewSurface(id, surface);
+      if (surface !== "console" && hasKind) state = await stageController.setViewKind(id, body.kind as ViewKind);
+      if (hasNdiSource) state = await stageController.setViewNdiSource(id, body.ndiSource as string | null);
       if (hasSlotsLayout) state = await stageController.setViewSlotsLayout(id, body.slotsLayout as SlotsLayout | null);
       if (hasServiceCueLayout) state = await stageController.setViewServiceCueLayout(id, serviceCueLayoutId as string | null);
       if (hasHideChrome) state = await stageController.setViewHideChrome(id, body.hideChrome as boolean);
+      if (hasShowInSidebar) state = await stageController.setViewShowInSidebar(id, body.showInSidebar as boolean);
       if (calendarFilters) {
         state = await stageController.setViewCalendarFilters(id, calendarFilters.sources, calendarFilters.tags);
         // Forced past the subscriber gate and NOT awaited. The operator who just
@@ -503,8 +560,18 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // DELETE /api/views/:id
     const viewDeleteMatch = pathname.match(/^\/api\/views\/([^/]+)$/);
     if (method === "DELETE" && viewDeleteMatch) {
-      const state = await stageController.deleteView(viewDeleteMatch[1]);
-      json(res, state);
+      // ?ifUnshown=1: only a view no screen shows. Removing a screen together with its
+      // view sends it, so a screen pointed at the view meanwhile is not left blank.
+      const ifUnshown = url.searchParams.get("ifUnshown") === "1";
+      try {
+        json(res, await stageController.deleteView(viewDeleteMatch[1], { ifUnshown }));
+      } catch (err) {
+        if (err instanceof ViewShownError) {
+          json(res, { error: err.message, code: err.code, screens: err.screens }, 409);
+          return;
+        }
+        throw err;
+      }
       return;
     }
 
@@ -585,12 +652,26 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // POST /api/outputs — { name?, viewId?, newView?, slug?, showInSidebar? }.
+    // newView ("wall"|"control") makes a blank view of that kind for the screen
+    // instead of viewId. All of it goes through stageController.createScreen,
+    // which validates before it writes. A `mode` is refused: the view decides.
     if (method === "POST" && pathname === "/api/outputs") {
       const body = await readBody(req) as Record<string, unknown>;
-      const name = typeof body.name === "string" ? body.name : undefined;
-      const viewId = typeof body.viewId === "string" ? body.viewId : null;
-      const { state } = await stageController.addOutput(name, viewId);
-      json(res, state, 201);
+      if (refuseMode(res, body)) return;
+      const input = readCreateScreenBody(body);
+      if ("error" in input) {
+        error(res, input.error);
+        return;
+      }
+      try {
+        const { state, output } = await stageController.createScreen(input);
+        // The id of the screen THIS call made, as a claim answers: a client that
+        // looked for "the new screen" in the state would find another operator's.
+        json(res, { ...state, outputId: output.id }, 201);
+      } catch (err) {
+        answerScreenWriteFailure(res, err);
+      }
       return;
     }
 
@@ -609,9 +690,12 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // PATCH /api/outputs/:id — { name? }, { viewId? } (string|null = routing),
     // { blackout? } (boolean = full black screen), { locked? }, { hideTopBar? }
     // (boolean = draw no kiosk top bar), { allowHls? } (boolean = whether a Video
-    // widget here may play over HLS), { textSize? } (number 50-300 = the ServiceCue
-    // text size this display shows), and/or { slug? } (string; "" clears the
-    // friendly URL alias)
+    // widget here may play over HLS), { groups? } (string[] = the message groups this
+    // screen belongs to), { textSize? } (number 50-300 = the ServiceCue
+    // text size this display shows), { rotation? } (0, 90, 180 or 270 = how far
+    // the Mac output helper turns the picture), { videoMode? } (a name from
+    // VIDEO_MODES = what a DeckLink port sends), and/or { slug? } (string; ""
+    // clears the friendly URL alias)
     const outputPatchMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
     if (method === "PATCH" && outputPatchMatch) {
       const id = outputPatchMatch[1];
@@ -623,37 +707,60 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       const hasLocked = typeof body.locked === "boolean";
       const hasHideTopBar = typeof body.hideTopBar === "boolean";
       const hasAllowHls = typeof body.allowHls === "boolean";
+      // Present at all counts, for the same reason as textSize below:
+      // setOutputGroups says what is wrong with a value that is not a list of
+      // group ids, where an ignored field would answer 200 having done nothing.
+      const hasGroups = "groups" in body;
       // Present at all counts: setOutputTextSize refuses a value that is not a
       // number from 50 to 300, so junk is a 400 with the reason rather than an
       // ignored field.
       const hasTextSize = "textSize" in body;
+      // Present at all counts, as with textSize: a rotation or a mode the server
+      // does not accept is a 400 naming what is accepted.
+      const hasRotation = "rotation" in body;
+      const hasVideoMode = "videoMode" in body;
       const hasSlug = typeof body.slug === "string";
-      const mode = body.mode === "panel" ? "panel" : body.mode === "display" ? "display" : null;
-      const hasMode = mode !== null;
-      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasTextSize && !hasSlug && !hasMode) {
-        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.textSize (number, 50 to 300), body.mode (\"display\"|\"panel\"), or body.slug (string) required");
+      if (refuseMode(res, body)) return;
+      // Checked against the view in `viewId`, so it means nothing without one: an
+      // ignored field is a caller believing the check ran.
+      const expectSurface = body.expectSurface;
+      if ("expectSurface" in body) {
+        if (expectSurface !== "display" && expectSurface !== "console") {
+          error(res, 'body.expectSurface must be "display" or "console"');
+          return;
+        }
+        if (typeof body.viewId !== "string") {
+          error(res, "body.expectSurface is checked against body.viewId, which must name a view");
+          return;
+        }
+      }
+      if (!hasName && !hasViewId && !hasBlackout && !hasLocked && !hasHideTopBar && !hasAllowHls && !hasGroups && !hasTextSize && !hasRotation && !hasVideoMode && !hasSlug) {
+        error(res, "body.name (string), body.viewId (string|null), body.blackout (boolean), body.locked (boolean), body.hideTopBar (boolean), body.allowHls (boolean), body.groups (string[]), body.textSize (number, 50 to 300), body.rotation (0, 90, 180 or 270), body.videoMode (string), or body.slug (string) required");
         return;
       }
       let state = stageController.getState();
       // One try for every field: each setter refuses by throwing (an id that names
-      // no output, a console bound to a wall screen, a slug that is reserved), and
+      // no output, a view that does not exist, a slug that is reserved), and
       // the answer is a 400 with the reason, not a 500 an operator would read as
       // the server itself being broken. Fields applied before the refusal stay
       // applied, as they always did.
       try {
+        // The view first: it is the one write that can be refused for something other
+        // than the field's own value (a view that is not the kind the caller was
+        // told, with 409), so a refusal there writes nothing, the name included.
+        if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null, { expectSurface: expectSurface as ViewSurface | undefined });
         if (hasName) state = await stageController.renameOutput(id, body.name as string);
-        // Mode BEFORE viewId, so a single request can turn a screen into a panel
-        // and point it at a console. The other order refuses its own second half.
-        if (hasMode) state = await stageController.setOutputMode(id, mode);
-        if (hasViewId) state = await stageController.setOutputView(id, body.viewId as string | null);
         if (hasBlackout) state = await stageController.setOutputBlackout(id, body.blackout as boolean);
         if (hasLocked) state = await stageController.setOutputLocked(id, body.locked as boolean);
         if (hasHideTopBar) state = await stageController.setOutputHideTopBar(id, body.hideTopBar as boolean);
         if (hasAllowHls) state = await stageController.setOutputAllowHls(id, body.allowHls as boolean);
+        if (hasGroups) state = await stageController.setOutputGroups(id, body.groups);
         if (hasTextSize) state = await stageController.setOutputTextSize(id, body.textSize);
+        if (hasRotation) state = await stageController.setOutputRotation(id, body.rotation);
+        if (hasVideoMode) state = await stageController.setOutputVideoMode(id, body.videoMode);
         if (hasSlug) state = await stageController.setOutputSlug(id, body.slug as string);
       } catch (err) {
-        error(res, errorMessage(err));
+        answerScreenWriteFailure(res, err);
         return;
       }
       json(res, state);

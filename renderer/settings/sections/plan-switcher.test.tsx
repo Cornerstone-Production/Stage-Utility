@@ -20,7 +20,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { installRenderDom, isPlumbing } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -86,7 +86,7 @@ const STATE = {
   // The api client's SSE channel report is a POST on its own 200 ms debounce.
   // It is not something the switcher does, and on a slow CI runner it lands
   // inside a case's window, so it is not recorded at all.
-  if (url.includes("/api/events/subscribe")) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
+  if (isPlumbing(url)) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
   requests.push({
     url,
     method: init?.method ?? "GET",

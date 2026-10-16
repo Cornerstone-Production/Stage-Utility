@@ -17,7 +17,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { eventually, installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -250,7 +250,7 @@ describe("the brand accent", () => {
     seedAccent();
     render(React.createElement(OneConsumer));
     await settle(); // BASE.accentColor is null: the operator picked no brand colour.
-    assert.equal(accent(), "", "an operator's 'no accent' was ignored");
+    await eventually(() => assert.equal(accent(), "", "an operator's 'no accent' was ignored"));
   });
 
   test("a hydrated colour is applied", async () => {
@@ -322,14 +322,14 @@ describe("the tab icon", () => {
       emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: true });
     });
     await settle();
-    assert.equal(href(), "data:image/png;base64,TINTED", "Recolor on never reached the tab icon");
-    assert.deepEqual(asked, [`${LOGO} #161b22`]);
+    await eventually(() => assert.equal(href(), "data:image/png;base64,TINTED", "Recolor on never reached the tab icon"));
+    await eventually(() => assert.deepEqual(asked, [`${LOGO} #161b22`]));
 
     act(() => {
       emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false });
     });
     await settle();
-    assert.equal(href(), LOGO, "Recolor off still showed the tinted icon");
+    await eventually(() => assert.equal(href(), LOGO, "Recolor off still showed the tinted icon"));
     __resetFavicon();
   });
 });
@@ -352,9 +352,14 @@ describe("a failed hydrate", () => {
     }
     render(React.createElement(ErrorConsumer));
     await settle();
-    (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
-    const seen = screen.getByTestId("err").textContent ?? "";
-    assert.ok(seen.includes("no server"), `error never reached the consumer (${seen})`);
+    try {
+      await eventually(() => {
+        const seen = screen.getByTestId("err").textContent ?? "";
+        assert.ok(seen.includes("no server"), `error never reached the consumer (${seen})`);
+      });
+    } finally {
+      (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
+    }
   });
 
   test("does NOT blank a broadcast that beat it", async () => {

@@ -90,14 +90,16 @@ sudo ./scripts/install.sh
 This verifies Node, installs dependencies (`npm ci`), builds the UI
 (`npm run build`), creates the data directory (default `/var/lib/stage-utility`),
 and writes + enables a `stage-utility` **systemd** service that **starts on boot
-and restarts on crash** (`Restart=on-failure`, `RestartSec=5`). It prints the
-access URLs at the end.
+and is restarted whenever it exits** (`Restart=always`, `RestartSec=3`; `always`
+rather than `on-failure` because the in-app updater restarts the server by exiting
+it). It also hands the checkout to the service user, so in-app updates can write
+it, and prints the access URLs at the end.
 
 Useful options:
 
 ```bash
-sudo ./scripts/install.sh --data-dir /srv/stage-utility   # custom data dir
-sudo ./scripts/install.sh --user stagemon                 # run as a specific user
+sudo ./scripts/install.sh --data-dir /srv/stage-utility   # custom data dir (or STAGE_UTILITY_DATA=…)
+sudo ./scripts/install.sh --user stagemon                 # run as a specific user (default: the user who ran sudo)
 sudo ./scripts/install.sh --no-service                    # build only, no service
 ```
 
@@ -129,16 +131,14 @@ sudo systemctl restart stage-utility  # restart
 cd /opt/stage-utility/Stage-Utility && git pull && sudo ./scripts/install.sh
 ```
 
-> To restart even on a *clean* exit (not only crashes), edit
-> `/etc/systemd/system/stage-utility.service`, change `Restart=on-failure` to
-> `Restart=always`, then `sudo systemctl daemon-reload && sudo systemctl restart stage-utility`.
-
 ---
 
 ## macOS
 
-No one-command installer here — you build once, then install a `launchd` daemon
-for boot + auto-restart.
+There is no installer for a checkout on a Mac: you build once, then register a
+`launchd` daemon yourself for boot + auto-restart. (The
+[one-line installer](docs/ops/install-and-config.md#install) does support macOS,
+with no build and no Node; this section is for running from a checkout.)
 
 ### 1. Install Node ≥ 24 and git
 
@@ -181,9 +181,10 @@ pwd                  # the Stage-Utility path
 whoami               # your username
 ```
 
-Create `/Library/LaunchDaemons/com.stage-utility.app.plist` (a system
-daemon → starts at boot before login). The label `com.stage-utility.app` is just an
-identifier — use your own reverse-DNS (e.g. `com.yourorg.stageutility`) if you prefer.
+Create `/Library/LaunchDaemons/com.stageutility.server.plist` (a system
+daemon → starts at boot before login). Keep the label `com.stageutility.server`:
+it is the one the one-line installer uses and the one `scripts/uninstall.sh`
+removes, so a job under any other label has to be removed by hand.
 Replace **`/ABS/PATH/TO/node`**, **`/ABS/PATH/TO/Stage-Utility`**, and **`youruser`**:
 
 ```xml
@@ -192,7 +193,7 @@ Replace **`/ABS/PATH/TO/node`**, **`/ABS/PATH/TO/Stage-Utility`**, and **`yourus
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key>            <string>com.stage-utility.app</string>
+  <key>Label</key>            <string>com.stageutility.server</string>
   <key>UserName</key>         <string>youruser</string>   <!-- omit this line to run as root if you want the port-free URL (:80) on macOS -->
   <key>WorkingDirectory</key> <string>/ABS/PATH/TO/Stage-Utility</string>
   <key>ProgramArguments</key>
@@ -218,12 +219,16 @@ Replace **`/ABS/PATH/TO/node`**, **`/ABS/PATH/TO/Stage-Utility`**, and **`yourus
 Load and start it:
 
 ```bash
-sudo launchctl bootstrap system /Library/LaunchDaemons/com.stage-utility.app.plist
-sudo launchctl enable system/com.stage-utility.app
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.stageutility.server.plist
+sudo launchctl enable system/com.stageutility.server
 ```
 
-`RunAtLoad` starts it on every boot; `KeepAlive` relaunches it within seconds if
-it crashes or is killed.
+`RunAtLoad` starts it on every boot; `KeepAlive` relaunches it if it crashes or is
+killed. launchd can leave a `KeepAlive` respawn parked, though, and a checkout run
+from a hand-written plist is not kicked back up by the app the way a one-line or
+Homebrew install is. If the server does not come back after a restart, an
+update or a config import, run
+`sudo launchctl kickstart -k system/com.stageutility.server`.
 
 ### 5. Configure
 
@@ -233,13 +238,13 @@ Open `http://<this-mac-ip>:8788/settings` and follow
 ### Operating & updating (macOS)
 
 ```bash
-sudo launchctl kickstart -k system/com.stage-utility.app   # restart
-tail -f /tmp/stage-utility.log                                    # logs
-sudo launchctl bootout system/com.stage-utility.app        # stop & unload
+sudo launchctl kickstart -k system/com.stageutility.server   # restart
+tail -f /tmp/stage-utility.log                               # logs
+sudo launchctl bootout system/com.stageutility.server        # stop & unload
 
 # Update:
 cd /ABS/PATH/TO/Stage-Utility && git pull && npm ci && npm run build
-sudo launchctl kickstart -k system/com.stage-utility.app
+sudo launchctl kickstart -k system/com.stageutility.server
 ```
 
 ---
@@ -358,18 +363,19 @@ Then work through the sidebar:
    [api.planningcenteronline.com](https://api.planningcenteronline.com) →
    Developers → Personal Access Tokens).
 2. **Integrations → Wireless Gear** *(optional)* — pick your model (Shure ULX-D /
-   Axient / PSM, or Sennheiser EW-DX / EW-G4 / Spectera) and enter its IP, port
-   (Shure TCP usually `2202`), and channel count. Offline/manual devices are OK too.
-3. **Integrations → ProPresenter / ProdCom / Smaart / OBS / OSC / SenSource / Ross**
-   *(all optional)* — host + port: ProPresenter `1025` (add multiple instances if
-   needed), ProdCom `24480`, Smaart `26000` (live SPL), OBS WebSocket `4455` +
-   password, SenSource Vea client ID + secret (people counting), Ross MultiViewer
-   TSL port (pushes people counts). OSC targets are set per **OSC button** in the
-   custom-layout editor.
+   Axient / PSM / SBC charger, or Sennheiser EW-DX / ewG4 / Spectera) and enter its
+   IP, port (Shure TCP usually `2202`), and channel count.
+3. **Integrations → ProPresenter / ProdCom / Smaart / OBS / REAPER / OSC / SenSource /
+   Ross** *(all optional)* — host + port: ProPresenter `1025` (add multiple
+   instances if needed), ProdCom `24480`, Smaart `26000` (live SPL), OBS WebSocket
+   `4455` + password, SenSource Vea client ID + secret (people counting), Ross
+   MultiViewer TSL port (pushes people counts). OSC targets are set per **OSC
+   button** in the custom-layout editor. The rest of the list is in
+   [integrations](docs/integrations/README.md).
 4. **Plan**, **Screens** — pick a plan (or Auto) and toggle which
    **Active Service Types** auto-selection considers, build views (slots, dashboard,
-   stage, captions, ServiceCue, SPL rundown, or a custom visual layout), and route each
-   screen to a view.
+   stage, captions, ServiceCue, SPL rundown, calendar, or a custom visual layout),
+   and route each screen to a view.
 5. **ServiceCue** *(optional)* — choose which service types appear on the `/servicecue`
    landing page and define global column layouts (Audio/Video/Lighting/…). **History**
    (SPL + attendance + item timing) and **Baptisms** appear once there's data.
@@ -387,18 +393,22 @@ To point a kiosk/Pi browser straight at one screen, use
 ## Updating from within the app
 
 Once installed, you can update without a terminal: open **Settings → Advanced →
-Updates**, where you can **Check now**, **Update now**, or enable **Automatic
-updates** on a weekly schedule (it skips while a Planning Center service is
-live). "Update now" pulls the latest, rebuilds, and restarts the service — the
-displays go blank and reload for a few seconds.
+Updates**, where you can **Check now**, **Update now**, or set **Updates** to
+**Install** (applied at the day and hour you choose, and waits for you to press
+Restart) or **Install + restart** (applied and restarted in that window; it skips
+while a Planning Center service is live). The new version is prepared while the
+current one keeps serving, and the server restarts once at the end — the
+displays reload for a few seconds.
 
 This works because the service manager restarts the process when the updater
-exits after rebuilding:
+exits:
 
 - **Linux:** the installer's systemd unit uses `Restart=always`. If you set up an
   older version, re-run `sudo ./scripts/install.sh` once to pick up the new unit.
 - **macOS / Windows:** the `launchd` `KeepAlive` and NSSM `AppExit … Restart`
-  settings in this guide already restart on exit — no change needed.
+  settings in this guide already restart on exit — no change needed. On macOS, see
+  the note under [Set it to auto-start](#4-set-it-to-auto-start-launchd) if the
+  server does not come back.
 
 In-app updates work however the server was installed. A git checkout fetches and
 rebuilds; a packaged install re-runs its own installer, which downloads the next
@@ -430,8 +440,9 @@ start — look for a `recovered config` line in the logs.)
 
 ## Uninstall
 
-- **Linux:** `sudo ./scripts/uninstall.sh` (stops + removes the service).
-- **macOS:** `sudo launchctl bootout system/com.cornerstone.stage-utility`, then delete `/Library/LaunchDaemons/com.cornerstone.stage-utility.plist`.
+- **Linux:** `sudo ./scripts/uninstall.sh` (stops and removes the service, the `stage-utility` account if one exists, and `/opt/stage-utility` — which is where step 2 above put the checkout, so move it elsewhere first if you want to keep it). `--dry-run` lists what it would do and changes nothing.
+- **macOS:** `sudo ./scripts/uninstall.sh`, or by hand `sudo launchctl bootout system/com.stageutility.server` and then delete `/Library/LaunchDaemons/com.stageutility.server.plist`. An install made before this label was introduced is registered as `com.cornerstone.stage-utility` instead (`sudo launchctl bootout system/com.cornerstone.stage-utility`, `/Library/LaunchDaemons/com.cornerstone.stage-utility.plist`); the script removes whichever is present, and re-running the installer moves such an install to the new label.
+- **macOS output helper** (or the `--browser` Chrome kiosk): the same `sudo ./scripts/uninstall.sh` stops it in every logged-in account and removes its LaunchAgent and app. On a Mac with no checkout: `curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/scripts/uninstall.sh | sudo bash`, and add `-s -- --dry-run` after `bash` to preview. By hand, see [Removing the helper](docs/kiosk-devices.md#installing-the-mac-output-helper).
 - **Windows:** `nssm remove StageUtility confirm` (or delete the scheduled task).
 
-The data directory is never removed automatically — back it up or delete it deliberately.
+The data directory is never removed automatically — back it up or delete it deliberately. The same goes for a Mac's device id and per-account helper settings, which the script lists. The sleep and screen saver settings the Mac installer changed are not restored, because it does not record them; the script prints the commands to set them.

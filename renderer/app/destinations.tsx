@@ -18,6 +18,7 @@ import {
   CalendarIcon,
   DropletIcon,
   ListChecksIcon,
+  MessageSquareIcon,
   MonitorIcon,
   PaletteIcon,
   PlugIcon,
@@ -43,6 +44,7 @@ import { ServiceCueSection } from "../settings/sections/servicecue-section";
 import {
   AdvancedRoute,
   BrandingRoute,
+  MessagesRoute,
   PlanRoute,
 } from "./settings-routes";
 
@@ -152,6 +154,13 @@ export const SETTINGS_DESTINATIONS: readonly Destination[] = [
     description: "Connect the gear and services that run your service.",
     icon: <PlugIcon className="size-4" />,
     Component: IntegrationsSection,
+  },
+  {
+    path: "/settings/messages",
+    label: "Messages",
+    description: "Groups of screens, and the messages and replies a console sends in one press.",
+    icon: <MessageSquareIcon className="size-4" />,
+    Component: MessagesRoute,
   },
   {
     path: "/settings/branding",

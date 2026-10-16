@@ -16,6 +16,7 @@ import {
   type RuleStepsLike,
   type StepSpecLookup,
 } from "./automation-param-validation.js";
+import { AUTOMATION_CONDITIONS } from "./automation-conditions.js";
 import { AUTOMATION_TRIGGERS } from "./automation-triggers.js";
 
 describe("validateParams — string", () => {
@@ -140,13 +141,19 @@ describe("validateParams — enum", () => {
     assert.deepEqual(validateParams([anchor], { anchor: "item" }), []);
   });
 
+  test("an enum with a default is not unset when blank, even if not optional", () => {
+    const withDefault: ParamDef = { ...target, options: [{ value: "a", label: "A" }], default: "a" };
+    assert.deepEqual(validateParams([withDefault], {}), []);
+    assert.deepEqual(validateParams([{ ...target, options: [{ value: "a", label: "A" }] }], {}).length, 1);
+  });
+
   test("an optional enum left blank is never an issue", () => {
     const optional: ParamDef = { ...target, optional: true };
     assert.deepEqual(validateParams([optional], {}), []);
   });
 });
 
-describe("validateParams — multi-enum: blank is a deliberate wildcard, never required", () => {
+describe("validateParams — multi-enum follows `optional`", () => {
   const days: ParamDef = {
     key: "days",
     label: "Days",
@@ -154,12 +161,22 @@ describe("validateParams — multi-enum: blank is a deliberate wildcard, never r
     options: ["Sun", "Mon", "Tue"].map((d, i) => ({ value: String(i), label: d })),
   };
 
-  test("blank multi-enum is never an issue, even without `optional` set", () => {
-    // time.day-of-week's real "days" param: not marked optional, and its own
-    // didFire treats "" as "every day" on purpose ("Unconfigured must not
-    // silently block every rule that carries it"). Flagging blank here would
-    // mark every rule using that intended default as needing setup.
-    assert.deepEqual(validateParams([days], {}), []);
+  test("a blank multi-enum that is not optional needs setup", () => {
+    assert.deepEqual(validateParams([days], {}), [{ key: "days", message: "Pick at least one" }]);
+    assert.deepEqual(validateParams([days], { days: " , " }), [{ key: "days", message: "Pick at least one" }]);
+  });
+
+  test("a blank optional multi-enum is never an issue", () => {
+    assert.deepEqual(validateParams([{ ...days, optional: true }], {}), []);
+  });
+
+  test("the two registry multi-enums that mean everything when blank are declared optional", () => {
+    // time.day-of-week reads "" as every day and pco.before-plan-time reads it
+    // as both kinds of time, on purpose. A rule using that default must not be
+    // marked as needing setup, so they say so rather than relying on the
+    // validator to exempt every multi-enum.
+    assert.deepEqual(validateParams(AUTOMATION_CONDITIONS["time.day-of-week"]!.params, {}), []);
+    assert.deepEqual(validateParams(AUTOMATION_TRIGGERS["pco.before-plan-time"]!.params, { minutes: 10 }), []);
   });
 
   test("a populated value must still be drawn from the static list", () => {
@@ -173,6 +190,20 @@ describe("validateParams — multi-enum: blank is a deliberate wildcard, never r
   test("an optionsFrom multi-enum is exempt from the static-list check the same way enum is", () => {
     const spec: ParamDef = { key: "x", label: "X", type: "multi-enum", optionsFrom: "displays" };
     assert.deepEqual(validateParams([spec], { x: "anything,at,all" }), []);
+  });
+
+  test("an exclusive choice cannot be saved beside another, and is fine alone", () => {
+    const spec: ParamDef = {
+      key: "to",
+      label: "To",
+      type: "multi-enum",
+      optionsFrom: "displays",
+      exclusiveChoice: { value: "all", message: "All cannot be combined" },
+    };
+    assert.deepEqual(validateParams([spec], { to: "all,x" }), [{ key: "to", message: "All cannot be combined" }]);
+    assert.deepEqual(validateParams([spec], { to: "x , all" }), [{ key: "to", message: "All cannot be combined" }]);
+    assert.deepEqual(validateParams([spec], { to: "all" }), []);
+    assert.deepEqual(validateParams([spec], { to: "x,y" }), []);
   });
 });
 

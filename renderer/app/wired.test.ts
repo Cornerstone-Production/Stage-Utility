@@ -63,7 +63,6 @@ const WIRING: { what: string; helper: string; usedBy: string }[] = [
  */
 const REACHABLE_HANDLERS = [
   "handleSetViewSurface",
-  "handleSetOutputMode",
   "handleAddView",
   "handleRemoveView",
 ];

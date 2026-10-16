@@ -15,6 +15,9 @@
 // included. Where a comment records a bug that was fixed once, it travelled
 // with the line it guards.
 
+import { viewIsConsole } from "@main/types/views";
+import { capabilityLive, contextForOutput } from "./render-context";
+
 /**
  * The kiosk chrome a screen draws around whatever it is showing.
  *
@@ -58,13 +61,12 @@ export type StageScreen =
       view: View | null;
       displayId: string;
       isPreview: boolean;
-      /** How the Output renders — `panel` is the only surface whose controls are
-       *  live. Undefined on a preview and on an Output with no mode set, which
-       *  `contextForOutput` reads as `display`. Carried here rather than looked
-       *  up again by the caller: it comes from the same `outputs.find` the name
-       *  does, and a preview has to null it, which is a rule that must live in
-       *  exactly one place. */
-      outputMode: Output["mode"];
+      /** Whether a press on this screen's controls fires: the view it shows is a
+       *  console (what makes a screen a control surface) and it is not a preview.
+       *  Decided here, once, from the same `activeView` the arm renders from, so
+       *  what a screen draws and whether its buttons work cannot disagree; every
+       *  arm that draws a control reads this and none re-derives it. */
+      interactive: boolean;
       /** Whether a Video widget here may attempt HLS — this screen's own "Use
        *  HLS on this screen" switch, `resolved`'s so it is never a picture of
        *  another screen the way `standingIn`'s chrome fields are. Always true
@@ -90,6 +92,41 @@ export interface ScreenInput {
    *  in. Null on a real display, and null for a preview that is not a screen (the
    *  View editor's own). See preview-url.ts for how it travels. */
   previewOutputId: string | null;
+}
+
+/** The screen a kiosk page IS: its id and the message groups it is in. */
+export interface OwnScreen {
+  outputId: string;
+  groups: readonly string[];
+  /**
+   * True only for a tile of a screen on a producer wall: a monitor of that screen,
+   * not the screen. A Messages widget in one shows the screen's messages but never
+   * answers for it; only the screen itself does.
+   */
+  monitor?: true;
+}
+
+/**
+ * Which screen this page is, for what is addressed to a screen's groups.
+ *
+ * Null on a preview, and that is load-bearing: a Screens-card iframe is a
+ * picture of another screen (`standingIn`, above), not that screen, so it must
+ * not answer for its groups — an alert drawn into a thumbnail, or a Messages
+ * widget offering replies for a group the thumbnail is not in, would be the
+ * Screens page acting as a screen. It reads `resolved`'s side of the decision
+ * for the same reason blackout does.
+ *
+ * A real page whose id matches no output is still a screen — it is simply in no
+ * group, and Everyone still reaches it.
+ */
+export function ownScreen(
+  input: Pick<ScreenInput, "state" | "displayId" | "previewViewId">,
+): OwnScreen | null {
+  if (input.previewViewId) return null;
+  return {
+    outputId: input.displayId,
+    groups: input.state?.resolvedByOutput?.[input.displayId]?.groups ?? [],
+  };
 }
 
 export function resolveScreen(input: ScreenInput): StageScreen {
@@ -206,7 +243,7 @@ export function resolveScreen(input: ScreenInput): StageScreen {
     view: activeView,
     displayId,
     isPreview: !!previewViewId,
-    outputMode: currentDisplay?.mode,
+    interactive: capabilityLive(contextForOutput(viewIsConsole(activeView), !!previewViewId), "control"),
     allowHls: resolved?.allowHls ?? true,
     textSize: standingIn?.textSize ?? null,
     ...chrome,

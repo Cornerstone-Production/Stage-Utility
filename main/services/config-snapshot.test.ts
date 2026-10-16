@@ -106,6 +106,8 @@ const EXPECTED_CONFIG = [
   "kiosk-devices.json",
   "layout-groups.json",
   "layout-templates.json",
+  // The operator's groups, quick messages and quick replies for stage messages.
+  "messaging.json",
   // The operator's own work product typed into notes/checklist objects.
   "notes.json",
   "osc-targets.json",
@@ -132,6 +134,8 @@ const EXPECTED_RUNTIME = [
   "automation-log.json",
   "baptism.json",
   "checklist-ticks.json",
+  // The day's stage messages: an observation, cleared nightly.
+  "messages.json",
   "service-timeline.json",
   "signals.json",
   "spl-history.json",

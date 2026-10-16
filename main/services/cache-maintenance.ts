@@ -5,6 +5,9 @@
 import { prunePhotoCache } from "./photo-cache.js";
 import { pruneAttachmentCache } from "./pco-attachment-cache.js";
 import { pruneLayoutImages } from "./layout-image-store.js";
+import { getUserDataPath } from "./app-paths.js";
+import { pruneOutputHelperCache } from "./output-helper-download.js";
+import { pkgVersion } from "./updater.js";
 
 const INITIAL_DELAY_MS = 30_000; // let startup settle first
 const INTERVAL_MS = 24 * 60 * 60 * 1000; // daily
@@ -33,6 +36,10 @@ class CacheMaintenance {
       await prunePhotoCache();
       await pruneAttachmentCache();
       await pruneLayoutImages();
+      // The Mac output helper's zips, about 290 MB a version: an update leaves the
+      // old version's behind, and a server that is never asked for it again would
+      // keep them for good.
+      await pruneOutputHelperCache(getUserDataPath(), pkgVersion());
     } catch (err) {
       console.error("[cache-maintenance] prune failed:", err);
     }

@@ -23,8 +23,17 @@ export interface ParamDef {
     | "displays"
     | "plan-items"
     | "propresenter-instances"
-    | "propresenter-macros";
+    | "propresenter-macros"
+    | "message-groups";
   optional?: boolean;
+  /** What a blank "enum" stands for. The field shows it and has no blank choice,
+   *  and the action reads a blank as it. Declare the param `optional` too: a
+   *  blank is valid, not unset. */
+  default?: string;
+  /** A "multi-enum" choice that stands for everything and cannot be picked beside
+   *  another ("Everyone" next to a group). Saving both is a Needs setup issue
+   *  carrying `message`. */
+  exclusiveChoice?: { value: string; message: string };
   help?: string;
   /** Column headings for a "key-value" param. */
   keyLabel?: string;

@@ -57,7 +57,7 @@ export function useUpcomingPlans({ enabled = true }: { enabled?: boolean } = {})
   };
 }
 
-/** "Wed Sep 10 · Cornerstone Youth", or "Cornerstone Youth default". */
+/** "Wed Sep 10 · Youth Night", or "Youth Night default". */
 function entryLabel(entry: SwitcherEntry, timeZone: string | null, withType: boolean): string {
   if (entry.planId === null) {
     return entry.serviceTypeName ? `${entry.serviceTypeName} default` : "Default";

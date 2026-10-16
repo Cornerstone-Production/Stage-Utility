@@ -22,6 +22,7 @@ const FLAG_FOR = {
   baptismStatus: "baptismKnown",
   cuesStatus: "cuesKnown",
   integrationsSnap: "integrationsKnown",
+  messagesStatus: "messagesKnown",
   obsStatus: "obsKnown",
   onlinePresence: "onlineKnown",
   planItemsStatus: "planItemsKnown",
@@ -41,6 +42,7 @@ function input(answered: Source | null): Input {
     resiStatus: status("resiStatus"),
     youtubeStatus: status("youtubeStatus"),
     scoresStatus: status("scoresStatus"),
+    messagesStatus: status("messagesStatus"),
     baptismStatus: status("baptismStatus"),
     cuesStatus: status("cuesStatus"),
     // `failed` is lit alongside `known`, so a failure flag read off another
@@ -86,6 +88,7 @@ describe("statusCtx", () => {
     assert.equal(from(out.resi), "resiStatus");
     assert.equal(from(out.youtube), "youtubeStatus");
     assert.equal(from(out.scores), "scoresStatus");
+    assert.equal(from(out.messages), "messagesStatus");
     assert.equal(from(out.baptism), "baptismStatus");
     assert.equal(from(out.cues), "cuesStatus");
     assert.equal(from(out.planItems), "planItemsStatus");

@@ -59,6 +59,10 @@ process.on("uncaughtException", (err) => {
   // true on launchd, which parks the respawn of a background job that exits
   // ("pended nondemand spawn = inefficient") and leaves the box dark until a
   // human runs kickstart. Same pairing the update and restart paths use.
+  //
+  // The return value (RelaunchPrep) is ignored here on purpose: there is no
+  // operator to tell and no reply to carry it, and a failure to arrange a
+  // relaunch is already on the log as [relaunch] before the process goes.
   exitForRestart(100, 1);
 });
 
@@ -66,6 +70,8 @@ import { getUserDataPath } from "./main/services/app-paths.js";
 import { SYSTEM_DATA_DIRS, wrongDataDirWarning } from "./main/services/port-holder.js";
 import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";
+import { messagesService } from "./main/services/messages-service.js";
+import { scrubError } from "./main/services/scrub.js";
 import { backupScheduler } from "./main/services/backup-scheduler.js";
 import { integrationManager } from "./main/services/integration-manager.js";
 import { resiService } from "./main/services/resi-service.js";
@@ -117,6 +123,14 @@ await stageController.init();
 await videoService.init();
 await integrationManager.init();
 await baptismTimerService.init();
+// Stage messages: load the day's thread, clear it if the date has moved on while
+// the server was off, take unknown groups off the screens, and start the
+// once-a-minute check. Failures come back rather than being thrown: a data
+// directory that cannot be written must not stop the server coming up and blank
+// every screen.
+for (const { what, error } of await messagesService.start()) {
+  console.error(`[messages] ${what} at start-up failed:`, scrubError(error));
+}
 // Unattended backups, if the operator has turned them on.
 backupScheduler.start();
 
@@ -166,6 +180,7 @@ async function shutdown(signal: string): Promise<void> {
   sensourceService.stop();
   tslService.stop();
   oscManager.stop();
+  messagesService.stop();
   try {
     await remoteServer.stop();
     await deviceManager.stop();

@@ -5,7 +5,8 @@ import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 
 export default [
-  { ignores: ["build/**", "node_modules/**", "public/**"] },
+  // helper/ is the Swift Mac output helper: nothing in it is JavaScript.
+  { ignores: ["build/**", "node_modules/**", "public/**", "helper/**"] },
   js.configs.recommended,
   {
     // Plain ESM helpers run by the update scripts — Node globals, no TS parser.

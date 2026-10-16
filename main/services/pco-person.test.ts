@@ -19,7 +19,7 @@ function respond(status: number, body: unknown) {
     return new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
   };
 }
-const person = (attributes: Record<string, unknown>) => ({ data: { id: "113920177", type: "Person", attributes } });
+const person = (attributes: Record<string, unknown>) => ({ data: { id: "100000001", type: "Person", attributes } });
 
 describe("a Planning Center person by ID", () => {
   beforeEach(() => pcoService.clearCache());
@@ -28,18 +28,18 @@ describe("a Planning Center person by ID", () => {
   });
 
   it("reads the person's own record", async () => {
-    respond(200, person({ first_name: "Ethan", last_name: "Matthews" }));
-    await pcoService.getPerson("app", "secret", "113920177");
+    respond(200, person({ first_name: "Alex", last_name: "Rivera" }));
+    await pcoService.getPerson("app", "secret", "100000001");
     assert.equal(urls.length, 1);
-    assert.match(urls[0] ?? "", /\/services\/v2\/people\/113920177$/);
+    assert.match(urls[0] ?? "", /\/services\/v2\/people\/100000001$/);
   });
 
   it("names them by full name, else first and last", async () => {
-    respond(200, person({ full_name: "Ethan J. Matthews", first_name: "Ethan", last_name: "Matthews" }));
-    assert.equal((await pcoService.getPerson("app", "secret", "1"))?.name, "Ethan J. Matthews");
+    respond(200, person({ full_name: "Alex J. Rivera", first_name: "Alex", last_name: "Rivera" }));
+    assert.equal((await pcoService.getPerson("app", "secret", "1"))?.name, "Alex J. Rivera");
     pcoService.clearCache();
-    respond(200, person({ first_name: "Ethan", last_name: "Matthews" }));
-    assert.equal((await pcoService.getPerson("app", "secret", "1"))?.name, "Ethan Matthews");
+    respond(200, person({ first_name: "Alex", last_name: "Rivera" }));
+    assert.equal((await pcoService.getPerson("app", "secret", "1"))?.name, "Alex Rivera");
   });
 
   it("takes a real photo at high resolution, and an initials placeholder as none", async () => {
@@ -61,9 +61,9 @@ describe("a Planning Center person by ID", () => {
   });
 
   it("reads a person once, then from cache", async () => {
-    respond(200, person({ first_name: "Ethan" }));
-    await pcoService.getPerson("app", "secret", "113920177");
-    await pcoService.getPerson("app", "secret", "113920177");
+    respond(200, person({ first_name: "Alex" }));
+    await pcoService.getPerson("app", "secret", "100000001");
+    await pcoService.getPerson("app", "secret", "100000001");
     assert.equal(urls.length, 1);
   });
 });

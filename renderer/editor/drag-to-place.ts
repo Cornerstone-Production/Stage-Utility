@@ -9,6 +9,8 @@
 
 import { clamp } from "@main/services/clamp";
 import type { FracRect } from "../main/layout-tree";
+import { LAYOUT_OBJECTS } from "../main/layout-objects";
+import type { LayoutObjectType } from "@main/types/views";
 
 /**
  * Default size for a newly dropped widget, as a fraction of the canvas.
@@ -29,6 +31,32 @@ export function defaultDropSize(isContainer: boolean): { w: number; h: number } 
   return isContainer
     ? { w: DROP_CONTAINER_W, h: DROP_CONTAINER_H }
     : { w: DROP_W, h: DROP_H };
+}
+
+/**
+ * The size a newly placed widget of this type starts at, from the toolbar or a
+ * drop: its own `defaultSize` when its spec has one, else the shared default.
+ */
+export function defaultSizeFor(type: LayoutObjectType): { w: number; h: number } {
+  return LAYOUT_OBJECTS[type].defaultSize ?? defaultDropSize(type === "container");
+}
+
+/**
+ * Where a new widget goes INSIDE a container, in the container's own coordinates.
+ *
+ * A container is a centred box, a plain widget a band across its middle (the
+ * shapes the editor has always used, to the digit), and a widget with its own
+ * `defaultSize` arrives centred at that size as the canvas would show it, so a tall
+ * composer is not squashed into a 0.4-high band; it is held inside the container.
+ * `parentAbs` is the container's rect on the canvas.
+ */
+export function nestedGeometry(type: LayoutObjectType, parentAbs: FracRect): FracRect {
+  const own = LAYOUT_OBJECTS[type].defaultSize;
+  if (!own) {
+    return type === "container" ? { x: 0.1, y: 0.1, w: 0.8, h: 0.8 } : { x: 0.1, y: 0.3, w: 0.8, h: 0.4 };
+  }
+  const centre = { x: parentAbs.x + parentAbs.w / 2, y: parentAbs.y + parentAbs.h / 2 };
+  return localiseToParent(rectForDrop(centre, own), parentAbs);
 }
 
 /**

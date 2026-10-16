@@ -16,9 +16,9 @@
 // useful time. Every query is coerced to a boolean or a string first.
 
 import { strict as assert } from "node:assert";
-import { after, afterEach, describe, test } from "node:test";
+import { after, afterEach, describe, mock, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -28,6 +28,7 @@ const React = await import("react");
 const { PeopleGraphInspector, PlanAttachmentConfig, RossTalkButtonConfig } = await import("./inspector.js");
 const { formatCommand } = await import("@main/services/rosstalk-commands.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
+const { toast } = await import("../components/ui/toast.js");
 const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
@@ -74,9 +75,9 @@ describe("the people graph's recorded-service picker", () => {
     const f = stubFetch(ROUTE, "throw");
     try {
       await mount(graph());
-      assert.match(alerts(), /Couldn't load the recorded services/i);
+      await eventually(() => assert.match(alerts(), /Couldn't load the recorded services/i));
       assert.equal(!!screen.queryByText(/not found/i), false, "the chosen service was not deleted — the read failed");
-      assert.ok(logged(f.logs, /recorded services/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`);
+      await eventually(() => assert.ok(logged(f.logs, /recorded services/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`));
     } finally {
       f.restore();
     }
@@ -103,11 +104,11 @@ describe("the people graph's recorded-service picker", () => {
       view.rerender(el("recorded"));
       await settle();
       await settle();
-      assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true, "the second read filled the picker");
+      await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true, "the second read filled the picker"));
       await act(async () => failFirst(new TypeError("fetch failed")));
       await settle();
       assert.equal(alerts(), "", "the first read no longer applies; its failure must not land");
-      assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true);
+      await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true));
     } finally {
       f.restore();
     }
@@ -128,14 +129,14 @@ describe("the people graph's recorded-service picker", () => {
       const view = render(el("recorded"));
       await settle();
       await settle();
-      assert.match(alerts(), /Couldn't load the recorded services/i);
+      await eventually(() => assert.match(alerts(), /Couldn't load the recorded services/i));
       view.rerender(el("live"));
       await settle();
       view.rerender(el("recorded"));
       await settle();
       await settle();
-      assert.equal(alerts(), "", "the list loaded; the note must go with the failure");
-      assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true);
+      await eventually(() => assert.equal(alerts(), "", "the list loaded; the note must go with the failure"));
+      await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true));
     } finally {
       f.restore();
     }
@@ -148,7 +149,7 @@ describe("the people graph's recorded-service picker", () => {
     });
     try {
       await mount(graph());
-      assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true);
+      await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /Weekend/ }), true));
       assert.equal(!!screen.queryByText(/not found/i), false);
       assert.equal(alerts(), "");
       assert.deepEqual(f.logs, []);
@@ -180,9 +181,9 @@ describe("the RossTalk button's target and command pickers", () => {
     const f = stubRossTalk("throw");
     try {
       await mount(button());
-      assert.match(alerts(), /Couldn't load the RossTalk targets/i);
+      await eventually(() => assert.match(alerts(), /Couldn't load the RossTalk targets/i));
       assert.equal(!!screen.queryByText(/not found/i), false, "the target was not deleted — the read failed");
-      assert.ok(logged(f.logs, /RossTalk targets/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`);
+      await eventually(() => assert.ok(logged(f.logs, /RossTalk targets/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`));
     } finally {
       f.restore();
     }
@@ -192,9 +193,9 @@ describe("the RossTalk button's target and command pickers", () => {
     const f = stubRossTalk(STUDIO, true);
     try {
       await mount(button());
-      assert.match(alerts(), /Couldn't load the RossTalk commands/i);
+      await eventually(() => assert.match(alerts(), /Couldn't load the RossTalk commands/i));
       assert.equal(!!screen.queryByText(/not found/i), false, "the command was not deleted — the read failed");
-      assert.ok(logged(f.logs, /RossTalk commands/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`);
+      await eventually(() => assert.ok(logged(f.logs, /RossTalk commands/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`));
     } finally {
       f.restore();
     }
@@ -204,8 +205,8 @@ describe("the RossTalk button's target and command pickers", () => {
     const f = stubRossTalk(STUDIO);
     try {
       await mount(button());
-      assert.equal(!!screen.queryByRole("option", { name: /Studio/ }), true);
-      assert.equal(!!screen.queryByRole("option", { name: "Cut" }), true);
+      await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /Studio/ }), true));
+      await eventually(() => assert.equal(!!screen.queryByRole("option", { name: "Cut" }), true));
       assert.equal(!!screen.queryByText(/not found/i), false);
       assert.equal(alerts(), "");
       assert.deepEqual(f.logs, []);
@@ -285,9 +286,9 @@ describe("the plan attachment's file picker", () => {
     const f = stubFetch(ROUTE, "throw", stateSays(true));
     try {
       await mount(attachment());
-      assert.match(alerts(), /Couldn't load the current plan's files/i);
+      await eventually(() => assert.match(alerts(), /Couldn't load the current plan's files/i));
       assert.equal(!!screen.queryByText(NO_DOCUMENTS), false);
-      assert.ok(logged(f.logs, /plan's files/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`);
+      await eventually(() => assert.ok(logged(f.logs, /plan's files/i), `expected a [layout-editor] line — got ${JSON.stringify(f.logs)}`));
     } finally {
       f.restore();
     }
@@ -297,12 +298,12 @@ describe("the plan attachment's file picker", () => {
     const f = stubFetch(ROUTE, { status: 502, body: { error: "Planning Center did not answer" } }, stateSays(true));
     try {
       await mount(attachment());
-      assert.match(alerts(), /Couldn't load the current plan's files/i);
+      await eventually(() => assert.match(alerts(), /Couldn't load the current plan's files/i));
       assert.equal(!!screen.queryByText(NO_DOCUMENTS), false);
-      assert.ok(
+      await eventually(() => assert.ok(
         logged(f.logs, /Planning Center did not answer/),
         `expected the server's reason on the [layout-editor] line — got ${JSON.stringify(f.logs)}`,
-      );
+      ));
     } finally {
       f.restore();
     }
@@ -316,7 +317,7 @@ describe("the plan attachment's file picker", () => {
     });
     try {
       await mount(attachment());
-      assert.equal(!!screen.queryByText(/Connect Planning Center to pick from the current plan/i), true);
+      await eventually(() => assert.equal(!!screen.queryByText(/Connect Planning Center to pick from the current plan/i), true));
       assert.equal(!!screen.queryByText(NO_DOCUMENTS), false, "there is no plan to have no documents");
       assert.equal(alerts(), "");
       assert.deepEqual(f.logs, []);
@@ -330,11 +331,73 @@ describe("the plan attachment's file picker", () => {
     const f = stubFetch(ROUTE, { status: 200, body: [] }, stateSays(true));
     try {
       await mount(attachment());
-      assert.equal(!!screen.queryByText(NO_DOCUMENTS), true);
+      await eventually(() => assert.equal(!!screen.queryByText(NO_DOCUMENTS), true));
       assert.equal(alerts(), "");
       assert.deepEqual(f.logs, []);
     } finally {
       f.restore();
     }
+  });
+});
+
+describe("the Plan file inspector's Fit box to file", () => {
+  const attachment = () =>
+    React.createElement(PlanAttachmentConfig, {
+      c: { type: "plan-attachment", match: "stage plot" } as Extract<LayoutObjectConfig, { type: "plan-attachment" }>,
+      onConfig: () => {},
+      o: { id: "o1", x: 0, y: 0, w: 0.5, h: 0.5 } as LayoutObject,
+      canvas: { width: 1920, height: 1080, background: null },
+      onGeom: () => {},
+    });
+  const click = async () => {
+    fireEvent.click(screen.getByRole("button", { name: /Fit box to file/ }));
+    await settle();
+    await settle();
+  };
+
+  async function fitWith(status: number) {
+    const asked: string[] = [];
+    const caches: Array<RequestCache | undefined> = [];
+    const errors: string[] = [];
+    mock.method(toast, "error", (m: string) => { errors.push(m); });
+    let stateRead = false;
+    const f = stubFetchWithLog((url, init) => {
+      if (url.includes("/api/pco/attachment?")) { asked.push(url); caches.push(init?.cache); return reply(status, ""); }
+      if (url.includes("/api/pco/attachments")) return ok([]);
+      if (url.includes("/api/state")) {
+        const res = ok({ pcoConfigured: true, planId: "p9" });
+        return { ...res, json: async () => ((stateRead = true), res.json()), text: async () => ((stateRead = true), res.text()) };
+      }
+      return ok({});
+    });
+    try {
+      await mount(attachment());
+      // The active plan id the request must carry is on the stage state; pressing
+      // Fit before it has landed asks for no plan at all.
+      await eventually(() => assert.ok(stateRead, "the stage state was never read"));
+      await settle();
+      await click();
+      // The notice follows the request's answer; the mocks must outlive it.
+      await eventually(() => assert.ok(errors.length > 0, "the failed request raised no notice"));
+    } finally {
+      f.restore();
+      mock.restoreAll();
+    }
+    return { asked, caches, errors };
+  }
+
+  test("a plan with no such file says so instead of doing nothing, and asks for the active plan, fresh", async () => {
+    const { asked, caches, errors } = await fitWith(404);
+    assert.equal(asked.length, 1);
+    assert.deepEqual(caches, ["reload"], "an operator asking now must not be answered from the HTTP cache");
+    assert.match(asked[0], /plan=p9/, "the active plan id was not sent as the cache-bust");
+    assert.equal(errors.length, 1, `expected a notice, got ${JSON.stringify(errors)}`);
+    assert.match(errors[0], /No file matching "stage plot"/);
+  });
+
+  test("a failed load says so instead of doing nothing", async () => {
+    const { errors } = await fitWith(502);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Couldn't load the file/);
   });
 });

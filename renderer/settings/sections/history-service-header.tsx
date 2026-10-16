@@ -239,7 +239,7 @@ function serviceKpisFrom(
        * different numbers and this had them the wrong way round.
        *
        * It took a door count as the value and `peakOccupancy` as "in room", so
-       * on the 17 Sep Salt Company recording the header said "Peak attendance
+       * on one recorded service the header said "Peak attendance
        * 2,061 / 1,196 in room" while the Attendance card directly below it said
        * "PEAK 1,196 / ENTRIES 2,061". Two figures, one page, labelled
        * oppositely.

@@ -1,0 +1,45 @@
+# The Mac output helper's Swift package (helper/macos): built and tested on a macOS
+# runner, for every pull request that touches it.
+#
+# ci.yml runs on Ubuntu and never builds the helper, so its tests ran only on a
+# developer's Mac. This builds the package and runs ./test.sh: the core and
+# DeckLinkKit tests. Neither needs CEF (the browser host is opened at run time, not
+# linked) or Desktop Video (each driver test says which it needs and is skipped
+# without it). A runner with no Metal device skips the GPU conversion tests with
+# that reason, rather than failing them.
+#
+# Tested by scripts/helper-macos-workflow.test.ts, which runs these steps' own shell
+# (the Xcode choice is in .github/actions/select-xcode).
+
+name: Mac output helper
+
+on:
+  pull_request:
+    paths:
+      - "helper/**"
+      # InstallerContractTests.swift reads this script, so a change to it alone
+      # must still run the guard.
+      - "scripts/kiosk/install-macos.sh"
+      - ".github/workflows/helper-macos.yml"
+      - ".github/actions/select-xcode/**"
+  # Lets a specific commit be verified on demand.
+  workflow_dispatch:
+
+# Least privilege, stated rather than inherited.
+permissions:
+  contents: read
+
+jobs:
+  swift:
+    name: helper swift build and tests
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # swift-testing comes with Swift 6, which is Xcode 16; the image's default
+      # Xcode may be older. The release workflow's helper build selects it the same way.
+      - uses: ./.github/actions/select-xcode
+
+      - name: Build and test the helper
+        run: cd helper/macos && swift build && ./test.sh

@@ -14,6 +14,7 @@ import {
 } from "./ui";
 import { Loader2Icon, CheckCircle2Icon, RefreshCwIcon, AlertTriangleIcon } from "lucide-react";
 import { cn } from "../lib/cn";
+import { plural } from "@main/services/plural";
 
 /**
  * SafeSpace is switched on and has no space id — say so where the fix is.
@@ -299,7 +300,7 @@ export function SenSourceScopePicker({
         <span className="text-caption2 text-gray-9">
           {selectedZoneIds.length === 0
             ? "Counting all visible zones. Select specific zones to scope the count to your room."
-            : `Counting ${selectedZoneIds.length} selected zone${selectedZoneIds.length === 1 ? "" : "s"}.`}
+            : `Counting ${plural(selectedZoneIds.length, "selected zone")}.`}
         </span>
       </div>
       {error && <span className="text-caption2 text-red-10">{error}</span>}

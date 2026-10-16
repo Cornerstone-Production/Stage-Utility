@@ -5,6 +5,7 @@ import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { serverClock } from "../lib/server-clock";
 import { hostTimeZone, zonedDateKey, zonedParts, type TimeZone } from "@main/services/app-timezone";
 import { cn } from "../lib/cn";
+import { plural } from "@main/services/plural";
 
 /** A month calendar for browsing recorded services: a day's cell is SHADED by how
  *  many services were recorded that day, click to jump; arrows page
@@ -215,7 +216,7 @@ export function HistoryCalendar({
             // unkeyed children and was free to reuse the wrong day's DOM on a
             // re-render. It says so in a dev build; the production bundle
             // strips that warning, which is why this was never noticed.
-            <Tooltip key={dateStr} label={hasData ? `${count} service${count === 1 ? "" : "s"}` : undefined}>
+            <Tooltip key={dateStr} label={hasData ? plural(count, "service") : undefined}>
               <button
                 type="button"
                 disabled={!hasData}
@@ -245,7 +246,7 @@ export function HistoryCalendar({
                   isToday && !isSel && "ring-1 ring-inset ring-accent/55",
                   isSel && "font-medium ring-2 ring-inset ring-accent",
                 )}
-                aria-label={hasData ? `${count} service${count === 1 ? "" : "s"}` : undefined}
+                aria-label={hasData ? plural(count, "service") : undefined}
               >
                 {d}
               </button>

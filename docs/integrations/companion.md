@@ -5,7 +5,7 @@ Drives and reads Stage Utility from [Bitfocus Companion](https://bitfocus.io/com
 from the live service.
 
 The module is a separate repository:
-[companion-module-cornerstone-stageutility](https://github.com/Cornerstone-Production/companion-module-cornerstone-stageutility).
+[companion-module-stageutility-stageutility](https://github.com/Cornerstone-Production/companion-module-stageutility-stageutility).
 
 ## How it connects
 
@@ -33,8 +33,13 @@ never counted in the context bar's "N disconnected".
 
 ## Setup
 
-**In Companion** — add a **Cornerstone Stage Utility** connection and enter this
-server's IP and port. No password; the API is LAN-only.
+**In Companion** — add a connection (search the connection list for **Stage
+Utility**) and enter this server's IP and port. No password; the API is LAN-only.
+
+The module's id is `stageutility-stageutility`, and its manifest lists the earlier id
+`cornerstone-stageutility` in `legacyIds`. A connection made under the earlier id is
+switched to this module in Companion, one connection at a time and by hand; nothing
+switches by itself.
 
 The module requires **Companion 4.3.0 or newer**, which is where Companion added
 the v2 connection API the module is built against. On anything older it installs
@@ -67,7 +72,7 @@ empty list.
 ## Pressing a button
 
 The automation action **Press a Companion button** presses one button at a page,
-row and column, exactly as a finger would. Build it under Settings → Automation
+row and column, exactly as a finger would. Build it on the Automation page
 and pick the button from the list rather than typing coordinates; the three
 numbers stay visible and editable for a button that is not in the export.
 
@@ -107,7 +112,7 @@ snapshot, no schedule reaches it.
 | `202` | this cue is set to **Ask twice**. `{confirm, expiresInSec}`; call again within 30 s with `?confirm=<token>`, or in the body. A confirmation is **single use** and lapses after 30 s — replaying one is answered with a fresh confirmation, never a second press |
 | `401` | no token, or a revoked one |
 | `404` | no cue by that name |
-| `409` | refused. `{error, reason}`; `error` is a sentence to read out, like *"The Gospel Way is live"* |
+| `409` | refused. `{error, reason}`; `error` is a sentence to read out, like *"Sunday Service is live"* |
 
 | `reason` | |
 |---|---|
@@ -137,7 +142,7 @@ be edited into shape through the editor is visible rather than silent.
 
 ### Tokens
 
-Settings → Automation → **Calling cues** mints one token per caller. The token is
+Automation → **Calling cues** mints one token per caller. The token is
 shown **once** — only a SHA-256 of it is stored — so a lost one is replaced, not
 recovered. Revoke them individually, which is why each has a label.
 
@@ -156,7 +161,7 @@ mitigation there is the same: an ACL on the switch port Companion is on.
 
 ### Importing ON/OFF pairs
 
-Settings → Automation → **Import from Companion…** finds, per page, buttons whose
+Automation → **Import from Companion…** finds, per page, buttons whose
 labels differ only by a trailing direction word — `ON`/`OFF`,
 `Startup`/`Shutdown`, `START`/`STOP` or `Open`/`Closed` (`Open`/`Close` is read
 the same way) — and offers each pair as two cues, `<name>_on` and `<name>_off`.
@@ -232,8 +237,8 @@ it cannot be read at all — but not when it already says on. `<name>_off` mirro
 it. See [Real state](#real-state). A trailing direction word — `ON`, `OFF`,
 `Startup`, `Shutdown`, `START`, `STOP`, `Open`, `Closed`, `Close` or `Toggle` —
 comes off the name first:
-"VCR Light ON" becomes `vcr_light_on` and `vcr_light_off`, not
-`vcr_light_on_off`.
+"Booth Light ON" becomes `booth_light_on` and `booth_light_off`, not
+`booth_light_on_off`.
 
 In Companion, set the variable from the button's own toggle branches — a **Set
 custom variable** action to `on` in the branch that turns the thing on, and one to
@@ -251,7 +256,7 @@ opposite every other press; the generated YAML carries a `# WARNING` comment on 
 the rule's **State variable** field says so, and the server logs:
 
 ```
-[cues] pair vcr_light presses one button with no state variable
+[cues] pair booth_light presses one button with no state variable
 ```
 
 ### When a button moves
@@ -271,8 +276,7 @@ is stored too and refreshed whenever the button is confirmed.
 It is checked on startup, whenever you press **Test** on the Companion
 integration, whenever you press **Refresh** in the button picker, and hourly —
 always against the same cached configuration export the picker reads, never a
-second request. Three outcomes, each a pill on the rule's row under Settings →
-Automation:
+second request. Three outcomes, each a pill on the rule's row on the Automation page:
 
 | | |
 |---|---|
@@ -364,7 +368,7 @@ HACS, copy `custom_components/stage_utility` into Home Assistant's
 | | |
 |---|---|
 | **Host** | an address on the network — `192.168.1.50`, `192.168.1.50:8788` or `http://stage-utility:8788`. Leave the scheme and port off and it assumes plain HTTP on 8788, where every install starts |
-| **Cue token** | an `su_…` secret from Settings → Automation → **Calling cues**, shown once when it is minted |
+| **Cue token** | an `su_…` secret from Automation → **Calling cues**, shown once when it is minted |
 
 Setup reads the cue manifest to prove it found a Stage Utility, then calls a cue
 name that cannot exist to prove the token is accepted — a `404` means the token
@@ -384,20 +388,43 @@ alone, and the room named here is offered as the Home Assistant area. A switch
 whose Companion button has gone missing goes **unavailable** rather than
 pretending a press would do something. A pair with a state source reports what
 the gear says and follows it when somebody turns the projector off at the wall;
-without one the switch reads **unknown** and shows separate on and off buttons,
-with a `reason` attribute saying why.
+without one the switch reads **unknown**, turns on `assumed_state` so the card
+shows separate on and off buttons, and a `reason` attribute says why.
+
+Each switch carries `reason`, `state_source` (the Companion variable it reads, or
+`null`), `toggle`, `cue_on` and `cue_off`, `settling`, `last_commanded` and
+`commanded_at`, and `last_result`; a button carries `last_result`. `last_result` is
+what the last call did: `dispatched`, `skipped` (the gear was already there),
+`simulated` or `failed`. **`simulated` means nothing was pressed**: the server's
+automation engine is in simulate mode, so the call succeeds and a warning is logged.
+`failed` is the server answering `200` with `ok: false` (it reached the cue and
+Companion did not answer); the call raises, a warning is logged, and the switch stays
+where the gear left it.
+
+For eight seconds after a command the switch shows the state it was asked for, with
+`assumed_state` on and `settling` true, and lets one contradicting read go by: a read
+that agrees ends the window at once, a contradiction that repeats is believed, and a
+window that lapses with nothing confirmed gives back whatever was last read. This is
+the same [settle window](#the-settle-window) the server keeps.
 
 **No polling.** The integration holds one subscription to the `cues` channel on
 this server's event stream and is pushed both state changes and changes to the
 cue list, so a cue added, renamed or deleted here reaches Home Assistant in
 seconds with nothing to re-paste and nothing to restart. It falls back to
-reading `/api/cues/states` every thirty seconds only while the stream is down.
+reading `/api/cues/states` every thirty seconds (backing off to no more than a
+minute) only while the stream is down, and reads the manifest again the moment the
+stream is back. With the stream down and the fallback failing too, every switch and
+button goes **unavailable** rather than showing what it last heard. Connects and
+disconnects are logged once per change, and an outage past five minutes logs one
+warning.
 
 Two options on the entry, under **Configure**: whether the server's own web
-interface appears in the Home Assistant sidebar, and whether a HomeKit Bridge is
-reloaded when the cue list changes — a bridge only works out what to publish on
-reload, so without that a new cue is missing from the Apple Home app and a
-deleted one shows as *No Response*.
+interface appears in the Home Assistant sidebar (left out, with a log line, when
+Home Assistant is served over HTTPS and cannot frame a plain-HTTP server), and
+whether a HomeKit Bridge is reloaded when the cue list changes — a bridge only works
+out what to publish on reload, so without that a new cue is missing from the Apple
+Home app and a deleted one shows as *No Response*. The reload comes fifteen seconds
+after the cue list stops changing.
 
 #### The generated YAML
 
@@ -454,11 +481,11 @@ so Home Assistant shows what it asked for rather than what the device did.
 Each cue's editor carries a **Home Assistant** switch. Turned off, the cue is
 voice-only: it is left out of `/api/cues/manifest`, out of the generated YAML
 and off the `cues` channel, so no entity is created for it and it appears under
-**Everything else** in the Automations tab. `POST /api/cues/<name>` still fires
+**Everything else** on the Automation page. `POST /api/cues/<name>` still fires
 it, and so does anything already calling it that way.
 
 A hidden pair's state is still read, and still shown on its row in the
-Automations tab — hiding a cue changes which entities Home Assistant is told
+Automation page — hiding a cue changes which entities Home Assistant is told
 to create and nothing else. `GET /api/cues/states` therefore still carries the
 pair, marked `hiddenFromHome: true`; the generated sensor only lifts the pairs
 the YAML listed, which are the shown ones.
@@ -508,7 +535,7 @@ A binding names one of two things:
 | Form | Reads |
 |---|---|
 | `projectors_state`, or `custom:projectors_state` | a Companion **custom variable** — one your own buttons set |
-| `VCR-Overhead-Light:power_state` | a **module variable** — one a connection publishes for itself |
+| `Booth-Overhead-Light:power_state` | a **module variable** — one a connection publishes for itself |
 
 A bare name is a custom variable, so every binding written before module
 variables could be named goes on meaning what it meant.
@@ -661,7 +688,7 @@ buttons that did the work, or it is the same optimism one system further along.
 
 A pair reads **unknown** when the variable holds something that is neither value,
 when Companion does not have a variable by that name, or when Companion cannot be
-reached. The rule's row in Settings → Automation shows an amber `unknown` pill
+reached. The rule's row on the Automation page shows an amber `unknown` pill
 with the reason, `/api/cues/states` carries it as `reason`, and the log says so
 once per change:
 
@@ -742,7 +769,7 @@ command outranks the variable:
   skipped: true}` and presses nothing. The variable is not read at all — nothing
   it could say would change the answer;
 - the **opposite** state presses, whatever the variable reads, because the
-  reading is presumed to be behind. `[cues] vcr_light_off by Home Assistant:
+  reading is presumed to be behind. `[cues] booth_light_off by Home Assistant:
   pressed against a stale reading (off) inside the settle window` says so.
 
 Flipping a switch in Apple Home several times quickly is what this is for: the
@@ -760,14 +787,14 @@ pair, so an integration can show what was asked for instead of a reading it has
 been told is stale. The log says how it ended, once:
 
 ```
-[cues] state of vcr_light_state settled to on after 3 s
-[cues] state of vcr_light_state did not settle within 8 s
+[cues] state of booth_light_state settled to on after 3 s
+[cues] state of booth_light_state did not settle within 8 s
 ```
 
 The generated Home Assistant switch reads `commanded` before `state` for the
 same reason: templated on the reading alone it flips itself back mid-window, and
-a switch that flips back is an invitation to tap it again. The rules list in
-Settings does the same: a bound pair's pill shows `commanded` while `settling`
+a switch that flips back is an invitation to tap it again. The rules list on
+the Automation page does the same: a bound pair's pill shows `commanded` while `settling`
 is true, never the stale reading underneath it. Re-paste the fragment
 to pick that up.
 
@@ -776,7 +803,7 @@ refused, and a call that was itself skipped all leave the variable as the only
 thing worth comparing against.
 
 If the whole read fails rather than one pair — the server could not answer at all
-— Settings → Automation says so in one line above the rules list and shows no
+— the Automation page says so in one line above the rules list and shows no
 pills, rather than leaving them out silently.
 
 Nothing polls Companion in the background: the variables are read when
@@ -819,12 +846,6 @@ reading it from somewhere else.
 | in error | `error` | Companion cannot reach the device. Its variables either 404 or hold whatever was last seen — neither is current |
 | not reporting | no status, or one this app has not verified | never came up; its variables 404 |
 
-On the install this was built against, the forty enabled connections on modules
-the state table knows read out as: eighteen `good`, every one answering a real
-value; six bulbs and ten plugs answering 404; five cameras answering an empty
-`200`; and one television, `error / Connection Failure`, answering `Off` — the
-value from before Companion lost it.
-
 Connections **disabled** in Companion are not counted. The row's own connected /
 no-clients state still follows the module clients alone — gear behind Companion
 being down is a fact about the building, not about this integration — so nothing
@@ -834,7 +855,7 @@ When anything is not ok, the hourly pass writes one line naming the modules and
 Companion's own words for what is wrong:
 
 ```
-[companion] 12 of 52 connection(s) in error, 10 not reporting: 6 tplink-kasasmartbulb (Connecting), 5 red-rcp2 (Connecting), SA-HL-Stage-TV (Connection Failure), 10 tplink-kasasmartplug (not reporting)
+[companion] 12 of 52 connection(s) in error, 10 not reporting: 6 tplink-kasasmartbulb (Connecting), 5 red-rcp2 (Connecting), Stage-TV (Connection Failure), 10 tplink-kasasmartplug (not reporting)
 ```
 
 **Only when it changes**, and never on a clean pass. An install with a fault
@@ -872,22 +893,53 @@ timer and nothing is read. The log says which:
 ## What the module exposes
 
 **Actions** — PCO Live next/previous, refresh lineup, jump to next plan, set plan,
-set service type, set plan mode, route a view to an output, blackout an output,
-refresh displays, apply a preset, show/hide the QR code, and ten actions for the
-baptism timer: Start, Advance, Mark baptized, Start baptisms, Next, Pause/resume,
-Undo, Finish, Reset, Set workflow.
+set service type, set plan mode (auto or manual), route a view to an output,
+blackout an output (on, off or toggle), reload kiosk displays, apply a slot preset,
+show, hide or toggle the connect QR code, ten actions for the baptism timer (Start,
+Advance, Mark baptized, Start baptisms, Next, Pause/resume, Undo, Finish, Reset, Set
+workflow), and three for stage messages (below).
 
-**Feedbacks** — countdown overtime, mic battery low, mic offline, ProPresenter
-disconnected, plan in manual mode, output showing a given view, output blacked
-out, occupancy over a threshold, captions idle, a people-count text feedback
-that writes the count onto a button, and three for the baptism timer: phase
-colour (always on), paused, running.
+**Feedbacks** — boolean unless noted:
 
-**Variables** — plan and series title, service type, plan mode, ProPresenter
-current/next item and slide position, PCO countdown label and seconds, mics
-online and total, lowest battery and its channel, last caption text and speaker,
-people attendance and occupancy (with per-zone variables), last sync time. Plus
-one pair per automation signal — see below.
+| Feedback | True when |
+|---|---|
+| Service is live (PCO Live) | an item is running, or counting down to the start, or either, by its **Counts as live** option |
+| PCO countdown is in overtime | the countdown has gone negative |
+| Mic battery low / Mic offline or RF dropout | a channel's battery is low, or a channel (or any) has dropped |
+| ProPresenter disconnected | the integration is not connected |
+| Plan mode is Manual | the plan is in manual mode |
+| Output is showing a specific View / Output is blacked out | the chosen output shows the view, or is blacked out |
+| People occupancy over threshold | the in-room count, total or one zone's, is at or above a number you set |
+| Set button text to people count | *advanced*: writes the count (or a zone's) onto the button, with a prefix and suffix |
+| OBS is recording / streaming / on virtual cam | the chosen OBS output is active |
+| REAPER is recording | REAPER is rolling |
+| Streaming platform is live | Resi, YouTube or either is live |
+| Recorder / streaming platform disconnected | the chosen one of OBS, REAPER, Resi or YouTube is not connected |
+| Captions idle | no caption line has arrived for the number of seconds you set |
+| ProVideoPlayer now-layer is playing a video / remaining time at or under threshold | the now-layer is playing, or has the seconds you set or fewer left |
+| Baptism phase colour (*advanced*) / paused / running | the timer's phase colours the button, or it is paused, or a clock is counting |
+| Alert running | a stage message alert is running, for any group or one |
+| Automation signal equals / failed to resolve | see [Signals](#signals) |
+
+**Variables** — plan, series and service type; the plan mode; ProPresenter current
+and next item and the slide index and count; whether a service is live (`service_live`,
+`live_mode` as `item`, `preservice` or `none`) and the live item's title; PCO countdown
+label and `mm:ss`; mics online and total, lowest battery and its channel; last caption
+text and speaker; people attendance, occupancy, connected, updated and zone count, with
+a name, attendance and occupancy per zone; last sync time. One connected, active or
+live variable per integration for OBS (recording, streaming, virtual camera, record
+duration), REAPER (recording, transport position), Resi and YouTube (live, name,
+live-for time), and ProVideoPlayer (connected, now-layer state, layer, cue, next cue,
+media name with and without its extension, clip duration, elapsed and remaining in
+seconds and as `m:ss`). Plus one pair per automation signal — see below.
+
+**Presets** — ready-made buttons in seven categories: **Live Control** (PCO Live next
+with the countdown, previous, refresh lineup), **Routing & Displays** (reload displays,
+blackout, set manual mode), **Monitoring & Alarms** (mic battery, mic offline,
+ProPresenter status), **Recording & Streaming** (OBS, REAPER, on air),
+**ProVideoPlayer** (now playing, remaining-time alarm), **Baptisms** (readouts for
+testimony, live clock, people baptized and session time, and advance, back, pause and
+finish keys) and **Messages**. Each already carries its action and feedback.
 
 **Baptism timer** — `baptism_phase` (`idle`/`armed`/`testimony`/`baptism`),
 `baptism_segment` (the running testimony or baptism clock), `baptism_testimony`
@@ -902,6 +954,45 @@ main button would do right now, in whichever phase the timer is in. Pressed
 while the baptism section is armed, **Next** starts "First person in" the same
 way Advance does, rather than skipping them — a key already bound to Next
 keeps working.
+
+**Stage messages** — the day's [stage messages](../features/stage-messages.md),
+sent and read from a button. The module follows the `messages:state` channel, so
+a renamed group, a new message or a running alert reaches a button without
+reconnecting. So does an edited quick list: the quick messages are read when the
+connection starts and again from every messages update the app sends after a
+change to them.
+
+| Actions | |
+|---|---|
+| `message_send` — **Send message** | **Groups** (Everyone, or one or more groups), **Text** (Companion variables are parsed), **Alert** (checkbox). Sends from `Companion` |
+| `message_send_quick` — **Send quick message** | **Quick message** (one of the quick messages), **Groups**, **Alert** |
+| `message_clear_alerts` — **Clear alerts** | no options; ends every running alert |
+
+| Feedback | |
+|---|---|
+| `message_alert_running` — **Alert running** | on while an alert runs. **Group** is optional: any group, or one |
+
+| Variables | Value |
+|---|---|
+| `message_last_text` | the newest message's text |
+| `message_last_from` | who sent it |
+| `message_last_to` | its groups by name, comma separated; `Everyone` for Everyone |
+| `message_reply_text` | the newest reply to any message today |
+| `message_reply_from` | who sent that reply |
+| `message_alert_active` | `true` while any alert runs, else `false` |
+| `message_alert_text` | the newest running alert's text, else empty |
+
+Every one except `message_alert_active` is an empty string when there is nothing
+yet, and after the nightly clear; `message_alert_active` reads `false`.
+
+**Presets** — a **Messages** category: one **Send** button per quick message,
+addressed to Everyone and editable after it is placed, and a **Clear alerts**
+button that wears the **Alert running** feedback.
+
+The same two things are available to rules and to any console's Action button as
+the automation actions **Send a stage message** and **Clear stage message
+alerts**; see [Automation](../automation.md#actions). Those send from
+`Automation`.
 
 ## Signals
 
@@ -928,7 +1019,7 @@ a Companion variable id, and anything else may not resolve.
 Production marks the talkback vocalist in Planning Center by adding a marker to
 their note for that event, alongside the slot number they already use: `4 TB`.
 
-In Stage Utility, under **Settings -> Automation**:
+In Stage Utility, on the **Automation** page:
 
 ```
 When:  Before a rehearsal or service      60 minutes, rehearsal + service
@@ -984,18 +1075,21 @@ but it does mean a crosspoint someone changed by hand will be put back.
 and re-evaluates the two time-relative feedbacks — that runs in the module's own
 memory and puts nothing on the network.
 
-It listens to seven channels: `server:hello`, `stage:state-changed`, `pco:live`,
+It listens to fifteen channels: `server:hello`, `stage:state-changed`, `pco:live`,
 `propresenter:status`, `prodcom:transcript`, `wireless:connections-changed`,
-`people:count`.
+`people:count`, `companion:signals`, `obs:status`, `reaper:status`,
+`resi:status`, `youtube:status`, `pvp:status`, `baptism:state` and
+`messages:state`.
 
 REST is used for two things: writes (every action is a POST), and a hydrate on
-connect that fetches nine endpoints in one burst — state, views, outputs, service
-types, presets, wireless channels, PCO live, ProPresenter status and people
-count.
+connect that fetches seventeen endpoints in one burst — state, views, outputs,
+service types, presets, wireless channels, PCO live, ProPresenter, people count,
+OBS, REAPER, Resi, YouTube, ProVideoPlayer, baptism, `GET /api/messaging` and
+`GET /api/messages` — plus the plan list when a service type is chosen.
 
 **Poll fallback is off by default** (`0` seconds) and should stay that way unless
-an SSE connection cannot be kept open. When enabled it re-runs that nine-endpoint
-hydrate on every tick, so a five-second fallback is 108 requests a minute, most
+an SSE connection cannot be kept open. When enabled it re-runs that
+hydrate on every tick, so a five-second fallback is over 200 requests a minute, most
 of them for configuration that rarely changes.
 
 The module reports those channels to the server. It sends a `cid` on the event

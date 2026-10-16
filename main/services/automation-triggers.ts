@@ -4,10 +4,11 @@
 // pair of state SNAPSHOTS into a yes/no "did this fire", which is what converts the
 // broadcaster's constantly-repeated state into edges.
 //
-// THE CONTRACT: didFire MUST return false when `prev` is null. On startup the engine
+// THE CONTRACT: didFire returns false when `prev` is null. On startup the engine
 // has no previous snapshot; treating that as a transition would fire every rule at
-// once after an update or crash mid-service, unattended. Asserted for every trigger
-// in automation-triggers.test.ts.
+// once after an update or crash mid-service, unattended. `def` enforces it for every
+// entry below, so a didFire here may assume `prev` is a real snapshot; asserted for
+// every trigger in automation-triggers.test.ts.
 
 import type { ParamDef, TriggerDef } from "../types/automation.js";
 import { dueAt } from "./automation-due-time.js";
@@ -45,8 +46,13 @@ const METRIC: ParamDef = {
   ],
 };
 
+/**
+ * A trigger with the restart guard applied: whatever its own `didFire` says, it
+ * does not fire without a previous snapshot. Written here once, so a trigger
+ * cannot forget it, and so none has to repeat it (it was spelled out 28 times).
+ */
 function def(t: TriggerDef): TriggerDef {
-  return t;
+  return { ...t, didFire: (prev, next, params, now) => prev !== null && t.didFire(prev, next, params, now) };
 }
 
 /**
@@ -131,11 +137,9 @@ const PVP_LAYER_PARAM: ParamDef = {
  * An edge on one ProVideoPlayer layer: everything every PVP trigger needs, with
  * only the edge itself left to write.
  *
- * The preamble is not boilerplate, it is three separate guards, and each of them
+ * The preamble is not boilerplate, it is two separate guards, and each of them
  * fails silently on its own:
  *
- *  - `prev === null` is the restart guard. Without it the first snapshot after
- *    an update reads as a transition and fires every rule at once, unattended.
  *  - `!pvpUp(next)` is what stops PVP going UNREACHABLE reading as every layer
  *    clearing and stopping at the same instant. Unknown is not empty.
  *  - `pvpNamed` applies the optional layer param, whose blank value means "any".
@@ -157,7 +161,6 @@ function pvpEdgeTrigger(
     params: [PVP_LAYER_PARAM],
     help,
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       if (!pvpUp(next)) return false;
       return pvpPairs(prev, next).some(
         ({ before, after }) => pvpNamed(after, params.layer) && edge(before, after),
@@ -229,7 +232,6 @@ function connectionTriggers(id: string, label: string): Record<string, TriggerDe
       channel: "integrations:state-changed",
       params: [],
       didFire: (prev, next) => {
-        if (prev === null) return false;
         return connOf(prev, id) !== "connected" && connOf(next, id) === "connected";
       },
     }),
@@ -240,7 +242,6 @@ function connectionTriggers(id: string, label: string): Record<string, TriggerDe
       params: [],
       help: "Fires when the link drops, including into an error state.",
       didFire: (prev, next) => {
-        if (prev === null) return false;
         const after = connOf(next, id);
         // A missing entry is UNKNOWN, not disconnected — an integration that
         // vanished from the payload must not read as a device going down.
@@ -298,7 +299,6 @@ function outputTriggers(spec: {
       channel,
       params: [],
       didFire: (prev, next) => {
-        if (prev === null) return false;
         return read(prev) !== true && read(next) === true;
       },
     }),
@@ -309,7 +309,6 @@ function outputTriggers(spec: {
       params: [],
       help: `Does not fire when ${device} simply goes offline — unreachable is unknown, not stopped.`,
       didFire: (prev, next) => {
-        if (prev === null) return false;
         if (!reachable(next)) return false;
         return read(prev) === true && read(next) === false;
       },
@@ -382,7 +381,6 @@ function streamTriggers(platform: string, channel: string, label: string): Recor
       channel,
       params: [],
       didFire: (prev, next) => {
-        if (prev === null) return false;
         return asStream(prev).live !== true && asStream(next).live === true;
       },
     }),
@@ -393,7 +391,6 @@ function streamTriggers(platform: string, channel: string, label: string): Recor
       params: [],
       help: `Does not fire when ${label} simply becomes unreachable — unreachable is unknown, not stopped.`,
       didFire: (prev, next) => {
-        if (prev === null) return false;
         const n = asStream(next);
         if (n.connected === false) return false;
         return asStream(prev).live === true && n.live === false;
@@ -840,7 +837,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
       },
     ],
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       const key = oscKeyOf(params);
       if (key === null) return false;
       const before = oscValueAt(prev, key);
@@ -940,6 +936,8 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
         key: "timeTypes",
         label: "Applies to",
         type: "multi-enum",
+        // Blank is both: didFire() reads it that way.
+        optional: true,
         options: [
           { value: "rehearsal", label: "Rehearsal" },
           { value: "service", label: "Service" },
@@ -949,7 +947,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     help:
       "Fires before EVERY matching time on the plan, so a roster change after rehearsal still takes effect before the service.",
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       const from = Date.parse(asLive(prev).serverNow ?? "");
       const to = Date.parse(asLive(next).serverNow ?? "");
       const raw = String(params.timeTypes ?? "").trim();
@@ -968,7 +965,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
       { key: "channel", label: "On channel", type: "string", optional: true, help: "Leave blank for any channel." },
     ],
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       const want = String(params.phrase ?? "").trim().toLowerCase();
       if (!want) return false; // an empty phrase would match every line
       const onlyChannel = String(params.channel ?? "").trim().toLowerCase();
@@ -995,7 +991,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     channel: "baptism:state",
     params: [],
     didFire: (prev, next) => {
-      if (prev === null) return false;
       return asBaptism(prev).phase === "idle" && asBaptism(next).phase !== "idle";
     },
   }),
@@ -1006,7 +1001,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     channel: "baptism:state",
     params: [],
     didFire: (prev, next) => {
-      if (prev === null) return false;
       const a = asBaptism(prev).phase;
       const b = asBaptism(next).phase;
       return a !== undefined && b !== undefined && a !== b;
@@ -1019,7 +1013,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     channel: "baptism:state",
     params: [],
     didFire: (prev, next) => {
-      if (prev === null) return false;
       return asBaptism(prev).phase !== "idle" && asBaptism(next).phase === "idle";
     },
   }),
@@ -1030,7 +1023,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     channel: "displays:presence",
     params: [DISPLAY_NAME],
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       const want = String(params.name ?? "").trim();
       const before = new Set(asConnected(prev));
       const arrived = asConnected(next).filter((d) => !before.has(d));
@@ -1044,7 +1036,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     channel: "displays:presence",
     params: [DISPLAY_NAME],
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       const want = String(params.name ?? "").trim();
       const after = new Set(asConnected(next));
       const left = asConnected(prev).filter((d) => !after.has(d));
@@ -1062,7 +1053,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
       { key: "metric", label: "Metric", type: "string", optional: true, help: 'e.g. "SPL A Slow". Blank picks the usual one.' },
     ],
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       return splCrossed(prev, next, params, "above");
     },
   }),
@@ -1077,7 +1067,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
       { key: "metric", label: "Metric", type: "string", optional: true, help: 'e.g. "SPL A Slow". Blank picks the usual one.' },
     ],
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       return splCrossed(prev, next, params, "below");
     },
   }),
@@ -1092,7 +1081,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     ],
     help: "A pack going offline does not fire this — a missing reading is unknown, not low.",
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       return deviceCrossedBelow(prev, next, String(params.slot ?? "").trim(), "battery", Number(params.threshold));
     },
   }),
@@ -1107,7 +1095,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     ],
     help: "A pack going offline does not fire this — a missing reading is unknown, not low.",
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       return deviceCrossedBelow(prev, next, String(params.slot ?? "").trim(), "rfBars", Number(params.threshold));
     },
   }),
@@ -1119,7 +1106,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     params: [{ key: "minutes", label: "Minutes over", type: "number", min: 1, max: 120 }],
     help: "Measured across finished items, so it is checked as each item ends. Only ever measured within one service.",
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       // Both readings must be the SAME occurrence. This channel carries any
       // record that is broadcast, including a historical one an operator has
       // just corrected in Settings — and the step from a live service's drift to
@@ -1135,7 +1121,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     channel: "update:status",
     params: [],
     didFire: (prev, next) => {
-      if (prev === null) return false;
       const n = (v: unknown) => {
         const x = v && typeof v === "object" ? (v as { releasesBehind?: unknown }).releasesBehind : null;
         return typeof x === "number" && Number.isFinite(x) ? x : 0;
@@ -1151,7 +1136,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     params: [],
     help: "Fires once when the last display drops off, not repeatedly while none are connected.",
     didFire: (prev, next) => {
-      if (prev === null) return false;
       return asConnected(prev).length > 0 && asConnected(next).length === 0;
     },
   }),
@@ -1163,7 +1147,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     params: [],
     help: "Fires the moment PCO Live moves from pre-service into the plan.",
     didFire: (prev, next) => {
-      if (prev === null) return false;
       return asLive(prev).mode !== "item" && asLive(next).mode === "item";
     },
   }),
@@ -1174,7 +1157,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     channel: "pco:live",
     params: [],
     didFire: (prev, next) => {
-      if (prev === null) return false;
       return asLive(prev).mode === "item" && asLive(next).mode !== "item";
     },
   }),
@@ -1185,7 +1167,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     channel: "pco:live",
     params: [{ key: "title", label: "Item title contains", type: "string", help: "Case-insensitive, matches part of the title" }],
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       const want = String(params.title ?? "").trim().toLowerCase();
       if (!want) return false;
       const before = (asLive(prev).currentItemTitle ?? "").toLowerCase();
@@ -1228,7 +1209,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     help:
       "Fires once, when the chosen moment passes. An item is exact if a plan time is named after it; otherwise its time is estimated from item lengths and drifts if the service runs long.",
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       const before = asLive(prev);
       const after = asLive(next);
 
@@ -1263,7 +1243,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     channel: "people:count",
     params: [{ key: "threshold", label: "Threshold", type: "number", min: 0, max: 100000 }, METRIC],
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       const metric = String(params.metric ?? "attendance");
       return crossed(metricOf(prev, metric), metricOf(next, metric), Number(params.threshold), "above");
     },
@@ -1275,7 +1254,6 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
     channel: "people:count",
     params: [{ key: "threshold", label: "Threshold", type: "number", min: 0, max: 100000 }, METRIC],
     didFire: (prev, next, params) => {
-      if (prev === null) return false;
       const metric = String(params.metric ?? "attendance");
       return crossed(metricOf(prev, metric), metricOf(next, metric), Number(params.threshold), "below");
     },

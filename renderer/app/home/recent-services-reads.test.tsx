@@ -16,7 +16,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -95,10 +95,10 @@ test("history that could not be read shows the card saying so, rather than hidin
   const f = stubFetch(["timeline", "attendance"]);
   try {
     await mount();
-    assert.equal(!!screen.queryByText("Open History"), true, "the card must not vanish as if nothing were recorded");
-    assert.match(alerts(), /Couldn't load the service timings and the attendance history/i);
-    assert.ok(loggedHistory(f.logs, /service timings/i), `expected a [history] line — got ${JSON.stringify(f.logs)}`);
-    assert.ok(loggedHistory(f.logs, /attendance history/i), `expected a [history] line — got ${JSON.stringify(f.logs)}`);
+    await eventually(() => assert.equal(!!screen.queryByText("Open History"), true, "the card must not vanish as if nothing were recorded"));
+    await eventually(() => assert.match(alerts(), /Couldn't load the service timings and the attendance history/i));
+    await eventually(() => assert.ok(loggedHistory(f.logs, /service timings/i), `expected a [history] line — got ${JSON.stringify(f.logs)}`));
+    await eventually(() => assert.ok(loggedHistory(f.logs, /attendance history/i), `expected a [history] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -111,8 +111,8 @@ for (const [read, words] of [["timeline", "the service timings"], ["attendance",
     const f = stubFetch([read]);
     try {
       await mount();
-      assert.equal(!!screen.queryByText("Open History"), true, "one failed read is enough to keep the card");
-      assert.equal(alerts(), `Couldn't load ${words}.`);
+      await eventually(() => assert.equal(!!screen.queryByText("Open History"), true, "one failed read is enough to keep the card"));
+      await eventually(() => assert.equal(alerts(), `Couldn't load ${words}.`));
     } finally {
       f.restore();
     }
@@ -124,15 +124,14 @@ test("a sound summary that loads on a second try takes its note away", async () 
   const f = stubFetch(failing, ATTENDANCE);
   try {
     const view = await mount(true);
-    assert.match(alerts(), /Couldn't load the sound summary/i);
+    await eventually(() => assert.match(alerts(), /Couldn't load the sound summary/i));
     // The operator turns the SPL trend line off and on again; this time it reads.
     failing.length = 0;
     view.rerender(card(false));
     await settle();
     view.rerender(card(true));
     await settle();
-    await settle();
-    assert.equal(alerts(), "", "the read that failed has since succeeded");
+    await eventually(() => assert.equal(alerts(), "", "the read that failed has since succeeded"));
   } finally {
     f.restore();
   }
@@ -142,9 +141,9 @@ test("a sound summary that could not be read is named on a card that has figures
   const f = stubFetch(["spl"], ATTENDANCE);
   try {
     await mount();
-    assert.equal(!!screen.queryByText("Peak"), true, "the attendance figures still draw");
-    assert.match(alerts(), /Couldn't load the sound summary/i);
-    assert.ok(loggedHistory(f.logs, /sound summary/i), `expected a [history] line — got ${JSON.stringify(f.logs)}`);
+    await eventually(() => assert.equal(!!screen.queryByText("Peak"), true, "the attendance figures still draw"));
+    await eventually(() => assert.match(alerts(), /Couldn't load the sound summary/i));
+    await eventually(() => assert.ok(loggedHistory(f.logs, /sound summary/i), `expected a [history] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();
   }
@@ -165,7 +164,7 @@ test("control: every read loads, the card draws its figures with no alert", asyn
   const f = stubFetch([], ATTENDANCE);
   try {
     await mount();
-    assert.equal(!!screen.queryByText("Peak"), true);
+    await eventually(() => assert.equal(!!screen.queryByText("Peak"), true));
     assert.equal(alerts(), "");
     assert.deepEqual(f.logs, []);
   } finally {

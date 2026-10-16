@@ -7,6 +7,7 @@
 // (port 8788), so all paths here are relative.
 
 import { errorMessage } from "@main/services/errors";
+import { readStored } from "./safe-storage";
 import { monotonicNow, serverClock } from "./server-clock";
 import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
 
@@ -22,10 +23,17 @@ const REQUEST_TIMEOUT_MS = 15000;
 export interface ApiError extends Error {
   status?: number;
   code?: string;
+  /** The whole answer, for a refusal that carries more than its message: a 409
+   *  `screens-changed` carries the screens as they are now. */
+  body?: Record<string, unknown>;
 }
 
+/** What a non-2xx answer carries: a message, a machine-readable code, and
+ *  whatever else that refusal needs. */
+type ErrorBody = { error?: string; code?: string; [k: string]: unknown };
+
 /** A non-2xx answer's body, or null when it is not JSON — never fatal. */
-async function errorBody(res: Response): Promise<{ error?: string; code?: string } | null> {
+async function errorBody(res: Response): Promise<ErrorBody | null> {
   try {
     return await res.json();
   } catch {
@@ -39,10 +47,11 @@ function timeoutError(path: string, cause: unknown): Error {
 }
 
 /** The Error a non-2xx answer becomes, from its status and parsed body. */
-function httpError(status: number, statusText: string, body: { error?: string; code?: string } | null): ApiError {
+function httpError(status: number, statusText: string, body: ErrorBody | null): ApiError {
   const err = new Error(typeof body?.error === "string" ? body.error : statusText) as ApiError;
   err.status = status;
   if (typeof body?.code === "string") err.code = body.code;
+  if (body && typeof body === "object") err.body = body;
   return err;
 }
 
@@ -134,7 +143,7 @@ function noteContent(channel: string, at: number): void {
  *  caller in another frame. */
 type SharedRead =
   | { kind: "ok"; body: unknown }
-  | { kind: "http"; status: number; statusText: string; body: { error?: string; code?: string } | null }
+  | { kind: "http"; status: number; statusText: string; body: ErrorBody | null }
   | { kind: "timeout" }
   | { kind: "failed"; name: string; message: string; cause: string | null };
 
@@ -283,18 +292,20 @@ async function sendAsAsked<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+function sendJson<T>(method: "POST" | "PATCH" | "PUT", path: string, body: unknown): Promise<T> {
+  return apiFetch<T>(path, { method, body: body !== undefined ? JSON.stringify(body) : undefined });
+}
+
 function post<T>(path: string, body?: unknown): Promise<T> {
-  return apiFetch<T>(path, {
-    method: "POST",
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  return sendJson<T>("POST", path, body);
 }
 
 function patch<T>(path: string, body?: unknown): Promise<T> {
-  return apiFetch<T>(path, {
-    method: "PATCH",
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  return sendJson<T>("PATCH", path, body);
+}
+
+function put<T>(path: string, body?: unknown): Promise<T> {
+  return sendJson<T>("PUT", path, body);
 }
 
 function del<T>(path: string): Promise<T> {
@@ -437,6 +448,12 @@ export type IpcChannel =
   | "layoutTemplates:list"
   | "layoutTemplates:save"
   | "layoutTemplates:update"
+  | "messages:clearAlert"
+  | "messages:get"
+  | "messages:reply"
+  | "messages:send"
+  | "messaging:get"
+  | "messaging:set"
   | "notes:set"
   | "obs:getStatus"
   | "osc:addTarget"
@@ -454,11 +471,13 @@ export type IpcChannel =
   | "outputs:rename"
   | "outputs:reorder"
   | "outputs:setAllowHls"
+  | "outputs:setGroups"
   | "outputs:setHideTopBar"
   | "outputs:setLocked"
-  | "outputs:setMode"
+  | "outputs:setRotation"
   | "outputs:setSlug"
   | "outputs:setTextSize"
+  | "outputs:setVideoMode"
   | "outputs:setView"
   | "patch:get"
   | "patch:parseXlsx"
@@ -588,8 +607,9 @@ export type IpcChannel =
   | "views:setLayout"
   | "views:setServiceCueLayout"
   | "views:setSlots"
+  | "views:setShowInSidebar"
   | "views:setSlotsLayout"
-  | "views:setSurface"
+  | "views:setRole"
   | "window:closeSettings"
   | "wireless:addConnection"
   | "wireless:channelStatuses"
@@ -1142,6 +1162,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { serviceCueLayoutId: p.serviceCueLayoutId });
     }
 
+    case "views:setShowInSidebar": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { showInSidebar: p.showInSidebar });
+    }
+
     case "views:setHideChrome": {
       const id = p.id as string;
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { hideChrome: p.hideChrome });
@@ -1256,7 +1281,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "views:remove": {
       const id = p.id as string;
-      return del<T>(`/api/views/${encodeURIComponent(id)}`);
+      return del<T>(`/api/views/${encodeURIComponent(id)}${p.ifUnshown ? "?ifUnshown=1" : ""}`);
     }
 
     // ── Layout templates ──────────────────────────────────────────────────
@@ -1317,7 +1342,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "outputs:setView": {
       const id = p.id as string;
-      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { viewId: p.viewId });
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { viewId: p.viewId, expectSurface: p.expectSurface });
     }
 
     case "outputs:setLocked": {
@@ -1335,9 +1360,24 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { textSize: p.textSize });
     }
 
+    case "outputs:setRotation": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { rotation: p.rotation });
+    }
+
+    case "outputs:setVideoMode": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { videoMode: p.videoMode });
+    }
+
     case "outputs:setAllowHls": {
       const id = p.id as string;
       return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { allowHls: p.allowHls });
+    }
+
+    case "outputs:setGroups": {
+      const id = p.id as string;
+      return patch<T>(`/api/outputs/${encodeURIComponent(id)}`, { groups: p.groups });
     }
 
     case "history:editWindow":
@@ -1476,8 +1516,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "automation:propresenter-instances": return apiFetch("/api/automation/propresenter-instances");
     case "automation:propresenter-macros": return apiFetch("/api/automation/propresenter-macros");
     case "automation:addRule": return post("/api/automation/rules", params);
-    case "automation:updateRule": return patch(`/api/automation/rules/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);
-    case "automation:removeRule": return del(`/api/automation/rules/${(params as { id: string }).id}`);
+    case "automation:updateRule": return patch(`/api/automation/rules/${encodeURIComponent((params as { id: string }).id)}`, (params as { patch: unknown }).patch);
+    case "automation:removeRule": return del(`/api/automation/rules/${encodeURIComponent((params as { id: string }).id)}`);
     case "automation:runRule": {
       const { id, confirmed } = params as { id: string; confirmed?: boolean };
       return post(`/api/automation/rules/${encodeURIComponent(id)}/run`, { confirmed: confirmed === true });
@@ -1526,9 +1566,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     }
     case "rosstalk:targets": return apiFetch("/api/rosstalk/targets");
     case "rosstalk:addTarget": return post("/api/rosstalk/targets", params);
-    case "rosstalk:updateTarget": return patch(`/api/rosstalk/targets/${(params as { id: string }).id}`, (params as { patch: unknown }).patch);
-    case "rosstalk:removeTarget": return del(`/api/rosstalk/targets/${(params as { id: string }).id}`);
-    case "rosstalk:test": return post(`/api/rosstalk/targets/${(params as { id: string }).id}/test`);
+    case "rosstalk:updateTarget": return patch(`/api/rosstalk/targets/${encodeURIComponent((params as { id: string }).id)}`, (params as { patch: unknown }).patch);
+    case "rosstalk:removeTarget": return del(`/api/rosstalk/targets/${encodeURIComponent((params as { id: string }).id)}`);
+    case "rosstalk:test": return post(`/api/rosstalk/targets/${encodeURIComponent((params as { id: string }).id)}/test`);
     case "rosstalk:commands": return apiFetch("/api/rosstalk/commands");
     case "rosstalk:send": return post("/api/rosstalk/send", params);
     case "rosstalk:setSimulate": return post("/api/rosstalk/simulate", params);
@@ -1537,9 +1577,6 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "action:invoke":
       return post<T>("/api/action/invoke", p);
-
-    case "outputs:setMode":
-      return patch<T>(`/api/outputs/${encodeURIComponent(String(p.id))}`, { mode: p.mode });
 
     case "barItems:set":
       return post<T>("/api/bar-items", p);
@@ -1550,8 +1587,31 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "notes:set":
       return post<T>("/api/notes", p);
 
-    case "views:setSurface":
-      return patch<T>(`/api/views/${encodeURIComponent(String(p.id))}`, { surface: p.surface });
+    case "messages:get":
+      // no-store, as the poll transport does: this read is also a clock sample (see
+      // useMessagesStatus), so it must come from the server now and not a cache.
+      return apiFetch<T>("/api/messages", { cache: "no-store" });
+    case "messages:send":
+      return post<T>("/api/messages", { to: p.to, text: p.text, alert: p.alert, from: p.from });
+    case "messages:clearAlert":
+      return post<T>(`/api/messages/${encodeURIComponent(String(p.id))}/clear-alert`, { from: p.from });
+    case "messages:reply":
+      return post<T>(`/api/messages/${encodeURIComponent(String(p.id))}/replies`, {
+        text: p.text,
+        objectId: p.objectId,
+        outputId: p.outputId,
+      });
+    case "messaging:get":
+      return apiFetch<T>("/api/messaging");
+    case "messaging:set":
+      return put<T>("/api/messaging", p);
+
+    // Changes the view AND every screen showing it, in one call the server undoes
+    // if it fails part-way. `screens` is the ids the operator was shown; a 409
+    // `screens-changed` answers when they are stale. PATCH /api/views/:id
+    // { surface } is the other route, and refuses a view that screens are showing.
+    case "views:setRole":
+      return post<T>(`/api/views/${encodeURIComponent(String(p.id))}/surface`, { surface: p.surface, screens: p.screens });
 
     case "osc:getFeedback":
       return apiFetch<T>("/api/osc/feedback");
@@ -1790,15 +1850,12 @@ function reportChannels(): void {
 // stops) is what closed it and what makes defaulting this on safe.
 //
 //   Opt out: localStorage.setItem("stage:sharedSse", "0")  (then reload)
+const SHARED_SSE_KEY = "stage:sharedSse";
 let sharedSse = (() => {
   // The worker exists to SHARE one EventSource across tabs. On the polling
   // transport there is no stream to share, so it would open one nobody reads.
   if (POLL_TRANSPORT) return false;
-  try {
-    return typeof SharedWorker !== "undefined" && localStorage.getItem("stage:sharedSse") !== "0";
-  } catch {
-    return false;
-  }
+  return typeof SharedWorker !== "undefined" && readStored(SHARED_SSE_KEY, (raw) => raw !== "0", false);
 })();
 
 /** Wrappers added to the direct stream while the worker is unavailable, so a
@@ -1960,9 +2017,8 @@ function scheduleWorkerRetry(): void {
     workerRetryTimer = null;
     workerRetryDelayMs = Math.min(workerRetryDelayMs * 2, WORKER_RETRY_MAX_MS);
     if (typeof SharedWorker === "undefined") return; // nothing to go back to
-    try {
-      if (localStorage.getItem("stage:sharedSse") === "0") return; // opted out
-    } catch { /* storage unavailable — keep trying */ }
+    // Storage unavailable reads as not opted out: keep trying.
+    if (!readStored(SHARED_SSE_KEY, (raw) => raw !== "0", true)) return;
     sharedSse = true;
     if (!ensureWorker()) return; // ensureWorker already fell back and rescheduled
     console.log("[api] shared SSE worker recovered — moving this tab back onto it");
@@ -2249,8 +2305,16 @@ if (typeof document !== "undefined") {
  */
 export function onNotification(
   channel: string,
-  cb: (payload: unknown, replayed: boolean) => void,
+  handler: (payload: unknown, replayed: boolean) => void,
 ): () => void {
+  // Every subscription is its own entry in the registries below, whatever
+  // function it was handed. They are Sets, and the React Compiler hoists a
+  // callback that captures nothing to module scope: every component using a
+  // hook like useDevices hands over the IDENTICAL `() => void refresh()`, the
+  // Set kept one entry for all of them, and the first component to unmount
+  // unsubscribed every other. Closing a Screen settings panel, or removing a
+  // screen card, stopped the Screens page hearing about devices until a reload.
+  const cb = (payload: unknown, replayed: boolean) => handler(payload, replayed);
   // Replay THIS process's own cached snapshot to the new callback, on either
   // transport. `lastPayload` is written by `fanOut`, which runs for every frame
   // this tab receives regardless of whether it arrived over the worker or the

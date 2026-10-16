@@ -59,19 +59,18 @@ describe("layout editing", () => {
 });
 
 describe("contextForOutput", () => {
-  test("an ordinary screen is a display", () => {
-    assert.equal(contextForOutput(undefined, false), "display");
-    assert.equal(contextForOutput("display", false), "display");
+  test("a screen whose view is not a console is a display", () => {
+    assert.equal(contextForOutput(false, false), "display");
   });
 
-  test("a screen set to panel is a panel", () => {
-    assert.equal(contextForOutput("panel", false), "panel");
+  test("a screen whose view is a console is a panel", () => {
+    assert.equal(contextForOutput(true, false), "panel");
   });
 
-  test("a PREVIEW is always a display, even of a panel", () => {
+  test("a PREVIEW is always a display, even of a console", () => {
     // Otherwise the Screens page could advance the service by being looked at:
     // every card renders a live preview of what that screen shows.
-    assert.equal(contextForOutput("panel", true), "display");
-    assert.equal(contextForOutput("display", true), "display");
+    assert.equal(contextForOutput(true, true), "display");
+    assert.equal(contextForOutput(false, true), "display");
   });
 });

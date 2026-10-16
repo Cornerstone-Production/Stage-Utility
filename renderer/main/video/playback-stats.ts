@@ -16,6 +16,7 @@
 
 import { errorMessage } from "@main/services/errors";
 import { OutageLog } from "@main/services/repeat-log";
+import { MAX_LAG_MS } from "@main/services/video/playback-health";
 import type { VideoPlaybackReport } from "@main/types/video";
 
 /** How long one stats read may take before it counts as a failed read. Under
@@ -51,6 +52,12 @@ interface RawCounts {
    *  and counts `waiting` events instead, which a genuine zero-freezes
    *  reading must not be confused with. */
   freezeCount?: number;
+  /** WebRTC only: the cumulative seconds frames have waited in the jitter
+   *  buffer and how many frames have left it. Undefined when the browser's
+   *  report carries either, so `jitterBufferMs` reads null rather than a
+   *  zero that never was measured. */
+  jitterBufferDelay?: number;
+  jitterBufferEmittedCount?: number;
 }
 
 type StatsEntry = {
@@ -61,6 +68,8 @@ type StatsEntry = {
   frameWidth?: number;
   frameHeight?: number;
   freezeCount?: number;
+  jitterBufferDelay?: number;
+  jitterBufferEmittedCount?: number;
 };
 
 /** `read`, or a rejection once STATS_READ_TIMEOUT_MS passes without it. A
@@ -88,10 +97,28 @@ async function readWebrtcCounts(pc: RTCPeerConnection): Promise<RawCounts | null
   let found: RawCounts | null = null;
   report.forEach((r: StatsEntry) => {
     if (r.type === "inbound-rtp" && r.kind === "video") {
-      found = { decoded: r.framesDecoded ?? 0, dropped: r.framesDropped ?? 0, width: r.frameWidth ?? 0, height: r.frameHeight ?? 0, freezeCount: r.freezeCount };
+      found = {
+        decoded: r.framesDecoded ?? 0,
+        dropped: r.framesDropped ?? 0,
+        width: r.frameWidth ?? 0,
+        height: r.frameHeight ?? 0,
+        freezeCount: r.freezeCount,
+        jitterBufferDelay: r.jitterBufferDelay,
+        jitterBufferEmittedCount: r.jitterBufferEmittedCount,
+      };
     }
   });
   return found;
+}
+
+/** A jitter-buffer figure as the report carries it: whole milliseconds, or
+ *  null past what the server will accept. The server refuses a whole report
+ *  array over MAX_LAG_MS, so a freak counter reading (a browser reporting
+ *  nonsense) must not cost the screen every widget's health for that
+ *  heartbeat; null says the figure was not usable. */
+function reportedMs(ms: number): number | null {
+  const whole = Math.round(ms);
+  return Number.isFinite(whole) && whole <= MAX_LAG_MS ? Math.max(0, whole) : null;
 }
 
 /** `decoded` is `totalVideoFrames` less `droppedVideoFrames`: the total counts
@@ -181,6 +208,11 @@ export function createSampler(
   // inbound-rtp video report: freezeCount if that report has one, `waiting`
   // otherwise, for the rest of the session whatever later reports carry.
   let stallSource: "freezeCount" | "waiting" | null = source.via === "hls" ? "waiting" : null;
+  // WebRTC's receive delay: `jitterBufferMs` is the average time a frame
+  // waited in the browser's jitter buffer THIS interval, from two cumulative
+  // counters read as deltas.
+  const jitterDelayDelta = trackDelta();
+  const jitterEmittedDelta = trackDelta();
   const statsOutage = new OutageLog();
   const read = (): Promise<RawCounts | null> => (source.via === "webrtc" ? inTime(readWebrtcCounts(source.pc)) : Promise.resolve(readHlsCounts(video)));
 
@@ -216,7 +248,7 @@ export function createSampler(
       stallSource ??= raw.freezeCount !== undefined ? "freezeCount" : "waiting";
       const stallCount =
         stallSource === "waiting" ? stallsDelta(stalls) : raw.freezeCount === undefined ? 0 : freezeCountDelta(raw.freezeCount);
-      return {
+      const report: VideoPlaybackReport = {
         feedId,
         via: source.via,
         decoded: decodedDelta(raw.decoded),
@@ -225,6 +257,19 @@ export function createSampler(
         width: raw.width,
         height: raw.height,
       };
+      if (source.via === "webrtc") {
+        // Null, not zero, when this interval could not measure it: a counter
+        // the browser does not report, a buffer that emitted nothing, or a
+        // reading past what the server accepts.
+        let jitterBufferMs: number | null = null;
+        if (raw.jitterBufferDelay !== undefined && raw.jitterBufferEmittedCount !== undefined) {
+          const waited = jitterDelayDelta(raw.jitterBufferDelay);
+          const emitted = jitterEmittedDelta(raw.jitterBufferEmittedCount);
+          if (emitted > 0) jitterBufferMs = reportedMs((waited / emitted) * 1000);
+        }
+        report.jitterBufferMs = jitterBufferMs;
+      }
+      return report;
     },
     stop: () => {
       stopped = true;

@@ -281,7 +281,7 @@ describe("fetchExport", () => {
  * companion-connections.test.ts.
  */
 const connectionsBody = (): unknown => [
-  { id: "a", label: "MA_HL_Projector", moduleId: "generic-pjlink", enabled: true, status: { category: "good", level: "ok", message: null } },
+  { id: "a", label: "Main_Projector", moduleId: "generic-pjlink", enabled: true, status: { category: "good", level: "ok", message: null } },
   { id: "b", label: "Bulb", moduleId: "tplink-kasasmartbulb", enabled: true, status: { category: "error", level: "Connecting", message: null } },
   { id: "c", label: "Plug", moduleId: "tplink-kasasmartplug", enabled: true, status: null },
   { id: "d", label: "Off", moduleId: "obs-studio", enabled: false, status: null },
@@ -722,12 +722,12 @@ describe("readVariable dispatches on the form of the binding", () => {
 
     // The value is trimmed here too: the module endpoint answers text, and a
     // trailing newline matching neither "On" nor "Off" reads as unknown.
-    assert.deepEqual(await companionApi.readVariable("VCR-Overhead-Light:power_state"), {
+    assert.deepEqual(await companionApi.readVariable("Booth-Overhead-Light:power_state"), {
       value: "On",
     });
     assert.deepEqual(
       calls.map((c) => c.url),
-      ["http://10.0.0.5:8000/api/variable/VCR-Overhead-Light/power_state/value"],
+      ["http://10.0.0.5:8000/api/variable/Booth-Overhead-Light/power_state/value"],
     );
     assert.equal(calls[0]!.signal instanceof AbortSignal, true, "the read was sent with no timeout");
   });
@@ -736,8 +736,8 @@ describe("readVariable dispatches on the form of the binding", () => {
     target({ host: "10.0.0.5", port: 8000 });
     stub(() => new Response("Not found", { status: 404 }));
 
-    assert.deepEqual(await companionApi.readVariable("VCR-Overhead-Light:power_state"), {
-      error: "no such variable VCR-Overhead-Light:power_state in Companion",
+    assert.deepEqual(await companionApi.readVariable("Booth-Overhead-Light:power_state"), {
+      error: "no such variable Booth-Overhead-Light:power_state in Companion",
     });
   });
 
@@ -758,7 +758,7 @@ describe("readVariable dispatches on the form of the binding", () => {
       throw new Error("fetch failed", { cause: new Error("connect ECONNREFUSED 10.0.0.5:8000") });
     };
 
-    assert.deepEqual(await companionApi.readVariable("VCR-Overhead-Light:power_state"), {
+    assert.deepEqual(await companionApi.readVariable("Booth-Overhead-Light:power_state"), {
       error: "connect ECONNREFUSED 10.0.0.5:8000",
     });
   });

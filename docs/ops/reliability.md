@@ -14,8 +14,9 @@ Built for a room full of always-on screens.
 - **Writes are atomic** — temp file then rename — and a file that will not parse is
   backed up rather than overwritten. Recorded services are one file each, so
   persisting a live service does not rewrite your whole history.
-- **Disk caches are pruned** by age and size. Photos and plan attachments are
-  cached, and images are served immutable so a screen fetches each one once.
+- **Disk caches are pruned.** Photos and plan attachments go by age and size, and
+  the Mac output helper's downloads (`cache/output-helper/`) are cut back to the
+  running version. Images are served immutable so a screen fetches each one once.
 - **Updates skip what they can** — no reinstall unless dependencies changed, no
   rebuild unless the interface did.
 
@@ -68,6 +69,8 @@ the running server prints its own path in **Settings → Advanced**:
 | `bar-config.json`, `saved-colors.json` | the context bar's arrangement, and your colours |
 | `baptism-triggers.json`, `scores-favourites.json` | per-plan baptism items, followed teams |
 | `history-milestones.json` | the dates you marked on the History trend chart |
+| `video-feeds.json` | the [video feeds](../integrations/video-feeds.md) and the relay's ports, never a camera or publish password |
+| `messaging.json` | the stage-message groups, quick messages and quick replies |
 | `branding-images/`, `layout-images/` | uploaded images, named by content hash |
 
 **What it observed** — deliberately not restored, because it describes this
@@ -78,24 +81,30 @@ machine's history rather than how you set it up:
 | `spl-history/`, `attendance-history/`, `service-timeline/` | recorded services, one file each |
 | `archive/` | the raw samples behind them — see [data archive](../data-archive.md) |
 | `baptism.json` | baptism sessions |
+| `messages.json` | the day's stage messages: a message describes one day, and last winter's would only reappear on this Sunday's screens |
 | `checklist-ticks.json` | which checklist rows are ticked, per plan |
 | `automation-log.json` | the Activity log |
 | `signals.json` | the values Companion reads |
 | `stream-starts.json` | when each platform was first seen live |
 | `update-notices.json` | which release has been announced |
+| `video-seen.json` | when each video feed was last confirmed live |
 
 **Neither** — never in a backup, and never restored:
 
 | | |
 |---|---|
 | `cache/photos/`, `cache/attachments/` | cached Planning Center photos and plan files |
+| `cache/output-helper/` | the Mac output helper's zips, one folder per release, downloaded again when missing |
+| `video-relay/` | the video relay's pinned MediaMTX download and its generated config, fetched again on a fresh machine. See [Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch) |
+| `update-track`, `update-progress.json`, `update-result.json`, `update-live.log`, `update-restart-pending` | the updater's own state: the track this install follows, and the files an update in flight and one waiting for its restart leave |
 | `server.log`, `update.log` | log history, replayed into `/log` on boot |
 | `secrets.bin` | integration and wireless credentials, AES-256-GCM encrypted |
 | `encryption.key` | 32-byte key, generated on first run, mode `600` |
 | `snapshots/`, `backups/` | saved config snapshots, and what the scheduler wrote |
 
 Which half a file lands in is declared where the file is defined and checked by
-the test suite, so a new store cannot quietly miss a backup.
+the test suite, so a new store cannot quietly miss a backup. The same files, one
+row each, are in [Data model](../reference/data-model.md#stored-data).
 
 A `*.json.migrated` file is an older store kept after its contents were split into
 per-service files. Safe to delete.

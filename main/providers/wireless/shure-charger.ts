@@ -39,7 +39,7 @@ export class ShureCharger extends ShureBaseProvider {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private static readonly POLL_MS = 30_000;
 
-  /** The unit's own name (DEVICE_ID), e.g. "MA: 5-8". Device-level, so it is held
+  /** The unit's own name (DEVICE_ID), e.g. "RF: 5-8". Device-level, so it is held
    *  here and applied to each bay — it arrives once per dump, before or after the
    *  bays depending on frame order, and a bay discovered later still needs it. */
   private deviceId: string | null = null;
@@ -91,7 +91,7 @@ export class ShureCharger extends ShureBaseProvider {
    * answers `< REP ERR >`, `GET 0 <field>` answers `< REP ERR >` for every field
    * (only `GET 0 ALL` is accepted at channel 0), and the device-level form with
    * no channel number is answered — `GET DEVICE_ID` returns `REP DEVICE_ID
-   * {MA: 5-8}`. That is the heartbeat: one field, always answered, and its reply
+   * {RF: 5-8}`. That is the heartbeat: one field, always answered, and its reply
    * is the name the bays are labelled with, so the probe keeps that fresh too.
    */
   protected override heartbeatCommand(): string {
@@ -241,7 +241,7 @@ export class ShureCharger extends ShureBaseProvider {
         break;
       }
 
-      // The operator's own name for the unit (e.g. "MA: 5-8", meaning it covers
+      // The operator's own name for the unit (e.g. "RF: 5-8", meaning it covers
       // mic assignments 5 to 8). Better than the "Ch 1..8" the picker showed.
       case "DEVICE_ID": {
         const id = value || null;

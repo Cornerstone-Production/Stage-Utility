@@ -782,7 +782,7 @@ describe("the per-button Toggle select", () => {
 // reads unknown forever, with a State select on screen that looks correct.
 describe("a button's own inferred state source", () => {
   const PLUG = {
-    variable: "VCR-Overhead-Light:power_state",
+    variable: "Booth-Overhead-Light:power_state",
     onValue: "On",
     offValue: "Off",
     moduleId: "tplink-kasasmartplug",
@@ -968,7 +968,7 @@ describe("a button's own inferred state source", () => {
   test("a single button with a source is offered as a SWITCH, and stays unticked", async () => {
     CUSTOM_VARIABLES = [];
     SINGLES = [
-      button({ page: 2, row: 2, col: 0, label: "VCR Light ON", slug: "vcr_light_on", stateSource: PLUG }),
+      button({ page: 2, row: 2, col: 0, label: "Booth Light ON", slug: "booth_light_on", stateSource: PLUG }),
       button({ row: 2, col: 3, label: "Take Screens", slug: "take_screens" }),
     ];
     await mount();
@@ -982,26 +982,26 @@ describe("a button's own inferred state source", () => {
     );
     assert.deepEqual(
       boxes()
-        .filter((b) => b.name.startsWith("VCR Light ON"))
+        .filter((b) => b.name.startsWith("Booth Light ON"))
         .map((b) => `${b.name}=${b.checked}`),
-      ["VCR Light ON · Room A: Screens=false"],
+      ["Booth Light ON · Room A: Screens=false"],
     );
-    assert.equal(toggleSelect("VCR Light ON · Room A: Screens")?.value, PLUG.variable);
+    assert.equal(toggleSelect("Booth Light ON · Room A: Screens")?.value, PLUG.variable);
   });
 
   test("a single button's inferred binding reaches the request once it is ticked", async () => {
     CUSTOM_VARIABLES = [];
     SINGLES = [
-      button({ page: 2, row: 2, col: 0, label: "VCR Light ON", slug: "vcr_light_on", stateSource: PLUG }),
+      button({ page: 2, row: 2, col: 0, label: "Booth Light ON", slug: "booth_light_on", stateSource: PLUG }),
     ];
     await mount();
     await act(async () => {
-      screen.getByRole("checkbox", { name: "VCR Light ON · Room A: Screens" }).click();
+      screen.getByRole("checkbox", { name: "Booth Light ON · Room A: Screens" }).click();
     });
     const body = await importNow();
     assert.deepEqual(
       body.buttons.map((b) => `${b.slug}=${b.stateVariable}/${b.stateOnValue}/${b.stateOffValue}`),
-      ["vcr_light_on=VCR-Overhead-Light:power_state/On/Off"],
+      ["booth_light_on=Booth-Overhead-Light:power_state/On/Off"],
     );
   });
 });

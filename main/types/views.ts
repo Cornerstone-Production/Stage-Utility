@@ -10,6 +10,7 @@
 
 import type { CalendarSelection } from "./calendar.js";
 import { externKeyed } from "./extern-keyed.js";
+import type { Rotation } from "./output-format.js";
 
 export type ViewKind =
   | "slots"
@@ -61,8 +62,8 @@ export function everyViewKind<const T extends readonly ViewKind[]>(kinds: T & Ex
  * all of it — this map is only about the default.
  *
  * Two readers, one fact: `stage-view.tsx` decides structurally which arms
- * render `ScreenTopBar`, and `outputs-section.tsx` decides whether the "Hide
- * top bar" and "Lock display" menu items would do anything on this screen.
+ * render `ScreenTopBar`, and `screen-settings-panel.tsx` decides whether the Top
+ * bar and Lock switches would do anything on this screen.
  * `stage-view-paths.test.tsx` renders every kind and asserts the real DOM
  * against this map, so the two cannot drift apart.
  */
@@ -232,6 +233,22 @@ export interface View {
    * flipping a console to a display and back does not lose the setting.
    */
   hideChrome?: boolean;
+  /**
+   * Whether this console is listed in the operator app's sidebar. Absent = shown,
+   * so every console that exists today stays listed; only an explicit `false`
+   * takes it out. Read through {@link viewShownInSidebar}, never directly.
+   *
+   * It is about the LIST and nothing else. A hidden console keeps its live
+   * controls on every screen showing it, still opens at `/consoles/<id>`, still
+   * has a titled page, and a screen card's Open link still reaches it. A control
+   * surface on a stage display is a screen first, and listing its view as a
+   * place the operator works was the wrong default for it.
+   *
+   * DORMANT on a display View, the way {@link hideChrome} is: a display is not a
+   * sidebar entry at all. It is stored rather than refused so flipping a console
+   * to a display and back does not lose the choice.
+   */
+  showInSidebar?: boolean;
   /**
    * @deprecated No longer read or written — the PCO Live Prev/Next controls were
    * removed from the script display. Kept only so an existing `views.json` still
@@ -499,6 +516,18 @@ export type LayoutObjectConfig =
   // "config" store, so it rides along in every backup). `placeholder` is the
   // prompt shown while empty; the content itself is never in the layout.
   | { type: "notes"; placeholder?: string }
+  // The newest stage messages sent to this screen's groups, with the latest reply
+  // under each, and — where controls are live — the quick replies as buttons.
+  // `groups` null/absent follows the screen the layout is drawn on; a list
+  // (even an empty one) is this widget's own and overrides it, which is also how
+  // a widget on an in-app console, which is no screen, gets any. Message group
+  // ids, from /api/messaging; one that has since been deleted matches nothing.
+  | { type: "messages"; groups?: string[] | null }
+  // Where a producer sends stage messages from: who it goes to, quick messages,
+  // the text, an alert switch, and the day's thread with its replies and Clear
+  // alert. No options — the groups, the quick messages and the sender all come
+  // from elsewhere (Settings, and the screen or console it is placed on).
+  | { type: "message-composer" }
   // No `resetDaily`: it was declared here and read by nothing, for its whole
   // life. The rows come from the plan's notes now, and their ticks are stored
   // per plan — so the reset happens because a new plan is a new set of keys,
@@ -1115,16 +1144,6 @@ export interface LayoutGroup {
  */
 export type ViewSurface = "display" | "console";
 
-/**
- * How an Output renders.
- *
- * `display` is a read-only wall screen. `panel` is a console pinned chrome-free
- * to a physical screen — which is how a control surface is built. An Output is a
- * display unless deliberately changed, so nothing becomes interactive by
- * accident.
- */
-export type OutputMode = "display" | "panel";
-
 /** A View's surface. Absent means "display": a View written before this field
  *  existed was rendering on a wall screen, and anything unrecognised (a hand
  *  edit, a downgrade) must read as the read-only one rather than the live one. */
@@ -1132,10 +1151,108 @@ export function viewSurface(v: Pick<View, "surface">): ViewSurface {
   return v.surface === "console" ? "console" : "display";
 }
 
-/** An Output's mode. Absent — or unrecognised — means "display". The safety
- *  property is an explicit opt-in, never an inference. */
-export function outputMode(o: Pick<Output, "mode">): OutputMode {
-  return o.mode === "panel" ? "panel" : "display";
+/** Is this View listed in the sidebar? Absent means yes: a console written
+ *  before the switch existed was listed, and stays so until it is turned off. */
+export function viewShownInSidebar(v: Pick<View, "showInSidebar">): boolean {
+  return v.showInSidebar !== false;
+}
+
+/** The kind of blank view createScreen makes for a screen: a wall view (read-only)
+ *  or a control surface (its buttons work). */
+export type NewViewKind = "wall" | "control";
+
+/** What createScreen takes. */
+export interface CreateScreenInput {
+  name?: string;
+  /** An existing view, of either kind. Alternative to `newView`. */
+  viewId?: string | null;
+  /** Make a blank custom view of this kind, named after the screen. */
+  newView?: NewViewKind;
+  slug?: string;
+  /** Written onto the view the screen shows, when that view is a control surface. */
+  showInSidebar?: boolean;
+  /** The kind of view `viewId` is, as the caller last saw it: what the operator was
+   *  shown the screen would be. Checked against the view in the same write turn as
+   *  the create; a view that is the other kind by then creates nothing. Only with
+   *  `viewId`. */
+  expectSurface?: ViewSurface;
+}
+
+/** Is this view a console? False for no view. The one spelling of the question,
+ *  for a caller that already holds the view a screen shows. */
+export function viewIsConsole(view: Pick<View, "surface"> | null | undefined): boolean {
+  return view !== null && view !== undefined && viewSurface(view) === "console";
+}
+
+/**
+ * What a screen is, from the view it shows: a "console" (its buttons work for
+ * anyone at it, a control surface) or a read-only "display" wall screen.
+ *
+ * The view decides: a screen is a control surface exactly when the view it shows
+ * is a console, and a wall display otherwise, including when it shows nothing or
+ * a view that is gone. Every reader, server and renderer, asks this or
+ * {@link screenIsControlSurface}.
+ */
+export function surfaceOfScreen(
+  output: Pick<Output, "viewId">,
+  views: readonly Pick<View, "id" | "surface">[],
+): ViewSurface {
+  const view = output.viewId ? views.find((v) => v.id === output.viewId) : undefined;
+  return viewIsConsole(view) ? "console" : "display";
+}
+
+/** Is this screen a control surface: do its buttons work for anyone at it? */
+export function screenIsControlSurface(
+  output: Pick<Output, "viewId">,
+  views: readonly Pick<View, "id" | "surface">[],
+): boolean {
+  return surfaceOfScreen(output, views) === "console";
+}
+
+/** What an operator calls a screen: its name, else its id. `name` is optional so a
+ *  screen as an error body carries it is accepted too. */
+export function screenName(output: { id: string; name?: string }): string {
+  return output.name || output.id;
+}
+
+/** The screens showing a view, in the order they are listed. */
+export function screensShowing<T extends Pick<Output, "viewId">>(viewId: string, outputs: readonly T[]): T[] {
+  return outputs.filter((o) => o.viewId === viewId);
+}
+
+/**
+ * Can this view be a control surface: does what it draws have anything for
+ * someone at the screen to operate?
+ *
+ * A custom view does (a button, a fader, an editable field on its layout), and so
+ * does a calendar (its month chevrons, which a wall display does not draw). Every
+ * other kind is a finished picture, so a console of one would promise controls
+ * that are not there. `stage-view-paths.test.tsx` renders each kind as a wall
+ * screen and as a control surface and fails when this list and the renderer
+ * disagree. Any view can be a wall view.
+ *
+ * A switch over every kind, not a list of the true ones: the build refuses a new
+ * kind until someone has decided which it is.
+ */
+export function viewCanBeControlSurface(view: Pick<View, "kind">): boolean {
+  switch (view.kind) {
+    case "custom":
+    case "calendar":
+      return true;
+    case "slots":
+    case "dashboard":
+    case "stage":
+    case "transcription":
+    case "script":
+    case "spl-rundown":
+      return false;
+    default: {
+      // A kind read from disk that this build does not know: nothing to operate.
+      const _never: never = view.kind;
+      void _never;
+      return false;
+    }
+  }
 }
 
 /** A physical screen at a URL slug, routed to exactly one View (or none). */
@@ -1148,7 +1265,9 @@ export interface Output {
    *  resolves to the same display. Never used as a storage key, so clearing it
    *  cannot orphan anything. Validated against RESERVED_SLUGS on save. */
   slug?: string;
-  /** The View this screen currently shows, or null when unrouted (renders a placeholder). */
+  /** The View this screen currently shows, or null when unrouted (renders a placeholder).
+   *  This is also what decides whether the screen is a control surface: see
+   *  {@link screenIsControlSurface}. */
   viewId: string | null;
   /** When true, this screen renders a full black "blackout" regardless of its
    *  routed View. Toggling it off restores the View instantly. */
@@ -1161,22 +1280,33 @@ export interface Output {
    *  the bar shows, which is what every screen did before this existed.
    *  Independent of `locked`, which KEEPS the bar and only strips its links. */
   hideTopBar?: boolean;
-  /** How this screen renders. Absent = "display" — read through {@link outputMode}.
-   *  Only a "panel" may be bound to a console View, enforced server-side in
-   *  stage-controller's setOutputView. */
-  mode?: OutputMode;
   /** When false, a Video widget on this screen never plays over HLS — only
    *  WebRTC. A B-frame feed that needs HLS to play at all says it cannot play
    *  here instead. Absent means allowed, which is what every screen did before
    *  this existed: a Pi 4 can freeze decoding HLS, and this is the per-screen
    *  escape hatch rather than turning HLS off everywhere. */
   allowHls?: boolean;
+  /** The message groups this screen belongs to (ids from messaging.json, in that
+   *  file's order). Absent means none; a message to Everyone still reaches it.
+   *  Set from the Screens card, never by the kiosk, and read through
+   *  {@link ResolvedOutput.groups}. See main/types/messages.ts. */
+  groups?: string[];
   /** The ServiceCue text size this screen shows its rundown at, 50 to 300 percent
    *  (see main/types/text-size.ts). Absent means 100. Kept here, not in the
    *  browser, so a Screens preview of the display draws the same size and a
    *  replacement device inherits it. Set from the display's own `?text=` link, or
    *  adopted once from the size that device remembered. */
   textSize?: number;
+  /** Quarter turns the Mac output helper applies before the picture leaves for
+   *  this screen's display or SDI port, for a monitor mounted on its side. Absent
+   *  means 0. Only that helper reads it: a browser showing the screen is turned
+   *  by its own device. */
+  rotation?: Rotation;
+  /** The video mode a DeckLink port sends this screen in, one of VIDEO_MODES in
+   *  output-format.ts. Absent means DEFAULT_VIDEO_MODE. Meaningful only for a
+   *  screen bound to a DeckLink output of the Mac output helper, which reads it
+   *  from `GET /api/outputs`. */
+  videoMode?: string;
 }
 
 /** Per-output render descriptor so the kiosk needs no client-side joins. */
@@ -1195,6 +1325,10 @@ export interface ResolvedOutput {
    *  reason `hideTopBar` does: the kiosk reads this descriptor, never the Output
    *  list, to decide what a Video widget on it may attempt. */
   allowHls: boolean;
+  /** {@link Output.groups}, `[]` when absent. Rides here for the same reason
+   *  `allowHls` does: the kiosk reads this descriptor, never the Output list, to
+   *  learn which messages are for it. */
+  groups: string[];
   /** {@link Output.textSize}, or null while none has been set. Null rather than
    *  100 because a display with no saved size may still hold one of its own to
    *  hand over (see use-servicecue-text-size.ts), and "never set" has to be told

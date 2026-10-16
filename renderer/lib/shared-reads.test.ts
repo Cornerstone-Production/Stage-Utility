@@ -126,7 +126,7 @@ describe("shared snapshot reads", () => {
     // Node's own message for every network failure is "fetch failed", with the
     // real reason on `cause`; a non-shared read rethrows it with that intact.
     (globalThis as unknown as { fetch: unknown }).fetch = async () => {
-      throw new TypeError("fetch failed", { cause: new Error("connect ECONNREFUSED 192.168.16.61:8788") });
+      throw new TypeError("fetch failed", { cause: new Error("connect ECONNREFUSED 192.168.1.50:8788") });
     };
     const err = await invoke("pco:getLive").then(
       () => assert.fail("the read should have failed"),
@@ -134,7 +134,7 @@ describe("shared snapshot reads", () => {
     );
     assert.ok(err instanceof TypeError);
     assert.equal(err.message, "fetch failed");
-    assert.equal(err.cause?.message, "connect ECONNREFUSED 192.168.16.61:8788");
+    assert.equal(err.cause?.message, "connect ECONNREFUSED 192.168.1.50:8788");
   });
 
   test("a read sent more than two seconds ago is not joined", async () => {

@@ -14,7 +14,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -22,7 +22,7 @@ const teardown = installRenderDom();
 const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { ViewDetail } = await import("./view-detail.js");
-const { TooltipProvider, Toaster } = await import("../../components/ui/index.js");
+const { TooltipProvider, Toaster, ConfirmHost } = await import("../../components/ui/index.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
@@ -78,13 +78,15 @@ function props(view: View): Parameters<typeof ViewDetail>[0] {
   } as unknown as Parameters<typeof ViewDetail>[0];
 }
 
-function mount(view: View) {
+function mount(view: View, outputs: Partial<Output>[] = []) {
+  const p = props(view);
   return render(
     React.createElement(
       TooltipProvider,
       null,
-      React.createElement(ViewDetail, props(view)),
+      React.createElement(ViewDetail, { ...p, stageState: { ...p.stageState, outputs } } as unknown as Parameters<typeof ViewDetail>[0]),
       React.createElement(Toaster),
+      React.createElement(ConfirmHost),
     ),
   );
 }
@@ -98,9 +100,9 @@ test("a failed console-chrome toggle toasts, rather than doing nothing silently"
   try {
     mount(CONSOLE_VIEW);
     await settle();
-    fireEvent.click(screen.getByRole("button", { name: /Hide the app's bars on this console/i }));
+    fireEvent.click(await eventually(() => screen.getByRole("button", { name: /Hide the app's bars on this console/i })));
     await settle();
-    assert.match(lastToast(), /Could not change this console's chrome/i);
+    await eventually(() => assert.match(lastToast(), /Could not change this console's chrome/i));
   } finally {
     f.restore();
   }
@@ -115,10 +117,61 @@ test("a failed Columns save toasts, rather than doing nothing silently", async (
   try {
     mount(SERVICE_CUE_VIEW);
     await settle();
+    // The layouts are a read behind the first paint; the option the test picks
+    // is one of them.
+    const columns = await eventually(() => {
+      const box = screen.getByRole("combobox", { name: "Columns" });
+      assert.ok([...(box as HTMLSelectElement).options].some((o) => o.value === "svl-audio"), "the layouts never loaded");
+      return box;
+    });
+    fireEvent.change(columns, { target: { value: "svl-audio" } });
     await settle();
-    fireEvent.change(screen.getByRole("combobox", { name: "Columns" }), { target: { value: "svl-audio" } });
+    await eventually(() => assert.match(lastToast(), /Could not change this view's columns/i));
+  } finally {
+    f.restore();
+  }
+});
+
+test("deleting a view names a screen that has no name by its id, not as an empty pair of quotes", async () => {
+  const f = stubFetchWithLog(() => ok({}));
+  try {
+    mount(CONSOLE_VIEW, [{ id: "display-7", name: "", viewId: "v1" }, { id: "o2", name: "Stage panel", viewId: "v1" }]);
     await settle();
-    assert.match(lastToast(), /Could not change this view's columns/i);
+    fireEvent.click(screen.getByRole("button", { name: "Delete view" }));
+    await settle();
+    const dialog = text(document.querySelector('[role="alertdialog"]')!);
+    assert.match(dialog, /"display-7" and "Stage panel" show it/);
+    assert.equal(/""/.test(dialog), false, "an unnamed screen was named with empty quotes");
+  } finally {
+    f.restore();
+  }
+});
+
+// Deleting a view un-routes every screen showing it. A control surface's screens
+// were live, so the operator is told its buttons stop working, not only that the
+// screens lose their view.
+test("deleting a console's view says its screens' buttons will stop working; a wall view's does not", async () => {
+  const f = stubFetchWithLog(() => ok({}));
+  try {
+    const screens = [{ id: "o1", name: "Booth panel", viewId: "v1" }, { id: "o2", name: "Stage panel", viewId: "v1" }, { id: "o3", name: "Elsewhere", viewId: "other" }];
+    mount(CONSOLE_VIEW, screens);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Delete view" }));
+    await settle();
+    const dialog = text(document.querySelector('[role="alertdialog"]')!);
+    assert.match(dialog, /"Booth panel" and "Stage panel" show it, and will show nothing until you pick another view\. Their buttons stop working\./);
+    assert.equal(/Elsewhere/.test(dialog), false, "a screen showing another view was named");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await settle();
+    cleanup();
+
+    mount({ ...CONSOLE_VIEW, surface: "display" } as View, screens);
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Delete view" }));
+    await settle();
+    const wall = text(document.querySelector('[role="alertdialog"]')!);
+    assert.match(wall, /will show nothing until you pick another view\./);
+    assert.equal(/buttons will stop working/.test(wall), false);
   } finally {
     f.restore();
   }

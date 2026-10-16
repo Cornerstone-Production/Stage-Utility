@@ -218,29 +218,29 @@ describe("homeAssistantYaml", () => {
     // toss deciding which room answers.
     const yaml = homeAssistantYaml(
       [
-        cue("ma_projectors_on", "Projectors on"),
-        cue("ma_projectors_off", "Projectors off"),
-        cue("sa_projectors_on", "Projectors on"),
-        cue("sa_projectors_off", "Projectors off"),
+        cue("main_projectors_on", "Projectors on"),
+        cue("main_projectors_off", "Projectors off"),
+        cue("second_projectors_on", "Projectors on"),
+        cue("second_projectors_off", "Projectors off"),
       ],
       BASE,
     );
     const names = friendlyNames(yaml);
-    assert.deepEqual(names, ["Ma Projectors", "Sa Projectors"]);
+    assert.deepEqual(names, ["Main Projectors", "Second Projectors"]);
     assert.equal(new Set(names).size, names.length, "two switches share a name");
   });
 
   test("distinct friendly names are left alone", () => {
     const yaml = homeAssistantYaml(
       [
-        cue("ma_projectors_on", "Main projectors on"),
-        cue("ma_projectors_off", "Main projectors off"),
-        cue("sa_projectors_on", "South projectors on"),
-        cue("sa_projectors_off", "South projectors off"),
+        cue("main_projectors_on", "Main projectors on"),
+        cue("main_projectors_off", "Main projectors off"),
+        cue("second_projectors_on", "Second projectors on"),
+        cue("second_projectors_off", "Second projectors off"),
       ],
       BASE,
     );
-    assert.deepEqual(friendlyNames(yaml), ["Main projectors", "South projectors"]);
+    assert.deepEqual(friendlyNames(yaml), ["Main projectors", "Second projectors"]);
   });
 
   test("a cue with no partner still gets its rest_command, and no switch", () => {
@@ -312,11 +312,11 @@ describe("homeAssistantYaml", () => {
     // Assistant. An assistant asked to run "the screens" then picks one at
     // random, which is the same failure as two identical switches.
     const yaml = homeAssistantYaml(
-      [cue("main_screens", "the screens"), cue("south_screens", "the screens")],
+      [cue("main_screens", "the screens"), cue("second_screens", "the screens")],
       BASE,
     );
     const aliases = scripts(yaml).map((x) => x.alias);
-    assert.deepEqual(aliases, ["Main Screens", "South Screens"]);
+    assert.deepEqual(aliases, ["Main Screens", "Second Screens"]);
     assert.equal(new Set(aliases).size, aliases.length, "two scripts share an alias");
   });
 

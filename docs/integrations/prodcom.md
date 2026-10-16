@@ -92,7 +92,7 @@ WebSocket attempt is unproven, so a re-test costs only the silence check's own
 newest-page baseline below (a one-row read for the row count, then the page),
 not a fresh channel read and backfill.
 
-Only entries whose `source` is `audio` become captions. A message an operator
+Only entries whose `source` is `audio` (or that carry no `source` at all) become captions. A message an operator
 typed into a comms channel (`typed`) and a line ProdCom's own automations
 produced (`automation`) are skipped and logged once per kind per connection —
 they are not something somebody said, and a stage or lobby wall is not where they
@@ -349,6 +349,27 @@ The `/log` page has the evidence when something looks wrong:
   repeat came over the socket; whether the first copy was SSE's from before the
   hand-over or the socket's own is not recorded, so the line does not say
 
+Smaller lines, each once per occurrence:
+
+- `[prodcom] connecting <host>:<port>` when the integration starts
+- `[prodcom] no transcript data for 900s — treating the stream as dead`, the SSE
+  15-minute silence timer firing: the card reads *Transcript stream went silent —
+  reconnecting* and the stream is reopened
+- `[prodcom] websocket reported an error: …` for an `error` frame ProdCom sent over the
+  socket
+- `[prodcom] websocket transcript frames carry the entry …` once per connection, where
+  in the frame the entry was found; `[prodcom] websocket frame is not a transcript
+  entry, ignoring it (…)` and `[prodcom] transcript stream sent a frame that is not
+  JSON, ignoring it (N bytes)` for frames that are not captions
+- `[prodcom] transcript buffer exceeded N bytes — resyncing` when one SSE event outgrows
+  the reader's buffer
+- `[prodcom] dropped N line(s) older than 4h` as finished lines age out of the buffer,
+  `[prodcom] dropped a stale partial on channel … — no final arrived` when the 30-second
+  partial timer clears one, and `[prodcom] backfill stopped at the 20-page cap — …`
+  when ProdCom holds more history than 4,000 lines since the horizon
+- `[prodcom] sensitive keywords will be hidden on displays` when **Hide sensitive
+  keywords** is turned on, the counterpart of the `turned OFF` line
+
 Text is never logged, only its length, and neither is any keyword — only counts.
 `PRODCOM_DEBUG=1` logs every raw WebSocket and SSE frame verbatim, which is how
 to capture the shape of a live transcript event; it prints transcript text that
@@ -367,7 +388,7 @@ channel count. The key is stored encrypted (secret key `apiKey`). **Hide
 sensitive keywords** is on by default; see
 [Sensitive keywords](#sensitive-keywords).
 
-**On a layout:** add object → **transcription strip**. Options: latest-line vs.
+**On a layout:** add object → **Transcription** (the transcription strip). Options: latest-line vs.
 multi-speaker scrolling feed, max lines, and hide specific channels by name.
 
 ## Caption colors

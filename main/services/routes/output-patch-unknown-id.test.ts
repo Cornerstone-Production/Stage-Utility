@@ -1,7 +1,7 @@
 // PATCH /api/outputs/:id on an id that names no output, for every boolean flag
 // the route accepts, and for `name`.
 //
-// setOutputView, setOutputMode and setOutputSlug were already wrapped here in a
+// setOutputView and setOutputSlug were already wrapped here in a
 // try/catch that turns a thrown "not found" into a clean 400 with the reason.
 // setOutputBlackout, setOutputLocked, setOutputHideTopBar and setOutputAllowHls
 // were not: each threw a plain Error the route let escape uncaught, which
@@ -25,7 +25,10 @@ const FIELDS: [name: string, body: Record<string, unknown>][] = [
   ["locked", { locked: true }],
   ["hideTopBar", { hideTopBar: true }],
   ["allowHls", { allowHls: false }],
+  ["groups", { groups: [] }],
   ["textSize", { textSize: 150 }],
+  ["rotation", { rotation: 90 }],
+  ["videoMode", { videoMode: "1080p50" }],
 ];
 
 describe("PATCH /api/outputs/:id — an unknown id, for every boolean flag and for name", () => {

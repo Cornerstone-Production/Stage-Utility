@@ -17,7 +17,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../../test-dom.js";
 import { baptismState } from "../../../test-fixtures/baptism-state.js";
 
 const teardown = installRenderDom();
@@ -274,6 +274,28 @@ const findInBody = (label: string) =>
  *  note's per-entry ones need different scopes). */
 const rebuildButtonsIn = (root: ParentNode) => rebuildButtonsMatching(root, '[role="alert"] button');
 
+/** The button in the page with this label, once it is there. */
+const inBody = (label: string) =>
+  eventually(() => {
+    const found = findInBody(label);
+    assert.ok(found, `no ${label} button on the page`);
+    return found;
+  });
+
+/** Press the first failed entry's Rebuild from raw once it is enabled. It stays
+ *  disabled until the entry's live check has been read, and a click on a disabled
+ *  button does nothing, so the confirm never opens. */
+async function pressEntryRebuild(root: ParentNode): Promise<void> {
+  const btn = await eventually(() => {
+    const [found] = rebuildButtonsIn(root);
+    assert.ok(found, "no Rebuild from raw on the entry");
+    assert.equal(found.disabled, false, "the entry's Rebuild never enabled");
+    return found;
+  });
+  fireEvent.click(btn);
+  await settle();
+}
+
 test("a failed entry with a serviceKey offers its own Rebuild from raw; one with none is disabled and says why", async () => {
   const { root, restore } = await mountWithRebuild(
     {
@@ -286,9 +308,13 @@ test("a failed entry with a serviceKey offers its own Rebuild from raw; one with
     { live: false },
   );
   try {
-    const buttons = rebuildButtonsIn(root);
-    assert.equal(buttons.length, 2, "expected one Rebuild action per failed entry");
-    assert.equal(buttons[0]!.disabled, false, "an entry with a serviceKey, not live, must be usable");
+    // Each entry's live check is a read of its own; the offer is usable once it lands.
+    const buttons = await eventually(() => {
+      const found = rebuildButtonsIn(root);
+      assert.equal(found.length, 2, "expected one Rebuild action per failed entry");
+      assert.equal(found[0]!.disabled, false, "an entry with a serviceKey, not live, must be usable");
+      return found;
+    });
     assert.equal(buttons[1]!.disabled, true, "an entry with no serviceKey has no raw rows to rebuild from");
     assert.match(
       await tooltipTextOf(buttons[1]!),
@@ -310,9 +336,11 @@ test("the offer is disabled while THAT entry's own service is live", async () =>
     { live: true },
   );
   try {
-    const buttons = rebuildButtonsIn(root);
-    assert.equal(buttons.length, 1);
-    assert.equal(buttons[0]!.disabled, true, "the server's own 'live' answer must disable this entry's own action");
+    await eventually(() => {
+      const buttons = rebuildButtonsIn(root);
+      assert.equal(buttons.length, 1);
+      assert.equal(buttons[0]!.disabled, true, "the server's own 'live' answer must disable this entry's own action");
+    });
   } finally {
     restore();
   }
@@ -337,18 +365,18 @@ test("clicking an entry's Rebuild confirms, then posts for THAT entry's serviceK
     },
   );
   try {
-    const [btn] = rebuildButtonsIn(root);
-    fireEvent.click(btn!);
-    await settle();
-    const dialog = (document.body.textContent ?? "");
-    assert.match(dialog, /Rebuild from raw\?/, "expected the shared confirm dialog to open");
-    fireEvent.click(findInBody("Rebuild")!);
+    await pressEntryRebuild(root);
+    await eventually(() => assert.match(document.body.textContent ?? "", /Rebuild from raw\?/, "expected the shared confirm dialog to open"));
+    fireEvent.click(await inBody("Rebuild"));
     await settle();
     await settle();
-    const rebuild = calls.find((c) => c.url.includes("/api/baptism/rebuild"));
-    assert.ok(rebuild, "expected a POST to /api/baptism/rebuild");
-    assert.deepEqual(rebuild!.body, { serviceKey: "svc-failed" }, "must target the FAILED entry's own serviceKey");
-    assert.equal(rebuiltCount(), 1, "onRebuilt must fire so Past sessions/Trends can reload");
+    const rebuild = await eventually(() => {
+      const found = calls.find((c) => c.url.includes("/api/baptism/rebuild"));
+      assert.ok(found, "expected a POST to /api/baptism/rebuild");
+      return found;
+    });
+    assert.deepEqual(rebuild.body, { serviceKey: "svc-failed" }, "must target the FAILED entry's own serviceKey");
+    await eventually(() => assert.equal(rebuiltCount(), 1, "onRebuilt must fire so Past sessions/Trends can reload"));
   } finally {
     restore();
   }
@@ -368,13 +396,11 @@ test("a NO-OP entry rebuild (nothing restored) calls onRebuilt directly — no p
     },
   );
   try {
-    const [btn] = rebuildButtonsIn(root);
-    fireEvent.click(btn!);
-    await settle();
-    fireEvent.click(findInBody("Rebuild")!);
+    await pressEntryRebuild(root);
+    fireEvent.click(await inBody("Rebuild"));
     await settle();
     await settle();
-    assert.equal(rebuiltCount(), 1, "a no-op rebuild's onRebuilt is the ONLY reload it gets");
+    await eventually(() => assert.equal(rebuiltCount(), 1, "a no-op rebuild's onRebuilt is the ONLY reload it gets"));
   } finally {
     restore();
   }
@@ -403,19 +429,15 @@ test("a rebuild that restored nothing for THIS session warns plainly instead of 
     },
   );
   try {
-    const [btn] = rebuildButtonsIn(root);
-    fireEvent.click(btn!);
-    await settle();
-    fireEvent.click(findInBody("Rebuild")!);
+    await pressEntryRebuild(root);
+    fireEvent.click(await inBody("Rebuild"));
     await settle();
     await settle();
-    const body = document.body.textContent ?? "";
-    assert.match(
-      body,
-      /The raw rows hold no finished copy of this session — copy the report now/,
-      `expected the plain warning, got: ${body}`,
-    );
-    assert.doesNotMatch(body, /0 updated, 0 added/i, "must not also show the generic success toast");
+    await eventually(() => {
+      const body = document.body.textContent ?? "";
+      assert.match(body, /The raw rows hold no finished copy of this session — copy the report now/, `expected the plain warning, got: ${body}`);
+    });
+    assert.doesNotMatch(document.body.textContent ?? "", /0 updated, 0 added/i, "must not also show the generic success toast");
   } finally {
     restore();
   }
@@ -430,10 +452,8 @@ test("cancelling the confirm reaches neither the server nor onRebuilt", async ()
     { live: false },
   );
   try {
-    const [btn] = rebuildButtonsIn(root);
-    fireEvent.click(btn!);
-    await settle();
-    fireEvent.click(findInBody("Cancel")!);
+    await pressEntryRebuild(root);
+    fireEvent.click(await inBody("Cancel"));
     await settle();
     assert.equal(calls.some((c) => c.url.includes("/api/baptism/rebuild")), false);
     assert.equal(rebuiltCount(), 0);
@@ -451,21 +471,21 @@ test("a live 409 the recheck did not catch shows the same refusal the header sho
     { live: false, rebuildStatus: 409, rebuildAnswer: { error: "That service is recording right now.", code: "live" } },
   );
   try {
-    const [btn] = rebuildButtonsIn(root);
-    fireEvent.click(btn!);
-    await settle();
-    fireEvent.click(findInBody("Rebuild")!);
+    await pressEntryRebuild(root);
+    fireEvent.click(await inBody("Rebuild"));
     await act(async () => {
       await settle();
       await settle();
     });
-    assert.ok(calls.some((c) => c.url.includes("/api/baptism/rebuild")), "the POST must still have been attempted");
-    const body = document.body.textContent ?? "";
-    assert.match(
-      body,
-      /This service started recording again — rebuild once it ends/,
-      `expected the same live-refusal toast the header's own Rebuild shows, got: ${body}`,
-    );
+    await eventually(() => assert.ok(calls.some((c) => c.url.includes("/api/baptism/rebuild")), "the POST must still have been attempted"));
+    await eventually(() => {
+      const body = document.body.textContent ?? "";
+      assert.match(
+        body,
+        /This service started recording again — rebuild once it ends/,
+        `expected the same live-refusal toast the header's own Rebuild shows, got: ${body}`,
+      );
+    });
     // The entry itself is drawn from `state.saveErrors`, which this refused
     // rebuild never changed — a real clear only ever arrives as a NEW state
     // prop, on the server's own push (see baptism-rebuild-clears-save-error

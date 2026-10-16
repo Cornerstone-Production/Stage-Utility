@@ -33,11 +33,12 @@ import { useTheme } from "../lib/use-theme";
 import { buildLabel } from "../lib/build-label";
 import { withViewTransition } from "../lib/view-transition";
 import { resetCurrentRoute } from "./route-reset";
-import { consolePageFor, consoleViewList, resolvePage } from "./active-page";
+import { consolePageFor, resolvePage, sidebarConsoleList } from "./active-page";
 import { useStageState } from "../main/use-stage-state";
 import { errorMessage } from "@main/services/errors";
 import { isUpdateAvailable } from "@main/services/update/availability";
 import { useUpdateStatus } from "./queries";
+import { useNotSetUpCount } from "./screens/use-devices";
 import {
   ALL_DESTINATIONS,
   DESTINATIONS,
@@ -47,6 +48,25 @@ import {
   type Destination,
 } from "./destinations";
 import { cn } from "../lib/cn";
+
+/** The Screens page's route: the row that carries the count of screens not set up. */
+const SCREENS_PATH = "/screens";
+
+/** A count on a nav row. The row positions it; this is only what it looks like.
+ *  Smaller in the collapsed rail, where the row is 40x32 and the badge sits in its
+ *  corner over the icon. */
+function CountBadge({ count, compact }: { count: number; compact: boolean }) {
+  return (
+    <span
+      className={cn(
+        "grid place-items-center rounded-full bg-accent font-semibold tabular-nums text-white",
+        compact ? "h-4 min-w-4 px-1 text-[10px]" : "h-[18px] min-w-[18px] px-[5px] text-[11px]",
+      )}
+    >
+      {count}
+    </span>
+  );
+}
 
 interface RailProps {
   onToggleCollapsed: () => void;
@@ -89,15 +109,21 @@ export function Rail({
   const { data: updateStatus, error: updateError } = useUpdateStatus();
   const versionError = updateError ? errorMessage(updateError) : null;
   const updateAvailable = isUpdateAvailable(updateStatus);
+  // Devices heard on the network and not set up. From every page, not just
+  // Screens: the server records them with no scan, and tells this tab on the
+  // channel Screens already listens to, so a screen switched on is noticed here.
+  const notSetUpCount = useNotSetUpCount();
 
-  // A rail entry per console View, from the same helper the shell titles a
-  // console with. The rail row and the page title cannot disagree about a
-  // console's name if only one place decides what it is called.
+  // A rail entry per console View the operator has not hidden from the sidebar.
+  // A hidden console is still a page — the shell titles it from the full list —
+  // so only the LIST is narrower here. The page builder is the one the shell
+  // titles a console with, so the rail row and the page title cannot disagree
+  // about a console's name if only one place decides what it is called.
   // Each console's page, built ONCE and used for both jobs below: the candidate
   // list the matcher runs over, and the row itself. It used to be built twice
   // per console per render, and the second copy's path was then re-spelled by
   // hand a third time to decide whether the row was selected.
-  const consoleEntries = consoleViewList(state?.views).map((view) => ({
+  const consoleEntries = sidebarConsoleList(state?.views).map((view) => ({
     view,
     page: consolePageFor(view),
   }));
@@ -197,9 +223,19 @@ export function Rail({
           return (
             <Fragment key={g.label}>
               <SidebarGroupLabel>{g.label}</SidebarGroupLabel>
-              {items.map((d) => (
-                <SidebarListItem key={d.path} item={d} icon={d.icon} title={d.label} />
-              ))}
+              {items.map((d) => {
+                const waiting = d.path === SCREENS_PATH ? notSetUpCount : 0;
+                return (
+                  <SidebarListItem
+                    key={d.path}
+                    item={d}
+                    icon={d.icon}
+                    title={d.label}
+                    ariaLabel={waiting > 0 ? `${d.label}, ${waiting} not set up` : undefined}
+                    badge={waiting > 0 ? <CountBadge count={waiting} compact={railed} /> : undefined}
+                  />
+                );
+              })}
             </Fragment>
           );
         })}

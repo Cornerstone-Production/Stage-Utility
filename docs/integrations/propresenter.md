@@ -73,14 +73,14 @@ one auditorium being switched off does not affect the other.
 ### What the log says
 
 ```
-[propresenter] streaming 6 endpoints from 192.168.0.123:1025
+[propresenter] streaming 6 endpoints from 192.168.1.50:1025
 [propresenter] stream ended (closed by ProPresenter) — reconnecting in 5s
 [propresenter] status/updates unsupported (HTTP 404) — falling back to polling for the rest of this run
-[propresenter] playlist unreadable on 192.168.0.123:1025 (HTTP 404) — no next-item name, retrying in 30s
-[propresenter] 192.168.0.123:1025 unreachable (connect ECONNREFUSED) — backing off, will keep retrying quietly
-[propresenter] unreadable presentation/current frame from 192.168.0.123:1025 (Unexpected end of JSON input) — that field goes blank, staying quiet about the rest
-[propresenter] 192.168.0.123:1025 accepts the status subscription and then sends nothing — the displays are holding the last slide it sent. Is ProPresenter's Network view wedged?
-[propresenter] status buffer exceeded 1000000 chars from 192.168.0.123:1025 — resyncing
+[propresenter] playlist unreadable on 192.168.1.50:1025 (HTTP 404) — no next-item name, retrying in 30s
+[propresenter] 192.168.1.50:1025 unreachable (connect ECONNREFUSED) — backing off, will keep retrying quietly
+[propresenter] unreadable presentation/current frame from 192.168.1.50:1025 (Unexpected end of JSON input) — that field goes blank, staying quiet about the rest
+[propresenter] 192.168.1.50:1025 accepts the status subscription and then sends nothing — the displays are holding the last slide it sent. Is ProPresenter's Network view wedged?
+[propresenter] status buffer exceeded 1000000 chars from 192.168.1.50:1025 — resyncing
 ```
 
 The unreadable-frame and buffer lines are the ones to look for when a panel goes
@@ -157,17 +157,17 @@ The macro is identified by its **name**, not by its uuid. A name means the same
 thing on every machine and survives re-importing a library, where a uuid is
 per-machine and does not — so one rule works in both auditoriums. The trade is
 that renaming a macro in ProPresenter stops the rule finding it; the action then
-fails with `no macro called "SONG INTRO" on MA`, which is also what the log says:
+fails with `no macro called "SONG INTRO" on Main`, which is also what the log says:
 
 ```
-[propresenter] macro "SONG INTRO" triggered on MA
-[propresenter] macro "SONG INTRO" failed: no such macro on MA (404)
+[propresenter] macro "SONG INTRO" triggered on Main
+[propresenter] macro "SONG INTRO" failed: no such macro on Main (404)
 ```
 
 The macro dropdown lists the names every configured instance reports, read fresh
 at most every 30 seconds. An instance that could not be read contributes nothing
 and never blocks the editor from opening; when more than one is configured, a
-name only some of them have is marked `DOORS (MA only)`. A macro already chosen
+name only some of them have is marked `DOORS (Main only)`. A macro already chosen
 on a rule is shown whether or not the machine holding it is reachable.
 
 **The `(… only)` suffix is dropped entirely while any instance is unreachable.**
@@ -177,7 +177,7 @@ not asked — marking every macro the reachable one reported as living there
 response names the instances that did not answer instead.
 
 When an instance does not answer, the field says which one, under the dropdown:
-`Chapel did not answer. A macro that only lives there is missing from this list.`
+`Overflow did not answer. A macro that only lives there is missing from this list.`
 A short list is then a machine that is off rather than macros that have gone.
 
 Changing an instance's host or port drops its cached list immediately, so a
@@ -188,14 +188,14 @@ list that was mid-read when the change landed is discarded rather than cached,
 and says so:
 
 ```
-[propresenter] macro list from 192.168.0.123:1025 discarded — the instance was pointed at another machine while it was being read
+[propresenter] macro list from 192.168.1.50:1025 discarded — the instance was pointed at another machine while it was being read
 ```
 
 Saving a change that does not move the target — the poll interval, the display
 name — does not drop the stream or the cached list.
 
 A rule whose ProPresenter is **switched off** triggers nothing: the action fails
-with `MA is switched off`, rather than dialling the last address the card held.
+with `Main is switched off`, rather than dialling the last address the card held.
 
 With **Simulate mode** on, the action reports what it would trigger and contacts
 nothing — a rule can be written and tested with the booth machine off.

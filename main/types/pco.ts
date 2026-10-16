@@ -183,6 +183,9 @@ export interface PcoAttachmentDTO {
   /** MIME type reported by PCO (e.g. "application/pdf"), or null. */
   contentType: string | null;
   fileSizeBytes: number | null;
+  /** When Planning Center last changed the file (its `updated_at`), or null. With
+   *  the size, what tells a replaced file from the one already cached. */
+  updatedAt: string | null;
   /** PCO-generated preview image URL, when available. */
   thumbnailUrl: string | null;
   /** PCO display ordering, when present. */

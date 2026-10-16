@@ -1,7 +1,7 @@
 # Automation
 
 Rules of the form **when something happens in Stage, do something to a device.**
-Built under **Settings → Automation**.
+Built on the **Automation** page, in the sidebar.
 
 > Rules fire with nobody present. Build every rule with the **Write a log message**
 > action first, watch it through a real service, and only then attach the real
@@ -16,6 +16,8 @@ Built under **Settings → Automation**.
 | **Then** | one action |
 | **Cooldown** | seconds before this rule may fire again (default 30) |
 | **Once per service** | fire at most once per service occurrence |
+
+![The Automation page: simulate mode, the Home Assistant cues and the other rules, each with a Run button](images/automation-rules.png)
 
 Triggers fire on **change**, not on state. Stage's channels carry snapshots — the
 live plan re-broadcasts constantly, the people counter reports the same number
@@ -63,6 +65,10 @@ runtime list — a RossTalk target, a ProPresenter macro — is never a problem
 just because that list came back short or without the stored value; the field
 shows an amber note instead and saves as it is, because the machine it names may
 simply be off right now.
+
+A field that picks several things from a list follows the same rule. A
+day-of-week condition left blank means every day, so its field is optional; a
+stage message's groups are required, so a blank one needs setup.
 
 ## Triggers
 
@@ -213,6 +219,8 @@ for "idle", because before it runs we do not know that it is idle.
 | OBS virtual camera | Start or stop the virtual camera a video call picks up as a webcam, on the same connection and with the same start/stop idempotency |
 | Trigger a ProPresenter macro | runs one of your own ProPresenter macros, on a chosen instance — see [Triggering a macro from a rule](integrations/propresenter.md#triggering-a-macro-from-a-rule) |
 | Refresh all displays | reloads every connected display |
+| Send a stage message | a [stage message](features/stage-messages.md) to Everyone or to chosen groups, optionally as an alert — see below |
+| Clear stage message alerts | ends every alert that is running — see below |
 | Set a Companion signal from the roster | publishes a value for a Companion Trigger to act on — see [Signals](integrations/companion.md#signals) |
 | Press a Companion button | presses one button at a page/row/column. Reports "dispatched", never "on" — see [Pressing a button](integrations/companion.md#pressing-a-button) |
 | Fire a ProVideoPlayer cue | a cue from a playlist. ProVideoPlayer always plays it on the cue's own layer |
@@ -263,18 +271,44 @@ for "idle", because before it runs we do not know that it is idle.
 > not — so the same rule works in both auditoriums, and re-importing a
 > ProPresenter library does not quietly break every rule. The cost is that
 > renaming a macro in ProPresenter stops the rule finding it; the action then
-> fails with `no macro called "SONG INTRO" on MA` rather than a bare 404.
+> fails with `no macro called "SONG INTRO" on Main` rather than a bare 404.
 >
 > The macro dropdown lists what every configured instance reports, so an
 > instance that could not be read simply contributes nothing — the rule editor
 > still opens. When more than one instance is set up and all of them answered, a
-> name only some of them have is marked, `DOORS (MA only)`; while any instance is
+> name only some of them have is marked, `DOORS (Main only)`; while any instance is
 > unreachable the mark is dropped, because "only" is a claim about the machines
 > that answered. A macro already chosen on a rule is always shown, marked, even
 > while the machine that has it is off.
 >
 > A rule whose ProPresenter is **switched off** triggers nothing and says so —
-> `MA is switched off` — rather than dialling the last address the card held.
+> `Main is switched off` — rather than dialling the last address the card held.
+
+> **Send a stage message** and **Clear stage message alerts** are the
+> [stage messages](features/stage-messages.md) feature as automation. Both are
+> sent from `Automation`, the same sender a Companion button shows as `Companion`;
+> the rule's own name is not in an action's context, so it is not the sender.
+>
+> **Send a stage message** takes **To** (Everyone, or one or more groups — not
+> both), **Message** (1–280 characters) and **Alert** (No unless set; an alert
+> takes the screens over for 30 seconds; from `POST /api/action/invoke` it may be
+> `yes`, `true` or `"true"` for an alert and `no`, `false` or blank for none, and
+> anything else fails and sends nothing). It goes through the same rules as a
+> console's send. A rule saved with no groups or a blank message shows **Needs
+> setup**, and so does one that ticks Everyone beside a group. A group deleted
+> since the rule was saved does not stop the editor opening: the field says the
+> choice is no longer offered and keeps it, and the rule **fails** when it fires,
+> `not sent: no group has the id g-0a1b2c3d`, sending nothing. Simulate mode
+> checks the same rules and answers `would send to Stage (alert): "Walk now"`
+> without sending.
+>
+> **Clear stage message alerts** takes no settings. It ends every alert that is
+> running, on every group, and leaves the messages in the thread. With nothing
+> running it succeeds and says `no alert was running`.
+>
+> Each result is an Activity entry like any other, and the messages service logs
+> each send and each cleared alert on the [log](ops/updates-and-logs.md)
+> (`[messages] sent to …`, `[messages] alert … cleared by Automation`).
 
 > **Advance the baptism timer** is one action, not four. It does whatever the
 > [baptism timer's](features/servicecue-and-baptisms.md) own operator panel
@@ -302,7 +336,7 @@ for an install that cannot run a custom integration.
 **For setup and teardown, not for cues during a service.** Turning the projectors
 on before a rehearsal, turning the foyer televisions off after. Every cue imported
 from Companion carries the **no service is live** condition, and refuses with a
-sentence — *"The Gospel Way is live"* — while a service is running or about to
+sentence — *"Sunday Service is live"* — while a service is running or about to
 start, and when Planning Center cannot be read.
 
 A cue's editor has an **Allowed during a service** switch that is the same
@@ -362,7 +396,7 @@ the trigger and action's own names. A pair shows whenever either half matches.
 | **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
 | **Home Assistant** | on by default. Off keeps the cue out of Home Assistant and Apple Home entirely, leaving it callable by voice and by HTTP. A pair's two halves share one setting, stored on the `_on` half |
-| **State variable** | in **This pair**, for an ON/OFF pair only, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Saved on the `_on` rule. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `VCR-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
+| **State variable** | in **This pair**, for an ON/OFF pair only, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Saved on the `_on` rule. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `Booth-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
 | **Learning** | shown in **This pair** for a pair with no binding whose connections have no verified module row: the app probes them for candidate variables and binds one by watching what moves when you press the pair on and off. **Learn again** forgets what it found and probes again. See [Learning a state source](integrations/companion.md#learning-a-state-source) |
 | **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |
 | **Once per service** | honoured on a call as well as on a trigger: a second call in the same service occurrence is refused `once-per-service` |
@@ -415,7 +449,7 @@ button, at `POST /api/cues/<name>` — without anything being saved. They are no
 on the Automation page, they are not in a config export, and they cannot be
 edited or deleted.
 
-Switches, listed while the integration is switched on in Settings:
+Switches, listed while the integration is switched on under Settings → Integrations:
 
 | Cue | What it does | State |
 |---|---|---|
@@ -619,7 +653,7 @@ act:
   nothing. The row says so.
 - **Disarm all** — while disarmed the button is disabled, and the server refuses
   the request with `409` and the reason.
-- **Confirm before running** — a rule with that switch on needs a second press
+- **Ask twice** — a cue with that switch on needs a second press
   within five seconds: the first turns the button into **Run it?**, and it lapses
   back if nobody presses again. The server also refuses such a rule with `428`
   unless the request says `confirmed: true`, so a stray API call cannot skip the
@@ -638,12 +672,12 @@ the rule's last-fired time, so a later automatic fire inside the cooldown is
 suppressed. It does not use up **once per service**.
 
 **Test** in the editor's footer is the same run, by the same route, for the saved
-rule: it respects simulate and disarm, and asks first when the rule is marked
-confirm before running.
+rule: it respects simulate and disarm, and asks first when the rule is set to
+**Ask twice**.
 
 A pair's row has one Run button per half, **Run on** and **Run off**, stacked on
 a narrow screen. Each runs its own rule exactly as above: it asks first when that
-half is marked confirm before running (the other half is not armed by it), is
+half is set to **Ask twice** (the other half is not armed by it), is
 disabled while disarmed, and reports under the row on its own line, prefixed
 *On:* or *Off:*.
 

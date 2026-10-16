@@ -9,8 +9,8 @@ That replaces the destination's configuration; this adds to it.
 
 ## Doing it
 
-**Export.** Three-dot menu on a view → **Export layout**. The same item is on a
-screen card and exports whichever view that screen shows. One file downloads.
+**Export.** **Export** in the layout editor's toolbar, with the view open (**Edit
+layout** on its card or in its settings). One file downloads.
 
 **Import.** **Import layout…** beside *New view* on the Screens page, or drop the
 file on that button. You get a review of what is in the file before anything is
@@ -27,7 +27,7 @@ the patch sheet variant it is assigned to and your saved slot presets. It is per
 service type, never per date: a per-plan board is one week's exception keyed by a
 Planning Center plan id, and that id means nothing on another machine.
 
-**Export.** Settings → Plan → **Export plan…**, beside *Active Service Types*.
+**Export.** **Plan** → **Export plan…**, beside *Active Service Types*.
 Pick the type and tick what travels:
 
 | | |

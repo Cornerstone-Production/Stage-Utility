@@ -9,8 +9,12 @@
 // Modelled on display-presence.ts, which does the same job for kiosk pages.
 
 import { broadcast } from "./broadcaster.js";
+import { sameOutput } from "./kiosk-discovery.js";
 import { mergeScreen, sameScreen } from "./kiosk-screen-size.js";
-import type { SeenDevice } from "../types/kiosk.js";
+import { scrub } from "./scrub.js";
+import { displaySignature, FRESH_TREND, HEALTH_TTL_MS, judge, type HealthTrend } from "./output-health.js";
+import type { DeviceOutputKind, SeenDevice } from "../types/kiosk.js";
+import type { OutputHealth, OutputHealthReport } from "../types/output-health.js";
 
 /** Longest gap before a device is considered gone. The agent probes every 2s and
  *  backs off to 30s once it has been ignored a while, so this must clear the
@@ -18,16 +22,20 @@ import type { SeenDevice } from "../types/kiosk.js";
 const TTL_MS = 90_000;
 const SWEEP_MS = 15_000;
 
+/** The most devices listed at once. Every unclaimed device the server hears is
+ *  listed whether or not a page is open, and a broadcast port takes datagrams from
+ *  anything on the LAN, so what a sender can make this Map hold has to be bounded.
+ *  A site's real screens and helper outputs are tens, not hundreds. */
+export const MAX_SEEN = 256;
+/** Whether the full-list warning has been said since the list last had room, so
+ *  a flood is one log line rather than one per datagram. */
+let fullWarned = false;
+
 /** How long a scan stays open when somebody presses the button. Long enough to
  *  walk to a screen and back, short enough that leaving it on is not a habit. */
 export const SCAN_WINDOW_MS = 60_000;
 
-/** An unknown device is recorded at most this often, so a misconfigured or
- *  malicious box cannot fill the list faster than a person can read it. */
-const RECORD_EVERY_MS = 60_000;
-
 const seen = new Map<string, SeenDevice>();
-const lastRecorded = new Map<string, number>();
 
 /**
  * Device secrets, kept OUT of the device record on purpose.
@@ -44,6 +52,14 @@ const lastRecorded = new Map<string, number>();
  * is remembered without recording a sighting.
  */
 const secrets = new Map<string, string>();
+
+/**
+ * The last health each output helper device reported. RUNTIME, like everything
+ * here: a reading of how an output is doing now, gone on restart and aged out
+ * when the reports stop. Keyed by device id, which has been through authorise()
+ * before it gets here, so it can only be the id of a binding this server holds.
+ */
+const health = new Map<string, { latest: OutputHealth; trend: HealthTrend }>();
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
 let lastSig = "";
 
@@ -73,23 +89,56 @@ export function startScan(holder = "manual", ms = SCAN_WINDOW_MS, now = Date.now
 /** Close a scan early — the button's Stop, or the page unmounting. */
 export function stopScan(holder = "manual"): void {
   if (scans.delete(holder)) announce();
-
 }
 
-/** Record a device we just heard from. Returns false when rate-limited. */
+/**
+ * Record a device we just heard from that is not bound here. A bound one is never
+ * recorded (see the responder), so it does not list, announce or log "output seen"
+ * for as long as it runs; an unbound one is listed the moment it is heard, and a
+ * released output is back on the list at its next probe.
+ */
 export function recordSeen(
   d: Omit<SeenDevice, "firstSeen" | "lastSeen">,
   now = Date.now(),
-): boolean {
-  const existing = seen.get(d.id);
+): void {
+  let existing = seen.get(d.id);
+  // Heard again after it had aged out: a new sighting, not a refresh. Treated as
+  // a refresh it would come back into the list with no announcement, because
+  // nothing a person reads would differ from the record kept for it.
+  if (existing && existing.lastSeen < now - TTL_MS) {
+    seen.delete(d.id);
+    existing = undefined;
+  }
   if (!existing) {
-    const last = lastRecorded.get(d.id) ?? 0;
-    if (now - last < RECORD_EVERY_MS && last !== 0) return false;
-    lastRecorded.set(d.id, now);
+    pruneExpired(now);
+    if (seen.size >= MAX_SEEN) {
+      if (!fullWarned) {
+        fullWarned = true;
+        console.warn(
+          `[kiosk-presence] ${scrub(MAX_SEEN)} devices are already listed, so ${scrub(d.id)} and any others heard until some age out are not`,
+        );
+      }
+      return;
+    }
+    fullWarned = false;
     seen.set(d.id, { ...d, firstSeen: now, lastSeen: now });
+    // One line per device appearing, not per probe: this branch runs once per
+    // sighting, which is the operator's evidence that the screen was heard. A
+    // helper with six outputs is six lines saying what the Mac offered.
+    // Devices are listed with no scan open, so this line is also the only record
+    // of one that was heard and never set up.
+    if (d.output) {
+      console.log(
+        `[output-helper] output seen: ${scrub(d.id)} (${scrub(d.output.kind)} "${scrub(d.output.name)}") on ${scrub(d.hostname ?? d.ip)}`,
+      );
+    } else {
+      console.log(
+        `[kiosk-presence] device seen: ${scrub(d.id)} (${scrub(d.os ?? "unknown OS")}) on ${scrub(d.hostname ?? d.ip)}`,
+      );
+    }
     ensureSweep();
     announce(now);
-    return true;
+    return;
   }
   // Known device: refresh cheaply. Only announce when something a person would
   // notice changed — a probe every two seconds must not become an SSE every two
@@ -102,10 +151,68 @@ export function recordSeen(
     existing.boundTo !== d.boundTo ||
     !!existing.unreachable !== !!d.unreachable ||
     existing.hostname !== d.hostname ||
+    // A card reporting new modes, or an output renamed, is a change a person
+    // reads on the row.
+    !sameOutput(existing.output, d.output) ||
     !sameScreen(existing.screen, screen);
   seen.set(d.id, { ...existing, ...d, screen, lastSeen: now });
   if (changed) announce(now);
-  return true;
+}
+
+/**
+ * Take in one authorised health report.
+ *
+ * Announces only when what a person reads changed (see displaySignature), so a
+ * healthy output reporting every ten seconds is not an SSE every ten seconds.
+ * Logs the verdict changing, never the reports themselves.
+ */
+export function recordHealth(
+  deviceId: string,
+  report: OutputHealthReport,
+  kind: DeviceOutputKind | undefined,
+  now = Date.now(),
+): OutputHealth {
+  const before = health.get(deviceId);
+  const trend = judge(before?.trend ?? FRESH_TREND, report, kind);
+  const latest: OutputHealth = { ...report, deviceId, receivedAt: now, struggling: trend.struggling };
+  health.set(deviceId, { latest, trend });
+  if (trend.struggling !== (before?.trend.struggling ?? false)) {
+    // The word is chosen first so there is one template to scrub, not two.
+    const verdict = trend.struggling ? "is struggling" : "has recovered";
+    console.log(
+      `[output-helper] ${scrub(deviceId)} ${scrub(verdict)}: ${scrub(report.dropped)} frames dropped so far, ${scrub(report.repeated)}% repeated, ${scrub(report.fps)} fps`,
+    );
+  }
+  ensureSweep();
+  announce(now);
+  return latest;
+}
+
+/** Plain code-unit order, not locale order: the same list on every box. */
+function byDeviceId(a: OutputHealth, b: OutputHealth): number {
+  if (a.deviceId < b.deviceId) return -1;
+  return a.deviceId > b.deviceId ? 1 : 0;
+}
+
+/** Health that is still a reading, by device id. */
+export function healthList(now = Date.now()): OutputHealth[] {
+  const cutoff = now - HEALTH_TTL_MS;
+  return [...health.values()]
+    .map((h) => h.latest)
+    .filter((h) => h.receivedAt > cutoff)
+    .sort(byDeviceId);
+}
+
+/** Drop what was reported for a device: it was released, or taken over. */
+export function forgetHealth(deviceId: string): void {
+  if (health.delete(deviceId)) announce();
+}
+
+/** Drop what has not been heard within the TTL. seenDevices() already hides it;
+ *  this is what lets the Map itself stop growing. */
+function pruneExpired(now: number): void {
+  const cutoff = now - TTL_MS;
+  for (const [id, d] of seen) if (d.lastSeen < cutoff) seen.delete(id);
 }
 
 /** Everything currently heard, freshest first. */
@@ -159,8 +266,8 @@ export function forgetSeen(id: string): void {
  * `lastSeen` is excluded deliberately — it changes on every probe, and including
  * it would turn a two-second heartbeat into a two-second broadcast.
  */
-function payload(now: number): { scanning: boolean; seen: SeenDevice[] } {
-  return { scanning: scanning(now), seen: seenDevices(now) };
+function payload(now: number): { scanning: boolean; seen: SeenDevice[]; health: OutputHealth[] } {
+  return { scanning: scanning(now), seen: seenDevices(now), health: healthList(now) };
 }
 
 /**
@@ -181,15 +288,12 @@ function announce(now = Date.now()): void {
   const sig = JSON.stringify({
     scanning: next.scanning,
     seen: next.seen.map(({ lastSeen: _l, firstSeen: _f, ...rest }) => rest),
+    // What a person reads of it, not the raw figures: see displaySignature.
+    health: next.health.map((h) => [h.deviceId, displaySignature(h)]),
   });
   if (sig === lastSig) return;
   lastSig = sig;
   broadcast("kiosk:devices", next);
-}
-
-/** Snapshot for a client whose SSE has just opened. */
-export function kioskPresenceSnapshot(): { scanning: boolean; seen: SeenDevice[] } {
-  return payload(Date.now());
 }
 
 function ensureSweep(): void {
@@ -198,8 +302,16 @@ function ensureSweep(): void {
     // The sweep is what prunes expired scans — see scanning().
     const now = Date.now();
     for (const [holder, until] of scans) if (until <= now) scans.delete(holder);
+    pruneExpired(now);
+    // An output that stopped reporting is a failure worth a line: its picture may
+    // have frozen, or the helper quit, and a stale reading must not stand in.
+    for (const [id, h] of health) {
+      if (h.latest.receivedAt > now - HEALTH_TTL_MS) continue;
+      health.delete(id);
+      console.log(`[output-helper] ${scrub(id)} stopped reporting health`);
+    }
     announce(now);
-    if (seen.size === 0 && scans.size === 0) {
+    if (seen.size === 0 && scans.size === 0 && health.size === 0) {
       if (sweepTimer) clearInterval(sweepTimer);
       sweepTimer = null;
     }
@@ -211,9 +323,10 @@ function ensureSweep(): void {
 /** Tests only: drop all state so cases cannot leak into each other. */
 export function resetKioskPresence(): void {
   secrets.clear();
+  health.clear();
   seen.clear();
-  lastRecorded.clear();
   scans.clear();
+  fullWarned = false;
   lastSig = "";
   if (sweepTimer) clearInterval(sweepTimer);
   sweepTimer = null;

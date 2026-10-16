@@ -78,7 +78,7 @@ export interface ConnectionProblem {
   /**
    * The labels in this group, in the order Companion listed them.
    *
-   * A group of one is worth naming — "SA-HL-Stage-TV (Connection Failure)" sends
+   * A group of one is worth naming — "Stage-TV (Connection Failure)" sends
    * an operator to a television, where "1 vizio-smartcast" sends them to a list
    * of twelve. A group of six bulbs is not: six device names on an hourly line
    * is the noise the grouping exists to avoid. connectionDetail decides where
@@ -207,7 +207,7 @@ export function summariseConnections(connections: readonly CompanionConnection[]
     total: connections.length,
     enabled: enabled.length,
     ...counts,
-    worst: counts.error > 0 ? "error" : counts.unknown > 0 ? "unknown" : "ok",
+    worst: WORST_FIRST.find((level) => counts[level] > 0) ?? "ok",
     problems,
   };
 }

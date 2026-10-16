@@ -1,7 +1,7 @@
 // series-colors.ts — one colour per service type, and it does not move.
 //
 // The colours used to be `SERIES_COLORS[i]` over the tile order, and the tile
-// order is busiest-first. So The Salt Company was blue on Attendance and green
+// order is busiest-first. So The Gathering was blue on Attendance and green
 // on Sound, because switching measure re-sorts the tiles; a quiet type that had
 // a loud week swapped colours with its neighbour; and a week where one type did
 // not record shuffled everything below it. A colour that means a different
@@ -11,6 +11,8 @@
 // arithmetic is pure and lives here so it can be tested without a browser; the
 // localStorage read and write are the two thin functions at the bottom, and the
 // write RETURNS its failure rather than swallowing it.
+
+import { readStored, storeFailure } from "../../../lib/safe-storage";
 
 /**
  * The palette, in the order it is handed out. Theme tokens only — a literal
@@ -85,29 +87,25 @@ export function colorForIndex(index: number): string {
  * screen, not operator data.
  */
 export function readColorAssignment(): ColorAssignment {
-  try {
-    const raw = localStorage.getItem(TREND_COLOR_KEY);
-    if (!raw) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out: ColorAssignment = {};
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof v === "number" && Number.isFinite(v)) out[k] = Math.trunc(v);
-    }
-    return out;
-  } catch {
-    return {};
-  }
+  return readStored<ColorAssignment>(
+    TREND_COLOR_KEY,
+    (raw) => {
+      if (!raw) return {};
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      const out: ColorAssignment = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === "number" && Number.isFinite(v)) out[k] = Math.trunc(v);
+      }
+      return out;
+    },
+    {},
+  );
 }
 
 /** Persist an assignment. Returns the failure rather than swallowing it: the
  *  caller logs it, so an operator whose colours move every reload has a
  *  `[history]` line saying why. */
 export function writeColorAssignment(map: ColorAssignment): Error | null {
-  try {
-    localStorage.setItem(TREND_COLOR_KEY, JSON.stringify(map));
-    return null;
-  } catch (err) {
-    return err instanceof Error ? err : new Error(String(err));
-  }
+  return storeFailure(TREND_COLOR_KEY, JSON.stringify(map));
 }

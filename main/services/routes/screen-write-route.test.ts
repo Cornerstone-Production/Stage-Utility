@@ -1,0 +1,767 @@
+// POST /api/outputs, PATCH /api/outputs/:id, POST /api/views/:id/surface and
+// POST /api/devices/claim, driven through the real route modules and controller.
+// A screen is a control surface when the view it shows is a console, so a `mode`
+// in a body is refused with that reason from every one of the routes that took it.
+//
+// The first block is the ORIGINAL call, { name, viewId }, and it is written to
+// pass unchanged against the build before createScreen existed: it is the check
+// that scripts and integrations posting that body still get what they always did.
+//
+// Every id and name is invented.
+
+import assert from "node:assert/strict";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import { beforeEach, describe, it } from "node:test";
+
+const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-screen-write-route-"));
+process.env.STAGE_UTILITY_DATA = TMP;
+process.env.HOME = path.join(TMP, "home");
+
+const { viewRoutes } = await import("./view-routes.js");
+const { kioskDeviceRoutes } = await import("./kiosk-device-routes.js");
+const { callRoute } = await import("./route-harness.js");
+const { stageController, ViewSurfaceChangedError } = await import("../stage-controller.js");
+const { screenIsControlSurface } = await import("../../types/views.js");
+const { recordSeen, resetKioskPresence } = await import("../kiosk-presence.js");
+const { kioskDevicesStore } = await import("../kiosk-devices-store.js");
+const { viewsStore } = await import("../views-store.js");
+
+type Mutable = { state: { views: View[]; outputs: Output[]; [k: string]: unknown }; broadcast: () => void; recomputeResolved: () => void };
+const ctl = stageController as unknown as Mutable;
+ctl.broadcast = () => {};
+
+const layout = { version: 1, canvas: { width: 1920, height: 1080 }, objects: [] };
+const NOW = "2026-01-01T00:00:00.000Z";
+
+beforeEach(async () => {
+  ctl.state = {
+    ...ctl.state,
+    views: [
+      { id: "wall-a", name: "Lobby loop", kind: "custom", surface: "display", createdAt: NOW, layout },
+      { id: "ctl-a", name: "Booth controls", kind: "custom", surface: "console", createdAt: NOW, layout },
+    ] as unknown as View[],
+    outputs: [
+      { id: "display-1", name: "Lobby TV", viewId: "wall-a" },
+      { id: "display-2", name: "Hallway TV", viewId: "wall-a" },
+      { id: "display-3", name: "Booth panel", viewId: "ctl-a" },
+      { id: "display-4", name: "Stage panel", viewId: "ctl-a" },
+    ] as unknown as Output[],
+  };
+  ctl.recomputeResolved();
+  resetKioskPresence();
+  await kioskDevicesStore.save([]);
+});
+
+const post = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "POST", body });
+const outputs = () => stageController.getState().outputs;
+const views = () => stageController.getState().views;
+const controlSurfaces = (viewId: string) =>
+  outputs().filter((o) => o.viewId === viewId).map((o) => screenIsControlSurface(o, views()));
+
+describe("POST /api/outputs — the original { name, viewId } call", () => {
+  it("answers 201 with the state, and the new screen is exactly { id, name, viewId }", async () => {
+    const r = await post("/api/outputs", { name: "Cafe TV", viewId: "wall-a" });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    const created = outputs().find((o) => o.name === "Cafe TV");
+    assert.ok(created, "no screen was made");
+    assert.deepEqual(Object.keys(created!).sort(), ["id", "name", "viewId"], "the new screen carries a field the original call never wrote");
+    assert.equal(created!.viewId, "wall-a");
+    assert.equal(views().length, 2, "a view was made for a call that did not ask for one");
+    const body = r.json as { outputs: Output[] };
+    assert.ok(body.outputs.some((o) => o.name === "Cafe TV"), "the answer is not the state");
+  });
+
+  it("answers the id of the screen it made, so a client need not look for it in the state", async () => {
+    const r = await post("/api/outputs", { name: "Cafe TV", viewId: "wall-a" });
+    const made = outputs().find((o) => o.name === "Cafe TV")!;
+    assert.equal((r.json as { outputId: string }).outputId, made.id);
+  });
+
+  it("with no body at all makes 'Display N' routed nowhere", async () => {
+    const r = await post("/api/outputs", {});
+    assert.equal(r.status, 201);
+    const created = outputs()[outputs().length - 1];
+    assert.match(created.name, /^Display \d+$/);
+    assert.equal(created.viewId, null);
+  });
+
+  it("ignores a name or viewId of the wrong type, as it always did", async () => {
+    const r = await post("/api/outputs", { name: 7, viewId: 7 });
+    assert.equal(r.status, 201);
+    assert.equal(outputs()[outputs().length - 1].viewId, null);
+  });
+});
+
+describe("POST /api/outputs — the guided creation fields", () => {
+  it("makes a control surface with a new view, a slug and the sidebar listing off", async () => {
+    const r = await post("/api/outputs", { name: "Wing", newView: "control", slug: "wing", showInSidebar: false });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    const made = outputs().find((o) => o.name === "Wing")!;
+    assert.equal(screenIsControlSurface(made, views()), true);
+    assert.equal("mode" in made, false, "a screen has no stored role");
+    assert.equal(made.slug, "wing");
+    const v = views().find((x) => x.id === made.viewId)!;
+    assert.equal(v.name, "Wing");
+    assert.equal(v.surface, "console");
+    assert.equal(v.showInSidebar, false);
+  });
+
+  it("makes a read-only screen with a new wall view", async () => {
+    const r = await post("/api/outputs", { name: "Atrium", newView: "wall" });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    const made = outputs().find((o) => o.name === "Atrium")!;
+    assert.equal(views().find((x) => x.id === made.viewId)!.surface, "display");
+    assert.equal(screenIsControlSurface(made, views()), false);
+  });
+
+  it("shows an existing console of either kind: the screen is a control surface", async () => {
+    const r = await post("/api/outputs", { name: "Wing", viewId: "ctl-a", showInSidebar: false });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(screenIsControlSurface(outputs().find((o) => o.name === "Wing")!, views()), true);
+  });
+
+  it("refuses a mode with a 400 that says the view decides, and creates nothing", async () => {
+    for (const mode of ["panel", "display", "kiosk", null]) {
+      const r = await post("/api/outputs", { name: "Nope", mode, viewId: "ctl-a" });
+      assert.equal(r.status, 400, String(mode));
+      assert.match((r.json as { error: string }).error, /takes its role from the view/);
+    }
+    assert.equal(outputs().length, 4);
+  });
+
+  it("refuses a showInSidebar with no control surface to put it on, rather than dropping it", async () => {
+    const r = await post("/api/outputs", { name: "Nope", viewId: "wall-a", showInSidebar: false });
+    assert.equal(r.status, 400);
+    assert.match((r.json as { error: string }).error, /showInSidebar/);
+    assert.equal(outputs().length, 4);
+  });
+
+  it("refuses a taken slug with a 400, and creates nothing", async () => {
+    await post("/api/outputs", { name: "One", slug: "cafe" });
+    const r = await post("/api/outputs", { name: "Two", slug: "cafe" });
+    assert.equal(r.status, 400);
+    assert.match((r.json as { error: string }).error, /already used/);
+    assert.equal(outputs().filter((o) => o.name === "Two").length, 0);
+  });
+
+  it("refuses a field of the wrong type rather than dropping it", async () => {
+    for (const body of [{ newView: true }, { newView: "yes" }, { slug: 5 }, { showInSidebar: "no" }]) {
+      const r = await post("/api/outputs", body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+    }
+    assert.equal(outputs().length, 4);
+  });
+
+  it("answers a failure part-way with a 500 that says what was undone", async () => {
+    (stageController as unknown as Record<string, unknown>).setViewShowInSidebar = async () => { throw new Error("disk full"); };
+    try {
+      const r = await post("/api/outputs", { name: "Doomed", newView: "control", showInSidebar: false });
+      assert.equal(r.status, 500);
+      const j = r.json as { error: string; failed: string; rolledBack: string[]; notRolledBack: string[] };
+      assert.equal(j.failed, "set the sidebar listing");
+      assert.deepEqual([...j.rolledBack].sort(), ["add the screen", "make the view"]);
+      assert.deepEqual(j.notRolledBack, []);
+    } finally {
+      delete (stageController as unknown as Record<string, unknown>).setViewShowInSidebar;
+    }
+    assert.equal(outputs().length, 4);
+    assert.equal(views().length, 2);
+  });
+});
+
+describe("PATCH /api/outputs/:id — the view decides", () => {
+  const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
+
+  it("refuses a mode with a 400 that says the view decides, and changes nothing", async () => {
+    const before = JSON.stringify(outputs());
+    for (const mode of ["panel", "display", "kiosk"]) {
+      const r = await patch("/api/outputs/display-1", { mode });
+      assert.equal(r.status, 400, mode);
+      assert.match((r.json as { error: string }).error, /takes its role from the view/);
+    }
+    // Even alongside a field that is fine: the whole request is refused, so a
+    // script is not left believing the screen is a control surface.
+    const mixed = await patch("/api/outputs/display-1", { name: "Renamed", mode: "panel" });
+    assert.equal(mixed.status, 400);
+    assert.equal(JSON.stringify(outputs()), before);
+  });
+
+  it("points a screen at a console and it is a control surface; back at a wall view and it is read-only", async () => {
+    let r = await patch("/api/outputs/display-1", { viewId: "ctl-a" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(screenIsControlSurface(outputs().find((o) => o.id === "display-1")!, views()), true);
+    r = await patch("/api/outputs/display-1", { viewId: "wall-a" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(screenIsControlSurface(outputs().find((o) => o.id === "display-1")!, views()), false);
+  });
+});
+
+describe("PATCH /api/outputs/:id — expectSurface", () => {
+  const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
+  const routed = (id: string) => outputs().find((o) => o.id === id)!.viewId;
+
+  it("goes ahead when the view is the kind the caller expected", async () => {
+    const r = await patch("/api/outputs/display-1", { viewId: "ctl-a", expectSurface: "console" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(routed("display-1"), "ctl-a");
+  });
+
+  it("is a 409 naming what the view is now, and writes nothing, when it is the other kind", async () => {
+    // The operator was asked about a wall view and said yes; it is a console now.
+    const r = await patch("/api/outputs/display-1", { viewId: "ctl-a", expectSurface: "display" });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    assert.deepEqual({ code: (r.json as { code: string }).code, surface: (r.json as { surface: string }).surface }, { code: "surface-changed", surface: "console" });
+    assert.equal(routed("display-1"), "wall-a", "the screen went live on a view nobody confirmed");
+    const live = await patch("/api/outputs/display-3", { viewId: "wall-a", expectSurface: "console" });
+    assert.equal(live.status, 409);
+    assert.equal(routed("display-3"), "ctl-a");
+  });
+
+  it("writes nothing else in the body when it refuses: a rename beside it does not land alone", async () => {
+    const r = await patch("/api/outputs/display-1", { name: "Renamed", viewId: "ctl-a", expectSurface: "display" });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    assert.equal(outputs().find((o) => o.id === "display-1")!.name, "Lobby TV", "a field beside the refused viewId was applied");
+    assert.equal(routed("display-1"), "wall-a");
+  });
+
+  it("without it the write is allowed whatever the kind: Companion and scripts", async () => {
+    const r = await patch("/api/outputs/display-1", { viewId: "ctl-a" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+  });
+
+  it("is refused as a 400 when it is not a kind, or has no view to be checked against", async () => {
+    for (const body of [
+      { viewId: "ctl-a", expectSurface: "kiosk" },
+      { viewId: "ctl-a", expectSurface: true },
+      { viewId: null, expectSurface: "display" },
+      { name: "Renamed", expectSurface: "display" },
+    ]) {
+      const r = await patch("/api/outputs/display-1", body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+    }
+    assert.equal(routed("display-1"), "wall-a");
+    assert.equal(outputs().find((o) => o.id === "display-1")!.name, "Lobby TV", "a field beside a refused one was applied");
+  });
+});
+
+describe("PATCH /api/views/:id refuses before it writes", () => {
+  const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
+  const wallA = () => views().find((v) => v.id === "wall-a")!;
+  const edited = { ...layout, canvas: { width: 1280, height: 720 } };
+
+  it("a stale layoutRev is a 409 with nothing else in the body written", async () => {
+    const r = await patch("/api/views/wall-a", { name: "Renamed", layout: edited, layoutRev: 5 });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    assert.deepEqual([(r.json as { code: string }).code, (r.json as { currentRev: number }).currentRev], ["layout-conflict", 0]);
+    assert.equal(wallA().name, "Lobby loop", "a field beside the refused layout was applied");
+    assert.deepEqual(wallA().layout, layout);
+  });
+
+  it("an unknown ServiceCue layout is a 400 naming it, with nothing else in the body written", async () => {
+    const r = await patch("/api/views/wall-a", { name: "Renamed", serviceCueLayoutId: "ghost" });
+    assert.equal(r.status, 400, JSON.stringify(r.json));
+    assert.match((r.json as { error: string }).error, /no ServiceCue layout ghost/);
+    assert.equal(wallA().name, "Lobby loop", "a field beside the refused ServiceCue layout was applied");
+  });
+
+  it("a current layoutRev saves the layout and the rest of the body", async () => {
+    const r = await patch("/api/views/wall-a", { name: "Renamed", layout: edited, layoutRev: 0 });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual([wallA().name, wallA().layoutRev], ["Renamed", 1]);
+  });
+});
+
+describe("PATCH /api/views/:id changing a console's kind", () => {
+  const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
+
+  it("refuses a kind with nothing to operate, with the reason, and writes nothing else in the body", async () => {
+    const r = await patch("/api/views/ctl-a", { name: "Renamed", kind: "slots" });
+    assert.equal(r.status, 400, JSON.stringify(r.json));
+    assert.match((r.json as { error: string }).error, /Booth controls.*cannot be a control surface/s);
+    const view = views().find((v) => v.id === "ctl-a")!;
+    assert.deepEqual([view.kind, view.name], ["custom", "Booth controls"], "a field beside the refused kind was applied");
+    assert.deepEqual(controlSurfaces("ctl-a"), [true, true]);
+  });
+
+  it("takes a kind that still has controls, and any kind once the same body makes it a wall view", async () => {
+    assert.equal((await patch("/api/views/ctl-a", { kind: "calendar" })).status, 200);
+    assert.equal(views().find((v) => v.id === "ctl-a")!.kind, "calendar");
+    const r = await post("/api/views/ctl-a/surface", { surface: "display" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    ctl.state = { ...ctl.state, outputs: outputs().filter((o) => o.viewId !== "ctl-a") };
+    ctl.state.views = views().map((v) => (v.id === "ctl-a" ? { ...v, surface: "console" } : v));
+    const both = await patch("/api/views/ctl-a", { surface: "display", kind: "slots" });
+    assert.equal(both.status, 200, JSON.stringify(both.json));
+    assert.deepEqual([views().find((v) => v.id === "ctl-a")!.kind, views().find((v) => v.id === "ctl-a")!.surface], ["slots", "display"]);
+  });
+});
+
+describe("PATCH /api/views/:id with a kind and a surface in one body", () => {
+  const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
+  const unrouted = () => {
+    // A wall view nothing shows, of a kind with nothing to operate.
+    ctl.state = { ...ctl.state, views: [...views(), { id: "mics", name: "Mic board", kind: "slots", surface: "display", createdAt: NOW }] as unknown as View[] };
+  };
+  const shape = (id: string) => {
+    const v = views().find((x) => x.id === id)!;
+    return { name: v.name, kind: v.kind, surface: v.surface };
+  };
+
+  it("makes a wall view a console of a kind that can be one: the kind lands first, and the rename with it", async () => {
+    unrouted();
+    const r = await patch("/api/views/mics", { name: "Renamed", kind: "custom", surface: "console" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(shape("mics"), { name: "Renamed", kind: "custom", surface: "console" });
+  });
+
+  it("makes a console a wall view of any kind: the surface lands first", async () => {
+    ctl.state = { ...ctl.state, outputs: outputs().filter((o) => o.viewId !== "ctl-a") };
+    const r = await patch("/api/views/ctl-a", { name: "Renamed", kind: "slots", surface: "display" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(shape("ctl-a"), { name: "Renamed", kind: "slots", surface: "display" });
+  });
+
+  it("refuses a console of a kind that cannot be one, and writes none of the body", async () => {
+    unrouted();
+    const r = await patch("/api/views/mics", { name: "Renamed", surface: "console" });
+    assert.equal(r.status, 400, JSON.stringify(r.json));
+    assert.match((r.json as { error: string }).error, /cannot be a control surface/);
+    assert.deepEqual(shape("mics"), { name: "Mic board", kind: "slots", surface: "display" }, "a field beside the refused surface was applied");
+  });
+
+  it("refuses a surface a screen is showing the view on, and writes none of the body", async () => {
+    // wall-a is shown by two screens: making it a console would wake both.
+    const r = await patch("/api/views/wall-a", { name: "Renamed", kind: "calendar", surface: "console" });
+    assert.equal(r.status, 400, JSON.stringify(r.json));
+    assert.match((r.json as { error: string }).error, /"Lobby TV", "Hallway TV"/);
+    assert.deepEqual(shape("wall-a"), { name: "Lobby loop", kind: "custom", surface: "display" }, "a field beside the refused surface was applied");
+  });
+});
+
+describe("POST /api/views/:id/surface", () => {
+  const patch = (url: string, body: unknown) => callRoute(viewRoutes, url, { method: "PATCH", body });
+
+  it("refuses a body with no surface, or one that is neither", async () => {
+    for (const body of [{}, { surface: "kiosk" }, { surface: 1 }, { surface: null }]) {
+      const r = await post("/api/views/wall-a/surface", body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+    }
+    assert.equal(views().find((v) => v.id === "wall-a")!.surface, "display");
+  });
+
+  it("makes the view a console, and every screen showing it a control surface, and answers the state", async () => {
+    const r = await post("/api/views/wall-a/surface", { surface: "console" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const answered = r.json as { views: View[]; outputs: Output[] };
+    assert.equal(answered.views.find((v) => v.id === "wall-a")!.surface, "console");
+    assert.deepEqual(controlSurfaces("wall-a"), [true, true]);
+  });
+
+  it("makes the screens read-only again", async () => {
+    const r = await post("/api/views/ctl-a/surface", { surface: "display" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(views().find((v) => v.id === "ctl-a")!.surface, "display");
+    assert.deepEqual(controlSurfaces("ctl-a"), [false, false]);
+  });
+
+  it("refuses a view that cannot be a control surface, and a missing one, with the reason as a 400", async () => {
+    ctl.state = { ...ctl.state, views: [...views(), { id: "mics", name: "Mic board", kind: "slots", createdAt: NOW }] as unknown as View[] };
+    const refused = await post("/api/views/mics/surface", { surface: "console" });
+    assert.equal(refused.status, 400);
+    assert.match((refused.json as { error: string }).error, /Mic board.*Slots view/s);
+    const patched = await patch("/api/views/mics", { surface: "console" });
+    assert.equal(patched.status, 400, "PATCH took the view the POST refused");
+    assert.equal(views().find((v) => v.id === "mics")!.surface, undefined);
+    const missing = await post("/api/views/ghost/surface", { surface: "display" });
+    assert.equal(missing.status, 400);
+    assert.match((missing.json as { error: string }).error, /not found/);
+  });
+
+  it("answers a failed write with the 500 shape of POST /api/outputs, and puts the view back", async () => {
+    // The write fails at the disk, after the view changed in memory: what a full
+    // disk does. setViewSurface puts the view back itself.
+    const store = viewsStore as unknown as Record<string, unknown>;
+    store.save = async () => { throw new Error("disk full"); };
+    try {
+      const r = await post("/api/views/wall-a/surface", { surface: "console" });
+      assert.equal(r.status, 500);
+      const j = r.json as { error: string; failed: string; rolledBack: string[]; notRolledBack: string[] };
+      assert.match(j.failed, /make the view a control surface/);
+      assert.deepEqual(j.rolledBack, ["make the view a control surface"]);
+      assert.deepEqual(j.notRolledBack, []);
+    } finally {
+      delete store.save;
+    }
+    assert.equal(views().find((v) => v.id === "wall-a")!.surface, "display");
+    assert.deepEqual(controlSurfaces("wall-a"), [false, false]);
+  });
+
+  it("answers 409 with the screens as they are now when the list the operator was shown is stale, and writes nothing", async () => {
+    const before = JSON.stringify({ views: views(), outputs: outputs() });
+    const r = await post("/api/views/wall-a/surface", { surface: "console", screens: ["display-1"] });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    const j = r.json as { error: string; code: string; screens: { id: string; name: string }[] };
+    assert.equal(j.code, "screens-changed");
+    assert.deepEqual(j.screens, [{ id: "display-1", name: "Lobby TV" }, { id: "display-2", name: "Hallway TV" }]);
+    assert.match(j.error, /"Lobby TV", "Hallway TV"/);
+    assert.equal(JSON.stringify({ views: views(), outputs: outputs() }), before);
+  });
+
+  it("goes ahead when the list matches", async () => {
+    const r = await post("/api/views/wall-a/surface", { surface: "console", screens: ["display-2", "display-1"] });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(controlSurfaces("wall-a"), [true, true]);
+  });
+
+  it("refuses a screens field that is not a list of ids", async () => {
+    for (const screens of ["display-1", [1], null, { id: "display-1" }]) {
+      const r = await post("/api/views/wall-a/surface", { surface: "console", screens });
+      assert.equal(r.status, 400, JSON.stringify(screens));
+    }
+    assert.equal(views().find((v) => v.id === "wall-a")!.surface, "display");
+  });
+
+  it("leaves PATCH /api/views/:id { surface } as it was: it refuses a view that screens are showing", async () => {
+    const r = await patch("/api/views/wall-a", { surface: "console" });
+    assert.equal(r.status, 400);
+    assert.match((r.json as { error: string }).error, /"Lobby TV", "Hallway TV"/);
+    assert.equal(views().find((v) => v.id === "wall-a")!.surface, "display");
+    assert.deepEqual(controlSurfaces("wall-a"), [false, false], "a read-only screen went live");
+  });
+});
+
+describe("POST /api/devices/claim — a new screen", () => {
+  const device = { id: "kiosk-aaaa", macs: ["aa:bb:cc:dd:ee:ff"], hostname: "lobby-pi", os: "linux", ip: "192.0.2.10" };
+  const claim = (body: Record<string, unknown>) => callRoute(kioskDeviceRoutes, "/api/devices/claim", { method: "POST", body: { deviceId: device.id, ...body } });
+
+  it("with no other fields makes a screen named after the device and binds it, as it always did", async () => {
+    recordSeen(device);
+    const r = await claim({});
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const made = outputs().find((o) => o.name === "lobby-pi");
+    assert.ok(made, "no screen named after the device");
+    assert.deepEqual(Object.keys(made!).sort(), ["id", "name", "viewId"]);
+    assert.equal((await kioskDevicesStore.load()).find((d) => d.id === device.id)?.outputId, made!.id);
+  });
+
+  it("answers with the id of the screen it made", async () => {
+    recordSeen(device);
+    const r = await claim({});
+    const made = outputs().find((o) => o.name === "lobby-pi");
+    assert.equal((r.json as { outputId: string }).outputId, made!.id);
+  });
+
+  it("names the screen 'New screen' for a device that reports an empty hostname, as it always did", async () => {
+    recordSeen({ ...device, hostname: "" });
+    const r = await claim({});
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(outputs().find((o) => o.id === (r.json as { outputId: string }).outputId)?.name, "New screen");
+  });
+
+  it("still takes the name the Screens page used to send as newName", async () => {
+    recordSeen(device);
+    await claim({ newName: "Atrium" });
+    assert.ok(outputs().some((o) => o.name === "Atrium"));
+  });
+
+  it("makes the screen from the guided fields and binds the device to it", async () => {
+    recordSeen(device);
+    const r = await claim({ name: "Wing", newView: "control", slug: "wing", showInSidebar: false });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const made = outputs().find((o) => o.name === "Wing")!;
+    assert.equal(screenIsControlSurface(made, views()), true);
+    assert.equal(made.slug, "wing");
+    assert.equal(views().find((v) => v.id === made.viewId)?.showInSidebar, false);
+    assert.equal((await kioskDevicesStore.load()).find((d) => d.id === device.id)?.outputId, made.id);
+  });
+
+  it("refuses a bad body with nothing created and the device still unclaimed", async () => {
+    recordSeen(device);
+    const r = await claim({ name: "Nope", viewId: "ghost" });
+    assert.equal(r.status, 400);
+    assert.equal(outputs().length, 4);
+    assert.equal(views().length, 2);
+    assert.equal((await kioskDevicesStore.load()).length, 0);
+  });
+
+  it("refuses a device that is already bound, rather than moving it to a new screen", async () => {
+    // Set up as a new screen is offered for a device that is waiting. If another
+    // operator bound it meanwhile, a new screen must not silently take it away.
+    recordSeen(device);
+    assert.equal((await claim({ outputId: "display-1" })).status, 200);
+    const count = outputs().length;
+    const r = await claim({ name: "Wing" });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    assert.match((r.json as { error: string }).error, /Lobby TV/, "must name the screen it is on");
+    assert.equal(outputs().length, count, "a screen was made");
+    assert.equal((await kioskDevicesStore.load()).find((d) => d.id === device.id)?.outputId, "display-1", "the device was moved");
+  });
+
+  it("two operators setting the same device up at once make one screen, not two", async () => {
+    recordSeen(device);
+    const count = outputs().length;
+    const answers = await Promise.all([claim({ name: "Wing A" }), claim({ name: "Wing B" })]);
+    assert.deepEqual(answers.map((r) => r.status).sort(), [200, 500], JSON.stringify(answers.map((r) => r.json)));
+    assert.equal(outputs().length, count + 1, "the losing claim left an empty screen behind");
+  });
+
+  it("still moves a bound device when the operator names the screen", async () => {
+    recordSeen(device);
+    await claim({ outputId: "display-1" });
+    assert.equal((await claim({ outputId: "display-2" })).status, 200);
+    assert.equal((await kioskDevicesStore.load()).find((d) => d.id === device.id)?.outputId, "display-2");
+  });
+
+  it("refuses a mode, with nothing created and the device still unclaimed", async () => {
+    recordSeen(device);
+    for (const body of [{ name: "Nope", mode: "panel", newView: "control" }, { outputId: "display-1", mode: "display" }]) {
+      const r = await claim(body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.match((r.json as { error: string }).error, /takes its role from the view/);
+    }
+    assert.equal(outputs().length, 4);
+    assert.equal((await kioskDevicesStore.load()).length, 0);
+  });
+
+  it("refuses creation fields alongside an existing screen to take over", async () => {
+    recordSeen(device);
+    const r = await claim({ outputId: "display-1", newView: "control" });
+    assert.equal(r.status, 400);
+    assert.match((r.json as { error: string }).error, /existing screen/);
+    assert.equal((await kioskDevicesStore.load()).length, 0);
+  });
+
+  it("puts an existing console back in the sidebar when the binding fails", async () => {
+    // The listing is written on a view that existed before the claim, so taking
+    // back the screen and any view made for it is not enough.
+    recordSeen(device);
+    const file = path.join(TMP, "kiosk-devices.json");
+    await fs.rm(file, { force: true });
+    await fs.mkdir(file);
+    try {
+      const r = await claim({ name: "Wing", viewId: "ctl-a", showInSidebar: false });
+      assert.equal(r.status, 500, JSON.stringify(r.json));
+    } finally {
+      await fs.rm(file, { recursive: true, force: true });
+    }
+    assert.equal(outputs().some((o) => o.name === "Wing"), false, "the empty screen was left behind");
+    assert.notEqual(views().find((v) => v.id === "ctl-a")!.showInSidebar, false, "the failed claim left the console hidden from the sidebar");
+  });
+
+  it("takes the screen AND the view it made back when the binding then fails", async () => {
+    recordSeen(device);
+    // A directory where the devices file goes: the write onto it cannot succeed.
+    const file = path.join(TMP, "kiosk-devices.json");
+    await fs.rm(file, { force: true });
+    await fs.mkdir(file);
+    try {
+      const r = await claim({ name: "Wing", newView: "control" });
+      // A failure part-way, answered as POST /api/outputs answers one.
+      assert.equal(r.status, 500, JSON.stringify(r.json));
+      assert.equal((r.json as { failed: string }).failed, "bind the device");
+    } finally {
+      await fs.rm(file, { recursive: true, force: true });
+    }
+    assert.equal(outputs().some((o) => o.name === "Wing"), false, "the empty screen was left behind");
+    assert.equal(views().some((v) => v.name === "Wing"), false, "the view made for it was left behind");
+  });
+});
+
+describe("POST /api/outputs and a claim — expectSurface, the kind the operator was shown", () => {
+  const device = { id: "kiosk-aaaa", macs: ["aa:bb:cc:dd:ee:ff"], hostname: "lobby-pi", os: "linux", ip: "192.0.2.10" };
+  const claim = (body: Record<string, unknown>) => callRoute(kioskDeviceRoutes, "/api/devices/claim", { method: "POST", body: { deviceId: device.id, ...body } });
+  const snapshot = () => JSON.stringify({ views: views(), outputs: outputs() });
+
+  it("a create goes ahead when the view is the kind that was shown", async () => {
+    const r = await post("/api/outputs", { name: "Wing", viewId: "ctl-a", expectSurface: "console" });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    assert.equal(screenIsControlSurface(outputs().find((o) => o.name === "Wing")!, views()), true);
+  });
+
+  it("a create is a 409 naming what the view is now when it is the other kind, and makes nothing", async () => {
+    const before = snapshot();
+    const r = await post("/api/outputs", { name: "Wing", viewId: "wall-a", expectSurface: "console" });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    const j = r.json as { code: string; surface: string; error: string };
+    assert.equal(j.code, "surface-changed");
+    assert.equal(j.surface, "display");
+    assert.match(j.error, /Nothing was changed/);
+    assert.equal(snapshot(), before, "a screen or a view was written");
+  });
+
+  it("is checked in the write turn of the add itself, not only before it", async () => {
+    // What the route's own early check cannot see: the view changed kind after it.
+    const before = snapshot();
+    await assert.rejects(
+      () => stageController.addOutput({ name: "Wing", viewId: "wall-a", expectSurface: "console" }),
+      (err: unknown) => err instanceof ViewSurfaceChangedError && err.surface === "display",
+    );
+    assert.equal(snapshot(), before, "the screen was added before the check");
+  });
+
+  it("a view that changes kind AFTER the early check, before the add, still creates nothing and is a 409", async () => {
+    const real = stageController.addOutput.bind(stageController);
+    const flip = stageController as unknown as { addOutput: unknown };
+    flip.addOutput = async (...args: Parameters<typeof real>) => {
+      ctl.state = { ...ctl.state, views: views().map((v) => (v.id === "ctl-a" ? { ...v, surface: "display" as const } : v)) };
+      return real(...args);
+    };
+    const before = JSON.stringify({ outputs: outputs() });
+    try {
+      const r = await post("/api/outputs", { name: "Wing", viewId: "ctl-a", expectSurface: "console" });
+      assert.equal(r.status, 409, JSON.stringify(r.json));
+      assert.equal((r.json as { surface: string }).surface, "display");
+    } finally {
+      delete (flip as { addOutput?: unknown }).addOutput;
+    }
+    assert.equal(JSON.stringify({ outputs: outputs() }), before, "the screen was added");
+  });
+
+  it("is a 400 without a viewId, with newView, or with a value that is not a kind", async () => {
+    const before = snapshot();
+    for (const body of [
+      { expectSurface: "console" },
+      { viewId: null, expectSurface: "console" },
+      { newView: "control", expectSurface: "console" },
+      { viewId: "ctl-a", newView: "control", expectSurface: "console" },
+      { viewId: "ctl-a", expectSurface: "wall" },
+      { viewId: "ctl-a", expectSurface: null },
+    ]) {
+      const r = await post("/api/outputs", body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+      assert.match((r.json as { error: string }).error, /expectSurface/);
+    }
+    assert.equal(snapshot(), before);
+  });
+
+  it("a claim goes ahead when the view is the kind that was shown, and binds the device", async () => {
+    recordSeen(device);
+    const r = await claim({ name: "Wing", viewId: "ctl-a", expectSurface: "console" });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const made = outputs().find((o) => o.name === "Wing")!;
+    assert.equal((await kioskDevicesStore.load()).find((d) => d.id === device.id)?.outputId, made.id);
+  });
+
+  it("a claim for a view of the other kind is a 409, makes no screen and leaves the device unbound", async () => {
+    recordSeen(device);
+    const before = snapshot();
+    const r = await claim({ name: "Wing", viewId: "wall-a", expectSurface: "console" });
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    assert.equal((r.json as { code: string }).code, "surface-changed");
+    assert.equal(snapshot(), before, "a screen was made for a refused claim");
+    assert.equal((await kioskDevicesStore.load()).length, 0, "the device was bound");
+  });
+
+  it("a claim with a bad combination is a 400 and creates nothing", async () => {
+    recordSeen(device);
+    const before = snapshot();
+    for (const body of [
+      { expectSurface: "console" },
+      { newView: "wall", expectSurface: "display" },
+      { viewId: "ctl-a", expectSurface: "wall" },
+      // Naming a screen to take over AND describing a new one.
+      { outputId: "display-1", viewId: "ctl-a", expectSurface: "console" },
+    ]) {
+      const r = await claim(body);
+      assert.equal(r.status, 400, JSON.stringify(body));
+    }
+    assert.equal(snapshot(), before);
+    assert.equal((await kioskDevicesStore.load()).length, 0);
+  });
+});
+
+describe("DELETE /api/views/:id?ifUnshown=1 — delete a view only if no screen shows it", () => {
+  const del = (url: string) => callRoute(viewRoutes, url, { method: "DELETE" });
+  beforeEach(() => {
+    ctl.state = { ...ctl.state, views: [...views(), { id: "spare", name: "Spare loop", kind: "custom", surface: "display", createdAt: NOW, layout }] as unknown as View[] };
+  });
+
+  it("deletes a view no screen shows", async () => {
+    const r = await del("/api/views/spare?ifUnshown=1");
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.equal(views().some((v) => v.id === "spare"), false);
+  });
+
+  it("is a 409 naming the screens when one shows it, and deletes nothing", async () => {
+    const before = JSON.stringify({ views: views(), outputs: outputs() });
+    const r = await del("/api/views/wall-a?ifUnshown=1");
+    assert.equal(r.status, 409, JSON.stringify(r.json));
+    const j = r.json as { code: string; screens: { id: string; name: string }[]; error: string };
+    assert.equal(j.code, "view-shown");
+    assert.deepEqual(j.screens, [{ id: "display-1", name: "Lobby TV" }, { id: "display-2", name: "Hallway TV" }]);
+    assert.match(j.error, /"Lobby TV", "Hallway TV" show it now/);
+    assert.equal(JSON.stringify({ views: views(), outputs: outputs() }), before, "the view was deleted or a screen unrouted");
+  });
+
+  it("without the flag it deletes a shown view and unroutes its screens, as it always did", async () => {
+    const r = await del("/api/views/wall-a");
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    assert.deepEqual(outputs().filter((o) => o.id === "display-1" || o.id === "display-2").map((o) => o.viewId), [null, null]);
+  });
+
+  it("a delete that fails releases the view: it can be pointed at again afterwards", async () => {
+    // The reservation must not outlive the delete. The view's inline slots fail to be
+    // cleaned up, so the delete rejects before the view leaves the state.
+    const inline = {
+      id: "inline-f", name: "Mic wall", kind: "custom", surface: "display", createdAt: NOW,
+      layout: { ...layout, objects: [{ id: "grid-f", x: 0, y: 0, w: 1, h: 1, z: 1, config: { type: "slots-grid", source: "inline" }, style: {} }] },
+    };
+    ctl.state = { ...ctl.state, views: [...views(), inline] as unknown as View[] };
+    const { slotsStore } = await import("../slots-store.js");
+    const store = slotsStore as unknown as { removeDisplay: (id: string) => Promise<unknown> };
+    const real = store.removeDisplay.bind(slotsStore);
+    store.removeDisplay = async () => { throw new Error("disk full"); };
+    try {
+      await assert.rejects(() => stageController.deleteView("inline-f", { ifUnshown: true }), /disk full/);
+    } finally {
+      store.removeDisplay = real;
+    }
+    assert.equal(views().some((v) => v.id === "inline-f"), true, "the view was removed by a delete that failed");
+    const routed = await callRoute(viewRoutes, "/api/outputs/display-1", { method: "PATCH", body: { viewId: "inline-f" } });
+    assert.equal(routed.status, 200, `the view is still reserved after its delete failed: ${JSON.stringify(routed.json)}`);
+  });
+
+  it("a view being deleted cannot be pointed at while its inline slots are cleaned up: not by routing, not by a new screen", async () => {
+    // The window is the await in deleteView before the view leaves the state. A
+    // view with an inline slots grid has one; hold it open and try both writes.
+    const inline = {
+      id: "inline", name: "Mic wall", kind: "custom", surface: "display", createdAt: NOW,
+      layout: { ...layout, objects: [{ id: "grid-1", x: 0, y: 0, w: 1, h: 1, z: 1, config: { type: "slots-grid", source: "inline" }, style: {} }] },
+    };
+    ctl.state = { ...ctl.state, views: [...views(), inline] as unknown as View[] };
+    const { slotsStore } = await import("../slots-store.js");
+    const store = slotsStore as unknown as { removeDisplay: (id: string) => Promise<unknown> };
+    const real = store.removeDisplay.bind(slotsStore);
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    store.removeDisplay = async (id: string) => { await held; return real(id); };
+    const deleting = del("/api/views/inline?ifUnshown=1");
+    try {
+      await new Promise((r) => setTimeout(r, 5));
+      const routed = await callRoute(viewRoutes, "/api/outputs/display-1", { method: "PATCH", body: { viewId: "inline" } });
+      assert.equal(routed.status, 400, JSON.stringify(routed.json));
+      assert.match((routed.json as { error: string }).error, /being deleted/);
+      const made = await post("/api/outputs", { name: "Wing", viewId: "inline" });
+      assert.equal(made.status, 400, JSON.stringify(made.json));
+    } finally {
+      release();
+      store.removeDisplay = real;
+    }
+    assert.equal((await deleting).status, 200);
+    assert.equal(outputs().find((o) => o.id === "display-1")?.viewId, "wall-a", "a screen was pointed at a view that is gone");
+    assert.equal(outputs().some((o) => o.name === "Wing"), false);
+  });
+});
+
+describe("POST /api/views/:id/duplicate — answers the copy it made", () => {
+  it("answers the id of the copy beside the state, so a client need not look for the newest view", async () => {
+    const r = await post("/api/views/wall-a/duplicate", { name: "Lobby loop 2" });
+    assert.equal(r.status, 201, JSON.stringify(r.json));
+    const made = views().find((v) => v.name === "Lobby loop 2");
+    assert.ok(made, "no copy was made");
+    assert.equal((r.json as { viewId: string }).viewId, made!.id);
+    assert.equal((r.json as { views: View[] }).views.some((v) => v.id === made!.id), true, "the answer is not the state");
+  });
+});

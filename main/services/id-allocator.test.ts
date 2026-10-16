@@ -194,14 +194,14 @@ console.log("CREATED:" + state.views[state.views.length - 1].id);`,
   it("does not reissue a deleted display's id, and keeps display-1 reserved", async () => {
     // display-1 is the primary output, so created displays start at display-2.
     ctl.state = { ...ctl.state, outputs: [{ id: "display-1", name: "Primary", viewId: null }] };
-    const a = await stageController.addOutput("Lobby");
-    const b = await stageController.addOutput("Foyer");
+    const a = await stageController.addOutput({ name: "Lobby" });
+    const b = await stageController.addOutput({ name: "Foyer" });
     assert.deepEqual([a.output.id, b.output.id], ["display-2", "display-3"]);
 
     await stageController.removeOutput("display-3");
     assert.equal((await idFloorsOnDisk()).output, 4, "the display floor never reached disk");
 
-    const c = await stageController.addOutput("Replacement");
+    const c = await stageController.addOutput({ name: "Replacement" });
     assert.equal(c.output.id, "display-4", "a deleted display's id came back");
   });
 });
@@ -373,7 +373,7 @@ ctl.recomputeResolved = () => {};
 await stageController.deleteView("view-3");
 const state = await stageController.createView("Replacement");
 await stageController.removeOutput("display-3");
-const { output } = await stageController.addOutput("Replacement");
+const { output } = await stageController.addOutput({ name: "Replacement" });
 console.log("CREATED:" + state.views[state.views.length - 1].id + "," + output.id);`,
     );
     assert.deepEqual(

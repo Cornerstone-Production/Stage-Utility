@@ -9,6 +9,7 @@
 // list of things to fix, not a number that says 80%.
 
 import { screensListViews } from "@main/services/home-view";
+import { plural } from "@main/services/plural";
 
 export interface ReadinessCheck {
   /** Stable key. Duplicates would render one check twice and hide another. */
@@ -108,7 +109,7 @@ export function readinessChecks(
         outputs.length === 0
           ? "no screens set up yet"
           : unassigned.length === 0
-            ? `${outputs.length} screen${outputs.length === 1 ? "" : "s"} routed`
+            ? `${plural(outputs.length, "screen")} routed`
             : `${unassigned.map((o) => o.name).join(", ")} showing nothing`,
       ok: outputs.length > 0 && unassigned.length === 0,
       route: "/screens",

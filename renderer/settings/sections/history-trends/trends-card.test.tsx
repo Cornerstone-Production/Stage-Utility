@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../../test-dom.js";
+import { eventually, installRenderDom } from "../../../test-dom.js";
 
 const teardown = installRenderDom();
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -912,9 +912,9 @@ describe("a service type's colour", () => {
   });
 
   test("is the same on Attendance and on Sound", () => {
-    // THE BUG Henry reported. Colours were the palette indexed by the tile
+    // THE BUG an operator reported. Colours were the palette indexed by the tile
     // sort, and the sort is busiest-first, so switching measure re-sorted and
-    // The Salt Company was blue on one and green on the other.
+    // The Gathering was blue on one and green on the other.
     return withTwoTypes(async (view) => {
       const before = colorsFor(view, "evening");
       assert.ok(before.line, "the evening line was not drawn, so this asserts nothing");
@@ -1150,9 +1150,11 @@ async function withCard(check: (view: ReturnType<typeof render>) => void | Promi
     view = render(
       React.createElement(TooltipProvider, null, React.createElement(TrendsCard, { recordings: recs })),
     );
-    for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
   });
   try {
+    // The marks are the milestones read, a fetch behind the first paint.
+    await eventually(() => assert.ok(view.container.querySelector("[data-milestone]"), "no marks drawn at all, so this asserts nothing"));
     await check(view);
   } finally {
     view.unmount();

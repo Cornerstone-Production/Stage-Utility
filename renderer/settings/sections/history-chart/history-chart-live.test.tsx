@@ -47,14 +47,14 @@ const { HistoryChart } = await import("./history-chart.js");
 
 const T0 = Date.parse("2026-09-17T20:00:00.000Z");
 const MIN = 60_000;
-const SERVICE_KEY = "salt:plan-9:time-1";
+const SERVICE_KEY = "gathering:plan-9:time-1";
 
 /** An OPEN record (endedAt null) with `n` samples, one a minute. */
 function openRecord(n: number) {
   return {
     serviceKey: SERVICE_KEY,
-    serviceTypeId: "salt",
-    serviceTypeName: "The Salt Company",
+    serviceTypeId: "gathering",
+    serviceTypeName: "The Gathering",
     planId: "plan-9",
     planTitle: "Night of Worship",
     seriesTitle: null,

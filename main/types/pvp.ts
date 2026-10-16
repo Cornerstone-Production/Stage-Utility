@@ -1,7 +1,7 @@
 // pvp.ts — the shapes the ProVideoPlayer integration speaks.
 //
 // Every field here was observed live on 2026-08-29; see
-// docs/superpowers/research/2026-08-29-provideoplayer.md. Fields that research
+// docs/research/2026-08-29-provideoplayer.md. Fields that research
 // could not observe are NOT here — a DTO field nothing ever fills is a renderer
 // branch that is never exercised.
 //

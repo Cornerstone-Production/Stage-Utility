@@ -18,6 +18,7 @@
 // `onResult`, so the log shares the relay dial's one-line-per-outage rule.
 
 import type { VideoFeed, VideoProbeEntry, VideoProbeState } from "../../types/video.js";
+import { InFlight } from "./in-flight.js";
 import { probeKind, type ProbeResult, type ProbeTarget } from "./probe.js";
 
 /** How often every pulled feed is asked, while watched. */
@@ -81,6 +82,9 @@ export class ProbeScheduler {
   private readonly feedRevisions = new Map<string, number>();
   /** Feeds a change asked to be re-checked at once, or every feed. */
   private pending: Set<string> | "all" | null = null;
+  /** Every round started and not yet finished, for whenIdle(). A stale
+   *  generation's round can still be running beside a newer one's. */
+  private readonly rounds = new InFlight();
 
   constructor(private readonly deps: ProbeSchedulerDeps) {}
 
@@ -147,13 +151,25 @@ export class ProbeScheduler {
     if (this.roundGeneration === generation) return;
     this.roundGeneration = generation;
     const seen = { global: this.globalRevision, feeds: new Map(this.feedRevisions) };
-    void this.round(generation, seen, only)
-      .then(() => this.deps.onRoundOk())
-      .catch((err: unknown) => this.deps.onRoundError(err))
-      .finally(() => {
-        if (this.roundGeneration === generation) this.roundGeneration = null;
-        if (this.pending && this.timer && this.generation === generation) this.runPending();
-      });
+    void this.rounds.track(
+      this.round(generation, seen, only)
+        .then(() => this.deps.onRoundOk())
+        .catch((err: unknown) => this.deps.onRoundError(err))
+        .finally(() => {
+          if (this.roundGeneration === generation) this.roundGeneration = null;
+          if (this.pending && this.timer && this.generation === generation) this.runPending();
+        }),
+    );
+  }
+
+  /** Resolves once no round is running, including one a finishing round
+   *  started for a change that landed while it ran. For the caller that needs
+   *  a round nobody handed it the promise of (every trigger starts one
+   *  unawaited) to have landed. No count of event-loop turns can say that: a
+   *  round reads the feed file and each camera's password, and a disk read
+   *  takes however many turns the machine's load makes it. */
+  whenIdle(): Promise<void> {
+    return this.rounds.whenIdle();
   }
 
   /** Has this feed (or anything) changed since a round took its `seen` snapshot? */

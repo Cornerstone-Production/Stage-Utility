@@ -42,6 +42,8 @@ describe("capability registry", () => {
       "action-button",
       "cue-button",
       "live-controls",
+      "message-composer",
+      "messages",
       "osc-button",
       "rosstalk-button",
     ]);

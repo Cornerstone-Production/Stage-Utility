@@ -21,6 +21,8 @@
 
 import { errorMessage } from "./errors.js";
 import { StatusIntegration } from "./integration-base.js";
+import { pinToOrigin } from "./pinned-origin.js";
+import { scrub } from "./scrub.js";
 import {
   cueSuccessors, driftedLayers, hasUnknownCue, isPlaylistsResponse, isWorkspaceResponse,
   layerSignature, parseWorkspace, updateMediaSince, withMediaSinceAt, withNextCues,
@@ -103,6 +105,58 @@ export interface PvpTarget {
   token: string | null;
 }
 
+declare const PVP_ORIGIN: unique symbol;
+declare const PVP_URL: unique symbol;
+/** The operator's configured ProVideoPlayer `scheme://host:port`, and nothing
+ *  after it. Made only by `pvpOrigin`, which refuses a host that is not one. */
+export type PvpOrigin = string & { readonly [PVP_ORIGIN]: true };
+/** A request URL on a `PvpOrigin`. Made only by `pvpUrl`; a plain string does not
+ *  type-check at the fetch. */
+export type PvpUrl = string & { readonly [PVP_URL]: true };
+
+/** The target as `scheme://host:port`. Not checked: see `pvpOrigin`. */
+function plainOrigin(t: PvpTarget): string {
+  return `${t.https ? "https" : "http"}://${t.host}:${t.port}`;
+}
+
+/**
+ * The origin the bearer token is allowed to reach, built from the configured host
+ * and port. Throws when they do not make a bare origin: a host carrying a `/`,
+ * `?`, `#`, `@` or `\` parses with a path, query, fragment or credentials, and a
+ * request built on it would go somewhere the operator did not configure.
+ */
+export function pvpOrigin(t: PvpTarget): PvpOrigin {
+  const text = plainOrigin(t);
+  let u: URL;
+  try {
+    u = new URL(text);
+  } catch {
+    throw new Error(`the ProVideoPlayer host "${scrub(t.host, 80)}" is not a usable host name or address`);
+  }
+  const port = String(t.port) === (t.https ? "443" : "80") ? "" : String(t.port);
+  if (
+    u.protocol !== `${t.https ? "https" : "http"}:` || u.port !== port || u.username !== "" ||
+    u.password !== "" || u.pathname !== "/" || u.search !== "" || u.hash !== ""
+  ) {
+    throw new Error(`the ProVideoPlayer host "${scrub(t.host, 80)}" is not a plain host name or address`);
+  }
+  return u.origin as PvpOrigin;
+}
+
+/** `path` is the code's own, with a leading slash: `/transportState/workspace`. */
+export function pvpUrl(origin: PvpOrigin, path: string): PvpUrl {
+  return `${origin}/api/0${path}` as PvpUrl;
+}
+
+/**
+ * The ONLY request to ProVideoPlayer: it carries the Network API bearer token.
+ * `url` is re-pinned onto `origin` here, so a `path` that begins `//` or holds an
+ * `@` can never move the token to another host.
+ */
+export function pvpFetch(origin: PvpOrigin, url: PvpUrl, init: RequestInit): Promise<Response> {
+  return fetch(pinToOrigin(origin, url, "pvp"), init);
+}
+
 class PvpService extends StatusIntegration<PvpStatusDTO> {
   private target: PvpTarget | null = null;
   private imageDurationSec: number = DEFAULT_IMAGE_DURATION_SEC;
@@ -175,12 +229,8 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
   override start(): void {
     if (this.running || !this.target) return;
     // The token is never logged, here or anywhere.
-    console.log(`[pvp] polling ${this.origin(this.target)}`);
+    console.log(`[pvp] polling ${plainOrigin(this.target)}`);
     super.start();
-  }
-
-  private origin(t: PvpTarget): string {
-    return `${t.https ? "https" : "http"}://${t.host}:${t.port}`;
   }
 
   /**
@@ -198,7 +248,8 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
     const headers: Record<string, string> = {};
     if (t.token) headers.Authorization = `Bearer ${t.token}`;
     if (init?.body != null) headers["Content-Type"] = "application/json";
-    const res = await fetch(`${this.origin(t)}/api/0${path}`, {
+    const origin = pvpOrigin(t);
+    const res = await pvpFetch(origin, pvpUrl(origin, path), {
       method: init?.method ?? "GET",
       body: init?.body,
       headers,

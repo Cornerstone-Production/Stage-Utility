@@ -41,6 +41,7 @@ import { ApplyWatchdog } from "./update/apply-watchdog.js";
 import { exitForRestart, selfRecovers } from "./update/relaunch.js";
 
 import { broadcast } from "./broadcaster.js";
+import { plural } from "./plural.js";
 import { latestOnTrack, newerThan } from "./release-tags.js";
 import { appendUpdateLog, updateLogPath } from "./update-log.js";
 
@@ -61,7 +62,7 @@ const TRACKS = ["main", "beta"];
  * packaged server reports 0.0.0 — which the UI shows, and which makes every
  * release look older than the one before it.
  */
-function pkgVersion(): string {
+export function pkgVersion(): string {
   try {
     const v = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version;
     if (v) return v;
@@ -718,8 +719,8 @@ export class Updater {
     // launchd parks KeepAlive respawns, so exit alone leaves a Homebrew (or
     // macOS tarball) box dark; exitForRestart pairs the exit with the detached
     // kickstart that brings it back.
-    exitForRestart(600);
-    return this.getStatus();
+    const relaunch = exitForRestart(600);
+    return { ...this.getStatus(), ...(relaunch.failure ? { relaunchFailure: relaunch.failure } : {}) };
   }
 
   /** Spawn the detached update/switch script and enter the "updating" phase. */
@@ -802,7 +803,7 @@ export class Updater {
     this.logEvent(
       `${checkout ? "switching to" : "applying update on"} ${branch} — ` +
         `${this.status.currentTag ?? this.status.currentSha ?? "?"} -> ${tag ?? this.status.latestSha ?? "tip"}` +
-        ` (${this.status.behind} commit${this.status.behind === 1 ? "" : "s"})`,
+        ` (${plural(this.status.behind, "commit")})`,
     );
     // The strategy decides what runs; this stays the only place that spawns.
     const plan = strategy.plan({

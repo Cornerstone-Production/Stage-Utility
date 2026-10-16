@@ -6,6 +6,7 @@ import { invoke } from "../lib/api";
 import { useStageState } from "./use-stage-state";
 import { useStatusChannel } from "./use-status-channel";
 import { resolvePatch, endpointKey } from "../lib/patch-resolve";
+import { plural } from "@main/services/plural";
 
 type ChainNode = { text: string; kind: "source" | "hop" | "rack" | "console" };
 const PILL: Record<ChainNode["kind"], string> = {
@@ -181,7 +182,7 @@ export function PatchView() {
               <div className="mt-4 overflow-hidden rounded-xl border border-warn-6 bg-warn-2/40">
                 <div className="flex items-center gap-2 border-l-2 border-warn-9 px-4 py-2.5 text-footnote font-semibold">
                   <TriangleAlertIcon className="size-4 text-warn-11" />
-                  <span className="text-warn-11">{changes.length} change{changes.length === 1 ? "" : "s"}</span>
+                  <span className="text-warn-11">{plural(changes.length, "change")}</span>
                   <span className="text-fg-muted">from the standard patch</span>
                 </div>
                 <div className="divide-y divide-line">

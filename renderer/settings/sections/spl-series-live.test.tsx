@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { eventually, installDom } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
@@ -177,8 +177,8 @@ describe("switching records", () => {
         }),
       );
       await settle();
+      await eventually(() => assert.notEqual(peakPath(), "", "the first service drew no line"));
       const first = peakPath();
-      assert.notEqual(first, "", "the first service drew no line");
 
       // The second record's answer is held, so this is exactly the in-flight
       // moment the bug lived in.
@@ -197,8 +197,8 @@ describe("switching records", () => {
 
       r.release();
       await settle();
+      await eventually(() => assert.notEqual(peakPath(), "", "the second service drew no line"));
       const second = peakPath();
-      assert.notEqual(second, "", "the second service drew no line");
       assert.notEqual(second, first, "the second service drew the first one's line");
       assert.deepEqual(r.asks, [KEY, "two:2:2"]);
     } finally {
@@ -221,10 +221,11 @@ describe("switching records", () => {
         }),
       );
       await settle();
+      await eventually(() => assert.ok(r.asksFor(KEY) >= 1, "the series was never asked for"));
       assert.equal(document.querySelectorAll("[data-series-line]").length, 0, "a line drew before the answer");
       r.release();
       await settle();
-      assert.notEqual(peakPath(), "");
+      await eventually(() => assert.notEqual(peakPath(), ""));
     } finally {
       globalThis.fetch = realFetch;
       cleanup();
@@ -244,7 +245,7 @@ describe("a read that failed rather than found nothing", () => {
         }),
       );
       await settle();
-      assert.equal(document.querySelectorAll("[data-series-line='LAeq 1']").length, 1);
+      await eventually(() => assert.equal(document.querySelectorAll("[data-series-line='LAeq 1']").length, 1));
     } finally {
       globalThis.fetch = realFetch;
       cleanup();
@@ -265,10 +266,11 @@ describe("a read that failed rather than found nothing", () => {
         }),
       );
       await settle();
+      // The failed read is what the note says; the absence of a chart is read after it.
+      await eventually(() => assert.ok(screen.queryAllByText(/Sound samples unavailable/).length > 0, "nothing said the read failed"));
       assert.equal(document.querySelectorAll("[data-series-line]").length, 0, "a chart drew for a failed read");
-      assert.ok(screen.queryAllByText(/Sound samples unavailable/).length > 0, "nothing said the read failed");
       const strip = document.querySelector("[data-history-strip]") as HTMLElement;
-      assert.ok(strip.textContent?.includes("Samples unavailable"), strip.textContent ?? "");
+      await eventually(() => assert.ok(strip.textContent?.includes("Samples unavailable"), strip.textContent ?? ""));
     } finally {
       globalThis.fetch = realFetch;
       cleanup();
@@ -290,12 +292,14 @@ describe("the live refetch", () => {
         }),
       );
       await settle();
+      await eventually(() => assert.ok(r.asksFor(KEY) >= 1, "the series was never asked for"));
       assert.equal(r.asksFor(KEY), 1);
 
       await act(async () => {
         FakeEventSource.last?.push("spl:history", live([item("a", "MESSAGE", 0), item("b", "What a God", 1)]));
       });
       await settle();
+      await eventually(() => assert.ok(r.asksFor(KEY) >= 2, "a new item did not re-read the series"));
       assert.equal(r.asksFor(KEY), 2, "a new item did not re-read the series");
     } finally {
       globalThis.fetch = realFetch;
@@ -317,6 +321,7 @@ describe("the live refetch", () => {
         }),
       );
       await settle();
+      await eventually(() => assert.ok(r.asksFor(KEY) >= 1, "the series was never asked for"));
       assert.equal(r.asksFor(KEY), 1);
 
       for (let i = 0; i < 4; i++) {
@@ -343,6 +348,7 @@ describe("the live refetch", () => {
         }),
       );
       await settle();
+      await eventually(() => assert.ok(r.asksFor(KEY) >= 1, "the series was never asked for"));
       await act(async () => {
         FakeEventSource.last?.push("spl:history", record("other:9:9", { live: true }));
       });
@@ -365,6 +371,7 @@ describe("the live refetch", () => {
         }),
       );
       await settle();
+      await eventually(() => assert.ok(r.asksFor(KEY) >= 1, "the series was never asked for"));
       await act(async () => {
         FakeEventSource.last?.push("spl:history", record(KEY, { live: true, items: [item("a", "MESSAGE", 0), item("b", "x", 1)] }));
       });
@@ -387,6 +394,7 @@ describe("the live refetch", () => {
         }),
       );
       await settle();
+      await eventually(() => assert.ok(r.asksFor(KEY) >= 1, "the series was never asked for"));
       await act(async () => {
         view.unmount();
       });

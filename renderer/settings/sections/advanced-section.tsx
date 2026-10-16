@@ -39,6 +39,10 @@ import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
 import { restartConsequence, restartOutcome } from "../../lib/restart-warning";
 import { useUpdateStatus } from "../../app/queries";
+import { plural } from "@main/services/plural";
+
+/** What a call that restarts the server answers: why it could not arrange its own relaunch, if it could not. */
+type RestartAnswer = { relaunchFailure?: string };
 
 const DAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const ANY_DAY = "any";
@@ -322,9 +326,11 @@ export function UpdatesPanel({
 
   async function onRestart() {
     const doRestart = () =>
-      void invoke("update:restart").catch((e) =>
-        window.alert(`Restart failed: ${errorMessage(e)}`),
-      );
+      void invoke<RestartAnswer>("update:restart")
+        .then((r) => {
+          if (r?.relaunchFailure) window.alert(restartOutcome(s?.selfRecovers, "Restarting.", r.relaunchFailure));
+        })
+        .catch((e) => window.alert(`Restart failed: ${errorMessage(e)}`));
     // Locked during a live service / recording, same as self-update — a manual
     // restart interrupts displays too. Overridable for a genuine emergency.
     if (lock?.active) {
@@ -420,7 +426,7 @@ export function UpdatesPanel({
                 : available > 0
                   ? s.tagBased && s.targetTag
                     ? `${s.targetTag} available`
-                    : `${available} update${available === 1 ? "" : "s"} available`
+                    : `${plural(available, "update")} available`
                   : "Up to date"}
             </FieldLabel>
             <FieldDescription>
@@ -436,7 +442,7 @@ export function UpdatesPanel({
                       nothing pending changes what the app does, but Update still
                       works if you want the version number to line up. */}
                   {!s.tagBased && behindNews === 0 && behind > 0
-                    ? ` A version bump is pending (${behind} commit${behind === 1 ? "" : "s"}) — nothing user-facing.`
+                    ? ` A version bump is pending (${plural(behind, "commit")}) — nothing user-facing.`
                     : ""}
                 </>
               ) : (
@@ -525,7 +531,7 @@ export function UpdatesPanel({
             ) : null}
             {!updating && available === 0 && !awaiting && unreleased > 0 ? (
               <p className="mt-1 text-caption2 text-gray-9">
-                {unreleased} commit{unreleased === 1 ? "" : "s"} merged since {s?.targetTag} and not yet
+                {plural(unreleased, "commit")} merged since {s?.targetTag} and not yet
                 released. Updates arrive once the release build passes.
               </p>
             ) : null}
@@ -860,6 +866,13 @@ function ConfigSnapshotPanel() {
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["config:listSnapshots"] });
 
+  /** Say a restore was accepted: as an error when the server could not arrange its own relaunch. */
+  function toastRestored(answer: RestartAnswer | undefined) {
+    const message = restartOutcome(selfRecovers, "Restored.", answer?.relaunchFailure);
+    if (answer?.relaunchFailure) toast.error(message);
+    else toast.success(message);
+  }
+
   function download() {
     // The export route sets Content-Disposition: attachment, so this downloads
     // without navigating away.
@@ -887,8 +900,7 @@ function ConfigSnapshotPanel() {
       confirmLabel: "Recall",
     }))) return;
     try {
-      await invoke("config:recallSnapshot", { id });
-      toast.success(restartOutcome(selfRecovers, "Restored."));
+      toastRestored(await invoke<RestartAnswer>("config:recallSnapshot", { id }));
     } catch (e) {
       toast.error(`Recall failed: ${errorMessage(e)}`);
     }
@@ -914,8 +926,7 @@ function ConfigSnapshotPanel() {
         message: `This overwrites the current config. ${restartConsequence(selfRecovers)} Secrets aren't included — you'll re-enter API keys/passwords after.`,
         confirmLabel: "Restore",
       })) {
-        await invoke("config:import", { bundle });
-        toast.success(restartOutcome(selfRecovers, "Restored."));
+        toastRestored(await invoke<RestartAnswer>("config:import", { bundle }));
       }
     } catch (err) {
       toast.error(`Import failed: ${errorMessage(err)}`);
@@ -973,7 +984,7 @@ function ConfigSnapshotPanel() {
                   <div className="flex-1 min-w-0">
                     <p className="truncate text-caption1 text-gray-12">{s.name}</p>
                     <p className="text-caption2 text-gray-9">
-                      {new Date(s.createdAt).toLocaleString()} · v{s.appVersion} · {s.fileCount} file{s.fileCount === 1 ? "" : "s"}
+                      {new Date(s.createdAt).toLocaleString()} · v{s.appVersion} · {plural(s.fileCount, "file")}
                     </p>
                   </div>
                   <Button variant="filled" size="small" onClick={() => recall(s.id, s.name)}>

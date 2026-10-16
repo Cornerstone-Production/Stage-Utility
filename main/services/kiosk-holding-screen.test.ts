@@ -9,12 +9,12 @@ import { holdingScreen } from "./kiosk-holding-screen.js";
 
 describe("what an unclaimed screen shows", () => {
   const html = holdingScreen({
-    id: "d4f19c2a", ip: "192.168.16.74", hostname: "raspberrypi",
+    id: "d4f19c2a", ip: "192.168.1.54", hostname: "raspberrypi",
     mac: "b8:27:eb:41:9c:2a", reason: "unclaimed",
   });
 
   test("it prints the facts you need standing in front of it", () => {
-    for (const fact of ["d4f19c2a", "192.168.16.74", "raspberrypi", "b8:27:eb:41:9c:2a"]) {
+    for (const fact of ["d4f19c2a", "192.168.1.54", "raspberrypi", "b8:27:eb:41:9c:2a"]) {
       assert.ok(html.includes(fact), `the screen does not show ${fact}`);
     }
   });

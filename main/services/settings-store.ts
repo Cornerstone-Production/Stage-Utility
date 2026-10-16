@@ -162,6 +162,14 @@ export interface SettingsData {
    */
   cardHairlineRaised?: boolean;
   /**
+   * Whether the screens' stored role has been taken out of the data (see
+   * screen-role-migration.ts): a screen is a control surface when the view it shows
+   * is a console, and has no role of its own. Recorded because the first pass
+   * reads a screen with no stored role as the read-only display it always was,
+   * which a later load must not do to a screen made after. Absent means never run.
+   */
+  screenRolesFromView?: boolean;
+  /**
    * Which of a plan's notes become the pre-service checklist.
    *
    * Names, not ids. A plan note carries `category_name` on its own attributes

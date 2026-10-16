@@ -28,8 +28,12 @@ export function restartConsequence(selfRecovers: boolean | undefined): string {
 }
 
 /** The toast after the action has been accepted, matching the same fact. */
-export function restartOutcome(selfRecovers: boolean | undefined, done: string): string {
-  return selfRecovers === false
-    ? `${done} The server has now stopped — start it again to finish.`
-    : `${done} The server is restarting.`;
+export function restartOutcome(selfRecovers: boolean | undefined, done: string, relaunchFailure?: string): string {
+  if (selfRecovers === false) return `${done} The server has now stopped — start it again to finish.`;
+  // A supervised server that could not arrange its own relaunch: it IS going
+  // down, and whether it comes back is up to launchd.
+  if (relaunchFailure) {
+    return `${done} The server is restarting, but it could not arrange its own relaunch (${relaunchFailure}). If it does not come back, start it again by hand.`;
+  }
+  return `${done} The server is restarting.`;
 }

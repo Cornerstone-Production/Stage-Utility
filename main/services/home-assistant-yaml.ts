@@ -159,7 +159,7 @@ function pairsOf(rules: Rule[], cues: Map<string, Cue>): Pair[] {
   return out.sort((a, b) => a.base.localeCompare(b.base));
 }
 
-/** "ma_conf_tvs" -> "Ma Conf Tvs". The cue name is all there is to go on. */
+/** "main_conf_tvs" -> "Main Conf Tvs". The cue name is all there is to go on. */
 function humanise(base: string): string {
   return base
     .split("_")

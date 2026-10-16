@@ -159,7 +159,7 @@ export function ProPresenterInstancesPanel({
                     <FieldLabel className="flex items-center gap-1.5">
                       Name
                     </FieldLabel>
-                    <FieldDescription>SA (e.g. Auditorium 2)</FieldDescription>
+                    <FieldDescription>Second (e.g. Auditorium 2)</FieldDescription>
                   </FieldContent>
                   <Input
                     value={r.name}

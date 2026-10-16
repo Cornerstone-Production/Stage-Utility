@@ -121,6 +121,14 @@ When reporting, please include:
   `!secret`, never by value), `/api/companion/buttons` and `/api/companion/pairs`. Nothing
   there presses anything or reveals a secret.
 
+## Code scanning
+
+CodeQL runs on every change. Two of its rules, `js/file-access-to-http` and
+`js/http-to-file-access`, flag what this product is for, and the alerts for the
+known flows are dismissed with a link to
+[Code scanning decisions](docs/reference/code-scanning.md#code-scanning-decisions),
+which lists the one fetch function per integration and the origin each is pinned to.
+
 ## Supported versions
 
 Security fixes target the latest release on the `main` branch. Please update to the latest

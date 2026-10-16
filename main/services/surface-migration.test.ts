@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import { migrateSurfaces, migrationLog } from "./surface-migration.js";
-import { viewSurface, outputMode } from "../types/views.js";
+import { viewSurface, screenIsControlSurface } from "../types/views.js";
 
 // The migration exists so that upgrading does not silently disable the buttons
 // on a control surface that works today. These build real layouts and run the real
@@ -34,7 +34,7 @@ const obj = (type: string, extra: Record<string, unknown> = {}) =>
   ({ id: `${type}-1`, x: 0, y: 0, w: 10, h: 10, z: 0, config: { type }, ...extra }) as unknown as LayoutObject;
 
 describe("surface migration", () => {
-  test("a View with an OSC button becomes a console, and its screen a panel", () => {
+  test("a View with an OSC button becomes a console, and its screen a control surface", () => {
     // The case that would otherwise break: a working control surface.
     const views = [view({ id: "v1", name: "Booth Panel", layout: layout([obj("osc-button")]) })];
     const outputs = [{ id: "out1", name: "Booth Touchscreen", viewId: "v1" }] as Output[];
@@ -42,7 +42,21 @@ describe("surface migration", () => {
     const r = migrateSurfaces(views, outputs);
 
     assert.equal(viewSurface(r.views[0]), "console");
-    assert.equal(outputMode(r.outputs[0]), "panel");
+    assert.equal(screenIsControlSurface(r.outputs[0], r.views), true);
+  });
+
+  test("the screens it makes live are returned by id, and a screen that said it was read-only is not among them", () => {
+    const views = [view({ id: "v1", name: "Booth Panel", layout: layout([obj("osc-button")]) })];
+    const outputs = [
+      { id: "a", name: "A", viewId: "v1" },
+      { id: "b", name: "B", viewId: "v1", mode: "display" },
+      { id: "c", name: "C", viewId: "elsewhere" },
+    ] as Output[];
+
+    const r = migrateSurfaces(views, outputs);
+
+    assert.deepEqual([...r.liveScreenIds], ["a"]);
+    assert.deepEqual(r.outputs, outputs, "the screens are handed back as given: nothing is written onto them");
   });
 
   test("a View with no controls is left as a display", () => {
@@ -52,7 +66,7 @@ describe("surface migration", () => {
     const r = migrateSurfaces(views, outputs);
 
     assert.equal(viewSurface(r.views[0]), "display");
-    assert.equal(outputMode(r.outputs[0]), "display");
+    assert.equal(screenIsControlSurface(r.outputs[0], r.views), false);
     assert.equal(r.changed.length, 0, "nothing to report when nothing moved");
   });
 
@@ -98,9 +112,9 @@ describe("surface migration", () => {
 
     const r = migrateSurfaces(views, outputs);
 
-    assert.equal(outputMode(r.outputs[0]), "panel");
-    assert.equal(outputMode(r.outputs[1]), "panel");
-    assert.equal(outputMode(r.outputs[2]), "display", "an unrelated screen must not move");
+    assert.equal(screenIsControlSurface(r.outputs[0], r.views), true);
+    assert.equal(screenIsControlSurface(r.outputs[1], r.views), true);
+    assert.equal(screenIsControlSurface(r.outputs[2], r.views), false, "an unrelated screen must not move");
   });
 
   test("it reports what it moved, so a stray control can be demoted", () => {
@@ -127,21 +141,21 @@ describe("surface migration", () => {
 
     assert.equal(second.changed.length, 0);
     assert.equal(viewSurface(second.views[0]), "console");
-    assert.equal(outputMode(second.outputs[0]), "panel");
+    assert.equal(screenIsControlSurface(second.outputs[0], second.views), true);
   });
 
   test("a deliberate demotion survives the next run", () => {
     // The point of idempotence, stated as the operator's story: they saw the log,
-    // decided that wall display should NOT be a panel, and set it back.
+    // decided that wall display should NOT be a control surface, and set it back.
     const views = [
       view({ id: "v1", name: "Wall", surface: "display", layout: layout([obj("live-controls")]) }),
     ];
-    const outputs = [{ id: "out1", name: "Lobby", viewId: "v1", mode: "display" }] as Output[];
+    const outputs = [{ id: "out1", name: "Lobby", viewId: "v1" }] as Output[];
 
     const r = migrateSurfaces(views, outputs);
 
     assert.equal(viewSurface(r.views[0]), "display", "the operator's decision must stand");
-    assert.equal(outputMode(r.outputs[0]), "display");
+    assert.equal(screenIsControlSurface(r.outputs[0], r.views), false);
     assert.equal(r.changed.length, 0);
   });
 

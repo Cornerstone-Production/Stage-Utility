@@ -21,7 +21,7 @@
 // adding the section's name above it would be a second, wronger title.
 
 import { screensListViews } from "@main/services/home-view";
-import { viewSurface, type View } from "@main/types/views";
+import { viewShownInSidebar, viewSurface, type View } from "@main/types/views";
 import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations";
 
 /** What the chrome needs to know about a page. A Destination minus its icon and
@@ -40,7 +40,13 @@ export interface ActivePage {
 }
 
 /**
- * The Views that are consoles, in rail order.
+ * EVERY View that is a console, whether or not the sidebar lists it.
+ *
+ * This is the list that RESOLVES a console: its page, its title, whether the
+ * shell is full-bleed on it, whether it hides the chrome. A console hidden from
+ * the sidebar still opens at `/consoles/<id>` and still has a name, so none of
+ * those may go through {@link sidebarConsoleList}. The sidebar is the one reader
+ * that wants the narrower list.
  *
  * Home is filtered out by the same helper the Screens page uses. It is a console
  * view, so it qualified — the rail once carried TWO Home entries — and
@@ -48,6 +54,14 @@ export interface ActivePage {
  */
 export function consoleViewList(views: readonly View[] | undefined): View[] {
   return screensListViews(views ?? []).filter((v) => viewSurface(v) === "console");
+}
+
+/**
+ * The consoles the sidebar lists: {@link consoleViewList} minus those the
+ * operator turned "Show in the sidebar" off for. Only the rail reads this.
+ */
+export function sidebarConsoleList(views: readonly View[] | undefined): View[] {
+  return consoleViewList(views).filter(viewShownInSidebar);
 }
 
 /** Where a console View lives. ONE spelling of the path shape, because it was
@@ -147,13 +161,6 @@ export function consoleHidesChrome(
 export const SHARED_CHROMELESS_PATHS: ReadonlySet<string> = new Set(["/history"]);
 
 /**
- * Does this EXACT path want the shell's chrome hidden, whether that is a
- * shared page or an operator's console?
- *
- * `consoleHidesChrome` stays as it is — other code and tests key off it
- * directly — this just adds the shared-path check beside it.
- */
-/**
  * Is this a shared chromeless page? The router serves `/history/` as the same
  * page as `/history` but reports the pathname with its slash, so one trailing
  * slash is forgiven; `/history/manage` is a different path and is not.
@@ -169,6 +176,13 @@ export function isSharedChromelessPath(pathname: string): boolean {
   return bare === "/servicecue" || /^\/servicecue\/(?!presets$)[^/]+\/[^/]+$/.test(bare);
 }
 
+/**
+ * Does this EXACT path want the shell's chrome hidden, whether that is a
+ * shared page or an operator's console?
+ *
+ * `consoleHidesChrome` stays as it is — other code and tests key off it
+ * directly — this just adds the shared-path check beside it.
+ */
 export function hidesChrome(pathname: string, views: readonly View[] | undefined): boolean {
   return isSharedChromelessPath(pathname) || consoleHidesChrome(pathname, views);
 }

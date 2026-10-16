@@ -19,7 +19,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -104,7 +104,7 @@ test("the ServiceCue view draws its rundown on a kiosk ground", async () => {
   const f = stubFetch();
   try {
     await mountInto(React.createElement(ServiceCue, { serviceCueLayoutId: "svl1" }));
-    assert.deepEqual(tableGround(), { table: true, ground: true });
+    await eventually(() => assert.deepEqual(tableGround(), { table: true, ground: true }));
   } finally {
     f.restore();
   }
@@ -114,7 +114,7 @@ test("the ServiceCue page draws its rundown on a kiosk ground", async () => {
   const f = stubFetch();
   try {
     await mountPage();
-    assert.deepEqual(tableGround(), { table: true, ground: true });
+    await eventually(() => assert.deepEqual(tableGround(), { table: true, ground: true }));
   } finally {
     f.restore();
   }

@@ -5,6 +5,7 @@ import { useFailedReads } from "../../lib/use-failed-reads";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { pcoConnected, useStageState } from "../../main/use-stage-state";
 import { Collapsible, ErrorNote, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
+import { plural } from "@main/services/plural";
 
 /**
  * Weekly assignment — pick a standing variant per PCO service type. The resolved
@@ -137,7 +138,7 @@ export function PatchWeekly({
                 </Select>
               </div>
               {planEntry?.tweaks && Object.keys(planEntry.tweaks).length > 0 && (
-                <span className="text-caption2 text-fg-subtle">{Object.keys(planEntry.tweaks).length} one-off tweak{Object.keys(planEntry.tweaks).length === 1 ? "" : "s"} this week — edit via the “This week” target above the table.</span>
+                <span className="text-caption2 text-fg-subtle">{plural(Object.keys(planEntry.tweaks).length, "one-off tweak")} this week — edit via the “This week” target above the table.</span>
               )}
             </div>
           )}

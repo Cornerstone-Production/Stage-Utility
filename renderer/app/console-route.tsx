@@ -13,6 +13,7 @@ import { useParams, useRouter } from "@tanstack/react-router";
 import { PencilIcon } from "lucide-react";
 import { HOME_VIEW_ID } from "@main/services/home-view";
 import { LayoutRenderer } from "../main/layout-renderer";
+import { CalendarView } from "../main/calendar-view";
 import { useStageSettings } from "./use-stage-settings";
 import { capabilityLive } from "../main/render-context";
 import { canEditInPlace } from "../editor/can-edit";
@@ -69,7 +70,8 @@ export function ConsoleRoute() {
     );
   }
 
-  const editable = canEditInPlace(view, "shell");
+  // A calendar can be a console but has no layout to edit.
+  const editable = view.kind === "custom" && canEditInPlace(view, "shell");
 
   if (editing && editable) {
     return (
@@ -125,8 +127,17 @@ export function ConsoleRoute() {
             ndiSource={view.ndiSource ?? null}
             interactive={capabilityLive("shell", "control")}
             surface="console"
-            // The operator's console page, not a screen with its own HLS switch.
+            // The operator's console page, not a screen with its own HLS switch
+            // and not a screen in any message group: a Messages widget here
+            // follows its own groups.
             allowHls
+            screen={null}
+          />
+        ) : view.kind === "calendar" ? (
+          <CalendarView
+            viewId={view.id}
+            pcoConfigured={s.stageState.pcoConfigured ?? false}
+            interactive={capabilityLive("shell", "control")}
           />
         ) : (
           <EmptyState

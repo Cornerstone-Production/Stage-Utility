@@ -141,12 +141,12 @@ describe("device-level fields, which used to return early and be logged away", (
   it("DEVICE_ID names the bays after the unit the operator named", async () => {
     // Verbatim, braces and trailing padding included: the device pads the name
     // to 31 characters, so the parse has to survive the spaces inside the braces.
-    const { emits, provider } = driven("< REP DEVICE_ID {MA: 5-8                        } >");
-    assert.equal(latest(emits, "3").name, "MA: 5-8 · Bay 3");
+    const { emits, provider } = driven("< REP DEVICE_ID {RF: 5-8                        } >");
+    assert.equal(latest(emits, "3").name, "RF: 5-8 · Bay 3");
     const channels = await provider.listChannels();
     assert.equal(
       channels[2]?.label,
-      "MA: 5-8 · Bay 3",
+      "RF: 5-8 · Bay 3",
       "the picker still labels bays Ch 1..8 while the device has a better name",
     );
   });
@@ -154,9 +154,9 @@ describe("device-level fields, which used to return early and be logged away", (
   it("a bay discovered after the device id still gets the name", async () => {
     // `GET 0 ALL` dumps every populated bay, so bays self-discover past the
     // configured count — and the device-level frames arrive first.
-    const { provider } = driven("< REP DEVICE_ID {MA: 5-8} >", "< REP 9 BATT_DETECTED YES >");
+    const { provider } = driven("< REP DEVICE_ID {RF: 5-8} >", "< REP 9 BATT_DETECTED YES >");
     const inner = provider as unknown as { channelStates: Map<number, { name: string | null }> };
-    assert.equal(inner.channelStates.get(9)?.name, "MA: 5-8 · Bay 9");
+    assert.equal(inner.channelStates.get(9)?.name, "RF: 5-8 · Bay 9");
   });
 
   it("with no DEVICE_ID the bays stay unnamed rather than inventing one", async () => {

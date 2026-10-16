@@ -8,7 +8,7 @@
 // saying where you are. They are one band now: the name goes at the head of the
 // strip, the actions at its tail, and the second band is gone. The measurements
 // behind that are in
-// docs/superpowers/research/2026-08-30-header-context-bar-merge.md.
+// docs/research/2026-08-30-header-context-bar-merge.md.
 //
 // THE NAME IS NOT A BAR ITEM, and its absence from BAR_ITEMS is deliberate
 // rather than an oversight. The operator arranges the readings; the page's name

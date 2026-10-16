@@ -178,6 +178,7 @@ function makeCallbacks() {
     cb: {
       onPhase: (p: string) => calls.push({ fn: "onPhase", arg: p }),
       onLatency: (s: number | null) => calls.push({ fn: "onLatency", arg: String(s) }),
+      onCaughtUp: (s: number) => calls.push({ fn: "onCaughtUp", arg: String(s) }),
       onWebrtcUnusable: (reason: string) => calls.push({ fn: "onWebrtcUnusable", arg: reason }),
       onDropped: (reason: string) => calls.push({ fn: "onDropped", arg: reason }),
     },
@@ -1326,6 +1327,33 @@ function renderRelaySession(video: FakeVideo, logs: string[]) {
   );
 }
 
+test("an HLS picture that jumps back to live says so on the screen's log", async () => {
+  stubGlobals({ status: 415 });
+  const undoHls = installFakeHls();
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    renderRelaySession(video, logs);
+    await act(async () => {
+      await flush();
+    });
+    act(() => video.fireFrame());
+    assert.ok(FakeHls.last, "expected the refusal to fall back to hls.js");
+    FakeHls.last!.latency = 6;
+    FakeHls.last!.liveSyncPosition = 104.5;
+    video.currentTime = 100;
+    act(() => mock.timers.tick(1000));
+    assert.deepEqual(
+      logs.filter((l) => l.includes("fell behind")),
+      ['"F" fell behind over HLS; jumped 4.5 s back to live on this screen'],
+    );
+  } finally {
+    mock.timers.reset();
+    undoHls();
+  }
+});
+
 test("a relay feed on HLS probes WebRTC every WEBRTC_RETRY_AFTER_MS without taking the HLS picture down, and logs the fallback once", async () => {
   const g = stubGlobals({ status: 415 });
   mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
@@ -1603,6 +1631,11 @@ test("an HLS frame is the delayed phase, with hls.js's latency rounded for the b
     FakeHls.last!.latency = 5.6;
     mock.timers.tick(1000);
     assert.deepEqual(calls.at(-1), { fn: "onLatency", arg: "6" }, "the badge follows hls.js's latency every second");
+    FakeHls.last!.liveSyncPosition = 104;
+    video.currentTime = 100;
+    mock.timers.tick(1000);
+    assert.deepEqual(calls.slice(-2), [{ fn: "onCaughtUp", arg: "4" }, { fn: "onLatency", arg: "6" }], "a feed past the margin jumps, and the jump is reported");
+    assert.equal(video.currentTime, 104, "the playhead moved to hls.js's live sync position");
     attempt.stop();
   } finally {
     mock.timers.reset();
@@ -1697,14 +1730,14 @@ test("sample() reports a live webrtc session's stats: feedId, via, deltas and cu
     pc.frameWidth = 1280;
     pc.frameHeight = 720;
     const first = await result.current.sample();
-    assert.deepEqual(first, { feedId: "cam", via: "webrtc", decoded: 30, dropped: 1, stalls: 0, width: 1280, height: 720 });
+    assert.deepEqual(first, { feedId: "cam", via: "webrtc", decoded: 30, dropped: 1, stalls: 0, width: 1280, height: 720, jitterBufferMs: null });
 
     pc.framesDecoded = 90;
     pc.framesDropped = 2;
     const second = await result.current.sample();
     assert.deepEqual(
       second,
-      { feedId: "cam", via: "webrtc", decoded: 60, dropped: 1, stalls: 0, width: 1280, height: 720 },
+      { feedId: "cam", via: "webrtc", decoded: 60, dropped: 1, stalls: 0, width: 1280, height: 720, jitterBufferMs: null },
       "expected the delta since the FIRST sample, not the running total",
     );
   } finally {

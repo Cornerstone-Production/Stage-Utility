@@ -46,7 +46,7 @@ Options for the one-line installers:
 | `STAGE_DATA=/srv/stage` | put config and history somewhere else |
 | `STAGE_PREFIX=/opt/stage` | install to a different prefix |
 | `STAGE_USER=svc` | the account the service runs as — Linux and macOS only. Default `stage-utility` on Linux (created if it does not exist), `root` on macOS |
-| `STAGE_NO_SERVICE=1` | install the files, register nothing |
+| `STAGE_NO_SERVICE=1` | install the files, register nothing — Linux and macOS only |
 
 **Where they go matters.** In a `curl … | sudo bash` pipeline, a variable placed
 at the front is set for `curl`, not for the shell that runs the script — the
@@ -101,8 +101,10 @@ To pin one exact version instead of "newest on the track", add
 **Re-running the installer upgrades in place — do not uninstall first.** It
 unpacks the new release beside the current one, flips the `current` pointer,
 rewrites the service definition and restarts it, then waits for the server to
-answer before reporting success. Your data directory is untouched, and the
-previous release stays under `releases/` to go back to:
+answer before reporting success. Nothing in the old data directory is deleted, but
+a re-run without your original options (below) registers the service with the
+defaults, which can be a different one. The previous release stays under
+`releases/` to go back to:
 
 ```
 /usr/local/stage-utility/
@@ -115,6 +117,11 @@ The one thing it does not remember is your **options**. They are read from the
 command, not from the existing install, so re-pass any `STAGE_PORT`,
 `STAGE_DATA` or `STAGE_PREFIX` you used originally — otherwise the new service
 is registered with the defaults and will not find data written somewhere else.
+
+On a Mac whose daemon is still registered as `com.cornerstone.stage-utility`, a
+re-run stops that job, removes its plist and registers `com.stageutility.server`
+in its place, printing the data directory and port the old daemon used and
+warning if this run's differ. In-app updates leave the registration as it is.
 
 An install already running does **not** need reinstalling to change track:
 **Settings → Advanced → Update track** switches between main and beta in place,
@@ -146,7 +153,8 @@ removes it. Step-by-step per platform is in [INSTALL.md](../../INSTALL.md).
 
 On macOS or a Linux workstation, [Homebrew](homebrew.md) is a supported
 alternative: it runs the app as a user agent that starts at login (port 8788),
-rather than a system service that starts at boot. Updates work from
+rather than a system service that starts at boot; port 80 is served only where
+that account may bind it. Updates work from
 **Settings → Advanced** the same way.
 
 ## Uninstalling
@@ -164,7 +172,7 @@ different install method, where it looks like the new method is broken.
 
 ```bash
 sudo ./scripts/uninstall.sh --dry-run   # say what it would do, change nothing
-sudo ./scripts/uninstall.sh             # systemd + launchd + the install tree
+sudo ./scripts/uninstall.sh             # systemd + launchd + the install tree + the Mac output helper
 ./scripts/uninstall.sh --brew           # Homebrew — WITHOUT sudo
 ```
 
@@ -172,6 +180,18 @@ It removes only what is actually present, never touches the data directory, and
 prints where that directory is. Homebrew is separate and unsudoed on purpose:
 brew refuses to run as root, and its agent lives in your own `gui/<uid>` domain,
 which root cannot reach.
+
+On a Mac that shows screens it also removes what `kiosk/install-macos.sh`
+installed: the Stage Utility Output helper (stopped in every logged-in account,
+then `/Library/LaunchAgents/com.stageutility.output.plist` and
+`/Applications/StageUtilityOutput.app`), or the Chrome kiosk's agent and launcher
+from `--browser`. The Mac's device id and token
+(`/Library/Application Support/StageUtility`) and each account's output settings
+(`~/Library/Application Support/StageUtilityOutput`, which holds secret tokens) are
+listed, not removed. The installer turned off display sleep, system sleep and the
+screen saver, and did not record what they were, so the script prints the commands
+to set them again instead of guessing. A helper copy someone opened by hand is not
+launchd's: the script warns that it is still running and leaves it for you to quit.
 
 Without a checkout, the per-method commands below are the same thing by hand.
 
@@ -188,13 +208,19 @@ sudo userdel stage-utility                # the service account, if unused
 **macOS** (one-line installer)
 
 ```bash
-sudo launchctl bootout system/com.cornerstone.stage-utility   # stop it now
-sudo rm /Library/LaunchDaemons/com.cornerstone.stage-utility.plist
+sudo launchctl bootout system/com.stageutility.server   # stop it now
+sudo rm /Library/LaunchDaemons/com.stageutility.server.plist
 sudo rm -rf /usr/local/stage-utility
 ```
 
 The `bootout` matters on its own: deleting the plist stops it coming back at
 boot, but leaves the running process serving until the machine restarts.
+
+Installs made before the label `com.stageutility.server` was introduced are
+registered as `com.cornerstone.stage-utility`; use that name in the first two
+commands. In-app updates keep an install on whichever label it has. Re-running the
+installer moves an old one to the new label: it stops the old job, deletes its
+plist and registers the new one. `scripts/uninstall.sh` removes whichever it finds.
 
 **Windows** — Administrator PowerShell
 
@@ -302,9 +328,9 @@ npm run server     # backend on :8788
 npm run dev        # Vite with hot reload on :3000
 ```
 
-Then open `http://localhost:3000/` for the display picker, or
+Then open `http://localhost:3000/` for Home, or
 `http://localhost:3000/settings`. Vite proxies the API and image paths to the
-backend.
+backend, on `STAGE_UTILITY_PORT` when that is set.
 
 ## Configure
 
@@ -393,3 +419,26 @@ Per-integration debug logging: `PP_DEBUG`, `PRODCOM_DEBUG`, `RESI_DEBUG`,
 
 The `STAGE_*` variables in the installer table further up are read by the
 installer scripts only, not by the server.
+
+**Set by the supervisor, read by the server.** `INVOCATION_ID` and
+`JOURNAL_STREAM` (systemd) and `XPC_SERVICE_NAME` (launchd) are how the server
+tells that a service manager started it, so it knows whether a deliberate restart
+will be followed by a relaunch. Nothing to set.
+
+**Kiosk installers.** The scripts a screen runs (`/kiosk/install-*`) read their
+own variables, set on the command line of the machine being set up:
+
+| | |
+|---|---|
+| `STAGE_SERVER` | Pin the device to one server's address, for a network where discovery does not reach it. All three installers |
+| `STAGE_KIOSK_PORT` | The UDP port the device broadcasts its discovery probe to. Default `8789` |
+| `STAGE_KIOSK_UID` | Linux only: the numeric id of the account the kiosk browser runs as. Default `1000` |
+| `STAGE_DOWNLOAD_FROM` | macOS only: the server to fetch the output helper from for this run only. See [Installing the Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper) |
+
+**Tooling and tests.** `STAGE_UTILITY_TEST_RELEASE_BASE` points the Mac output
+helper download at a test server instead of GitHub's releases, and the server
+logs a notice when it is set. `STAGE_UTILITY_RELEASE_NOTES_DIR` redirects where
+the release-notes script looks for notes. `PRIVATE_TERMS` and `REQUIRE_TERMS` are
+read by the public-hygiene check in CI, described in
+[Contributing](../contributing.md#public-hygiene). None of these has a use in
+running an install.
