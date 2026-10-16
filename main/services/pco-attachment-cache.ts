@@ -172,8 +172,6 @@ async function download(
   id: string,
   filename: string,
   filePath: string,
-  dir: string,
-  safe: string,
   ext: string,
   openUrl: (opts?: { fresh?: boolean }) => Promise<string>,
 ): Promise<CachedFile | null> {
@@ -191,7 +189,7 @@ async function download(
     return null;
   }
   await atomicWrite(filePath, Buffer.from(await resp.arrayBuffer()));
-  const leftover = await removeOtherVersions(dir, safe, filePath);
+  const leftover = await removeOtherVersions(path.dirname(filePath), safeName(id), filePath);
   if (leftover) {
     console.warn(`[attachment-cache] ${scrub(leftover)} of "${scrub(filename)}"; the age sweep will`);
   }
@@ -232,7 +230,7 @@ export async function getAttachmentFile(
     const existing = inFlight.get(filePath);
     if (existing) return await existing;
 
-    const job = download(id, filename, filePath, dir, safe, ext, openUrl).finally(() => inFlight.delete(filePath));
+    const job = download(id, filename, filePath, ext, openUrl).finally(() => inFlight.delete(filePath));
     inFlight.set(filePath, job);
     return await job;
   } catch (err) {
