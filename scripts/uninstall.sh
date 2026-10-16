@@ -86,13 +86,14 @@ need_root() {
   die "$1 needs root. Re-run with sudo."
 }
 
-FOUND=0
-DATA_DIRS=()
-note_data() {
-  [ -n "${1:-}" ] || return 0
-  local d
-  for d in ${DATA_DIRS[@]+"${DATA_DIRS[@]}"}; do [ "$d" = "$1" ] && return 0; done
-  DATA_DIRS+=("$1")
+# Remove a file or folder if it is there, saying what it belongs to. $1 is that,
+# $2 the path, and the rest are rm's flags (-f for a file, -rf for a folder).
+remove_path() {
+  local what="$1" target="$2"
+  shift 2
+  [ -e "$target" ] || return 0
+  log "${what}: removing ${target}"
+  run rm "$@" "$target"
 }
 
 # True when $1 is one of the remaining arguments.
@@ -103,6 +104,13 @@ contains() {
     if [ "$item" = "$needle" ]; then return 0; fi
   done
   return 1
+}
+
+FOUND=0
+DATA_DIRS=()
+note_data() {
+  [ -n "${1:-}" ] || return 0
+  contains "$1" ${DATA_DIRS[@]+"${DATA_DIRS[@]}"} || DATA_DIRS+=("$1")
 }
 
 # Data of the Mac output helper and the Chrome kiosk, listed at the end like the
@@ -210,10 +218,7 @@ remove_launchd() {
     # returning at boot but leaves the running process serving until a restart.
     log "launchd: stopping ${label}"
     run launchctl bootout "system/${label}" 2>/dev/null || true
-    if [ -f "$plist" ]; then
-      log "launchd: removing ${plist}"
-      run rm -f "$plist"
-    fi
+    remove_path "launchd" "$plist" -f
   done
   [ -n "$removed" ] || return 0
   remove_tree "$MACOS_PREFIX"
@@ -296,14 +301,8 @@ remove_output_helper() {
 
   # Stopped first: removing the plist only keeps it from returning at the next login.
   boot_out_agent "$HELPER_LABEL"
-  if [ -f "$plist" ]; then
-    log "output helper: removing ${plist}"
-    run rm -f "$plist"
-  fi
-  if [ -d "$app" ]; then
-    log "output helper: removing ${app}"
-    run rm -rf "$app"
-  fi
+  remove_path "output helper" "$plist" -f
+  remove_path "output helper" "$app" -rf
   # A copy opened by hand is not launchd's and stays up until it is quit. It is
   # not killed from here: it is the operator's window, and may be mid-save.
   if [ -z "$DRY_RUN" ]; then
@@ -326,14 +325,8 @@ remove_chrome_kiosk() {
   need_root "Removing the Chrome kiosk"
 
   boot_out_agent "$KIOSK_LABEL"
-  if [ -f "$plist" ]; then
-    log "Chrome kiosk: removing ${plist}"
-    run rm -f "$plist"
-  fi
-  if [ -e "$KIOSK_BIN" ]; then
-    log "Chrome kiosk: removing ${KIOSK_BIN}"
-    run rm -f "$KIOSK_BIN"
-  fi
+  remove_path "Chrome kiosk" "$plist" -f
+  remove_path "Chrome kiosk" "$KIOSK_BIN" -f
   # Its Chrome profile and the server address it found are in the state directory.
   note_mac_state
 }
