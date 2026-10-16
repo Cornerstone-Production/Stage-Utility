@@ -33,6 +33,11 @@ done. Dismiss it and it stays dismissed.
 | Services | **Plan**, **History**, **Baptisms** |
 | Settings | **Integrations**, **Messages**, **Branding**, **Advanced** |
 
+**Screens** carries a number when devices have been heard on the network that are
+not set up, from any page, and it goes when they are set up or stop being heard.
+It counts the devices the banner on [Screens](#adding-a-screen) names, dismissed
+ones included.
+
 Consoles you have built get a row each, above the groups — see
 [Consoles](#consoles). The running version sits at the foot of the sidebar. Drag
 its right edge to resize it, or collapse it to icons; on a phone it becomes a

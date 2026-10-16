@@ -5,12 +5,13 @@
 // A card-level fetch would be one request per screen on every render, so the
 // subscription lives here and the components read from it.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { invoke, onNotification } from "../../lib/api";
 import type { SeenDevice } from "@main/types/kiosk";
 import type { PublicDevice } from "@main/services/kiosk-devices-store";
 import type { OutputHealth } from "@main/types/output-health";
+import { notSetUp } from "./not-set-up";
 // One phrasing of a screen size, shared with the holding screen the operator is
 // looking at on the wall — the two must not drift apart.
 export { describeScreen } from "@main/services/kiosk-screen-size";
@@ -62,13 +63,24 @@ function publish(next: DevicesPayload): void {
  * put it can show it whether or not it was the one that asked.
  */
 export function refreshDevices(): Promise<Error | null> {
-  inFlight ??= invoke<Omit<DevicesPayload, "error" | "health" | "reported"> & { health?: OutputHealth[] }>("devices:list")
+  inFlight ??= invoke<Partial<Omit<DevicesPayload, "error" | "reported">>>("devices:list")
     .then((d): Error | null => {
       // `health` is absent from a server older than the page, which an updating
       // appliance is for a moment; no readings, rather than a page that throws.
+      // The other lists get the same treatment because this is read on every page
+      // now (the sidebar's count), and a navigation that throws on one odd answer
+      // takes the whole app with it.
       const health = d.health ?? [];
       const reported = [...new Set([...current.reported, ...health.map((h) => h.deviceId)])];
-      publish({ ...d, health, reported, error: null });
+      publish({
+        scanning: d.scanning ?? false,
+        seen: d.seen ?? [],
+        matches: d.matches ?? {},
+        bound: d.bound ?? [],
+        health,
+        reported,
+        error: null,
+      });
       return null;
     })
     .catch((err: unknown): Error => {
@@ -84,18 +96,39 @@ export function refreshDevices(): Promise<Error | null> {
   return inFlight;
 }
 
+/**
+ * Follow the shared listing: read it now, and again on every `kiosk:devices`.
+ * Returns the way to stop. The server broadcasts on every claim, release and
+ * newly-heard device, so nothing here polls.
+ */
+function subscribe(listener: (d: DevicesPayload) => void): () => void {
+  listeners.add(listener);
+  void refreshDevices();
+  const off = onNotification("kiosk:devices", () => void refreshDevices());
+  return () => {
+    listeners.delete(listener);
+    off();
+  };
+}
+
 export function useDevices(): DevicesPayload {
   const [data, setData] = useState(current);
-  useEffect(() => {
-    listeners.add(setData);
-    void refreshDevices();
-    // The server broadcasts on every claim, release and newly-heard device, so
-    // nothing here polls.
-    const off = onNotification("kiosk:devices", () => void refreshDevices());
-    return () => {
-      listeners.delete(setData);
-      off();
-    };
-  }, []);
+  useEffect(() => subscribe(setData), []);
   return data;
+}
+
+// Module-level, so useSyncExternalStore sees one stable function. Each subscribe
+// wraps its caller in a listener of its own: the same function twice would be one
+// entry in the Set, and the first to unmount would unsubscribe both.
+const subscribeToCount = (onChange: () => void) => subscribe(() => onChange());
+const countNow = () => notSetUp(current.seen).length;
+
+/**
+ * How many devices are not set up, for the sidebar. The same listing, the same
+ * channel and the same filter as the Screens page's banner, so the number and the
+ * banner cannot disagree; and a number, so the sidebar re-renders when the count
+ * changes rather than on every health report the page cares about.
+ */
+export function useNotSetUpCount(): number {
+  return useSyncExternalStore(subscribeToCount, countNow);
 }
