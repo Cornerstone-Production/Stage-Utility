@@ -25,6 +25,7 @@ import { cardOf, outputModeLine } from "./output-helpers";
 import { useDisplayPresence } from "./use-display-presence";
 import { groupByMachine, type Machine, type MachineRow } from "./machine-groups";
 import { NOT_SET_UP_ID, panelDeviceOf } from "./not-set-up";
+import { useDismissed } from "./dismissed-found";
 import type { DeviceOutput, SeenDevice } from "@main/types/kiosk";
 import type { Output } from "@main/types/views";
 import type { PanelDevice } from "../../settings/sections/screen-settings-panel";
@@ -32,6 +33,10 @@ import type { PanelDevice } from "../../settings/sections/screen-settings-panel"
 /** The page holds a scan open while it is on screen — work gated on somebody
  *  actually looking, which is the house rule applied to a UDP socket. */
 const HOLDER = "screens-page";
+
+/** Said beside a device the banner no longer names, so a device that is missing
+ *  from the banner is not a device that went missing. */
+const DISMISSED_NOTE = "dismissed from the banner";
 
 export function UnclaimedScreens({
   outputs,
@@ -43,6 +48,7 @@ export function UnclaimedScreens({
   onSetUpNew: (device: PanelDevice) => void;
 }) {
   const data = useDevices();
+  const dismissed = useDismissed();
   const connected = useDisplayPresence();
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -159,7 +165,7 @@ export function UnclaimedScreens({
                     {d.hostname || "Unconfigured screen"}
                   </div>
                   <div className="text-caption1 text-fg-muted">
-                    {[d.os, d.ip, describeScreen(d.screen)].filter(Boolean).join(" · ")}
+                    {[d.os, d.ip, describeScreen(d.screen), dismissed.has(d.id) && DISMISSED_NOTE].filter(Boolean).join(" · ")}
                   </div>
                   {d.boundTo && (
                     <div className="mt-1 text-caption1 text-warn-11">
@@ -321,6 +327,7 @@ function OutputRow({ row, outputs, connected, busy, lookedLikeNames, onSetUpNew,
   onClaim: (deviceId: string, outputId: string) => void;
 }) {
   const output = row.device.output!;
+  const dismissed = useDismissed();
   const titleId = `output-${row.device.id}`;
   const base = "grid grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[9px] border border-line bg-bg px-2.5 py-2 max-sm:grid-cols-[22px_minmax(0,1fr)]";
 
@@ -351,7 +358,7 @@ function OutputRow({ row, outputs, connected, busy, lookedLikeNames, onSetUpNew,
       <OutputIcon kind={output.kind} />
       <div className="min-w-0">
         <b id={titleId} className="block truncate text-footnote font-semibold text-fg">{output.name}</b>
-        <span className="block truncate text-caption1 text-fg-subtle">{outputLine(output, d)}</span>
+        <span className="block truncate text-caption1 text-fg-subtle">{[outputLine(output, d), dismissed.has(d.id) && DISMISSED_NOTE].filter(Boolean).join(" · ")}</span>
         {d.boundTo && (
           <span className="block text-caption1 text-warn-11">Set up on another server, which it cannot reach.</span>
         )}

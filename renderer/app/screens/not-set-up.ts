@@ -54,33 +54,3 @@ export function foundRow(d: SeenDevice): FoundRow {
 export function foundTitle(count: number): string {
   return count === 1 ? "A screen was found that is not set up" : `${count} screens were found that are not set up`;
 }
-
-/** Where dismissals are kept. A choice of the person at this browser, like the
- *  panel's open state: nothing on the server changes when one is made. */
-export const DISMISSED_KEY = "stage-utility-screens-dismissed-found";
-
-/** The dismissed device ids. Empty when storage is absent, throws, or holds
- *  something that is not a list of strings: a banner that cannot remember a
- *  dismissal must still draw. */
-export function readDismissed(): Set<string> {
-  try {
-    const raw = localStorage.getItem(DISMISSED_KEY);
-    if (!raw) return new Set();
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? new Set(parsed.filter((x): x is string => typeof x === "string")) : new Set();
-  } catch {
-    return new Set();
-  }
-}
-
-/** Keep the dismissed ids. Returns whether they were kept, so a caller that can
- *  say something about it may; the banner itself carries on either way. */
-export function writeDismissed(ids: ReadonlySet<string>): boolean {
-  try {
-    if (ids.size === 0) localStorage.removeItem(DISMISSED_KEY);
-    else localStorage.setItem(DISMISSED_KEY, JSON.stringify([...ids]));
-    return true;
-  } catch {
-    return false;
-  }
-}

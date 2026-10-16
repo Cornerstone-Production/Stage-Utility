@@ -34,7 +34,7 @@ const { Rail } = await import("./rail.js");
 const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { __resetDevicesForTests } = await import("./screens/use-devices.js");
-const { DISMISSED_KEY } = await import("./screens/not-set-up.js");
+const { DISMISSED_KEY, __resetDismissedForTests } = await import("./screens/dismissed-found.js");
 
 type SeenDevice = import("@main/types/kiosk").SeenDevice;
 
@@ -52,6 +52,7 @@ beforeEach(() => {
   seen = [];
   devicesReads = 0;
   localStorage.clear();
+  __resetDismissedForTests();
   fetchStub = stubFetchWithLog((url) => {
     if (url.includes("/api/state")) return ok({ views: [], outputs: [], appName: APP });
     if (url.startsWith("/api/devices")) {

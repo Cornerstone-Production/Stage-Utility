@@ -11,13 +11,14 @@
 // nothing on the server changes, and the device stays under Not set up yet where
 // it can be set up at any time.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { Button, toast } from "../../components/ui";
 import type { SeenDevice } from "@main/types/kiosk";
 import type { PanelDevice } from "../../settings/sections/screen-settings-panel";
 import { useDevices } from "./use-devices";
-import { NOT_SET_UP_ID, foundRow, foundTitle, notSetUp, panelDeviceOf, readDismissed, writeDismissed } from "./not-set-up";
+import { NOT_SET_UP_ID, foundRow, foundTitle, notSetUp, panelDeviceOf } from "./not-set-up";
+import { dismissFound, restoreAllFound, restoreFound, useDismissed } from "./dismissed-found";
 
 const LINK =
   "whitespace-nowrap rounded px-0.5 py-1 text-caption1 font-medium text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
@@ -27,19 +28,15 @@ export function FoundBanner({ onSetUp }: {
   onSetUp: (device: PanelDevice) => void;
 }) {
   const { seen, bound } = useDevices();
-  const [dismissed, setDismissed] = useState(readDismissed);
-  // Mirrored to storage after every change rather than at each call site, so no
-  // path that changes the set can forget to keep it.
-  useEffect(() => {
-    writeDismissed(dismissed);
-  }, [dismissed]);
+  const dismissed = useDismissed();
 
   // A device that was set up is no longer one to dismiss: if it is released later
   // it is a new find, and should be named again.
-  const boundIds = new Set(bound.map((b) => b.id));
-  if ([...dismissed].some((id) => boundIds.has(id))) {
-    setDismissed((prev) => new Set([...prev].filter((id) => !boundIds.has(id))));
-  }
+  const setUpIds = bound.map((b) => b.id).filter((id) => dismissed.has(id));
+  const setUpKey = setUpIds.join("\n");
+  useEffect(() => {
+    if (setUpKey) restoreFound(setUpKey.split("\n"));
+  }, [setUpKey]);
 
   const found = notSetUp(seen);
   const showing = found.filter((d) => !dismissed.has(d.id));
@@ -47,10 +44,16 @@ export function FoundBanner({ onSetUp }: {
   if (showing.length === 0) return null;
 
   const dismiss = (d: SeenDevice) => {
-    setDismissed((prev) => new Set(prev).add(d.id));
-    toast.info(`Dismissed ${foundRow(d).name}. It is still under Not set up yet.`, {
-      action: { label: "Undo", onSelect: () => setDismissed((prev) => new Set([...prev].filter((id) => id !== d.id))) },
-    });
+    const kept = dismissFound(d.id);
+    const name = foundRow(d).name;
+    // Undo is the store's, not this component's: the toast outlives the banner
+    // when the operator leaves Screens, and Undo must still work then.
+    toast.info(
+      kept
+        ? `Dismissed ${name}. It is still under Not set up yet.`
+        : `Dismissed ${name}. This browser could not remember that, so it will be back after a reload. It is still under Not set up yet.`,
+      { action: { label: "Undo", onSelect: () => restoreFound([d.id]) } },
+    );
   };
   const seeAll = () =>
     document.getElementById(NOT_SET_UP_ID)?.scrollIntoView?.({ behavior: "smooth", block: "start" });
@@ -66,7 +69,7 @@ export function FoundBanner({ onSetUp }: {
           </div>
         </div>
         {hidden > 0 && (
-          <button type="button" className={LINK} onClick={() => setDismissed(new Set())}>
+          <button type="button" className={LINK} onClick={restoreAllFound}>
             Show dismissed
           </button>
         )}
