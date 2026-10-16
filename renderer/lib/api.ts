@@ -291,25 +291,20 @@ async function sendAsAsked<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+function sendJson<T>(method: "POST" | "PATCH" | "PUT", path: string, body: unknown): Promise<T> {
+  return apiFetch<T>(path, { method, body: body !== undefined ? JSON.stringify(body) : undefined });
+}
+
 function post<T>(path: string, body?: unknown): Promise<T> {
-  return apiFetch<T>(path, {
-    method: "POST",
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  return sendJson<T>("POST", path, body);
 }
 
 function patch<T>(path: string, body?: unknown): Promise<T> {
-  return apiFetch<T>(path, {
-    method: "PATCH",
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  return sendJson<T>("PATCH", path, body);
 }
 
 function put<T>(path: string, body?: unknown): Promise<T> {
-  return apiFetch<T>(path, {
-    method: "PUT",
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  return sendJson<T>("PUT", path, body);
 }
 
 function del<T>(path: string): Promise<T> {
