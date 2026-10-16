@@ -188,13 +188,19 @@ export function recordHealth(
   return latest;
 }
 
+/** Plain code-unit order, not locale order: the same list on every box. */
+function byDeviceId(a: OutputHealth, b: OutputHealth): number {
+  if (a.deviceId < b.deviceId) return -1;
+  return a.deviceId > b.deviceId ? 1 : 0;
+}
+
 /** Health that is still a reading, by device id. */
 export function healthList(now = Date.now()): OutputHealth[] {
   const cutoff = now - HEALTH_TTL_MS;
   return [...health.values()]
     .map((h) => h.latest)
     .filter((h) => h.receivedAt > cutoff)
-    .sort((a, b) => (a.deviceId < b.deviceId ? -1 : a.deviceId > b.deviceId ? 1 : 0));
+    .sort(byDeviceId);
 }
 
 /** Drop what was reported for a device: it was released, or taken over. */
