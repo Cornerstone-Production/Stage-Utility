@@ -70,6 +70,11 @@ function decodeOutput(v: unknown): DeviceOutput | undefined {
   return modes.length > 0 ? { kind, name, port, modes } : { kind, name, port };
 }
 
+/** Do two reports describe the same output? A small plain object, so JSON says. */
+export function sameOutput(a: DeviceOutput | undefined, b: DeviceOutput | undefined): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 /** Parse a probe, or null when the datagram is not one. Never throws. */
 export function decodeProbe(buf: Buffer | string): DiscoveryProbe | null {
   if (buf.length > MAX_DATAGRAM) return null;

@@ -9,6 +9,7 @@
 // Modelled on display-presence.ts, which does the same job for kiosk pages.
 
 import { broadcast } from "./broadcaster.js";
+import { sameOutput } from "./kiosk-discovery.js";
 import { mergeScreen, sameScreen } from "./kiosk-screen-size.js";
 import { scrub } from "./scrub.js";
 import { displaySignature, FRESH_TREND, HEALTH_TTL_MS, judge, type HealthTrend } from "./output-health.js";
@@ -151,8 +152,8 @@ export function recordSeen(
     !!existing.unreachable !== !!d.unreachable ||
     existing.hostname !== d.hostname ||
     // A card reporting new modes, or an output renamed, is a change a person
-    // reads on the row. Compared as JSON: it is a small plain object.
-    JSON.stringify(existing.output) !== JSON.stringify(d.output) ||
+    // reads on the row.
+    !sameOutput(existing.output, d.output) ||
     !sameScreen(existing.screen, screen);
   seen.set(d.id, { ...existing, ...d, screen, lastSeen: now });
   if (changed) announce(now);
