@@ -41,6 +41,9 @@ public enum PrivateFiles {
     let temp = file.deletingLastPathComponent().appendingPathComponent(".\(file.lastPathComponent).\(UUID().uuidString).tmp")
     let fd = open(temp.path, O_WRONLY | O_CREAT | O_EXCL, mode)
     guard fd >= 0 else { throw posixError("create \(temp.lastPathComponent)") }
+    // Closed here and nowhere else, whichever way this leaves: a descriptor closed
+    // early can be handed out again, and closing it a second time would close that.
+    defer { close(fd) }
     do {
       try data.withUnsafeBytes { buffer in
         var offset = 0
@@ -54,11 +57,9 @@ public enum PrivateFiles {
         }
       }
       if fsync(fd) != 0 { throw posixError("flush \(temp.lastPathComponent)") }
-      close(fd)
       beforeRename(temp)
       if rename(temp.path, file.path) != 0 { throw posixError("rename onto \(file.lastPathComponent)") }
     } catch {
-      close(fd)
       unlink(temp.path)
       throw error
     }
