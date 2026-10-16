@@ -258,6 +258,9 @@ function MenuCheckboxItem({
   );
 }
 
+/** A card's name box: it reads as the card's title until it is focused for renaming. */
+const CARD_NAME_INPUT = "h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0";
+
 /** The `data-flash-id` of one screen's card, so a screen just made can be scrolled
  *  to and outlined (see flashTarget). */
 export const screenFlashId = (outputId: string): string => `screen-${outputId}`;
@@ -393,7 +396,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           // pointerdown version of this guard was inert.
           onMouseDown={(e) => { if (nameFocused) e.stopPropagation(); }}
           onTouchStart={(e) => { if (nameFocused) e.stopPropagation(); }}
-          className="h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0"
+          className={CARD_NAME_INPUT}
           aria-label="Display name"
           // A click here focuses the name for renaming AND moves the panel.
           data-retarget
@@ -679,7 +682,7 @@ function UnassignedViewCard({
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
           // A click here focuses the name for renaming AND moves the panel.
           data-retarget
-          className="h-auto flex-1 min-w-0 rounded-md border-0 bg-transparent px-1 -mx-1 py-0 text-callout font-semibold leading-tight text-fg focus:bg-fill focus:ring-0"
+          className={CARD_NAME_INPUT}
           aria-label="View name"
         />
         <Pill tone={isControl ? "accent" : "muted"}>{isControl ? "control surface" : "wall"}</Pill>
