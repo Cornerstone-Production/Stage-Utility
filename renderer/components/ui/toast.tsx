@@ -24,6 +24,14 @@ interface ToastEntry {
 
 type Listener = (toasts: ToastEntry[]) => void;
 
+/** How long a toast is shown. One that carries a button is given time to be read
+ *  and reached for. */
+const SHOW_MS = 4000;
+const SHOW_WITH_ACTION_MS = 8000;
+/** The most toasts the store holds. The visible ones leave it when Radix closes
+ *  them; this only keeps a store that no Toaster is mounted to show from growing. */
+const MAX_HELD = 8;
+
 let _toasts: ToastEntry[] = [];
 let _listeners: Listener[] = [];
 let _nextId = 1;
@@ -34,10 +42,11 @@ function notify() {
 
 function addToast(type: ToastEntry["type"], message: string, opts?: { action?: ToastAction }) {
   const id = String(_nextId++);
-  _toasts = [..._toasts, { id, type, message, action: opts?.action }];
+  _toasts = [..._toasts, { id, type, message, action: opts?.action }].slice(-MAX_HELD);
   notify();
-  // Auto-dismiss after 4 s
-  setTimeout(() => removeToast(id), 4000);
+  // No timer of our own: the countdown is Radix's (the `duration` on the Root
+  // below), which stops while the pointer is over the toasts or focus is in them.
+  // A timer here ran on regardless and took an Undo out from under the pointer.
 }
 
 function removeToast(id: string) {
@@ -69,6 +78,7 @@ export function Toaster() {
         <ToastPrimitive.Root
           key={t.id}
           open
+          duration={t.action ? SHOW_WITH_ACTION_MS : SHOW_MS}
           onOpenChange={(open) => {
             if (!open) removeToast(t.id);
           }}
