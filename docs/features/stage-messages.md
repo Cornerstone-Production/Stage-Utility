@@ -190,6 +190,10 @@ with every reply under its message.
   name** on a console in the app, and **Home** on Home. One trailing `Display`,
   `Screen`, `Monitor` or `Console` is left off, so a screen named `Sam Display`
   signs as `Sam`; a name that is only that word keeps it.
+- The text box grows with what is typed, up to about nine lines, then scrolls; it
+  has no resize handle. When the composer's controls are taller than the widget (a
+  short widget, or a large text scale) the widget scrolls, so **Send** stays
+  reachable.
 - A send that fails keeps what was typed, the groups and the alert switch, and says
   why; the failure is also on `/log` as `[messages]`.
 
@@ -201,8 +205,10 @@ smaller and muted, each with its sender and how long ago above it and the latest
 reply in green below. Consecutive messages from the same sender share one sender
 line, showing the time of the first of them, so a run of three from one person is
 one heading and three messages. Ages are counted against the server's clock.
-When the messages are taller than the widget, the oldest is cut off rather than
-drawn over the reply buttons.
+When the messages are taller than the widget, the oldest ones that do not fit
+whole are left out: a message is never cut through a line or drawn over the reply
+buttons. A sender is shown as it is signed, so a derived `Sam Display` reads `Sam`
+here too.
 
 Which groups it follows is its **Groups** setting in the layout editor's inspector:
 
