@@ -584,8 +584,6 @@ extern "C" int32_t dl_output_take_timings(dl_output *output, dl_frame_timing *ou
   return output->output->takeTimings(out, capacity);
 }
 
-extern "C" uint64_t dl_host_now_ns(void) { return hostNowNs(); }
-
 extern "C" bool dl_watch_devices(dl_devices_changed_fn changed, void *ctx) {
   DeviceWatch::shared().setListener(changed, ctx);
   return DeviceWatch::shared().ensure();

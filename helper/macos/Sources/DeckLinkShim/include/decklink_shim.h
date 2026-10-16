@@ -309,9 +309,6 @@ typedef struct {
 int32_t dl_output_take_timings(dl_output *output, dl_frame_timing *out, int32_t capacity);
 #define DL_TIMINGS_KEPT 1024
 
-/// The host clock every time above is on: mach_absolute_time in nanoseconds.
-uint64_t dl_host_now_ns(void);
-
 // MARK: Device changes
 
 /// Called on the driver's thread when a DeckLink device arrives or goes. An open
