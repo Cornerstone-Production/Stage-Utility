@@ -363,7 +363,7 @@ something to fire on: the keyword only matches an item that exists, and per-plan
 bindings only exist on plans you set them on. So the setting can stay on all year.
 
 Keep the keyword specific — plain "baptism" would catch a "Baptism class signup"
-announcement where "baptism stories" would not. The Baptisms tab states, for the
+announcement where "baptism stories" would not. The Baptisms page states, for the
 plan currently loaded, which item will start each phase or that nothing will.
 
 ## Armed, then running

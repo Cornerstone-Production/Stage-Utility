@@ -95,7 +95,7 @@ operator jumping to the previous song expects.
 
 ## Reading it back
 
-The History tab opens on **All services**: a Trends card, then a calendar beside
+The History page opens on **All services**: a Trends card, then a calendar beside
 the day's services, or above them when the page is too narrow for both. Open a
 service for its own page, described after it.
 
@@ -404,10 +404,9 @@ until something is recorded, shows the same note instead of hiding.
 blank for all dates — and a list of sheets, and downloads them as one `.xlsx`.
 It reads only, so it is offered on the shared `/history` link too.
 
-The page carries no Overview card. Every figure it blended across a service type
-— average length, average start against schedule, average per-item overrun, peak
-and level — is on the service page's own KPI row, against the service it belongs
-to, where it means something specific rather than something all-time.
+Figures belong to the service they were recorded in: average length, start
+against schedule, per-item overrun, peak and level are on the service page's own
+header row, not blended across a service type.
 
 A row is a summary that opens the service page; Delete lives on that page's
 header, not on the row. The shared `/history` link shows the same figures.
@@ -423,7 +422,7 @@ names exactly which occurrence is open — reload, bookmark or share it and the
 same one opens again, rather than landing back on the whole month. This is the
 one URL that opens a specific service, and the only way in from outside the
 page itself: a baptism session's own **Past sessions** card, on the Baptisms
-tab, links each row with a known service through this same address, so
+page, links each row with a known service through this same address, so
 opening one from there lands here rather than on a copy of this page.
 
 ### The service page
@@ -478,22 +477,22 @@ whichever plan items it spans — the
 same items the chart below clips its own plan lane to, so the two can never
 name a different plan. A plan recorded with no lengths at all has nothing for
 Vs plan to compare against, and it says so rather than reporting a false
-overrun. These are not the Baptisms tab's own six (Timed, Wall clock, Not
+overrun. These are not the Baptisms page's own six (Timed, Wall clock, Not
 counted and the two averages) — this card is about one recorded segment of a
 finished service, not a running session, and the two answer different
 questions. Two or more sessions linked to one occurrence sum into these same
 six figures rather than each getting their own row.
 
 Below the strip: a read-only two-lane chart per linked session — the same
-timer-over-plan chart the live Baptisms tab draws, showing that session's own
+timer-over-plan chart the live Baptisms page draws, showing that session's own
 testimonies and baptisms against the plan items running at the time; and,
 under each chart, that session's own per-person splits (testimony, baptism
 and total time per person). A session with nothing in the shared timing rows
 for it — recorded before that raw layer existed, or matched to this service
 only by its start time rather than by a service key of its own — shows its
 splits with a plain line in place of the chart rather than one reading as an
-empty session. A **Open in Baptisms →** link beside the card's title returns
-to the live tab; the shared `/history` link never shows it, since it opens
+empty session. An **Open in Baptisms →** link beside the card's title returns
+to the live page; the shared `/history` link never shows it, since it opens
 into the operator app.
 
 Two or more sessions recorded in one occurrence — an operator finishing,
@@ -601,10 +600,9 @@ a legend that dropped what was off could never turn it back on.
 
 Every one of these is remembered **per browser** — they are view preferences,
 not recording settings: `attendance:visibleMetrics`, `spl:visibleFigures`,
-`spl:visibleSeries` and `spl:visibleMetrics`. The Smaart metric list used to be
-a server setting shared by everyone, so one person clicking a legend entry
-changed what the next person saw; a browser that has never chosen is seeded from
-that old setting once, so no existing selection was lost.
+`spl:visibleSeries` and `spl:visibleMetrics`. A browser that has never chosen a
+Smaart metric is seeded once from the server's shared metric list, and after that
+its own choice is its own.
 
 While a service is recording, the chart grows with it: new samples extend the line
 in place, the newest stretch draws in, the live edge carries a pulsing dot, the
@@ -612,44 +610,35 @@ current item's block grows, and the time axis widens in ten-minute steps rather
 than sliding on every sample. All of that motion is off when the machine asks for
 reduced motion; the live edge itself stays, because it is information.
 
-The overview's attendance trend can carry a second line: the **service SPL** for
-each date, drawn behind the attendance curve on its own dB scale. Right-click the
-chart — or tap and hold it, or tap the **⋯** in its corner on a touch device — to
-switch it on and to choose which Smaart metric it plots — the list offers the
-metrics your history actually holds, and defaults to the LAeq with the longest
-averaging window the meter reports (LAeq 10 over LAeq 2 over LAeq 1), because that
-is the steadiest number for "how loud was the service".
+### Recent services on Home
+
+Home's **Recent services** widget is a glance with a way into History: four
+headline figures for the active service type (average attendance with its trend,
+peak, average length and average start), an attendance trend chart when the tile
+is tall enough to hold one, and **Open History**. It stays hidden until something
+has been recorded, and says so rather than hiding when the history cannot be read.
+
+The chart can carry a second line, the **service SPL** for each date, drawn behind
+the attendance curve on its own dB scale. Right-click the widget — or tap and hold
+it, or tap the **⋯** in its corner on a touch device — and tick **SPL trend line**.
+While it is on the menu also offers a **Metric** list: the metrics your history
+actually holds, defaulting to the LAeq with the longest averaging window the meter
+reports (LAeq 10 over LAeq 2 over LAeq 1), because that is the steadiest number for
+"how loud was the service".
 
 Hovering a point with a mouse shows its reading in a tooltip; on a touch device,
 tapping a point pins that same reading in place — no hover needed — until another
 tap elsewhere on the page clears it.
 
-Each point is the service's equivalent continuous level, energy-averaged across
+Each SPL point is the service's equivalent continuous level, energy-averaged across
 its plan items and weighted by how long each ran, so a 30-second welcome does not
 count as much as a 25-minute sermon. Several services on one date combine the same
 way. A date with no recording breaks the line rather than dropping it to zero — a
-missing reading is not a quiet service. The setting is per-machine and off by
-default; Home's **Recent services** widget offers the same two settings on its own
-right-click (or tap-and-hold) menu, but only History shows the summary below —
-Home stays headline figures only.
+missing reading is not a quiet service. The line is off by default.
 
-On History, while the line is on, the same right-click (or tap-and-hold) menu also puts an average
-level under the average attendance, in the same shape: the level across settled
-weekends, then the latest weekend against the four before it. The comparison is
-a **dB difference**, not a percentage — decibels are logarithmic, so a percentage
-of one says nothing about loudness — and it is never coloured, because a louder
-weekend is not a worse one. A change under half a dB, below what most listeners
-can tell apart, shows no arrow at all rather than a direction nobody could hear.
-Both figures are energy averages. Weekends with no SPL recording are left out,
-and the block is absent entirely when nothing in scope carries a level.
-
-Above them is a KPI overview you can reorder and toggle sparklines on: service
-timers, attendance, highest and lowest attended, day totals. On a baptism weekend
-a Baptisms block appears alongside, showing people, total, testimony and baptism
-times, and per-person averages.
-
-Service windows are editable if a capture went wrong, individual items can be
-excluded from the timers, and a service report is exportable.
+A service's window is editable if a capture went wrong (**Edit times**),
+individual items can be excluded from the timers, and the service report is
+copyable (**Copy report**).
 
 The rundown itself is a table of every item as it ran: number, title, planned
 length, actual, the difference, and the times it started and ended. A table too

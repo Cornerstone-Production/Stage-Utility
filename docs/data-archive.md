@@ -205,18 +205,18 @@ Three surfaces report this, at three different levels of detail. The
 `unchanged`, `newer`, `disagreeing` and `kept` as running counts too (zero
 included), `invalid` only when it is not zero, and `full` only when it is
 not zero, in a line of its own naming the cap and how many sessions could
-not be added. The Baptisms tab's own result names every category except
+not be added. The Baptisms page's own result names every category except
 `unchanged`, since a session the rows reproduced exactly needed nothing said
 about it — `updated` and `added` always shown, the rest (including `full`)
 only when they are not zero. History's result names the same categories the
-Baptisms tab does, but folds them into "what was written" (`added`,
+Baptisms page does, but folds them into "what was written" (`added`,
 `updated`, shown only when nonzero), a "left alone" breakdown (`newer`,
 `disagreeing`, `invalid`, `kept`, each shown only when nonzero), and `full`
 as its own clause when nonzero, since its one line already covers three
 other legs.
 
 Reachable from three places, all of which post the same merge: the Baptisms
-tab's own **Rebuild from raw**, in its header, targets one service on its own
+page's own **Rebuild from raw**, in its header, targets one service on its own
 (`POST /api/baptism/rebuild`); a save-failure entry's own **Rebuild from raw**,
 in the Timer card's note, targets that entry's own service the same way;
 History's **Rebuild from raw** runs the same merge as one more leg alongside

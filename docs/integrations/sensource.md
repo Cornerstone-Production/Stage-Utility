@@ -202,7 +202,7 @@ down with it.
 
 `attendance-recorder.ts` folds the live counts into a per-service record: it samples
 every 30 s, keeps running peak/min/last, and broadcasts the open record on
-**`attendance:history`** every 5 s so the History tab updates during a service rather
+**`attendance:history`** every 5 s so the History page updates during a service rather
 than only after it.
 
 On the History **Overview**, the attendance trend chart includes the service that is
