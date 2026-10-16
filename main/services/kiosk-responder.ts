@@ -82,6 +82,12 @@ export function startKioskResponder(opts: ResponderOptions): void {
         output: probe.output,
       });
     }
+    if (decision.list === "none") {
+      // Heard, and not ours to show. If it WAS listed (it was unclaimed a moment
+      // ago and has since been set up on another server) it leaves the list now,
+      // not when its last sighting ages out 90 s later.
+      forgetSeen(probe.id);
+    }
     if (decision.list === "mine") {
       // Keep the stored hardware facts current.
       // update(), not load()+save(): the atomic read-modify-write, so a probe

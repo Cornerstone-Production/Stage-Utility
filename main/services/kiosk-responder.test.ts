@@ -18,6 +18,13 @@ const { startKioskResponder, stopKioskResponder } = await import("./kiosk-respon
 const { encodeProbe, decodeReply } = await import("./kiosk-discovery.js");
 const { startScan, stopScan, seenDevices, resetKioskPresence } = await import("./kiosk-presence.js");
 const { kioskDevicesStore, updateDevices, release } = await import("./kiosk-devices-store.js");
+const { addBroadcastListener } = await import("./broadcaster.js");
+
+/** Every kiosk:devices frame since a test last cleared it. */
+const frames: { seen: { id: string }[] }[] = [];
+addBroadcastListener((channel, payload) => {
+  if (channel === "kiosk:devices") frames.push(payload as (typeof frames)[number]);
+});
 
 const THIS_MAC = "02:00:00:00:00:aa";
 const OTHER_MAC = "02:00:00:00:00:bb";
@@ -146,6 +153,23 @@ describe("an unclaimed device while nothing is scanning", () => {
     await send({ id: "was-ours", macs: [OTHER_MAC], boundTo: "srv-test" });
     assert.equal(await answered(2000), true);
     assert.deepEqual(seenDevices().map((d) => d.id), ["was-ours"]);
+  });
+
+  test("one set up on another server after it was listed leaves the list at once, announced once", async () => {
+    // Heard unclaimed, then claimed on a second server: its next probe says so.
+    // Left alone it would sit here for the rest of its 90 s.
+    await send({ id: "taken-pi", macs: [OTHER_MAC], hostname: "pi" });
+    const listedBy = Date.now() + 2000;
+    while (seenDevices().length === 0 && Date.now() < listedBy) await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(seenDevices().map((d) => d.id), ["taken-pi"]);
+    frames.length = 0;
+    await send({ id: "taken-pi", macs: [OTHER_MAC], hostname: "pi", boundTo: "srv-other" });
+    const goneBy = Date.now() + 2000;
+    while (seenDevices().length > 0 && Date.now() < goneBy) await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(seenDevices().map((d) => d.id), [], "a device claimed elsewhere stayed in the list");
+    assert.equal(frames.length, 1, `${frames.length} frames announced the departure`);
+    assert.deepEqual(frames[0].seen, []);
+    assert.equal(await answered(200), false);
   });
 
   test("one bound to another server is neither answered nor listed", async () => {
