@@ -56,11 +56,11 @@ export function ScreenDevice({ outputId, name, videoMode }: { outputId: string; 
 
   const size = describeScreen(device.screen);
 
+  const deviceId = device.id;
   async function release() {
-    if (!device) return;
     setBusy(true);
     try {
-      await releaseDevice(device.id, name);
+      await releaseDevice(deviceId, name);
     } finally {
       setBusy(false);
     }
