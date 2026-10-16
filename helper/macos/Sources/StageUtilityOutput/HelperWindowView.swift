@@ -8,7 +8,6 @@ import SwiftUI
 private enum Palette {
   static let window = Color(red: 0x1e / 255, green: 0x1e / 255, blue: 0x1e / 255)
   static let fg = Color(red: 0xed / 255, green: 0xed / 255, blue: 0xf0 / 255)
-  static let muted = Color(red: 0x9a / 255, green: 0x9a / 255, blue: 0xa2 / 255)
   static let subtle = Color(red: 0x63 / 255, green: 0x63 / 255, blue: 0x6b / 255)
   static let accent = Color(red: 0x6a / 255, green: 0xa6 / 255, blue: 0xdf / 255)
   static let ok = Color(red: 0x86 / 255, green: 0xef / 255, blue: 0xac / 255)
