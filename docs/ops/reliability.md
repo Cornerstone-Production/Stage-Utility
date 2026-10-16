@@ -69,6 +69,7 @@ the running server prints its own path in **Settings → Advanced**:
 | `bar-config.json`, `saved-colors.json` | the context bar's arrangement, and your colours |
 | `baptism-triggers.json`, `scores-favourites.json` | per-plan baptism items, followed teams |
 | `history-milestones.json` | the dates you marked on the History trend chart |
+| `video-feeds.json` | the [video feeds](../integrations/video-feeds.md) and the relay's ports, never a camera or publish password |
 | `messaging.json` | the stage-message groups, quick messages and quick replies |
 | `branding-images/`, `layout-images/` | uploaded images, named by content hash |
 
@@ -86,6 +87,7 @@ machine's history rather than how you set it up:
 | `signals.json` | the values Companion reads |
 | `stream-starts.json` | when each platform was first seen live |
 | `update-notices.json` | which release has been announced |
+| `video-seen.json` | when each video feed was last confirmed live |
 
 **Neither** — never in a backup, and never restored:
 
@@ -93,13 +95,16 @@ machine's history rather than how you set it up:
 |---|---|
 | `cache/photos/`, `cache/attachments/` | cached Planning Center photos and plan files |
 | `cache/output-helper/` | the Mac output helper's zips, one folder per release, downloaded again when missing |
+| `video-relay/` | the video relay's pinned MediaMTX download and its generated config, fetched again on a fresh machine. See [Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch) |
+| `update-track`, `update-progress.json`, `update-result.json`, `update-live.log`, `update-restart-pending` | the updater's own state: the track this install follows, and the files an update in flight and one waiting for its restart leave |
 | `server.log`, `update.log` | log history, replayed into `/log` on boot |
 | `secrets.bin` | integration and wireless credentials, AES-256-GCM encrypted |
 | `encryption.key` | 32-byte key, generated on first run, mode `600` |
 | `snapshots/`, `backups/` | saved config snapshots, and what the scheduler wrote |
 
 Which half a file lands in is declared where the file is defined and checked by
-the test suite, so a new store cannot quietly miss a backup.
+the test suite, so a new store cannot quietly miss a backup. The same files, one
+row each, are in [Data model](../reference/data-model.md#stored-data).
 
 A `*.json.migrated` file is an older store kept after its contents were split into
 per-service files. Safe to delete.
