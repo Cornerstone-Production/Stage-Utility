@@ -287,10 +287,21 @@ function StringList({ label, noun, description, items, max, itemMax, placeholder
 
 /** How many screens are in a group; nothing until the screens are known, rather than 0. */
 function ScreenCount({ screens }: { screens: number | null }) {
+  let text = "";
+  if (screens === 0) text = "no screens";
+  else if (screens !== null) text = plural(screens, "screen");
+  return <span className="w-20 shrink-0 text-caption2 text-fg-subtle">{text}</span>;
+}
+
+/** The card a list of the config sits in: its title over its body. */
+function ConfigCard({ title, testId, children }: { title: string; testId?: string; children: ReactNode }) {
   return (
-    <span className="w-20 shrink-0 text-caption2 text-fg-subtle">
-      {screens === null ? "" : screens === 0 ? "no screens" : plural(screens, "screen")}
-    </span>
+    <div className="su-card" data-testid={testId}>
+      <div className="border-b border-line px-4 py-3">
+        <h3 className="text-callout font-semibold text-fg">{title}</h3>
+      </div>
+      {children}
+    </div>
   );
 }
 
@@ -370,10 +381,10 @@ export function MessagesSection({
       } catch (err) {
         const { status, code } = err as ApiError;
         if (status === 409) {
-          // Another window saved first. Nothing was changed; what it left is read
-          // BEFORE the next queued save runs, or that one is refused the same way.
           // Another window saved first, or this page's own earlier save went through
-          // after its answer was lost (a timeout): either way the page is behind.
+          // after its answer was lost (a timeout): either way the page is behind and
+          // nothing was changed. What is stored is read BEFORE the next queued save
+          // runs, or that one is refused the same way.
           logToServer("messages", "the groups and quick messages changed since this page loaded; reloaded");
           toast.error("The groups and quick messages changed since this page loaded, so they have been reloaded. Make your change again.");
           await read();
@@ -400,6 +411,14 @@ export function MessagesSection({
     return result;
   }
 
+  /** Save a change to one of the two lists of plain text (see StringListProps.onChange). */
+  function saveList(key: "quickMessages" | "quickReplies", update: (current: readonly string[]) => string[] | null): Promise<boolean> {
+    return save((current) => {
+      const list = update(current[key]);
+      return list && { [key]: list };
+    });
+  }
+
   if (!config) {
     return failed.has("config") ? (
       <div className="flex flex-col items-start gap-2 pt-5">
@@ -417,22 +436,17 @@ export function MessagesSection({
 
   async function removeGroup(group: MessageGroup) {
     const n = screensIn(group.id);
-    const message =
-      n === null
-        ? "Any screens in it will be taken out of it. Messages already sent to it stay in today's thread."
-        : n === 0
-          ? "No screens are in it. Messages already sent to it stay in today's thread."
-          : `${plural(n, "screen is", "screens are")} in it, and will be taken out of it. Messages already sent to it stay in today's thread.`;
+    let who = "Any screens in it will be taken out of it.";
+    if (n === 0) who = "No screens are in it.";
+    else if (n !== null) who = `${plural(n, "screen is", "screens are")} in it, and will be taken out of it.`;
+    const message = `${who} Messages already sent to it stay in today's thread.`;
     if (!(await confirm({ title: `Remove ${group.name}?`, message, confirmLabel: "Remove", destructive: true }))) return;
     await save((current) => (current.groups.some((g) => g.id === group.id) ? { groups: current.groups.filter((g) => g.id !== group.id) } : null));
   }
 
   return (
     <div className="flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
-      <div className="su-card" data-testid="messages-groups">
-        <div className="border-b border-line px-4 py-3">
-          <h3 className="text-callout font-semibold text-fg">Groups</h3>
-        </div>
+      <ConfigCard title="Groups" testId="messages-groups">
         <div className="flex flex-col gap-2 px-4 pb-4 pt-3">
           <p className="text-caption2 text-fg-subtle">
             A group is a set of screens that gets a message together: Green room, Stage, Booth. Put a screen in groups
@@ -468,12 +482,9 @@ export function MessagesSection({
             onAdd={(name) => save((current) => ({ groups: [...current.groups, { name }] }))}
           />
         </div>
-      </div>
+      </ConfigCard>
 
-      <div className="su-card">
-        <div className="border-b border-line px-4 py-3">
-          <h3 className="text-callout font-semibold text-fg">Quick messages</h3>
-        </div>
+      <ConfigCard title="Quick messages">
         <StringList
           label="Quick messages"
           noun="quick message"
@@ -482,19 +493,11 @@ export function MessagesSection({
           max={QUICK_MESSAGES_MAX}
           itemMax={MESSAGE_MAX}
           placeholder="New quick message"
-          onChange={(update) =>
-            save((current) => {
-              const quickMessages = update(current.quickMessages);
-              return quickMessages && { quickMessages };
-            })
-          }
+          onChange={(update) => saveList("quickMessages", update)}
         />
-      </div>
+      </ConfigCard>
 
-      <div className="su-card">
-        <div className="border-b border-line px-4 py-3">
-          <h3 className="text-callout font-semibold text-fg">Quick replies</h3>
-        </div>
+      <ConfigCard title="Quick replies">
         <StringList
           label="Quick replies"
           noun="quick reply"
@@ -503,14 +506,9 @@ export function MessagesSection({
           max={QUICK_REPLIES_MAX}
           itemMax={QUICK_REPLY_MAX}
           placeholder="New quick reply"
-          onChange={(update) =>
-            save((current) => {
-              const quickReplies = update(current.quickReplies);
-              return quickReplies && { quickReplies };
-            })
-          }
+          onChange={(update) => saveList("quickReplies", update)}
         />
-      </div>
+      </ConfigCard>
     </div>
   );
 }
