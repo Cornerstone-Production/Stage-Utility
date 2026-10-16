@@ -1941,14 +1941,7 @@ class IntegrationManager {
         if (!host || !port) {
           return { ok: false, message: "Host and Port are required" };
         }
-        const result = await propresenterService.test(host, port);
-        this.setConnectionState(
-          "propresenter",
-          result.ok ? "connected" : "error",
-          result.message ?? null,
-        );
-        this.broadcastStates();
-        return result;
+        return this.reportTest("propresenter", await propresenterService.test(host, port));
       }
 
       if (id === "prodcom") {
@@ -1957,10 +1950,7 @@ class IntegrationManager {
           return { ok: false, message: "Host and Port are required" };
         }
         const secrets = await secretsStore.getSecrets("prodcom");
-        const result = await prodcomService.test(host, port, secrets.apiKey ?? null);
-        this.setConnectionState("prodcom", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("prodcom", await prodcomService.test(host, port, secrets.apiKey ?? null));
       }
 
       if (id === "smaart") {
@@ -1969,10 +1959,7 @@ class IntegrationManager {
           return { ok: false, message: "Host and Port are required" };
         }
         const secrets = await secretsStore.getSecrets("smaart");
-        const result = await smaartService.test(host, port, secrets.password ?? null);
-        this.setConnectionState("smaart", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("smaart", await smaartService.test(host, port, secrets.password ?? null));
       }
 
       if (id === "obs") {
@@ -1981,10 +1968,7 @@ class IntegrationManager {
           return { ok: false, message: "Host and Port are required" };
         }
         const secrets = await secretsStore.getSecrets("obs");
-        const result = await obsService.test(host, port, secrets.password ?? null);
-        this.setConnectionState("obs", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("obs", await obsService.test(host, port, secrets.password ?? null));
       }
 
       if (id === "reaper") {
@@ -1992,10 +1976,7 @@ class IntegrationManager {
         if (!host || !port) {
           return { ok: false, message: "Host and Port are required" };
         }
-        const result = await reaperService.test(host, port);
-        this.setConnectionState("reaper", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("reaper", await reaperService.test(host, port));
       }
 
       if (id === "pvp") {
@@ -2007,17 +1988,11 @@ class IntegrationManager {
           };
         }
         const secrets = await secretsStore.getSecrets("pvp");
-        const result = await pvpService.test(host, port, https, secrets.token ?? null);
-        this.setConnectionState("pvp", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("pvp", await pvpService.test(host, port, https, secrets.token ?? null));
       }
 
       if (id === "scores") {
-        const result = await scoresService.test();
-        this.setConnectionState("scores", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("scores", await scoresService.test());
       }
 
       if (id === "resi") {
@@ -2025,28 +2000,19 @@ class IntegrationManager {
         if (!username || !password) {
           return { ok: false, message: "Resi email and password are required" };
         }
-        const result = await resiService.test(username, password);
-        this.setConnectionState("resi", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("resi", await resiService.test(username, password));
       }
 
       if (id === "youtube") {
-        const result = await youtubeService.test(await this.getYouTubeConfig());
-        this.setConnectionState("youtube", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("youtube", await youtubeService.test(await this.getYouTubeConfig()));
       }
 
       if (id === "sensource") {
         const cfg = await this.getSensourceConfig();
-        if (!cfg.apiToken && (!cfg.clientId || !cfg.clientSecret)) {
+        if (!hasSensourceCredentials(cfg)) {
           return { ok: false, message: "Client ID and Secret (or a static token) are required" };
         }
-        const result = await sensourceService.test(cfg);
-        this.setConnectionState("sensource", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("sensource", await sensourceService.test(cfg));
       }
 
       if (id === "ross-tsl") {
@@ -2054,10 +2020,7 @@ class IntegrationManager {
         if (!host || !port) {
           return { ok: false, message: "Switcher Host and TSL Port are required" };
         }
-        const result = await tslService.test(host, port);
-        this.setConnectionState("ross-tsl", result.ok ? "connected" : "error", result.message ?? null);
-        this.broadcastStates();
-        return result;
+        return this.reportTest("ross-tsl", await tslService.test(host, port));
       }
 
       if (id === "video") {
@@ -2096,6 +2059,13 @@ class IntegrationManager {
   }
 
   // ── Internals ─────────────────────────────────────────────────────────
+
+  /** Put a Test's answer on the integration's row, and hand it back to the caller. */
+  private reportTest<T extends { ok: boolean; message?: string }>(id: string, result: T): T {
+    this.setConnectionState(id, result.ok ? "connected" : "error", result.message ?? null);
+    this.broadcastStates();
+    return result;
+  }
 
   private setConnectionState(
     id: string,
