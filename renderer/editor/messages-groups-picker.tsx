@@ -31,6 +31,11 @@ export function MessagesGroupsPicker({
   const known = new Set(all.groups.map((g) => g.id));
   const unknown = all.known && !all.failed ? (own ?? []).filter((id) => !known.has(id)) : [];
 
+  // What stands in for the list while there is none to show.
+  let noGroupsNote = "Reading the groups...";
+  if (all.failed) noGroupsNote = "Could not read the groups.";
+  else if (all.known) noGroupsNote = "No groups yet. Add some in Settings, Messages. Everyone's messages always show.";
+
   function toggle(id: string, on: boolean) {
     const mine = new Set(own ?? []);
     if (on) mine.add(id);
@@ -54,13 +59,7 @@ export function MessagesGroupsPicker({
       />
       {own !== null && (
         all.groups.length === 0 ? (
-          <p className="text-caption2 text-fg-muted leading-snug">
-            {all.failed
-              ? "Could not read the groups."
-              : all.known
-                ? "No groups yet. Add some in Settings, Messages. Everyone's messages always show."
-                : "Reading the groups..."}
-          </p>
+          <p className="text-caption2 text-fg-muted leading-snug">{noGroupsNote}</p>
         ) : (
           <div className="flex flex-col gap-1.5" role="group" aria-label="Groups this widget answers for">
             {all.groups.map((g) => (
