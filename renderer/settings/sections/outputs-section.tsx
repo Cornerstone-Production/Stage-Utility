@@ -31,7 +31,7 @@ import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
 
 import type { SectionProps } from "../types";
-import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useNameDraft } from "../../lib/use-name-draft";
 import { useSortableRow } from "../../lib/use-sortable-row";
 import { useVideoState } from "../../main/video/use-video-state";
 import { useMessageGroups, type MessageGroups } from "../../main/use-message-groups";
@@ -318,7 +318,7 @@ function useMenuFocusHandoff() {
 }
 
 export function OutputRow({ output, views, baseUrl, online, struggles, lags, outputStruggle, canRemove, iconColor, iconKey, legacyIconKey, onRename, onRenameView, onSetView, messageGroups, panelOpen, onSelect, selected, onRefresh, onRemove, onEditLayout, onRequestNewView }: OutputRowProps) {
-  const [editName, setEditName] = useState(output.name);
+  const name = useNameDraft(output.name, onRename);
   const assignedView = views.find((v) => v.id === output.viewId) ?? null;
   const [renamingView, setRenamingView] = useState(false);
   const [viewName, setViewName] = useState("");
@@ -329,19 +329,6 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
   // (a group deleted since) names nothing and draws nothing; the server takes it
   // off the screen when the group is deleted.
   const screenGroups = messageGroups.groups.filter((g) => output.groups?.includes(g.id));
-
-  useResyncOn([output.name], () => {
-    setEditName(output.name);
-  });
-
-  function handleBlur() {
-    const trimmed = editName.trim();
-    if (trimmed && trimmed !== output.name) {
-      onRename(trimmed);
-    } else {
-      setEditName(output.name);
-    }
-  }
 
   const outputUrl = `${baseUrl}/${encodeURIComponent(output.id)}`;
 
@@ -386,9 +373,9 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           <IconTint itemKey={iconKey} legacyKey={legacyIconKey} icon={MonitorIcon} color={iconColor} label={output.name} />
         </span>
         <Input
-          value={editName}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
-          onBlur={() => { setNameFocused(false); handleBlur(); }}
+          value={name.draft}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => name.setDraft(e.target.value)}
+          onBlur={() => { setNameFocused(false); name.commit(); }}
           onFocus={() => setNameFocused(true)}
           // Claim the gesture ONLY while editing. This field is flex-1, so
           // blocking unconditionally made the entire middle of the header
@@ -674,10 +661,7 @@ function UnassignedViewCard({
   onRemove: () => void;
   onEditLayout?: () => void;
 }) {
-  const [editName, setEditName] = useState(view.name);
-  // Follow a rename that happened elsewhere (a duplicate, an import) without
-  // clobbering what is being typed here.
-  useResyncOn([view.name], () => setEditName(view.name));
+  const name = useNameDraft(view.name, onRename);
   const handoff = useMenuFocusHandoff();
   const isControl = viewIsConsole(view);
   const card = selectableCard(panelOpen, selected, onSelect);
@@ -690,13 +674,9 @@ function UnassignedViewCard({
       <div className="flex items-center gap-2 px-3 pt-2.5">
         <LayoutGridIcon className="size-4 shrink-0 text-accent" aria-hidden="true" />
         <Input
-          value={editName}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
-          onBlur={() => {
-            const next = editName.trim();
-            if (next && next !== view.name) onRename(next);
-            else setEditName(view.name);
-          }}
+          value={name.draft}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => name.setDraft(e.target.value)}
+          onBlur={name.commit}
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
           // A click here focuses the name for renaming AND moves the panel.
           data-retarget

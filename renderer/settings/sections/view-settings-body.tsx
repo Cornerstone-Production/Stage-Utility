@@ -5,10 +5,8 @@
 // Reached from a view's card, from "View settings" on a screen, and from a chip
 // in another view's "Shown on".
 
-import { useState } from "react";
-
 import { Button } from "../../components/ui";
-import { useResyncOn } from "../../lib/use-resync-on";
+import { useNameDraft } from "../../lib/use-name-draft";
 import { screensShowing, viewCanBeControlSurface, viewShownInSidebar, viewSurface, type ViewSurface } from "@main/types/views";
 import { SURFACE_COPY } from "../screen-role-confirm";
 import { ChoiceCard, DangerButton, NameInput, OutlineButton, PanelFooter, Section, SidebarRow } from "./screen-panel-parts";
@@ -25,13 +23,7 @@ export function ViewBody({ view, outputs, actions }: { view: View; outputs: Outp
   const shownOn = screensShowing(view.id, outputs);
   const canBeControl = viewCanBeControlSurface(view);
 
-  const [name, setName] = useState(view.name);
-  useResyncOn([view.name], () => setName(view.name));
-  function commitName() {
-    const trimmed = name.trim();
-    if (trimmed && trimmed !== view.name) actions.onRenameView(view.id, trimmed);
-    else setName(view.name);
-  }
+  const name = useNameDraft(view.name, (renamed) => actions.onRenameView(view.id, renamed));
   /** Switching what a view is changes every screen showing it, so a view that is
    *  on screens goes through the confirm that names them (setViewRole). */
   function choose(to: ViewSurface) {
@@ -42,7 +34,7 @@ export function ViewBody({ view, outputs, actions }: { view: View; outputs: Outp
     <>
       <div className="flex-1 overflow-y-auto px-[18px] pb-[18px] pt-1.5">
         <Section title="Name">
-          <NameInput id="view-name" label="View name" value={name} onChange={setName} onCommit={commitName} />
+          <NameInput id="view-name" label="View name" value={name.draft} onChange={name.setDraft} onCommit={name.commit} />
         </Section>
 
         <Section title="What this view is">

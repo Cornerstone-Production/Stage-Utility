@@ -31,6 +31,7 @@ import { copyText } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
 import { KIND_DRAWS_TOP_BAR, screenIsControlSurface, viewShownInSidebar, viewSurface, type CreateScreenInput, type ViewSurface } from "@main/types/views";
+import { useNameDraft } from "../../lib/use-name-draft";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { NONE, chooseViewForScreen } from "../screen-role-confirm";
 import { useDevices } from "../../app/screens/use-devices";
@@ -432,8 +433,7 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
   // are about a strip only some kinds draw. An unrouted screen still shows a bar.
   const drawsTopBar = shown ? KIND_DRAWS_TOP_BAR[shown.kind] : true;
 
-  const [name, setName] = useState(output.name);
-  useResyncOn([output.name], () => setName(output.name));
+  const name = useNameDraft(output.name, (renamed) => actions.onRename(output.id, renamed));
   const [draftSize, setDraftSize] = useState<number | null>(null);
 
   /** Choosing a view is choosing what the screen is, so a view of the other kind
@@ -446,12 +446,6 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
       setView: (...choice) => actions.onSetView(output.id, ...choice),
       requestNewView: (surface) => actions.onRequestNewView(output.id, surface),
     });
-  }
-
-  function commitName() {
-    const trimmed = name.trim();
-    if (trimmed && trimmed !== output.name) actions.onRename(output.id, trimmed);
-    else setName(output.name);
   }
 
   const permanent = `${baseUrl}/${encodeURIComponent(output.id)}`;
@@ -484,7 +478,7 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
           )}
         </Section>
         <Section title="Name and address">
-          <NameInput id="screen-name" value={name} onChange={setName} onCommit={commitName} />
+          <NameInput id="screen-name" value={name.draft} onChange={name.setDraft} onCommit={name.commit} />
           <SlugField slug={output.slug ?? ""} baseUrl={baseUrl} onSave={(s) => actions.onSetSlug(output.id, s)} />
           <div className="mt-1.5 flex items-start gap-1.5">
             {/* overflow-wrap:anywhere, not break-all: a long URL may still break,
