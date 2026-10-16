@@ -73,14 +73,14 @@ one auditorium being switched off does not affect the other.
 ### What the log says
 
 ```
-[propresenter] streaming 6 endpoints from 192.168.0.123:1025
+[propresenter] streaming 6 endpoints from 192.168.1.50:1025
 [propresenter] stream ended (closed by ProPresenter) — reconnecting in 5s
 [propresenter] status/updates unsupported (HTTP 404) — falling back to polling for the rest of this run
-[propresenter] playlist unreadable on 192.168.0.123:1025 (HTTP 404) — no next-item name, retrying in 30s
-[propresenter] 192.168.0.123:1025 unreachable (connect ECONNREFUSED) — backing off, will keep retrying quietly
-[propresenter] unreadable presentation/current frame from 192.168.0.123:1025 (Unexpected end of JSON input) — that field goes blank, staying quiet about the rest
-[propresenter] 192.168.0.123:1025 accepts the status subscription and then sends nothing — the displays are holding the last slide it sent. Is ProPresenter's Network view wedged?
-[propresenter] status buffer exceeded 1000000 chars from 192.168.0.123:1025 — resyncing
+[propresenter] playlist unreadable on 192.168.1.50:1025 (HTTP 404) — no next-item name, retrying in 30s
+[propresenter] 192.168.1.50:1025 unreachable (connect ECONNREFUSED) — backing off, will keep retrying quietly
+[propresenter] unreadable presentation/current frame from 192.168.1.50:1025 (Unexpected end of JSON input) — that field goes blank, staying quiet about the rest
+[propresenter] 192.168.1.50:1025 accepts the status subscription and then sends nothing — the displays are holding the last slide it sent. Is ProPresenter's Network view wedged?
+[propresenter] status buffer exceeded 1000000 chars from 192.168.1.50:1025 — resyncing
 ```
 
 The unreadable-frame and buffer lines are the ones to look for when a panel goes
@@ -188,7 +188,7 @@ list that was mid-read when the change landed is discarded rather than cached,
 and says so:
 
 ```
-[propresenter] macro list from 192.168.0.123:1025 discarded — the instance was pointed at another machine while it was being read
+[propresenter] macro list from 192.168.1.50:1025 discarded — the instance was pointed at another machine while it was being read
 ```
 
 Saving a change that does not move the target — the poll interval, the display

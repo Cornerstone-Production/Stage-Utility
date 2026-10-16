@@ -76,8 +76,8 @@ more.
 
 ## Setup
 
-**On the device:** enable RossTalk. On a Carbonite it is under the network/comms setup;
-the default device address is `192.168.0.123`. Note the IP; the port is 7788.
+**On the device:** enable RossTalk. On a Carbonite it is under the network/comms setup.
+Note the device's IP address; the port is 7788.
 
 **In Stage:** Settings → Integrations → **RossTalk (Carbonite / Ultrix)** → **Add
 target** → name it, set host and port, choose **Carbonite switcher** or **Ultrix
