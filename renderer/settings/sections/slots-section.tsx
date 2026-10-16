@@ -42,6 +42,7 @@ import { SlotsTargetPill } from "./slots-target-pill";
 import { PlanSwitcher } from "./plan-switcher";
 import { errorMessage } from "@main/services/errors";
 import { plural } from "@main/services/plural";
+import { useNameDraft } from "../../lib/use-name-draft";
 
 // ---- slot row (sortable) ----------------------------------------------------
 
@@ -835,15 +836,9 @@ export type PresetHandlers = Pick<
 >;
 
 /** One draggable preset row: grip + inline-rename + slots count + recall / overwrite / export / delete. */
-function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers: PresetHandlers }) {
+export function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers: PresetHandlers }) {
   const { setNodeRef, style, attributes, listeners } = useSortableRow(preset.id);
-  const [editName, setEditName] = useState(preset.name);
-
-  function commitName() {
-    const trimmed = editName.trim();
-    if (trimmed && trimmed !== preset.name) handlers.handleRenamePreset(preset.id, trimmed);
-    else setEditName(preset.name);
-  }
+  const name = useNameDraft(preset.name, (renamed) => handlers.handleRenamePreset(preset.id, renamed));
 
   return (
     <div ref={setNodeRef} style={style} className="flex flex-wrap items-center gap-2 py-2 border-t border-gray-a3 first:border-t-0">
@@ -857,10 +852,10 @@ function SortablePresetRow({ preset, handlers }: { preset: SlotPreset; handlers:
         <GripVerticalIcon className="size-4 text-gray-7" />
       </button>
       <Input
-        value={editName}
+        value={name.draft}
         data-preset-id={preset.id}
-        onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
-        onBlur={commitName}
+        onChange={(e: ChangeEvent<HTMLInputElement>) => name.setDraft(e.target.value)}
+        onBlur={name.commit}
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
         }}
