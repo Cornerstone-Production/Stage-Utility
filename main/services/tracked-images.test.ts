@@ -1,4 +1,5 @@
-// No screenshot may be committed to this PUBLIC repository.
+// No screenshot may be committed to this PUBLIC repository, except the docs
+// images that scripts/docs-screenshots makes from an invented install.
 //
 // This guard exists because one was. `slots-short-after.png` — a full-width
 // mic-slots display carrying ten real faces and full names, several of them
@@ -30,6 +31,33 @@ const ALLOWED = [
   "public/icon-192.png",
   "public/icon-512.png",
   "public/icon-maskable-512.png",
+  // Docs screenshots, made by `npm run docs:screenshots` from a seeded install
+  // with invented names, plans and addresses (scripts/docs-screenshots), and
+  // each looked at before it was committed. Replace one only by re-running the
+  // script, never with a capture of a real install.
+  "docs/images/automation-rules.png",
+  "docs/images/baptisms-sessions.png",
+  "docs/images/history-overview.png",
+  "docs/images/history-service.png",
+  "docs/images/history-trends.png",
+  "docs/images/home-dashboard.png",
+  "docs/images/integrations-overview.png",
+  "docs/images/integrations-wireless.png",
+  "docs/images/layout-editor.png",
+  "docs/images/messages-alert.png",
+  "docs/images/messages-composer.png",
+  "docs/images/messages-panel.png",
+  "docs/images/messages-settings.png",
+  "docs/images/patch-sheet.png",
+  "docs/images/plan-selection.png",
+  "docs/images/screens-overview.png",
+  "docs/images/servicecue-picker.png",
+  "docs/images/servicecue-rundown.png",
+  "docs/images/slots-editor.png",
+  "docs/images/video-feeds.png",
+  "docs/images/wall-lobby.png",
+  "docs/images/wall-servicecue.png",
+  "docs/images/wall-stage-wall.png",
 ] as const;
 
 const RASTER = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|avif)$/i;
