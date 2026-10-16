@@ -137,7 +137,7 @@ export function MessagesObject({ objectId, config, state, known, screen, interac
       >
         Messages
       </div>
-      <Feed groups={groups} state={state} known={known} shown={shown} editing={editing} interactive={interactive} now={now} />
+      <Feed groups={groups} known={known} shown={shown} editing={editing} interactive={interactive} now={now} />
       {answering && (
         <Replies
           target={shown?.[0] ?? null}
@@ -154,7 +154,6 @@ export function MessagesObject({ objectId, config, state, known, screen, interac
 /** What goes under the heading: the messages, or the one quiet line that says why not. */
 function Feed({
   groups,
-  state,
   known,
   shown,
   editing,
@@ -162,7 +161,6 @@ function Feed({
   now,
 }: {
   groups: readonly string[] | null;
-  state: MessagesState | null;
   known: boolean;
   shown: StageMessage[] | null;
   editing: boolean;
@@ -179,7 +177,7 @@ function Feed({
     return interactive ? <Quiet>Choose groups for this widget</Quiet> : null;
   }
   // Not answered yet, or the read failed: neither is "no messages".
-  if (!known || !state || !shown) return null;
+  if (!known || !shown) return null;
   if (shown.length === 0) return <Quiet>No messages for this screen&apos;s groups</Quiet>;
   return (
     // The list takes what the card has left (`flex: 1 1 0`, `minHeight: 0`) and
