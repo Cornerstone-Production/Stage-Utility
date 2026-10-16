@@ -597,12 +597,14 @@ export function PlanAttachmentConfig({
   // Resize the object box to match the rendered (cropped/trimmed) content aspect,
   // keeping the top-left anchor so there's no letterboxing.
   async function fitBoxToFile() {
+    const match = c.match ?? "stage plot";
+    const couldNotLoad = "Couldn't load the file to fit the box to, so the box was left as it is.";
     setFitting(true);
     try {
       // The active plan id busts the browser's cached copy, as it does on a display,
       // and recheck goes around it: this is an operator asking now.
       const r = await loadProcessedAttachment(
-        c.match ?? "stage plot",
+        match,
         { page: c.page ?? 1, crop: c.crop, trim: c.trim, background: c.background },
         stage.state?.planId ?? null,
         { recheck: true },
@@ -613,14 +615,10 @@ export function PlanAttachmentConfig({
         onGeom({ h: clamp(newH, 0.03, 1 - o.y) });
       } else {
         // Nothing to size the box to. Doing nothing read as a button that does not work.
-        toast.error(
-          r === "empty"
-            ? `No file matching "${c.match ?? "stage plot"}" is on the current plan, so the box was left as it is.`
-            : "Couldn't load the file to fit the box to, so the box was left as it is.",
-        );
+        toast.error(r === "empty" ? `No file matching "${match}" is on the current plan, so the box was left as it is.` : couldNotLoad);
       }
     } catch {
-      toast.error("Couldn't load the file to fit the box to, so the box was left as it is.");
+      toast.error(couldNotLoad);
     } finally {
       setFitting(false);
     }
