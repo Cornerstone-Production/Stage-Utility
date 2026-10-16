@@ -6,7 +6,7 @@ import Testing
 /// Serialized: the count of frames the software clocks have made is one number for
 /// the whole process, and only these tests' clocks are counted.
 @Suite(.serialized) struct CardFramesTests {
-  /// `frames` nil leaves the port's own default.
+  /// `frames` nil is the port's own default, the card's frames.
   func fakePort(
     _ source: CardFrameSource, log: LogLines, frames: DeckLinkOutputPort.Frames? = nil, refuses: Bool = false,
     makesNoFrames: Bool = false
@@ -14,13 +14,9 @@ import Testing
     let hardware = DeckLinkOutputPort.Hardware.softwareClock(
       width: 16, height: 4, frameDuration: 1001, timeScale: 60000, ticksByItself: false,
       refusesHelperFrames: refuses, makesNoFrames: makesNoFrames, countsFrames: true)
-    guard let frames else {
-      return DeckLinkOutputPort(
-        label: "SDI test", hardware: hardware, source: source, retryInterval: 3600, pollInterval: 3600, log: log.write)
-    }
     return DeckLinkOutputPort(
-      label: "SDI test", hardware: hardware, source: source, frames: frames, retryInterval: 3600, pollInterval: 3600,
-      log: log.write)
+      label: "SDI test", hardware: hardware, source: source, frames: frames ?? .card, retryInterval: 3600,
+      pollInterval: 3600, log: log.write)
   }
 
   /// The card's frames are what a port asks for, and the pictures go straight into
