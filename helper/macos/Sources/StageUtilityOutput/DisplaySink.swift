@@ -15,13 +15,15 @@ protocol OutputSink: AnyObject {
   /// Turn the picture, as the screen's `rotation` says.
   func setRotation(_ rotation: Rotation)
   /// Write what the output is showing to `file` as a PNG, turned the way it goes
-  /// out. `completion` gets nil on success, else why not.
+  /// out. `completion` gets what became of it.
   func writeSnapshot(to file: URL, completion: @escaping @MainActor (FrameDumpOutcome) -> Void)
 }
 
 extension OutputSink {
   /// What the engine could not set up, worded for the log and the window.
   var surfaceProblems: [String] { surface.problems }
+
+  func show(url: URL) { surface.load(url) }
 }
 
 /// An output that is a display: a web surface in a borderless window on one NSScreen.
@@ -37,8 +39,6 @@ final class DisplaySink: OutputSink {
     destination = WindowDestination(placement: .fullScreen(of: screen))
     destination.attach(surface.hostView)
   }
-
-  func show(url: URL) { surface.load(url) }
 
   func stop() {
     surface.stop()

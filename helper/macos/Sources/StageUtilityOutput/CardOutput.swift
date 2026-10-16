@@ -134,8 +134,6 @@ final class CardOutput: OutputSink {
     }
   }()
 
-  func show(url: URL) { surface.load(url) }
-
   func stop() {
     // The port first: it calls the browser from its thread, and `surface.stop()`
     // frees the browser. No fill runs after `close` returns.
