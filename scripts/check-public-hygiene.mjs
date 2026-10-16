@@ -87,8 +87,8 @@ const GITHUB_NOREPLY_DOMAIN = "users.noreply.github.com";
  * Whole addresses that are legitimate and name no one here. Each needs a reason.
  */
 const ALLOWED_ADDRESSES = new Set([
-  // The trailer docs/contributing.md shows for an agent's commits: a role
-  // address, published by the vendor.
+  // A vendor's published role address, named in docs/contributing.md's list of
+  // what this check allows.
   "noreply@anthropic.com",
   // The SSH form of a GitHub remote, as in `git@github.com:owner/repo.git`.
   "git@github.com",
