@@ -36,6 +36,12 @@ public struct OutputRecord: Codable, Equatable {
   public func deviceId(mac: String, key: String) -> String {
     kioskIdentity == true ? mac : DeviceIdentity.deviceId(mac: mac, key: key)
   }
+
+  /// The id an output goes by, whether or not it has a record yet: a record's own,
+  /// else the one a new record would get.
+  public static func deviceId(of record: OutputRecord?, mac: String, key: String) -> String {
+    record?.deviceId(mac: mac, key: key) ?? DeviceIdentity.deviceId(mac: mac, key: key)
+  }
 }
 
 /// A Mac that was a Chrome kiosk keeps its screen when the helper takes its place.

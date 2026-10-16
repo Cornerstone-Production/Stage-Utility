@@ -397,7 +397,7 @@ final class AppModel: ObservableObject {
 
   private func deviceId(_ rt: Runtime) -> String {
     let key = rt.descriptor.key
-    return store.record(for: key)?.deviceId(mac: identity.deviceId, key: key) ?? DeviceIdentity.deviceId(mac: identity.deviceId, key: key)
+    return OutputRecord.deviceId(of: store.record(for: key), mac: identity.deviceId, key: key)
   }
 
   // MARK: Server
