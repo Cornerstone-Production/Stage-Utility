@@ -117,7 +117,7 @@ since nothing outside this machine ever reaches them:
 
 ## What a feed is
 
-A feed is a name and a source, `{id, name, source}`. The `id` is a slug of the
+A feed is a name (up to 60 characters) and a source, `{id, name, source}`. The `id` is a slug of the
 name it was given when created and never changes, even across a rename — so
 renaming a feed on the Video feeds page does not break any layout or Home card
 already pointed at it.
@@ -202,7 +202,7 @@ For a device that connects outward — OBS, a hardware encoder, or an NDI
 source through a converter box. Choose **How it connects**: SRT, RTMP, or
 WHIP (OBS) — switching it before saving previews that protocol's own address
 below, with the same password, so there is no need to save just to see what
-each one looks like. Saving the feed mints a random password, shown once the
+each one looks like. Saving the feed mints a random 16-character password, shown once the
 feed exists under **Paste this into the device** — the exact address to
 paste, with **Copy** (its label reads "Copied" for a moment after) — and
 **Password**.
@@ -533,7 +533,18 @@ from the server:
   removed; `could not remove old relay file <name>` when one cannot be.
 - A busy port, naming the program holding it and its process id.
 - `stopped a relay left over from the last run (pid N)`, or that it would
-  not stop, which also stops this start.
+  not stop, which also stops this start; `the relay left over from the last run is
+  gone` when a later try succeeds.
+- `relay restarting on new ports` when saved ports change under a running relay, and
+  `the relay's pre-launch checks are passing again` once a start that was failing
+  before launch gets through.
+- `relay recovered` once a restarted relay has stayed up long enough to count as healthy,
+  and `the relay's own process reported an error: …` for an error the child process
+  raised without exiting.
+- `could not look for old relay versions to remove: …` when clearing earlier releases
+  cannot list the folder; the relay is unaffected.
+- `could not save the last-seen time: …` when the time a feed was last seen cannot be
+  written, and `saving the last-seen time is working again`.
 - The relay's own bookkeeping failing, each once per outage and once more
   when it works again: `could not stop the relay` and `stopping the relay is
   working again`; a start or stop step that could not run while the relay
