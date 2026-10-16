@@ -1595,17 +1595,11 @@ export class StageController {
       }
       return out;
     };
-    const views = this.state.views.map((v) =>
-      v.id === id ? { ...v, calendarSources: clean(calendarSources), calendarTags: clean(calendarTags) } : v,
-    );
-    console.log(
+    return this.commitViewPatch(
+      id,
+      { calendarSources: clean(calendarSources), calendarTags: clean(calendarTags) },
       `[stage-controller] setViewCalendarFilters id=${scrub(id)} calendars=${scrub(calendarSources.length)} tags=${scrub(calendarTags.length)}`,
     );
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
   }
 
   // ── ServiceCue ──────────────────────────────────────────────────────────
@@ -3149,17 +3143,28 @@ export class StageController {
     return view;
   }
 
-  async renameView(id: string, name: string): Promise<StageState> {
-    const trimmed = name.trim();
-    if (!trimmed) throw new Error("views:rename — name must be non-empty");
-    this.requireView(id, "views:rename");
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, name: trimmed } : v));
-    console.log(`[stage-controller] renameView id=${scrub(id)} name="${scrub(trimmed)}"`);
+  /**
+   * The one write behind every setter that changes fields on a single view: patch
+   * it, log, assign the state, save, recompute, broadcast. The views twin of
+   * commitOutputPatch, for the setters with nothing of their own to do between the
+   * save and the broadcast. The caller has already refused what it refuses and
+   * built `logLine` with scrub() on every value it carries.
+   */
+  private async commitViewPatch(id: string, patch: Partial<View>, logLine: string): Promise<StageState> {
+    const views = this.state.views.map((v) => (v.id === id ? { ...v, ...patch } : v));
+    console.log(scrub(logLine, 400));
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();
     this.broadcast();
     return this.state;
+  }
+
+  async renameView(id: string, name: string): Promise<StageState> {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("views:rename — name must be non-empty");
+    this.requireView(id, "views:rename");
+    return this.commitViewPatch(id, { name: trimmed }, `[stage-controller] renameView id=${scrub(id)} name="${scrub(trimmed)}"`);
   }
 
   /** Change a View's kind (used by the legacy /api/displays kind alias). */
@@ -3249,25 +3254,21 @@ export class StageController {
   async setViewNdiSource(id: string, source: string | null): Promise<StageState> {
     this.requireView(id, "views:setNdiSource");
     const ndiSource = source?.trim() ? source.trim() : null;
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, ndiSource } : v));
-    console.log(`[stage-controller] setViewNdiSource id=${scrub(id)} source=${scrub(ndiSource ?? "(none)")}`);
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitViewPatch(
+      id,
+      { ndiSource },
+      `[stage-controller] setViewNdiSource id=${scrub(id)} source=${scrub(ndiSource ?? "(none)")}`,
+    );
   }
 
   /** Set (or clear) a slots-View's physical-alignment config. */
   async setViewSlotsLayout(id: string, slotsLayout: SlotsLayout | null): Promise<StageState> {
     this.requireView(id, "views:setSlotsLayout");
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, slotsLayout } : v));
-    console.log(`[stage-controller] setViewSlotsLayout id=${scrub(id)} ${slotsLayout ? `${scrub(slotsLayout.displayWidthIn)}in` : "(off)"}`);
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitViewPatch(
+      id,
+      { slotsLayout },
+      `[stage-controller] setViewSlotsLayout id=${scrub(id)} ${slotsLayout ? `${scrub(slotsLayout.displayWidthIn)}in` : "(off)"}`,
+    );
   }
 
   /**
@@ -3287,13 +3288,11 @@ export class StageController {
     this.requireView(id, "views:setServiceCueLayout");
     const refused = await this.serviceCueLayoutRefusal(serviceCueLayoutId);
     if (refused) throw new Error(`views:setServiceCueLayout — ${refused}`);
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, serviceCueLayoutId } : v));
-    console.log(`[stage-controller] setViewServiceCueLayout id=${scrub(id)} → ${scrub(serviceCueLayoutId)}`);
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitViewPatch(
+      id,
+      { serviceCueLayoutId },
+      `[stage-controller] setViewServiceCueLayout id=${scrub(id)} → ${scrub(serviceCueLayoutId)}`,
+    );
   }
 
   /**
@@ -3305,13 +3304,11 @@ export class StageController {
    */
   async setViewHideChrome(id: string, hideChrome: boolean): Promise<StageState> {
     this.requireView(id, "views:setHideChrome");
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, hideChrome } : v));
-    console.log(`[stage-controller] setViewHideChrome id=${scrub(id)} → ${scrub(hideChrome ? "HIDDEN" : "shown")}`);
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitViewPatch(
+      id,
+      { hideChrome },
+      `[stage-controller] setViewHideChrome id=${scrub(id)} → ${scrub(hideChrome ? "HIDDEN" : "shown")}`,
+    );
   }
 
   /**
@@ -3324,13 +3321,11 @@ export class StageController {
    */
   async setViewShowInSidebar(id: string, showInSidebar: boolean): Promise<StageState> {
     this.requireView(id, "views:setShowInSidebar");
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, showInSidebar } : v));
-    console.log(`[stage-controller] setViewShowInSidebar id=${scrub(id)} → ${scrub(showInSidebar ? "listed" : "HIDDEN")}`);
-    this.state = { ...this.state, views };
-    await viewsStore.save(views);
-    this.recomputeResolved();
-    this.broadcast();
-    return this.state;
+    return this.commitViewPatch(
+      id,
+      { showInSidebar },
+      `[stage-controller] setViewShowInSidebar id=${scrub(id)} → ${scrub(showInSidebar ? "listed" : "HIDDEN")}`,
+    );
   }
 
   /**
