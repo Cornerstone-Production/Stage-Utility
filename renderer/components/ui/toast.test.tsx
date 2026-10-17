@@ -83,7 +83,7 @@ describe("a toast with a button", () => {
 describe("the same message again", () => {
   const count = (text: string) => (document.body.textContent?.split(text).length ?? 1) - 1;
 
-  test("refreshes the toast in place instead of stacking another", () => {
+  test("refreshes the toast instead of stacking another", () => {
     mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
     render(React.createElement(Toaster));
     act(() => {
@@ -92,6 +92,19 @@ describe("the same message again", () => {
       toast.success("Branding updated.");
     });
     assert.equal(count("Branding updated."), 1, "three identical toasts were stacked");
+  });
+
+  test("the refreshed toast is the newest, so it is the last one in the list", () => {
+    mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+    render(React.createElement(Toaster));
+    act(() => {
+      toast.success("First");
+      toast.success("Second");
+      toast.success("First");
+    });
+    // The store is module-wide, so earlier tests' toasts may still be ahead of these two.
+    const order = [...document.querySelectorAll(".text-footnote")].map((e) => e.textContent).slice(-2);
+    assert.deepEqual(order, ["Second", "First"]);
   });
 
   test("restarts its countdown", () => {
