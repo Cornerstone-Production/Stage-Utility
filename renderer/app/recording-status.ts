@@ -351,10 +351,6 @@ export function formatDuration(sec: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }
 
-/** The loudest current SPL reading across every meter, which is the number
- *  anyone glancing at Home actually wants. Prefers Smaart's A-weighted slow
- *  metric and falls back to whatever the meter reports, since the metric names
- *  come from Smaart verbatim and vary by configuration. */
 /**
  * The `meterId` value meaning "whichever meter is loudest right now".
  *
@@ -364,20 +360,51 @@ export function formatDuration(sec: number): string {
  */
 export const LOUDEST_METER = "loudest";
 
-type SplMeters = { connected: boolean; meters: Record<string, { metrics: Record<string, number> }> } | null;
+export type SplMeters = {
+  connected: boolean;
+  meters: Record<string, { deviceName?: string; channelName?: string; metrics: Record<string, number> }>;
+} | null;
 
 /**
- * The number this card reads off ONE meter: A-weighted when the meter reports
- * one, else whatever it reports first.
+ * The metric the card reads off a meter when nobody picked one: A-weighted when
+ * the meter reports one, else whatever it reports first. Null for a meter with
+ * no metrics at all.
  *
- * Shared by the loudest-meter and pinned-meter paths so the two can never
- * disagree about which metric they are showing — pinning a meter should change
- * WHICH meter you read, not what "SPL" means.
+ * THE one definition of "Automatic". The card, the loudest-meter comparison and
+ * the Metric submenu's "Automatic" row all go through it, so the row can never
+ * name a metric the card is not showing.
  */
-function splReading(meter: { metrics: Record<string, number> }): number | null {
-  const entries = Object.entries(meter.metrics ?? {});
-  if (!entries.length) return null;
-  return (entries.find(([k]) => /SPL\s*A/i.test(k)) ?? entries[0])[1];
+export function autoSplMetric(metrics: Record<string, number> | undefined): string | null {
+  const keys = Object.keys(metrics ?? {});
+  if (!keys.length) return null;
+  return keys.find((k) => /SPL\s*A/i.test(k)) ?? keys[0];
+}
+
+/** A metric name and its value, as read off one meter. */
+type SplReading = { metric: string; value: number };
+
+/**
+ * What this card reads off ONE meter: the metric it resolved to and its value.
+ *
+ * With `metric` unset that is `autoSplMetric`. With one pinned, it is exactly
+ * that metric or null — NEVER another one. Smaart names its metrics and a
+ * reconfiguration can drop one; falling back to the A-weighted number would put a
+ * real figure about a different quantity under a caption naming the one the
+ * operator asked for.
+ *
+ * hasOwn says out loud that the pinned key must be the meter's own: it comes off
+ * a saved card, and "constructor" is `in` every parsed object. The number check
+ * below is what actually rejects such a key, so the two agree.
+ */
+function splReading(
+  meter: { metrics: Record<string, number> },
+  metric?: string,
+): SplReading | null {
+  const metrics = meter.metrics ?? {};
+  const key = metric ? (Object.hasOwn(metrics, metric) ? metric : null) : autoSplMetric(metrics);
+  if (key == null) return null;
+  const value = metrics[key];
+  return typeof value === "number" ? { metric: key, value } : null;
 }
 
 /** A meter key ("device::channel") as the card labels it. */
@@ -385,20 +412,57 @@ function meterName(key: string): string {
   return key.split("::").pop() ?? key;
 }
 
-export function loudestSpl(spl: SplMeters): { value: string; sub: string } {
-  if (!spl?.connected) return { value: "\u2014", sub: "Smaart offline" };
-  let best: number | null = null;
-  let bestName = "";
-  for (const [key, meter] of Object.entries(spl.meters ?? {})) {
-    const reading = splReading(meter);
+/**
+ * The loudest meter, judged on `metric` when one is pinned and on each meter's
+ * own automatic metric otherwise.
+ *
+ * Shared by the card and the Metric submenu so the menu lists the keys of the
+ * very meter the card is reading.
+ */
+function loudestReading(spl: SplMeters, metric?: string): (SplReading & { meterKey: string }) | null {
+  let best: (SplReading & { meterKey: string }) | null = null;
+  for (const [meterKey, meter] of Object.entries(spl?.meters ?? {})) {
+    const reading = splReading(meter, metric);
     if (reading == null) continue;
-    if (best == null || reading > best) {
-      best = reading;
-      bestName = meterName(key);
-    }
+    if (best == null || reading.value > best.value) best = { meterKey, ...reading };
   }
-  if (best == null) return { value: "\u2014", sub: "no readings yet" };
-  return { value: `${Math.round(best)} dB`, sub: bestName };
+  return best;
+}
+
+/**
+ * The card's "no reading" answer. `reportsAnything` says whether the meter(s) in
+ * question reported any metric at all: if they did, the pinned one is what is
+ * missing and the caption names it; if not, nothing has arrived yet.
+ */
+function noReading(metric: string | undefined, reportsAnything: boolean): { value: string; sub: string } {
+  return { value: "\u2014", sub: metric && reportsAnything ? `${metric} not reporting` : "no readings yet" };
+}
+
+/** "<metric> · <meter>", the caption under the number. */
+function splCaption(metric: string, meterKey: string): string {
+  return `${metric} \u00b7 ${meterName(meterKey)}`;
+}
+
+/**
+ * The loudest current SPL reading across every meter, which is the number
+ * anyone glancing at Home actually wants.
+ *
+ * `metric` pins which Smaart metric is compared and shown; unset means each
+ * meter's automatic one. A pinned metric that NO meter reports reads "—" and
+ * names it, rather than quietly showing something else.
+ */
+export function loudestSpl(spl: SplMeters, metric?: string): { value: string; sub: string } {
+  if (!spl?.connected) return { value: "\u2014", sub: "Smaart offline" };
+  const best = loudestReading(spl, metric);
+  if (best == null) {
+    return noReading(metric, Object.values(spl.meters ?? {}).some((m) => autoSplMetric(m.metrics) != null));
+  }
+  return { value: `${Math.round(best.value)} dB`, sub: splCaption(best.metric, best.meterKey) };
+}
+
+/** A meter as the Meter submenu and the Metric submenu's heading name it. */
+function meterLabel(id: string, m: { deviceName?: string; channelName?: string }): string {
+  return m.channelName || m.deviceName || id;
 }
 
 /**
@@ -410,12 +474,12 @@ export function loudestSpl(spl: SplMeters): { value: string; sub: string } {
  * looks unset while the card reads "not reporting", and have to guess.
  */
 export function meterOptions(
-  spl: { meters: Record<string, { deviceName: string; channelName: string }> } | null,
+  spl: { meters: Record<string, { deviceName?: string; channelName?: string }> } | null,
   pinned: string,
 ): { value: string; label: string }[] {
   const out = [{ value: LOUDEST_METER, label: "Loudest meter" }];
   for (const [id, m] of Object.entries(spl?.meters ?? {})) {
-    out.push({ value: id, label: m.channelName || m.deviceName || id });
+    out.push({ value: id, label: meterLabel(id, m) });
   }
   if (pinned !== LOUDEST_METER && !out.some((o) => o.value === pinned)) {
     out.push({ value: pinned, label: `${meterName(pinned)} (not reporting)` });
@@ -431,11 +495,65 @@ export function meterOptions(
  * would read as the channel being fine, which is the opposite of the truth when
  * Smaart has restarted and dropped it.
  */
-export function pinnedSpl(spl: SplMeters, meterId: string): { value: string; sub: string } {
+export function pinnedSpl(spl: SplMeters, meterId: string, metric?: string): { value: string; sub: string } {
   if (!spl?.connected) return { value: "\u2014", sub: "Smaart offline" };
   const meter = spl.meters?.[meterId];
   if (!meter) return { value: "\u2014", sub: `${meterName(meterId)} not reporting` };
-  const reading = splReading(meter);
-  if (reading == null) return { value: "\u2014", sub: "no readings yet" };
-  return { value: `${Math.round(reading)} dB`, sub: meterName(meterId) };
+  const reading = splReading(meter, metric);
+  if (reading == null) return noReading(metric, autoSplMetric(meter.metrics) != null);
+  return { value: `${Math.round(reading.value)} dB`, sub: splCaption(reading.metric, meterId) };
+}
+
+/** One row of the Metric submenu. `value` is null for a pinned metric the meter
+ *  no longer reports. */
+export interface SplMetricOption {
+  metric: string;
+  value: number | null;
+}
+
+/**
+ * The Metric submenu's content, for the card pinned to `meterId` and `metric`
+ * ("" is Automatic).
+ *
+ * `automatic` is the metric Automatic resolves to right now, for the row's
+ * right-hand hint. `from` names the meter the rows come from and `options` are
+ * every metric that meter reports, in Smaart's order, each with its live value.
+ *
+ * For the loudest-meter default the rows come from the meter the card is
+ * currently reading (judged on the pinned metric, as the card judges it), so the
+ * list always describes the number on screen. A pinned metric the meter has
+ * stopped reporting is still listed, with a null value — the Meter submenu does
+ * the same for a vanished meter, and for the same reason: dropping it leaves a
+ * menu with nothing ticked while the card reads "not reporting".
+ */
+export function metricOptions(
+  spl: SplMeters,
+  meterId: string,
+  metric: string,
+): { automatic: string | null; from: string; options: SplMetricOption[] } {
+  // Offline Smaart keeps its last meters; the card reads "Smaart offline", so the
+  // menu must not list a stale meter's numbers as if they were live.
+  const live = spl?.connected ? spl : null;
+  let from: string;
+  let metrics: Record<string, number>;
+  // What picking Automatic would show: the unpinned loudest meter's own automatic
+  // metric, NOT the automatic metric of the meter the pinned metric is loudest on.
+  let automatic: string | null;
+  if (meterId === LOUDEST_METER) {
+    from = "Loudest meter";
+    // The rows follow the meter the card is reading. If NO meter reports the
+    // pinned metric the card reads a dash and the menu still wants a meter to list,
+    // so use the automatic loudest.
+    const best = loudestReading(live, metric || undefined) ?? loudestReading(live);
+    metrics = (best && live?.meters[best.meterKey]?.metrics) || {};
+    automatic = loudestReading(live)?.metric ?? null;
+  } else {
+    const m = live?.meters?.[meterId];
+    from = m ? meterLabel(meterId, m) : `${meterName(meterId)} (not reporting)`;
+    metrics = m?.metrics ?? {};
+    automatic = autoSplMetric(metrics);
+  }
+  const options: SplMetricOption[] = Object.entries(metrics).map(([k, v]) => ({ metric: k, value: v }));
+  if (metric && !options.some((o) => o.metric === metric)) options.push({ metric, value: null });
+  return { automatic, from, options };
 }

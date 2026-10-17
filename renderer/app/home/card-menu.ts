@@ -11,7 +11,7 @@ import type { ContextMenuItem } from "../../components/ui/context-menu";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
 import { gameOptions } from "../../main/scores-object";
 import { preferredSplMetric } from "../../settings/sections/overview-data";
-import { meterOptions, sourceOptions } from "../recording-status";
+import { metricOptions, meterOptions, sourceOptions, type SplMeters } from "../recording-status";
 import { PICK_OPTIONS, pickedValue, togglesFor, withToggle } from "./card-toggles";
 import { SIZES, SIZE_ORDER, WHEN_LABELS, removeCard, replaceCard, setSize, setWhen, sizeOf, whenOf } from "./home-cards";
 import type { HomeCardSize, HomeVisibility } from "@main/types/views";
@@ -21,7 +21,7 @@ export interface CardMenuDeps {
   /** The followed teams, for a scores card's Game submenu. */
   scoresFavourites: Parameters<typeof gameOptions>[0];
   /** Live Smaart state, for the SPL card's Meter and Metric submenus. */
-  spl: Parameters<typeof meterOptions>[0];
+  spl: SplMeters;
   /** History's per-service summaries, for Recent services' Metric submenu. */
   splSummary: SplServiceSummary[] | undefined;
   /** Apply a change to the card list and persist it. */
@@ -99,8 +99,8 @@ export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMe
     });
   }
   // Which name the compact PVP "now" caption borrows. Offered only while
-  // Compact is ON, the same reason the SPL metric picker below is gated on
-  // its own switch — a Label picker for a mode the card is not drawing is a
+  // Compact is ON, the same reason Recent services' Metric picker below is gated
+  // on its own switch — a Label picker for a mode the card is not drawing is a
   // setting for something the operator cannot see.
   const nowLabel = pickedValue(card, "nowLabel");
   if (nowLabel != null && (card.config as { compact?: boolean }).compact) {
@@ -157,6 +157,37 @@ export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMe
         },
       })),
     });
+    // Which Smaart metric the SPL card reads, right under which meter. The
+    // Automatic row names the metric it resolves to this second; every other row
+    // is a metric the meter in view reports, with its live value, so the choice is
+    // made looking at the numbers. Rebuilt with every SPL push, like the rest of
+    // the menu. `home-spl` only: see PICKS.metricKey for why the wall object is
+    // not offered the same menu.
+    const metric = pickedValue(card, "metricKey");
+    if (metric != null && type === "home-spl") {
+      const model = metricOptions(spl, meter, metric);
+      const pick = (next: string) => () => {
+        save((objs) => replaceCard(objs, withToggle(card, "metricKey", next)));
+        close();
+      };
+      const rows: ContextMenuItem[] = [
+        { label: "Automatic", checked: metric === "", meta: model.automatic ?? undefined, onSelect: pick("") },
+      ];
+      if (model.options.length) {
+        rows.push({ separator: true }, { heading: true, label: `From ${model.from}` });
+        for (const o of model.options) {
+          rows.push({
+            // A pinned metric the meter stopped reporting stays listed and ticked,
+            // so the menu is not blank while the card reads "not reporting".
+            label: o.value == null ? `${o.metric} (not reporting)` : o.metric,
+            checked: metric === o.metric,
+            meta: o.value == null ? undefined : o.value.toFixed(1),
+            onSelect: pick(o.metric),
+          });
+        }
+      }
+      items.push({ label: "Metric", items: rows });
+    }
   }
 
   if (items.length) items.push({ separator: true });

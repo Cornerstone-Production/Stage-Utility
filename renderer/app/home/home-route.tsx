@@ -214,7 +214,7 @@ export function HomeRoute() {
     retry: 1,
   });
   /**
-   * The Smaart meters, for the "Meter" submenu on an SPL card.
+   * The Smaart meters, for the "Meter" and "Metric" submenus on an SPL card.
    *
    * Gated exactly like the favourites above, and for the same reason: Home is
    * the page every operator lands on, and opening an SPL subscription for a card
