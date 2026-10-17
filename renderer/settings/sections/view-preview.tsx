@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { cn } from "@renderer/lib/cn";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { previewSrc } from "@renderer/main/preview-url";
 
@@ -26,6 +27,7 @@ export function ViewPreview({
   outputId = null,
   aspect = 16 / 9,
   draftSlots = null,
+  bleed = false,
 }: {
   viewId: string;
   /**
@@ -47,6 +49,13 @@ export function ViewPreview({
   outputId?: string | null;
   aspect?: number;
   draftSlots?: Slot[] | null;
+  /**
+   * Edge to edge inside whatever frames it: no side border and no corner radius,
+   * so the container's own border and radius are the preview's sides. The top and
+   * bottom rules stay, as the seam against the header above and the footer below.
+   * The Screens cards use it; the View editor's own preview keeps its rounded box.
+   */
+  bleed?: boolean;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -97,14 +106,18 @@ export function ViewPreview({
   return (
     <div
       ref={boxRef}
-      className="relative isolate w-full overflow-hidden rounded-xl border border-gray-a4 bg-black"
+      className={cn(
+        "relative isolate w-full overflow-hidden border border-gray-a4 bg-black",
+        bleed ? "border-x-0" : "rounded-xl",
+      )}
       style={{
         aspectRatio: `${DESIGN_W} / ${designH}`,
         // The iframe is scaled with a transform, which puts it on its own compositor
         // layer, and `overflow: hidden` with a radius does not reliably clip such a
         // layer: the frame's own square corners showed through the rounded box. A
-        // clip-path does clip it. 0.75rem is `rounded-xl`, the radius above.
-        clipPath: "inset(0 round 0.75rem)",
+        // clip-path does clip it. 0.75rem is `rounded-xl`, the radius above. A bleed
+        // preview has no radius, so there is nothing to clip.
+        clipPath: bleed ? undefined : "inset(0 round 0.75rem)",
       }}
     >
       <iframe

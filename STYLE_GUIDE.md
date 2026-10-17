@@ -176,7 +176,18 @@ Two card utilities (in `@layer utilities`) build on the tokens:
 
 - **Spacing** (4px scale): sections `flex flex-col gap-6`; field internals `gap-1.5`;
   button rows `gap-2`; field padding `px-3 py-2.5`; section wrapper
-  `px-5 max-sm:px-3 pt-5 max-sm:pt-4 pb-[50vh]` (the `pb-[50vh]` gives scroll runway).
+  `pt-5 max-sm:pt-4 pb-[50vh]` (the `pb-[50vh]` gives scroll runway).
+- **Page gutter:** 8px each side (`px-2`), 12px below `sm` (`max-sm:px-3`), applied once
+  by the shell's `<main>` and nowhere else — a section never pads its own sides. The
+  context strip insets its title by the same amount in CSS, so the page name lines up
+  with the content under it. A route that fills the content area edge to edge cancels
+  the gutter with the negated pair (`-mx-2 max-sm:-mx-3`). `page-gutter.test.ts` holds
+  all three to one number.
+- **Full-bleed preview:** a live preview inside a Screens card (`LazyPreview`, which
+  gives its `ViewPreview` `bleed`) runs edge to edge — no side inset, side border or
+  corner radius — so the card's own border and radius frame it, and its focus ring draws
+  over the preview, inside. Its top and bottom rules stay as the seam
+  against the card's header and footer. Elsewhere a preview keeps its own `rounded-xl` border.
 - **Radius:** `rounded-md` (6px, controls), `rounded-lg` (8px, fieldsets), `rounded-xl`
   (12px, dialogs), `.su-card`'s `0.875rem` (14px), `rounded-full` (pills/dots). Kiosk
   objects use a fractional `cornerRadius` (~`0.0148·H`).
@@ -325,7 +336,7 @@ History, Baptisms, Advanced.
 **Section layout convention** (every section in `renderer/settings/sections/`):
 
 ```tsx
-<div className="px-5 max-sm:px-3 flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
+<div className="flex flex-col gap-6 pt-5 max-sm:pt-4 pb-[50vh]">
   <FieldSet title="…">
     <FieldGroup>
       <Field orientation="horizontal">
