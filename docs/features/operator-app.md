@@ -152,7 +152,7 @@ an edited Home alone.
 ## Screens
 
 **Screens** has a card for every physical screen, with a live preview of what it
-shows. The card keeps what an operator changes while working: its name, the view
+shows, running edge to edge across the card. The card keeps what an operator changes while working: its name, the view
 it shows, the colour and icon, the message groups it is in, and the way into its
 layout. Its menu (the vertical dots) is actions only:
 
