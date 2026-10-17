@@ -8,7 +8,7 @@
 //
 // THE FIRST FIX WAS WRONG AND THIS IS THE HALF THAT CATCHES IT. The console
 // cancelled the padding itself with `sm:-mt-4`, the way it already cancels the
-// horizontal gutter with `-mx-5`. But the console is `h-full`, and a negative
+// horizontal gutter with negative side margins. But the console is `h-full`, and a negative
 // margin moves a box without giving it the height back — so it still measured
 // the padded area, ended 16px short, and the white band simply moved from above
 // the console to below it. Measured in a browser at 900x800:
@@ -115,6 +115,8 @@ describe("the gutter is decided in one place", () => {
 
   test("the horizontal cancel stays, because that one does work", () => {
     // Width is not h-full: the negative inline margins genuinely widen the box.
-    assert.match(consoleRoute, /-mx-5/, "the console lost its full-bleed width");
+    // The VALUE is page-gutter.test.ts's to check: it derives the cancel from the
+    // shell's own gutter, so the number lives in one place.
+    assert.match(consoleRoute, /-mx-\d+ max-sm:-mx-\d+/, "the console lost its full-bleed width");
   });
 });

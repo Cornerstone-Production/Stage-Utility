@@ -103,7 +103,7 @@ export function ConsoleRoute() {
     // ended 16px short — the white band simply moved from above the console to
     // below it. The shell does not apply the padding to a console at all now.
     <div
-      className="relative flex h-full min-h-0 flex-col -mx-5 max-sm:-mx-3"
+      className="relative flex h-full min-h-0 flex-col -mx-2 max-sm:-mx-3"
       // Proximity, not a hover region. A region big enough to aim at is also a
       // region that swallows every click inside it, and the top-right corner of
       // a console is a perfectly reasonable place to put a control. This watches

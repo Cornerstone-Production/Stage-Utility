@@ -835,7 +835,7 @@ body {
    items printed over the page beside them. */
 .context-strip {
   column-gap: 12px;
-  padding-inline: 20px;
+  padding-inline: 8px;
   overflow: hidden;
 }
 
@@ -919,8 +919,9 @@ body {
 }
 
 /* Level 2 — the compact bar. Every idle word becomes that item's own mark (the
-   `.bar-drop-2` rule above), gaps and edge padding tighten, and the capsule
-   gives up the space around its logos. Counts keep their digits: the plug
+   `.bar-drop-2` rule above), gaps tighten, and the capsule gives up the space
+   around its logos. The edge padding is already 8px from `sm` up, so it only
+   moves on a phone. Counts keep their digits: the plug
    appears BESIDE the 6, never instead of it. */
 .context-strip:is([data-fit="2"], [data-fit="3"]) {
   column-gap: 8px;

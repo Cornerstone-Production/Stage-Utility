@@ -221,7 +221,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     //
     // Chromeless since isSharedChromelessPath named this route: no rail and no
     // context bar, so h-full is the whole window.
-    <div className="flex flex-col h-full overflow-hidden kiosk-surface -mx-5 max-sm:-mx-3 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="flex flex-col h-full overflow-hidden kiosk-surface -mx-2 max-sm:-mx-3 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       {/* The bar and the rundown are shared with the ServiceCue view-kind and the
           layout object; only the two navigation slots are this page's own. */}
       <ServiceCueHeader
