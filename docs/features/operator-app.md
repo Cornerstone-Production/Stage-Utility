@@ -416,19 +416,43 @@ a wall, in a different page entirely.
 ## Branding
 
 **Settings → Branding** controls how the app introduces itself, on every screen
-and in its own chrome.
+and in its own chrome. The page opens on the app's identity: the logo large on a
+stage-black canvas with the name beneath it, as a display draws them. Beside it sit
+the settings that style them. Below are the images, each drawn where it is used;
+click the logo or any image to edit it in a dialog.
 
 | | |
 |---|---|
-| **App name** | shown in the sidebar and the kiosk's top bar. Set it to your organization's name |
-| **Logo** | PNG, JPG, SVG or WebP, up to 1.5 MB, shown next to the app name and used as the browser tab icon on every page. With **Recolor to match theme** on, the tab icon is the logo recolored to contrast with the browser's light or dark setting (a custom browser theme can differ from it); with it off, it is the logo as uploaded. Removing the logo restores the stock icon |
-| **Recolor to match theme** | for a single-color logo — recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
-| **Accent color** | the brand color for buttons, selection, links and focus, app-wide. Status colors (live / over / caution) are unaffected. Clear to use the built-in default |
-| **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray |
+| **App name** | shown in the sidebar, on every display's top bar and in the browser tab, and used as the home-screen label when the app is added to a phone or tablet. Set it to your organization's name |
+| **Accent color** | the brand color for buttons, selection, links and focus, app-wide: six presets, a custom color, or **Default**. Status colors (live / over / caution) are unaffected |
+| **Recolor to match theme** | shown once a logo is set. For a single-color logo: recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
+| **Logo** | click it in the identity canvas. PNG, JPG, SVG or WebP, up to 1.5 MB, with **Upload** (**Replace** once set), **Adjust** (pan and zoom a square crop) and **Remove**. Shown next to the app name and, unless a tab icon is set, used as the browser tab icon on every page. With **Recolor to match theme** on, the tab icon is the logo recolored to contrast with the browser's light or dark setting (a custom browser theme can differ from it); with it off, it is the logo as uploaded |
+| **Tab and home-screen icon** | the image behind the browser tab, bookmarks, and the icon on a phone or tablet home screen. Until one is set the tab shows your logo and phones show the built-in Stage Utility icon |
+| **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray. Same **Upload**, **Adjust** and **Remove** |
 | **Default avatar** | shown for a scheduled person with no photo in Planning Center, in place of their initials, recolored to match the theme. A built-in silhouette is the fallback when unset |
 
-The connect QR toggle lives on this page too — see
+The connect QR toggle is the last card on this page — see
 [QR codes](../display-urls.md#qr-codes).
+
+### Tab and home-screen icon
+
+Click the icon card, then **Upload** a square PNG, SVG or WebP (at least 512 x 512),
+or press **Use my logo** to build it from the logo already set. Stage Utility draws
+every size from that one square in your browser: 180 px for the iPhone and iPad
+home screen, 192 and 512 px for Android and the tab, and a second 512 px version
+for Android's round and rounded-square masks with the art kept inside the centre
+80%. The dialog previews it at tab, iPhone and Android sizes.
+
+**Background** fills the transparent areas of your art (black, two blues or white);
+phones would otherwise fill them with black. Changing it redraws every size at once.
+Once set, the dialog offers **Replace**, **Adjust** and **Remove**. Removing it puts
+everything back: the tab follows the logo again, and phones get the built-in icon.
+
+A tab icon is shown exactly as drawn and never recolored, and it wins over the
+logo. The home-screen label is the app name, read by iOS when the app is added, so
+renaming the app does not rename an icon already on a home screen; adding it again
+does. The manifest and icon files behind this are listed in the
+[API](../reference/api.md).
 
 ## Read-only links to hand out
 
