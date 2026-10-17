@@ -129,7 +129,7 @@ function DeviceEditor({ device: d, onUpdate, onRemove }: { device: PatchDevice; 
       </div>
 
       <div className="border-t border-line pt-2">
-        <Button variant="transparent" size="small" onClick={onRemove} aria-label={`Remove ${d.name}`} className="text-fg-subtle hover:text-warn-11">
+        <Button variant="transparent" size="small" onClick={onRemove} aria-label={`Remove ${d.name}`} className="text-fg-subtle hover:text-danger-11">
           <Trash2Icon className="size-3.5" /> Remove device
         </Button>
       </div>
