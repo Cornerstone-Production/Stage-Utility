@@ -123,14 +123,16 @@ export function PatchWeekly({
       )}
       {plan?.planId && (
         <div className="border-t border-line py-1.5">
-          <div className="flex items-center justify-between gap-2 text-caption1">
+          {/* Stacked: the plan's title is long and would otherwise wrap to four
+              lines beside its select. */}
+          <div className="flex flex-col gap-1 text-caption1">
             <span className="min-w-0 font-medium text-fg">This week{plan.planTitle ? ` · ${plan.planTitle}` : ""}</span>
             {/* The per-plan override is the one assignment no delete path
                 cleans up: removing a variant clears it from byServiceType and
                 leaves byPlan pointing at it. The Select keeps that id visible
                 rather than reading as "Use standing". */}
             <Select value={planEntry?.variantId ?? ""} onValueChange={(v) => setPlanVariant(plan.planId!, v)}>
-              <SelectTrigger className={WA_SELECT}><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-6 w-full px-2"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="">Use standing{standingForPlan ? ` — ${variants.find((v) => v.id === standingForPlan)?.name ?? "variant"}` : " — Default"}</SelectItem>
                 {variants.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
