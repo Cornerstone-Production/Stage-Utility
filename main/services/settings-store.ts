@@ -2,6 +2,7 @@
 // integration configs (non-secret fields), display options.
 
 import type { BaptismAutoStart, BaptismMode, DisplayInfo, Output } from "../types/stage.js";
+import { NO_APP_ICON } from "./app-icon.js";
 import { setAppTimeZone } from "./app-timezone.js";
 import { externalizeBrandingImages } from "./branding-image-store.js";
 import { DataStore } from "./data-store.js";
@@ -93,6 +94,18 @@ export interface SettingsData {
   /** Original upload + crop transform for the default avatar (settings-only). */
   defaultAvatarOriginal: string | null;
   defaultAvatarCrop: { scale: number; x: number; y: number } | null;
+  /** The custom tab and home-screen icon. All null until one is set, and then all
+   *  set together (see app-icon.ts). `appIcon` is the square art the sizes are drawn
+   *  from; the rest are what browsers and phones are served. */
+  appIcon: string | null;
+  appIconOriginal: string | null;
+  appIconCrop: { scale: number; x: number; y: number } | null;
+  /** `#rrggbb` the sizes were drawn over, behind any transparent area. */
+  appIconBackground: string;
+  appIconApple: string | null;
+  appIcon192: string | null;
+  appIcon512: string | null;
+  appIconMaskable: string | null;
   /** Show NDI-related controls (source field, NDI video object). Off by default —
    *  NDI is only used by the native Apple client.
    *
@@ -223,6 +236,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   defaultAvatar: null,
   defaultAvatarOriginal: null,
   defaultAvatarCrop: null,
+  ...NO_APP_ICON,
   ndiEnabled: false,
   publicUrl: null,
   iconColors: {},

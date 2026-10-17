@@ -7,13 +7,14 @@
 
 import { type RouteCtx, json, error, readBody, MAX_IMAGE_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
+import { parseAppIcon } from "../app-icon.js";
 
 export async function brandingRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, url, method } = c;
     // ── Branding (app name + logos) ─────────────────────────────────────────
     if (method === "GET" && pathname === "/api/branding/source") {
       const t = url.searchParams.get("target");
-      const target = t === "empty" ? "empty" : t === "avatar" ? "avatar" : "app";
+      const target = t === "empty" ? "empty" : t === "avatar" ? "avatar" : t === "icon" ? "icon" : "app";
       json(res, await stageController.getBrandingSource(target));
       return;
     }
@@ -71,6 +72,16 @@ export async function brandingRoutes(c: RouteCtx): Promise<void> {
       readCrop("logoCrop");
       readCrop("emptyLogoCrop");
       readCrop("avatarCrop");
+
+      // The tab and home-screen icon is validated as one unit (see app-icon.ts).
+      if ("icon" in body) {
+        const icon = parseAppIcon(body.icon);
+        if (!icon.ok) {
+          error(res, icon.error);
+          return;
+        }
+        partial.icon = icon.value;
+      }
 
       const state = await stageController.setBranding(
         partial as Parameters<typeof stageController.setBranding>[0],

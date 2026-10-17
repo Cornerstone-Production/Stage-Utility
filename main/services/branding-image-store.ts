@@ -1,4 +1,4 @@
-// branding-image-store.ts — the app logo, empty-slot logo and default avatar, kept
+// branding-image-store.ts — the app logo, empty-slot logo, default avatar and app icon, kept
 // as files rather than base64 inside settings.
 //
 // They used to live inline, which cost twice over. Two of them ride in stage:state,
@@ -24,6 +24,14 @@ export const BRANDING_IMAGE_KEYS = [
   "emptySlotLogoOriginal",
   "defaultAvatar",
   "defaultAvatarOriginal",
+  // The custom tab and home-screen icon: the art it is drawn from, that art's
+  // pre-crop upload, and the four sizes served to browsers and phones.
+  "appIcon",
+  "appIconOriginal",
+  "appIconApple",
+  "appIcon192",
+  "appIcon512",
+  "appIconMaskable",
 ] as const;
 
 export type BrandingImageKey = (typeof BRANDING_IMAGE_KEYS)[number];

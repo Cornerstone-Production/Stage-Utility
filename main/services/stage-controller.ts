@@ -55,6 +55,7 @@ import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
 import { PersonDirectory } from "./person-directory.js";
+import { DEFAULT_ICON_BACKGROUND, iconToSettings, NO_APP_ICON, type AppIconInput } from "./app-icon.js";
 import { externalizeBrandingImages, migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore, describeSlotsTarget, type SlotsTarget } from "./slots-store.js";
@@ -430,6 +431,9 @@ export class StageController {
     appLogoMonochrome: true,
     emptySlotLogo: null,
     defaultAvatar: null,
+    appIcon192: null,
+    appIconMaskable: null,
+    appIconBackground: DEFAULT_ICON_BACKGROUND,
     ndiEnabled: false,
     publicUrl: null,
     captionChannelColors: {},
@@ -668,6 +672,9 @@ export class StageController {
       appLogoMonochrome: settings.appLogoMonochrome ?? true,
       emptySlotLogo: settings.emptySlotLogo ?? null,
       defaultAvatar: settings.defaultAvatar ?? null,
+      appIcon192: settings.appIcon192 ?? null,
+      appIconMaskable: settings.appIconMaskable ?? null,
+      appIconBackground: settings.appIconBackground ?? DEFAULT_ICON_BACKGROUND,
       ndiEnabled: settings.ndiEnabled ?? false,
       publicUrl: settings.publicUrl ?? null,
       // Both of these are written to settings.json by their setters and were
@@ -2805,15 +2812,25 @@ export class StageController {
     avatar?: string | null;
     avatarOriginal?: string | null;
     avatarCrop?: { scale: number; x: number; y: number } | null;
+    /** The custom tab and home-screen icon, set as a whole; `null` removes it. */
+    icon?: AppIconInput | null;
   }): Promise<StageState> {
     // Fields that live in both the broadcast state and settings.
-    const stateNext: Partial<Pick<StageState, "appName" | "accentColor" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar">> = {};
+    const stateNext: Partial<Pick<StageState, "appName" | "accentColor" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar" | "appIcon192" | "appIconMaskable" | "appIconBackground">> = {};
     if (typeof partial.name === "string") stateNext.appName = partial.name.trim() || "Stage Utility";
     if (partial.accentColor !== undefined) stateNext.accentColor = partial.accentColor;
     if (partial.logo !== undefined) stateNext.appLogo = partial.logo;
     if (typeof partial.monochrome === "boolean") stateNext.appLogoMonochrome = partial.monochrome;
     if (partial.emptyLogo !== undefined) stateNext.emptySlotLogo = partial.emptyLogo;
     if (partial.avatar !== undefined) stateNext.defaultAvatar = partial.avatar;
+    // One icon is five images that stand or fall together, so it is decided once
+    // here and fanned out to both halves below.
+    const iconSettings = partial.icon === undefined ? null : partial.icon === null ? NO_APP_ICON : iconToSettings(partial.icon);
+    if (iconSettings) {
+      stateNext.appIcon192 = iconSettings.appIcon192;
+      stateNext.appIconMaskable = iconSettings.appIconMaskable;
+      stateNext.appIconBackground = iconSettings.appIconBackground;
+    }
 
     // Images arrive as base64 data URLs. settingsStore.patch stores them as files,
     // but only for the copy it writes: merged into this.state as-is, the full data
@@ -2823,7 +2840,9 @@ export class StageController {
     const stored = await externalizeBrandingImages(stateNext);
 
     // Settings-only fields (originals + crops), never broadcast.
-    const settingsNext: Record<string, unknown> = { ...stored };
+    // The icon's sizes are already stored references in `stored`; they win over the
+    // data URLs they came from, so no image is written twice.
+    const settingsNext: Record<string, unknown> = { ...iconSettings, ...stored };
     if (partial.logoOriginal !== undefined) settingsNext.appLogoOriginal = partial.logoOriginal;
     if (partial.logoCrop !== undefined) settingsNext.appLogoCrop = partial.logoCrop;
     if (partial.emptyLogoOriginal !== undefined) settingsNext.emptySlotLogoOriginal = partial.emptyLogoOriginal;
@@ -2862,6 +2881,12 @@ export class StageController {
     );
     this.state = { ...this.state, ...stored };
     await settingsStore.patch(settingsStored);
+    // After the write, so the line is only ever true. One per change, never per request.
+    if (partial.icon) {
+      console.log("[branding] custom tab and home-screen icon set, background", scrub(partial.icon.background));
+    } else if (partial.icon === null) {
+      console.log("[branding] custom tab and home-screen icon removed; the tab follows the logo and phones show the built-in icon");
+    }
     this.broadcast();
     return this.state;
   }
@@ -2895,7 +2920,7 @@ export class StageController {
   }
 
   /** Original upload + saved crop transform for a brand image, for re-editing. */
-  async getBrandingSource(target: "app" | "empty" | "avatar" = "app"): Promise<{
+  async getBrandingSource(target: "app" | "empty" | "avatar" | "icon" = "app"): Promise<{
     original: string | null;
     crop: { scale: number; x: number; y: number } | null;
   }> {
@@ -2910,6 +2935,12 @@ export class StageController {
       return {
         original: settings.defaultAvatarOriginal ?? null,
         crop: settings.defaultAvatarCrop ?? null,
+      };
+    }
+    if (target === "icon") {
+      return {
+        original: settings.appIconOriginal ?? null,
+        crop: settings.appIconCrop ?? null,
       };
     }
     return { original: settings.appLogoOriginal ?? null, crop: settings.appLogoCrop ?? null };
