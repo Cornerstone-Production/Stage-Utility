@@ -112,8 +112,8 @@ export function isConsolePath(pathname: string, views: readonly View[] | undefin
 /**
  * A route that draws its OWN full-bleed surface, edge to edge.
  *
- * The shell gutters its content — 8px each side (12px on a phone), 16px under the strip — which is
- * air between the strip and a page. A route that paints its own ground to the
+ * The shell gutters its content — 8px each side (12px on a phone), 16px under the
+ * strip — which is air between the strip and a page. A route that paints its own ground to the
  * edges has no page for that air to sit around: it renders as a light frame
  * drawn around a dark slab, which is what was reported on ServiceCue.
  *

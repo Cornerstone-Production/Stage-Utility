@@ -56,7 +56,7 @@ function px(utility: string): number {
  * The context bar was the second entry and is not any more. It sits outside
  * <main> too and still carries the same gutter, but it declares it in CSS rather
  * than in utilities, because its fit ladder tightens the edge padding at level 2
- * and a rung that has to out-specify a Tailwind class to do it stops working the
+ * (on a phone, where the gutter is 12px) and a rung that has to out-specify a Tailwind class to do it stops working the
  * first time somebody reorders the class list. See `.context-strip`.
  */
 const ALLOWED = new Set([
@@ -114,7 +114,7 @@ describe("page gutter", () => {
     );
   });
 
-  test("the context strip insets by the same amount, at both widths", () => {
+  test("the context strip insets by the same amount, at both widths, before the fit ladder tightens it", () => {
     // The strip sits OUTSIDE <main>, so it cannot inherit the gutter and declares
     // its own in CSS. It is the title's left edge: out of step with the content
     // below it, the page name sits visibly off the column it heads.

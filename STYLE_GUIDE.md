@@ -183,9 +183,10 @@ Two card utilities (in `@layer utilities`) build on the tokens:
   with the content under it. A route that fills the content area edge to edge cancels
   the gutter with the negated pair (`-mx-2 max-sm:-mx-3`). `page-gutter.test.ts` holds
   all three to one number.
-- **Full-bleed preview:** a live preview inside a Screens card (`<LazyPreview bleed>`) runs
-  edge to edge — no side inset, side border or corner radius — so the card's own border and
-  radius frame it, and its focus ring draws inside. Its top and bottom rules stay as the seam
+- **Full-bleed preview:** a live preview inside a Screens card (`LazyPreview`, which
+  gives its `ViewPreview` `bleed`) runs edge to edge — no side inset, side border or
+  corner radius — so the card's own border and radius frame it, and its focus ring draws
+  over the preview, inside. Its top and bottom rules stay as the seam
   against the card's header and footer. Elsewhere a preview keeps its own `rounded-xl` border.
 - **Radius:** `rounded-md` (6px, controls), `rounded-lg` (8px, fieldsets), `rounded-xl`
   (12px, dialogs), `.su-card`'s `0.875rem` (14px), `rounded-full` (pills/dots). Kiosk

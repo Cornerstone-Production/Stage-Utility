@@ -112,11 +112,4 @@ describe("the gutter is decided in one place", () => {
       "the console pulls itself up to cancel padding — it is h-full, so that moves the white band to the BOTTOM rather than giving the console the height",
     );
   });
-
-  test("the horizontal cancel stays, because that one does work", () => {
-    // Width is not h-full: the negative inline margins genuinely widen the box.
-    // The VALUE is page-gutter.test.ts's to check: it derives the cancel from the
-    // shell's own gutter, so the number lives in one place.
-    assert.match(consoleRoute, /-mx-\d+ max-sm:-mx-\d+/, "the console lost its full-bleed width");
-  });
 });

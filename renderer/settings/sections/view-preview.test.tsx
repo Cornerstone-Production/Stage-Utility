@@ -22,8 +22,8 @@ const { ViewPreview } = await import("./view-preview.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
-// NOT unit-tested here: that the preview's four corners are rounded (or, with
-// `bleed`, square). The scaled
+// NOT unit-tested here: that the preview's four corners are rounded, or with
+// `bleed` square. The scaled
 // iframe sits on its own compositor layer and the box clips it with a clip-path;
 // jsdom loads no stylesheet and paints nothing, so a test could only read the style
 // string back, which would pass whether or not any corner is clipped. It is checked

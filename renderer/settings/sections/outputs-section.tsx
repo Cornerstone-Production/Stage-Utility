@@ -545,7 +545,6 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
             // switch in Screen settings visibly do something: the card loses
             // its bar too.
             outputId={output.id}
-            bleed
             onExpand={onEditLayout}
             expandLabel={`Edit what ${output.name} shows`}
             following={panelOpen ? { label: `Show settings for ${output.name}`, onOpenDisplay: () => window.open(outputUrl, `display-${output.id}`) } : undefined}
@@ -746,7 +745,6 @@ function UnassignedViewCard({
 
       <div className="pt-2">
         <LazyPreview
-          bleed
           viewId={view.id}
           onExpand={onEditLayout}
           expandLabel={`Edit ${view.name}`}

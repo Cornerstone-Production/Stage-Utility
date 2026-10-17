@@ -93,7 +93,11 @@ globalThis.fetch = (async (input: RequestInfo | URL) => {
 }) as typeof fetch;
 
 
-function renderRow(struggles: Parameters<typeof OutputRow>[0]["struggles"], lags: Parameters<typeof OutputRow>[0]["lags"] = []) {
+function renderRow(
+  struggles: Parameters<typeof OutputRow>[0]["struggles"],
+  lags: Parameters<typeof OutputRow>[0]["lags"] = [],
+  extra: Partial<Parameters<typeof OutputRow>[0]> = {},
+) {
   return render(
     React.createElement(
       TooltipProvider,
@@ -116,6 +120,7 @@ function renderRow(struggles: Parameters<typeof OutputRow>[0]["struggles"], lags
         onRefresh: () => {},
         onRemove: () => {},
         onRequestNewView: () => {},
+        ...extra,
       }),
     ),
   );
@@ -352,11 +357,10 @@ test("OutputsSection builds the lagging box from the pair's EPISODE — the wors
 
 // ── The preview runs edge to edge inside its card ────────────────────────────
 //
-// NOT covered: that it LOOKS edge to edge. jsdom loads no stylesheet, so a class
-// is all it can see; the 9px from the rail to the preview's left edge is
-// measured in a browser. What this does prove is the wiring that has failed
-// before: the `bleed` prop reaching the preview box, and no wrapper between the
-// card and the preview putting its inset back.
+// jsdom loads no stylesheet, so a class is all it can see; how it LOOKS (9px from
+// the rail to the preview's left edge) is checked in a browser. What this proves is
+// the wiring that has failed before: the `bleed` reaching the preview box, and no
+// wrapper between the card and the preview putting an inset or a radius back.
 
 /** Every element from the preview iframe up to, but not including, the card root —
  *  the one `overflow-hidden rounded-xl` box, which is what frames a bleeding preview. */
@@ -371,45 +375,36 @@ function chainAbove(iframe: Element): Element[] {
   return chain;
 }
 
-function assertBleeds(iframe: Element, what: string): void {
+/** Any padding or margin on the sides, at any breakpoint: `px-3`, `p-3`, `ps-3`, `sm:mx-2`. */
+const SIDE_SPACING = /^(?:[\w-]+:)*-?(?:p|m)[xlrse]?-\d/;
+
+function assertBleeds(iframe: Element, what: string): Element[] {
   const chain = chainAbove(iframe);
   const box = chain[0]!;
   assert.ok(box.classList.contains("border-x-0"), `${what}: the preview box still has side borders`);
+  assert.equal((box as HTMLElement).style.clipPath, "", `${what}: the preview box still clips to a radius`);
   for (const el of chain) {
-    assert.ok(!el.classList.contains("rounded-xl"), `${what}: a rounded-xl sits between the card and the preview (${el.className})`);
-    assert.ok(![...el.classList].some((c) => /^p[xlr]-/.test(c)), `${what}: a wrapper insets the preview sideways (${el.className})`);
+    const classes = [...el.classList];
+    assert.ok(!classes.some((c) => /(^|:)rounded/.test(c)), `${what}: a rounded corner sits between the card and the preview (${el.className})`);
+    assert.ok(!classes.some((c) => SIDE_SPACING.test(c) && !/(^|:)(mt|mb|pt|pb)-/.test(c)), `${what}: something insets the preview sideways (${el.className})`);
   }
+  return chain;
 }
 
 test("a screen card's preview has no side inset, side border or corner radius", async () => {
-  const { container } = render(
-    React.createElement(
-      TooltipProvider,
-      null,
-      React.createElement(OutputRow, {
-        output: { ...OUTPUT, viewId: "v1" },
-        views: [],
-        baseUrl: "http://192.168.1.50:8788",
-        online: true,
-        struggles: [],
-        lags: [],
-        canRemove: true,
-        iconKey: OUTPUT.id,
-        onRename: () => {},
-        onRenameView: () => {},
-        onSetView: () => {},
-        messageGroups: { groups: [], known: true, failed: false },
-        panelOpen: false,
-        onSelect: () => {},
-        onRefresh: () => {},
-        onRemove: () => {},
-        onRequestNewView: () => {},
-        onEditLayout: () => {},
-      }),
-    ),
-  );
+  const { container } = renderRow([], [], { output: { ...OUTPUT, viewId: "v1" }, onEditLayout: () => {} });
   await eventually(() => assert.ok(container.querySelector("iframe"), "the preview never mounted"));
   assertBleeds(container.querySelector("iframe")!, "screen card");
+});
+
+test("the same holds while the side panel follows, and the button still shows keyboard focus", async () => {
+  const { container } = renderRow([], [], { output: { ...OUTPUT, viewId: "v1" }, onEditLayout: () => {}, panelOpen: true });
+  await eventually(() => assert.ok(container.querySelector("iframe"), "the preview never mounted"));
+  const chain = assertBleeds(container.querySelector("iframe")!, "following screen card");
+  // An inset ring on the button paints under its opaque child, so the ring is its
+  // own overlay inside the button. Deleting it leaves a focused preview unmarked.
+  const button = chain.find((el) => el.tagName === "BUTTON")!;
+  assert.ok(button.querySelector("span.ring-inset"), "the preview button has no focus ring over the preview");
 });
 
 test("a view-not-on-a-screen card's preview runs edge to edge the same way", async () => {

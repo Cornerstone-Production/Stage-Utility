@@ -20,7 +20,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { PlayIcon, ExpandIcon } from "lucide-react";
-import { cn } from "@renderer/lib/cn";
 import { ViewPreview } from "./view-preview";
 
 /**
@@ -67,6 +66,18 @@ export function opensInNewTab(e: { shiftKey: boolean; metaKey: boolean; ctrlKey:
   return e.shiftKey || (isApple() ? e.metaKey : e.ctrlKey);
 }
 
+/**
+ * The keyboard-focus ring, drawn OVER the preview. An outer ring is clipped by the
+ * card, and an inset one on the button paints beneath its opaque child, so
+ * neither shows; this sits above the preview and is lit by the button's own focus.
+ */
+const FOCUS_RING = (
+  <span
+    aria-hidden="true"
+    className="pointer-events-none absolute inset-0 ring-2 ring-inset ring-focus opacity-0 group-focus-visible:opacity-100"
+  />
+);
+
 export function LazyPreview({
   viewId,
   outputId = null,
@@ -74,7 +85,6 @@ export function LazyPreview({
   onExpand,
   expandLabel,
   following,
-  bleed = false,
 }: {
   viewId: string;
   /** The Output this preview stands in for — passed straight through to
@@ -97,10 +107,6 @@ export function LazyPreview({
    * open.
    */
   following?: { label: string; onOpenDisplay?: () => void };
-  /** Edge to edge in the card around it — see ViewPreview. Squares the corners of
-   *  everything drawn over the preview too, and draws the focus ring INSIDE it,
-   *  since the card clips anything outside. */
-  bleed?: boolean;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const tokenRef = useRef<symbol>(Symbol("preview"));
@@ -156,9 +162,9 @@ export function LazyPreview({
     };
   }, [visible, forced]);
 
-  const preview = <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} bleed={bleed} />;
-  const corners = bleed ? "" : "rounded-xl";
-  const ring = cn("focus:outline-none focus-visible:ring-2 focus-visible:ring-focus", bleed && "focus-visible:ring-inset");
+  // Edge to edge: both callers are Screens cards, which clip to their own radius,
+  // so nothing here rounds a corner or draws outside the preview.
+  const preview = <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} bleed />;
 
   /** The live preview, wrapped for whatever the card does with a click on it. */
   function streamingPreview() {
@@ -183,9 +189,10 @@ export function LazyPreview({
                 following.onOpenDisplay();
               }
             }}
-            className={cn("block w-full", corners, ring)}
+            className="group relative block w-full focus:outline-none"
           >
             {preview}
+            {FOCUS_RING}
           </button>
           {/* The way into the editor, as a control of its own: a click on it is
               its own and does not move the panel. */}
@@ -212,14 +219,12 @@ export function LazyPreview({
           onClick={onExpand}
           title={expandLabel}
           aria-label={expandLabel}
-          className={cn("group relative block w-full", corners, ring)}
+          className="group relative block w-full focus:outline-none"
         >
           {preview}
+          {FOCUS_RING}
           <span
-            className={cn(
-              "pointer-events-none absolute inset-0 grid place-items-center bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100",
-              corners,
-            )}
+            className="pointer-events-none absolute inset-0 grid place-items-center bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
             aria-hidden="true"
           >
             {/* A SOLID neutral grey, not white at reduced opacity. Opacity made
@@ -244,10 +249,7 @@ export function LazyPreview({
           type="button"
           data-retarget
           onClick={() => setForced(true)}
-          className={cn(
-            "grid aspect-video w-full place-items-center gap-1.5 border border-dashed border-line text-fg-subtle transition-colors hover:bg-fill hover:text-fg",
-            bleed ? "border-x-0" : "rounded-lg",
-          )}
+          className="grid aspect-video w-full place-items-center gap-1.5 border border-dashed border-x-0 border-line text-fg-subtle transition-colors hover:bg-fill hover:text-fg"
           aria-label="Load this preview"
         >
           <PlayIcon className="size-4" />

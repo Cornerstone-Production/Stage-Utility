@@ -74,14 +74,6 @@ describe("the page and the shell each do their half", () => {
     );
   });
 
-  it("the page cancels the side gutter itself", () => {
-    // Width is not h-full: negative inline margins genuinely widen the box, which
-    // is why this half CAN be done from the page.
-    // The VALUE is page-gutter.test.ts's to check: it derives the cancel from the
-    // shell's own gutter, so the number lives in one place.
-    assert.match(page, /-mx-\d+ max-sm:-mx-\d+/, "the rundown sits inside the side gutter again");
-  });
-
   it("the page sizes to its slot, not to the viewport", () => {
     assert.doesNotMatch(
       page,
