@@ -10,6 +10,9 @@
 // Either every image is present or none is. Five optional keys would let a request
 // set a 180 icon and leave a stale 512 one behind, which a phone then shows.
 
+import { looksLikeStoredRef } from "./branding-image-store.js";
+import { isDataUrl } from "./image-files.js";
+
 export interface IconCrop {
   scale: number;
   x: number;
@@ -59,18 +62,6 @@ export const NO_APP_ICON: AppIconSettings = {
   appIcon512: null,
   appIconMaskable: null,
 };
-
-/** The public paths a custom icon is served at, and the settings field behind each.
- *  The paths are the ones the HTML documents and the manifest already name, so a
- *  custom icon needs no change to either beyond the app name. */
-export const ICON_ROUTES = {
-  "/apple-touch-icon.png": { field: "appIconApple", size: 180 },
-  "/icon-192.png": { field: "appIcon192", size: 192 },
-  "/icon-512.png": { field: "appIcon512", size: 512 },
-  "/icon-maskable-512.png": { field: "appIconMaskable", size: 512 },
-} as const satisfies Record<string, { field: keyof AppIconSettings; size: number }>;
-
-export type IconRoutePath = keyof typeof ICON_ROUTES;
 
 /** Each data URL is held to the cap the other branding images have. */
 const MAX_DATA_URL_CHARS = 2_000_000;
@@ -139,8 +130,10 @@ export function parseAppIcon(v: unknown): IconParse {
 
   let original: string | null = null;
   if (body.original !== null && body.original !== undefined) {
-    if (typeof body.original !== "string" || !body.original.startsWith("data:image/")) {
-      return { ok: false, error: "body.icon.original must be an image data URL or null" };
+    // A stored reference is accepted for the editor's source, which hands back what
+    // GET /api/branding/source gave it; the route checks the file exists.
+    if (!isDataUrl(body.original) && !looksLikeStoredRef(body.original)) {
+      return { ok: false, error: "body.icon.original must be an image data URL, a stored image or null" };
     }
     if (body.original.length > MAX_DATA_URL_CHARS) {
       return { ok: false, error: "body.icon.original too large (max ~1.5 MB)" };

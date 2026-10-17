@@ -7,7 +7,21 @@
 // /icon-*.png and /apple-touch-icon.png paths whether or not an operator has set a
 // custom icon, and app-icon-routes.ts decides which bytes each path answers with.
 
+import type { AppIconSettings } from "./app-icon.js";
+
 export const MANIFEST_PATH = "/manifest.webmanifest";
+
+/** The public paths a custom icon is served at, and the settings field behind each.
+ *  The paths are the ones the HTML documents and the manifest already name, so a
+ *  custom icon needs no change to either beyond the app name. */
+export const ICON_ROUTES = {
+  "/apple-touch-icon.png": { field: "appIconApple" },
+  "/icon-192.png": { field: "appIcon192" },
+  "/icon-512.png": { field: "appIcon512" },
+  "/icon-maskable-512.png": { field: "appIconMaskable" },
+} as const satisfies Record<string, { field: keyof AppIconSettings }>;
+
+export type IconRoutePath = keyof typeof ICON_ROUTES;
 
 /** The manifest for an app called `appName`. The name is the label under the icon
  *  on Android and the title of the installed window. */

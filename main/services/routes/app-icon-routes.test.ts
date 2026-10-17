@@ -23,7 +23,7 @@ const { callRoute } = await import("./route-harness.js");
 const { stageController } = await import("../stage-controller.js");
 const { configSnapshot } = await import("../config-snapshot.js");
 const { iconInput, pngDataUrl } = await import("../app-icon-fixture.js");
-const { ICON_ROUTES } = await import("../app-icon.js");
+const { ICON_ROUTES } = await import("../install-metadata.js");
 const { initLogCapture, getLogLines, setLogSink } = await import("../log-buffer.js");
 // The buffer only records while something is listening to it.
 setLogSink(() => {});
@@ -173,6 +173,43 @@ describe("with a custom icon set", () => {
     const added = branding().slice(before);
     assert.equal(added.length, 1, `expected one line for three requests, got ${JSON.stringify(added)}`);
     assert.match(added[0]!, /a custom icon is set but its file could not be read; serving the built-in icon for \/icon-192\.png \/branding-images\//);
+  });
+});
+
+describe("saving an adjusted image sends back the reference the editor was given", () => {
+  // GET /api/branding/source returns `/branding-images/<hash>`, never the base64, and
+  // the editor posts that same value back as the original with the new crop. The
+  // route used to refuse anything that was not a data URL, so every Adjust failed.
+  test("each of the four originals accepts a stored reference, and keeps it", async () => {
+    await post({ logo: pngDataUrl(64, 5), logoOriginal: pngDataUrl(64, 6), emptyLogo: pngDataUrl(64, 7), emptyLogoOriginal: pngDataUrl(64, 8), avatar: pngDataUrl(64, 9), avatarOriginal: pngDataUrl(64, 10) });
+    const kept = await settings();
+    for (const [key, field] of [["logoOriginal", "appLogoOriginal"], ["emptyLogoOriginal", "emptySlotLogoOriginal"], ["avatarOriginal", "defaultAvatarOriginal"]] as const) {
+      const ref = kept[field] as string;
+      assert.match(ref, REF);
+      const r = await post({ [key]: ref, [key.replace("Original", "Crop")]: { scale: 2, x: -3, y: -4 } });
+      assert.equal(r.status, 200, `${key}: ${r.body.slice(0, 160)}`);
+      assert.equal((await settings())[field], ref, `${key} changed`);
+    }
+    const iconOriginal = (await settings()).appLogoOriginal as string;
+    const r = await post({ icon: iconInput({ original: iconOriginal }) });
+    assert.equal(r.status, 200, r.body.slice(0, 160));
+    assert.equal((await settings()).appIconOriginal, iconOriginal);
+  });
+
+  test("a reference to a file that is not stored, or that is not one of ours, is a 400", async () => {
+    for (const ref of ["/branding-images/0000000000000000.png", "/branding-images/../settings.json", "/branding-images/abc.png", "/layout-images/0123456789abcdef.png", "https://example.com/x.png"]) {
+      const r = await post({ logoOriginal: ref });
+      assert.equal(r.status, 400, ref);
+      const icon = await post({ icon: iconInput({ original: ref }) });
+      assert.equal(icon.status, 400, `icon.original ${ref}`);
+    }
+  });
+
+  test("only an original may be a reference: the image itself must still be a data URL", async () => {
+    const ref = (await settings()).appLogoOriginal as string;
+    const r = await post({ logo: ref });
+    assert.equal(r.status, 400);
+    assert.match(String((r.json as { error: string }).error), /body\.logo must be an image data URL or null/);
   });
 });
 

@@ -4,8 +4,7 @@ import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import { readFileSync } from "fs";
 import { resolve } from "path";
-import { ICON_ROUTES } from "./main/services/app-icon";
-import { MANIFEST_PATH } from "./main/services/install-metadata";
+import { ICON_ROUTES, MANIFEST_PATH } from "./main/services/install-metadata";
 import { cleanUrlsMiddleware } from "./main/services/routes/dev-clean-urls";
 import { serverPort } from "./main/services/server-port";
 

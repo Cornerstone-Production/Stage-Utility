@@ -12,8 +12,7 @@
 
 import type { RouteCtx } from "./context.js";
 import { BRANDING_IMAGE_DIR } from "../branding-image-store.js";
-import { ICON_ROUTES } from "../app-icon.js";
-import { buildManifest, MANIFEST_PATH } from "../install-metadata.js";
+import { buildManifest, ICON_ROUTES, MANIFEST_PATH } from "../install-metadata.js";
 import { readImage } from "../image-files.js";
 import { scrub } from "../scrub.js";
 import { settingsStore } from "../settings-store.js";

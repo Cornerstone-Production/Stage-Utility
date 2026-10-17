@@ -15,8 +15,7 @@ import { inflateSync } from "node:zlib";
 
 import { JSDOM } from "jsdom";
 
-import { ICON_ROUTES } from "../main/services/app-icon.js";
-import { buildManifest } from "../main/services/install-metadata.js";
+import { buildManifest, ICON_ROUTES } from "../main/services/install-metadata.js";
 
 // @ts-expect-error -- a plain .mjs script with no type declarations
 const { buildIcons } = await import("./build-icons.mjs");
