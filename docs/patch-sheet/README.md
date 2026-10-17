@@ -17,8 +17,11 @@ follows the live or next Planning Center plan on its own.
   and is unavailable on the last sheet). At the right: **Import**, **Export** and
   **Print**.
 - **Second row** — **Inputs / Outputs**; **Editing**, which picks the Default patch,
-  This week or a variant, with **New variant**; **By rack / By device**; and the
-  **Ripple** switch.
+  This week or a variant; **By rack / By device**; and the **Ripple** switch, which
+  is shown in By rack only. On the Default patch the row offers **New variant**. With
+  a variant selected it shows the variant's name field, a delete button and the note
+  *Only changes vs the default are saved.*; on This week the note reads *One-off
+  tweaks for this week only — saved over the assigned base.*
 - **Left column** — the **Devices** card and the **Weekly assignment** card, always
   open.
 - **The sheet** — one card per rack, one 32px row per channel. A cell reads as plain
@@ -51,7 +54,8 @@ cells and ripple cleanly (`B-1` → `B-2`) in the patch table.
 
 Each device is one line — color, name, kind, and input/output counts. Click it to
 open its editor under the line: name, kind, channel counts, color (ten swatches or
-none), and the connector-label generator. **Add device** appends a rack and opens it.
+none), the connector-label generator, and **Remove device**. **Add device** appends a
+rack, opens it and selects its name for typing.
 
 ## Inputs and outputs
 

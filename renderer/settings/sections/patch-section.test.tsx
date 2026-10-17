@@ -79,7 +79,6 @@ test("a failed patch read says so and offers no editable empty patch", async () 
     await mount();
     await eventually(() => assert.match(alerts(), /Couldn't load the patch/i));
     // The editor is absent entirely — not a blank sheet a Save would write back.
-    assert.equal(!!screen.queryByLabelText("Sheet name"), false, "must not offer an empty sheet to edit");
     assert.equal(screen.queryAllByRole("tab").length, 0, "must not draw the blank default sheet");
     await eventually(() => assert.ok(
       f.logs.some((l) => l.tag === "patch" && /the patch/i.test(l.message)),

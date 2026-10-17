@@ -184,7 +184,11 @@ export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice
           <div key={d.id}>
             <button
               type="button"
-              onClick={() => setOpenId(open ? null : d.id)}
+              onClick={() => {
+                setOpenId(open ? null : d.id);
+                // Only the opening that Add device caused selects the name.
+                setAddedId(null);
+              }}
               aria-expanded={open}
               className={cn("grid w-full grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-fill", open && "bg-fill")}
             >

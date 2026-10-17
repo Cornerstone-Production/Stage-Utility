@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { DeviceDot } from "./patch-dot";
 
 /** Which hop is open for editing, and which of its two fields takes focus. */
-type Editing = { index: number; focus: "device" | "connector" } | null;
+export type HopEditing = { index: number; focus: "device" | "connector" } | null;
 
 /**
  * One endpoint's ordered From (in) / To (out) hop chain, on one line.
@@ -16,11 +16,29 @@ type Editing = { index: number; focus: "device" | "connector" } | null;
  * The editor closes when focus leaves it, so there is no separate Done.
  *
  * A stored id (a hop's deviceId) can outlive the list it was chosen from, because
- * deleting a device does not walk the endpoints; patch-table.test.tsx guards that.
+ * deleting a device does not walk the endpoints; patch-path-cell.test.tsx guards that.
  */
-export function PathCell({ path, stageDevices, onChange }: { path: PatchHop[] | undefined; stageDevices: PatchDevice[]; onChange: (hops: PatchHop[]) => void }) {
+export function PathCell({
+  path,
+  stageDevices,
+  onChange,
+  editing: controlled,
+  onEditingChange,
+}: {
+  path: PatchHop[] | undefined;
+  stageDevices: PatchDevice[];
+  onChange: (hops: PatchHop[]) => void;
+  /** Which hop is open, held by the caller. Needed where changing a hop's device
+   *  moves the row (By device): the row remounts under its new group, and state
+   *  held in here would be lost with it — the editor closing mid-edit. Omit both
+   *  and the cell keeps it itself. */
+  editing?: HopEditing;
+  onEditingChange?: (next: HopEditing) => void;
+}) {
   const hops = path ?? [];
-  const [editing, setEditing] = useState<Editing>(null);
+  const [local, setLocal] = useState<HopEditing>(null);
+  const editing = onEditingChange ? (controlled ?? null) : local;
+  const setEditing = onEditingChange ?? setLocal;
   // Closing the editor from the keyboard unmounts the control that held focus.
   // The chip it turned back into takes it, so Tab and a screen reader carry on
   // from the hop that was being edited rather than from the top of the page.

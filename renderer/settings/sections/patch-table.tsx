@@ -5,7 +5,7 @@ import { cn } from "../../lib/cn";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { rippleEndpoints, type RippleField } from "../../lib/patch-ripple";
 import { DeviceDot } from "./patch-dot";
-import { PathCell } from "./patch-path-cell";
+import { PathCell, type HopEditing } from "./patch-path-cell";
 import { RippleBar, type Dir, type RippleState } from "./patch-ripple-bar";
 
 const keyOf = (rackId: string, dir: Dir, index: number) => `${rackId}:${dir}:${index}`;
@@ -50,12 +50,15 @@ interface RowProps {
   stageDevices: PatchDevice[];
   showOwner: boolean;
   reach: boolean;
+  /** The open hop editor, if it is on THIS row. */
+  editing: HopEditing;
+  onEditing: (next: HopEditing) => void;
   edit: (rackId: string, index: number, field: RippleField, value: unknown) => void;
   onFocusRow: (rackId: string, index: number) => void;
   onBlurRow: () => void;
 }
 
-function Row({ rackId, idx, rackLabel, dir, endpoint: e, stageDevices, showOwner, reach, edit, onFocusRow, onBlurRow }: RowProps) {
+function Row({ rackId, idx, rackLabel, dir, endpoint: e, stageDevices, showOwner, reach, editing, onEditing, edit, onFocusRow, onBlurRow }: RowProps) {
   // Tint the row's left edge with the color of the device it's sourced from.
   const srcColor = stageDevices.find((dv) => dv.id === e?.path?.[0]?.deviceId)?.color;
   return (
@@ -83,7 +86,7 @@ function Row({ rackId, idx, rackLabel, dir, endpoint: e, stageDevices, showOwner
         <Cell label="Feed" placeholder="IEM / wedge…" value={e?.feedType ?? ""} onChange={(v) => edit(rackId, idx, "feedType", v)} />
       )}
       <td className={TD_PLAIN}>
-        <PathCell path={e?.path} stageDevices={stageDevices} onChange={(hops) => edit(rackId, idx, "path", hops)} />
+        <PathCell path={e?.path} stageDevices={stageDevices} editing={editing} onEditingChange={onEditing} onChange={(hops) => edit(rackId, idx, "path", hops)} />
       </td>
       {showOwner && <Cell label="Owner" placeholder="Owner" value={e?.owner ?? ""} onChange={(v) => edit(rackId, idx, "owner", v)} />}
     </tr>
@@ -146,6 +149,10 @@ export function PatchTable({
   // ripple bar blurs the row, and a bar whose "from row" text vanished on
   // mousedown would shift under the pointer and swallow the click.
   const [focus, setFocus] = useState<{ rackId: string; index: number } | null>(null);
+  // The open hop editor, held here rather than in the row's PathCell. In By device
+  // a row moves to another card when its first hop's device changes, which remounts
+  // it; state inside the cell would go with it and close the editor mid-edit.
+  const [editingHop, setEditingHop] = useState<{ row: string; hop: NonNullable<HopEditing> } | null>(null);
   // It does not survive disarming or a switch of direction: the rows it named
   // are no longer the ones on screen.
   useResyncOn([ripple.on, dir], () => setFocus(null));
@@ -240,6 +247,8 @@ export function PatchTable({
         stageDevices={stageDevices}
         showOwner={showOwner}
         reach={isInFocusRun(rackId, idx, channelsOf(rackId))}
+        editing={editingHop?.row === `${rackId}:${idx}` ? editingHop.hop : null}
+        onEditing={(hop) => setEditingHop(hop ? { row: `${rackId}:${idx}`, hop } : null)}
         edit={edit}
         onFocusRow={onFocusRow}
         onBlurRow={onBlurRow}

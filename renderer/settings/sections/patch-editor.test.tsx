@@ -57,6 +57,7 @@ const fixture = (): PatchFile => ({
         ep(1, { label: "Kick 1", consoleChannel: "1", mic: "Beta 91", path: [{ deviceId: "snA", connector: "A-1" }] }),
         ep(2, { label: "Snare", consoleChannel: "2", path: [{ deviceId: "snA", connector: "A-2" }] }),
         ep(3, { label: "Gone", path: [{ deviceId: "dev-deleted", connector: "9" }] }),
+        ep(6, { label: "Spare" }),
       ],
       variants: [{ id: "var1", name: "Acoustic", overrides: {} }],
       assignments: { byServiceType: {}, byPlan: {} },
@@ -183,6 +184,21 @@ describe("ripple", () => {
       assert.equal(!!bar().queryByText(/from row 5/), true);
       await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Outputs" })); });
       assert.equal(!!bar().queryByText(/from row/), false, "nothing is focused on the other direction's rows");
+    } finally {
+      f.restore();
+    }
+  });
+
+  test("re-arming starts with no start row", async () => {
+    const f = stubServer();
+    try {
+      await mount();
+      await arm();
+      await focus(sourceOf(2));
+      assert.equal(!!bar().queryByText(/from row 2/), true);
+      await act(async () => { fireEvent.click(screen.getByRole("switch", { name: "Ripple" })); });
+      await arm();
+      assert.equal(!!bar().queryByText(/from row/), false, "the last arming's row must not come back");
     } finally {
       f.restore();
     }
@@ -450,6 +466,14 @@ describe("export", () => {
   });
 });
 
+describe("exportUrl", () => {
+  test("This week names the plan and its service type, and ignores a variant", async () => {
+    const { exportUrl } = await import("./patch-export.js");
+    assert.equal(exportUrl("xlsx", "analog", "var1", { planId: "p1", serviceTypeId: "st1" }), "/api/patch/export?sheetId=analog&format=xlsx&planId=p1&serviceTypeId=st1");
+    assert.equal(exportUrl("csv", "analog", null, { planId: "p1", serviceTypeId: null }), "/api/patch/export?sheetId=analog&format=csv&planId=p1");
+  });
+});
+
 describe("variant bar", () => {
   test("a variant shows its name, delete and the diff note; the default shows New variant", async () => {
     const f = stubServer();
@@ -480,13 +504,29 @@ describe("variant bar", () => {
 });
 
 describe("grouping", () => {
+  test("changing a hop's device in By device keeps its editor open, though the row moves group", async () => {
+    const f = stubServer();
+    try {
+      await mount();
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "By device" })); });
+      const snakeA = within(screen.getByRole("region", { name: "Snake A" }));
+      await act(async () => { fireEvent.click(snakeA.getAllByRole("button", { name: /Snake A · A-1/ })[0]); });
+      await type(within(screen.getByRole("group", { name: "Edit hop" })).getByLabelText("Device"), "snB");
+      // The row is now under Snake B, and its editor came with it.
+      const snakeB = within(screen.getByRole("region", { name: "Snake B" }));
+      assert.equal(snakeB.queryAllByRole("group", { name: "Edit hop" }).length, 1, "the editor must follow the row to its new group");
+    } finally {
+      f.restore();
+    }
+  });
+
   test("By device groups by the first hop's device, with the rest under Direct to rack", async () => {
     const f = stubServer();
     try {
       await mount();
       await act(async () => { fireEvent.click(screen.getByRole("button", { name: "By device" })); });
       const headings = screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"));
-      assert.deepEqual(headings.filter((h) => h === "Snake A" || h === "dev-deleted" || h === "Direct to rack"), ["Snake A", "dev-deleted"]);
+      assert.deepEqual(headings.filter((h) => h === "Snake A" || h === "dev-deleted" || h === "Direct to rack"), ["Snake A", "dev-deleted", "Direct to rack"]);
       assert.equal(screen.queryAllByRole("switch", { name: "Ripple" }).length, 0, "ripple fills down a rack, so it is not offered here");
     } finally {
       f.restore();
@@ -522,6 +562,21 @@ describe("devices", () => {
       assert.equal((devices().getByLabelText("Device name") as HTMLInputElement).value, "Device 4");
       assert.equal(!!screen.queryByRole("region", { name: "Device 4" }), true, "a new Input Rack is a card on the sheet");
       await eventually(() => assert.ok(document.activeElement === devices().getByLabelText("Device name"), "the new device's name is ready to type"));
+    } finally {
+      f.restore();
+    }
+  });
+
+  test("reopening an added device does not grab focus again", async () => {
+    const f = stubServer();
+    try {
+      await mount();
+      await act(async () => { fireEvent.click(devices().getByRole("button", { name: "Add device" })); });
+      const row = () => devices().getByRole("button", { name: /^Device 4/ });
+      await act(async () => { fireEvent.click(row()); });          // collapse
+      await act(async () => { fireEvent.click(row()); });          // reopen
+      await settle();
+      assert.ok(document.activeElement !== devices().getByLabelText("Device name"), "only the opening Add device caused should focus the name");
     } finally {
       f.restore();
     }
