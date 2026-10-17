@@ -21,8 +21,11 @@ A rundown's **All services** arrow returns to the launcher it was opened from: t
 sidebar's `/servicecue/manage` if you came from there, the tablet's `/servicecue`
 if you came from that. The launcher records itself in the address as `?from=`, so
 the arrow still knows after a reload and when the page changes its own layout or
-plan. A rundown opened directly (a typed address, a QR code, a shared link, a
-kiosk) has no `?from=` and goes to `/servicecue`.
+plan. A rundown opened directly (a typed address, a QR code, a kiosk) has no
+`?from=` and goes to `/servicecue`. The origin lives in the address, so an address
+copied from the browser's bar after opening a rundown from the sidebar carries it
+to whoever receives it; a link without `?from=` is the one that always returns to
+`/servicecue`.
 
 Configure it with **Edit column presets** on the ServiceCue page (`/servicecue/presets`), with a live
 preview. The layouts and category roles are this app's own and can be edited before Planning Center

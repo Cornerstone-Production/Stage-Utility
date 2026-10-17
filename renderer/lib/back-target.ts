@@ -16,8 +16,9 @@
 //   - `document.referrer` is empty under a strict Referrer-Policy and in a home
 //     screen app, and says nothing about the page's own sub-navigation.
 //
-// A page reached with no `from` — a typed URL, a QR code, a shared link, a
-// kiosk — falls back to the target it always had. A page that changes its own
+// A page reached with no `from` — a typed URL, a QR code, a kiosk — falls back
+// to the target it always had. An address copied from the bar carries its `from`
+// along, which is the cost of the address being the carrier. A page that changes its own
 // params (layout, plan, text size) keeps `from` through `keepSearch`.
 
 import { useCallback } from "react";

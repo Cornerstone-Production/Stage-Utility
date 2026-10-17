@@ -162,7 +162,7 @@ test("opened directly, with no origin in the address, back goes to the volunteer
   }
 });
 
-test("a reload of the rundown, and a change of layout on it, both keep the origin", async () => {
+test("a reload of the rundown, and a change of layout or text size on it, all keep the origin", async () => {
   const f = stubFetch();
   try {
     const rundown = "/servicecue/weekend/audio?from=%2Fservicecue%2Fmanage&plan=p1";
@@ -176,6 +176,13 @@ test("a reload of the rundown, and a change of layout on it, both keep the origi
     await act(async () => { fireEvent.change(select, { target: { value: "__all__" } }); });
     await eventually(() => assert.equal(router.state.location.pathname, "/servicecue/weekend/all-columns"));
     assert.equal(await hrefOf("All services"), "/servicecue/manage", "changing layout did not drop the origin");
+
+    // And the text size, which rewrites the address in place.
+    const sized = await loadPage("/servicecue/weekend/audio?from=%2Fservicecue%2Fmanage&text=100");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Larger text" })); });
+    await eventually(() => assert.notEqual(sized.state.location.search.text, 100, "the size changed"));
+    assert.equal(sized.state.location.search.from, "/servicecue/manage", "changing the text size did not drop the origin");
+    assert.equal(await hrefOf("All services"), "/servicecue/manage");
   } finally {
     f.restore();
   }
