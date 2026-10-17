@@ -394,7 +394,11 @@ function assertBleeds(iframe: Element, what: string): Element[] {
 test("a screen card's preview has no side inset, side border or corner radius", async () => {
   const { container } = renderRow([], [], { output: { ...OUTPUT, viewId: "v1" }, onEditLayout: () => {} });
   await eventually(() => assert.ok(container.querySelector("iframe"), "the preview never mounted"));
-  assertBleeds(container.querySelector("iframe")!, "screen card");
+  const chain = assertBleeds(container.querySelector("iframe")!, "screen card");
+  // The focus ring is the button's LAST child: the hover and focus scrim also lights
+  // on :focus-visible and would dim a ring that sits beneath it.
+  const button = chain.find((el) => el.tagName === "BUTTON")!;
+  assert.ok(button.lastElementChild!.classList.contains("ring-inset"), "the focus ring is not the last thing painted over the preview");
 });
 
 test("the same holds while the side panel follows, and the button still shows keyboard focus", async () => {

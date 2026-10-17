@@ -222,7 +222,6 @@ export function LazyPreview({
           className="group relative block w-full focus:outline-none"
         >
           {preview}
-          {FOCUS_RING}
           <span
             className="pointer-events-none absolute inset-0 grid place-items-center bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
             aria-hidden="true"
@@ -234,6 +233,8 @@ export function LazyPreview({
                 anything sitting on a dark surface. */}
             <ExpandIcon className="size-7 text-[#d4d4d4]" strokeWidth={1.5} />
           </span>
+          {/* After the scrim, so the hover and focus wash does not dim it. */}
+          {FOCUS_RING}
         </button>
       );
     }
