@@ -22,8 +22,9 @@
 // What is NOT here, because jsdom loads no stylesheet and reports every
 // offsetHeight as 0: the 34px row height, the 270px sticky column, the amber tint
 // and the 3px device edge actually being painted, and the container query that
-// drops the console node from a path when the card is narrow (only the classes that
-// ask for it are checked). They need a layout engine, and are checked in a browser.
+// drops the console node from a path when the card is narrow, the two-column changes
+// card, and the medium row of cards actually sitting in a row (only the classes that
+// ask for these are checked). They need a layout engine, and are checked in a browser.
 //
 // Every name, label and colour below is INVENTED. This is a public repository.
 
@@ -182,7 +183,13 @@ const sources = (table: HTMLElement) => column(table, "Source");
 const tableFor = (rack: string) => screen.getByRole("table", { name: new RegExp(`^${rack}`) });
 const tableNames = () => screen.queryAllByRole("table").map((t) => t.getAttribute("aria-label"));
 /** Which of the three layouts is on screen. */
-const layout = () => document.querySelector("[data-layout]")?.getAttribute("data-layout") ?? "stacked";
+const layout = () => {
+  const named = document.querySelector("[data-layout]")?.getAttribute("data-layout");
+  if (named) return named;
+  // No tables is not enough to call it stacked: a crashed render has none either.
+  assert.ok(screen.queryByText("How to read"), "neither a table layout nor the stacked column is on screen");
+  return "stacked";
+};
 const type = (value: string) => fireEvent.change(screen.getByRole("textbox"), { target: { value } });
 
 beforeEach(() => {
@@ -462,7 +469,8 @@ describe("at desk width", () => {
   test("the thresholds are in rem of the ROOT font, so a larger root asks for more pane", async () => {
     const g = globalThis as unknown as { getComputedStyle: unknown };
     const real = g.getComputedStyle;
-    g.getComputedStyle = () => ({ fontSize: "20px" }); // 56rem is now 1120px, 74rem 1480px
+    // Only the ROOT is 20px: a hook that read the pane's own font would see 16.
+    g.getComputedStyle = (el: Element) => ({ fontSize: el === document.documentElement ? "20px" : "16px" }); // 56rem is now 1120px, 74rem 1480px
     try {
       width = 1119;
       await mount();
@@ -512,11 +520,21 @@ describe("at desk width", () => {
     assert.ok(above(jump, toolbar), "Jump to comes before the toolbar");
     assert.ok(above(toolbar, screen.getAllByRole("table")[0]), "the toolbar comes before the tables");
     assert.deepEqual(tableNames(), ["Alpha Rack inputs", "Beta Rack inputs"]);
+    // A row of cards, not a stack, and the changes card scrolls rather than push the tables down.
+    const row = screen.getByText("This week").parentElement!.parentElement!;
+    assert.match(row.className, /(^| )flex( |$)/);
+    assert.match(row.className, /flex-wrap/);
+    assert.doesNotMatch(row.className, /sticky/);
+    assert.match(screen.getByRole("region", { name: "Changes" }).className, /max-h-64 overflow-y-auto/);
     // The same behaviour, because it is the same component.
     type("lead");
     assert.deepEqual(tableNames(), ["Beta Rack inputs"]);
     fireEvent.click(within(jump).getByRole("button", { name: /Beta Rack/ }));
     assert.deepEqual(scrolled, ["Beta Rack"]);
+    // Jump to stays when nothing matches, so the cards beside it do not change shape as somebody types.
+    type("nothing matches this");
+    assert.ok(screen.getByRole("navigation", { name: "Jump to" }));
+    assert.ok(screen.getByText("No racks"));
   });
 
   test("the wide layout has the side column", async () => {

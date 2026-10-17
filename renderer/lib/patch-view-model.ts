@@ -1,7 +1,8 @@
 // What the /patch volunteer view shows, as plain functions of a sheet and its
-// resolved patch. Both of the view's layouts (the stacked column for a phone and
-// the two-column table for a desk) call these, so a filter or a note is decided in
-// one place and the two layouts cannot disagree about which channels are on screen.
+// resolved patch. All three of the view's layouts (the stacked column for a phone, the
+// tables under a row of cards, and the tables beside a column) call these, so a
+// filter or a note is decided in one place and they cannot disagree about which
+// channels are on screen.
 //
 // Pure: no React, no I/O. The resolve step itself is lib/patch-resolve.
 

@@ -22,8 +22,9 @@ function rootFontPx(): number {
  * only a change of tier renders the page again.
  *
  * Measured before the first paint, so a page that opens wide never flashes the
- * narrow layout. 0 until the element mounts, and in an environment with no
- * ResizeObserver it is measured once. Measures offsetWidth, which includes a
+ * narrow layout. 0 until the first measurement, which is taken when the hook
+ * mounts, so the element must already be attached then (the page's wrapper is
+ * always rendered); in an environment with no ResizeObserver it is measured once. Measures offsetWidth, which includes a
  * classic scrollbar, so the layout the answer picks cannot change the scrollbar
  * and with it the width the answer was picked from.
  */

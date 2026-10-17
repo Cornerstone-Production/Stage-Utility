@@ -68,9 +68,8 @@ so it changes when the sidebar is collapsed or dragged. There are three:
 
 - **74rem (1184px) and wider:** two columns. A column on the left stays in view while the
   page scrolls, with the tables beside it.
-- **56rem (896px) up to that:** the same cards in a row above full-width tables. At the
-  sidebar's default width that is a 1440px window, a 1280px window, and a 1024px window
-  with the sidebar collapsed.
+- **56rem (896px) up to that:** the same cards in a row above full-width tables. That is
+  a 1280px or 1440px window with the sidebar open, or a 1024px window with it collapsed.
 - **Narrower than 56rem:** one stacked column, which suits a phone in the wings: the
   Read-only tag, This week, the legend, the changes card for the direction on screen, the
   Inputs / Outputs switch with Filter and Changes only, then a collapsible card per rack
@@ -79,7 +78,8 @@ so it changes when the sidebar is collapsed or dragged. There are three:
 The first two hold the same things:
 
 - **This week**: the service type, the plan and its date, the base variant and a Read-only tag.
-- **Changes from the standard patch**: an amber card listing inputs and outputs together.
+- **Changes from the standard patch**: an amber card listing inputs and outputs together
+  (in the row above the tables it scrolls inside the card when the week has many).
   A row is the direction and channel (`in 11`, `out 8`), the source (struck through when
   unused) and a note: *was `<old label>`*, *new*, *re-patched*, *unused*, or *changed* when
   something else about it differs (mic, feed, 48V, console channel, owner, notes).

@@ -24,7 +24,8 @@ import { PatchWide } from "./patch-view-wide";
  * card the width of the pane, 881px with the card's border, is the medium layout:
  * 56rem (896px at a 16px root) is that rounded up to a whole rem. Beside a 270px
  * column and its 14px gap the card is 284px narrower, so the sticky column needs
- * 1165px and 74rem (1184px) is that rounded up. At either width the note column,
+ * 1165px. 74rem (1184px) clears that with room, and is exactly a 1280px window
+ * with the sidebar collapsed. At either width the note column,
  * which says why a row changed, stays in its card for the names measured; a
  * classic 15px scrollbar takes some of the 15px (medium) or 19px (wide) of room,
  * and a longer name takes the rest.

@@ -46,10 +46,11 @@ const TH = "whitespace-nowrap border-b border-line px-2.5 py-[7px] text-left tex
 const TD = "h-[34px] whitespace-nowrap border-b border-line px-2.5 align-middle";
 
 /**
- * The /patch volunteer view at desk width: a sticky column for this week's
- * context, what changed and a jump list, and one table per rack beside it. A
- * desk has the room to show every channel on one line, which is what lets a
- * volunteer scan 56 inputs without scrolling past two lines of each.
+ * The /patch volunteer view with room for tables: this week's context, what
+ * changed and a jump list, and one table per rack. In the `wide` layout the three
+ * cards are a sticky column beside the tables; in `medium` they are a row above
+ * them. A table has the room to show every channel on one line, which is what
+ * lets a volunteer scan 56 inputs without scrolling past two lines of each.
  */
 export function PatchWide(p: PatchWideProps) {
   const { sheet, resolved } = p;
@@ -88,7 +89,12 @@ export function PatchWide(p: PatchWideProps) {
     <div className={cn("@container rounded-xl border border-warn-9/40 bg-warn-9/12 px-3.5 py-3", medium && "min-w-[20rem] flex-1")}>
       <h2 className="mb-2 text-footnote font-semibold text-warn-11">{plural(p.changes.length, "change")} from the standard patch</h2>
       {/* Two columns when the card has the room (a row above the tables), one when not. */}
-      <div className={cn(medium && "@min-[34rem]:columns-2 @min-[34rem]:gap-x-6")}>
+      <div
+        // Above the tables the card must not push them off the screen: a long
+        // week scrolls inside the card, which the keyboard can reach.
+        {...(medium && { tabIndex: 0, role: "region", "aria-label": "Changes" })}
+        className={cn(medium && "max-h-64 overflow-y-auto @min-[34rem]:columns-2 @min-[34rem]:gap-x-6")}
+      >
         {p.changes.map(({ e, note }) => (
           <div key={endpointKey(e)} className="flex break-inside-avoid gap-2 border-t border-warn-9/22 py-1 text-footnote">
             <span className="w-11 shrink-0 font-mono text-caption1 text-fg-muted">{e.dir} {e.index}</span>
@@ -102,9 +108,12 @@ export function PatchWide(p: PatchWideProps) {
     </div>
   );
 
-  const jumpCard = p.sections.length > 0 && (
+  // In the row above the tables it stays when a filter matches nothing, or the
+  // changes card beside it would widen and change its columns while somebody types.
+  const jumpCard = (medium || p.sections.length > 0) && (
     <nav aria-label="Jump to" className={cn(CARD, "p-2", medium && "w-[220px] shrink-0")}>
       <div className={cn(EYEBROW, "px-2 py-1.5")}>Jump to</div>
+      {p.sections.length === 0 && <div className="px-2 py-1.5 text-footnote text-fg-subtle">No racks</div>}
       {p.sections.map(({ rack, rows }) => (
         <button
           key={rack.id}
