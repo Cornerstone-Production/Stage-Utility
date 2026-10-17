@@ -5,6 +5,7 @@ import type { useSensors } from "@dnd-kit/core";
 import type { DeviceChannel } from "@main/types/devices";
 import type { CreateScreenInput, ViewSurface } from "@main/types/views";
 import type { Rotation } from "@main/types/output-format";
+import type { AppIconInput } from "@main/services/app-icon";
 
 /**
  * One bindable wireless channel, as `/api/integrations/wireless/channels`
@@ -64,7 +65,9 @@ export interface SectionHandlers {
     avatar?: string | null;
     avatarOriginal?: string | null;
     avatarCrop?: { scale: number; x: number; y: number } | null;
-  }) => Promise<void>;
+    /** The tab and home-screen icon, set as a whole; `null` removes it. */
+    icon?: AppIconInput | null;
+  }) => Promise<boolean>;
   // Slot editor (operates on the currently-selected View)
   updateSlot: (idx: number, updated: Slot) => void;
   addSlot: () => void;

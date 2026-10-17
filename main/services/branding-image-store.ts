@@ -1,4 +1,4 @@
-// branding-image-store.ts — the app logo, empty-slot logo and default avatar, kept
+// branding-image-store.ts — the app logo, empty-slot logo, default avatar and app icon, kept
 // as files rather than base64 inside settings.
 //
 // They used to live inline, which cost twice over. Two of them ride in stage:state,
@@ -10,7 +10,7 @@
 // The stored value is a `/branding-images/<hash>.<ext>` URL. `<img src>` accepts it
 // exactly as it accepted a data URL, so nothing downstream had to change.
 
-import { isDataUrl, saveImage } from "./image-files.js";
+import { isDataUrl, readImage, saveImage } from "./image-files.js";
 import type { SettingsData } from "./settings-store.js";
 
 export const BRANDING_IMAGE_DIR = "branding-images";
@@ -24,9 +24,31 @@ export const BRANDING_IMAGE_KEYS = [
   "emptySlotLogoOriginal",
   "defaultAvatar",
   "defaultAvatarOriginal",
+  // The custom tab and home-screen icon: the art it is drawn from, that art's
+  // pre-crop upload, and the four sizes served to browsers and phones.
+  "appIcon",
+  "appIconOriginal",
+  "appIconApple",
+  "appIcon192",
+  "appIcon512",
+  "appIconMaskable",
 ] as const;
 
 export type BrandingImageKey = (typeof BRANDING_IMAGE_KEYS)[number];
+
+/** The shape of a reference this store hands out: `/branding-images/<hash>.<ext>`. */
+const STORED_REF = /^\/branding-images\/([0-9a-f]{16}\.(?:png|jpg|gif|webp|svg))$/;
+
+/** True when `v` is a reference to an image this store holds. */
+export async function isStoredBrandingImage(v: unknown): Promise<boolean> {
+  const m = typeof v === "string" ? STORED_REF.exec(v) : null;
+  return m !== null && (await readImage(BRANDING_IMAGE_DIR, m[1]!)) !== null;
+}
+
+/** True when `v` has the shape of a stored reference, whether or not the file is there. */
+export function looksLikeStoredRef(v: unknown): v is string {
+  return typeof v === "string" && STORED_REF.test(v);
+}
 
 /** Store a data URL and return its reference. A value that is already a reference
  *  (or null) passes through untouched, so this is safe to call on every write. */

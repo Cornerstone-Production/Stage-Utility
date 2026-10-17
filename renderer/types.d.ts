@@ -149,5 +149,7 @@ declare global {
   interface BrandingSource {
     original: string | null;
     crop: { scale: number; x: number; y: number } | null;
+    /** Icon target only: the square art the icon's sizes are drawn from. */
+    art?: string | null;
   }
 }

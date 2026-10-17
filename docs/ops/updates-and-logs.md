@@ -183,7 +183,7 @@ a path or a credential. If you see one, report it.
 | `[baptism-replay]` | A data-archive rebuild skipping baptism rows it could not place, and why: [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced) |
 | `[baptism-timer]` | The live timer's own persistence: debounced save failures, a save that failed at shutdown, a dismissed save-failure notice |
 | `[bar-config]` | The context bar's one-time migration splitting service type out of a plan item, on the one start that needed it: [The context bar](../features/context-bar.md) |
-| `[branding]` | A logo or avatar image failing to externalize to `branding-images/`: [Branding](../features/operator-app.md#branding) |
+| `[branding]` | A logo or avatar image failing to externalize to `branding-images/`; the custom tab and home-screen icon being set or removed, a custom icon whose stored file cannot be read, so the built-in one is served (once per file), and, from the browser, the Branding page failing to draw an icon or to open an image in the crop editor: [Branding](../features/operator-app.md#branding) |
 | `[broadcaster]` | A subscriber's own callback throwing while handling a broadcast — internal plumbing, not an operator signal |
 | `[cache-maintenance]` | The daily disk-cache prune (photos, attachments, layout images, the Mac output helper's cached zips) failing outright: [Under load](reliability.md#under-load) |
 | `[calendar]` | The pushed month-grid view folding or failing a refresh: [Calendar](../integrations/planning-center.md#calendar) |

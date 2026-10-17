@@ -76,9 +76,10 @@ function publish(next: UseStageStateResult): void {
 function adoptState(next: StageState): void {
   setDisplayHourCycle(next.hourCycle);
   applyAccentVar(next.accentColor);
-  // The tab icon follows the uploaded logo, from a hydrated state only, for the
-  // accent's reason: a consumer that has not loaded yet must not reset it.
-  applyFavicon(next.appLogo, next.appLogoMonochrome);
+  // The tab icon follows the custom icon, else the uploaded logo, from a hydrated
+  // state only, for the accent's reason: a consumer that has not loaded yet must
+  // not reset it.
+  applyFavicon(next.appLogo, next.appLogoMonochrome, next.appIcon192);
   publish({ state: next, isLoading: false, error: null });
 }
 

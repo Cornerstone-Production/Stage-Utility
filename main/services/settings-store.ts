@@ -2,12 +2,18 @@
 // integration configs (non-secret fields), display options.
 
 import type { BaptismAutoStart, BaptismMode, DisplayInfo, Output } from "../types/stage.js";
+import { NO_APP_ICON, type AppIconSettings } from "./app-icon.js";
 import { setAppTimeZone } from "./app-timezone.js";
 import { externalizeBrandingImages } from "./branding-image-store.js";
 import { DataStore } from "./data-store.js";
 import { ID_KINDS, initialFloor, nextId, type IdKind } from "./id-allocator.js";
 
-export interface SettingsData {
+/**
+ * `AppIconSettings` is the custom tab and home-screen icon: all null until one is
+ * set, and then all set together (see app-icon.ts). It is spread in rather than
+ * restated so a field added there cannot be missing here.
+ */
+export interface SettingsData extends AppIconSettings {
   /** Whether and how the baptism timer starts itself from the plan. */
   baptismAutoStart?: BaptismAutoStart;
   /** Workflow the baptism timer opens in. Grouped is how a baptism actually
@@ -223,6 +229,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   defaultAvatar: null,
   defaultAvatarOriginal: null,
   defaultAvatarCrop: null,
+  ...NO_APP_ICON,
   ndiEnabled: false,
   publicUrl: null,
   iconColors: {},

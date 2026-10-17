@@ -1042,7 +1042,8 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/branding", p);
 
     case "stage:getBrandingSource": {
-      const target = p.target === "empty" ? "empty" : p.target === "avatar" ? "avatar" : "app";
+      const target =
+        p.target === "empty" ? "empty" : p.target === "avatar" ? "avatar" : p.target === "icon" ? "icon" : "app";
       return apiFetch<T>(`/api/branding/source?target=${target}`);
     }
 
