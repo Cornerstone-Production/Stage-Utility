@@ -607,7 +607,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           ariaLabel={`View on ${output.name}`}
           triggerClassName={cn(
             "h-7 w-auto min-w-0 max-w-[70%] truncate rounded-lg border-transparent px-2.5 text-footnote font-medium",
-            output.viewId ? "bg-fill text-fg" : "bg-warn-3 text-warn-11",
+            output.viewId ? "bg-fill text-fg" : "bg-warn-9/15 text-warn-11",
           )}
         />
         {/* Opening the real screen moved here, because the preview now opens the

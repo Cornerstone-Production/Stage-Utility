@@ -179,7 +179,7 @@ export function PatchView() {
             </div>
             {/* Changes-first */}
             {changes.length > 0 && (
-              <div className="mt-4 overflow-hidden rounded-xl border border-warn-6 bg-warn-2/40">
+              <div className="mt-4 overflow-hidden rounded-xl border border-warn-9/40 bg-warn-9/12">
                 <div className="flex items-center gap-2 border-l-2 border-warn-9 px-4 py-2.5 text-footnote font-semibold">
                   <TriangleAlertIcon className="size-4 text-warn-11" />
                   <span className="text-warn-11">{plural(changes.length, "change")}</span>
@@ -208,7 +208,7 @@ export function PatchView() {
               </div>
               <div className="flex items-center gap-2">
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…" className="h-8 w-32 rounded-md border border-line-strong bg-field px-2.5 text-footnote text-fg focus:outline-none focus:border-focus" />
-                <button type="button" onClick={() => setChangesOnly((v) => !v)} className={`rounded-md border px-3 py-1.5 text-footnote transition-colors ${changesOnly ? "border-warn-7 bg-warn-2/40 text-warn-11" : "border-line text-fg-muted hover:text-fg"}`}>
+                <button type="button" onClick={() => setChangesOnly((v) => !v)} className={`rounded-md border px-3 py-1.5 text-footnote transition-colors ${changesOnly ? "border-warn-9 bg-warn-9/12 text-warn-11" : "border-line text-fg-muted hover:text-fg"}`}>
                   Changes only
                 </button>
               </div>
@@ -254,7 +254,7 @@ export function PatchView() {
                               )}
                               <div
                                 style={!changed && srcColor ? { boxShadow: `inset 3px 0 0 ${srcColor}` } : undefined}
-                                className={`flex items-baseline gap-3 px-4 py-2 ${changed ? "bg-warn-2/25 shadow-[inset_2px_0_0_var(--warn-9)]" : ""} ${e.unused ? "opacity-55" : ""}`}
+                                className={`flex items-baseline gap-3 px-4 py-2 ${changed ? "bg-warn-9/12 shadow-[inset_2px_0_0_var(--su-warn-9)]" : ""} ${e.unused ? "opacity-55" : ""}`}
                               >
                                 <span className="w-14 shrink-0 font-mono text-caption1 tabular-nums text-fg-subtle">{e.index}{e.consoleChannel ? ` · ${e.consoleChannel}` : ""}</span>
                                 <div className="min-w-0 flex-1">
