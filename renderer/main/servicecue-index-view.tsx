@@ -7,6 +7,7 @@ import { pcoConnected, useStageState } from "./use-stage-state";
 import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
+import { useOriginHref } from "../lib/back-target";
 
 // Implicit layout that shows every note-category column — always available so the
 // landing page works before any custom layout is configured (Phase 3 adds those).
@@ -39,6 +40,9 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
   const [layouts, setLayouts] = useState<ServiceCueLayout[]>([]);
   const [shownIds, setShownIds] = useState<string[]>([]);
   const { failed, fail, clear } = useFailedReads<"load">("servicecue");
+  // The rundown's back arrow returns to this page, whichever of the two
+  // launchers (shell or chromeless) it is.
+  const withThisPage = useOriginHref();
   const [sel, setSel] = useState<Record<string, string>>({});
   // A launcher for Planning Center's service types, so nothing is read until it
   // is connected (see pcoConnected).
@@ -143,7 +147,7 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
                   </div>
                   <Tooltip label={`Open ${type.name}`}>
                     <a
-                      href={serviceCueUrl(type.name, cur, globalLayouts.find((l) => l.id === cur)?.name)}
+                      href={withThisPage(serviceCueUrl(type.name, cur, globalLayouts.find((l) => l.id === cur)?.name))}
                       className="flex items-center justify-center rounded-lg border border-line bg-surface size-8 shrink-0 transition-colors hover:bg-fill-hover"
                       aria-label={`Open ${type.name}`}
                     >

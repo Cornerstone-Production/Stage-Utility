@@ -17,6 +17,13 @@ Pick a service type from the landing page and it opens at a readable, shareable
 URL (`/servicecue/weekend/audio`) you can pin in its own tab. The clock follows
 the plan's timezone.
 
+A rundown's **All services** arrow returns to the launcher it was opened from: the
+sidebar's `/servicecue/manage` if you came from there, the tablet's `/servicecue`
+if you came from that. The launcher records itself in the address as `?from=`, so
+the arrow still knows after a reload and when the page changes its own layout or
+plan. A rundown opened directly (a typed address, a QR code, a shared link, a
+kiosk) has no `?from=` and goes to `/servicecue`.
+
 Configure it with **Edit column presets** on the ServiceCue page (`/servicecue/presets`), with a live
 preview. The layouts and category roles are this app's own and can be edited before Planning Center
 is connected; the preview, which reads a plan, says to connect it. So do the
