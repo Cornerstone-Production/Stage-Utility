@@ -44,9 +44,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const [planParam, setPlanParam] = useSearchParam("plan");
   const [textSize, setTextSize] = useTextSize(PAGE_TEXT_SIZE_KEY, { syncAddress: true });
   const navigateTo = useNavigateTo();
-  // "All services" leads back to the launcher you opened this from: the
-  // operator's, in the shell, or the tablet's, without it. Opened directly, the
-  // tablet's.
+  // "All services" leads back to the launcher this was opened from, else the tablet's.
   const backHref = useBackHref("/servicecue");
 
   // The service types and the plan come from Planning Center, so they are asked

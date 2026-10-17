@@ -40,8 +40,7 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
   const [layouts, setLayouts] = useState<ServiceCueLayout[]>([]);
   const [shownIds, setShownIds] = useState<string[]>([]);
   const { failed, fail, clear } = useFailedReads<"load">("servicecue");
-  // The rundown's back arrow returns to this page, whichever of the two
-  // launchers (shell or chromeless) it is.
+  // Lets a rundown's back arrow lead back to this page.
   const withThisPage = useOriginHref();
   const [sel, setSel] = useState<Record<string, string>>({});
   // A launcher for Planning Center's service types, so nothing is read until it

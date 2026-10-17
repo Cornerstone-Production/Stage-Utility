@@ -1,19 +1,14 @@
 // servicecue-back.test.tsx — a rundown's back arrow returns to the launcher it
 // was opened from.
 //
-// The arrow was a hard-coded `/servicecue`, the tablet's chromeless launcher. An
-// operator who opened a rundown from ServiceCue in the sidebar (`/servicecue/manage`)
-// pressed it and lost the sidebar.
+// Driven through the app's REAL route table, under a bare root so the shell's
+// live wiring (an SSE loop that never settles) is not mounted. The links between
+// these pages are plain anchors, i.e. document loads, and jsdom does not follow
+// an anchor: each hop reads the anchor's href and opens it in a FRESH router,
+// which is what a document load is. That is why a reload is the same operation
+// as a click here.
 //
-// Driven through the app's REAL route table (ALL_DESTINATIONS and NESTED_ROUTES),
-// under a bare root so the shell's live wiring, whose SSE loop never settles, is
-// not mounted. The links between these pages are plain anchors — document loads —
-// and jsdom does not follow an anchor, so each hop here reads the anchor's href
-// and opens it in a FRESH router, which is what a document load is: a new page at
-// that address with nothing carried over but the address. That is the property
-// the fix leans on, and it is why a reload is the same operation as a click.
-//
-// What jsdom cannot see: whether the sidebar is on screen. Chromelessness is
+// jsdom cannot see whether the sidebar is on screen, so chromelessness is
 // asserted through isSharedChromelessPath, the function the shell asks; the
 // pictures are in the browser run.
 //
@@ -39,7 +34,6 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { ALL_DESTINATIONS, NESTED_ROUTES } = await import("../app/destinations.js");
 const { isSharedChromelessPath } = await import("../app/active-page.js");
-const { parseOrigin, withOrigin } = await import("../lib/back-target.js");
 const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
@@ -191,19 +185,11 @@ test("a reload of the rundown, and a change of layout or text size on it, all ke
 test("an origin that is not a path in this app is ignored, not followed", async () => {
   const f = stubFetch();
   try {
-    for (const from of ["//evil.example", "https://evil.example", "/\\evil.example", "javascript:alert(1)", "/a b", "/x?y=1", ""]) {
+    for (const from of ["//evil.example", "https://evil.example", "/\\evil.example", "javascript:alert(1)", "/a b", "/x?y=1", "servicecue", ""]) {
       await loadPage(`/servicecue/weekend/audio?from=${encodeURIComponent(from)}`);
       assert.equal(await hrefOf("All services"), "/servicecue", `from=${from} fell back`);
     }
   } finally {
     f.restore();
   }
-});
-
-test("withOrigin and parseOrigin agree: what one writes the other reads back", () => {
-  assert.equal(withOrigin("/servicecue/a/b", "/servicecue/manage"), "/servicecue/a/b?from=%2Fservicecue%2Fmanage");
-  assert.equal(withOrigin("/servicecue/a/b?plan=1", "/servicecue/"), "/servicecue/a/b?plan=1&from=%2Fservicecue");
-  assert.equal(parseOrigin("/servicecue/manage"), "/servicecue/manage");
-  assert.equal(parseOrigin(null), null);
-  assert.equal(parseOrigin("servicecue"), null);
 });

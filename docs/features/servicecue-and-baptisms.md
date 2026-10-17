@@ -18,13 +18,10 @@ URL (`/servicecue/weekend/audio`) you can pin in its own tab. The clock follows
 the plan's timezone.
 
 A rundown's **All services** arrow returns to the launcher it was opened from: the
-sidebar's `/servicecue/manage` if you came from there, the tablet's `/servicecue`
-if you came from that. The launcher records itself in the address as `?from=`, so
-the arrow still knows after a reload and when the page changes its own layout or
-plan. A rundown opened directly (a typed address, a QR code, a kiosk) has no
-`?from=` and goes to `/servicecue`. The origin lives in the address, so an address
-copied from the browser's bar after opening a rundown from the sidebar carries it
-to whoever receives it; a link without `?from=` is the one that always returns to
+sidebar's `/servicecue/manage` or the tablet's `/servicecue`. The launcher records
+itself in the address as `?from=`, so this holds across a reload and a change of
+layout or plan, and an address copied from the browser's bar carries it along. A
+rundown opened without `?from=` (a typed address, a QR code, a kiosk) goes to
 `/servicecue`.
 
 Configure it with **Edit column presets** on the ServiceCue page (`/servicecue/presets`), with a live
