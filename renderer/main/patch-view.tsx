@@ -6,35 +6,44 @@ import { invoke } from "../lib/api";
 import { useStageState } from "./use-stage-state";
 import { useStatusChannel } from "./use-status-channel";
 import { resolvePatch, endpointKey } from "../lib/patch-resolve";
+import { useMediaQuery } from "../lib/use-media-query";
+import { chainNodes, collectChanges, rackSections, sourceColor } from "../lib/patch-view-model";
 import { plural } from "@main/services/plural";
+import { PatchChain } from "./patch-chain";
+import { PatchWide } from "./patch-view-wide";
 
-type ChainNode = { text: string; kind: "source" | "hop" | "rack" | "console" };
-const PILL: Record<ChainNode["kind"], string> = {
-  source: "border-line-strong bg-fill-active text-fg font-medium",
-  hop: "border-line bg-surface text-fg-muted font-mono",
-  rack: "border-line-strong bg-surface text-fg font-mono",
-  console: "border-line bg-transparent text-fg-subtle font-mono",
-};
+/** Tailwind's `lg`. From here up the page has room for a table per rack; below it
+ *  stays the stacked column that suits a phone held in the wings. */
+export const PATCH_WIDE_MIN_WIDTH = 1024;
 
-/** SVG chevron connector between diagram nodes. */
-function Arrow() {
+function SheetTabs({ sheets, activeId, onPick, className }: { sheets: PatchSheet[]; activeId?: string; onPick: (id: string) => void; className: string }) {
+  if (sheets.length < 2) return null;
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" className="shrink-0 text-fg-faint" aria-hidden="true">
-      <path d="M4 2.5 L7.5 6 L4 9.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <div className={`flex items-center gap-1 overflow-x-auto ${className}`}>
+      {sheets.map((s) => (
+        <button
+          key={s.id}
+          type="button"
+          onClick={() => onPick(s.id)}
+          className={`shrink-0 rounded-md px-3 py-1.5 text-footnote font-medium transition-colors ${s.id === activeId ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}
+        >
+          {s.name}
+        </button>
+      ))}
+    </div>
   );
 }
 
-/** A signal path drawn as connected nodes: source → hops → rack → console. */
-function PatchChain({ nodes }: { nodes: ChainNode[] }) {
+/** The editor is the back of this page. Without this link it is a route
+ *  nobody can find — which is exactly what happened when Settings
+ *  dissolved and only the viewer was routed. "Settings → Patch" is also
+ *  no longer where it lives. */
+function PatchFooter() {
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      {nodes.map((n, i) => (
-        <Fragment key={i}>
-          {i > 0 && <Arrow />}
-          <span className={`rounded-md border px-2 py-0.5 text-caption2 whitespace-nowrap ${PILL[n.kind]}`}>{n.text}</span>
-        </Fragment>
-      ))}
+    <div className="mt-6 flex items-center justify-center gap-2 text-caption2 text-fg-faint">
+      <CableIcon className="size-3.5" />
+      <span>Read-only · updates live ·</span>
+      <a href="/patch/edit" className="text-accent hover:underline">Edit the patch</a>
     </div>
   );
 }
@@ -80,40 +89,48 @@ export function PatchView() {
     [sheet, state?.serviceTypeId, state?.planId],
   );
 
-  const devName = (id: string) => sheet?.devices.find((d) => d.id === id)?.name ?? id;
-  const racks = useMemo(() => (sheet?.devices ?? []).filter((d) => d.kind === "rack"), [sheet]);
-  const baseByKey = useMemo(() => new Map((sheet?.endpoints ?? []).map((e) => [endpointKey(e), e] as const)), [sheet]);
+  const wide = useMediaQuery(`(min-width: ${PATCH_WIDE_MIN_WIDTH}px)`);
 
-  function chainNodes(e: PatchEndpoint): ChainNode[] {
-    const hops: ChainNode[] = (e.path ?? []).map((h) => ({ text: `${devName(h.deviceId)} ${h.connector}`.trim(), kind: "hop" }));
-    const rk = racks.find((r) => r.id === e.rackId);
-    const rack: ChainNode = { text: `${rk?.name ?? "rack"} ${e.dir === "in" ? "in" : "out"} ${e.index}`, kind: "rack" };
-    const console: ChainNode[] = e.consoleChannel ? [{ text: `console ${e.consoleChannel}`, kind: "console" }] : [];
-    const src: ChainNode[] = e.label ? [{ text: e.label, kind: "source" }] : [];
-    // Signal flows source → stage boxes → rack → console (outputs flow the other way).
-    return e.dir === "in" ? [...src, ...hops, rack, ...console] : [...console, rack, ...hops, ...src];
-  }
-  function meaningful(e: PatchEndpoint): boolean {
-    return Boolean(e.label || e.consoleChannel || (e.path && e.path.length) || e.unused);
-  }
-
-  // "What changed vs the default" for the current direction.
-  const changes = useMemo(() => {
-    if (!resolved) return [];
-    return resolved.endpoints
-      .filter((e) => e.dir === tab && resolved.changed.has(endpointKey(e)))
-      .sort((a, b) => a.index - b.index)
-      .map((e) => {
-        const base = baseByKey.get(endpointKey(e));
-        let note = "";
-        if (e.unused) note = "unused this week";
-        else if ((base?.label ?? "") !== (e.label ?? "")) note = base?.label ? `was ${base.label}` : "new";
-        else if (JSON.stringify(base?.path ?? []) !== JSON.stringify(e.path ?? [])) note = "re-patched";
-        return { e, note };
-      });
-  }, [resolved, tab, baseByKey]);
+  // Every change, both directions: the desk layout lists them all, the stacked
+  // one only the direction on screen.
+  const allChanges = useMemo(() => (sheet && resolved ? collectChanges(sheet, resolved) : []), [sheet, resolved]);
+  const sections = useMemo(
+    () => (sheet && resolved ? rackSections(sheet, resolved, tab, { changesOnly, q }) : []),
+    [sheet, resolved, tab, changesOnly, q],
+  );
 
   const hasPatch = sheets.length > 0;
+  const toggleRack = (id: string) => setCollapsed((c) => ({ ...c, [id]: !c[id] }));
+
+  if (wide && sheet && resolved) {
+    return (
+      <div className="h-full overflow-y-auto bg-bg text-fg">
+        <div className="pb-[max(1rem,env(safe-area-inset-bottom))] pt-1">
+          <SheetTabs sheets={sheets} activeId={sheet.id} onPick={setSheetId} className="mb-3" />
+          <PatchWide
+            sheet={sheet}
+            state={state}
+            resolved={resolved}
+            variantName={resolved.variantName}
+            changes={allChanges}
+            sections={sections}
+            tab={tab}
+            onTab={setTab}
+            q={q}
+            onQ={setQ}
+            changesOnly={changesOnly}
+            onChangesOnly={setChangesOnly}
+            collapsed={collapsed}
+            onToggleRack={toggleRack}
+            onOpenRack={(id) => setCollapsed((c) => (c[id] ? { ...c, [id]: false } : c))}
+          />
+          <PatchFooter />
+        </div>
+      </div>
+    );
+  }
+
+  const changes = allChanges.filter(({ e }) => e.dir === tab);
 
   return (
     // No `dark` class: this renders inside the operator shell, which follows the
@@ -151,20 +168,7 @@ export function PatchView() {
         </div>
 
         {/* Sheet tabs (only when more than one sheet has a patch) */}
-        {sheets.length > 1 && (
-          <div className="mt-4 flex items-center gap-1 overflow-x-auto">
-            {sheets.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => setSheetId(s.id)}
-                className={`shrink-0 rounded-md px-3 py-1.5 text-footnote font-medium transition-colors ${s.id === sheet?.id ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}
-              >
-                {s.name}
-              </button>
-            ))}
-          </div>
-        )}
+        <SheetTabs sheets={sheets} activeId={sheet?.id} onPick={setSheetId} className="mt-4" />
 
         {!hasPatch ? (
           <div className="mt-6 rounded-xl border border-line bg-surface px-4 py-10 text-center text-footnote text-fg-subtle">
@@ -188,7 +192,7 @@ export function PatchView() {
                 <div className="divide-y divide-line">
                   {changes.map(({ e, note }) => (
                     <div key={endpointKey(e)} className="flex items-baseline gap-3 px-4 py-2">
-                      <span className="w-10 shrink-0 font-mono text-caption1 tabular-nums text-fg-subtle">{tab === "in" ? "in" : "out"} {e.index}</span>
+                      <span className="w-10 shrink-0 font-mono text-caption1 tabular-nums text-fg-subtle">{e.dir} {e.index}</span>
                       <span className="font-medium">{e.unused ? <span className="text-fg-subtle line-through">{e.label || "(source)"}</span> : e.label || "(unnamed)"}</span>
                       {note && <span className="text-caption1 text-fg-muted">· {note}</span>}
                     </div>
@@ -216,22 +220,12 @@ export function PatchView() {
 
             {/* Full patch, grouped by rack (and by owner within a rack) */}
             <div className="mt-4 flex flex-col gap-3">
-              {racks.map((rack) => {
-                const rows = (resolved?.endpoints ?? [])
-                  .filter((e) => e.rackId === rack.id && e.dir === tab && meaningful(e))
-                  .filter((e) => !changesOnly || resolved?.changed.has(endpointKey(e)))
-                  .filter((e) => {
-                    if (!q.trim()) return true;
-                    const hay = `${e.index} ${e.label ?? ""} ${e.mic ?? ""} ${e.feedType ?? ""} ${e.consoleChannel ?? ""} ${e.owner ?? ""}`.toLowerCase();
-                    return hay.includes(q.toLowerCase());
-                  })
-                  .sort((a, b) => a.index - b.index);
-                if (rows.length === 0) return null;
+              {sections.map(({ rack, rows }) => {
                 const isCollapsed = collapsed[rack.id];
                 let lastOwner: string | undefined;
                 return (
                   <div key={rack.id} style={rack.color ? { boxShadow: `inset 3px 0 0 ${rack.color}` } : undefined} className="overflow-hidden rounded-xl border border-line bg-surface">
-                    <button type="button" onClick={() => setCollapsed((c) => ({ ...c, [rack.id]: !c[rack.id] }))} className="flex w-full items-center gap-2 px-4 py-2.5 text-left">
+                    <button type="button" onClick={() => toggleRack(rack.id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left">
                       <ChevronRightIcon className={`size-4 text-fg-subtle transition-transform ${isCollapsed ? "" : "rotate-90"}`} />
                       {rack.color && <span className="size-2.5 shrink-0 rounded-full" style={{ background: rack.color }} />}
                       <span className="text-footnote font-semibold">{rack.name}</span>
@@ -244,7 +238,7 @@ export function PatchView() {
                           const owner = e.owner?.trim() || undefined;
                           const showOwner = owner !== lastOwner && owner !== undefined;
                           lastOwner = owner;
-                          const srcColor = sheet?.devices.find((dv) => dv.id === e.path?.[0]?.deviceId)?.color;
+                          const srcColor = sheet ? sourceColor(e, sheet.devices) : undefined;
                           return (
                             <Fragment key={endpointKey(e)}>
                               {showOwner && (
@@ -264,7 +258,7 @@ export function PatchView() {
                                     {tab === "in" && e.phantom && <span className="rounded border border-accent/40 px-1 font-mono text-[10px] text-accent">48V</span>}
                                     {tab === "out" && e.feedType && <span className="text-caption1 text-fg-muted">{e.feedType}</span>}
                                   </div>
-                                  <div className="mt-1"><PatchChain nodes={chainNodes(e)} /></div>
+                                  <div className="mt-1"><PatchChain nodes={chainNodes(e, sheet?.devices ?? [])} /></div>
                                 </div>
                               </div>
                             </Fragment>
@@ -279,15 +273,7 @@ export function PatchView() {
           </>
         )}
 
-        {/* The editor is the back of this page. Without this link it is a route
-            nobody can find — which is exactly what happened when Settings
-            dissolved and only the viewer was routed. "Settings → Patch" is also
-            no longer where it lives. */}
-        <div className="mt-6 flex items-center justify-center gap-2 text-caption2 text-fg-faint">
-          <CableIcon className="size-3.5" />
-          <span>Read-only · updates live ·</span>
-          <a href="/patch/edit" className="text-accent hover:underline">Edit the patch</a>
-        </div>
+        <PatchFooter />
       </div>
     </div>
   );

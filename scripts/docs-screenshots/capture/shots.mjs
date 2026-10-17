@@ -96,7 +96,7 @@ export const SHOTS = [
   {
     name: "patch-sheet",
     phase: "week",
-    shows: "The volunteer patch sheet at /patch: what changed this week, then every input with its signal path.",
+    shows: "The volunteer patch sheet at /patch: this week and what changed in a column beside a table per rack, each input with its signal path.",
     async run({ session, page }) {
       await session.goto(page, "/patch");
       await session.shoot(page, "patch-sheet");
