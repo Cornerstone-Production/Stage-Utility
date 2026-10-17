@@ -6,30 +6,39 @@ import { invoke } from "../lib/api";
 import { useStageState } from "./use-stage-state";
 import { useStatusChannel } from "./use-status-channel";
 import { resolvePatch, endpointKey } from "../lib/patch-resolve";
-import { useElementAtLeastRem } from "../lib/use-element-width";
+import { useElementTier } from "../lib/use-element-width";
 import { chainNodes, collectChanges, noRowsMessage, rackSections, sourceColor, withOwnerHeadings } from "../lib/patch-view-model";
 import { plural } from "@main/services/plural";
 import { LEGEND_NODES, PatchChain } from "./patch-chain";
 import { PatchWide } from "./patch-view-wide";
 
 /**
- * How wide the page itself (the pane beside the sidebar, not the window) has to be
- * for the table-per-rack layout; below it the page is the stacked column that
- * suits a phone held in the wings.
+ * Three layouts, chosen by how wide the page itself is (the pane beside the
+ * sidebar, not the window): the stacked column that suits a phone held in the
+ * wings, the same cards in a row above full-width tables, and a sticky column
+ * beside the tables.
  *
  * Measured: with the console node left out of the path, which the rack card does
  * below 62rem, the widest table this app draws (real chain labels such as
- * "1.11 SD Rack in 12", a mic name, the longest note) is 879px. The card is the
- * pane minus the 270px column and its 14px gap, so the pane has to be at least
- * 1163px, and 74rem (1184px at a 16px root) is that rounded up to a whole rem. At
- * that width the note column, which says why a row changed, stays in its card for
- * the names measured; a classic 15px scrollbar takes some of the 21px of room, and
- * a longer name takes the rest. With the sidebar at its default width, a 1440px
- * window is a 1176px pane and stacks, a 1280px one with the sidebar collapsed is
- * exactly 1184px, and 1440px collapsed is 1344px. Dragging the sidebar narrower
- * moves the pane with it.
+ * "1.11 SD Rack in 12", a mic name, the longest note) is 879px. That table in a
+ * card the width of the pane, 881px with the card's border, is the medium layout:
+ * 56rem (896px at a 16px root) is that rounded up to a whole rem. Beside a 270px
+ * column and its 14px gap the card is 284px narrower, so the sticky column needs
+ * 1165px and 74rem (1184px) is that rounded up. At either width the note column,
+ * which says why a row changed, stays in its card for the names measured; a
+ * classic 15px scrollbar takes some of the 15px (medium) or 19px (wide) of room,
+ * and a longer name takes the rest.
+ *
+ * With the sidebar at its default width a 1024px window is a 760px pane (stacked,
+ * or 928px collapsed: medium), 1280px is 1016px (medium), 1440px is 1176px
+ * (medium) and 1920px is 1656px (wide); collapsed, 1280px is exactly 1184px
+ * (wide). Dragging the sidebar moves the pane with it.
  */
+export const PATCH_MEDIUM_MIN_PANE_REM = 56;
 export const PATCH_WIDE_MIN_PANE_REM = 74;
+/** Ascending, so the tier is how many of them the pane has reached. */
+const PANE_TIERS = [PATCH_MEDIUM_MIN_PANE_REM, PATCH_WIDE_MIN_PANE_REM] as const;
+const LAYOUT_BY_TIER = ["stacked", "medium", "wide"] as const;
 
 function SheetTabs({ sheets, activeId, onPick, className }: { sheets: PatchSheet[]; activeId?: string; onPick: (id: string) => void; className: string }) {
   if (sheets.length < 2) return null;
@@ -105,7 +114,7 @@ export function PatchView() {
   );
 
   const paneRef = useRef<HTMLDivElement>(null);
-  const wide = useElementAtLeastRem(paneRef, PATCH_WIDE_MIN_PANE_REM);
+  const layout = LAYOUT_BY_TIER[useElementTier(paneRef, PANE_TIERS)];
 
   // Every change, both directions: the desk layout lists them all, the stacked
   // one only the direction on screen.
@@ -120,10 +129,11 @@ export function PatchView() {
   const openRack = (id: string) => setCollapsed((c) => (c[id] ? { ...c, [id]: false } : c));
 
   const body =
-    wide && sheet && resolved ? (
+    layout !== "stacked" && sheet && resolved ? (
       <div className="pb-[max(1rem,env(safe-area-inset-bottom))] pt-1">
         <SheetTabs sheets={sheets} activeId={sheet.id} onPick={setSheetId} className="mb-3" />
         <PatchWide
+          layout={layout}
           sheet={sheet}
           state={state}
           resolved={resolved}

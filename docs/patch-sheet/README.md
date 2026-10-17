@@ -61,43 +61,48 @@ and updates without a reload. When a patch has more than one sheet with devices,
 per sheet sits across the top. An install with no patch yet shows "No patch has been set
 up yet."; the footer links to the editor.
 
-![The volunteer patch sheet: this week and what changed in a column beside a table per rack, each input with its signal path](../images/patch-sheet.png)
+![The volunteer patch sheet: this week, what changed and a rack list in a row above a table per rack, each input with its signal path](../images/patch-sheet.png)
 
-**When the page is 74rem (1184px) wide or more** it uses the whole width in two columns. That
-is the width of the page itself, beside the sidebar, not of the window: a 1440px window
-has room for it with the sidebar collapsed and, at the sidebar's default width, not with it open.
+The layout follows the width of the page itself, beside the sidebar, not of the window,
+so it changes when the sidebar is collapsed or dragged. There are three:
 
-- **The left column** stays in view while the page scrolls. It holds *This week* (the
-  service type, the plan and its date, the base variant and a Read-only tag), the amber
-  **changes from the standard patch** card, and **Jump to**, a list of the racks showing,
-  each with its colour and channel count. A change card row is the direction and channel
-  (`in 11`, `out 8`), the source (struck through when unused) and a note: *was `<old
-  label>`*, *new*, *re-patched*, *unused*, or *changed* when something else
-  about it differs (mic, feed, 48V, console channel, owner, notes). The card lists inputs and outputs together.
-  Jump to scrolls to a rack and opens it if it was collapsed.
-- **The right column** starts with the **Inputs / Outputs** switch, a **Filter** box, a
-  **Changes only** toggle and, at the right, a legend showing how to read a signal path.
-  Below it is one card per rack: a header with a chevron, the rack's colour, its name and
-  its channel count (*8 of 24* while a filter hides some), then a table of channel,
-  console channel, source (destination for outputs), mic (feed for outputs), 48V (inputs
-  only), the signal path on one line, and a note.
+- **74rem (1184px) and wider:** two columns. A column on the left stays in view while the
+  page scrolls, with the tables beside it.
+- **56rem (896px) up to that:** the same cards in a row above full-width tables. At the
+  sidebar's default width that is a 1440px window, a 1280px window, and a 1024px window
+  with the sidebar collapsed.
+- **Narrower than 56rem:** one stacked column, which suits a phone in the wings: the
+  Read-only tag, This week, the legend, the changes card for the direction on screen, the
+  Inputs / Outputs switch with Filter and Changes only, then a collapsible card per rack
+  with two lines per channel, the same rules deciding which channels show.
+
+The first two hold the same things:
+
+- **This week**: the service type, the plan and its date, the base variant and a Read-only tag.
+- **Changes from the standard patch**: an amber card listing inputs and outputs together.
+  A row is the direction and channel (`in 11`, `out 8`), the source (struck through when
+  unused) and a note: *was `<old label>`*, *new*, *re-patched*, *unused*, or *changed* when
+  something else about it differs (mic, feed, 48V, console channel, owner, notes).
+- **Jump to**: the racks showing, each with its colour and channel count. It scrolls to a
+  rack and opens it if it was collapsed.
+- **The toolbar**: the **Inputs / Outputs** switch, a **Filter** box, a **Changes only**
+  toggle and, at the right, a legend showing how to read a signal path.
+- **One card per rack**: a header with a chevron, the rack's colour, its name and its channel
+  count (*8 of 24* while a filter hides some), then a table of channel, console channel,
+  source (destination for outputs), mic (feed for outputs), 48V (inputs only), the signal
+  path on one line, and a note.
 
 Each row is one line. The colour of the first box a channel comes through shows as a
 bar on the row's left edge. A channel that changed this week is tinted amber and its last
 column says why. A channel marked unused is dimmed with its source struck through and
-reads *unused this week*, in amber only when this week made it unused. A channel set under an owner has a group row, *Owned by
-`<owner>`*, above its first row in the run. The header chevron collapses a rack.
+reads *unused this week*, in amber only when this week made it unused. A channel set under an owner has a group row, *Owned
+by `<owner>`*, above its first row in the run. The header chevron collapses a rack.
 
 Filter matches the channel number, source, mic, feed, console channel and owner. A
 signal path reads source, the boxes it passes through, the rack and the console channel,
 and outputs read the other way. The console end of the path is left out of a table row
 when the rack card is narrower than 62rem, so the notes stay in view; the console channel
 has a column of its own.
-
-**Narrower than that** the page is one stacked column, which suits a phone in the wings: the
-Read-only tag, This week, the legend, the changes card for the direction on screen, the
-Inputs / Outputs switch with Filter and Changes only, then a collapsible card per rack
-with two lines per channel, the same rules deciding which channels show.
 
 ## Bulk entry
 

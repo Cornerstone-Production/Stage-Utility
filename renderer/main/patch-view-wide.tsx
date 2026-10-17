@@ -18,6 +18,9 @@ import { Input } from "../components/ui/input";
 import { LEGEND_NODES, PatchChain } from "./patch-chain";
 
 export interface PatchWideProps {
+  /** `wide`: a sticky column beside the tables. `medium`: the same three cards in
+   *  a row above them, for a pane with room for the tables but not for a column. */
+  layout: "medium" | "wide";
   sheet: PatchSheet;
   state: StageState | null;
   resolved: ResolvedPatch;
@@ -67,52 +70,74 @@ export function PatchWide(p: PatchWideProps) {
   // One per header cell below, so an owner row spans the whole table.
   const cols = isIn ? 7 : 6;
 
+  const medium = p.layout === "medium";
+
+  const weekCard = (
+    <div className={cn(CARD, "px-4 py-3.5", medium && "w-[270px] shrink-0")}>
+      <div className={EYEBROW}>This week</div>
+      <div className="mt-1 text-callout font-semibold">{p.state?.serviceTypeName ?? "—"}</div>
+      {planLine && <div className="mt-0.5 text-footnote text-fg-muted">{planLine}</div>}
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {resolved.variantName && <span className={PILL}>Base: {resolved.variantName}</span>}
+        <span className={PILL}>Read-only</span>
+      </div>
+    </div>
+  );
+
+  const changesCard = p.changes.length > 0 && (
+    <div className={cn("@container rounded-xl border border-warn-9/40 bg-warn-9/12 px-3.5 py-3", medium && "min-w-[20rem] flex-1")}>
+      <h2 className="mb-2 text-footnote font-semibold text-warn-11">{plural(p.changes.length, "change")} from the standard patch</h2>
+      {/* Two columns when the card has the room (a row above the tables), one when not. */}
+      <div className={cn(medium && "@min-[34rem]:columns-2 @min-[34rem]:gap-x-6")}>
+        {p.changes.map(({ e, note }) => (
+          <div key={endpointKey(e)} className="flex break-inside-avoid gap-2 border-t border-warn-9/22 py-1 text-footnote">
+            <span className="w-11 shrink-0 font-mono text-caption1 text-fg-muted">{e.dir} {e.index}</span>
+            <span className={cn("min-w-0 truncate", e.unused && "text-fg-muted line-through")}>
+              {e.unused ? e.label || "(source)" : e.label || "(unnamed)"}
+            </span>
+            {note && <em className="ml-auto whitespace-nowrap pl-1 not-italic text-warn-11">{note === UNUSED_NOTE ? "unused" : note}</em>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const jumpCard = p.sections.length > 0 && (
+    <nav aria-label="Jump to" className={cn(CARD, "p-2", medium && "w-[220px] shrink-0")}>
+      <div className={cn(EYEBROW, "px-2 py-1.5")}>Jump to</div>
+      {p.sections.map(({ rack, rows }) => (
+        <button
+          key={rack.id}
+          type="button"
+          onClick={() => jumpTo(rack.id)}
+          className="flex w-full items-center gap-2 rounded-[7px] px-2 py-1.5 text-left text-footnote hover:bg-fill"
+        >
+          <i className="size-2 shrink-0 rounded-sm" style={{ background: rack.color ?? "var(--su-line-strong)" }} />
+          <span className="min-w-0 truncate">{rack.name}</span>
+          <span className="ml-auto font-mono text-caption1 text-fg-subtle">{rows.length}</span>
+        </button>
+      ))}
+    </nav>
+  );
+
   return (
-    <div className="grid grid-cols-[270px_minmax(0,1fr)] items-start gap-3.5">
-      <aside className="sticky top-0 flex max-h-[calc(100vh-7rem)] flex-col gap-3 overflow-y-auto">
-        <div className={cn(CARD, "px-4 py-3.5")}>
-          <div className={EYEBROW}>This week</div>
-          <div className="mt-1 text-callout font-semibold">{p.state?.serviceTypeName ?? "—"}</div>
-          {planLine && <div className="mt-0.5 text-footnote text-fg-muted">{planLine}</div>}
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {resolved.variantName && <span className={PILL}>Base: {resolved.variantName}</span>}
-            <span className={PILL}>Read-only</span>
-          </div>
+    <div
+      data-layout={p.layout}
+      className={medium ? undefined : "grid grid-cols-[270px_minmax(0,1fr)] items-start gap-3.5"}
+    >
+      {medium ? (
+        <div className="mb-3 flex flex-wrap items-start gap-3">
+          {weekCard}
+          {changesCard}
+          {jumpCard}
         </div>
-
-        {p.changes.length > 0 && (
-          <div className="rounded-xl border border-warn-9/40 bg-warn-9/12 px-3.5 py-3">
-            <h2 className="mb-2 text-footnote font-semibold text-warn-11">{plural(p.changes.length, "change")} from the standard patch</h2>
-            {p.changes.map(({ e, note }) => (
-              <div key={endpointKey(e)} className="flex gap-2 border-t border-warn-9/22 py-1 text-footnote">
-                <span className="w-11 shrink-0 font-mono text-caption1 text-fg-muted">{e.dir} {e.index}</span>
-                <span className={cn("min-w-0 truncate", e.unused && "text-fg-muted line-through")}>
-                  {e.unused ? e.label || "(source)" : e.label || "(unnamed)"}
-                </span>
-                {note && <em className="ml-auto whitespace-nowrap pl-1 not-italic text-warn-11">{note === UNUSED_NOTE ? "unused" : note}</em>}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {p.sections.length > 0 && (
-          <nav aria-label="Jump to" className={cn(CARD, "p-2")}>
-            <div className={cn(EYEBROW, "px-2 py-1.5")}>Jump to</div>
-            {p.sections.map(({ rack, rows }) => (
-              <button
-                key={rack.id}
-                type="button"
-                onClick={() => jumpTo(rack.id)}
-                className="flex w-full items-center gap-2 rounded-[7px] px-2 py-1.5 text-left text-footnote hover:bg-fill"
-              >
-                <i className="size-2 shrink-0 rounded-sm" style={{ background: rack.color ?? "var(--su-line-strong)" }} />
-                <span className="min-w-0 truncate">{rack.name}</span>
-                <span className="ml-auto font-mono text-caption1 text-fg-subtle">{rows.length}</span>
-              </button>
-            ))}
-          </nav>
-        )}
-      </aside>
+      ) : (
+        <aside className="sticky top-0 flex max-h-[calc(100vh-7rem)] flex-col gap-3 overflow-y-auto">
+          {weekCard}
+          {changesCard}
+          {jumpCard}
+        </aside>
+      )}
 
       <section className="min-w-0">
         <div className="mb-2.5 flex flex-wrap items-center gap-2">

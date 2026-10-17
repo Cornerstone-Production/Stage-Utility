@@ -29,7 +29,7 @@ App pages are 1440x900 in the light theme; screens are 1920x1080 as they render.
 | `messages-composer.png` | The Producer Console: the message composer with groups, quick messages and the day's thread with replies, beside a live copy of the wall. |
 | `messages-panel.png` | A stage-side panel: the thread with each reply under its message, and the quick-reply buttons. |
 | `messages-settings.png` | Settings → Messages: groups with their screen counts, quick messages and quick replies. |
-| `patch-sheet.png` | The volunteer patch sheet at `/patch`: this week and what changed in a column beside a table per rack, each input with its signal path. |
+| `patch-sheet.png` | The volunteer patch sheet at `/patch`: this week, what changed and a rack list in a row above a table per rack, each input with its signal path. |
 | `plan-selection.png` | The Plan page: manual plan selection, active service types and the plan switcher mode. |
 | `screens-overview.png` | Screens: a card per screen with a live preview and its message groups, the found-devices banner and the sidebar's count of screens not set up. |
 | `servicecue-picker.png` | The ServiceCue landing page: a service type and a column preset to open its rundown. |

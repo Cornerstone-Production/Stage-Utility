@@ -181,6 +181,8 @@ function column(table: HTMLElement, header: string): string[] {
 const sources = (table: HTMLElement) => column(table, "Source");
 const tableFor = (rack: string) => screen.getByRole("table", { name: new RegExp(`^${rack}`) });
 const tableNames = () => screen.queryAllByRole("table").map((t) => t.getAttribute("aria-label"));
+/** Which of the three layouts is on screen. */
+const layout = () => document.querySelector("[data-layout]")?.getAttribute("data-layout") ?? "stacked";
 const type = (value: string) => fireEvent.change(screen.getByRole("textbox"), { target: { value } });
 
 beforeEach(() => {
@@ -441,24 +443,34 @@ describe("at desk width", () => {
     assert.ok(screen.getByText("No outputs on this sheet."));
   });
 
-  test("the table layout starts at exactly 74rem of pane, and one px less is the stacked column", async () => {
-    width = 1184;
+  test("the layouts start at exactly 56rem and 74rem of pane, and one px less is the one before", async () => {
+    width = 895;
     await mount();
-    assert.equal(screen.queryAllByRole("table").length, 2);
-    await resizePane(1183);
-    assert.equal(screen.queryAllByRole("table").length, 0);
+    assert.equal(layout(), "stacked");
+    for (const [px, expected] of [
+      [896, "medium"],
+      [1183, "medium"],
+      [1184, "wide"],
+      [1183, "medium"],
+      [895, "stacked"],
+    ] as const) {
+      await resizePane(px);
+      assert.equal(layout(), expected, `${px}px`);
+    }
   });
 
-  test("the threshold is 74 rem of the ROOT font, so a larger root asks for more pane", async () => {
+  test("the thresholds are in rem of the ROOT font, so a larger root asks for more pane", async () => {
     const g = globalThis as unknown as { getComputedStyle: unknown };
     const real = g.getComputedStyle;
-    g.getComputedStyle = () => ({ fontSize: "20px" }); // 74rem is now 1480px
+    g.getComputedStyle = () => ({ fontSize: "20px" }); // 56rem is now 1120px, 74rem 1480px
     try {
-      width = 1400;
+      width = 1119;
       await mount();
-      assert.equal(screen.queryAllByRole("table").length, 0, "1400px is under 74 rem of a 20px root");
-      await resizePane(1480);
-      assert.equal(screen.queryAllByRole("table").length, 2);
+      assert.equal(layout(), "stacked");
+      for (const [px, expected] of [[1120, "medium"], [1479, "medium"], [1480, "wide"]] as const) {
+        await resizePane(px);
+        assert.equal(layout(), expected, `${px}px`);
+      }
     } finally {
       g.getComputedStyle = real;
     }
@@ -472,13 +484,45 @@ describe("at desk width", () => {
     assert.equal(observers.size, 0, "a ResizeObserver outlived the page");
   });
 
-  test("collapsing the sidebar, which widens the pane, swaps the stacked column for the tables", async () => {
-    width = 1176; // a 1440px window with the sidebar open
+  test("opening, then collapsing the sidebar moves the pane up through the layouts", async () => {
+    width = 760; // a 1024px window, sidebar open
     await mount();
-    assert.equal(screen.queryAllByRole("table").length, 0);
-    await resizePane(1370); // and with it collapsed
-    assert.equal(screen.queryAllByRole("table").length, 2);
-    assert.ok(screen.getByRole("navigation", { name: "Jump to" }));
+    assert.equal(layout(), "stacked");
+    for (const [px, expected] of [
+      [928, "medium"], // 1024px, sidebar collapsed
+      [1176, "medium"], // 1440px, sidebar open
+      [1344, "wide"], // 1440px, sidebar collapsed
+    ] as const) {
+      await resizePane(px);
+      assert.equal(layout(), expected, `${px}px`);
+    }
+  });
+
+  test("the medium layout has the same cards in a row above the tables, and no side column", async () => {
+    width = 1176;
+    await mount();
+    assert.equal(layout(), "medium");
+    assert.equal(screen.queryByRole("complementary"), null, "medium must not have the side column");
+    const above = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const toolbar = screen.getByRole("textbox");
+    const jump = screen.getByRole("navigation", { name: "Jump to" });
+    const changes = screen.getByText(/from the standard patch/);
+    assert.ok(above(screen.getByText("This week"), changes), "This week comes before the changes");
+    assert.ok(above(changes, jump), "the changes come before Jump to");
+    assert.ok(above(jump, toolbar), "Jump to comes before the toolbar");
+    assert.ok(above(toolbar, screen.getAllByRole("table")[0]), "the toolbar comes before the tables");
+    assert.deepEqual(tableNames(), ["Alpha Rack inputs", "Beta Rack inputs"]);
+    // The same behaviour, because it is the same component.
+    type("lead");
+    assert.deepEqual(tableNames(), ["Beta Rack inputs"]);
+    fireEvent.click(within(jump).getByRole("button", { name: /Beta Rack/ }));
+    assert.deepEqual(scrolled, ["Beta Rack"]);
+  });
+
+  test("the wide layout has the side column", async () => {
+    await mount();
+    assert.equal(layout(), "wide");
+    assert.ok(screen.getByRole("complementary"));
   });
 
   test("the empty state and the footer are the same", async () => {
@@ -493,7 +537,7 @@ describe("at desk width", () => {
 
 describe("in a narrow pane", () => {
   beforeEach(() => {
-    width = 1100;
+    width = 800;
   });
 
   test("it is the stacked column: no table, the same rows, one direction of changes", async () => {
