@@ -53,10 +53,10 @@ describe("status colour steps", () => {
     for (const file of sources(ROOT)) {
       const src = withoutComments(readFileSync(file, "utf8"));
       const at = file.replace(ROOT, "");
-      for (const m of src.matchAll(new RegExp(`\\b[a-z]+-((?:${FAMILY})-\\d+)(?:/\\d+)?`, "g"))) {
+      for (const m of src.matchAll(new RegExp(`\\b[a-z]+-((?:${FAMILY})-a?\\d+)(?:/\\d+)?`, "g"))) {
         if (!declaredSteps.has(m[1])) offenders.push(`${at}: ${m[0]}`);
       }
-      for (const m of src.matchAll(new RegExp(`var\\((--(?:su-)?(?:${FAMILY})-\\d+)\\)`, "g"))) {
+      for (const m of src.matchAll(new RegExp(`var\\((--(?:su-)?(?:${FAMILY})-a?\\d+)\\s*[,)]`, "g"))) {
         if (!declaredVars.has(m[1])) offenders.push(`${at}: var(${m[1]})`);
       }
     }

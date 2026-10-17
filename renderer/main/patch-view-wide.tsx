@@ -182,7 +182,7 @@ export function PatchWide(p: PatchWideProps) {
                 <span className="font-mono text-caption1 text-fg-subtle">{rows.length === total ? rows.length : `${rows.length} of ${total}`}</span>
               </button>
               {!isCollapsed && (
-                <div className="overflow-x-auto">
+                <div tabIndex={0} role="region" aria-label={`${rack.name} table`} className="overflow-x-auto">
                   <table aria-label={`${rack.name} ${isIn ? "inputs" : "outputs"}`} className="w-full border-collapse text-footnote">
                     <thead>
                       <tr>

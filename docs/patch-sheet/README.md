@@ -59,7 +59,7 @@ volunteer highlight.
 the week's variant and tweaks applied. It follows the live or next Planning Center plan
 and updates without a reload. When a patch has more than one sheet with devices, a tab
 per sheet sits across the top. An install with no patch yet shows "No patch has been set
-up yet." with a link to the editor, which is also linked in the footer.
+up yet."; the footer links to the editor.
 
 ![The volunteer patch sheet: this week and what changed in a column beside a table per rack, each input with its signal path](../images/patch-sheet.png)
 
@@ -70,8 +70,8 @@ up yet." with a link to the editor, which is also linked in the footer.
   **changes from the standard patch** card, and **Jump to**, a list of the racks showing,
   each with its colour and channel count. A change card row is the direction and channel
   (`in 11`, `out 8`), the source (struck through when unused) and a note: *was `<old
-  label>`*, *new*, *re-patched*, *unused*, or *changed* when only its mic, feed, 48V, console
-  channel or owner differs. The card lists inputs and outputs together.
+  label>`*, *new*, *re-patched*, *unused*, or *changed* when something else
+  about it differs (mic, feed, 48V, console channel, owner, notes). The card lists inputs and outputs together.
   Jump to scrolls to a rack and opens it if it was collapsed.
 - **The right column** starts with the **Inputs / Outputs** switch, a **Filter** box, a
   **Changes only** toggle and, at the right, a legend showing how to read a signal path.
@@ -89,8 +89,8 @@ reads *unused this week*, in amber only when this week made it unused. A channel
 Filter matches the channel number, source, mic, feed, console channel and owner. A
 signal path reads source, the boxes it passes through, the rack and the console channel,
 and outputs read the other way. The console end of the path is left out of a table row
-when the card is too narrow to show the notes beside it, because the console channel has
-a column of its own.
+when the rack card is narrower than 62rem, so the notes stay in view; the console channel
+has a column of its own.
 
 **Below 1024px** the page is one stacked column, which suits a phone in the wings: the
 Read-only tag, This week, the legend, the changes card for the direction on screen, the

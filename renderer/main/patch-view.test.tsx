@@ -270,10 +270,21 @@ describe("at desk width", () => {
     // arrow after it are the two that the container query hides.
     const path = within(tableFor("Alpha Rack")).getAllByRole("row")[1].querySelector("div.w-max")!;
     const kids = [...path.children];
-    assert.match(kids[0].className, /hidden/, "the console pill is not droppable");
+    // Both must name the same container width, or one drops without the other.
+    assert.match(kids[0].className, /(^| )hidden @min-\[62rem\]:inline( |$)/, "the console pill is not droppable");
     assert.equal(kids[1].tagName.toLowerCase(), "svg");
-    assert.match(kids[1].getAttribute("class") ?? "", /hidden/, "a dangling arrow is left before the rack pill");
+    assert.match(kids[1].getAttribute("class") ?? "", /(^| )hidden @min-\[62rem\]:block( |$)/, "a dangling arrow is left before the rack pill");
     assert.doesNotMatch(kids[2].className, /hidden/, "the rack pill must stay");
+  });
+
+  test("a channel already unused that changes another way does not claim to be newly unused", async () => {
+    const sheet = analog();
+    sheet.endpoints.push(ep("alpha", "in", 7, { label: "Spare", mic: "Old", consoleChannel: "17", unused: true, path: via("snake", "7") }));
+    sheet.variants[0].overrides["alpha:in:7"] = ep("alpha", "in", 7, { mic: "New" });
+    FILE = file(sheet);
+    await mount();
+    const alpha = tableFor("Alpha Rack");
+    assert.equal(column(alpha, "Note")[sources(alpha).indexOf("Spare")], "changed");
   });
 
   test("the context card names the week, the variant and that the page is read-only", async () => {

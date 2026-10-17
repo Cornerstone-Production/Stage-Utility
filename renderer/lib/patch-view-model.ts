@@ -58,7 +58,9 @@ export const UNUSED_NOTE = "unused this week";
 /** Why a channel differs from the standard patch, in the words the page uses.
  *  Only meaningful for a channel in the changed set. */
 export function changeNote(e: PatchEndpoint, base: PatchEndpoint | undefined): string {
-  if (e.unused) return UNUSED_NOTE;
+  // Unused this week only when the standard patch had it in use; one that was
+  // already unused and changed some other way falls through to say that.
+  if (e.unused && !base?.unused) return UNUSED_NOTE;
   if ((base?.label ?? "") !== (e.label ?? "")) return base?.label ? `was ${base.label}` : "new";
   if (JSON.stringify(base?.path ?? []) !== JSON.stringify(e.path ?? [])) return "re-patched";
   // Something else about the channel changed (mic, 48V, feed, console channel,
