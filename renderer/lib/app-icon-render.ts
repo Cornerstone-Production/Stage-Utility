@@ -58,7 +58,7 @@ export function drawIcon(
 }
 
 /** The art fraction for each icon: the maskable one keeps clear of the edge. */
-const ART_FRACTION: Record<IconField, number> = { apple: 1, any192: 1, any512: 1, maskable: MASKABLE_ART };
+export const ART_FRACTION: Record<IconField, number> = { apple: 1, any192: 1, any512: 1, maskable: MASKABLE_ART };
 
 function canvasOf(size: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const canvas = document.createElement("canvas");

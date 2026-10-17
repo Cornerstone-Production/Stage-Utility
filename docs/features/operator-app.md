@@ -436,8 +436,8 @@ The connect QR toggle is the last card on this page — see
 
 ### Tab and home-screen icon
 
-Click the icon card, then **Upload** a square PNG, SVG or WebP (at least 512 x 512),
-or press **Use my logo** to build it from the logo already set. Stage Utility draws
+Click the icon card, then **Upload** a square PNG, JPG, SVG or WebP,
+or press **Use my logo** to build it from the logo already set. A square of 512 x 512 or more is recommended; smaller art is scaled up and looks soft. Stage Utility draws
 every size from that one square in your browser: 180 px for the iPhone and iPad
 home screen, 192 and 512 px for Android and the tab, and a second 512 px version
 for Android's round and rounded-square masks with the art kept inside the centre

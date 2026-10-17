@@ -180,8 +180,13 @@ describe("the connect QR card", () => {
     const sw = screen.getByRole("switch", { name: "Show connect QR on displays" });
     await press(sw);
     assert.deepEqual(qr, [false]);
-    const labels = [...document.querySelectorAll("span")].map((s) => s.textContent);
-    assert.ok(labels.lastIndexOf("Show connect QR on displays") > labels.indexOf("Accent color"));
+    // Document order: the QR card comes after the last asset card.
+    const qrCard = sw.closest("div.rounded-xl");
+    const avatarCard = screen.getByRole("button", { name: /Default avatar/ });
+    assert.ok(
+      qrCard !== null && (avatarCard.compareDocumentPosition(qrCard) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+      "the QR card is not after the asset cards",
+    );
   });
 });
 
@@ -325,6 +330,39 @@ describe("the dialogs", () => {
       assert.deepEqual([asked.length, writes.length], [0, 0]);
     } finally {
       globalThis.fetch = before;
+    }
+  });
+
+  test("two quick swatch clicks on a saved icon make one icon, the first", async () => {
+    const before = globalThis.fetch;
+    const beforeTimeout = AbortSignal.timeout;
+    AbortSignal.timeout = () => new AbortController().signal;
+    globalThis.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ original: null, crop: null, art: "/branding-images/cccccccccccccccc.png" }),
+    })) as unknown as typeof fetch;
+    const restoreCanvas = fakeCanvas();
+    try {
+      const { writes } = mount({
+        appIcon192: "/branding-images/aaaaaaaaaaaaaaaa.png",
+        appIconMaskable: "/branding-images/bbbbbbbbbbbbbbbb.png",
+        appIconBackground: "#2e6691",
+      });
+      await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+      const d = within(await dialog("Tab and home-screen icon"));
+      await act(async () => {
+        fireEvent.click(button(d, "Background #15425c"));
+        fireEvent.click(button(d, "Background #ffffff"));
+        await new Promise((r) => setTimeout(r, 50));
+      });
+      const icons = writes.filter((w) => w.icon);
+      assert.equal(icons.length, 1, `expected one icon write, got ${icons.length}`);
+      assert.equal((icons[0]!.icon as { background: string }).background, "#15425c");
+    } finally {
+      restoreCanvas();
+      globalThis.fetch = before;
+      AbortSignal.timeout = beforeTimeout;
     }
   });
 

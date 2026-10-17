@@ -9,7 +9,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { drawIcon, layoutIcon, MASKABLE_ART, type IconContext } from "./app-icon-render";
+import { ART_FRACTION, drawIcon, layoutIcon, MASKABLE_ART, type IconContext } from "./app-icon-render";
 
 function recorder() {
   const calls: string[] = [];
@@ -34,6 +34,14 @@ describe("layoutIcon", () => {
       const { art, offset } = layoutIcon(size, MASKABLE_ART);
       assert.ok(Math.abs(size - art - offset * 2) <= 1, `${size}: ${offset} + ${art} + ${offset}`);
     }
+  });
+});
+
+describe("which icon gets which share of its square", () => {
+  // The constant above can be right and the table wrong: the maskable icon filling
+  // its square (cropped by Android's round mask), or a plain icon shrunk.
+  test("only the maskable icon keeps clear of the edge", () => {
+    assert.deepEqual(ART_FRACTION, { apple: 1, any192: 1, any512: 1, maskable: MASKABLE_ART });
   });
 });
 
