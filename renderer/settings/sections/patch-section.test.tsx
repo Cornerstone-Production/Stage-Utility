@@ -80,7 +80,7 @@ test("a failed patch read says so and offers no editable empty patch", async () 
     await eventually(() => assert.match(alerts(), /Couldn't load the patch/i));
     // The editor is absent entirely — not a blank sheet a Save would write back.
     assert.equal(!!screen.queryByLabelText("Sheet name"), false, "must not offer an empty sheet to edit");
-    assert.equal(!!screen.queryByRole("button", { name: "Analog" }), false, "must not draw the blank default sheet");
+    assert.equal(screen.queryAllByRole("tab").length, 0, "must not draw the blank default sheet");
     await eventually(() => assert.ok(
       f.logs.some((l) => l.tag === "patch" && /the patch/i.test(l.message)),
       `expected a [patch] line naming the patch — got ${JSON.stringify(f.logs)}`,
@@ -94,7 +94,7 @@ test("a failed stage-state read says the plan could not load, not that there is 
   const f = stubFetch("state");
   try {
     await mount();
-    await eventually(() => assert.equal(!!screen.queryByRole("button", { name: "Stage left" }), true, "the patch itself loaded"));
+    await eventually(() => assert.equal(!!screen.queryByRole("tab", { name: "Stage left" }), true, "the patch itself loaded"));
     await eventually(() => assert.match(alerts(), /Couldn't load the current plan/i));
     assert.ok(
       // Its own line. The Weekly assignment panel reads the same stage state and
@@ -111,7 +111,7 @@ test("control: both reads load, This week is offered and nothing alerts", async 
   const f = stubFetch(null);
   try {
     await mount();
-    await eventually(() => assert.equal(!!screen.queryByRole("button", { name: "Stage left" }), true));
+    await eventually(() => assert.equal(!!screen.queryByRole("tab", { name: "Stage left" }), true));
     await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /This week/ }), true, "a loaded plan offers This week"));
     assert.equal(alerts(), "");
     assert.deepEqual(f.logs, []);

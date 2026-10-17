@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
-import { UploadIcon, PlusIcon, Trash2Icon, DownloadIcon, PrinterIcon } from "lucide-react";
+import { UploadIcon, PlusIcon, Trash2Icon, PrinterIcon } from "lucide-react";
 
 import { invoke, onNotification } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
@@ -8,11 +8,33 @@ import { Button, ErrorNote, Input, SkeletonRows, toast, confirm , UnsavedBanner,
 import { mergeOverrides, diffEndpoints } from "../../lib/patch-resolve";
 import { uid } from "../../lib/uid";
 import { PatchDeviceManager } from "./patch-device-manager";
-import { PatchTable } from "./patch-table";
 import { PatchImport } from "./patch-import";
 import { PatchWeekly } from "./patch-weekly";
+import { PatchTable } from "./patch-table";
+import { ExportMenu } from "./patch-export";
+import { RippleSwitch, DEFAULT_RIPPLE, type RippleState } from "./patch-ripple-bar";
+import { SheetTabs } from "./patch-sheet-tabs";
 
 const emptyAssignments = (): PatchAssignments => ({ byServiceType: {}, byPlan: {} });
+
+/** A two-way switch between peers, e.g. Inputs / Outputs. */
+function Seg<T extends string>({ value, onChange, options, label }: { value: T; onChange: (v: T) => void; options: { value: T; label: string }[]; label: string }) {
+  return (
+    <div role="group" aria-label={label} className="inline-flex rounded-lg border border-line bg-surface p-0.5">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          aria-pressed={value === o.value}
+          onClick={() => onChange(o.value)}
+          className={`rounded-md px-3 py-1 text-footnote transition-colors ${value === o.value ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Stage patch editor (Settings → Patch). The patch is a set of SHEETS (tabs) —
@@ -21,58 +43,10 @@ const emptyAssignments = (): PatchAssignments => ({ byServiceType: {}, byPlan: {
  * docs/patch-sheet/DESIGN.md). Edits a local draft and saves the whole file via
  * patch:save (broadcasts patch:updated for live sync). Within a sheet, editing
  * "Default" changes its base patch; editing a variant stores only diffs.
- */
-/**
- * Export and print for the active sheet.
  *
- * The export is served from the SAVED file, so it is deliberately unavailable
- * while there are unsaved edits: handing back a document that differs from the
- * screen is the one failure a patch sheet cannot afford, and it would be silent.
- *
- * Downloads are plain navigations rather than fetches — the browser then handles
- * the file and honours the Content-Disposition filename, which a blob round-trip
- * would discard.
+ * Layout: sheet tabs and toolbar on top; beside the sheet, a column holding the
+ * Devices and Weekly assignment cards; the sheet itself is one card per rack.
  */
-function ExportControls({
-  sheetId,
-  variantId,
-  plan,
-  dirty,
-}: {
-  sheetId: string;
-  variantId: string | null;
-  /** Set only on the "This week" tab — the export then resolves the plan's
-   *  variant and tweaks server-side, the same way the table on screen does. */
-  plan: { planId: string | null; serviceTypeId: string | null } | null;
-  dirty: boolean;
-}) {
-  const download = (format: "csv" | "xlsx") => {
-    const q = new URLSearchParams({ sheetId, format });
-    if (plan?.planId) {
-      q.set("planId", plan.planId);
-      if (plan.serviceTypeId) q.set("serviceTypeId", plan.serviceTypeId);
-    } else if (variantId) {
-      q.set("variantId", variantId);
-    }
-    window.location.href = `/api/patch/export?${q.toString()}`;
-  };
-  const blocked = dirty ? "Save your changes first — the export comes from the saved sheet" : undefined;
-
-  return (
-    <div className="patch-print-hide flex items-center gap-1.5">
-      <Button variant="filled" size="small" disabled={dirty} title={blocked} onClick={() => download("csv")}>
-        <DownloadIcon className="size-3.5" /> Export CSV
-      </Button>
-      <Button variant="filled" size="small" disabled={dirty} title={blocked} onClick={() => download("xlsx")}>
-        <DownloadIcon className="size-3.5" /> Export Excel
-      </Button>
-      <Button variant="filled" size="small" onClick={() => window.print()}>
-        <PrinterIcon className="size-3.5" /> Print
-      </Button>
-    </div>
-  );
-}
-
 export function PatchSection() {
   const [saved, setSaved] = useState<PatchFile | null>(null);
   const [draft, setDraft] = useState<PatchFile | null>(null);
@@ -82,6 +56,7 @@ export function PatchSection() {
   const [importing, setImporting] = useState(false);
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
   const [group, setGroup] = useState<"rack" | "device">("rack");
+  const [ripple, setRipple] = useState<RippleState>(DEFAULT_RIPPLE);
   const [plan, setPlan] = useState<{ serviceTypeId: string | null; planId: string | null; planTitle: string | null } | null>(null);
   const { failed, fail } = useFailedReads<"patch" | "plan">("patch");
 
@@ -246,76 +221,47 @@ export function PatchSection() {
         </div>
       )}
 
-      {/* Sheet tabs (Analog / Dante / WSG / Monitoring / …) + add / rename / delete */}
-      <div className="patch-print-hide flex flex-wrap items-center gap-2 border-b border-line pb-3">
-        <div className="flex items-center gap-1 overflow-x-auto">
-          {draft.sheets.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => switchSheet(s.id)}
-              className={`shrink-0 rounded-md px-3 py-1.5 text-footnote font-medium transition-colors ${s.id === sheet.id ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}
-            >
-              {s.name}
-            </button>
-          ))}
-          <button type="button" onClick={addSheet} className="touch-target shrink-0 rounded-md px-2 py-1.5 text-fg-subtle hover:text-fg transition-colors" aria-label="Add sheet">
-            <PlusIcon className="size-4" />
-          </button>
-        </div>
-        <div className="ml-auto flex items-center gap-1">
-          <Input value={sheet.name} onChange={(e) => renameSheet(e.target.value)} className="w-36" placeholder="Sheet name" aria-label="Sheet name" />
-          {draft.sheets.length > 1 && (
-            <button type="button" onClick={deleteSheet} className="touch-target rounded-md p-1.5 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors" aria-label={`Delete ${sheet.name} sheet`}>
-              <Trash2Icon className="size-4" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Inputs / Outputs tabs (peers) + import */}
-      <div className="patch-print-hide flex items-center justify-between gap-2">
-        <div className="inline-flex rounded-lg border border-line bg-surface p-1">
-          {(["in", "out"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              className={`rounded-md px-3.5 py-1.5 text-footnote transition-colors ${tab === t ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}
-            >
-              {t === "in" ? "Inputs" : "Outputs"}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1.5">
+      {/* Sheet tabs, with the active one's Rename / Delete menu, and what is done
+          with the whole sheet: import, export, print. */}
+      <div className="patch-print-hide flex flex-wrap items-center gap-2 border-b border-line">
+        <SheetTabs
+          sheets={draft.sheets}
+          activeId={sheet.id}
+          onSwitch={switchSheet}
+          onAdd={addSheet}
+          onRename={renameSheet}
+          onDelete={deleteSheet}
+        />
+        <div className="ml-auto flex items-center gap-1.5 pb-1.5">
           <Button variant="filled" size="small" onClick={() => setImporting((v) => !v)}>
-            <UploadIcon className="size-3.5" /> Import CSV
+            <UploadIcon className="size-3.5" /> Import
           </Button>
-          <ExportControls
+          <ExportMenu
             sheetId={sheet.id}
             variantId={editingVariant?.id ?? null}
             plan={isWeek && plan?.planId ? { planId: plan.planId, serviceTypeId: plan.serviceTypeId } : null}
             dirty={dirty}
           />
+          <Button variant="filled" size="small" onClick={() => window.print()}>
+            <PrinterIcon className="size-3.5" /> Print
+          </Button>
         </div>
       </div>
 
-      {importing && (
-        <PatchImport devices={sheet.devices} endpoints={sheet.endpoints} dir={tab} onChange={setEndpoints} onClose={() => setImporting(false)} />
-      )}
-
-      <div className="patch-print-hide">
-        <PatchDeviceManager devices={sheet.devices} onChange={setDevices} />
-      </div>
-
-      {/* Variant switcher — Default patch vs a named overlay */}
-      <div className="patch-print-hide flex flex-wrap items-center gap-2">
-        <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Editing</span>
+      {/* Inputs / Outputs, which patch is being edited, how it is grouped, ripple */}
+      <div className="patch-print-hide flex flex-wrap items-center gap-x-2.5 gap-y-2">
+        <Seg
+          label="Direction"
+          value={tab}
+          onChange={setTab}
+          options={[{ value: "in", label: "Inputs" }, { value: "out", label: "Outputs" }]}
+        />
+        <span className="ml-1.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Editing</span>
         {/* "__week" is only offered while a plan is loaded, so an operator editing
             this week's tweaks when the plan drops out would otherwise see the
             switcher snap to "Default patch" and start writing there. */}
         <Select value={editingVariantId ?? ""} onValueChange={(v) => setEditingVariantId(v || null)}>
-          <SelectTrigger className="px-2"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="px-2" aria-label="Patch being edited"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="">Default patch</SelectItem>
             {plan?.planId && <SelectItem value="__week">This week{plan.planTitle ? ` — ${plan.planTitle}` : ""}</SelectItem>}
@@ -326,7 +272,7 @@ export function PatchSection() {
         </Select>
         {editingVariant ? (
           <>
-            <Input value={editingVariant.name} onChange={(e) => renameVariant(editingVariant.id, e.target.value)} className="w-40" placeholder="Variant name" />
+            <Input value={editingVariant.name} onChange={(e) => renameVariant(editingVariant.id, e.target.value)} className="w-40" placeholder="Variant name" aria-label="Variant name" />
             <button type="button" onClick={() => deleteVariant(editingVariant.id)} className="touch-target rounded-md p-1.5 text-fg-subtle hover:bg-fill hover:text-danger-11 transition-colors" aria-label="Delete variant">
               <Trash2Icon className="size-4" />
             </button>
@@ -339,27 +285,47 @@ export function PatchSection() {
             <PlusIcon className="size-3.5" /> New variant
           </Button>
         )}
-        <div className="ml-auto inline-flex rounded-lg border border-line bg-surface p-1">
-          {(["rack", "device"] as const).map((g) => (
-            <button key={g} type="button" onClick={() => setGroup(g)} className={`rounded-md px-3 py-1 text-caption1 transition-colors ${group === g ? "bg-fill-active text-fg" : "text-fg-muted hover:text-fg"}`}>
-              {g === "rack" ? "By rack" : "By device"}
-            </button>
-          ))}
-        </div>
+        <span className="flex-1" />
+        <Seg
+          label="Group by"
+          value={group}
+          onChange={setGroup}
+          options={[{ value: "rack", label: "By rack" }, { value: "device", label: "By device" }]}
+        />
+        {/* Ripple fills down a rack, so it has nothing to do in By device. */}
+        {group === "rack" && <RippleSwitch ripple={ripple} setRipple={setRipple} />}
       </div>
+
+      {importing && (
+        <PatchImport devices={sheet.devices} endpoints={sheet.endpoints} dir={tab} onChange={setEndpoints} onClose={() => setImporting(false)} />
+      )}
 
       {failed.has("plan") && (
         <ErrorNote className="patch-print-hide">Couldn't load the current plan, so This week isn't offered.</ErrorNote>
       )}
 
-      {/* The only thing that belongs on paper. Everything above and below is
-          editing chrome and is hidden by the print stylesheet. */}
-      <div className="patch-print-sheet">
-        <PatchTable dir={tab} group={group} racks={racks} stageDevices={stageDevices} endpoints={tableEndpoints} onChange={onTableChange} showOwner={sheet.kind !== "analog"} />
-      </div>
-
-      <div className="patch-print-hide">
-        <PatchWeekly variants={sheet.variants} assignments={sheet.assignments} plan={plan} onChange={setAssignments} />
+      {/* Devices and weekly assignment beside the sheet. On paper only the sheet
+          prints, so the print stylesheet drops this grid back to a single block. */}
+      <div className="patch-print-layout grid items-start gap-3.5 lg:grid-cols-[250px_minmax(0,1fr)]">
+        <aside className="patch-print-hide flex flex-col gap-3">
+          <PatchDeviceManager devices={sheet.devices} onChange={setDevices} />
+          <PatchWeekly variants={sheet.variants} assignments={sheet.assignments} plan={plan} onChange={setAssignments} />
+        </aside>
+        {/* The only thing that belongs on paper. Everything else here is editing
+            chrome and is hidden by the print stylesheet. */}
+        <div className="patch-print-sheet min-w-0">
+          <PatchTable
+            dir={tab}
+            group={group}
+            racks={racks}
+            stageDevices={stageDevices}
+            endpoints={tableEndpoints}
+            onChange={onTableChange}
+            ripple={ripple}
+            setRipple={setRipple}
+            showOwner={sheet.kind !== "analog"}
+          />
+        </div>
       </div>
     </div>
   );
