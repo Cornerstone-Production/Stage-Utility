@@ -729,14 +729,41 @@
 /* Printing a patch sheet — the copy that gets taped to the rack.
    Everything that is not the patch is chrome, and chrome wastes paper.
 
-   The app is a dark UI; printed as-is it is grey-on-grey and eats toner, so the
-   patch area is forced back to black on white. The table is a CSS grid of divs
-   rather than a <table>, so `display: table-header-group` is not available —
-   the column header instead repeats per rack group, which the layout already
-   does, and groups are kept off page boundaries. */
+   Two jobs. First, make the page BE the sheet: the operator shell is a
+   viewport-tall box that clips its overflow, with a rail and a context strip
+   beside the content, so printed as-is it is one cropped page with the sidebar
+   on it. When a `.patch-print-sheet` is on the page, every element that neither
+   holds the sheet nor sits inside it is dropped, and every element that holds it
+   is released from its height, clipping and flex/grid layout. This is keyed on
+   the sheet's presence, so no other page prints differently.
+
+   Second, ink. The app is a dark UI; printed as-is it is grey-on-grey and eats
+   toner, so the patch area is forced back to black on white. The sheet is a real
+   <table>, so each rack's header row repeats when a rack runs onto a second page.
+   Device colour survives as the small dot beside a hop and a rack's name, which
+   is all the colour a black-and-white printer needs to lose. */
 @media print {
+  /* Chrome inside the sheet (the ripple bar, "+ hop"). Elsewhere on the page it
+     is belt and braces: the rule below already drops what does not hold the sheet. */
   .patch-print-hide {
     display: none !important;
+  }
+
+  /* Only the sheet, and what holds it. */
+  :root:has(.patch-print-sheet) :not(:has(.patch-print-sheet)):not(.patch-print-sheet):not(.patch-print-sheet *) {
+    display: none !important;
+  }
+  :has(.patch-print-sheet) {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
   }
 
   /* Nothing sticky on paper — a fixed bar prints on top of the first rows. */
@@ -751,6 +778,26 @@
     box-shadow: none !important;
     /* Keep device colour coding legible as a border rather than a fill. */
     border-color: #999 !important;
+  }
+
+  /* An empty cell prints empty, not as its hint text. */
+  .patch-print-sheet ::placeholder {
+    color: transparent !important;
+  }
+
+  /* The device colour, kept on its dot. */
+  .patch-print-sheet .patch-dot {
+    background: var(--dot, #999) !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* 48V: an off switch prints as an empty pill, an on switch as a filled one.
+     Without this both are white on white and the state is not on the paper. */
+  .patch-print-sheet [role="switch"][aria-checked="true"] {
+    background: #000 !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
   }
 
   .patch-print-sheet {

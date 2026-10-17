@@ -7,23 +7,56 @@ standard this week.
 Edit it with **Edit the patch** on the **Patch** page (`/patch/edit`). Volunteers read it at **`/patch`**, which
 follows the live or next Planning Center plan on its own.
 
+## The editor
+
+`/patch/edit` is laid out like a spreadsheet.
+
+- **Top row** — a tab per sheet, an underline marking the active one, and **+** to
+  add a sheet. The active tab carries a **⋯** menu with **Rename** (edits the tab in
+  place; Enter keeps the name, Escape abandons it) and **Delete sheet…** (asks first,
+  and is unavailable on the last sheet). At the right: **Import**, **Export** and
+  **Print**.
+- **Second row** — **Inputs / Outputs**; **Editing**, which picks the Default patch,
+  This week or a variant; **By rack / By device**; and the **Ripple** switch, which
+  is shown in By rack only. On the Default patch the row offers **New variant**. With
+  a variant selected it shows the variant's name field, a delete button and the note
+  *Only changes vs the default are saved.*; on This week the note reads *One-off
+  tweaks for this week only — saved over the assigned base.*
+- **Left column** — the **Devices** card and the **Weekly assignment** card, always
+  open.
+- **The sheet** — one card per rack, one 32px row per channel. A cell reads as plain
+  text until you hover or focus it, and every cell is a real field, so Tab walks the
+  row. The path is a line of chips, each a color dot and `Device · connector`; click
+  a chip to change its device or connector in place, **+ hop** (shown on row hover)
+  adds one, and an empty row reads *direct · add hop*. The row's left edge takes the
+  color of the first hop's device.
+
+An unsaved-changes banner with **Save** and **Discard** floats at the top while the
+draft differs from the saved patch.
+
 ## Sheets
 
 The patch is a set of sheets, each an independent surface of the same shape — the
 way a console patch spreadsheet is usually organised: analog stage patch, Dante,
 Waves SoundGrid, monitoring.
 
-Each sheet has its own devices, endpoints, variants and weekly assignments. Sheets
-can be colour-coded and marked with which team owns them.
+Each sheet has its own devices, endpoints, variants and weekly assignments. On
+every sheet except an analog one, each channel can name the team that owns it in
+an **Owner** column.
 
 ## Devices
 
-Each sheet's device list is the rack spine every endpoint references: racks,
+Each sheet's device list, in the left column, is the rack spine every endpoint references: racks,
 snakes, drop snakes, floor pockets, wireless/RF and arrays. A device has a
 **name**, a **color** that tints every channel sourced from it in the table and
 on `/patch`, and can generate sequential connector labels from a **prefix**
 (`B-`) and a starting number — those labels autocomplete in the From/To path
 cells and ripple cleanly (`B-1` → `B-2`) in the patch table.
+
+Each device is one line — color, name, kind, and input/output counts. Click it to
+open its editor under the line: name, kind, channel counts, color (ten swatches or
+none), the connector-label generator, and **Remove device**. **Add device** appends a
+rack, opens it and selects its name for typing.
 
 ## Inputs and outputs
 
@@ -68,10 +101,13 @@ It updates live, without a reload.
 
 Wiring a snake across a rack channel by channel is slow, so the editor has two aids.
 
-**Ripple fill** (DiGiCo-style) — in **By rack** mode, arm the Ripple bar with how far
-the fill reaches (2 to 12 channels, or to the end of the rack) and which columns
+**Ripple fill** (DiGiCo-style) — in **By rack** mode, turn on **Ripple**; a bar with
+the options appears across the top of each rack card. Choose how far the fill reaches (2 to 12 channels, or to the end of the rack) and which columns
 ripple. From and Console are on by default; Source, Mic and 48V are available for
-inputs, To, Console, Dest and Feed for outputs.
+inputs, To, Console, Dest and Feed for outputs, and Owner on sheets that have an
+Owner column. The bar names the row the next fill starts from and the rows it will
+reach are tinted. Ripple is one-shot: it switches itself off when you leave the cell
+you filled from.
 
 **Connector labels** default to numeric and can be edited to whatever the rig uses
 — `B-1`, `S11`, and so on.
@@ -81,7 +117,7 @@ spreadsheet.
 
 ## Export and print
 
-Three ways out, beside the Import button:
+Three ways out, beside Import. **Export** opens a menu of the two file formats:
 
 | | For |
 |---|---|
@@ -107,12 +143,14 @@ Endpoints marked unused are left out.
 The headings are chosen so this app's own importer recognises every column without
 hand-mapping, which makes the export a working backup as well as a document.
 
-Export reads the **saved** sheet, so the buttons are disabled while you have
-unsaved changes rather than quietly handing back an older patch.
+Export reads the **saved** sheet, so the button is disabled while you have unsaved
+changes rather than quietly handing back an older patch.
 
-Print hides the app around the table and prints black on white. The column header
-repeats for each rack, and rack groups are kept off page boundaries. There is no
-separate PDF export — print to PDF.
+Print leaves only the sheet on the page — no sidebar, toolbar or side cards — in
+black on white. The column header repeats for each rack, and rack groups are kept off
+page boundaries. A hop keeps its device's color on its dot, 48V prints as an empty or
+a filled switch, and empty cells print empty rather than showing their hint text.
+There is no separate PDF export — print to PDF.
 
 ## Where it is stored
 
