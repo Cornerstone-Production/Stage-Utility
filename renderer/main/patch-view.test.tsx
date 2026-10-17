@@ -449,6 +449,29 @@ describe("at desk width", () => {
     assert.equal(screen.queryAllByRole("table").length, 0);
   });
 
+  test("the threshold is 74 rem of the ROOT font, so a larger root asks for more pane", async () => {
+    const g = globalThis as unknown as { getComputedStyle: unknown };
+    const real = g.getComputedStyle;
+    g.getComputedStyle = () => ({ fontSize: "20px" }); // 74rem is now 1480px
+    try {
+      width = 1400;
+      await mount();
+      assert.equal(screen.queryAllByRole("table").length, 0, "1400px is under 74 rem of a 20px root");
+      await resizePane(1480);
+      assert.equal(screen.queryAllByRole("table").length, 2);
+    } finally {
+      g.getComputedStyle = real;
+    }
+  });
+
+  test("leaving the page stops watching its pane", async () => {
+    await mount();
+    assert.ok(observers.size > 0, "nothing was watching the pane to begin with");
+    cleanup();
+    await settle();
+    assert.equal(observers.size, 0, "a ResizeObserver outlived the page");
+  });
+
   test("collapsing the sidebar, which widens the pane, swaps the stacked column for the tables", async () => {
     width = 1176; // a 1440px window with the sidebar open
     await mount();

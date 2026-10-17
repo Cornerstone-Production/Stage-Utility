@@ -45,7 +45,7 @@ export function PatchChain({
   compact?: boolean;
   /** For a chain inside an `@container`: below ~62rem of card width the console
    *  node is not drawn. The table has the console channel in a column of its own,
-   *  and the whole path is about 985px, so on a laptop with the sidebar open the
+   *  and the whole row is about 985px, so on a laptop with the sidebar open the
    *  alternative is the note column scrolled out of sight. */
   dropConsoleInNarrowCard?: boolean;
 }) {

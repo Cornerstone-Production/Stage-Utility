@@ -6,7 +6,7 @@ import { invoke } from "../lib/api";
 import { useStageState } from "./use-stage-state";
 import { useStatusChannel } from "./use-status-channel";
 import { resolvePatch, endpointKey } from "../lib/patch-resolve";
-import { rootFontPx, useElementWidth } from "../lib/use-element-width";
+import { useElementAtLeastRem } from "../lib/use-element-width";
 import { chainNodes, collectChanges, noRowsMessage, rackSections, sourceColor, withOwnerHeadings } from "../lib/patch-view-model";
 import { plural } from "@main/services/plural";
 import { LEGEND_NODES, PatchChain } from "./patch-chain";
@@ -21,10 +21,13 @@ import { PatchWide } from "./patch-view-wide";
  * below 62rem, the widest table this app draws (real chain labels such as
  * "1.11 SD Rack in 12", a mic name, the longest note) is 879px. The card is the
  * pane minus the 270px column and its 14px gap, so the pane has to be at least
- * 1163px, and 74rem (1184px) is that rounded up to a whole rem. At that width the
- * note column, which says why a row changed, is never scrolled out of its card. A
- * 1440px window with the sidebar open is a 1176px pane and stacks; a 1280px one
- * with it collapsed is exactly 1184px, and 1440px collapsed is 1344px.
+ * 1163px, and 74rem (1184px at a 16px root) is that rounded up to a whole rem. At
+ * that width the note column, which says why a row changed, stays in its card for
+ * the names measured; a classic 15px scrollbar takes some of the 21px of room, and
+ * a longer name takes the rest. With the sidebar at its default width, a 1440px
+ * window is a 1176px pane and stacks, a 1280px one with the sidebar collapsed is
+ * exactly 1184px, and 1440px collapsed is 1344px. Dragging the sidebar narrower
+ * moves the pane with it.
  */
 export const PATCH_WIDE_MIN_PANE_REM = 74;
 
@@ -102,8 +105,7 @@ export function PatchView() {
   );
 
   const paneRef = useRef<HTMLDivElement>(null);
-  const paneWidth = useElementWidth(paneRef);
-  const wide = paneWidth >= PATCH_WIDE_MIN_PANE_REM * rootFontPx();
+  const wide = useElementAtLeastRem(paneRef, PATCH_WIDE_MIN_PANE_REM);
 
   // Every change, both directions: the desk layout lists them all, the stacked
   // one only the direction on screen.

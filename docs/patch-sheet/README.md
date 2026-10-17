@@ -65,7 +65,7 @@ up yet."; the footer links to the editor.
 
 **When the page is 74rem (1184px) wide or more** it uses the whole width in two columns. That
 is the width of the page itself, beside the sidebar, not of the window: a 1440px window
-has room for it with the sidebar collapsed and not with it open.
+has room for it with the sidebar collapsed and, at the sidebar's default width, not with it open.
 
 - **The left column** stays in view while the page scrolls. It holds *This week* (the
   service type, the plan and its date, the base variant and a Read-only tag), the amber

@@ -98,12 +98,20 @@ export const SHOTS = [
     phase: "week",
     shows: "The volunteer patch sheet at /patch: this week and what changed in a column beside a table per rack, each input with its signal path.",
     async run({ session, page }) {
-      await session.goto(page, "/patch");
       // The table layout needs 74rem of page, which a 1440px window only has
-      // with the sidebar collapsed; open it is the stacked column.
-      await page.getByRole("button", { name: "Collapse sidebar" }).click();
-      await page.waitForSelector("table");
-      await session.shoot(page, "patch-sheet");
+      // with the sidebar collapsed; open it is the stacked column. The
+      // preference is stored, and every shot after this one reuses the page, so
+      // it is set before the load (no collapse animation to catch mid-way) and
+      // taken back out after.
+      await page.goto(`${session.base}/patch`);
+      await page.evaluate(() => localStorage.setItem("settings-sidebar-collapsed", "1"));
+      try {
+        await session.goto(page, "/patch");
+        await page.waitForSelector("table");
+        await session.shoot(page, "patch-sheet");
+      } finally {
+        await page.evaluate(() => localStorage.removeItem("settings-sidebar-collapsed"));
+      }
     },
   },
   {
