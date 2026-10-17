@@ -395,7 +395,7 @@ The custom tab and home-screen icon is eight `settings.json` fields: `appIcon`
 by default) and the four sizes served to browsers and phones, `appIconApple`
 (180 px), `appIcon192`, `appIcon512` and `appIconMaskable` (512 px, art inside the
 safe zone). The image fields are references into `branding-images/`. The icon is
-set or removed as a whole, so the other seven are null until one is set; only
+set or removed as a whole, so the seven image and crop fields are null until one is set; only
 `appIconOriginal` and `appIconCrop` may stay null in a set icon (one made through
 the API has no upload to adjust). The state carries `appIcon192`,
 `appIconMaskable` and `appIconBackground`, and nothing else of it.

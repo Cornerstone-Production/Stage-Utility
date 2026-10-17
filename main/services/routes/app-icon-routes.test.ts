@@ -132,6 +132,15 @@ describe("with a custom icon set", () => {
     }
   });
 
+  test("the tab's own URL, with its ?v= query, is answered like the bare path", async () => {
+    // The tab loads /icon-192.png?v=<hash>; the dispatcher hands a route only the
+    // pathname, and callRoute splits the URL the same way.
+    const bare = await served("/icon-192.png");
+    const tab = await callRoute(appIconRoutes, "/icon-192.png?v=0123456789abcdef");
+    assert.ok(bare && tab.responded, "the tab's URL fell through to the built-in icon");
+    assert.equal(tab.body, bare.body);
+  });
+
   test("the four paths are four different images", async () => {
     const bodies = new Set<string>();
     for (const p of PATHS) bodies.add((await served(p))!.body);

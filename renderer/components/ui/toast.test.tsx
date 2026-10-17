@@ -132,4 +132,15 @@ describe("the same message again", () => {
     });
     assert.equal(count("Saved"), 6, "toasts that are not the same were merged");
   });
+
+  test("a plain toast arriving after one that carries a button does not take the button away", () => {
+    mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+    render(React.createElement(Toaster));
+    act(() => {
+      toast.info("Deleted it", { action: { label: "Undo it", onSelect: () => {} } });
+      toast.info("Deleted it");
+    });
+    assert.equal(count("Deleted it"), 2, "the toast with the Undo button was merged away");
+    assert.ok(present("Undo it"), "the Undo button is gone");
+  });
 });

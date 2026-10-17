@@ -141,8 +141,8 @@ export function IdentityStage({ brand, onLogo }: { brand: Brand; onLogo: () => v
 export function useImageSize(src: string | null): { w: number; h: number } | null {
   const [size, setSize] = useState<{ src: string; w: number; h: number } | null>(null);
   useEffect(() => {
-    if (!src) return;
-    const img = document.createElement("img");
+    if (!src || typeof Image === "undefined") return;
+    const img = new Image();
     img.onload = () => setSize({ src, w: img.naturalWidth, h: img.naturalHeight });
     img.src = src;
     return () => {

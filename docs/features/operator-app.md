@@ -448,12 +448,12 @@ phones would otherwise fill them with black. Changing it redraws every size at o
 Once set, the dialog offers **Replace**, **Adjust** and **Remove**. Removing it puts
 everything back: the tab follows the logo again, and phones get the built-in icon.
 
-A tab icon is shown exactly as drawn and never recolored, and it wins over the
-logo. The tab loads it from `/icon-192.png`, which answers with the built-in icon
-if the stored file is ever missing, so the tab is never blank. The home-screen label is the app name, read by iOS when the app is added, so
-renaming the app does not rename an icon already on a home screen; adding it again
-does. The manifest and icon files behind this are listed in the
-[API](../reference/api.md).
+A tab icon is shown exactly as drawn and never recolored, and it wins over the logo.
+The tab loads it from `/icon-192.png`, which answers with the built-in icon if the
+stored file is ever missing, so the tab is never blank. The home-screen label is the
+app name, read by iOS when the app is added, so renaming the app does not rename an
+icon already on a home screen; adding it again does. The manifest and icon files
+behind this are listed in the [API](../reference/api.md).
 
 ## Read-only links to hand out
 

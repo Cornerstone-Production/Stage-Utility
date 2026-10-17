@@ -74,13 +74,13 @@ function mount(state: Partial_ = {}, accept = true) {
 const absent = (found: Element | null, message: string) => assert.ok(found === null, message);
 
 /** `Image` and a 2D canvas that always succeed. Returns the undo. */
-function fakeCanvas(): () => void {
+function fakeCanvas(side = 512): () => void {
   const g = globalThis as unknown as Record<string, unknown>;
   const proto = window.HTMLCanvasElement.prototype as unknown as Record<string, unknown>;
   const saved = { Image: g.Image, getContext: proto.getContext, toDataURL: proto.toDataURL };
   g.Image = class {
-    naturalWidth = 512;
-    naturalHeight = 512;
+    naturalWidth = side;
+    naturalHeight = side;
     onload: (() => void) | null = null;
     set src(_: string) {
       queueMicrotask(() => this.onload?.());
@@ -363,6 +363,27 @@ describe("the dialogs", () => {
       restoreCanvas();
       globalThis.fetch = before;
       AbortSignal.timeout = beforeTimeout;
+    }
+  });
+
+  test("Use my logo says so when the logo is under 512 px, and says nothing when it is not", async () => {
+    for (const [side, expected] of [[300, true], [1024, false]] as const) {
+      const restore = fakeCanvas(side);
+      try {
+        mount({ appLogo: LOGO });
+        await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+        await dialog("Tab and home-screen icon");
+        await act(async () => {
+          await settle();
+          await settle();
+        });
+        const note = screen.queryByText(`Your logo is ${side} × ${side}, so an icon made from it may look soft.`);
+        assert.equal(note !== null, expected, `${side} px logo: note ${expected ? "missing" : "shown"}`);
+      } finally {
+        restore();
+        cleanup();
+        await settle();
+      }
     }
   });
 
