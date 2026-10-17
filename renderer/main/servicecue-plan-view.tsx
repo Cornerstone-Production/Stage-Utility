@@ -13,6 +13,9 @@ import { useTextSize } from "./use-servicecue-text-size";
 import { useUpcomingPlans } from "../settings/sections/plan-switcher";
 import { useNavigateTo, useSearchParam } from "../lib/use-search-param";
 import { useBackHref } from "../lib/back-target";
+
+/** The pages that open a rundown, which its back arrow may return to. */
+const SERVICECUE_LAUNCHERS = ["/servicecue", "/servicecue/manage"] as const;
 import { useDashboardState } from "./use-dashboard-state";
 import { pcoConnected } from "./use-stage-state";
 import { invoke } from "../lib/api";
@@ -45,7 +48,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const [textSize, setTextSize] = useTextSize(PAGE_TEXT_SIZE_KEY, { syncAddress: true });
   const navigateTo = useNavigateTo();
   // "All services" leads back to the launcher this was opened from, else the tablet's.
-  const backHref = useBackHref("/servicecue");
+  const backHref = useBackHref("/servicecue", SERVICECUE_LAUNCHERS);
 
   // The service types and the plan come from Planning Center, so they are asked
   // for only once it is connected (see pcoConnected), and until then the body

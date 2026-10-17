@@ -151,8 +151,9 @@ sidebar under Content, with the app's usual chrome; `/servicecue/presets`, which
 edits layouts, keeps the chrome too. `?plan=<id>` on a rundown opens another plan
 of that type without changing the one the app follows; see
 [Plan switcher](features/servicecue-and-baptisms.md#plan-switcher). `?from=<path>`
-names the launcher a rundown was opened from, which its back arrow returns to;
-without it the arrow goes to `/servicecue`.
+names the launcher a rundown was opened from, `/servicecue` or
+`/servicecue/manage`, which its back arrow returns to; without it, or with any
+other path, the arrow goes to `/servicecue`.
 
 ## Polling transport
 

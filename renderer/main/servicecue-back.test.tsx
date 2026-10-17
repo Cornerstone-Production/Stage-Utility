@@ -182,10 +182,10 @@ test("a reload of the rundown, and a change of layout or text size on it, all ke
   }
 });
 
-test("an origin that is not a path in this app is ignored, not followed", async () => {
+test("an origin that is not one of the launchers is ignored, not followed", async () => {
   const f = stubFetch();
   try {
-    for (const from of ["//evil.example", "https://evil.example", "/\\evil.example", "javascript:alert(1)", "/a b", "/x?y=1", "servicecue", ""]) {
+    for (const from of ["//evil.example", "https://evil.example", "/\\evil.example", "javascript:alert(1)", "/a b", "/x?y=1", "servicecue", "", "/settings/advanced", "/servicecue/manage/"]) {
       await loadPage(`/servicecue/weekend/audio?from=${encodeURIComponent(from)}`);
       assert.equal(await hrefOf("All services"), "/servicecue", `from=${from} fell back`);
     }
