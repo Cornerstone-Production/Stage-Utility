@@ -40,8 +40,9 @@ The patch is a set of sheets, each an independent surface of the same shape — 
 way a console patch spreadsheet is usually organised: analog stage patch, Dante,
 Waves SoundGrid, monitoring.
 
-Each sheet has its own devices, endpoints, variants and weekly assignments. Sheets
-can be colour-coded and marked with which team owns them.
+Each sheet has its own devices, endpoints, variants and weekly assignments. On
+every sheet except an analog one, each channel can name the team that owns it in
+an **Owner** column.
 
 ## Devices
 
