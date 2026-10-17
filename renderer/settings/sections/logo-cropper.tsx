@@ -2,6 +2,10 @@ import { clamp } from "@main/services/clamp";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { BrandLogo } from "../../components/brand-logo";
 import { Button } from "../../components/ui";
+import { cn } from "../../lib/cn";
+import { logToServer } from "../../lib/client-log";
+import { drawableSource } from "../../lib/sized-svg";
+import { errorMessage } from "@main/services/errors";
 
 // On-screen crop square. The exported PNG matches the cropped region's native
 // resolution (so a high-res upload stays crisp on the kiosk/wall), capped to
@@ -21,6 +25,10 @@ interface LogoCropperProps {
    * drawn. Off shows the artwork exactly as uploaded.
    */
   monochrome?: boolean;
+  /** What is being cropped, for the labels: "logo", "icon", "image". */
+  noun?: string;
+  /** Extra classes for the outer panel, e.g. to drop its border inside a dialog. */
+  className?: string;
   onCancel: () => void;
   /** Returns the rendered crop plus the source + transform to persist. */
   onSave: (result: {
@@ -38,15 +46,36 @@ interface LogoCropperProps {
  * displayed-pixels per source-pixel. Both are clamped so the image always
  * covers the viewport (no empty corners).
  */
-export function LogoCropper({ src, initial, monochrome = false, onCancel, onSave }: LogoCropperProps) {
+export function LogoCropper({ src, initial, monochrome = false, noun = "logo", className, onCancel, onSave }: LogoCropperProps) {
   const imgRef = useRef<HTMLImageElement | null>(null);
+  /** What the image element is given: `src`, or a sized copy when it is an SVG
+   *  (see sized-svg.ts). The ORIGINAL saved is always `src` itself. */
+  const [work, setWork] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
   const [minScale, setMinScale] = useState(1);
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
 
+  // One cropper per image: the caller keys it by `src`, so this never has to reset.
   useEffect(() => {
+    let live = true;
+    drawableSource(src).then(
+      (w) => live && setWork(w),
+      (err: unknown) => {
+        if (!live) return;
+        logToServer("branding", `the crop editor could not open the image: ${errorMessage(err)}`);
+        setLoadError(errorMessage(err));
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [src]);
+
+  useEffect(() => {
+    if (!work) return;
     const img = new Image();
     img.onload = () => {
       imgRef.current = img;
@@ -64,8 +93,12 @@ export function LogoCropper({ src, initial, monochrome = false, onCancel, onSave
       setScale(s);
       setOffset(o);
     };
-    img.src = src;
-  }, [src, initial]);
+    img.onerror = () => {
+      logToServer("branding", "the crop editor could not decode the image");
+      setLoadError("That image could not be read.");
+    };
+    img.src = work;
+  }, [work, initial]);
 
   /** Hold a pan offset inside the image at this scale. Renamed off `clamp`,
    *  which now means the numeric one — two different functions under one name in
@@ -138,8 +171,8 @@ export function LogoCropper({ src, initial, monochrome = false, onCancel, onSave
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-gray-a4 bg-gray-a2 p-4">
-      <span className="text-caption1 text-gray-11 font-medium">Position &amp; zoom your logo</span>
+    <div className={cn("flex flex-col gap-3 rounded-lg border border-gray-a4 bg-gray-a2 p-4", className)}>
+      <span className="text-caption1 text-gray-11 font-medium">Position &amp; zoom your {noun}</span>
       <div className="flex items-start gap-4 flex-wrap">
         <div
           // text-fg is explicit rather than inherited: the recoloured preview fills
@@ -159,14 +192,14 @@ export function LogoCropper({ src, initial, monochrome = false, onCancel, onSave
               // here rendered it invisible against the light viewport — you were
               // positioning something you could not see.
               <BrandLogo
-                logo={src}
+                logo={work ?? src}
                 monochrome
                 className="absolute select-none max-w-none"
                 style={{ width: nat.w * scale, height: nat.h * scale, left: offset.x, top: offset.y }}
               />
             ) : (
               <img
-                src={src}
+                src={work ?? src}
                 alt=""
                 draggable={false}
                 className="absolute select-none max-w-none"
@@ -189,12 +222,18 @@ export function LogoCropper({ src, initial, monochrome = false, onCancel, onSave
               aria-label="Zoom"
             />
           </label>
-          <p className="text-caption2 text-gray-9">
-            Drag the image to reposition. The square area is what gets saved.
-          </p>
+          {loadError ? (
+            <p role="alert" className="text-caption2 text-danger-11">
+              {loadError}
+            </p>
+          ) : (
+            <p className="text-caption2 text-gray-9">
+              Drag the image to reposition. The square area is what gets saved.
+            </p>
+          )}
           <div className="flex items-center gap-2 mt-1">
-            <Button variant="accent" size="small" onClick={save}>
-              Save logo
+            <Button variant="accent" size="small" onClick={save} disabled={!nat}>
+              Save {noun}
             </Button>
             <Button variant="transparent" size="small" onClick={onCancel}>
               Cancel
