@@ -6,20 +6,21 @@ import { cn } from "../lib/cn";
 import { endpointKey, type ResolvedPatch } from "../lib/patch-resolve";
 import {
   chainNodes,
+  noRowsMessage,
   sourceColor,
   UNUSED_NOTE,
+  withOwnerHeadings,
   type PatchChange,
   type RackSection,
 } from "../lib/patch-view-model";
+import { prefersReducedMotion } from "../lib/reduced-motion";
 import { Input } from "../components/ui/input";
-import { PatchChain } from "./patch-chain";
+import { LEGEND_NODES, PatchChain } from "./patch-chain";
 
 export interface PatchWideProps {
   sheet: PatchSheet;
   state: StageState | null;
   resolved: ResolvedPatch;
-  /** The standing variant's name, when this week sits on one. */
-  variantName: string | null;
   /** Every change across inputs and outputs. */
   changes: PatchChange[];
   /** The racks, filtered, for the direction on screen. */
@@ -41,14 +42,6 @@ const PILL = "inline-flex items-center rounded-full border border-line-strong px
 const TH = "whitespace-nowrap border-b border-line px-2.5 py-[7px] text-left text-caption2 font-semibold uppercase tracking-wider text-fg-subtle";
 const TD = "h-[34px] whitespace-nowrap border-b border-line px-2.5 align-middle";
 
-/** The legend: one real path, drawn the way every row below draws its own. */
-const LEGEND = [
-  { text: "Kick In", kind: "source" },
-  { text: "Snake B 1", kind: "hop" },
-  { text: "Input Rack in 12", kind: "rack" },
-  { text: "console 12", kind: "console" },
-] as const;
-
 /**
  * The /patch volunteer view at desk width: a sticky column for this week's
  * context, what changed and a jump list, and one table per rack beside it. A
@@ -62,12 +55,16 @@ export function PatchWide(p: PatchWideProps) {
 
   function jumpTo(rackId: string) {
     p.onOpenRack(rackId);
-    const reduce = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    cardRefs.current.get(rackId)?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    const card = cardRefs.current.get(rackId);
+    card?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
+    // Scrolling does not move focus: without this the next Tab from a keyboard
+    // jump goes to the next rack in the list, not into the one just shown.
+    card?.querySelector("button")?.focus({ preventScroll: true });
   }
 
   const planLine = [p.state?.planTitle, p.state?.planDates].filter(Boolean).join(" · ");
   const isIn = p.tab === "in";
+  // One per header cell below, so an owner row spans the whole table.
   const cols = isIn ? 7 : 6;
 
   return (
@@ -78,14 +75,14 @@ export function PatchWide(p: PatchWideProps) {
           <div className="mt-1 text-callout font-semibold">{p.state?.serviceTypeName ?? "—"}</div>
           {planLine && <div className="mt-0.5 text-footnote text-fg-muted">{planLine}</div>}
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {p.variantName && <span className={PILL}>Base: {p.variantName}</span>}
+            {resolved.variantName && <span className={PILL}>Base: {resolved.variantName}</span>}
             <span className={PILL}>Read-only</span>
           </div>
         </div>
 
         {p.changes.length > 0 && (
           <div className="rounded-xl border border-warn-9/40 bg-warn-9/12 px-3.5 py-3">
-            <h4 className="mb-2 text-footnote font-semibold text-warn-11">{plural(p.changes.length, "change")} from the standard patch</h4>
+            <h2 className="mb-2 text-footnote font-semibold text-warn-11">{plural(p.changes.length, "change")} from the standard patch</h2>
             {p.changes.map(({ e, note }) => (
               <div key={endpointKey(e)} className="flex gap-2 border-t border-warn-9/22 py-1 text-footnote">
                 <span className="w-11 shrink-0 font-mono text-caption1 text-fg-muted">{e.dir} {e.index}</span>
@@ -151,18 +148,19 @@ export function PatchWide(p: PatchWideProps) {
             Changes only
           </button>
           <div className="ml-auto flex items-center gap-1.5 text-caption1 text-fg-muted">
-            <span>How to read:</span>
-            <PatchChain compact nodes={[...LEGEND]} />
+            <span className="whitespace-nowrap">How to read:</span>
+            <PatchChain compact nodes={LEGEND_NODES} />
           </div>
         </div>
 
         {p.sections.length === 0 && (
-          <div className={cn(CARD, "px-4 py-8 text-center text-footnote text-fg-muted")}>No channels match.</div>
+          <div className={cn(CARD, "px-4 py-8 text-center text-footnote text-fg-muted")}>
+            {noRowsMessage(p.tab, { changesOnly: p.changesOnly, q: p.q })}
+          </div>
         )}
 
         {p.sections.map(({ rack, rows, total }) => {
           const isCollapsed = p.collapsed[rack.id];
-          let lastOwner: string | undefined;
           return (
             <div
               key={rack.id}
@@ -194,24 +192,23 @@ export function PatchWide(p: PatchWideProps) {
                         <th className={TH}>{isIn ? "Mic" : "Feed"}</th>
                         {isIn && <th className={TH}>48V</th>}
                         <th className={TH}>Signal path</th>
-                        <th className={TH} />
+                        <th className={TH}><span className="sr-only">Note</span></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((e) => {
+                      {withOwnerHeadings(rows).map(({ e, heading }) => {
                         const key = endpointKey(e);
                         const changed = resolved.changed.has(key);
-                        const owner = e.owner?.trim() || undefined;
-                        const showOwner = owner !== undefined && owner !== lastOwner;
-                        lastOwner = owner;
                         const edge = sourceColor(e, sheet.devices) ?? (changed ? "var(--su-warn-9)" : undefined);
-                        const note = noteByKey.get(key) ?? (e.unused ? UNUSED_NOTE : "");
+                        // An unused channel the standard patch already had unused is not a change,
+                        // so its note is said plainly rather than in the colour of one.
+                        const note = changed ? (noteByKey.get(key) ?? "") : e.unused ? UNUSED_NOTE : "";
                         return (
                           <Fragment key={key}>
-                            {showOwner && (
+                            {heading && (
                               <tr>
                                 <td colSpan={cols} className="h-6 border-b border-line bg-fill/60 px-2.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
-                                  Owned by {owner}
+                                  Owned by {heading}
                                 </td>
                               </tr>
                             )}
@@ -237,7 +234,7 @@ export function PatchWide(p: PatchWideProps) {
                               <td className={TD}>
                                 <PatchChain compact dropConsoleInNarrowCard nodes={chainNodes(e, sheet.devices)} />
                               </td>
-                              <td className={cn(TD, "text-caption2 font-medium text-warn-11")}>{note}</td>
+                              <td className={cn(TD, "text-caption2 font-medium", changed ? "text-warn-11" : "text-fg-subtle")}>{note}</td>
                             </tr>
                           </Fragment>
                         );

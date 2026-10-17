@@ -21,9 +21,8 @@
 // What is NOT here, because jsdom loads no stylesheet and reports every
 // offsetHeight as 0: the 34px row height, the 270px sticky column, the amber tint
 // and the 3px device edge actually being painted, and the container query that
-// drops the console node from a path when the card is narrow. Those were driven in
-// a browser (see the PR) rather than asserted against a layout engine that is not
-// there.
+// drops the console node from a path when the card is narrow (only the classes that
+// ask for it are checked). They need a layout engine, and are checked in a browser.
 //
 // Every name, label and colour below is INVENTED. This is a public repository.
 
@@ -38,8 +37,8 @@ const teardown = installRenderDom();
 
 let FILE: PatchFile;
 let STATE: StageState;
-/** Which side of the lg breakpoint the viewport is on. */
-let wide = true;
+/** The viewport width the matchMedia stub answers for. */
+let width = 1440;
 /** The rack each jump scrolled to, by the name in its header. */
 let scrolled: string[] = [];
 
@@ -60,7 +59,9 @@ const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/ap
 // jsdom has no matchMedia and no scrollIntoView. The first decides the layout,
 // the second is what Jump to exists to call.
 (globalThis as unknown as { window: Window }).window.matchMedia = ((query: string) => ({
-  matches: query.includes("min-width") && wide,
+  // Answers the real question, so a breakpoint moved off 1024 is noticed: only a
+  // query for a minimum width the viewport has reached matches.
+  matches: Number(/min-width:\s*(\d+)px/.exec(query)?.[1] ?? Infinity) <= width,
   media: query,
   addEventListener: () => {},
   removeEventListener: () => {},
@@ -164,7 +165,7 @@ const type = (value: string) => fireEvent.change(screen.getByRole("textbox"), { 
 beforeEach(() => {
   FILE = file(analog());
   STATE = { ...DEFAULT_STAGE_STATE, serviceTypeId: "st-1", serviceTypeName: "Service One", planId: "plan-1", planTitle: "Week Title", planDates: "Sun Jan 4" };
-  wide = true;
+  width = 1440;
   scrolled = [];
 });
 afterEach(async () => {
@@ -182,7 +183,7 @@ describe("at desk width", () => {
     const alpha = tableFor("Alpha Rack");
     assert.deepEqual(
       within(alpha).getAllByRole("columnheader").map((h) => h.textContent),
-      ["Ch", "Console", "Source", "Mic", "48V", "Signal path", ""],
+      ["Ch", "Console", "Source", "Mic", "48V", "Signal path", "Note"],
     );
     assert.deepEqual(sources(alpha), ["Kick", "Snare Top", "Bass", "Keys", "Guitar", "Tom"]);
 
@@ -191,21 +192,21 @@ describe("at desk width", () => {
     assert.deepEqual(tableNames(), ["Alpha Rack outputs"]);
     assert.deepEqual(
       within(tableFor("Alpha Rack")).getAllByRole("columnheader").map((h) => h.textContent),
-      ["Ch", "Console", "Destination", "Feed", "Signal path", ""],
+      ["Ch", "Console", "Destination", "Feed", "Signal path", "Note"],
     );
   });
 
   test("the notes say what changed: was, new, re-patched, unused", async () => {
     await mount();
     const alpha = tableFor("Alpha Rack");
-    const notes = column(alpha, "");
+    const notes = column(alpha, "Note");
     const labels = sources(alpha);
     const noteOf = (label: string) => notes[labels.indexOf(label)];
     assert.equal(noteOf("Snare Top"), "was Snare");
     assert.equal(noteOf("Tom"), "new");
     assert.equal(noteOf("Bass"), "unused this week");
     assert.equal(noteOf("Kick"), "");
-    assert.equal(column(tableFor("Beta Rack"), "")[0], "re-patched");
+    assert.equal(column(tableFor("Beta Rack"), "Note")[0], "re-patched");
   });
 
   test("an unused row is marked so it can be struck through, a changed one so it can be tinted", async () => {
@@ -237,6 +238,42 @@ describe("at desk width", () => {
     assert.match(screen.getByText(/from the standard patch/).textContent ?? "", /^5 changes/, "the card follows the direction");
     const jump = screen.getByRole("navigation", { name: "Jump to" });
     assert.deepEqual(within(jump).getAllByRole("button").map((b) => b.textContent), ["Alpha Rack2"]);
+  });
+
+  test("a channel that changed only in its mic still says it changed", async () => {
+    const sheet = analog();
+    sheet.variants[0].overrides["alpha:in:1"] = ep("alpha", "in", 1, { mic: "Mic K2" });
+    FILE = file(sheet);
+    await mount();
+    const alpha = tableFor("Alpha Rack");
+    assert.equal(column(alpha, "Note")[sources(alpha).indexOf("Kick")], "changed");
+  });
+
+  test("an unused channel the standard patch already had unused is dimmed, not flagged as a change", async () => {
+    const sheet = analog();
+    sheet.endpoints.push(ep("alpha", "in", 7, { label: "Spare", consoleChannel: "17", unused: true, path: via("snake", "7") }));
+    FILE = file(sheet);
+    await mount();
+    const alpha = tableFor("Alpha Rack");
+    const row = within(alpha).getAllByRole("row").find((r) => within(r).queryByText("Spare", { selector: "td" }))!;
+    assert.equal(row.dataset.unused, "true");
+    assert.equal(row.dataset.changed, undefined, "an unchanged row was marked changed");
+    const note = within(row).getByText("unused this week");
+    assert.doesNotMatch(note.className, /text-warn/, "the note wears the colour of a change");
+  });
+
+  test("on an Outputs row the arrow beside the console node goes with it when the card is narrow", async () => {
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: "Outputs" }));
+    await settle();
+    // Outputs read console, rack, box, destination. The console pill and the
+    // arrow after it are the two that the container query hides.
+    const path = within(tableFor("Alpha Rack")).getAllByRole("row")[1].querySelector("div.w-max")!;
+    const kids = [...path.children];
+    assert.match(kids[0].className, /hidden/, "the console pill is not droppable");
+    assert.equal(kids[1].tagName.toLowerCase(), "svg");
+    assert.match(kids[1].getAttribute("class") ?? "", /hidden/, "a dangling arrow is left before the rack pill");
+    assert.doesNotMatch(kids[2].className, /hidden/, "the rack pill must stay");
   });
 
   test("the context card names the week, the variant and that the page is read-only", async () => {
@@ -298,6 +335,13 @@ describe("at desk width", () => {
       assert.deepEqual(scrolled, ["Beta Rack", "Alpha Rack"]);
     });
 
+    test("moves focus into the rack, so a keyboard user lands where the page scrolled", async () => {
+      await mount();
+      fireEvent.click(within(screen.getByRole("navigation", { name: "Jump to" })).getByRole("button", { name: /Beta Rack/ }));
+      assert.match(document.activeElement?.textContent ?? "", /^Beta Rack/);
+      assert.equal(document.activeElement?.getAttribute("aria-expanded"), "true");
+    });
+
     test("opens a rack that was collapsed", async () => {
       await mount();
       fireEvent.click(screen.getByRole("button", { name: /Beta Rack/, expanded: true }));
@@ -350,6 +394,27 @@ describe("at desk width", () => {
     assert.ok(sources(tableFor("Alpha Rack")).includes("Piano"), "the pushed channel never appeared");
   });
 
+  test("an empty filter result and a sheet with no outputs say different things", async () => {
+    await mount();
+    type("zzz");
+    assert.ok(screen.getByText("No channels match."));
+    type("");
+    FILE = file({ ...analog(), variants: [], endpoints: analog().endpoints.filter((e) => e.dir === "in") });
+    await act(async () => {
+      FakeEventSource.last!.push("patch:updated", FILE);
+    });
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Outputs" }));
+    await settle();
+    assert.ok(screen.getByText("No outputs on this sheet."));
+  });
+
+  test("the desk layout starts at exactly 1024px", async () => {
+    width = 1024;
+    await mount();
+    assert.equal(screen.queryAllByRole("table").length, 2);
+  });
+
   test("the empty state and the footer are the same", async () => {
     FILE = file({ ...analog(), devices: [], endpoints: [], variants: [] });
     await mount();
@@ -362,7 +427,7 @@ describe("at desk width", () => {
 
 describe("below lg", () => {
   beforeEach(() => {
-    wide = false;
+    width = 1023;
   });
 
   test("it is the stacked column: no table, the same rows, one direction of changes", async () => {
@@ -384,6 +449,12 @@ describe("below lg", () => {
     await settle();
     assert.equal(screen.queryAllByText("Kick").length, 0, "an unchanged channel survived Changes only");
     assert.ok(screen.getAllByText("Snare Top").length > 0);
+  });
+
+  test("a filter that matches nothing says so, as it does at desk width", async () => {
+    await mount();
+    type("zzz");
+    assert.ok(screen.getByText("No channels match."));
   });
 
   test("an edit pushed on patch:updated reaches it too", async () => {

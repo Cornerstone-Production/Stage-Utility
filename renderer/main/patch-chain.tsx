@@ -18,6 +18,14 @@ const COMPACT_PILL: Record<ChainNode["kind"], string> = {
   console: "border-dashed border-line-strong text-fg-muted",
 };
 
+/** The legend's example path: a real source, one stage box, the rack and the console. */
+export const LEGEND_NODES: ChainNode[] = [
+  { text: "Kick In", kind: "source" },
+  { text: "Snake B 1", kind: "hop" },
+  { text: "Input Rack in 12", kind: "rack" },
+  { text: "console 12", kind: "console" },
+];
+
 /** SVG chevron connector between diagram nodes. */
 function Arrow({ className }: { className?: string }) {
   return (
@@ -45,9 +53,12 @@ export function PatchChain({
     <div className={cn("flex items-center gap-1", compact ? "w-max flex-nowrap" : "flex-wrap")}>
       {nodes.map((n, i) => {
         const droppable = dropConsoleInNarrowCard && n.kind === "console";
+        // The arrow beside a dropped node goes with it, on whichever side it is:
+        // outputs read console first, so it is the arrow AFTER the console node.
+        const arrowDroppable = droppable || (dropConsoleInNarrowCard && nodes[i - 1]?.kind === "console");
         return (
           <Fragment key={i}>
-            {i > 0 && <Arrow className={droppable ? "hidden @min-[62rem]:block" : undefined} />}
+            {i > 0 && <Arrow className={arrowDroppable ? "hidden @min-[62rem]:block" : undefined} />}
             <span
               className={cn(
                 "border whitespace-nowrap",

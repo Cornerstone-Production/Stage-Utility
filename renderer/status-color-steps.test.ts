@@ -3,17 +3,14 @@
 // styles.css defines the semantic status colours at two steps only: 9 (a fill)
 // and 11 (text). Tailwind generates no utility for `bg-warn-2`, and a CSS
 // variable the stylesheet never declares resolves to nothing, so both compile and
-// ship: the class is simply not there. The /patch page's amber "changes" card
-// carried `border-warn-6 bg-warn-2/40` that way for as long as it existed, and
-// rendered with a black border and no tint on every theme.
+// ship: the class is simply not there, and the element renders with a default
+// border and no tint.
 //
 // The class names are read as written and checked against what the stylesheet
 // declares, so a step added to the theme is accepted and a step nobody declared
-// is not. Comments are blanked first: a comment naming `bg-warn-2` neither fails
-// this nor satisfies it.
-//
-// Proven red in the session that wrote it: with the eight offenders below still in
-// the source it reported all eight, and each fix took exactly its own line off.
+// is not. Both spellings of a variable are covered, `--warn-9` and `--su-warn-9`.
+// Comments are blanked first: a comment naming `bg-warn-2` neither fails this nor
+// satisfies it.
 
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -43,12 +40,12 @@ function sources(dir: string): string[] {
 /** `warn-9`, `ok-11`: the steps the theme declares as a colour utility. */
 const declaredSteps = new Set([...CSS.matchAll(new RegExp(`--color-((?:${FAMILY})-\\d+)\\s*:`, "g"))].map((m) => m[1]));
 /** `--live-9`: raw variables the stylesheet declares, for `var(--x)` references. */
-const declaredVars = new Set([...CSS.matchAll(/(--[a-z]+-\d+)\s*:/g)].map((m) => m[1]));
+const declaredVars = new Set([...CSS.matchAll(/(--(?:su-)?[a-z]+-\d+)\s*:/g)].map((m) => m[1]));
 
 describe("status colour steps", () => {
   test("the theme declares some, so the scan below is not checking against nothing", () => {
     assert.ok(declaredSteps.has("warn-9") && declaredSteps.has("warn-11"), [...declaredSteps].join(", "));
-    assert.ok(declaredVars.has("--live-9"), "the raw variable pattern found nothing");
+    assert.ok(declaredVars.has("--live-9") && declaredVars.has("--su-warn-9"), "the raw variable pattern found nothing");
   });
 
   test("every status colour utility and variable a component names is declared", () => {
@@ -59,7 +56,7 @@ describe("status colour steps", () => {
       for (const m of src.matchAll(new RegExp(`\\b[a-z]+-((?:${FAMILY})-\\d+)(?:/\\d+)?`, "g"))) {
         if (!declaredSteps.has(m[1])) offenders.push(`${at}: ${m[0]}`);
       }
-      for (const m of src.matchAll(new RegExp(`var\\((--(?:${FAMILY})-\\d+)\\)`, "g"))) {
+      for (const m of src.matchAll(new RegExp(`var\\((--(?:su-)?(?:${FAMILY})-\\d+)\\)`, "g"))) {
         if (!declaredVars.has(m[1])) offenders.push(`${at}: var(${m[1]})`);
       }
     }

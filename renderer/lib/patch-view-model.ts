@@ -7,15 +7,14 @@
 
 import { endpointKey, type ResolvedPatch } from "./patch-resolve";
 
-export type ChainNodeKind = "source" | "hop" | "rack" | "console";
 export interface ChainNode {
   text: string;
-  kind: ChainNodeKind;
+  kind: "source" | "hop" | "rack" | "console";
 }
 
 /** An endpoint with nothing set on it is an empty channel, not a row. */
 export function isMeaningful(e: PatchEndpoint): boolean {
-  return Boolean(e.label || e.consoleChannel || (e.path && e.path.length) || e.unused);
+  return Boolean(e.label || e.consoleChannel || e.path?.length || e.unused);
 }
 
 /** The Filter box: channel, source, mic, feed, console channel and owner. */
@@ -56,12 +55,15 @@ export function rackSections(
 
 export const UNUSED_NOTE = "unused this week";
 
-/** Why a channel differs from the standard patch, in the words the page uses. */
+/** Why a channel differs from the standard patch, in the words the page uses.
+ *  Only meaningful for a channel in the changed set. */
 export function changeNote(e: PatchEndpoint, base: PatchEndpoint | undefined): string {
   if (e.unused) return UNUSED_NOTE;
   if ((base?.label ?? "") !== (e.label ?? "")) return base?.label ? `was ${base.label}` : "new";
   if (JSON.stringify(base?.path ?? []) !== JSON.stringify(e.path ?? [])) return "re-patched";
-  return "";
+  // Something else about the channel changed (mic, 48V, feed, console channel,
+  // owner). A tinted row with nothing written on it says it by colour alone.
+  return "changed";
 }
 
 export interface PatchChange {
@@ -84,13 +86,31 @@ export function chainNodes(e: PatchEndpoint, devices: PatchDevice[]): ChainNode[
   const devName = (id: string) => devices.find((d) => d.id === id)?.name ?? id;
   const hops: ChainNode[] = (e.path ?? []).map((h) => ({ text: `${devName(h.deviceId)} ${h.connector}`.trim(), kind: "hop" }));
   const rk = devices.find((d) => d.kind === "rack" && d.id === e.rackId);
-  const rack: ChainNode = { text: `${rk?.name ?? "rack"} ${e.dir === "in" ? "in" : "out"} ${e.index}`, kind: "rack" };
-  const console: ChainNode[] = e.consoleChannel ? [{ text: `console ${e.consoleChannel}`, kind: "console" }] : [];
+  const rack: ChainNode = { text: `${rk?.name ?? "rack"} ${e.dir} ${e.index}`, kind: "rack" };
+  const consoleNode: ChainNode[] = e.consoleChannel ? [{ text: `console ${e.consoleChannel}`, kind: "console" }] : [];
   const src: ChainNode[] = e.label ? [{ text: e.label, kind: "source" }] : [];
-  return e.dir === "in" ? [...src, ...hops, rack, ...console] : [...console, rack, ...hops, ...src];
+  return e.dir === "in" ? [...src, ...hops, rack, ...consoleNode] : [...consoleNode, rack, ...hops, ...src];
 }
 
 /** The colour of the first box a channel comes through: the edge a row carries. */
 export function sourceColor(e: PatchEndpoint, devices: PatchDevice[]): string | undefined {
   return devices.find((d) => d.id === e.path?.[0]?.deviceId)?.color;
+}
+
+/** Rows paired with the owner heading that opens their run, if one does. An
+ *  unowned row ends the run, so the same owner after it gets its heading again. */
+export function withOwnerHeadings(rows: PatchEndpoint[]): { e: PatchEndpoint; heading?: string }[] {
+  let last: string | undefined;
+  return rows.map((e) => {
+    const owner = e.owner?.trim() || undefined;
+    const heading = owner !== undefined && owner !== last ? owner : undefined;
+    last = owner;
+    return { e, heading };
+  });
+}
+
+/** What to say when no rack has a row to show. */
+export function noRowsMessage(dir: "in" | "out", filters: { changesOnly: boolean; q: string }): string {
+  if (filters.changesOnly || filters.q.trim()) return "No channels match.";
+  return `No ${dir === "in" ? "inputs" : "outputs"} on this sheet.`;
 }

@@ -7,9 +7,9 @@ import { useStageState } from "./use-stage-state";
 import { useStatusChannel } from "./use-status-channel";
 import { resolvePatch, endpointKey } from "../lib/patch-resolve";
 import { useMediaQuery } from "../lib/use-media-query";
-import { chainNodes, collectChanges, rackSections, sourceColor } from "../lib/patch-view-model";
+import { chainNodes, collectChanges, noRowsMessage, rackSections, sourceColor, withOwnerHeadings } from "../lib/patch-view-model";
 import { plural } from "@main/services/plural";
-import { PatchChain } from "./patch-chain";
+import { LEGEND_NODES, PatchChain } from "./patch-chain";
 import { PatchWide } from "./patch-view-wide";
 
 /** Tailwind's `lg`. From here up the page has room for a table per rack; below it
@@ -101,6 +101,7 @@ export function PatchView() {
 
   const hasPatch = sheets.length > 0;
   const toggleRack = (id: string) => setCollapsed((c) => ({ ...c, [id]: !c[id] }));
+  const openRack = (id: string) => setCollapsed((c) => (c[id] ? { ...c, [id]: false } : c));
 
   if (wide && sheet && resolved) {
     return (
@@ -111,7 +112,6 @@ export function PatchView() {
             sheet={sheet}
             state={state}
             resolved={resolved}
-            variantName={resolved.variantName}
             changes={allChanges}
             sections={sections}
             tab={tab}
@@ -122,7 +122,7 @@ export function PatchView() {
             onChangesOnly={setChangesOnly}
             collapsed={collapsed}
             onToggleRack={toggleRack}
-            onOpenRack={(id) => setCollapsed((c) => (c[id] ? { ...c, [id]: false } : c))}
+            onOpenRack={openRack}
           />
           <PatchFooter />
         </div>
@@ -179,7 +179,7 @@ export function PatchView() {
             {/* How to read the diagram */}
             <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-4 py-3">
               <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">How to read</span>
-              <PatchChain nodes={[{ text: "Kick In", kind: "source" }, { text: "Snake B 1", kind: "hop" }, { text: "Input Rack in 12", kind: "rack" }, { text: "console 12", kind: "console" }]} />
+              <PatchChain nodes={LEGEND_NODES} />
             </div>
             {/* Changes-first */}
             {changes.length > 0 && (
@@ -220,9 +220,13 @@ export function PatchView() {
 
             {/* Full patch, grouped by rack (and by owner within a rack) */}
             <div className="mt-4 flex flex-col gap-3">
+              {sections.length === 0 && (
+                <div className="rounded-xl border border-line bg-surface px-4 py-8 text-center text-footnote text-fg-subtle">
+                  {noRowsMessage(tab, { changesOnly, q })}
+                </div>
+              )}
               {sections.map(({ rack, rows }) => {
                 const isCollapsed = collapsed[rack.id];
-                let lastOwner: string | undefined;
                 return (
                   <div key={rack.id} style={rack.color ? { boxShadow: `inset 3px 0 0 ${rack.color}` } : undefined} className="overflow-hidden rounded-xl border border-line bg-surface">
                     <button type="button" onClick={() => toggleRack(rack.id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left">
@@ -233,17 +237,14 @@ export function PatchView() {
                     </button>
                     {!isCollapsed && (
                       <div className="divide-y divide-line/60">
-                        {rows.map((e) => {
+                        {withOwnerHeadings(rows).map(({ e, heading }) => {
                           const changed = resolved?.changed.has(endpointKey(e));
-                          const owner = e.owner?.trim() || undefined;
-                          const showOwner = owner !== lastOwner && owner !== undefined;
-                          lastOwner = owner;
                           const srcColor = sheet ? sourceColor(e, sheet.devices) : undefined;
                           return (
                             <Fragment key={endpointKey(e)}>
-                              {showOwner && (
+                              {heading && (
                                 <div className="bg-fill/60 px-4 py-1 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
-                                  Owned by {owner}
+                                  Owned by {heading}
                                 </div>
                               )}
                               <div

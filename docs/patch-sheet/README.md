@@ -70,7 +70,8 @@ up yet." with a link to the editor, which is also linked in the footer.
   **changes from the standard patch** card, and **Jump to**, a list of the racks showing,
   each with its colour and channel count. A change card row is the direction and channel
   (`in 11`, `out 8`), the source (struck through when unused) and a note: *was `<old
-  label>`*, *new*, *re-patched* or *unused*. The card lists inputs and outputs together.
+  label>`*, *new*, *re-patched*, *unused*, or *changed* when only its mic, feed, 48V, console
+  channel or owner differs. The card lists inputs and outputs together.
   Jump to scrolls to a rack and opens it if it was collapsed.
 - **The right column** starts with the **Inputs / Outputs** switch, a **Filter** box, a
   **Changes only** toggle and, at the right, a legend showing how to read a signal path.
@@ -81,8 +82,8 @@ up yet." with a link to the editor, which is also linked in the footer.
 
 Each row is one line. The colour of the first box a channel comes through shows as a
 bar on the row's left edge. A channel that changed this week is tinted amber and its last
-column says why; a channel marked unused is dimmed with its source struck through and
-reads *unused this week*. A channel set under an owner has a group row, *Owned by
+column says why. A channel marked unused is dimmed with its source struck through and
+reads *unused this week*, in amber only when this week made it unused. A channel set under an owner has a group row, *Owned by
 `<owner>`*, above its first row in the run. The header chevron collapses a rack.
 
 Filter matches the channel number, source, mic, feed, console channel and owner. A
