@@ -79,3 +79,44 @@ describe("a toast with a button", () => {
     assert.ok(present("Focus me"), "the toast left while focus was in it");
   });
 });
+
+describe("the same message again", () => {
+  const count = (text: string) => (document.body.textContent?.split(text).length ?? 1) - 1;
+
+  test("refreshes the toast in place instead of stacking another", () => {
+    mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+    render(React.createElement(Toaster));
+    act(() => {
+      toast.success("Branding updated.");
+      toast.success("Branding updated.");
+      toast.success("Branding updated.");
+    });
+    assert.equal(count("Branding updated."), 1, "three identical toasts were stacked");
+  });
+
+  test("restarts its countdown", () => {
+    mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+    render(React.createElement(Toaster));
+    act(() => toast.success("Branding updated."));
+    advance(3_000);
+    act(() => toast.success("Branding updated."));
+    advance(3_000); // 6 s after the first, 3 s after the second
+    assert.ok(present("Branding updated."), "the refreshed toast kept the first one's clock");
+    advance(1_500);
+    assert.equal(present("Branding updated."), false, "the refreshed toast never left");
+  });
+
+  test("a different message, a different type, or a toast with a button is its own toast", () => {
+    mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+    render(React.createElement(Toaster));
+    act(() => {
+      toast.success("Saved");
+      toast.error("Saved");
+      toast.success("Saved too");
+      toast.info("Saved");
+      toast.info("Saved", { action: { label: "Undo", onSelect: () => {} } });
+      toast.info("Saved", { action: { label: "Undo", onSelect: () => {} } });
+    });
+    assert.equal(count("Saved"), 6, "toasts that are not the same were merged");
+  });
+});
