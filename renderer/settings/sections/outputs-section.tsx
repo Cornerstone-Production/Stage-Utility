@@ -531,7 +531,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           mounts once the card is on screen — eight iframes booting at once each
           fetch state and open a stream, which timed out the server on a real
           install with eight displays. */}
-      <div className="px-3 pt-2">
+      <div className="pt-2">
         {output.viewId ? (
           // The preview IS the display, so clicking it opens the real thing in a
           // new tab - the same place the menu's "Open display" goes. An anchor
@@ -545,12 +545,13 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
             // switch in Screen settings visibly do something: the card loses
             // its bar too.
             outputId={output.id}
+            bleed
             onExpand={onEditLayout}
             expandLabel={`Edit what ${output.name} shows`}
             following={panelOpen ? { label: `Show settings for ${output.name}`, onOpenDisplay: () => window.open(outputUrl, `display-${output.id}`) } : undefined}
           />
         ) : (
-          <div className="grid aspect-video place-items-center rounded-lg border border-dashed border-line text-caption1 text-fg-subtle">
+          <div className="grid aspect-video place-items-center border-y border-dashed border-line text-caption1 text-fg-subtle">
             Nothing assigned
           </div>
         )}
@@ -743,8 +744,9 @@ function UnassignedViewCard({
         </DropdownMenu.Root>
       </div>
 
-      <div className="px-3 pt-2">
+      <div className="pt-2">
         <LazyPreview
+          bleed
           viewId={view.id}
           onExpand={onEditLayout}
           expandLabel={`Edit ${view.name}`}

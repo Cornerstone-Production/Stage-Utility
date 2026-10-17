@@ -22,7 +22,8 @@ const { ViewPreview } = await import("./view-preview.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
-// NOT unit-tested here: that the preview's four corners are rounded. The scaled
+// NOT unit-tested here: that the preview's four corners are rounded (or, with
+// `bleed`, square). The scaled
 // iframe sits on its own compositor layer and the box clips it with a clip-path;
 // jsdom loads no stylesheet and paints nothing, so a test could only read the style
 // string back, which would pass whether or not any corner is clipped. It is checked
@@ -34,5 +35,17 @@ describe("ViewPreview's iframe", () => {
     const iframe = container.querySelector("iframe");
     assert.ok(iframe, "no iframe rendered");
     assert.equal(iframe!.style.pointerEvents, "none");
+  });
+
+  test("is a rounded, bordered box unless it is told to bleed", () => {
+    // The View editor's preview is a ViewPreview with no `bleed`, and must keep its
+    // own box; only the Screens cards ask for edge to edge.
+    const plain = render(React.createElement(ViewPreview, { viewId: "v1" })).container.querySelector("iframe")!.parentElement!;
+    assert.ok(plain.classList.contains("rounded-xl"), "the default preview lost its radius");
+    assert.ok(!plain.classList.contains("border-x-0"), "the default preview lost its side borders");
+    cleanup();
+    const bleed = render(React.createElement(ViewPreview, { viewId: "v1", bleed: true })).container.querySelector("iframe")!.parentElement!;
+    assert.ok(!bleed.classList.contains("rounded-xl"), "a bleed preview kept its radius");
+    assert.ok(bleed.classList.contains("border-x-0"), "a bleed preview kept its side borders");
   });
 });

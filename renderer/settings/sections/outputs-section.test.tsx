@@ -349,3 +349,76 @@ test("OutputsSection builds the lagging box from the pair's EPISODE — the wors
   const rightCard = screen.getByDisplayValue("Right Mic Display").closest('[class*="rounded-xl"]') as HTMLElement;
   assert.equal(within(rightCard).queryByText(/in its own buffer/), null, "the second screen is not lagging and carries no box");
 });
+
+// ── The preview runs edge to edge inside its card ────────────────────────────
+//
+// NOT covered: that it LOOKS edge to edge. jsdom loads no stylesheet, so a class
+// is all it can see; the 9px from the rail to the preview's left edge is
+// measured in a browser. What this does prove is the wiring that has failed
+// before: the `bleed` prop reaching the preview box, and no wrapper between the
+// card and the preview putting its inset back.
+
+/** Every element from the preview iframe up to, but not including, the card root —
+ *  the one `overflow-hidden rounded-xl` box, which is what frames a bleeding preview. */
+function chainAbove(iframe: Element): Element[] {
+  const chain: Element[] = [];
+  let el = iframe.parentElement;
+  while (el && !(el.classList.contains("overflow-hidden") && el.classList.contains("rounded-xl") && el.classList.contains("flex-col"))) {
+    chain.push(el);
+    el = el.parentElement;
+  }
+  assert.ok(el, "found no card root above the preview");
+  return chain;
+}
+
+function assertBleeds(iframe: Element, what: string): void {
+  const chain = chainAbove(iframe);
+  const box = chain[0]!;
+  assert.ok(box.classList.contains("border-x-0"), `${what}: the preview box still has side borders`);
+  for (const el of chain) {
+    assert.ok(!el.classList.contains("rounded-xl"), `${what}: a rounded-xl sits between the card and the preview (${el.className})`);
+    assert.ok(![...el.classList].some((c) => /^p[xlr]-/.test(c)), `${what}: a wrapper insets the preview sideways (${el.className})`);
+  }
+}
+
+test("a screen card's preview has no side inset, side border or corner radius", async () => {
+  const { container } = render(
+    React.createElement(
+      TooltipProvider,
+      null,
+      React.createElement(OutputRow, {
+        output: { ...OUTPUT, viewId: "v1" },
+        views: [],
+        baseUrl: "http://192.168.1.50:8788",
+        online: true,
+        struggles: [],
+        lags: [],
+        canRemove: true,
+        iconKey: OUTPUT.id,
+        onRename: () => {},
+        onRenameView: () => {},
+        onSetView: () => {},
+        messageGroups: { groups: [], known: true, failed: false },
+        panelOpen: false,
+        onSelect: () => {},
+        onRefresh: () => {},
+        onRemove: () => {},
+        onRequestNewView: () => {},
+        onEditLayout: () => {},
+      }),
+    ),
+  );
+  await eventually(() => assert.ok(container.querySelector("iframe"), "the preview never mounted"));
+  assertBleeds(container.querySelector("iframe")!, "screen card");
+});
+
+test("a view-not-on-a-screen card's preview runs edge to edge the same way", async () => {
+  stubVideoState(videoState([]));
+  const view = { id: "v9", name: "Orphan board", kind: "slots" } as unknown as NonNullable<Parameters<typeof OutputsSection>[0]["stageState"]["views"]>[number];
+  const state = { outputs: [], views: [view], iconColors: {}, publicUrl: "" } as unknown as Parameters<typeof OutputsSection>[0]["stageState"];
+  const { container } = render(
+    React.createElement(TooltipProvider, null, React.createElement(OutputsSection, { stageState: state, handlers: NOOP_HANDLERS, panelOpen: false, selected: null, onSelect: () => {}, onAddScreen: () => {}, onRequestNewView: () => {}, onRemoveScreen: () => {}, onDeleteView: () => {}, onEditLayout: () => {} })),
+  );
+  await eventually(() => assert.ok(container.querySelector("iframe"), "the preview never mounted"));
+  assertBleeds(container.querySelector("iframe")!, "unassigned view card");
+});

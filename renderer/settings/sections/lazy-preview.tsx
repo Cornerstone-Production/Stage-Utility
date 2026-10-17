@@ -20,6 +20,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { PlayIcon, ExpandIcon } from "lucide-react";
+import { cn } from "@renderer/lib/cn";
 import { ViewPreview } from "./view-preview";
 
 /**
@@ -73,6 +74,7 @@ export function LazyPreview({
   onExpand,
   expandLabel,
   following,
+  bleed = false,
 }: {
   viewId: string;
   /** The Output this preview stands in for — passed straight through to
@@ -95,6 +97,10 @@ export function LazyPreview({
    * open.
    */
   following?: { label: string; onOpenDisplay?: () => void };
+  /** Edge to edge in the card around it — see ViewPreview. Squares the corners of
+   *  everything drawn over the preview too, and draws the focus ring INSIDE it,
+   *  since the card clips anything outside. */
+  bleed?: boolean;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const tokenRef = useRef<symbol>(Symbol("preview"));
@@ -150,7 +156,9 @@ export function LazyPreview({
     };
   }, [visible, forced]);
 
-  const preview = <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} />;
+  const preview = <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} bleed={bleed} />;
+  const corners = bleed ? "" : "rounded-xl";
+  const ring = cn("focus:outline-none focus-visible:ring-2 focus-visible:ring-focus", bleed && "focus-visible:ring-inset");
 
   /** The live preview, wrapped for whatever the card does with a click on it. */
   function streamingPreview() {
@@ -175,7 +183,7 @@ export function LazyPreview({
                 following.onOpenDisplay();
               }
             }}
-            className="block w-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            className={cn("block w-full", corners, ring)}
           >
             {preview}
           </button>
@@ -204,11 +212,14 @@ export function LazyPreview({
           onClick={onExpand}
           title={expandLabel}
           aria-label={expandLabel}
-          className="group relative block w-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          className={cn("group relative block w-full", corners, ring)}
         >
           {preview}
           <span
-            className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
+            className={cn(
+              "pointer-events-none absolute inset-0 grid place-items-center bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100",
+              corners,
+            )}
             aria-hidden="true"
           >
             {/* A SOLID neutral grey, not white at reduced opacity. Opacity made
@@ -233,7 +244,10 @@ export function LazyPreview({
           type="button"
           data-retarget
           onClick={() => setForced(true)}
-          className="grid aspect-video w-full place-items-center gap-1.5 rounded-lg border border-dashed border-line text-fg-subtle transition-colors hover:bg-fill hover:text-fg"
+          className={cn(
+            "grid aspect-video w-full place-items-center gap-1.5 border border-dashed border-line text-fg-subtle transition-colors hover:bg-fill hover:text-fg",
+            bleed ? "border-x-0" : "rounded-lg",
+          )}
           aria-label="Load this preview"
         >
           <PlayIcon className="size-4" />
