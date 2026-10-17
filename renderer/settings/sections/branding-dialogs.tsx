@@ -18,7 +18,8 @@ import {
   FieldLabel,
 } from "../../components/ui";
 import { cn } from "../../lib/cn";
-import { AndroidIcon, Describe, IosIcon, TabIcon, type Brand } from "./branding-cards";
+import { AndroidIcon, Describe, IosIcon, TabIcon, useImageSize, type Brand } from "./branding-cards";
+import { ART_MAX } from "../../lib/app-icon-render";
 import { LogoCropper } from "./logo-cropper";
 
 /** Behind-the-icon colours offered for transparent areas: black, two of the app's
@@ -207,6 +208,9 @@ export function IconDialog({
   onUseLogo: () => void;
 } & ImageActions) {
   const isSet = !!brand.appIcon192;
+  // Use my logo draws from the logo as it is saved, so say when that is small.
+  const logoSize = useImageSize(isSet ? null : brand.appLogo);
+  const logoSoft = logoSize !== null && Math.min(logoSize.w, logoSize.h) < ART_MAX;
   return (
     <Frame
       title="Tab and home-screen icon"
@@ -230,8 +234,8 @@ export function IconDialog({
       }
     >
       <Lead>
-        A square PNG, SVG or WebP, at least 512 × 512. Stage Utility makes every size from it: the browser tab,
-        the iPhone and iPad home screen, and Android&apos;s round and rounded-square masks.
+        A square PNG, JPG, SVG or WebP. 512 × 512 or larger looks sharpest. Stage Utility makes every size from
+        it: the browser tab, the iPhone and iPad home screen, and Android&apos;s round and rounded-square masks.
       </Lead>
       <div className="flex flex-wrap items-end gap-[18px]">
         <Size label="Tab 16" size={16}>
@@ -272,6 +276,11 @@ export function IconDialog({
           ))}
         </div>
       </div>
+      {logoSoft && (
+        <Describe className="mt-0 text-warn-11">
+          Your logo is {logoSize.w} × {logoSize.h}, so an icon made from it may look soft.
+        </Describe>
+      )}
       <Describe className="mt-0">
         Uses the app name for the home-screen label: <b className="text-fg">{brand.appName}</b>.
       </Describe>
@@ -293,6 +302,8 @@ export function CropDialog({
     initial: { scale: number; x: number; y: number } | null;
     noun: string;
     monochrome: boolean;
+    /** Warn when the cropped area is smaller than this many source pixels. */
+    sharpFrom?: number;
   } | null;
   onCancel: () => void;
   onSave: (result: { logo: string; original: string; crop: { scale: number; x: number; y: number } }) => void;
@@ -309,6 +320,7 @@ export function CropDialog({
             initial={crop.initial}
             monochrome={crop.monochrome}
             noun={crop.noun}
+            sharpFrom={crop.sharpFrom}
             className="border-0 bg-transparent p-0"
             onCancel={onCancel}
             onSave={onSave}

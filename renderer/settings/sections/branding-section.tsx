@@ -9,7 +9,7 @@ import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { errorMessage } from "@main/services/errors";
 import { DEFAULT_ICON_BACKGROUND } from "@main/services/install-metadata";
 import { logToServer } from "../../lib/client-log";
-import { renderIconSizes, toIconArt } from "../../lib/app-icon-render";
+import { ART_MAX, renderIconSizes, toIconArt } from "../../lib/app-icon-render";
 import { AvatarCard, CARD, Describe, EmptySlotCard, IconCard, IdentityStage, QrCard } from "./branding-cards";
 import { AvatarDialog, CropDialog, EmptySlotDialog, IconDialog, LogoDialog } from "./branding-dialogs";
 
@@ -430,6 +430,8 @@ export function BrandingSection({
             // The empty-slot image and the avatar are always drawn recoloured; the
             // logo follows the toggle; the icon is drawn exactly as it is.
             monochrome: crop.target === "app" ? stageState.appLogoMonochrome : crop.target !== "icon",
+            // An icon is drawn up to 512 px: a smaller crop is scaled up and looks soft.
+            sharpFrom: crop.target === "icon" ? ART_MAX : undefined,
           }
         }
         onCancel={() => setCrop(null)}

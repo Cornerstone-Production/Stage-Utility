@@ -31,6 +31,24 @@ export const STOCK_FAVICON_TYPE = "image/svg+xml";
 /** The declared type of a PNG: a recoloured logo, or the custom icon. A raw logo declares none (null). */
 const PNG_TYPE = "image/png";
 
+/** Where the server answers for the custom icon's 192 px image, falling back to the
+ *  built-in icon when the stored file is gone. */
+export const CUSTOM_ICON_PATH = "/icon-192.png";
+
+/**
+ * The tab icon's href for a custom icon, given the stored reference the state holds.
+ *
+ * Never the stored file itself: after a restore that carried the settings and not
+ * the images, that URL is a 404 and the tab shows a blank icon, whereas the route
+ * answers with the built-in icon. The query is the reference's name, which is a
+ * hash of the image, so a changed icon is a new URL and the tab shows it at once
+ * even though the route is revalidated rather than cached forever.
+ */
+export function customIconHref(stored: string): string {
+  const name = (stored.split("/").pop() ?? stored).replace(/\.[a-z0-9]+$/i, "");
+  return `${CUSTOM_ICON_PATH}?v=${encodeURIComponent(name)}`;
+}
+
 /** The app's own `--su-fg` in `:root` and `.dark` (renderer/styles.css). */
 export const INK = { light: "#161b22", dark: "#ededf0" } as const;
 
@@ -144,7 +162,7 @@ function settle(href: string, type: string | null): void {
 
 function resolve(): void {
   const { logo, monochrome, icon } = request;
-  if (icon) return settle(icon, PNG_TYPE); // a PNG, drawn by the operator's own icon
+  if (icon) return settle(customIconHref(icon), PNG_TYPE); // a PNG, drawn by the operator's own icon
   if (!logo) return settle(STOCK_FAVICON, STOCK_FAVICON_TYPE);
   if (!monochrome) return settle(logo, null);
   // A cached failure is the raw logo, which declares no type.
@@ -191,7 +209,7 @@ function resolve(): void {
  * @param appLogo     The uploaded logo URL, or null for the stock icon.
  * @param monochrome  Recolor to match theme: tint the logo to contrast with the
  *                    browser's colour scheme. False leaves it as uploaded.
- * @param appIcon     The custom tab and home-screen icon (its 192 px PNG), or null.
+ * @param appIcon     The stored reference of the custom icon's 192 px PNG, or null.
  *                    When set it wins over the logo and is never recoloured.
  */
 export function applyFavicon(

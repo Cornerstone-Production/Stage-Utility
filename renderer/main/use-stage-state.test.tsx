@@ -311,13 +311,13 @@ describe("the tab icon", () => {
   test("a custom icon in the state wins over the logo, and removing it brings the logo back", async () => {
     // The hook has to hand the icon to applyFavicon at all: a favicon helper that
     // is right in isolation and never given the field leaves the tab on the logo.
-    const ICON = "/branding-images/feedbeef.png";
+    const ICON = "/branding-images/feedbeef.png"; // its tab href is the route, keyed by this name
     render(React.createElement(OneConsumer));
     await settle();
     act(() => {
       emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false, appIcon192: ICON });
     });
-    assert.equal(href(), ICON, "the custom icon never reached the tab");
+    assert.equal(href(), "/icon-192.png?v=feedbeef", "the custom icon never reached the tab");
     act(() => {
       emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false, appIcon192: null });
     });

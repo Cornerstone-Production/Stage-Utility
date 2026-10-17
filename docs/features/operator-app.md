@@ -436,8 +436,8 @@ The connect QR toggle is the last card on this page — see
 
 ### Tab and home-screen icon
 
-Click the icon card, then **Upload** a square PNG, JPG, SVG or WebP,
-or press **Use my logo** to build it from the logo already set. A square of 512 x 512 or more is recommended; smaller art is scaled up and looks soft. Stage Utility draws
+Click the icon card, then **Upload** a square PNG, JPG, SVG or WebP (512 x 512 or larger looks sharpest),
+or press **Use my logo** to build it from the logo already set. Smaller art is never refused: the editor, and the dialog for **Use my logo**, say when it is smaller than 512 x 512 and may look soft. Stage Utility draws
 every size from that one square in your browser: 180 px for the iPhone and iPad
 home screen, 192 and 512 px for Android and the tab, and a second 512 px version
 for Android's round and rounded-square masks with the art kept inside the centre
@@ -449,7 +449,8 @@ Once set, the dialog offers **Replace**, **Adjust** and **Remove**. Removing it 
 everything back: the tab follows the logo again, and phones get the built-in icon.
 
 A tab icon is shown exactly as drawn and never recolored, and it wins over the
-logo. The home-screen label is the app name, read by iOS when the app is added, so
+logo. The tab loads it from `/icon-192.png`, which answers with the built-in icon
+if the stored file is ever missing, so the tab is never blank. The home-screen label is the app name, read by iOS when the app is added, so
 renaming the app does not rename an icon already on a home screen; adding it again
 does. The manifest and icon files behind this are listed in the
 [API](../reference/api.md).

@@ -27,6 +27,8 @@ interface LogoCropperProps {
   monochrome?: boolean;
   /** What is being cropped, for the labels: "logo", "icon", "image". */
   noun?: string;
+  /** Say so when the area being saved is fewer than this many source pixels across. */
+  sharpFrom?: number;
   /** Extra classes for the outer panel, e.g. to drop its border inside a dialog. */
   className?: string;
   onCancel: () => void;
@@ -46,7 +48,7 @@ interface LogoCropperProps {
  * displayed-pixels per source-pixel. Both are clamped so the image always
  * covers the viewport (no empty corners).
  */
-export function LogoCropper({ src, initial, monochrome = false, noun = "logo", className, onCancel, onSave }: LogoCropperProps) {
+export function LogoCropper({ src, initial, monochrome = false, noun = "logo", sharpFrom, className, onCancel, onSave }: LogoCropperProps) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   /** What the image element is given: `src`, or a sized copy when it is an SVG
    *  (see sized-svg.ts). The ORIGINAL saved is always `src` itself. */
@@ -222,6 +224,12 @@ export function LogoCropper({ src, initial, monochrome = false, noun = "logo", c
               aria-label="Zoom"
             />
           </label>
+          {!loadError && sharpFrom !== undefined && nat && VIEWPORT / scale < sharpFrom && (
+            <p className="text-caption2 text-warn-11">
+              The area being saved is {Math.round(VIEWPORT / scale)} × {Math.round(VIEWPORT / scale)}.{" "}
+              {sharpFrom} × {sharpFrom} or larger looks sharpest, so this may look soft.
+            </p>
+          )}
           {loadError ? (
             <p role="alert" className="text-caption2 text-danger-11">
               {loadError}

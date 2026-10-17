@@ -12,6 +12,7 @@ import type { StageState } from "@main/types/state";
 import { BrandLogo } from "../../components/brand-logo";
 import { FieldDescription, FieldLabel, Switch } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { customIconHref } from "../../lib/apply-favicon";
 
 /** The card chrome every block on this page shares: the same material as a FieldSet. */
 export const CARD = "rounded-xl border border-line bg-surface shadow-[var(--su-shadow-1)]";
@@ -36,7 +37,8 @@ export type Brand = Pick<
  *  setting, exactly as applyFavicon draws it), else the stock icon. */
 export function TabIcon({ brand, size }: { brand: Brand; size: number }) {
   if (brand.appIcon192) {
-    return <img src={brand.appIcon192} alt="" width={size} height={size} className="block rounded-[3px]" />;
+    // The route the real tab uses, so the preview shows what the tab will.
+    return <img src={customIconHref(brand.appIcon192)} alt="" width={size} height={size} className="block rounded-[3px]" />;
   }
   if (brand.appLogo) {
     return (
@@ -136,7 +138,7 @@ export function IdentityStage({ brand, onLogo }: { brand: Brand; onLogo: () => v
 
 /** Natural pixel size of an image, once it has loaded; null before that or when it
  *  cannot be measured. Only used for the "1024 × 1024" in a state line. */
-function useImageSize(src: string | null): { w: number; h: number } | null {
+export function useImageSize(src: string | null): { w: number; h: number } | null {
   const [size, setSize] = useState<{ src: string; w: number; h: number } | null>(null);
   useEffect(() => {
     if (!src) return;
