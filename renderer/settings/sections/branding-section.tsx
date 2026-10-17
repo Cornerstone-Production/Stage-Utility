@@ -7,6 +7,7 @@ import { cn } from "../../lib/cn";
 import { ColorField } from "../../components/ui/color-field";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { errorMessage } from "@main/services/errors";
+import { DEFAULT_ICON_BACKGROUND } from "@main/services/install-metadata";
 import { logToServer } from "../../lib/client-log";
 import { renderIconSizes, toIconArt } from "../../lib/app-icon-render";
 import { AvatarCard, CARD, Describe, EmptySlotCard, IconCard, IdentityStage, QrCard } from "./branding-cards";
@@ -22,8 +23,6 @@ const ACCENT_PRESETS = ["#2e6691", "#3b82a6", "#5b9bd8", "#6e56cf", "#0d9488", "
 const MAX_LOGO_BYTES = 1_500_000;
 const ACCEPTED = "image/png,image/jpeg,image/svg+xml,image/webp";
 
-/** What a new icon is drawn over until the operator picks something else. */
-const DEFAULT_ICON_BACKGROUND = "#000000";
 
 type Crop = { scale: number; x: number; y: number };
 type Target = "app" | "empty" | "avatar" | "icon";
@@ -42,6 +41,8 @@ export function BrandingSection({
   const [crop, setCrop] = useState<{ src: string; initial: Crop | null; target: Target } | null>(null);
   /** An icon is being drawn and saved: its controls wait. */
   const [iconBusy, setIconBusy] = useState(false);
+  /** The same fact for the handlers: state would still read false in a second click's closure. */
+  const iconRunning = useRef(false);
   /** The background a NEW icon will be drawn over; once one is set, the saved one rules. */
   const [draftBackground, setDraftBackground] = useState(DEFAULT_ICON_BACKGROUND);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -131,82 +132,84 @@ export function BrandingSection({
   const iconBackground = stageState.appIcon192 ? stageState.appIconBackground : draftBackground;
 
   /** The saved upload and crop behind a target, for re-editing. The icon also hands
-   *  back its art, which a new background is redrawn from. */
-  async function sourceOf(target: Target): Promise<BrandingSource | null> {
+   *  back its art, which a new background is redrawn from. Rejects when it cannot be
+   *  read: an editor opened on a stand-in would save the stand-in over the original. */
+  async function sourceOf(target: Target): Promise<BrandingSource> {
     try {
       return await invoke<BrandingSource>("stage:getBrandingSource", { target });
     } catch (err) {
       logToServer("branding", `could not read the saved ${NOUN[target]} to edit: ${errorMessage(err)}`);
-      return null;
+      throw err;
     }
   }
 
   // Re-open the editor on the ORIGINAL upload, restoring saved zoom/position.
   async function onAdjust(target: Target) {
-    const fallback =
-      target === "app"
-        ? stageState.appLogo
-        : target === "empty"
-          ? stageState.emptySlotLogo
-          : target === "avatar"
-            ? stageState.defaultAvatar
-            : stageState.appIcon192;
-    const source = await sourceOf(target);
-    const src = source?.original ?? source?.art ?? fallback;
+    const current: Record<Target, string | null> = {
+      app: stageState.appLogo,
+      empty: stageState.emptySlotLogo,
+      avatar: stageState.defaultAvatar,
+      icon: null, // a 192 px thumbnail with its background baked in is no source for an icon
+    };
+    let source: BrandingSource;
+    try {
+      source = await sourceOf(target);
+    } catch (err) {
+      toast.error(`Could not open the editor: ${errorMessage(err)}`);
+      return;
+    }
+    const src = source.original ?? source.art ?? current[target];
     if (!src) {
       toast.error("There is nothing to adjust.");
       return;
     }
     setDialog(null);
-    setCrop({ src, initial: source?.crop ?? null, target });
+    setCrop({ src, initial: source.crop ?? null, target });
   }
 
-  /**
-   * Draw every size of the icon from `art` over `background` and save the set.
-   *
-   * Resolves true only when the server took it. A failure to draw is shown and put
-   * on /log here; a refusal by the server is shown by the write itself. Either way
-   * the dialog stays open, so nothing reads as saved that was not.
-   */
-  async function saveIcon(icon: {
+  /** What an icon is made from. `art` is any square image; it is brought down to 512. */
+  interface IconSpec {
     art: string;
     original: string | null;
     crop: Crop | null;
     background: string;
-  }): Promise<boolean> {
+  }
+
+  /**
+   * Make the icon from `build()`'s answer: draw every size and save the set.
+   *
+   * Resolves true only when the server took it. A failure at any step is shown and
+   * put on /log here, except a refusal by the server, which the write itself shows.
+   * The dialog stays open either way, so nothing reads as saved that was not. A
+   * second request while one is running is dropped, from the moment of the click:
+   * two overlapping ones would land in whichever order their image decodes finished.
+   */
+  async function makeIcon(build: () => Promise<IconSpec>): Promise<boolean> {
+    if (iconRunning.current) return false;
+    iconRunning.current = true;
     setIconBusy(true);
     try {
-      const sizes = await renderIconSizes(icon.art, icon.background);
-      return await handlers.handleSetBranding({ icon: { ...icon, ...sizes } });
+      const spec = await build();
+      const art = await toIconArt(spec.art);
+      const sizes = await renderIconSizes(art, spec.background);
+      return await handlers.handleSetBranding({ icon: { ...spec, art, ...sizes } });
     } catch (err) {
-      logToServer("branding", `the tab and home-screen icon could not be drawn: ${errorMessage(err)}`);
+      logToServer("branding", `the tab and home-screen icon could not be made: ${errorMessage(err)}`);
       toast.error(`Could not make the icon: ${errorMessage(err)}`);
       return false;
     } finally {
+      iconRunning.current = false;
       setIconBusy(false);
     }
   }
 
   /** Build the icon from the logo that is already set, with the same crop. */
   async function buildIconFromLogo() {
-    if (!stageState.appLogo) return;
-    setIconBusy(true);
-    let art: string;
-    let source: BrandingSource | null;
-    try {
-      [art, source] = await Promise.all([toIconArt(stageState.appLogo), sourceOf("app")]);
-    } catch (err) {
-      logToServer("branding", `the icon could not be built from the logo: ${errorMessage(err)}`);
-      toast.error(`Could not make the icon from your logo: ${errorMessage(err)}`);
-      return;
-    } finally {
-      setIconBusy(false);
-    }
-    const ok = await saveIcon({
-      art,
-      original: source?.original ?? null,
-      crop: source?.crop ?? null,
-      background: iconBackground,
+    const logo = stageState.appLogo;
+    if (!logo) return;
+    const ok = await makeIcon(async () => {
+      const source = await sourceOf("app");
+      return { art: logo, original: source.original, crop: source.crop, background: iconBackground };
     });
     if (ok) setDialog(null);
   }
@@ -217,36 +220,39 @@ export function BrandingSection({
       setDraftBackground(hex);
       return;
     }
-    const source = await sourceOf("icon");
-    try {
-      const art = await toIconArt(source?.art ?? stageState.appIcon192);
-      await saveIcon({ art, original: source?.original ?? null, crop: source?.crop ?? null, background: hex });
-    } catch (err) {
-      logToServer("branding", `the icon could not be redrawn on the new background: ${errorMessage(err)}`);
-      toast.error(`Could not change the background: ${errorMessage(err)}`);
-    }
+    if (hex === stageState.appIconBackground) return;
+    await makeIcon(async () => {
+      const source = await sourceOf("icon");
+      if (!source.art) throw new Error("the saved icon has no art to redraw; replace the icon instead");
+      return { art: source.art, original: source.original, crop: source.crop, background: hex };
+    });
   }
 
   async function onCropSave(result: { logo: string; original: string; crop: Crop }) {
     if (!crop) return;
     const target = crop.target;
     if (target === "icon") {
-      try {
-        const art = await toIconArt(result.logo);
-        const ok = await saveIcon({ art, original: result.original, crop: result.crop, background: iconBackground });
-        if (ok) setCrop(null);
-      } catch (err) {
-        logToServer("branding", `the icon could not be drawn from the crop: ${errorMessage(err)}`);
-        toast.error(`Could not make the icon: ${errorMessage(err)}`);
-      }
+      const ok = await makeIcon(async () => ({
+        art: result.logo,
+        original: result.original,
+        crop: result.crop,
+        background: iconBackground,
+      }));
+      if (ok) setCrop(null);
       return;
     }
-    const saved =
-      target === "app"
-        ? { logo: result.logo, logoOriginal: result.original, logoCrop: result.crop }
-        : target === "empty"
-          ? { emptyLogo: result.logo, emptyLogoOriginal: result.original, emptyLogoCrop: result.crop }
-          : { avatar: result.logo, avatarOriginal: result.original, avatarCrop: result.crop };
+    let saved: Parameters<typeof handlers.handleSetBranding>[0];
+    switch (target) {
+      case "app":
+        saved = { logo: result.logo, logoOriginal: result.original, logoCrop: result.crop };
+        break;
+      case "empty":
+        saved = { emptyLogo: result.logo, emptyLogoOriginal: result.original, emptyLogoCrop: result.crop };
+        break;
+      case "avatar":
+        saved = { avatar: result.logo, avatarOriginal: result.original, avatarCrop: result.crop };
+        break;
+    }
     // The editor stays open when the server refuses, so the work is not lost with the toast.
     if (await handlers.handleSetBranding(saved)) setCrop(null);
   }

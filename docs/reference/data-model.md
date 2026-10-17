@@ -390,12 +390,12 @@ Uploaded logos and layout images are files in `branding-images/` and
 `layout-images/`, named by content hash and carried by a config snapshot.
 
 The custom tab and home-screen icon is eight `settings.json` fields, all null
-until one is set and then all set together: `appIcon` (the square art the sizes
+until one is set: `appIcon` (the square art the sizes
 are drawn from), `appIconOriginal` and `appIconCrop` (the upload and its crop,
 for Adjust), `appIconBackground` (`#rrggbb`, `#000000` by default) and the four
 sizes served to browsers and phones, `appIconApple` (180 px), `appIcon192`,
 `appIcon512` and `appIconMaskable` (512 px, art inside the safe zone). Each image
-is a reference into `branding-images/`. The state carries `appIcon192`,
+is a reference into `branding-images/`. The icon is set or removed as a whole; only `appIconOriginal` and `appIconCrop` may be null in a set icon (one made through the API has no upload to adjust). The state carries `appIcon192`,
 `appIconMaskable` and `appIconBackground`, and nothing else of it.
 
 ## How state reaches a screen

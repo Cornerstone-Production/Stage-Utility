@@ -602,13 +602,11 @@ export class RemoteServer {
       // (see useStageState). Content-hashed /assets are never rewritten.
       let out = data;
       if (ext === ".html") {
-        out = Buffer.from(
-          brandHtml(
-            data.toString("utf-8").replace("</head>", `<script>window.__APP_VERSION__=${JSON.stringify(SERVER_VERSION)}</script></head>`),
-            stageController.getState().appName,
-          ),
-          "utf-8",
-        );
+        const stamped = data.toString("utf-8").replace("</head>", `<script>window.__APP_VERSION__=${JSON.stringify(SERVER_VERSION)}</script></head>`);
+        // Only the two app documents carry the operator's name: control.html is a
+        // different page with a title of its own.
+        const named = urlPath === "/index.html" || urlPath === "/app.html";
+        out = Buffer.from(named ? brandHtml(stamped, stageController.getState().appName) : stamped, "utf-8");
       }
       sendStatic(res, out, mime, cacheControl, ext, acceptEncoding, immutable ? candidate : null);
       return true;

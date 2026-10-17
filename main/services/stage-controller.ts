@@ -55,7 +55,8 @@ import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
 import { PersonDirectory } from "./person-directory.js";
-import { DEFAULT_ICON_BACKGROUND, iconToSettings, NO_APP_ICON, type AppIconInput } from "./app-icon.js";
+import { iconToSettings, type AppIconInput } from "./app-icon.js";
+import { DEFAULT_ICON_BACKGROUND } from "./install-metadata.js";
 import { externalizeBrandingImages, migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore, describeSlotsTarget, type SlotsTarget } from "./slots-store.js";
@@ -2825,7 +2826,7 @@ export class StageController {
     if (partial.avatar !== undefined) stateNext.defaultAvatar = partial.avatar;
     // One icon is five images that stand or fall together, so it is decided once
     // here and fanned out to both halves below.
-    const iconSettings = partial.icon === undefined ? null : partial.icon === null ? NO_APP_ICON : iconToSettings(partial.icon);
+    const iconSettings = partial.icon === undefined ? null : iconToSettings(partial.icon);
     if (iconSettings) {
       stateNext.appIcon192 = iconSettings.appIcon192;
       stateNext.appIconMaskable = iconSettings.appIconMaskable;

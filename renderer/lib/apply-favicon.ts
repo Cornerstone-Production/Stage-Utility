@@ -28,8 +28,8 @@ import { logToServer } from "./client-log";
 export const STOCK_FAVICON = "/favicon.svg";
 export const STOCK_FAVICON_TYPE = "image/svg+xml";
 
-/** The declared type of a recoloured icon. A raw logo declares none (null). */
-const TINTED_TYPE = "image/png";
+/** The declared type of a PNG: a recoloured logo, or the custom icon. A raw logo declares none (null). */
+const PNG_TYPE = "image/png";
 
 /** The app's own `--su-fg` in `:root` and `.dark` (renderer/styles.css). */
 export const INK = { light: "#161b22", dark: "#ededf0" } as const;
@@ -144,11 +144,11 @@ function settle(href: string, type: string | null): void {
 
 function resolve(): void {
   const { logo, monochrome, icon } = request;
-  if (icon) return settle(icon, TINTED_TYPE); // a PNG, drawn by the operator's own icon
+  if (icon) return settle(icon, PNG_TYPE); // a PNG, drawn by the operator's own icon
   if (!logo) return settle(STOCK_FAVICON, STOCK_FAVICON_TYPE);
   if (!monochrome) return settle(logo, null);
   // A cached failure is the raw logo, which declares no type.
-  const typeOf = (href: string) => (href === logo ? null : TINTED_TYPE);
+  const typeOf = (href: string) => (href === logo ? null : PNG_TYPE);
 
   const ink = prefersDark() ? INK.dark : INK.light;
   const key = `${ink}|${logo}`;

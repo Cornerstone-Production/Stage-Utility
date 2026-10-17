@@ -8,7 +8,6 @@
 
 import type { ReactNode } from "react";
 import { CropIcon, TrashIcon, UploadIcon } from "lucide-react";
-import type { StageState } from "@main/types/state";
 import { BrandLogo } from "../../components/brand-logo";
 import {
   Button,
@@ -19,17 +18,12 @@ import {
   FieldLabel,
 } from "../../components/ui";
 import { cn } from "../../lib/cn";
-import { AndroidIcon, Describe, IosIcon, TabIcon } from "./branding-cards";
+import { AndroidIcon, Describe, IosIcon, TabIcon, type Brand } from "./branding-cards";
 import { LogoCropper } from "./logo-cropper";
 
 /** Behind-the-icon colours offered for transparent areas: black, two of the app's
  *  own blues, and white. The server accepts any #rrggbb; these are the choices. */
-export const ICON_BACKGROUNDS = ["#000000", "#15425c", "#2e6691", "#ffffff"] as const;
-
-type Brand = Pick<
-  StageState,
-  "appName" | "appLogo" | "appLogoMonochrome" | "appIcon192" | "appIconMaskable"
->;
+const ICON_BACKGROUNDS = ["#000000", "#15425c", "#2e6691", "#ffffff"] as const;
 
 /** The dialog frame: header with the title, a body, and a footer rule above the actions. */
 function Frame({
@@ -219,14 +213,9 @@ export function IconDialog({
       open={open}
       onClose={actions.onClose}
       footer={
-        isSet ? (
-          <Actions isSet busy={busy} removeLabel="Remove tab and home-screen icon" {...actions} />
-        ) : (
-          <>
-            <Button variant="filled" size="small" disabled={busy} onClick={actions.onUpload}>
-              <UploadIcon className="size-3.5 text-gray-9" />
-              Upload
-            </Button>
+        <>
+          <Actions isSet={isSet} busy={busy} removeLabel="Remove tab and home-screen icon" {...actions} />
+          {!isSet && (
             <Button
               variant="transparent"
               size="small"
@@ -236,8 +225,8 @@ export function IconDialog({
             >
               Use my logo
             </Button>
-          </>
-        )
+          )}
+        </>
       }
     >
       <Lead>

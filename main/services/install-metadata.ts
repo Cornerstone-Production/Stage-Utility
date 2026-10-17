@@ -11,17 +11,18 @@ import type { AppIconSettings } from "./app-icon.js";
 
 export const MANIFEST_PATH = "/manifest.webmanifest";
 
+/** What a new icon is drawn over until the operator picks something else. */
+export const DEFAULT_ICON_BACKGROUND = "#000000";
+
 /** The public paths a custom icon is served at, and the settings field behind each.
  *  The paths are the ones the HTML documents and the manifest already name, so a
  *  custom icon needs no change to either beyond the app name. */
 export const ICON_ROUTES = {
-  "/apple-touch-icon.png": { field: "appIconApple" },
-  "/icon-192.png": { field: "appIcon192" },
-  "/icon-512.png": { field: "appIcon512" },
-  "/icon-maskable-512.png": { field: "appIconMaskable" },
-} as const satisfies Record<string, { field: keyof AppIconSettings }>;
-
-export type IconRoutePath = keyof typeof ICON_ROUTES;
+  "/apple-touch-icon.png": "appIconApple",
+  "/icon-192.png": "appIcon192",
+  "/icon-512.png": "appIcon512",
+  "/icon-maskable-512.png": "appIconMaskable",
+} as const satisfies Record<string, keyof AppIconSettings>;
 
 /** The PNGs POST /api/branding takes as `icon`, by request field, and the exact
  *  pixel size each must be. The browser draws them to these sizes and the server

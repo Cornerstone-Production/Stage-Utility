@@ -25,7 +25,10 @@ export function Describe({ className, children }: { className?: string; children
   return <FieldDescription className={cn("mt-0.5 text-caption1 text-fg-muted", className)}>{children}</FieldDescription>;
 }
 
-type Brand = Pick<StageState, "appName" | "appLogo" | "appLogoMonochrome" | "appIcon192" | "appIconMaskable">;
+export type Brand = Pick<
+  StageState,
+  "appName" | "appLogo" | "appLogoMonochrome" | "appIcon192" | "appIconMaskable"
+>;
 
 // ── The icon, as it appears in each place ─────────────────────────────────────
 

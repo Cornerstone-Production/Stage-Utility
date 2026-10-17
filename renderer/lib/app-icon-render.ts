@@ -12,8 +12,6 @@
 import { clamp } from "@main/services/clamp";
 import { ICON_SIZES, type IconField } from "@main/services/install-metadata";
 
-export { ICON_SIZES, type IconField };
-
 /** The longest side the stored art is kept at: the largest icon is 512. */
 export const ART_MAX = 512;
 
@@ -72,7 +70,7 @@ function canvasOf(size: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderi
 }
 
 /** Load an image from a data URL or a same-origin URL. Rejects when it cannot. */
-export function loadImage(src: string): Promise<HTMLImageElement> {
+function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);

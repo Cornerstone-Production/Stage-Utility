@@ -12,7 +12,7 @@
 
 import { looksLikeStoredRef } from "./branding-image-store.js";
 import { isDataUrl } from "./image-files.js";
-import { ICON_SIZES, type IconField } from "./install-metadata.js";
+import { DEFAULT_ICON_BACKGROUND, ICON_SIZES, type IconField } from "./install-metadata.js";
 
 export interface IconCrop {
   scale: number;
@@ -37,8 +37,6 @@ export interface AppIconInput {
   any512: string;
   maskable: string;
 }
-
-export const DEFAULT_ICON_BACKGROUND = "#000000";
 
 /** The custom icon fields of the settings file, and the one place they are named. */
 export interface AppIconSettings {
@@ -81,9 +79,9 @@ export function pngSize(dataUrl: string): { width: number; height: number } | nu
   return { width: head.readUInt32BE(16), height: head.readUInt32BE(20) };
 }
 
-export type IconParse = { ok: true; value: AppIconInput | null } | { ok: false; error: string };
+type IconParse = { ok: true; value: AppIconInput | null } | { ok: false; error: string };
 
-function parseCrop(v: unknown): IconCrop | null {
+export function parseCrop(v: unknown): IconCrop | null {
   if (typeof v !== "object" || v === null) return null;
   const c = v as Record<string, unknown>;
   return typeof c.scale === "number" && typeof c.x === "number" && typeof c.y === "number"
@@ -157,9 +155,11 @@ export function parseAppIcon(v: unknown): IconParse {
   };
 }
 
-/** The settings fields for a custom icon, from a validated request. Image fields
- *  are still data URLs here; the settings store turns them into stored files. */
-export function iconToSettings(icon: AppIconInput): AppIconSettings {
+/** The settings fields for a custom icon, from a validated request; `null` is the
+ *  icon removed. Image fields are still data URLs here; the settings store turns
+ *  them into stored files. */
+export function iconToSettings(icon: AppIconInput | null): AppIconSettings {
+  if (icon === null) return NO_APP_ICON;
   return {
     appIcon: icon.art,
     appIconOriginal: icon.original,

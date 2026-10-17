@@ -37,7 +37,7 @@ export async function appIconRoutes({ res, pathname, method }: RouteCtx): Promis
   }
 
   if (!Object.hasOwn(ICON_ROUTES, pathname)) return;
-  const { field } = ICON_ROUTES[pathname as keyof typeof ICON_ROUTES];
+  const field = ICON_ROUTES[pathname as keyof typeof ICON_ROUTES];
   const ref = (await settingsStore.get())[field];
   if (!ref) return; // no custom icon: the built-in file answers
 

@@ -19,14 +19,15 @@ after(() => {
   delete (globalThis as Record<string, unknown>).XMLSerializer;
 });
 
-const dims = (svg: string) => {
-  const root = new DOMParser().parseFromString(svg, "image/svg+xml").documentElement;
+const dims = (svg: string | null) => {
+  const root = new DOMParser().parseFromString(svg ?? "", "image/svg+xml").documentElement;
   return [Number(root.getAttribute("width")), Number(root.getAttribute("height"))];
 };
 
 describe("sizeSvgText", () => {
   test("a viewBox-only square gets the long side in both directions", () => {
     const out = sizeSvgText('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="9" height="9"/></svg>');
+    assert.ok(out !== null, "a viewBox-only SVG was left unsized");
     assert.deepEqual(dims(out), [SVG_LONG_SIDE, SVG_LONG_SIDE]);
     assert.match(out, /viewBox="0 0 200 200"/, "the viewBox is kept");
     assert.match(out, /<rect/, "the artwork is kept");
@@ -36,8 +37,13 @@ describe("sizeSvgText", () => {
     assert.deepEqual(dims(sizeSvgText('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100"/>')), [1024, 256]);
   });
 
-  test("plain-number and px width and height set the aspect, in preference to the viewBox", () => {
-    assert.deepEqual(dims(sizeSvgText('<svg xmlns="http://www.w3.org/2000/svg" width="300px" height="100" viewBox="0 0 10 10"/>')), [1024, 341]);
+  test("an SVG with plain numeric width and height is left alone, so saved crops still fit it", () => {
+    assert.equal(sizeSvgText('<svg xmlns="http://www.w3.org/2000/svg" width="300px" height="100" viewBox="0 0 10 10"/>'), null);
+    assert.equal(sizeSvgText('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"/>'), null);
+  });
+
+  test("only one of width and height is not enough", () => {
+    assert.deepEqual(dims(sizeSvgText('<svg xmlns="http://www.w3.org/2000/svg" width="200" viewBox="0 0 100 50"/>')!), [1024, 512]);
   });
 
   test("percent sizes are not sizes: the viewBox decides", () => {

@@ -73,6 +73,28 @@ function mount(state: Partial_ = {}, accept = true) {
 /** Asserts absence WITHOUT handing the node to assert, whose failure message would inspect it. */
 const absent = (found: Element | null, message: string) => assert.ok(found === null, message);
 
+/** `Image` and a 2D canvas that always succeed. Returns the undo. */
+function fakeCanvas(): () => void {
+  const g = globalThis as unknown as Record<string, unknown>;
+  const proto = window.HTMLCanvasElement.prototype as unknown as Record<string, unknown>;
+  const saved = { Image: g.Image, getContext: proto.getContext, toDataURL: proto.toDataURL };
+  g.Image = class {
+    naturalWidth = 512;
+    naturalHeight = 512;
+    onload: (() => void) | null = null;
+    set src(_: string) {
+      queueMicrotask(() => this.onload?.());
+    }
+  };
+  proto.getContext = () => ({ fillRect() {}, drawImage() {} });
+  proto.toDataURL = () => "data:image/png;base64,AAAA";
+  return () => {
+    g.Image = saved.Image;
+    proto.getContext = saved.getContext;
+    proto.toDataURL = saved.toDataURL;
+  };
+}
+
 const LOGO = "/branding-images/0123456789abcdef.png";
 const press = async (el: Element) => {
   await act(async () => {
@@ -252,6 +274,58 @@ describe("the dialogs", () => {
     assert.equal(writes.length, 0, "a background alone created an icon");
     assert.equal(button(d, "Background #15425c").getAttribute("aria-pressed"), "true");
     assert.equal(button(d, "Background #000000").getAttribute("aria-pressed"), "false");
+  });
+
+  test("a swatch on a saved icon whose source cannot be read writes nothing", async () => {
+    // Redrawing from the 192 px thumbnail instead would bake the old background in
+    // for good and wipe the original and crop, with a success toast to say so.
+    const before = globalThis.fetch;
+    const beforeTimeout = AbortSignal.timeout;
+    AbortSignal.timeout = () => new AbortController().signal; // the stub never reads it; a live timer would outlive the test
+    const asked: string[] = [];
+    globalThis.fetch = (async (url: unknown) => {
+      asked.push(String(url));
+      throw new Error("network down");
+    }) as unknown as typeof fetch;
+    // A drawing surface that always succeeds, so the ONLY thing standing between a
+    // failed read and a saved icon is the code under test, not jsdom's missing canvas.
+    const restoreCanvas = fakeCanvas();
+    try {
+      const { writes } = mount({
+        appIcon192: "/branding-images/aaaaaaaaaaaaaaaa.png",
+        appIconMaskable: "/branding-images/bbbbbbbbbbbbbbbb.png",
+        appIconBackground: "#2e6691",
+      });
+      await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+      const d = within(await dialog("Tab and home-screen icon"));
+      await press(button(d, "Background #ffffff"));
+      await act(async () => settle());
+      assert.ok(asked.some((u) => u.includes("/api/branding/source?target=icon")), `the source was never asked for: ${asked.join()}`);
+      assert.deepEqual(writes, [], "an icon was saved from a stand-in after the source read failed");
+    } finally {
+      restoreCanvas();
+      globalThis.fetch = before;
+      AbortSignal.timeout = beforeTimeout;
+    }
+  });
+
+  test("the already-saved background is not redrawn", async () => {
+    const before = globalThis.fetch;
+    const asked: string[] = [];
+    globalThis.fetch = (async (url: unknown) => (asked.push(String(url)), { ok: true, json: async () => ({}) })) as unknown as typeof fetch;
+    try {
+      const { writes } = mount({
+        appIcon192: "/branding-images/aaaaaaaaaaaaaaaa.png",
+        appIconMaskable: "/branding-images/bbbbbbbbbbbbbbbb.png",
+        appIconBackground: "#2e6691",
+      });
+      await press(screen.getByRole("button", { name: /Tab and home-screen icon/ }));
+      await press(button(within(await dialog("Tab and home-screen icon")), "Background #2e6691"));
+      await act(async () => settle());
+      assert.deepEqual([asked.length, writes.length], [0, 0]);
+    } finally {
+      globalThis.fetch = before;
+    }
   });
 
   test("with an icon set the dialog offers Replace, Adjust and Remove, and the saved background is pressed", async () => {

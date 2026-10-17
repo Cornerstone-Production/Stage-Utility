@@ -9,7 +9,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { drawIcon, ICON_SIZES, layoutIcon, MASKABLE_ART, type IconContext } from "./app-icon-render";
+import { drawIcon, layoutIcon, MASKABLE_ART, type IconContext } from "./app-icon-render";
 
 function recorder() {
   const calls: string[] = [];
@@ -46,7 +46,7 @@ describe("drawIcon", () => {
 
   test("a maskable icon keeps its art inside the centre 80%", () => {
     const { ctx, calls } = recorder();
-    drawIcon(ctx, {} as CanvasImageSource, ICON_SIZES.maskable, "#000000", MASKABLE_ART);
+    drawIcon(ctx, {} as CanvasImageSource, 512, "#000000", MASKABLE_ART);
     assert.deepEqual(calls, ["fill #000000 0,0 512x512", "art 51,51 410x410"]);
     // The art ends 51 px short of every edge: 10% of the side, inside the safe zone.
     assert.ok(51 + 410 <= 512 * 0.9 + 1);

@@ -7,7 +7,7 @@
 
 import { type RouteCtx, json, error, readBody, MAX_IMAGE_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
-import { parseAppIcon } from "../app-icon.js";
+import { parseAppIcon, parseCrop } from "../app-icon.js";
 import { isStoredBrandingImage, looksLikeStoredRef } from "../branding-image-store.js";
 
 export async function brandingRoutes(c: RouteCtx): Promise<void> {
@@ -79,12 +79,7 @@ export async function brandingRoutes(c: RouteCtx): Promise<void> {
       if (!(await validateImage("avatarOriginal"))) return;
 
       const readCrop = (key: "logoCrop" | "emptyLogoCrop" | "avatarCrop"): void => {
-        if (!(key in body)) return;
-        const c = body[key] as Record<string, unknown> | null;
-        partial[key] =
-          c && typeof c.scale === "number" && typeof c.x === "number" && typeof c.y === "number"
-            ? { scale: c.scale, x: c.x, y: c.y }
-            : null;
+        if (key in body) partial[key] = parseCrop(body[key]);
       };
       readCrop("logoCrop");
       readCrop("emptyLogoCrop");

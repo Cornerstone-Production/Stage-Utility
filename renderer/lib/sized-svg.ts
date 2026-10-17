@@ -29,37 +29,34 @@ function numeric(v: string | null): number | null {
 
 /**
  * The same SVG with `width` and `height` set, longest side SVG_LONG_SIDE, in the
- * artwork's own aspect: from its width and height when both are plain numbers,
- * else from its viewBox, else 2:1 (the browser's default object size).
+ * artwork's own aspect (from its viewBox, else 2:1, the browser's default object
+ * size); or null when it already declares plain numeric width AND height, which
+ * browsers size correctly and which a crop saved earlier was measured against.
  * Throws when the text is not an SVG document.
  */
-export function sizeSvgText(text: string): string {
+export function sizeSvgText(text: string): string | null {
   const doc = new DOMParser().parseFromString(text, "image/svg+xml");
   const root = doc.documentElement;
   if (root.localName !== "svg" || doc.querySelector("parsererror")) throw new Error("not a valid SVG document");
+  if (numeric(root.getAttribute("width")) !== null && numeric(root.getAttribute("height")) !== null) return null;
 
-  let w = numeric(root.getAttribute("width"));
-  let h = numeric(root.getAttribute("height"));
-  if (w === null || h === null) {
-    const vb = (root.getAttribute("viewBox") ?? "").trim().split(/[\s,]+/).map(Number);
-    const [vw, vh] = [vb[2], vb[3]];
-    if (vb.length === 4 && vw && vh && vw > 0 && vh > 0) [w, h] = [vw, vh];
-    else [w, h] = [300, 150];
-  }
+  const vb = (root.getAttribute("viewBox") ?? "").trim().split(/[\s,]+/).map(Number);
+  const [vw, vh] = [vb[2], vb[3]];
+  const [w, h] = vb.length === 4 && vw && vh && vw > 0 && vh > 0 ? [vw, vh] : [300, 150];
   const k = SVG_LONG_SIDE / Math.max(w, h);
   root.setAttribute("width", String(Math.round(w * k)));
   root.setAttribute("height", String(Math.round(h * k)));
   return new XMLSerializer().serializeToString(root);
 }
 
-/** A data URL for `svgText`. UTF-8 safe: btoa alone throws on anything above Latin-1. */
+/** A data URL for `svgText`, UTF-8 safe. */
 function toDataUrl(svgText: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
 }
 
 /**
- * The source to hand an image element: `src` itself unless it is an SVG, in which
- * case a sized copy. Rejects, with the reason, when the SVG cannot be read, so the
+ * The source to hand an image element: `src` itself unless it is an SVG with no
+ * size of its own, in which case a sized copy. Rejects, with the reason, when the SVG cannot be read, so the
  * caller decides what to tell the operator.
  */
 export async function drawableSource(src: string): Promise<string> {
@@ -72,5 +69,6 @@ export async function drawableSource(src: string): Promise<string> {
   } catch (err) {
     throw new Error(`the SVG could not be read: ${errorMessage(err)}`, { cause: err });
   }
-  return toDataUrl(sizeSvgText(text));
+  const sized = sizeSvgText(text);
+  return sized === null ? src : toDataUrl(sized);
 }
