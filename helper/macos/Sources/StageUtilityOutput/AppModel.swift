@@ -361,9 +361,9 @@ final class AppModel: ObservableObject {
       label: d.port, port: options.discoveryPort, mode: mode,
       boundTo: { [weak self] in self?.store.record(for: key)?.boundTo },
       makeProbe: { [weak self, weak rt] unreachable in self?.probe(for: rt, unreachable: unreachable) ?? Data() })
-    discovery.onReply = { [weak self, weak rt] reply in
+    discovery.onReply = { [weak self, weak rt] reply, change in
       guard let self, let rt else { return }
-      self.heard(key, rt, reply)
+      self.heard(key, rt, reply, change)
     }
     discovery.onLocalNetworkSuspected = { [weak self] in self?.suspectLocalNetwork() }
     rt.discovery = discovery
@@ -407,7 +407,7 @@ final class AppModel: ObservableObject {
 
   // MARK: Server
 
-  private func heard(_ key: String, _ rt: Runtime, _ reply: DiscoveryReply) {
+  private func heard(_ key: String, _ rt: Runtime, _ reply: DiscoveryReply, _ change: OutputBinding) {
     rt.serverName = reply.name
     clearLocalNetworkSuspicion()
     // A server file names the server; an answer from it only says it is there.
@@ -416,7 +416,10 @@ final class AppModel: ObservableObject {
       rt.serverURL = reply.url
       navigate(rt)
     }
-    save { try store.setBoundTo(reply.serverId, key: key) }
+    if case .forget(let server) = change {
+      Log.notice(.discovery, "\(rt.descriptor.port): \"\(reply.name)\" (\(server)) no longer has this output set up; forgot it, so any server can set it up")
+    }
+    save { try store.apply(change, key: key) }
     refresh()
   }
 

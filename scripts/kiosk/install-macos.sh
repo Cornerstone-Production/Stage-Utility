@@ -820,15 +820,59 @@ discover() {
   return 0
 }
 
+# More than one server can answer in the two seconds. The answer kept is the one
+# from the server this screen remembers, else one from a server that says it is
+# set up there, else the last.
+pick() {
+  bound="\$(cat "\$BOUND_FILE" 2>/dev/null || true)"
+  replies="\$(printf '%s' "\$1" | awk '{ gsub(/\\}\\{"stageUtility"/, "}\\n{\\"stageUtility\\""); print }')"
+  mine=""
+  [ -n "\$bound" ] && mine="\$(printf '%s\\n' "\$replies" | grep -F "\\"serverId\\":\\"\$bound\\"" | head -n 1)"
+  claimed="\$(printf '%s\\n' "\$replies" | grep '"claimed":true' | head -n 1)"
+  if [ -n "\$mine" ]; then printf '%s' "\$mine"
+  elif [ -n "\$claimed" ]; then printf '%s' "\$claimed"
+  else printf '%s\\n' "\$replies" | tail -n 1
+  fi
+}
+
+# What this screen remembers, and puts in every probe as boundTo: a server that says
+# it is set up there, forgotten when that same server says it no longer is. Every
+# other server ignores a screen that names somebody else, so remembering one that
+# merely answered would keep a released screen away from them for good. An
+# answer that does not say either way, from a server older than the field, is
+# remembered. Returns 1 when it has just forgotten its server.
+remember() {
+  srv="\$(printf '%s' "\$1" | sed -n 's/.*"serverId":"\\([^"]*\\)".*/\\1/p')"
+  [ -n "\$srv" ] || return 0
+  claimed="\$(printf '%s' "\$1" | sed -nE 's/.*"claimed":(true|false).*/\\1/p')"
+  if [ "\$claimed" != "false" ]; then
+    printf '%s' "\$srv" > "\$BOUND_FILE"
+  elif [ "\$srv" = "\$(cat "\$BOUND_FILE" 2>/dev/null)" ] && rm -f "\$BOUND_FILE"; then
+    echo "[kiosk] server \$srv no longer has this screen set up; forgot it, so any server can set it up" >&2
+    return 1
+  fi
+}
+
+# One probe: the answer kept, remembered, and the address it gives. An answer that
+# makes this screen forget its server is followed straight away by one more probe
+# without it, so a server with its Screens page open can answer in this boot
+# rather than the next. If none does, the address the old server gave stands.
+find_server() {
+  reply="\$(pick "\$(discover)")"
+  url="\$(printf '%s' "\$reply" | sed -n 's/.*"url":"\\([^"]*\\)".*/\\1/p')"
+  if ! remember "\$reply"; then
+    again="\$(find_server)"
+    [ -n "\$again" ] && url="\$again"
+  fi
+  printf '%s' "\$url"
+}
+
 if [ -r "\$STATE_DIR/server" ]; then
   URL="\$(cat "\$STATE_DIR/server")"
 else
   URL=""; fails=0
   while [ -z "\$URL" ]; do
-    reply="\$(discover)"
-    URL="\$(printf '%s' "\$reply" | sed -n 's/.*"url":"\\([^"]*\\)".*/\\1/p')"
-    SRV="\$(printf '%s' "\$reply" | sed -n 's/.*"serverId":"\\([^"]*\\)".*/\\1/p')"
-    [ -n "\$SRV" ] && printf '%s' "\$SRV" > "\$BOUND_FILE"
+    URL="\$(find_server)"
     if [ -z "\$URL" ]; then
       fails=\$((fails + 1))
       [ "\$fails" -lt 10 ] && sleep 2 || sleep 30

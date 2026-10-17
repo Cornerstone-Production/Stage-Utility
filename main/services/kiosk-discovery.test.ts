@@ -32,6 +32,16 @@ describe("the wire format survives a broadcast port", () => {
   test("a reply round-trips", () => {
     const r = { serverId: "srv-1", name: "FOH — Stage Utility", url: "http://192.168.1.50" };
     assert.deepEqual(decodeReply(encodeReply(r)), r);
+    for (const claimed of [true, false]) assert.deepEqual(decodeReply(encodeReply({ ...r, claimed })), { ...r, claimed });
+  });
+
+  test("a reply's claimed is a boolean or absent", () => {
+    // Absent from a server older than the field; anything else is not an answer.
+    const base = { stageUtility: "server", v: 1, serverId: "srv-1", url: "http://192.168.1.50" };
+    assert.equal("claimed" in decodeReply(JSON.stringify(base))!, false);
+    for (const claimed of [1, "true", null]) {
+      assert.equal("claimed" in decodeReply(JSON.stringify({ ...base, claimed }))!, false, JSON.stringify(claimed));
+    }
   });
 
   test("rubbish decodes to null instead of throwing", () => {
