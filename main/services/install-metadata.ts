@@ -23,6 +23,12 @@ export const ICON_ROUTES = {
 
 export type IconRoutePath = keyof typeof ICON_ROUTES;
 
+/** The PNGs POST /api/branding takes as `icon`, by request field, and the exact
+ *  pixel size each must be. The browser draws them to these sizes and the server
+ *  refuses any other, so the two cannot disagree. */
+export const ICON_SIZES = { apple: 180, any192: 192, any512: 512, maskable: 512 } as const;
+export type IconField = keyof typeof ICON_SIZES;
+
 /** The manifest for an app called `appName`. The name is the label under the icon
  *  on Android and the title of the installed window. */
 export function buildManifest(appName: string): Record<string, unknown> {

@@ -2923,6 +2923,9 @@ export class StageController {
   async getBrandingSource(target: "app" | "empty" | "avatar" | "icon" = "app"): Promise<{
     original: string | null;
     crop: { scale: number; x: number; y: number } | null;
+    /** The icon only: the square art its sizes are drawn from, so a new background
+     *  can redraw them without the operator uploading again. */
+    art?: string | null;
   }> {
     const settings = await settingsStore.load();
     if (target === "empty") {
@@ -2941,6 +2944,7 @@ export class StageController {
       return {
         original: settings.appIconOriginal ?? null,
         crop: settings.appIconCrop ?? null,
+        art: settings.appIcon ?? null,
       };
     }
     return { original: settings.appLogoOriginal ?? null, crop: settings.appLogoCrop ?? null };

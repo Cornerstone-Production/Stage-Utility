@@ -126,6 +126,53 @@ describe("applyFavicon without recoloring", () => {
   });
 });
 
+describe("a custom tab and home-screen icon", () => {
+  const ICON = "/branding-images/cc.png";
+
+  test("wins over the logo, and is declared as the PNG it is", () => {
+    applyFavicon(LOGO, false, ICON);
+    assert.equal(href(), ICON);
+    assert.equal(links()[0]?.getAttribute("type"), "image/png");
+  });
+
+  test("is never recolored, with Recolor on, and never rasterizes the logo", async () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(LOGO, true, ICON);
+    await tick();
+    assert.equal(href(), ICON, "the icon was replaced by a tinted logo");
+    assert.equal(r.calls.length, 0, "the logo was rasterized although the icon is what shows");
+  });
+
+  test("with no logo at all, still shows the icon rather than the stock one", () => {
+    applyFavicon(null, true, ICON);
+    assert.equal(href(), ICON);
+  });
+
+  test("removing it falls back to the logo with today's logic, then to the stock icon", async () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(LOGO, true, ICON);
+    applyFavicon(LOGO, false, null);
+    assert.equal(href(), LOGO, "removing the icon did not bring the logo back");
+    assert.equal(links()[0]?.hasAttribute("type"), false);
+    applyFavicon(LOGO, true, ICON);
+    applyFavicon(null, true, null);
+    assert.equal(href(), STOCK_FAVICON);
+    assert.equal(links()[0]?.getAttribute("type"), STOCK_FAVICON_TYPE);
+  });
+
+  test("a raster still loading does not override an icon set meanwhile", async () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(LOGO, true);
+    applyFavicon(LOGO, true, ICON);
+    r.calls[0]!.resolve("data:image/png;base64,LATE");
+    await tick();
+    assert.equal(href(), ICON, "a late tint replaced the custom icon");
+  });
+});
+
 describe("applyFavicon with recoloring", () => {
   test("the tinted image is the icon, tinted with the light-scheme ink", async () => {
     const r = controlled();

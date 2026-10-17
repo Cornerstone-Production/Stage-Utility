@@ -12,6 +12,7 @@
 
 import { looksLikeStoredRef } from "./branding-image-store.js";
 import { isDataUrl } from "./image-files.js";
+import { ICON_SIZES, type IconField } from "./install-metadata.js";
 
 export interface IconCrop {
   scale: number;
@@ -91,7 +92,7 @@ function parseCrop(v: unknown): IconCrop | null {
 }
 
 /** The sizes the icon images must be, by request field. `art` only has to be square. */
-const IMAGE_SIZES = { art: null, apple: 180, any192: 192, any512: 512, maskable: 512 } as const;
+const IMAGE_SIZES: Record<"art" | IconField, number | null> = { art: null, ...ICON_SIZES };
 
 /** The reason a field is not an acceptable icon PNG, or null when it is. */
 function pngProblem(key: keyof typeof IMAGE_SIZES, value: unknown): string | null {

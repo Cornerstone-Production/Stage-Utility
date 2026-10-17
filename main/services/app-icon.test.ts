@@ -105,6 +105,6 @@ describe("parseAppIcon", () => {
   });
 
   test("the original must be an image data URL when given", () => {
-    assert.match(rejected({ ...iconInput({ original: "/branding-images/abc.png" }) }), /body\.icon\.original must be an image data URL or null/);
+    assert.match(rejected({ ...iconInput({ original: "/branding-images/abc.png" }) }), /body\.icon\.original must be an image data URL, a stored image or null/);
   });
 });

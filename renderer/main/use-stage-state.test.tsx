@@ -308,6 +308,22 @@ describe("the tab icon", () => {
     assert.equal(link()?.getAttribute("type"), STOCK_FAVICON_TYPE);
   });
 
+  test("a custom icon in the state wins over the logo, and removing it brings the logo back", async () => {
+    // The hook has to hand the icon to applyFavicon at all: a favicon helper that
+    // is right in isolation and never given the field leaves the tab on the logo.
+    const ICON = "/branding-images/feedbeef.png";
+    render(React.createElement(OneConsumer));
+    await settle();
+    act(() => {
+      emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false, appIcon192: ICON });
+    });
+    assert.equal(href(), ICON, "the custom icon never reached the tab");
+    act(() => {
+      emitStateChanged({ ...BASE, appLogo: LOGO, appLogoMonochrome: false, appIcon192: null });
+    });
+    assert.equal(href(), LOGO, "removing the icon left it in the tab");
+  });
+
   test("Recolor on tints the tab icon, Recolor off leaves the logo as uploaded", async () => {
     // The flag has to travel from the broadcast to applyFavicon: this is the
     // test that the hook passes `appLogoMonochrome` at all.

@@ -1,11 +1,16 @@
-// Points the browser tab icon at the logo uploaded in Branding → Logo, and back
-// at the stock icon when there is none. Called from the one place every surface
+// Points the browser tab icon at the operator's tab and home-screen icon when one
+// is set (Branding), else at the logo uploaded in Branding → Logo, and else at the
+// stock icon. Called from the one place every surface
 // adopts a StageState (use-stage-state.ts), exactly as applyAccentVar is, so the
 // operator app and every kiosk display follow a logo change without a reload.
 //
 // The stored logo is already a square PNG: the Branding cropper always exports a
 // square region, so there is nothing to letterbox. It may arrive as a
 // /branding-images/ URL or a data URL; either works as an icon.
+//
+// PRECEDENCE. A custom icon is shown exactly as drawn, never recoloured: it already
+// carries its own background, which is the point of setting one. Only with no icon
+// does the logo become the tab icon, and then through the recolouring below.
 //
 // RECOLOR. With "Recolor to match theme" on (the default) the app draws the logo
 // as a CSS mask filled with the theme's foreground, because a single-colour logo
@@ -65,7 +70,11 @@ const rasterizeInCanvas: Rasterizer = async (logo, ink) => {
 
 let rasterize: Rasterizer = rasterizeInCanvas;
 /** The latest thing asked for, so a scheme change can redo it. */
-let request: { logo: string | null; monochrome: boolean } = { logo: null, monochrome: false };
+let request: { logo: string | null; monochrome: boolean; icon: string | null } = {
+  logo: null,
+  monochrome: false,
+  icon: null,
+};
 /** Bumped whenever the answer changes; a slow raster only lands if still current. */
 let seq = 0;
 /** Key of the raster currently in flight, so a repeat broadcast does not start another. */
@@ -134,7 +143,8 @@ function settle(href: string, type: string | null): void {
 }
 
 function resolve(): void {
-  const { logo, monochrome } = request;
+  const { logo, monochrome, icon } = request;
+  if (icon) return settle(icon, TINTED_TYPE); // a PNG, drawn by the operator's own icon
   if (!logo) return settle(STOCK_FAVICON, STOCK_FAVICON_TYPE);
   if (!monochrome) return settle(logo, null);
   // A cached failure is the raw logo, which declares no type.
@@ -181,9 +191,15 @@ function resolve(): void {
  * @param appLogo     The uploaded logo URL, or null for the stock icon.
  * @param monochrome  Recolor to match theme: tint the logo to contrast with the
  *                    browser's colour scheme. False leaves it as uploaded.
+ * @param appIcon     The custom tab and home-screen icon (its 192 px PNG), or null.
+ *                    When set it wins over the logo and is never recoloured.
  */
-export function applyFavicon(appLogo: string | null | undefined, monochrome?: boolean): void {
-  request = { logo: appLogo || null, monochrome: !!monochrome };
+export function applyFavicon(
+  appLogo: string | null | undefined,
+  monochrome?: boolean,
+  appIcon?: string | null,
+): void {
+  request = { logo: appLogo || null, monochrome: !!monochrome, icon: appIcon || null };
   watchScheme();
   resolve();
 }
@@ -192,7 +208,7 @@ export function applyFavicon(appLogo: string | null | undefined, monochrome?: bo
 export function __resetForTests(fn: Rasterizer | null = null): void {
   scheme?.removeEventListener("change", resolve);
   scheme = null;
-  request = { logo: null, monochrome: false };
+  request = { logo: null, monochrome: false, icon: null };
   seq++;
   inflight = null;
   cache.clear();

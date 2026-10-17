@@ -105,6 +105,7 @@ describe("POST /api/branding with an icon", () => {
   test("the editor's source for the icon is its original and crop", async () => {
     const src = await stageController.getBrandingSource("icon");
     assert.match(src.original as string, REF);
+    assert.match(src.art as string, REF, "the art is what a new background is redrawn from");
     assert.deepEqual(src.crop, { scale: 1, x: 0, y: 0 });
     const viaRoute = await callRoute(brandingRoutes, "/api/branding/source?target=icon");
     assert.deepEqual(viaRoute.json, src);
@@ -228,6 +229,6 @@ describe("removing the icon", () => {
       assert.equal(onDisk[key], null, `${key} survived removal`);
     }
     assert.equal(onDisk.appIconBackground, "#000000");
-    assert.deepEqual((await stageController.getBrandingSource("icon")), { original: null, crop: null });
+    assert.deepEqual(await stageController.getBrandingSource("icon"), { original: null, crop: null, art: null });
   });
 });
