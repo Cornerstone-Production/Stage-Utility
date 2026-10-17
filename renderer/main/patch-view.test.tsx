@@ -16,7 +16,8 @@
 //    for it and nothing else says an output changed; the stacked layout keeps its
 //    one direction at a time.
 // 4. IT UPDATES LIVE. A push on patch:updated has to reach the open table.
-// 5. BELOW lg IT IS STILL THE STACKED COLUMN, from the same filters.
+// 5. A NARROW PANE IS STILL THE STACKED COLUMN, from the same filters. What decides
+//    is the width of the pane beside the sidebar, not of the window.
 //
 // What is NOT here, because jsdom loads no stylesheet and reports every
 // offsetHeight as 0: the 34px row height, the 270px sticky column, the amber tint
@@ -37,8 +38,8 @@ const teardown = installRenderDom();
 
 let FILE: PatchFile;
 let STATE: StageState;
-/** The viewport width the matchMedia stub answers for. */
-let width = 1440;
+/** The width of the page's pane, in px. */
+let width = 1400;
 /** The rack each jump scrolled to, by the name in its header. */
 let scrolled: string[] = [];
 
@@ -58,14 +59,34 @@ const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/ap
 
 // jsdom has no matchMedia and no scrollIntoView. The first decides the layout,
 // the second is what Jump to exists to call.
-(globalThis as unknown as { window: Window }).window.matchMedia = ((query: string) => ({
-  // Answers the real question, so a breakpoint moved off 1024 is noticed: only a
-  // query for a minimum width the viewport has reached matches.
-  matches: Number(/min-width:\s*(\d+)px/.exec(query)?.[1] ?? Infinity) <= width,
-  media: query,
-  addEventListener: () => {},
-  removeEventListener: () => {},
-})) as unknown as typeof window.matchMedia;
+// The layout is chosen from the width of the page's own pane, so the pane has to
+// have one: jsdom lays nothing out, and every offsetWidth is 0.
+Object.defineProperty((globalThis as unknown as { HTMLElement: { prototype: object } }).HTMLElement.prototype, "offsetWidth", {
+  get: () => width,
+  configurable: true,
+});
+/** Every ResizeObserver the page created, so a test can resize the pane. */
+const observers = new Set<() => void>();
+(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+  private readonly cb: () => void;
+  constructor(cb: () => void) {
+    this.cb = cb;
+  }
+  observe() {
+    observers.add(this.cb);
+  }
+  disconnect() {
+    observers.delete(this.cb);
+  }
+};
+async function resizePane(to: number) {
+  width = to;
+  await act(async () => {
+    for (const cb of [...observers]) cb();
+  });
+  await settle();
+}
+// jsdom has no scrollIntoView, which is what Jump to exists to call.
 (globalThis as unknown as { Element: { prototype: { scrollIntoView: unknown } } }).Element.prototype.scrollIntoView =
   function (this: Element) {
     scrolled.push(this.querySelector("b")?.textContent ?? "(no header)");
@@ -165,7 +186,7 @@ const type = (value: string) => fireEvent.change(screen.getByRole("textbox"), { 
 beforeEach(() => {
   FILE = file(analog());
   STATE = { ...DEFAULT_STAGE_STATE, serviceTypeId: "st-1", serviceTypeName: "Service One", planId: "plan-1", planTitle: "Week Title", planDates: "Sun Jan 4" };
-  width = 1440;
+  width = 1400;
   scrolled = [];
 });
 afterEach(async () => {
@@ -420,10 +441,21 @@ describe("at desk width", () => {
     assert.ok(screen.getByText("No outputs on this sheet."));
   });
 
-  test("the desk layout starts at exactly 1024px", async () => {
-    width = 1024;
+  test("the table layout starts at exactly 74rem of pane, and one px less is the stacked column", async () => {
+    width = 1184;
     await mount();
     assert.equal(screen.queryAllByRole("table").length, 2);
+    await resizePane(1183);
+    assert.equal(screen.queryAllByRole("table").length, 0);
+  });
+
+  test("collapsing the sidebar, which widens the pane, swaps the stacked column for the tables", async () => {
+    width = 1176; // a 1440px window with the sidebar open
+    await mount();
+    assert.equal(screen.queryAllByRole("table").length, 0);
+    await resizePane(1370); // and with it collapsed
+    assert.equal(screen.queryAllByRole("table").length, 2);
+    assert.ok(screen.getByRole("navigation", { name: "Jump to" }));
   });
 
   test("the empty state and the footer are the same", async () => {
@@ -436,9 +468,9 @@ describe("at desk width", () => {
   });
 });
 
-describe("below lg", () => {
+describe("in a narrow pane", () => {
   beforeEach(() => {
-    width = 1023;
+    width = 1100;
   });
 
   test("it is the stacked column: no table, the same rows, one direction of changes", async () => {

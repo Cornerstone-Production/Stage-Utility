@@ -99,6 +99,10 @@ export const SHOTS = [
     shows: "The volunteer patch sheet at /patch: this week and what changed in a column beside a table per rack, each input with its signal path.",
     async run({ session, page }) {
       await session.goto(page, "/patch");
+      // The table layout needs 74rem of page, which a 1440px window only has
+      // with the sidebar collapsed; open it is the stacked column.
+      await page.getByRole("button", { name: "Collapse sidebar" }).click();
+      await page.waitForSelector("table");
       await session.shoot(page, "patch-sheet");
     },
   },

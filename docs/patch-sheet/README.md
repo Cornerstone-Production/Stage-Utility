@@ -63,7 +63,9 @@ up yet."; the footer links to the editor.
 
 ![The volunteer patch sheet: this week and what changed in a column beside a table per rack, each input with its signal path](../images/patch-sheet.png)
 
-**At 1024px and wider** the page uses the whole width in two columns.
+**When the page is 74rem (1184px) wide or more** it uses the whole width in two columns. That
+is the width of the page itself, beside the sidebar, not of the window: a 1440px window
+has room for it with the sidebar collapsed and not with it open.
 
 - **The left column** stays in view while the page scrolls. It holds *This week* (the
   service type, the plan and its date, the base variant and a Read-only tag), the amber
@@ -92,7 +94,7 @@ and outputs read the other way. The console end of the path is left out of a tab
 when the rack card is narrower than 62rem, so the notes stay in view; the console channel
 has a column of its own.
 
-**Below 1024px** the page is one stacked column, which suits a phone in the wings: the
+**Narrower than that** the page is one stacked column, which suits a phone in the wings: the
 Read-only tag, This week, the legend, the changes card for the direction on screen, the
 Inputs / Outputs switch with Filter and Changes only, then a collapsible card per rack
 with two lines per channel, the same rules deciding which channels show.
