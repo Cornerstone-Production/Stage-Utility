@@ -90,21 +90,65 @@ public struct ProbeLinkState: Equatable {
 /// Anything on the LAN can answer a broadcast. Once an output is bound to a server it
 /// listens to that server alone: another host's answer would hand it a different
 /// address to load, and with it the output's token, in the URL.
+///
+/// An output set up nowhere follows the first server that answers it, for as long as
+/// discovery runs, so two servers both on their Screens page do not swap its page back
+/// and forth. That is remembered here, in memory, and never put in the probe: a server
+/// that merely answered has not claimed anything. Two answers break it: one that says
+/// this output is set up on the server that sent it (an operator just claimed it
+/// there), and the release that makes it forget its server.
 public struct ReplyFilter: Equatable {
   public enum Decision: Equatable {
-    case accept
-    /// Not from the server this output is bound to. `firstTime` once per run, so the
-    /// log has the line and a noisy host cannot fill it.
+    /// Believed, and what it does to the server the output remembers.
+    case accept(OutputBinding)
+    /// Not from the server this output is bound to, or is following. `firstTime` once
+    /// per run for each of the two, so the log has the line and a noisy host cannot
+    /// fill it.
     case ignore(firstTime: Bool)
   }
 
-  private var announced = false
+  private var announcedBound = false
+  private var announcedFollowing = false
+  /// The server an unbound output is following, once one has answered.
+  public private(set) var following: String?
 
   public init() {}
 
   public mutating func decide(_ reply: DiscoveryReply, boundTo: String?) -> Decision {
-    guard let boundTo, reply.serverId != boundTo else { return .accept }
+    if let boundTo {
+      guard reply.serverId == boundTo else { return Self.ignore(&announcedBound) }
+      // Released by its own server: free to follow whoever answers next.
+      following = reply.claimed == false ? nil : boundTo
+      return .accept(OutputBinding.change(after: reply, boundTo: boundTo))
+    }
+    if let following, reply.serverId != following, reply.claimed != true { return Self.ignore(&announcedFollowing) }
+    following = reply.serverId
+    return .accept(OutputBinding.change(after: reply, boundTo: nil))
+  }
+
+  private static func ignore(_ announced: inout Bool) -> Decision {
     defer { announced = true }
     return .ignore(firstTime: !announced)
+  }
+}
+
+/// What an accepted answer does to the server an output remembers, its `boundTo`.
+///
+/// `boundTo` goes in every probe, and every other server ignores an output that names
+/// someone else, so it must mean claimed: remembered when a server says this output is
+/// set up there, forgotten when that same server says it is not (released, or claimed
+/// on an install since wiped). An answer with no `claimed`, from a server older than
+/// the field, is remembered.
+public enum OutputBinding: Equatable {
+  case keep
+  case bind(String)
+  case forget(String)
+
+  public static func change(after reply: DiscoveryReply, boundTo: String?) -> OutputBinding {
+    let fromBound = reply.serverId == boundTo
+    switch reply.claimed {
+    case .some(false): return fromBound ? .forget(reply.serverId) : .keep
+    case .some(true), .none: return fromBound ? .keep : .bind(reply.serverId)
+    }
   }
 }

@@ -130,6 +130,15 @@ export interface DiscoveryReply {
   name: string;
   /** Where to load the display from. */
   url: string;
+  /**
+   * Whether the device that probed is set up on this server. An agent remembers a
+   * server — and puts it in its probe as `boundTo` — only once one says true, and
+   * forgets it when that same server says false, which is how a device released on
+   * one server becomes free for another. Absent from a server older than this
+   * field: the Mac helper and the macOS and Windows agents then remember the
+   * server, and the Linux agent does not.
+   */
+  claimed?: boolean;
 }
 
 /** The default discovery port. Adjustable — AV gear is fond of odd UDP ports,

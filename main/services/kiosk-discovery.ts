@@ -108,7 +108,7 @@ export function decodeProbe(buf: Buffer | string): DiscoveryProbe | null {
 }
 
 export function encodeReply(r: DiscoveryReply): string {
-  return JSON.stringify({ [MAGIC]: REPLY, v: VERSION, serverId: r.serverId, name: r.name, url: r.url });
+  return JSON.stringify({ [MAGIC]: REPLY, v: VERSION, serverId: r.serverId, name: r.name, url: r.url, claimed: r.claimed });
 }
 
 /** Parse a reply, or null. Used by the device agent. Never throws. */
@@ -126,7 +126,13 @@ export function decodeReply(buf: Buffer | string): DiscoveryReply | null {
   const serverId = str(o.serverId);
   const url = str(o.url, 512);
   if (!serverId || !url) return null;
-  return { serverId, name: str(o.name) ?? serverId, url };
+  return {
+    serverId,
+    name: str(o.name) ?? serverId,
+    url,
+    // Kept only when it is a real boolean; absent from a server older than the field.
+    ...(typeof o.claimed === "boolean" && { claimed: o.claimed }),
+  };
 }
 
 /**
@@ -172,14 +178,16 @@ export interface ProbeDecision {
  *     does not carry the binding yet: listing that would offer a screen that is
  *     already set up, and announce it as newly seen.
  *  3. **A device that names us but is not bound here is unclaimed, and answered**:
- *     released, a restored config, or claimed on an install since wiped. It must
- *     stay answerable so it can be set up again rather than going dark.
+ *     released, or claimed on an install since wiped. The answer says it is not
+ *     claimed here, and that is what makes the device forget us, which is what
+ *     lets another server set it up. Not answering would leave it naming us for
+ *     ever, and every other server ignoring it (rule 1).
  *  4. **Anything else is LISTED always, and answered only while SCANNING.**
  *     Listing costs nothing and commits nobody: it is what lets Screens, its
  *     banner and the sidebar count show a new device the moment anyone looks,
- *     with no scan to open first. Answering is the commitment. A device binds to
- *     the first server that answers it, so a server answering every new device
- *     all the time would race any other Stage Utility on the network for it; it
+ *     with no scan to open first. Answering is the commitment. A device loads its
+ *     holding screen from the first server that answers it, so a server answering
+ *     every new device all the time would race any other Stage Utility for it; it
  *     answers one while a Screens page is open, which is somebody standing in
  *     front of this server to set screens up. That answer is also what puts the
  *     holding screen (id, address, MAC) on the physical screen, which is how an
@@ -201,10 +209,11 @@ export function decideProbe(
 /**
  * The binding a listed device is shown with: only one to ANOTHER server.
  *
- * Agents remember whichever server answered them, so a released device, or one
- * that was only ever heard by this server, still names it. Shown as bound, it read
- * "Set up on another server, which it cannot reach" under a device that can reach
- * this one fine.
+ * A released device still names this server until it hears the answer that says
+ * otherwise, and an agent older than the reply's `claimed` field remembers
+ * whichever server answered it, claimed or not. Shown as bound, either read "Set
+ * up on another server, which it cannot reach" under a device that can reach this
+ * one fine.
  */
 export function listedBoundTo(probe: Pick<DiscoveryProbe, "boundTo">, serverId: string): string | undefined {
   return probe.boundTo === serverId ? undefined : probe.boundTo;

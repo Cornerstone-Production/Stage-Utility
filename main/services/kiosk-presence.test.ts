@@ -4,7 +4,7 @@ import { describe, test, beforeEach, afterEach, mock } from "node:test";
 import {
   scanning, startScan, stopScan, recordSeen, seenDevices, forgetSeen,
   resetKioskPresence, rememberScreen, rememberSecret, SCAN_WINDOW_MS,
-  recordHealth, healthList, forgetHealth, MAX_SEEN,
+  recordHealth, healthList, forgetHealth, MAX_SEEN, noteReleased,
 } from "./kiosk-presence.js";
 import { HEALTH_TTL_MS } from "./output-health.js";
 import { addBroadcastListener } from "./broadcaster.js";
@@ -504,5 +504,37 @@ describe("the sweep timer", () => {
     } finally {
       globalThis.setInterval = real;
     }
+  });
+});
+
+describe("a device told it is no longer set up here", () => {
+  const lines: string[] = [];
+  const realLog = console.log;
+  beforeEach(() => {
+    resetKioskPresence();
+    lines.length = 0;
+    console.log = (...a: unknown[]) => {
+      lines.push(a.map(String).join(" "));
+    };
+  });
+  afterEach(() => {
+    console.log = realLog;
+  });
+  const LINE = "[kiosk-responder] d1 still names this server but is not set up here; told it so";
+
+  test("is logged once however often it is told", () => {
+    // An agent older than the reply's claimed field never forgets, and is told at
+    // every probe.
+    for (let i = 0; i < 5; i++) noteReleased("d1");
+    assert.deepEqual(lines, [LINE]);
+  });
+
+  test("is logged again after it is set up here and released once more", () => {
+    // A claim calls forgetSeen, and so does a probe from a device bound here. A
+    // kiosk does not probe while its browser runs, so the claim must reset it.
+    noteReleased("d1");
+    forgetSeen("d1");
+    noteReleased("d1");
+    assert.deepEqual(lines, [LINE, LINE]);
   });
 });
