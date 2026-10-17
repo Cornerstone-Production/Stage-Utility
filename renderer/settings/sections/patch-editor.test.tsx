@@ -174,6 +174,20 @@ describe("ripple", () => {
     }
   });
 
+  test("the start row does not outlive a switch between Inputs and Outputs", async () => {
+    const f = stubServer();
+    try {
+      await mount();
+      await arm();
+      await focus(sourceOf(5));
+      assert.equal(!!bar().queryByText(/from row 5/), true);
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Outputs" })); });
+      assert.equal(!!bar().queryByText(/from row/), false, "nothing is focused on the other direction's rows");
+    } finally {
+      f.restore();
+    }
+  });
+
   test("a non-analog sheet offers an Owner fill", async () => {
     const f = stubServer();
     try {
@@ -233,6 +247,54 @@ describe("hops", () => {
       await act(async () => { fireEvent.click(row(2).getByRole("button", { name: "Remove hop" })); });
       assert.equal(!!row(2).queryByRole("button", { name: /direct · add hop/ }), true, "back to a direct row");
       assert.equal(!!row(2).queryByRole("button", { name: /Snake A/ }), false);
+    } finally {
+      f.restore();
+    }
+  });
+
+  test("Enter closes the editor and returns focus to the hop's chip", async () => {
+    const f = stubServer();
+    try {
+      await mount();
+      await act(async () => { fireEvent.click(row(1).getByRole("button", { name: /Snake A · A-1/ })); });
+      const connector = row(1).getByLabelText("Connector");
+      const chip = () => row(1).getByRole("button", { name: /Snake A · A-1/ });
+      // Synchronously, inside the key's own handling: focus must NOT have moved yet.
+      // A browser activates whatever button holds focus when Enter's default action
+      // runs, so a chip focused here would be pressed by the same keystroke and
+      // reopen the editor it just closed (seen in Chrome; jsdom cannot press it).
+      act(() => { fireEvent.keyDown(connector, { key: "Enter" }); });
+      assert.ok(document.activeElement !== chip(), "focus moved to the chip before the keystroke finished");
+      await eventually(() => assert.ok(document.activeElement === chip(), "focus must land on the chip"));
+    } finally {
+      f.restore();
+    }
+  });
+
+  test("with an editor open, pressing another chip keeps focus where it is, so one click opens that chip", async () => {
+    // A mousedown that moved focus would close the open editor, which turns back
+    // into a narrower chip and shifts the pressed chip left before mouseup.
+    const f = stubServer();
+    try {
+      await mount();
+      // Row 1 has one hop; add a second so a chip sits beside the open editor.
+      await act(async () => { fireEvent.click(row(1).getByRole("button", { name: "Add hop" })); });
+      assert.equal(row(1).queryAllByRole("group", { name: "Edit hop" }).length, 1, "the new hop's editor is open");
+      const chip = row(1).getByRole("button", { name: /Snake A · A-1/ });
+      assert.equal(fireEvent.mouseDown(chip), false, "mousedown on a chip must be default-prevented while an editor is open");
+      await act(async () => { fireEvent.click(chip); });
+      assert.equal(row(1).queryAllByRole("button", { name: /Snake A · A-1/ }).length, 0, "that chip is now the open editor");
+    } finally {
+      f.restore();
+    }
+  });
+
+  test("every channel row has a row header, so a bare Source field says which channel it is", async () => {
+    const f = stubServer();
+    try {
+      await mount();
+      const headers = within(screen.getByRole("region", { name: "Main Rack" })).getAllByRole("rowheader").map((h) => h.textContent);
+      assert.deepEqual(headers, ["1", "2", "3", "4", "5", "6", "7", "8"]);
     } finally {
       f.restore();
     }
@@ -459,6 +521,7 @@ describe("devices", () => {
       await act(async () => { fireEvent.click(devices().getByRole("button", { name: "Add device" })); });
       assert.equal((devices().getByLabelText("Device name") as HTMLInputElement).value, "Device 4");
       assert.equal(!!screen.queryByRole("region", { name: "Device 4" }), true, "a new Input Rack is a card on the sheet");
+      await eventually(() => assert.ok(document.activeElement === devices().getByLabelText("Device name"), "the new device's name is ready to type"));
     } finally {
       f.restore();
     }

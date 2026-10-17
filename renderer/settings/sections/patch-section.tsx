@@ -7,13 +7,16 @@ import { useFailedReads } from "../../lib/use-failed-reads";
 import { Button, ErrorNote, Input, SkeletonRows, toast, confirm , UnsavedBanner, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { mergeOverrides, diffEndpoints } from "../../lib/patch-resolve";
 import { uid } from "../../lib/uid";
-import { PatchDeviceManager } from "./patch-device-manager";
+import { PatchDeviceManager, EYEBROW } from "./patch-device-manager";
 import { PatchImport } from "./patch-import";
 import { PatchWeekly } from "./patch-weekly";
 import { PatchTable } from "./patch-table";
 import { ExportMenu } from "./patch-export";
 import { RippleSwitch, DEFAULT_RIPPLE, type RippleState } from "./patch-ripple-bar";
 import { SheetTabs } from "./patch-sheet-tabs";
+
+/** The Editing select's value for this week's one-off tweaks. */
+const WEEK = "__week";
 
 const emptyAssignments = (): PatchAssignments => ({ byServiceType: {}, byPlan: {} });
 
@@ -51,7 +54,7 @@ export function PatchSection() {
   const [saved, setSaved] = useState<PatchFile | null>(null);
   const [draft, setDraft] = useState<PatchFile | null>(null);
   const [activeSheetId, setActiveSheetId] = useState<string>("");
-  const [tab, setTab] = useState<"in" | "out">("in");
+  const [dir, setDir] = useState<"in" | "out">("in");
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
@@ -148,8 +151,8 @@ export function PatchSection() {
 
   const racks = sheet.devices.filter((d) => d.kind === "rack");
   const stageDevices = sheet.devices.filter((d) => d.kind !== "rack");
-  const isWeek = editingVariantId === "__week" && !!plan?.planId;
-  const editingVariant = editingVariantId && editingVariantId !== "__week" ? sheet.variants.find((v) => v.id === editingVariantId) ?? null : null;
+  const isWeek = editingVariantId === WEEK && !!plan?.planId;
+  const editingVariant = editingVariantId && editingVariantId !== WEEK ? sheet.variants.find((v) => v.id === editingVariantId) ?? null : null;
 
   // A week's one-off tweaks layer over: default + the plan's assigned variant.
   const weekBase = (() => {
@@ -252,19 +255,19 @@ export function PatchSection() {
       <div className="patch-print-hide flex flex-wrap items-center gap-x-2.5 gap-y-2">
         <Seg
           label="Direction"
-          value={tab}
-          onChange={setTab}
+          value={dir}
+          onChange={setDir}
           options={[{ value: "in", label: "Inputs" }, { value: "out", label: "Outputs" }]}
         />
-        <span className="ml-1.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Editing</span>
-        {/* "__week" is only offered while a plan is loaded, so an operator editing
+        <span className={`ml-1.5 ${EYEBROW}`}>Editing</span>
+        {/* WEEK is only offered while a plan is loaded, so an operator editing
             this week's tweaks when the plan drops out would otherwise see the
             switcher snap to "Default patch" and start writing there. */}
         <Select value={editingVariantId ?? ""} onValueChange={(v) => setEditingVariantId(v || null)}>
           <SelectTrigger className="px-2" aria-label="Patch being edited"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="">Default patch</SelectItem>
-            {plan?.planId && <SelectItem value="__week">This week{plan.planTitle ? ` — ${plan.planTitle}` : ""}</SelectItem>}
+            {plan?.planId && <SelectItem value={WEEK}>This week{plan.planTitle ? ` — ${plan.planTitle}` : ""}</SelectItem>}
             {sheet.variants.map((v) => (
               <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
             ))}
@@ -297,7 +300,7 @@ export function PatchSection() {
       </div>
 
       {importing && (
-        <PatchImport devices={sheet.devices} endpoints={sheet.endpoints} dir={tab} onChange={setEndpoints} onClose={() => setImporting(false)} />
+        <PatchImport devices={sheet.devices} endpoints={sheet.endpoints} dir={dir} onChange={setEndpoints} onClose={() => setImporting(false)} />
       )}
 
       {failed.has("plan") && (
@@ -305,8 +308,8 @@ export function PatchSection() {
       )}
 
       {/* Devices and weekly assignment beside the sheet. On paper only the sheet
-          prints, so the print stylesheet drops this grid back to a single block. */}
-      <div className="patch-print-layout grid items-start gap-3.5 lg:grid-cols-[250px_minmax(0,1fr)]">
+          prints, and the print stylesheet releases this grid (see styles.css). */}
+      <div className="grid items-start gap-3.5 lg:grid-cols-[250px_minmax(0,1fr)]">
         <aside className="patch-print-hide flex flex-col gap-3">
           <PatchDeviceManager devices={sheet.devices} onChange={setDevices} />
           <PatchWeekly variants={sheet.variants} assignments={sheet.assignments} plan={plan} onChange={setAssignments} />
@@ -315,7 +318,7 @@ export function PatchSection() {
             chrome and is hidden by the print stylesheet. */}
         <div className="patch-print-sheet min-w-0">
           <PatchTable
-            dir={tab}
+            dir={dir}
             group={group}
             racks={racks}
             stageDevices={stageDevices}

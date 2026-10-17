@@ -743,6 +743,8 @@
    Device colour survives as the small dot beside a hop and a rack's name, which
    is all the colour a black-and-white printer needs to lose. */
 @media print {
+  /* Chrome inside the sheet (the ripple bar, "+ hop"). Elsewhere on the page it
+     is belt and braces: the rule below already drops what does not hold the sheet. */
   .patch-print-hide {
     display: none !important;
   }

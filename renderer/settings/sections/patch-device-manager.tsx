@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Trash2Icon, PlusIcon, ChevronRightIcon } from "lucide-react";
 
 import { Button, NumberInput, Input } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { uid } from "../../lib/uid";
+import { DeviceDot } from "./patch-dot";
 import { generateLabels } from "../../lib/patch-ripple";
 
 const KINDS: { value: PatchDeviceKind; label: string }[] = [
@@ -25,14 +26,23 @@ function labelSummary(labels: string[] | undefined): string | null {
   return labels.length === 1 ? labels[0] : `${labels[0]}…${labels[labels.length - 1]}`;
 }
 
-const EYEBROW = "text-caption2 font-semibold uppercase tracking-wider text-fg-subtle";
+export const EYEBROW = "text-caption2 font-semibold uppercase tracking-wider text-fg-subtle";
 
 /**
  * Everything editable about one device, shown under its row in the list: name,
  * kind, channel counts, the color it tints its channels with, and the connector
  * labels that autocomplete in the From/To cells and ripple cleanly in the table.
  */
-function DeviceEditor({ device: d, onUpdate, onRemove }: { device: PatchDevice; onUpdate: (patch: Partial<PatchDevice>) => void; onRemove: () => void }) {
+function DeviceEditor({ device: d, focusName, onUpdate, onRemove }: { device: PatchDevice; focusName: boolean; onUpdate: (patch: Partial<PatchDevice>) => void; onRemove: () => void }) {
+  const nameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (focusName) {
+      nameRef.current?.focus();
+      nameRef.current?.select();
+    }
+    // Once, when the editor opens: a device just added is named next.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The label generator's inputs are the editor's own, so opening another
   // device does not inherit the last one's prefix.
   const [prefix, setPrefix] = useState("");
@@ -43,7 +53,7 @@ function DeviceEditor({ device: d, onUpdate, onRemove }: { device: PatchDevice; 
   return (
     <div className="mb-1.5 mt-0.5 flex flex-col gap-3 rounded-lg border border-line bg-surface-raised p-2.5">
       <div className="flex flex-col gap-2">
-        <Input value={d.name} onChange={(e) => onUpdate({ name: e.target.value })} placeholder="Device name" aria-label="Device name" />
+        <Input ref={nameRef} value={d.name} onChange={(e) => onUpdate({ name: e.target.value })} placeholder="Device name" aria-label="Device name" />
         {/* Left as a raw <select>: KINDS is a fixed, exhaustive list of
             main/types/patch.ts's PatchDeviceKind union, which has never
             dropped a member — a device's kind cannot hold a value this
@@ -129,7 +139,7 @@ function DeviceEditor({ device: d, onUpdate, onRemove }: { device: PatchDevice; 
       </div>
 
       <div className="border-t border-line pt-2">
-        <Button variant="transparent" size="small" onClick={onRemove} aria-label={`Remove ${d.name}`} className="text-fg-subtle hover:text-danger-11">
+        <Button variant="transparent" size="small" onClick={onRemove} className="text-fg-subtle hover:text-danger-11">
           <Trash2Icon className="size-3.5" /> Remove device
         </Button>
       </div>
@@ -145,6 +155,8 @@ function DeviceEditor({ device: d, onUpdate, onRemove }: { device: PatchDevice; 
  */
 export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice[]; onChange: (d: PatchDevice[]) => void }) {
   const [openId, setOpenId] = useState<string | null>(null);
+  // Set by Add device, so the new device's name is selected for typing.
+  const [addedId, setAddedId] = useState<string | null>(null);
 
   function update(id: string, patch: Partial<PatchDevice>) {
     onChange(devices.map((d) => (d.id === id ? { ...d, ...patch } : d)));
@@ -153,6 +165,7 @@ export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice
     const id = uid("dev");
     onChange([...devices, { id, name: `Device ${devices.length + 1}`, kind: "rack", inputs: 8, outputs: 0 }]);
     setOpenId(id);
+    setAddedId(id);
   }
   function remove(id: string) {
     onChange(devices.filter((d) => d.id !== id));
@@ -175,7 +188,7 @@ export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice
               aria-expanded={open}
               className={cn("grid w-full grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-fill", open && "bg-fill")}
             >
-              <i className={cn("size-2.5 rounded-[3px]", !d.color && "bg-fg-faint")} style={d.color ? { background: d.color } : undefined} />
+              <DeviceDot color={d.color} className="size-2.5" />
               <span className="min-w-0">
                 <span className="block truncate text-footnote text-fg">{d.name || "Unnamed device"}</span>
                 <span className="block text-caption1 text-fg-subtle">{KINDS.find((k) => k.value === d.kind)?.label ?? d.kind}</span>
@@ -185,7 +198,7 @@ export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice
                 <ChevronRightIcon className={cn("size-3 text-fg-subtle transition-transform", open && "rotate-90")} />
               </span>
             </button>
-            {open && <DeviceEditor device={d} onUpdate={(patch) => update(d.id, patch)} onRemove={() => remove(d.id)} />}
+            {open && <DeviceEditor device={d} focusName={addedId === d.id} onUpdate={(patch) => update(d.id, patch)} onRemove={() => remove(d.id)} />}
           </div>
         );
       })}

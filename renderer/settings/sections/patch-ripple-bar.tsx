@@ -2,7 +2,7 @@ import { Switch } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import type { RippleField, RippleCount } from "../../lib/patch-ripple";
 
-export type Dir = "in" | "out";
+export type Dir = PatchEndpoint["dir"];
 
 export const RIPPLE_COUNTS: RippleCount[] = [2, 4, 6, 8, 10, 12, "end"];
 

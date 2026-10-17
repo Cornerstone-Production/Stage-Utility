@@ -19,7 +19,7 @@ import { installDom } from "../../test-dom.js";
 const teardown = installDom();
 
 const { render, cleanup, fireEvent, screen } = await import("@testing-library/react");
-const { PathCell } = await import("./patch-table.js");
+const { PathCell } = await import("./patch-path-cell.js");
 
 after(() => {
   cleanup();

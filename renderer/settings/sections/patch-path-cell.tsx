@@ -2,11 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { PlusIcon, XIcon } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
-
-/** A device's color on a dot, as the variable the print stylesheet reads back. */
-export function dotStyle(color: string | undefined): React.CSSProperties {
-  return { "--dot": color ?? "var(--color-fg-faint)", background: "var(--dot)" } as React.CSSProperties;
-}
+import { DeviceDot } from "./patch-dot";
 
 /** Which hop is open for editing, and which of its two fields takes focus. */
 type Editing = { index: number; focus: "device" | "connector" } | null;
@@ -19,12 +15,26 @@ type Editing = { index: number; focus: "device" | "connector" } | null;
  * input, with the connector autocompleting from the device's generated labels.
  * The editor closes when focus leaves it, so there is no separate Done.
  *
- * Exported for patch-table.test.tsx — it is the one place in this file a stored
- * id (a hop's deviceId) can outlive the list it was chosen from.
+ * A stored id (a hop's deviceId) can outlive the list it was chosen from, because
+ * deleting a device does not walk the endpoints; patch-table.test.tsx guards that.
  */
 export function PathCell({ path, stageDevices, onChange }: { path: PatchHop[] | undefined; stageDevices: PatchDevice[]; onChange: (hops: PatchHop[]) => void }) {
   const hops = path ?? [];
   const [editing, setEditing] = useState<Editing>(null);
+  // Closing the editor from the keyboard unmounts the control that held focus.
+  // The chip it turned back into takes it, so Tab and a screen reader carry on
+  // from the hop that was being edited rather than from the top of the page.
+  const cellRef = useRef<HTMLDivElement>(null);
+  const refocus = useRef<number | null>(null);
+  useEffect(() => {
+    if (editing !== null || refocus.current === null) return;
+    const hop = refocus.current;
+    refocus.current = null;
+    // A task later, not now: the Enter that closed the editor has not finished.
+    // Focus moved to the chip while it is still being handled would let the
+    // key's own activation press that chip, and reopen the editor.
+    setTimeout(() => cellRef.current?.querySelector<HTMLElement>(`[data-hop="${hop}"]`)?.focus(), 0);
+  });
   const setHop = (i: number, patch: Partial<PatchHop>) => onChange(hops.map((h, j) => (j === i ? { ...h, ...patch } : h)));
   const add = () => {
     onChange([...hops, { deviceId: stageDevices[0]?.id ?? "", connector: "" }]);
@@ -37,7 +47,7 @@ export function PathCell({ path, stageDevices, onChange }: { path: PatchHop[] | 
   const dev = (id: string) => stageDevices.find((d) => d.id === id);
 
   return (
-    <div className="flex flex-wrap items-center gap-1 px-2 py-[3px]">
+    <div ref={cellRef} className="flex flex-wrap items-center gap-1 px-2 py-[3px]">
       {hops.map((h, i) => {
         const device = dev(h.deviceId);
         if (editing?.index === i) {
@@ -45,12 +55,14 @@ export function PathCell({ path, stageDevices, onChange }: { path: PatchHop[] | 
             <HopEditor
               key={i}
               hop={h}
-              device={device}
               devices={stageDevices}
               focus={editing.focus}
               onChange={(patch) => setHop(i, patch)}
               onRemove={() => remove(i)}
-              onClose={() => setEditing(null)}
+              onClose={(viaKeyboard) => {
+                if (viaKeyboard) refocus.current = i;
+                setEditing(null);
+              }}
             />
           );
         }
@@ -62,20 +74,25 @@ export function PathCell({ path, stageDevices, onChange }: { path: PatchHop[] | 
           <button
             key={i}
             type="button"
+            data-hop={i}
             onClick={() => setEditing({ index: i, focus: "connector" })}
+            // With an editor open, mousedown on another chip would blur it, close
+            // it, and shift this chip left before the mouse comes up — no click.
+            onMouseDown={editing ? (e) => e.preventDefault() : undefined}
             title={missing ? "This device is no longer in the sheet's device list" : "Edit hop"}
             className={`inline-flex items-center gap-1 rounded-[5px] border px-1.5 py-px font-mono text-[11.5px] hover:bg-fill ${missing ? "border-warn-9 text-warn-11" : "border-line-strong text-fg"}`}
           >
-            <i className="patch-dot size-[7px] rounded-[2px]" style={dotStyle(device?.color)} />
+            <DeviceDot color={device?.color} className="size-[7px] rounded-[2px]" />
             {name}{h.connector ? ` · ${h.connector}` : ""}
           </button>
         );
       })}
-      {hops.length === 0 ? (
+      {hops.length === 0 && (
         <button type="button" onClick={add} className="patch-print-hide rounded px-0.5 text-footnote text-fg-faint hover:text-fg-muted">
           direct · add hop
         </button>
-      ) : editing ? null : (
+      )}
+      {hops.length > 0 && !editing && (
         <button
           type="button"
           onClick={add}
@@ -97,7 +114,6 @@ export function PathCell({ path, stageDevices, onChange }: { path: PatchHop[] | 
  */
 function HopEditor({
   hop,
-  device,
   devices,
   focus,
   onChange,
@@ -105,12 +121,11 @@ function HopEditor({
   onClose,
 }: {
   hop: PatchHop;
-  device: PatchDevice | undefined;
   devices: PatchDevice[];
   focus: "device" | "connector";
   onChange: (patch: Partial<PatchHop>) => void;
   onRemove: () => void;
-  onClose: () => void;
+  onClose: (viaKeyboard: boolean) => void;
 }) {
   const rootRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -119,6 +134,7 @@ function HopEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // Suggest the source device's connector labels (from "Generate labels").
+  const device = devices.find((d) => d.id === hop.deviceId);
   const labels = device?.inLabels ?? device?.outLabels ?? [];
   const listId = labels.length ? `hoplabels-${hop.deviceId}` : undefined;
   return (
@@ -129,10 +145,10 @@ function HopEditor({
       className="inline-flex items-center gap-1"
       onBlur={(e) => {
         // Focus moving between this editor's own controls is not leaving it.
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onClose();
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onClose(false);
       }}
       onKeyDown={(e) => {
-        if (e.key === "Escape" || (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT")) onClose();
+        if (e.key === "Escape" || (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT")) onClose(true);
       }}
     >
       {/* A hop points at a device by id, and deleting a device does not walk the

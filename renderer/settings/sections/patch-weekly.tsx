@@ -7,10 +7,13 @@ import { pcoConnected, useStageState } from "../../main/use-stage-state";
 import { ErrorNote, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { plural } from "@main/services/plural";
 
+const WA_ROW = "flex items-center justify-between gap-2 border-t border-line py-1.5 text-caption1";
+const WA_SELECT = "h-6 max-w-[9.5rem] shrink-0 px-2";
+
 /**
  * Weekly assignment — pick a standing variant per PCO service type. The resolved
  * week patch (default → service-type variant → per-plan override → week tweaks) is
- * what the /patch volunteer view shows. Per-plan overrides land in a later increment.
+ * what the /patch volunteer view shows.
  */
 export function PatchWeekly({
   variants,
@@ -85,9 +88,6 @@ export function PatchWeekly({
 
   const standingForPlan = plan?.serviceTypeId ? assignments.byServiceType[plan.serviceTypeId] : undefined;
   const planEntry = plan?.planId ? assignments.byPlan[plan.planId] : undefined;
-  const WA_ROW = "flex items-center justify-between gap-2 border-t border-line py-1.5 text-caption1";
-  const WA_SELECT = "h-6 max-w-[9.5rem] shrink-0 px-2";
-
   return (
     <section aria-label="Weekly assignment" className="rounded-xl border border-line bg-surface px-3.5 py-3">
       <div className="mb-1.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Weekly assignment</div>

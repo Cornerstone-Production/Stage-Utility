@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 
 import { Switch } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { useResyncOn } from "../../lib/use-resync-on";
 import { rippleEndpoints, type RippleField } from "../../lib/patch-ripple";
-import { PathCell, dotStyle } from "./patch-path-cell";
+import { DeviceDot } from "./patch-dot";
+import { PathCell } from "./patch-path-cell";
 import { RippleBar, type Dir, type RippleState } from "./patch-ripple-bar";
-
-export { PathCell };
 
 const keyOf = (rackId: string, dir: Dir, index: number) => `${rackId}:${dir}:${index}`;
 const meaningful = (e: PatchEndpoint) => Boolean(e.label || e.consoleChannel || (e.path && e.path.length) || e.unused || e.mic || e.feedType);
@@ -20,9 +20,10 @@ function rippleHasValue(field: RippleField, value: unknown): boolean {
 
 // A cell reads as plain text; the input underneath is always there, so the
 // keyboard walks the sheet the way it would a form. Hover tints it, focus rings it.
-const TD = "h-[31px] border-b border-r border-line p-0 last:border-r-0 hover:bg-fill focus-within:bg-surface-raised focus-within:shadow-[inset_0_0_0_2px_var(--color-accent)]";
 const TD_PLAIN = "h-[31px] border-b border-r border-line p-0 last:border-r-0";
-const INPUT = "block h-[31px] w-full min-w-0 bg-transparent px-2 text-footnote text-fg outline-none placeholder:text-fg-faint";
+const TD = cn(TD_PLAIN, "hover:bg-fill focus-within:bg-surface-raised focus-within:shadow-[inset_0_0_0_2px_var(--color-accent)]");
+// scroll-mt: a field scrolled into view by Tab must clear the sticky ripple bar.
+const INPUT = "block h-[31px] scroll-mt-14 w-full min-w-0 bg-transparent px-2 text-footnote text-fg outline-none placeholder:text-fg-faint";
 const TH = "border-b border-line bg-surface px-2 py-[7px] text-left text-[10.5px] font-semibold uppercase tracking-[0.08em] text-fg-subtle";
 
 function Cell({ value, onChange, placeholder, label, mono, strong }: { value: string; onChange: (v: string) => void; placeholder: string; label: string; mono?: boolean; strong?: boolean }) {
@@ -42,8 +43,6 @@ function Cell({ value, onChange, placeholder, label, mono, strong }: { value: st
 interface RowProps {
   rackId: string;
   idx: number;
-  /** Channels in this rack in this direction — the ripple's clamp. */
-  rackChannels: number;
   /** By-device mode with several racks: say which rack the channel is on. */
   rackLabel: string | null;
   dir: Dir;
@@ -51,12 +50,12 @@ interface RowProps {
   stageDevices: PatchDevice[];
   showOwner: boolean;
   reach: boolean;
-  edit: (rackId: string, index: number, field: RippleField, value: unknown, patch: Partial<PatchEndpoint>, rackChannels: number) => void;
+  edit: (rackId: string, index: number, field: RippleField, value: unknown) => void;
   onFocusRow: (rackId: string, index: number) => void;
   onBlurRow: () => void;
 }
 
-function Row({ rackId, idx, rackChannels, rackLabel, dir, endpoint: e, stageDevices, showOwner, reach, edit, onFocusRow, onBlurRow }: RowProps) {
+function Row({ rackId, idx, rackLabel, dir, endpoint: e, stageDevices, showOwner, reach, edit, onFocusRow, onBlurRow }: RowProps) {
   // Tint the row's left edge with the color of the device it's sourced from.
   const srcColor = stageDevices.find((dv) => dv.id === e?.path?.[0]?.deviceId)?.color;
   return (
@@ -66,26 +65,27 @@ function Row({ rackId, idx, rackChannels, rackLabel, dir, endpoint: e, stageDevi
       data-reach={reach || undefined}
       className="group/row data-[reach]:[&>td:not([data-n])]:bg-accent/10"
     >
-      <td data-n="" className={cn(TD_PLAIN, "pr-2 text-right font-mono text-caption1 tabular-nums text-fg-subtle")} style={srcColor ? { boxShadow: `inset 3px 0 0 ${srcColor}` } : undefined}>
+      {/* The row header, so a screen reader hears which channel a bare "Source" field is on. */}
+      <th scope="row" data-n="" className={cn(TD_PLAIN, "pr-2 text-right font-mono text-caption1 font-normal tabular-nums text-fg-subtle")} style={srcColor ? { boxShadow: `inset 3px 0 0 ${srcColor}` } : undefined}>
         {idx}
-      </td>
+      </th>
       {rackLabel != null && <td className={cn(TD_PLAIN, "truncate px-2 text-caption2 text-fg-subtle")}>{rackLabel}</td>}
-      <Cell mono label="Console channel" placeholder={String(idx)} value={e?.consoleChannel ?? ""} onChange={(v) => edit(rackId, idx, "consoleChannel", v, { consoleChannel: v }, rackChannels)} />
-      <Cell strong label={dir === "in" ? "Source" : "Destination"} placeholder={dir === "in" ? "Source" : "Destination"} value={e?.label ?? ""} onChange={(v) => edit(rackId, idx, "label", v, { label: v }, rackChannels)} />
+      <Cell mono label="Console channel" placeholder={String(idx)} value={e?.consoleChannel ?? ""} onChange={(v) => edit(rackId, idx, "consoleChannel", v)} />
+      <Cell strong label={dir === "in" ? "Source" : "Destination"} placeholder={dir === "in" ? "Source" : "Destination"} value={e?.label ?? ""} onChange={(v) => edit(rackId, idx, "label", v)} />
       {dir === "in" ? (
         <>
-          <Cell label="Mic / DI" placeholder="Mic / DI" value={e?.mic ?? ""} onChange={(v) => edit(rackId, idx, "mic", v, { mic: v }, rackChannels)} />
+          <Cell label="Mic / DI" placeholder="Mic / DI" value={e?.mic ?? ""} onChange={(v) => edit(rackId, idx, "mic", v)} />
           <td className={cn(TD_PLAIN, "text-center")}>
-            <Switch className="scale-[0.85]" aria-label="48V" checked={e?.phantom ?? false} onCheckedChange={(v) => edit(rackId, idx, "phantom", v, { phantom: v }, rackChannels)} />
+            <Switch className="scale-[0.85]" aria-label="48V" checked={e?.phantom ?? false} onCheckedChange={(v) => edit(rackId, idx, "phantom", v)} />
           </td>
         </>
       ) : (
-        <Cell label="Feed" placeholder="IEM / wedge…" value={e?.feedType ?? ""} onChange={(v) => edit(rackId, idx, "feedType", v, { feedType: v }, rackChannels)} />
+        <Cell label="Feed" placeholder="IEM / wedge…" value={e?.feedType ?? ""} onChange={(v) => edit(rackId, idx, "feedType", v)} />
       )}
       <td className={TD_PLAIN}>
-        <PathCell path={e?.path} stageDevices={stageDevices} onChange={(hops) => edit(rackId, idx, "path", hops, { path: hops }, rackChannels)} />
+        <PathCell path={e?.path} stageDevices={stageDevices} onChange={(hops) => edit(rackId, idx, "path", hops)} />
       </td>
-      {showOwner && <Cell label="Owner" placeholder="Owner" value={e?.owner ?? ""} onChange={(v) => edit(rackId, idx, "owner", v, { owner: v }, rackChannels)} />}
+      {showOwner && <Cell label="Owner" placeholder="Owner" value={e?.owner ?? ""} onChange={(v) => edit(rackId, idx, "owner", v)} />}
     </tr>
   );
 }
@@ -95,7 +95,7 @@ function Card({ title, dot, meta, ripple, children }: { title: string; dot?: str
   return (
     <section aria-label={title} className="overflow-clip rounded-xl border border-line bg-surface">
       <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
-        {dot && <span className="patch-dot size-2.5 shrink-0 rounded-[3px]" style={dotStyle(dot)} />}
+        {dot && <DeviceDot color={dot} className="size-2.5" />}
         <b className="text-footnote font-semibold text-fg">{title}</b>
         <span className="font-mono text-caption1 text-fg-subtle">{meta}</span>
       </div>
@@ -144,14 +144,11 @@ export function PatchTable({
   // The row last focused while armed: where the next fill would start, so its
   // reach can be highlighted. It is NOT cleared on blur — pressing a chip in the
   // ripple bar blurs the row, and a bar whose "from row" text vanished on
-  // mousedown would shift under the pointer and swallow the click. It lasts until
-  // ripple is disarmed.
+  // mousedown would shift under the pointer and swallow the click.
   const [focus, setFocus] = useState<{ rackId: string; index: number } | null>(null);
-  const [wasOn, setWasOn] = useState(ripple.on);
-  if (wasOn !== ripple.on) {
-    setWasOn(ripple.on);
-    if (!ripple.on) setFocus(null);
-  }
+  // It does not survive disarming or a switch of direction: the rows it named
+  // are no longer the ones on screen.
+  useResyncOn([ripple.on, dir], () => setFocus(null));
   // Ripple is one-shot: after a fill actually happens, it disarms when the edited
   // cell loses focus (on blur, not on keystroke — so a multi-digit start like "12"
   // still ripples fully before disarming). This flag tracks "a fill happened".
@@ -178,12 +175,13 @@ export function PatchTable({
 
   // Route an edit through ripple when armed + the field is checked + it has a
   // value worth spreading; otherwise a plain single-cell upsert.
-  function edit(rackId: string, index: number, field: RippleField, value: unknown, patch: Partial<PatchEndpoint>, rackChannels: number) {
+  function edit(rackId: string, index: number, field: RippleField, value: unknown) {
+    const rackChannels = channelsOf(rackId);
     if (rippleActive && ripple.fields[field] && rippleHasValue(field, value)) {
       onChange(rippleEndpoints({ endpoints, rackId, dir, startIndex: index, field, value, count: ripple.count, rackChannels, stageDevices }));
       rippledRef.current = true; // disarm on the next blur
     } else {
-      upsert(rackId, index, patch);
+      upsert(rackId, index, { [field]: value } as Partial<PatchEndpoint>);
     }
   }
 
@@ -231,19 +229,17 @@ export function PatchTable({
   );
 
   const renderRow = (rackId: string, idx: number, rackLabel: string | null) => {
-    const rackChannels = channelsOf(rackId);
     return (
       <Row
         key={`${rackId}:${idx}`}
         rackId={rackId}
         idx={idx}
-        rackChannels={rackChannels}
         rackLabel={rackLabel}
         dir={dir}
         endpoint={byKey.get(keyOf(rackId, dir, idx))}
         stageDevices={stageDevices}
         showOwner={showOwner}
-        reach={isInFocusRun(rackId, idx, rackChannels)}
+        reach={isInFocusRun(rackId, idx, channelsOf(rackId))}
         edit={edit}
         onFocusRow={onFocusRow}
         onBlurRow={onBlurRow}
