@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { readFileSync } from "node:fs";
 
+import { buildManifest } from "@main/services/install-metadata";
+
 // What a phone gets when the app is added to a home screen.
 //
 // There are TWO html entry points and they had opposite amounts of this:
@@ -16,7 +18,7 @@ import { readFileSync } from "node:fs";
 
 const app = readFileSync(new URL("../app.html", import.meta.url), "utf8");
 const kiosk = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-const manifest = JSON.parse(readFileSync(new URL("../public/manifest.webmanifest", import.meta.url), "utf8"));
+const manifest = buildManifest("Stage Utility") as Record<string, string>;
 
 const ENTRIES: [string, string][] = [
   ["app.html", app],

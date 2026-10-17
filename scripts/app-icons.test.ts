@@ -15,6 +15,9 @@ import { inflateSync } from "node:zlib";
 
 import { JSDOM } from "jsdom";
 
+import { ICON_ROUTES } from "../main/services/app-icon.js";
+import { buildManifest } from "../main/services/install-metadata.js";
+
 // @ts-expect-error -- a plain .mjs script with no type declarations
 const { buildIcons } = await import("./build-icons.mjs");
 
@@ -84,10 +87,22 @@ test("every icon the HTML documents and the manifest name exists in public/", ()
     assert.equal(tags.length, 2, `${doc} should declare one rel="icon" and one rel="apple-touch-icon"`);
     for (const tag of tags) named.push(tag.getAttribute("href")?.replace(/^\//, "") ?? `(no href in ${doc})`);
   }
-  const manifest = JSON.parse(readFileSync(path.join(PUBLIC, "manifest.webmanifest"), "utf8")) as {
-    icons: { src: string; purpose: string }[];
-  };
+  // The manifest is served by the app (it carries the operator's app name), so it is
+  // read from the function that builds it, not from a file.
+  const manifest = buildManifest("Stage Utility") as { icons: { src: string; purpose: string }[] };
   for (const icon of manifest.icons) named.push(icon.src.replace(/^\//, ""));
   assert.ok(manifest.icons.some((i) => i.purpose === "maskable"), "the manifest has no maskable icon");
   for (const name of named) assert.ok(existsSync(path.join(PUBLIC, name)), `public/${name} is named but missing`);
+});
+
+test("every PNG icon the documents and the manifest name can be replaced by a custom icon", () => {
+  // A path missing from ICON_ROUTES is an icon the operator's own cannot reach: the
+  // phone would keep showing the built-in one whatever was uploaded.
+  const named = new Set<string>();
+  for (const doc of ["index.html", "app.html"]) {
+    const parsed = new JSDOM(readFileSync(path.join(ROOT, doc), "utf8")).window.document;
+    named.add(parsed.querySelector('link[rel="apple-touch-icon"]')?.getAttribute("href") ?? `(none in ${doc})`);
+  }
+  for (const icon of (buildManifest("x").icons as { src: string }[])) named.add(icon.src);
+  assert.deepEqual([...named].sort(), Object.keys(ICON_ROUTES).sort());
 });

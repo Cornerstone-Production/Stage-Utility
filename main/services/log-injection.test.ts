@@ -134,6 +134,9 @@ const REQUEST_FACING = [
   // into Settings over HTTP.
   "pinned-origin.ts",
   "plan-export.ts",
+  // The path is one of four fixed keys and the reference is read from settings,
+  // but both are scrubbed: settings.json is a file an operator can edit by hand.
+  "routes/app-icon-routes.ts",
   "routes/archive-routes.ts",
   "routes/automation-routes.ts",
   "routes/branding-routes.ts",

@@ -4,6 +4,8 @@ import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { ICON_ROUTES } from "./main/services/app-icon";
+import { MANIFEST_PATH } from "./main/services/install-metadata";
 import { cleanUrlsMiddleware } from "./main/services/routes/dev-clean-urls";
 import { serverPort } from "./main/services/server-port";
 
@@ -106,6 +108,17 @@ export default defineConfig({
         target: API_TARGET,
         changeOrigin: true,
       },
+      // The manifest and the app icons are answered by the Node server, which holds
+      // the app name and any custom icon. Left to the dev server they would be the
+      // built-in files in public/ — a manifest called "Stage Utility" whatever the
+      // operator named the app, and a custom icon that never shows. Matched exactly:
+      // a prefix would proxy /icon-192.png.map and the like.
+      ...Object.fromEntries(
+        [MANIFEST_PATH, ...Object.keys(ICON_ROUTES)].map((p) => [
+          `^${p.replace(/\./g, "\\.")}$`,
+          { target: API_TARGET, changeOrigin: true },
+        ]),
+      ),
     },
   },
 });
