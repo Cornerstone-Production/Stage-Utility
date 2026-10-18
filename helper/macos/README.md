@@ -542,7 +542,8 @@ log stream --level info --predicate 'subsystem == "com.stageutility.output"'
 It logs decisions and failures: an output appearing, going or switching, an answer from
 a server, a probe that could not be sent, a page that did not load (once per run of
 failures, with why, the address cut to its host and path, and what the output shows
-instead; again only if the reason changes) and the page loading again after it, health
+instead; again only if the reason changes, and once when the screen starts saying where
+to turn on Local Network access) and the page loading again after it, health
 posts refused or paused, a rotation applied, a foreign server's answer
 ignored, a state file that could not be read or saved. Chromium's own (category `cef`):
 whether it started, with its version and whether the sandbox is on, or why not; a page's

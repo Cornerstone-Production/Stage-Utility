@@ -30,6 +30,12 @@ public enum UnreachablePage {
     }
 
     public static let none = Evidence(serverAnswered: false, broadcastsBlocked: false)
+
+    /// From when the server last answered and when the loads began failing. An
+    /// answer from before the failures could be from a server switched off since.
+    public init(answeredAt: Date?, failingSince: Date, broadcastsBlocked: Bool) {
+      self.init(serverAnswered: (answeredAt ?? .distantPast) > failingSince, broadcastsBlocked: broadcastsBlocked)
+    }
   }
 
   public struct Content: Equatable {

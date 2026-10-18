@@ -54,8 +54,6 @@ final class SurfaceLoader {
   private var tracker = PageLoadTracker()
   private var requested: URL?
   private var reloadWork: DispatchWorkItem?
-  /// When the current run of failures began.
-  private var failingSince: Date?
 
   /// `navigate` starts the engine loading an address.
   init(label: String, navigate: @escaping @MainActor (URL) -> Void) {
@@ -92,29 +90,28 @@ final class SurfaceLoader {
   /// helper's own page for a failed load, even when its commit arrives after a
   /// reload has begun.
   func committed(_ url: URL) {
-    guard tracker.reportsCommit, url.scheme != "data" else { return }
+    guard tracker.reportsCommit(of: url) else { return }
     onCommitted?(url)
   }
 
   func finished() { apply(tracker.finished()) }
 
-  /// A navigation failed. Every Chromium net error is replaced on the screen by
-  /// `UnreachablePage`, whether or not it counts as a new failure (the one after a
-  /// 5xx does not): the browser host has hidden Chromium's own error page, which
-  /// prints the address and its token, and shows the browser again only when this
-  /// page commits. Not when the failure page itself failed: that would loop, and the
-  /// host stays black until the next load.
+  /// The failure page is up, or about to be: Chromium's error page may still be the
+  /// renderer's document, hidden on screen but not to a DevTools screenshot.
+  var showingFailurePage: Bool { tracker.showingFailurePage }
+
+  /// A navigation failed. A Chromium net error is replaced on the screen by
+  /// `UnreachablePage` (`PageLoadTracker.failed` says when).
   func failed(_ error: NSError) {
-    let wasShowingPage = tracker.showingFailurePage
-    let outcome = tracker.navigationFailed(error)
-    guard error.domain == PageLoadTracker.netErrorDomain, !wasShowingPage, let requested else {
-      return apply(outcome)
-    }
-    if case .failed(let f) = outcome, f.failures == 1 { failingSince = Date() }
+    let (outcome, showPage) = tracker.failed(error)
+    guard showPage, let requested else { return apply(outcome) }
     let page = UnreachablePage.content(
-      target: requested, netError: error.code, evidence: localNetworkEvidence?(failingSince ?? Date()) ?? .none)
+      target: requested, netError: error.code,
+      evidence: localNetworkEvidence?(tracker.failingSince ?? Date()) ?? .none)
     apply(outcome, note: page.logNote)
-    tracker.failurePageShown()
+    if page.localNetwork, tracker.localNetworkHintShown() {
+      Log.error(.output, "\(label): the server answers this output's probes but its page will not load; the output now says where to turn on Local Network access")
+    }
     navigate(UnreachablePage.url(page))
   }
 
@@ -142,7 +139,6 @@ final class SurfaceLoader {
       reloadWork = work
       DispatchQueue.main.asyncAfter(deadline: .now() + f.delay, execute: work)
     case .loaded(let afterFailures):
-      failingSince = nil
       if afterFailures > 0 { Log.notice(.output, "\(label): page loaded again after \(afterFailures) failures") }
       onLoadResult?(0)
     }

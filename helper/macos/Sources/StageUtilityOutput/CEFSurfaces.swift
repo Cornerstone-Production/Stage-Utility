@@ -175,6 +175,12 @@ final class CEFWindowedSurface: CEFPage, WebSurface {
       completion(nil, "no page has been loaded yet")
       return
     }
+    // A screenshot draws the renderer's document whatever the host hides, and in the
+    // moment after a failed load that is Chromium's error page, with the token.
+    if loader.showingFailurePage {
+      completion(nil, "no snapshot: the page did not load")
+      return
+    }
     let box = Unmanaged.passRetained(CaptureBox(completion)).toOpaque()
     api.pointee.devtools!(browser, "Page.captureScreenshot", #"{"format":"png"}"#, box) { ctx, json, length, error in
       let box = Unmanaged<CaptureBox>.fromOpaque(ctx!).takeRetainedValue()

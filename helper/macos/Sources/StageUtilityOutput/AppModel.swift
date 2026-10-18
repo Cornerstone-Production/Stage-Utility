@@ -622,7 +622,7 @@ final class AppModel: ObservableObject {
   /// answer from before could be a server switched off since), or every broadcast
   /// was refused.
   private func localNetworkEvidence(_ rt: Runtime, since: Date) -> UnreachablePage.Evidence {
-    .init(serverAnswered: (rt.answeredAt ?? .distantPast) > since, broadcastsBlocked: noteTable["local-network"] != nil)
+    .init(answeredAt: rt.answeredAt, failingSince: since, broadcastsBlocked: noteTable["local-network"] != nil)
   }
 
   private func clearLocalNetworkSuspicion() {

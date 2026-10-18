@@ -56,8 +56,8 @@ import Testing
   @Test func theLineIsShownForAnUnreachableLANServerThatIsUp() {
     #expect(hint("192.168.1.50:8788", -109))
     #expect(hint("10.0.0.5:8788", -109))
-    #expect(hint("172.20.1.1:8788", -109))
-    #expect(hint("169.254.3.4:8788", -109))
+    #expect(hint("172.20.1.1:8788", -109))  // hygiene-allow: a range test, not a host
+    #expect(hint("169.254.3.4:8788", -109))  // hygiene-allow: a range test, not a host
     #expect(hint("stage.local:8788", -109))
     #expect(hint("[fd00::5]:8788", -109))
     #expect(hint("[fe80::1]:8788", -109))
@@ -66,6 +66,16 @@ import Testing
       target: Self.target, netError: -109, evidence: .init(serverAnswered: true, broadcastsBlocked: false))
     #expect(UnreachablePage.lines(content).contains(UnreachablePage.localNetworkLine))
     #expect(shown(content)[0].contains("System Settings &gt; Privacy &amp; Security &gt; Local Network"))
+  }
+
+  /// An answer counts only from after the loads began failing: one from before could
+  /// be from a server switched off since.
+  @Test func anAnswerCountsOnlyAfterTheFailuresBegan() {
+    let began = Date(timeIntervalSince1970: 1_000)
+    #expect(UnreachablePage.Evidence(answeredAt: began.addingTimeInterval(5), failingSince: began, broadcastsBlocked: false).serverAnswered)
+    #expect(!UnreachablePage.Evidence(answeredAt: began.addingTimeInterval(-5), failingSince: began, broadcastsBlocked: false).serverAnswered)
+    #expect(!UnreachablePage.Evidence(answeredAt: nil, failingSince: began, broadcastsBlocked: false).serverAnswered)
+    #expect(UnreachablePage.Evidence(answeredAt: nil, failingSince: began, broadcastsBlocked: true).broadcastsBlocked)
   }
 
   /// A server switched off on the same subnet gives the same error. With nothing
@@ -82,7 +92,7 @@ import Testing
   /// local network.
   @Test func theLineIsOnlyForTheLocalNetwork() {
     for host in ["127.0.0.1:8788", "[::1]:8788", "localhost:8788", "203.0.113.5:8788", "172.32.0.1:8788",
-      "192.169.0.1:8788", "100.64.0.1:8788", "[2001:db8::1]:8788", "stage.example.com:8788"]
+      "192.169.0.1:8788", "100.64.0.1:8788", "[2001:db8::1]:8788", "stage.example.com:8788"]  // hygiene-allow: range tests, not hosts
     {
       #expect(!hint(host, -109), "\(host)")
     }

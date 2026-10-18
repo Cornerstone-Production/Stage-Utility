@@ -24,6 +24,10 @@ public struct PageLoadTracker: Equatable {
   public private(set) var showingFailurePage = false
   /// The reason last written to the log in this run of failures.
   private var loggedReason: String?
+  /// When the current run of failures began; nil while the page is up.
+  public private(set) var failingSince: Date?
+  /// The failure page has said where to turn on Local Network access in this run.
+  private var localNetworkHintLogged = false
 
   public struct Failure: Equatable {
     public var failures: Int
@@ -48,8 +52,14 @@ public struct PageLoadTracker: Equatable {
   /// A new address was asked for: nothing from the old one carries over.
   public mutating func reset() {
     failures = 0
-    loggedReason = nil
+    endRun()
     loadStarted()
+  }
+
+  private mutating func endRun() {
+    loggedReason = nil
+    failingSince = nil
+    localNetworkHintLogged = false
   }
 
   /// A load (or a reload) begins.
@@ -59,12 +69,32 @@ public struct PageLoadTracker: Equatable {
     showingFailurePage = false
   }
 
-  /// The helper's own page for the failure is being shown in the browser.
-  public mutating func failurePageShown() { showingFailurePage = true }
+  /// Whether a page that committed at `url` is one to report: not a 5xx's, and not
+  /// the helper's own failure page, even when its commit arrives after a reload has
+  /// begun (a `data:` address is never the server's).
+  public func reportsCommit(of url: URL) -> Bool { !responseFailed && !showingFailurePage && url.scheme != "data" }
 
-  /// Whether a page that committed is one to report: not a 5xx's, and not the
-  /// helper's own failure page.
-  public var reportsCommit: Bool { !responseFailed && !showingFailurePage }
+  /// A navigation failed: what it counts as, and whether the helper's failure page
+  /// replaces it on the screen. Every Chromium net error is replaced, whether or not
+  /// it counts as a new failure (the one after a 5xx does not), because the browser
+  /// host has hidden Chromium's own error page and shows the browser again only when
+  /// a page commits. Not when the failure page itself failed: that would loop.
+  public mutating func failed(_ error: NSError) -> (outcome: Outcome, showFailurePage: Bool) {
+    let wasShowing = showingFailurePage
+    let outcome = navigationFailed(error)
+    let show = error.domain == Self.netErrorDomain && !wasShowing
+    if show { showingFailurePage = true }
+    return (outcome, show)
+  }
+
+  /// The failure page says where to turn on Local Network access: true the first
+  /// time in a run of failures, so it is logged once (the failure's own line may
+  /// already have been written without it).
+  public mutating func localNetworkHintShown() -> Bool {
+    if localNetworkHintLogged { return false }
+    localNetworkHintLogged = true
+    return true
+  }
 
   /// The main frame's response arrived with this HTTP status.
   public mutating func responded(status: Int) -> Outcome {
@@ -84,7 +114,7 @@ public struct PageLoadTracker: Equatable {
     }
     let ended = failures
     failures = 0
-    loggedReason = nil
+    endRun()
     return .loaded(afterFailures: ended)
   }
 
@@ -123,6 +153,7 @@ public struct PageLoadTracker: Equatable {
 
   private mutating func fail(_ reason: String) -> Outcome {
     failures += 1
+    if failures == 1 { failingSince = Date() }
     let log = reason != loggedReason
     if log { loggedReason = reason }
     return .failed(

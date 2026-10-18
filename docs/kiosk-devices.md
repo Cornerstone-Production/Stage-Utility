@@ -208,8 +208,9 @@ rather than running them.
 - answer the **Local Network** prompt the first time the helper opens ("Allow Stage
   Utility Output to find devices on local networks?"). Without it the helper cannot
   find the server or load its pages, and says so in its own window and on each output.
-  It is the helper's one entry in System Settings > Privacy & Security > Local Network,
-  and an update keeps the answer;
+  It is the helper's one entry in System Settings > Privacy & Security > Local Network.
+  macOS keeps the answer by bundle id, and the logs on a Mac running the helper show it
+  kept across an update;
 - check **Lock Screen**: require a password after the screen saver or display off is
   *Never*, and the screen saver and display-off times read *Never*. The installer sets
   them where macOS accepts it, and a managed Mac may not.
@@ -465,7 +466,8 @@ Security > Local Network. A server on the same Mac does not need it.
 and keeps trying (after 2, 4, 8, 16, then every 30 s). It never shows Chromium's error
 page, which printed the whole address, the output's secret token included. When the
 failure looks like Local Network access being off (no route to a server on the local
-network that has answered the helper's probes since, or every broadcast refused), a second line says
+network that has answered this output's probes since its loads began failing, or every
+broadcast probe refused), a second line says
 where to turn it on. The helper's log has one line per run of failures, with the error.
 
 **Replacing an output's token.** If an output's token has been seen (an older helper

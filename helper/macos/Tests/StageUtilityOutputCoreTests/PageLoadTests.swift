@@ -114,21 +114,61 @@ import Testing
   /// reported, and neither is a load.
   @Test func theFailurePageIsNotThePageComingBack() {
     var t = PageLoadTracker()
+    let page = URL(string: "data:text/html;base64,AA==")!
     for n in 1...3 {
       t.loadStarted()
-      #expect(failure(t.navigationFailed(NSError(domain: "net", code: -109)))?.failures == n)
-      t.failurePageShown()
-      #expect(!t.reportsCommit)
+      let (outcome, show) = t.failed(NSError(domain: "net", code: -109))
+      #expect(failure(outcome)?.failures == n)
+      #expect(show)
+      #expect(!t.reportsCommit(of: page))
       #expect(t.responded(status: 0) == .none)
       #expect(t.finished() == .none)  // the failed navigation's
       #expect(t.finished() == .none)  // the failure page's
-      #expect(t.navigationFailed(NSError(domain: "net", code: -2)) == .none)
+      // The failure page itself failing is not a failure, and not shown again.
+      let again = t.failed(NSError(domain: "net", code: -2))
+      #expect(again.outcome == .none && !again.showFailurePage)
     }
     #expect(t.failures == 3)
-    // The retry is a new load: it reports again.
+    // The retry is a new load: it reports again, but never a late data: commit.
     t.loadStarted()
-    #expect(t.reportsCommit)
+    #expect(t.reportsCommit(of: URL(string: "http://192.0.2.10:8788/display-1")!))
+    #expect(!t.reportsCommit(of: page))
     #expect(t.finished() == .loaded(afterFailures: 3))
+  }
+
+  /// Chromium reports a 5xx and then, for a page with no body, a net error for the
+  /// same navigation. It is one failure, but the host has blanked for the net error,
+  /// so the failure page must still go up or the output stays dark until the retry.
+  @Test func theNetErrorAfterAFiveHundredStillShowsTheFailurePage() {
+    var t = PageLoadTracker()
+    #expect(failure(t.responded(status: 503))?.failures == 1)
+    let (outcome, show) = t.failed(NSError(domain: "net", code: -379))
+    #expect(outcome == .none)
+    #expect(show)
+    // A cancel is not a net error: nothing to replace.
+    t.loadStarted()
+    let cancelled = t.failed(NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled))
+    #expect(cancelled.outcome == .none && !cancelled.showFailurePage)
+  }
+
+  /// The run's start, which the Local Network evidence is measured from, and the
+  /// hint logged once per run.
+  @Test func aRunRemembersWhenItBeganAndLogsTheHintOnce() {
+    var t = PageLoadTracker()
+    #expect(t.failingSince == nil)
+    _ = t.failed(NSError(domain: "net", code: -109))
+    let began = t.failingSince
+    #expect(began != nil)
+    t.loadStarted()
+    _ = t.failed(NSError(domain: "net", code: -109))
+    #expect(t.failingSince == began)
+    let first = t.localNetworkHintShown(), second = t.localNetworkHintShown()
+    #expect(first && !second)
+    t.loadStarted()
+    _ = t.finished()
+    #expect(t.failingSince == nil)
+    let nextRun = t.localNetworkHintShown()
+    #expect(nextRun)
   }
 
   /// A run of failures is written once, and again only when its reason changes: a
