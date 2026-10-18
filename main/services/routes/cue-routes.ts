@@ -151,6 +151,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
   // ── Home Assistant config ─────────────────────────────────────────────────
 
   if (method === "GET" && pathname === "/api/cues/home-assistant.yaml") {
+    automationEngine.assertRulesRead();
     // Open, like every other read here. It contains cue names — which
     // GET /api/automation/rules already serves to anyone on the LAN — and refers
     // to the token as `!secret stage_utility_token`, never by value.
@@ -169,6 +170,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "GET" && pathname === "/api/cues/states") {
+    automationEngine.assertRulesRead();
     // Open, like the YAML and the token list: it carries cue names, the
     // Companion variable names the operator chose, and on/off. Gating it would
     // need a header a same-origin GET does not send, and the thing polling it
@@ -182,6 +184,10 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "GET" && pathname === "/api/cues/manifest") {
+    // Fails rather than answering from rules that could not be read: Home
+    // Assistant removes the entity of every cue a manifest leaves out, and
+    // marks them unavailable on a failure instead. Same for states and YAML.
+    automationEngine.assertRulesRead();
     // Open, like the states route, the YAML and the token list. It carries cue
     // names, room names, on/off and this server's own LAN address — all of
     // which GET /api/automation/rules and GET /api/version already serve to
