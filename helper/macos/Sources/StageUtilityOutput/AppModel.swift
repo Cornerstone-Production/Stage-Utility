@@ -349,9 +349,9 @@ final class AppModel: ObservableObject {
       guard let self, let rt else { return }
       self.pageMoved(rt, to: url)
     }
-    sink.surface.localNetworkEvidence = { [weak self, weak rt] in
+    sink.surface.localNetworkEvidence = { [weak self, weak rt] since in
       guard let self, let rt else { return .none }
-      return self.localNetworkEvidence(rt)
+      return self.localNetworkEvidence(rt, since: since)
     }
 
     // With a `server` file the page loads from it at once and the probes go to that
@@ -617,15 +617,12 @@ final class AppModel: ObservableObject {
     setNote("local-network", LocalNetworkAccess.windowMessage)
   }
 
-  /// How long an answer from the server counts as the server being up, for the
-  /// page shown when a load fails: three probe intervals once it has answered.
-  static let answerFreshFor: TimeInterval = 3 * ProbeSchedule.interval(unanswered: 0, answered: true)
-
   /// What says a failed load is Local Network access rather than the server being
-  /// off: the server answered this output lately, or every broadcast was refused.
-  private func localNetworkEvidence(_ rt: Runtime) -> UnreachablePage.Evidence {
-    let answered = rt.answeredAt.map { Date().timeIntervalSince($0) < AppModel.answerFreshFor } ?? false
-    return .init(serverAnswered: answered, broadcastsBlocked: noteTable["local-network"] != nil)
+  /// off: the server answered this output's probe after the loads began failing (an
+  /// answer from before could be a server switched off since), or every broadcast
+  /// was refused.
+  private func localNetworkEvidence(_ rt: Runtime, since: Date) -> UnreachablePage.Evidence {
+    .init(serverAnswered: (rt.answeredAt ?? .distantPast) > since, broadcastsBlocked: noteTable["local-network"] != nil)
   }
 
   private func clearLocalNetworkSuspicion() {

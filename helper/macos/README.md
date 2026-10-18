@@ -245,8 +245,9 @@ ERR_ADDRESS_UNREACHABLE ("No route to host"), the server's address is on the loc
 network (a private or link-local address, or a `.local` name), and something says the
 server is not simply switched off, a second line says where to turn Local Network
 access on (see [Local Network permission](#local-network-permission)). That something
-is the server having answered this output's probe in the last 90 s, or every broadcast
-probe having been refused. A server switched off on the same subnet gives the same
+is the server having answered this output's probe since its loads began failing (probes
+go on every 30 s, so the line can appear from the second or third retry), or every
+broadcast probe having been refused. A server switched off on the same subnet gives the same
 error and neither holds, so it gets the first line only. The retries go on underneath;
 the screen goes when the page loads.
 

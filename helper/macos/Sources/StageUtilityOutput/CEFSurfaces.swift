@@ -96,7 +96,7 @@ class CEFPage {
     get { loader.onProcessGone }
     set { loader.onProcessGone = newValue }
   }
-  var localNetworkEvidence: (@MainActor () -> UnreachablePage.Evidence)? {
+  var localNetworkEvidence: (@MainActor (_ since: Date) -> UnreachablePage.Evidence)? {
     get { loader.localNetworkEvidence }
     set { loader.localNetworkEvidence = newValue }
   }

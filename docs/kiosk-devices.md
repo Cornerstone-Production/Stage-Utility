@@ -465,7 +465,7 @@ Security > Local Network. A server on the same Mac does not need it.
 and keeps trying (after 2, 4, 8, 16, then every 30 s). It never shows Chromium's error
 page, which printed the whole address, the output's secret token included. When the
 failure looks like Local Network access being off (no route to a server on the local
-network that has answered the helper, or every broadcast refused), a second line says
+network that has answered the helper's probes since, or every broadcast refused), a second line says
 where to turn it on. The helper's log has one line per run of failures, with the error.
 
 **Replacing an output's token.** If an output's token has been seen (an older helper

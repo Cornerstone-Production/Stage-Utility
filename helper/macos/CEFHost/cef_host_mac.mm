@@ -190,15 +190,18 @@ class Client : public CefClient,
 
   // CefLoadHandler
   void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType) override {
-    // CEF calls this only for a page that committed without an error, so whatever
-    // is on the screen now is the app's to show.
-    if (frame->IsMain()) Blank(browser, false);
-    if (detached_ || !frame->IsMain() || !events_.committed) return;
+    if (!frame->IsMain()) return;
     // The entry on screen now is the one that committed, with its response status.
     int status = 0;
     if (CefRefPtr<CefNavigationEntry> entry = browser->GetHost()->GetVisibleNavigationEntry())
       status = entry->GetHttpStatusCode();
     std::string url = frame->GetURL().ToString();
+    // A page committed, and it is the app's to show, unless it is Chromium's error
+    // page for the load that just failed: that carries the failed address and no
+    // HTTP status (CEF documents OnLoadStart with OnLoadError for a failure after
+    // commit). The same address answered by the server has a status.
+    if (!(blanked_ && status == 0 && url == failed_url_)) Blank(browser, false);
+    if (detached_ || !events_.committed) return;
     events_.committed(events_.context, url.c_str(), status);
   }
 
@@ -214,7 +217,10 @@ class Client : public CefClient,
     // is shown. The app loads its own page in its place from `failed`, and that
     // page's commit (OnLoadStart) shows the browser again. ERR_ABORTED commits no
     // error page: it is a load replaced by another.
-    if (frame->IsMain() && code != ERR_ABORTED) Blank(browser, true);
+    if (frame->IsMain() && code != ERR_ABORTED) {
+      failed_url_ = failed_url.ToString();
+      Blank(browser, true);
+    }
     if (detached_ || !frame->IsMain() || !events_.failed) return;
     std::string t = text.ToString(), u = failed_url.ToString();
     events_.failed(events_.context, static_cast<int>(code), t.c_str(), u.c_str());
@@ -328,6 +334,8 @@ class Client : public CefClient,
   su_browser_events events_;
   bool windowless_;
   std::atomic<bool> blanked_{false};
+  // The address whose load failed last, while blanked: its error page must not unblank.
+  std::string failed_url_;
   std::atomic<int> width_, height_;
   bool detached_ = false;
   CefRefPtr<CefRegistration> registration_;

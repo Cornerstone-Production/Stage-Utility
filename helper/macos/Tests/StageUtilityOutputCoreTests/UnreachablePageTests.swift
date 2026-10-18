@@ -32,6 +32,7 @@ import Testing
       #expect(!text.contains("mac-1"))
       #expect(!text.contains("/enroll"))
     }
+    #expect(!content.logNote.contains(Self.token) && content.logNote.contains("Can't reach 192.168.1.50:8788"))
     let html = shown(content)[0]
     #expect(html.contains("Can't reach 192.168.1.50:8788"))
   }

@@ -17,8 +17,8 @@ public enum UnreachablePage {
   /// What macOS's Local Network privacy has to do with a failure, as far as the
   /// helper can tell from the rest of the app.
   public struct Evidence: Equatable {
-    /// The server answered this output's discovery probe lately: it is up, and the
-    /// app reaches it.
+    /// The server answered this output's discovery probe since the loads began
+    /// failing: it is up, and the app reaches it.
     public var serverAnswered: Bool
     /// Every broadcast probe failed with "No route to host": the app's own Local
     /// Network access is likely off (`LocalNetworkAccess`).
@@ -37,6 +37,11 @@ public enum UnreachablePage {
     public var headline: String
     /// Whether to say where Local Network access is turned on.
     public var localNetwork: Bool
+
+    /// The end of the failure's log line: what the output shows instead.
+    public var logNote: String {
+      "; the output shows \"\(headline)\"" + (localNetwork ? " and where to turn on Local Network access" : "")
+    }
   }
 
   public static let localNetworkLine =
