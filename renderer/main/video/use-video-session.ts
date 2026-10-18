@@ -256,6 +256,9 @@ export function startPlaybackAttempt(
 
   /** Why the browser refused play(), so the first-frame deadline can name it. */
   let playRefused: string | null = null;
+  /** Re-asks after an AbortError, at most this many times per attempt: each
+   *  one answers a reload, and an element aborting every ask must not spin. */
+  let playRetriesLeft = 3;
   /**
    * Starts playback as soon as a source is attached instead of leaving it to
    * the element's `autoplay`: Safari's autoplay waits for HAVE_ENOUGH_DATA,
@@ -264,10 +267,12 @@ export function startPlaybackAttempt(
    * see "Measuring playback" in docs/integrations/video-feeds.md.
    *
    * A refused play() is not an outcome by itself; the first-frame deadline
-   * decides that and names the refusal. An AbortError is not a refusal (the
-   * source changed under a pending play() and playback continues on the new
-   * one), so it is not recorded. Called through a promise so that a throwing
-   * or promise-less play() can never end the attempt.
+   * decides that and names the refusal. An AbortError is not a refusal: the
+   * source was reloaded under a pending play() (hls.js recovering a media
+   * error does this), which leaves the element paused, so play() is asked
+   * again rather than leaving the new source to Safari's autoplay. Called
+   * through a promise so that a throwing or promise-less play() can never end
+   * the attempt.
    */
   const startPlaying = () => {
     Promise.resolve()
@@ -275,7 +280,10 @@ export function startPlaybackAttempt(
       .catch((err: unknown) => {
         if (ended) return;
         const name = err instanceof Error ? err.name : "";
-        if (name === "AbortError") return;
+        if (name === "AbortError") {
+          if (playRetriesLeft-- > 0) startPlaying();
+          return;
+        }
         playRefused = name && name !== "Error" ? `${name}: ${errorMessage(err)}` : errorMessage(err);
       });
   };
@@ -326,7 +334,9 @@ export function startPlaybackAttempt(
         // "connected" with no frame is no less stuck than one that never did.
         connectTimer = setTimeout(() => {
           if (gotFirstFrame) return;
-          const why = whep.pc.connectionState === "connected" ? noFrame("connected, but no frame ever arrived") : "never connected after a successful handshake";
+          // A refused play() is named only by the first-frame deadline, the
+          // path a session takes once its "connected" event arrives.
+          const why = whep.pc.connectionState === "connected" ? "connected, but no frame ever arrived" : "never connected after a successful handshake";
           webrtcUnusable(why);
         }, CONNECT_TIMEOUT_MS);
         whep.pc.addEventListener(

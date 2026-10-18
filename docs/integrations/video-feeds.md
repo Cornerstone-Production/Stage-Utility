@@ -414,10 +414,10 @@ the player depends on what the browser has:
 
 | Browser | HLS player |
 |---|---|
-| Chrome, Firefox, Edge | hls.js, on Media Source Extensions |
+| Chrome, Firefox, Edge on a computer or Android | hls.js, on Media Source Extensions |
 | Safari on macOS, Safari on iPadOS | hls.js, on Media Source Extensions |
-| Safari on iPhone, iOS 17.1 or later | hls.js, on Managed Media Source |
-| Safari on iPhone before iOS 17.1 | Safari's own HLS player |
+| Any browser on iPhone, iOS 17.1 or later | hls.js, on Managed Media Source |
+| Any browser on iPhone before iOS 17.1 | Safari's own HLS player |
 
 The widget starts the picture itself as soon as the browser can play it,
 rather than leaving that to the browser's autoplay, which in Safari waits
@@ -427,14 +427,15 @@ low-latency HLS).
 Send the encoder's full frame rate, 59.94 or 60, rather than a setting that
 halves it to 30 (some encoders call it Auto). On a 60 Hz screen Safari
 sometimes shows a 30 fps picture with an uneven cadence, alternating short
-and long frames, which reads as judder; at 59.94 or 60 it shows every frame
-evenly. Chrome and Firefox show either rate evenly.
+and long frames, which reads as judder: in half the sessions measured,
+and in the worst more than half its frames were held a refresh too short or
+too long. At 59.94 it stayed as close to even as Chrome does at either
+rate.
 
 ### Measuring playback
 
-What a unit test cannot see, a browser has to: jsdom plays nothing, so
-playback timing and cadence are measured on a running server instead, the
-same way as a stutter reported on a real device:
+Playback timing and cadence are measured in a browser on a running server,
+the same way as a stutter reported on a real device:
 
 - **Cadence**: `requestVideoFrameCallback` on the widget's `<video>`, the
   wall-clock interval between presented frames as a histogram. An even
@@ -649,11 +650,13 @@ password in an SRT `streamid` are all stripped.
 Each screen writes its own `[video]` lines from the browser:
 
 - A feed failing on a screen, once per failing streak: its first failure and
-  the reason (a picture that never arrived because the browser refused to
-  start it says so, in the browser's own words), a reminder at most every 5
-  minutes while it goes on failing (with how many attempts and for how
-  long), and a line when it is playing again after holding for 10 seconds. Individual retries are not logged; the
+  the reason, a reminder at most every 5 minutes while it goes on failing
+  (with how many attempts and for how long), and a line when it is playing
+  again after holding for 10 seconds. Individual retries are not logged; the
   browser console shows each one, with its delay, at the Verbose level.
+- When a picture never arrived because the browser refused to start it, the
+  reason on that line, or on the WebRTC fallback line below, ends with the
+  browser's own words.
 - A relay feed falling back to HLS on a screen because WebRTC did not carry
   it there, once per outage, and a line when WebRTC is carrying it again.
   Its retries every 5 minutes are not logged.

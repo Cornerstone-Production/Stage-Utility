@@ -1660,41 +1660,50 @@ test("an HLS frame is the delayed phase, with hls.js's latency rounded for the b
 // prove the call; the timing it buys exists only in a browser, and is
 // measured there (docs/integrations/video-feeds.md, "Measuring playback").
 
+// Each stops its attempt in `finally`: an attempt left running keeps its
+// frame-count poll (a real setInterval) alive, and a failed assertion would
+// then hang the runner instead of reporting.
+
+const HLS = { method: "hls", url: "/video/p/index.m3u8" } as const;
+const WHEP = { method: "webrtc", url: "/video/p/whep", relayManaged: true } as const;
+const refused = () => Promise.reject(new DOMException("The request is not allowed by the user agent", "NotAllowedError"));
+const REFUSAL = "the browser refused to play (NotAllowedError: The request is not allowed by the user agent)";
+
 test("an hls.js attempt calls play() once hls.js has the element, without waiting on autoplay", async () => {
   const undoHls = installFakeHls();
   const video = new FakeVideo();
-  const { cb } = makeCallbacks();
+  const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, HLS, makeCallbacks().cb);
   try {
-    const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "hls", url: "/video/p/index.m3u8" }, cb);
     await flush();
     assert.deepEqual(FakeHls.last!.calls, ["loadSource /video/p/index.m3u8", "attachMedia"]);
     assert.equal(video.playCalls, 1, "the attempt must start playback itself");
-    attempt.stop();
   } finally {
+    attempt.stop();
     undoHls();
   }
 });
 
 test("a native HLS attempt calls play() once its source is set", async () => {
   const video = new FakeVideo();
-  const { cb } = makeCallbacks();
-  const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "hls", url: "/video/p/index.m3u8" }, cb);
-  await flush();
-  assert.equal(video.src, "/video/p/index.m3u8", "expected the native branch (Node has no MediaSource)");
-  assert.equal(video.playCalls, 1, "the attempt must start playback itself");
-  attempt.stop();
+  const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, HLS, makeCallbacks().cb);
+  try {
+    await flush();
+    assert.equal(video.src, "/video/p/index.m3u8", "expected the native branch (Node has no MediaSource)");
+    assert.equal(video.playCalls, 1, "the attempt must start playback itself");
+  } finally {
+    attempt.stop();
+  }
 });
 
 test("a WebRTC attempt calls play() once the answer is applied", async () => {
   const g = stubGlobals("succeed");
   const video = new FakeVideo();
-  const { cb } = makeCallbacks();
+  const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, WHEP, makeCallbacks().cb);
   try {
-    const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
     await flush();
     assert.equal(video.playCalls, 1, "the attempt must start playback itself");
-    attempt.stop();
   } finally {
+    attempt.stop();
     g.restore();
   }
 });
@@ -1702,16 +1711,15 @@ test("a WebRTC attempt calls play() once the answer is applied", async () => {
 test("a play() the browser refuses is named when no frame arrives over HLS", async () => {
   mock.timers.enable({ apis: ["setTimeout"] });
   const video = new FakeVideo();
-  video.playAnswer = () => Promise.reject(new DOMException("The request is not allowed by the user agent", "NotAllowedError"));
+  video.playAnswer = refused;
   const { calls, cb } = makeCallbacks();
+  const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, HLS, cb);
   try {
-    startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "hls", url: "/video/p/index.m3u8" }, cb);
     await flush();
     mock.timers.tick(HLS_FIRST_FRAME_TIMEOUT_MS);
-    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [
-      { fn: "onDropped", arg: "no frame arrived over HLS; the browser refused to play (NotAllowedError: The request is not allowed by the user agent)" },
-    ]);
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [{ fn: "onDropped", arg: `no frame arrived over HLS; ${REFUSAL}` }]);
   } finally {
+    attempt.stop();
     mock.timers.reset();
   }
 });
@@ -1720,34 +1728,37 @@ test("a play() the browser refuses is named when a connected WebRTC session show
   const g = stubGlobals("succeed");
   mock.timers.enable({ apis: ["setTimeout"] });
   const video = new FakeVideo();
-  video.playAnswer = () => Promise.reject(new DOMException("The request is not allowed by the user agent", "NotAllowedError"));
+  video.playAnswer = refused;
   const { calls, cb } = makeCallbacks();
+  const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, WHEP, cb);
   try {
-    startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
     await flush();
     FakePeerConnection.instances[0]!.setConnectionState("connected");
     mock.timers.tick(FIRST_FRAME_TIMEOUT_MS);
     await flush();
     assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [
-      { fn: "onWebrtcUnusable", arg: "connected, but no frame ever arrived; the browser refused to play (NotAllowedError: The request is not allowed by the user agent)" },
+      { fn: "onWebrtcUnusable", arg: `connected, but no frame ever arrived; ${REFUSAL}` },
     ]);
   } finally {
+    attempt.stop();
     mock.timers.reset();
     g.restore();
   }
 });
 
-test("a play() interrupted by a source change is not named as a refusal", async () => {
+test("a play() interrupted by a source change is asked again, a bounded number of times, and never named as a refusal", async () => {
   mock.timers.enable({ apis: ["setTimeout"] });
   const video = new FakeVideo();
   video.playAnswer = () => Promise.reject(new DOMException("The play() request was interrupted by a new load request", "AbortError"));
   const { calls, cb } = makeCallbacks();
+  const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, HLS, cb);
   try {
-    startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "hls", url: "/video/p/index.m3u8" }, cb);
     await flush();
+    assert.equal(video.playCalls, 4, "an interrupted play() leaves the element paused: asked once, then three more times");
     mock.timers.tick(HLS_FIRST_FRAME_TIMEOUT_MS);
     assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [{ fn: "onDropped", arg: "no frame arrived over HLS" }]);
   } finally {
+    attempt.stop();
     mock.timers.reset();
   }
 });
