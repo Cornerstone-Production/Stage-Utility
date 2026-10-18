@@ -204,7 +204,7 @@ describe("Fire a cue", () => {
     assert.deepEqual(configs.at(-1), { type: "cue-button", cue: "stage_reset", label: "Lights", showDevice: true });
   });
 
-  test("offers + New manual cue… as a link to the Automation page's creation flow", () => {
+  test("offers + New manual cue… as a link to /automation?new=manual, in a new tab", () => {
     const { container } = mount({ type: "cue-button", cue: "", showDevice: true });
     const link = [...container.querySelectorAll("a")].find((a) => a.textContent === "+ New manual cue…");
     assert.ok(link, "no + New manual cue… link");

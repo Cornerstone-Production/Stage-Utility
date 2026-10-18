@@ -505,7 +505,7 @@ See [OSC](../integrations/osc.md) and [RossTalk](../integrations/rosstalk.md).
 A button's label is centred on it, in the middle both ways, and wraps inside it
 with a margin on every side. A word longer than the button breaks, and text that
 still does not fit is clipped at the button's edge rather than drawn over its
-neighbours. The OSC, RossTalk, action and cue buttons all draw it the same way.
+neighbours. The OSC button, the RossTalk button and both kinds of Button draw it the same way.
 
 **Button** is one widget with a **Does** choice at the top of its settings.
 
@@ -564,8 +564,8 @@ after the button's label (the action's name when the label is blank), with a
 name — a name ending `_on` or `_off` gets `_cue` added, because a lone one would
 read as half of an ON/OFF pair and never appear in the list. It is saved enabled,
 with a **Cooldown** of 2 seconds, **Allowed during a service** on and **Home
-Assistant** off; change any of that on the Automation page. A cue obeys what an
-action button does not: Simulate mode (the button then says it sent nothing),
+Assistant** off; change any of that on the Automation page. A cue obeys what a Button
+set to Run an action does not: Simulate mode (the button then says it sent nothing),
 Disarm, the cooldown, and the service guard if it is switched back on. If the server
 refuses the rule, the button is left as it was and the reason is shown under the
 button.
