@@ -309,13 +309,13 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    */
   forget(serviceKey: string): boolean {
     const wasUnsaved = this.unsaved.delete(serviceKey);
-    if (this.currentKey !== serviceKey && this.current?.serviceKey !== serviceKey) {
-      if (wasUnsaved) this.generation += 1;
-      return wasUnsaved;
+    const wasCurrent = this.currentKey === serviceKey || this.current?.serviceKey === serviceKey;
+    if (wasCurrent) {
+      this.cancelPersist();
+      this.current = null;
+      this.currentKey = null;
     }
-    this.cancelPersist();
-    this.current = null;
-    this.currentKey = null;
+    if (!wasCurrent && !wasUnsaved) return false;
     this.generation += 1;
     return true;
   }
@@ -351,13 +351,11 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   /**
    * Save a record this recorder has just closed. Never throws.
    *
-   * Every close is on the live tick, and a write that throws there stops more
-   * than the write. At a split it threw before the switch to the next record,
-   * so every later tick took the same path and threw again, and the next
-   * service went unrecorded until the disk recovered. On leaving item mode it
-   * skipped the close broadcast. So a failed save is logged, the record is
-   * held here, and the save is retried every persistDebounceMs until it lands.
-   * Held in memory only: a restart before then loses it, and the log says so.
+   * Every close is on the live tick: a write that threw at the split left
+   * currentKey unchanged, so every later tick threw again and the next service
+   * went unrecorded. A failed save is logged, the record is held here, and the
+   * save is retried every persistDebounceMs. Held in memory only: a restart
+   * before it lands loses it, and the log says so.
    */
   protected async saveClosed(record: T): Promise<void> {
     try {

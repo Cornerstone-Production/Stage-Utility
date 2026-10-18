@@ -13,7 +13,7 @@
 // see service-recorder-split-broadcast.test.ts for the shape of the tick.
 
 import assert from "node:assert/strict";
-import { describe, it, beforeEach, afterEach, mock } from "node:test";
+import { describe, it, beforeEach, afterEach, mock, type TestContext } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -30,6 +30,7 @@ const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js
 const { splRecorder } = await import("./spl-recorder.js");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
 const { addBroadcastListener } = await import("./broadcaster.js");
+const { captureConsole } = await import("./fixtures/capture-console.js");
 
 type Rec = { serviceKey: string; endedAt: string | null };
 type Held = {
@@ -115,12 +116,15 @@ async function setWritable(writable: boolean): Promise<void> {
   }
 }
 
-/** Fire every retry timer, then let the real file writes they start finish.
- *  Only setTimeout and Date are mocked, so setImmediate still yields to I/O. */
+/** One turn of the event loop. Only setTimeout and Date are mocked, so this
+ *  still yields to real file I/O. */
+const settle = () => new Promise((r) => setImmediate(r));
+
+/** Fire every retry timer, then let the real file writes they start finish. */
 async function runRetries(until: () => Promise<boolean>): Promise<void> {
   mock.timers.tick(PAST_EVERY_RETRY_MS);
   const deadline = performance.now() + 5_000;
-  while (!(await until()) && performance.now() < deadline) await new Promise((r) => setImmediate(r));
+  while (!(await until()) && performance.now() < deadline) await settle();
 }
 
 const asRoot = process.getuid?.() === 0;
@@ -128,13 +132,13 @@ const asRoot = process.getuid?.() === 0;
 describe("a failed save at the service split", { skip: asRoot && "chmod does not stop root writing" }, () => {
   let planId = "";
   let n = 0;
-  const errors: string[] = [];
-  const logs: string[] = [];
+  let errors: string[] = [];
+  let logs: string[] = [];
 
-  beforeEach(async () => {
+  beforeEach(async (t) => {
     mock.timers.enable({ apis: ["Date", "setTimeout"] });
-    mock.method(console, "error", (...args: unknown[]) => errors.push(args.map(String).join(" ")));
-    mock.method(console, "log", (...args: unknown[]) => logs.push(args.map(String).join(" ")));
+    errors = captureConsole(t as TestContext, "error");
+    logs = captureConsole(t as TestContext, "log");
     planId = `plan-${++n}`;
     (stageController as unknown as { getState(): unknown }).getState = () => ({
       serviceTypeId: "75953",
@@ -149,8 +153,6 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
       rec.lastLiveAt = 0;
     }
     pushes = [];
-    errors.length = 0;
-    logs.length = 0;
     await setWritable(true);
   });
 
@@ -163,7 +165,6 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
       rec.currentKey = null;
     }
     mock.timers.reset();
-    mock.restoreAll();
   });
 
   it("opens the next service's record on the same tick, and saves the outgoing one once it can", async () => {
@@ -252,7 +253,8 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
 
     await setWritable(true);
     mock.timers.tick(PAST_EVERY_RETRY_MS);
-    for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+    // Absence can only be shown by waiting; 50 turns is far past a file write.
+    for (let i = 0; i < 50; i++) await settle();
     for (const { name, dir } of RECORDERS) {
       assert.equal(await readRecord(dir, key1), null, `${name}: wrote a forgotten record back`);
     }
