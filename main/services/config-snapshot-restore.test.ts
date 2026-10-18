@@ -262,3 +262,26 @@ describe("a hand-edited id floor cannot abort a restore half-written", () => {
     );
   });
 });
+
+// A backup left out what it could not read and reported success, and the
+// scheduler then pruned the older copies that still held it.
+describe("a backup of a config store that cannot be read", () => {
+  const file = path.join(TMP, TARGET);
+
+  afterEach(async () => {
+    await fs.rm(file, { recursive: true, force: true });
+  });
+
+  it("fails, rather than leaving the store out", async () => {
+    await fs.rm(file, { recursive: true, force: true });
+    // A directory where the file should be fails the read for root as well.
+    await fs.mkdir(file);
+    await assert.rejects(configSnapshot.build(), { name: "StoreReadError", code: "EISDIR" });
+  });
+
+  it("still leaves out a store that has no file yet", async () => {
+    await fs.rm(file, { recursive: true, force: true });
+    const bundle = await configSnapshot.build();
+    assert.equal(Object.hasOwn(bundle.files, TARGET), false);
+  });
+});
