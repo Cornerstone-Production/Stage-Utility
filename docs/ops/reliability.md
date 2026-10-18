@@ -216,13 +216,14 @@ is never written over, and recording carries on beside it:
   [Data archive](../data-archive.md)) that cannot be read, or stops taking rows
   mid-service, is passed over: rows go on into the next file of its roll
   (`spl.2.csv`), which every reader already reads, starting with the row that
-  failed. A read that fails for a reason that is not about the file (too many
-  open files, a failing disk) passes nothing over: that row is lost, and the
-  next one tries the same file again.
+  failed. A failure of the machine rather than the file (out of file handles,
+  memory or space) passes nothing over: that row is lost, and the next one
+  tries the same file again.
 - **Nothing is decided from the gap.** While any service record cannot be read,
   the data archive's export, inspect and import refuse (an import took that
   service for new and replaced it), and so does the History workbook; a
-  scheduled backup that includes the archive fails and keeps its older copies.
+  scheduled backup that includes the archive fails, writing nothing and keeping
+  its older copies.
   That service cannot be edited in History (merge, delete, trim, rebuild,
   recalculate, item times); every other service can. A raw file that cannot be
   read refuses a merge with nothing moved, fails the SPL chart and the baptism
@@ -234,8 +235,9 @@ Each is on `/log`, once per file:
 
 ```
 [attendance-history] st1-p1-t1.json in attendance-history could not be read
-(EACCES): left as it is, missing from history, and a save for that service goes
-to a .held file beside it until the server restarts. Fix the file, then restart.
+(EACCES): EACCES: permission denied, open '…/st1-p1-t1.json'. Left as it is,
+missing from history, and a save for that service goes to a .held file beside it
+until the server restarts. Fix the file, then restart.
 [attendance-history] saving st1:p1:t1 to st1-p1-t1.json.held-2026-10-18T14-02-11-512Z
 rather than over st1-p1-t1.json, because …
 [archive] 2026-10-18_st1-p1-t1/spl.csv could not be read (EACCES). Recording spl
