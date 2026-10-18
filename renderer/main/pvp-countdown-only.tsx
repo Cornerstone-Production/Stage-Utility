@@ -15,10 +15,19 @@
 // test CAN reach, and pvp-now.test.tsx does, is what this layout draws and what
 // it leaves out.
 
+import { DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
+import type { LayoutHAlign } from "@main/types/views";
+
 import { useBoxSize } from "./readout";
 import { MeterFill } from "./readout-meter";
 import { METER_MIN_PX, METER_SCALE } from "./readout-size";
 import { countdownFontPx } from "./pvp-now-config";
+
+const ALIGN_ITEMS: Record<LayoutHAlign, "flex-start" | "center" | "flex-end"> = {
+  left: "flex-start",
+  center: "center",
+  right: "flex-end",
+};
 
 /** What stands in for a time when nothing is counting. A dash, dimmed, so a
  *  widget with nothing to count never reads as one that has frozen. */
@@ -29,6 +38,7 @@ export function PvpCountdownOnly({
   color = null,
   meter = null,
   meterKey = null,
+  align = null,
 }: {
   /** The formatted time left, or null when nothing is counting. */
   time: string | null;
@@ -39,6 +49,11 @@ export function PvpCountdownOnly({
   meter?: number | null;
   /** Which clip `meter` measures — see MeterFill. */
   meterKey?: string | null;
+  /** The object's horizontal alignment, from its Align pad. The vertical one
+   *  arrives the way Readout's does, as the `--readout-v-align` custom property
+   *  the object's box publishes. Unset is Readout's own default, so the pad shows
+   *  what is drawn. */
+  align?: LayoutHAlign | null;
 }) {
   const [ref, boxH, boxW] = useBoxSize();
   const text = time ?? COUNTDOWN_NONE;
@@ -53,8 +68,10 @@ export function PvpCountdownOnly({
         // wrapper, over its own padding.
         position: "absolute",
         inset: 0,
-        display: "grid",
-        placeItems: "center",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "var(--readout-v-align, center)",
+        alignItems: ALIGN_ITEMS[align ?? DEFAULT_READOUT_ALIGN],
         overflow: "hidden",
         borderRadius: "inherit",
         boxSizing: "border-box",

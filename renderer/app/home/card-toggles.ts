@@ -317,7 +317,8 @@ type Config = Record<string, unknown>;
  *
  * `showMeridiem` on a 24-hour clock is dropped rather than shown disabled: it
  * has no effect there, so a switch for it is worse than no switch. The inspector
- * hides it under the same condition.
+ * hides it under the same condition. Next cue is dropped the same way outside
+ * the Full layout, where the inspector greys it.
  */
 export function togglesFor(card: LayoutObject): CardToggle[] {
   const config = card.config as Config;
@@ -343,6 +344,10 @@ export function togglesFor(card: LayoutObject): CardToggle[] {
   for (const spec of SPECS) {
     if (!supports(spec.key)) continue;
     if (spec.key === "showMeridiem" && is24h) continue;
+    // Only Full draws the next cue; Compact and Countdown only never do, so a
+    // switch for it would tick and change nothing — the inspector greys the same
+    // row for the same reason (pvpNowRowStates).
+    if (spec.key === "showNextCue" && pvpNowLayout(config as PvpNowConfig) !== "full") continue;
     if (spec.choice) {
       const checked = valueOf(spec) === spec.choice.on;
       out.push({

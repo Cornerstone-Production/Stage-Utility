@@ -737,7 +737,7 @@ export type LayoutObjectConfig =
        * remaining time alone, and the next-cue footer never draws);
        * `"countdown"` draws the time left and NOTHING else, as large as the box
        * allows. Absent reads as `"full"`, unless the object still carries the
-       * legacy `compact` below — see `pvpNowLayout` in renderer/main/pvp-now.tsx.
+       * legacy `compact` below — see `pvpNowLayout` in renderer/main/pvp-now-config.ts.
        */
       layout?: PvpNowLayout;
       /**

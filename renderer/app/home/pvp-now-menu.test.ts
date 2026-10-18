@@ -25,9 +25,19 @@ describe("Home's card menu", () => {
   test("Compact is no longer a toggle; Warn near the end is, off by default", () => {
     const toggles = togglesFor(home({}));
     assert.deepEqual(toggles.map((t) => t.label), ["Progress bar", "Next cue", "Warn near the end", "Count down stills"]);
+    assert.deepEqual(togglesFor(home({ layout: "countdown" })).map((t) => t.label), ["Progress bar", "Warn near the end", "Count down stills"]);
     assert.equal(toggles.find((t) => t.key === "warnNearEnd")?.checked, false);
     // The same two on the wall object, which the inspector shares the keys with.
     assert.ok(togglesFor({ ...home({}), config: { type: "pvp-now" } } as LayoutObject).some((t) => t.key === "warnNearEnd"));
+  });
+
+  test("Next cue is offered only in Full — Compact and Countdown only never draw it", () => {
+    const has = (config: Record<string, unknown>) => togglesFor(home(config)).some((t) => t.key === "showNextCue");
+    assert.equal(has({ layout: "full" }), true);
+    assert.equal(has({ layout: "compact" }), false);
+    assert.equal(has({ layout: "countdown" }), false);
+    assert.equal(has({ layout: undefined, compact: true }), false, "a legacy Compact card was offered a dead Next cue switch");
+    assert.equal(has({ layout: undefined, compact: false }), true);
   });
 
   test("the Warn toggle writes warnNearEnd", () => {

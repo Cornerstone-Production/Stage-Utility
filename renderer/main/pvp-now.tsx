@@ -320,6 +320,7 @@ export function PvpNowObject({
         color={warnColor}
         meter={meter}
         meterKey={pvpMeterKey(layer)}
+        align={align}
       />
     );
   }

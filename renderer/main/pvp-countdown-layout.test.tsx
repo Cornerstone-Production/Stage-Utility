@@ -144,6 +144,25 @@ describe("Countdown only draws the time left and nothing else", () => {
   });
 });
 
+describe("Countdown only honours the Align pad", () => {
+  const at = (align: "left" | "center" | "right" | undefined) =>
+    renderToStaticMarkup(<PvpNowObject config={{ layout: "countdown" }} status={status([clip(277)])} now={AT} align={align} />);
+
+  test("left, centre and right each draw their own alignment", () => {
+    assert.ok(at("left").includes("align-items:flex-start"), at("left"));
+    assert.ok(at("center").includes("align-items:center"), at("center"));
+    assert.ok(at("right").includes("align-items:flex-end"), at("right"));
+  });
+
+  test("unset is Readout's own default, which is what the pad shows", () => {
+    assert.equal(at(undefined), at("left"));
+  });
+
+  test("the vertical alignment is the custom property the object's box publishes", () => {
+    assert.ok(at("center").includes("justify-content:var(--readout-v-align, center)"), at("center"));
+  });
+});
+
 describe("Countdown only, nothing counting: a dim dash", () => {
   const cfg: PvpNowConfig = { layout: "countdown" };
   const dash = (html: string) => {
@@ -218,10 +237,12 @@ describe("Warn near the end: the thresholds and their edges", () => {
         const red = at(10);
         assert.ok(red.includes(OVER) && !red.includes(WARN), `10 s was not red:\n${red}`);
         assert.ok(inkOfTime(red, "0:10").includes(OVER), `the 10 s DIGITS were not red:\n${red}`);
-        // The rule carries the colour too, not just the digits.
+        // The rule carries the colour too, not just the digits: its FILL, which
+        // the track behind it (a 22% mix of the same colour) cannot stand in for.
         for (const [html, token] of [[amber, WARN], [red, OVER]] as const) {
-          const rule = html.slice(html.indexOf("data-readout-meter"));
-          assert.ok(rule.includes(token), `the hairline stayed white:\n${html}`);
+          const fill = /class="su-meter-fill"[^>]*?background:([^;"]*)/.exec(html);
+          assert.ok(fill, `no hairline fill drawn:\n${html}`);
+          assert.equal(fill[1], token, `the hairline fill stayed white:\n${html}`);
         }
       });
 

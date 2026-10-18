@@ -393,9 +393,15 @@ const PVP_LIVE_FOR: Record<string, PvpStatusDTO> = {
 
 /** One render of one object, as markup. */
 async function draw(type: string, key: string, value: unknown, home: boolean, live: boolean): Promise<string> {
-  happening = live;
   activePvpLive = PVP_LIVE_FOR[key] ?? PVP_LIVE;
   const base = LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS].config() as Record<string, unknown>;
+  return drawConfig({ ...base, ...(PREREQ[key] ?? {}), [key]: value }, home, live);
+}
+
+/** One render of an object with EXACTLY this config, as markup — for a config
+ *  no registry default produces, like a widget saved before a setting existed. */
+async function drawConfig(config: Record<string, unknown>, home: boolean, live: boolean): Promise<string> {
+  happening = live;
   let container!: HTMLElement;
   await act(async () => {
     ({ container } = render(
@@ -405,7 +411,7 @@ async function draw(type: string, key: string, value: unknown, home: boolean, li
         React.createElement(ObjectContent, {
           o: {
             id: "o1", x: 0, y: 0, w: 6, h: 4, z: 1,
-            config: { ...base, ...(PREREQ[key] ?? {}), [key]: value },
+            config,
             style: {},
           },
           ctx: ctxFor(home, live),
@@ -522,6 +528,19 @@ describe("every CHOICE Home's card menu offers changes what the widget draws", (
       );
     });
   }
+});
+
+describe("a Home card saved before Layout existed", () => {
+  // The card is drawn through HomeCard -> PvpNowCard, a path no wall render
+  // touches: a Home card with `compact: true` and no `layout` has to come out
+  // Compact there too, not Full.
+  test("home-pvp-now with compact: true and no layout draws what layout: compact draws", async () => {
+    const legacy = await drawConfig({ type: "home-pvp-now", compact: true }, true, true);
+    const compact = await drawConfig({ type: "home-pvp-now", layout: "compact" }, true, true);
+    const full = await drawConfig({ type: "home-pvp-now" }, true, true);
+    assert.equal(legacy, compact, "a saved Compact Home card no longer draws Compact");
+    assert.notEqual(legacy, full, "a saved Compact Home card drew Full");
+  });
 });
 
 describe("a pick that both surfaces read is read on BOTH", () => {
