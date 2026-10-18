@@ -28,6 +28,7 @@ import { strict as assert } from "node:assert";
 import { after, before, describe, test } from "node:test";
 
 import { eventually, installDom } from "../../test-dom.js";
+import { WEEKEND_ATTENDANCE } from "../../test-fixtures/weekend-attendance.js";
 
 const teardown = installDom();
 
@@ -39,34 +40,9 @@ class StubEventSource {
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
 
-/** Three weekends so the chart actually draws — it renders nothing below two
- *  points, and a null render cannot be hovered at all. */
-const WEEKENDS = ["2026-08-16", "2026-08-23", "2026-08-30"];
-const ATTENDANCE: ServiceAttendance[] = WEEKENDS.map((day, i) => ({
-  serviceKey: `st-1:plan-${day}:${day}`,
-  serviceTypeId: "st-1",
-  serviceTypeName: "Weekend",
-  planId: `plan-${day}`,
-  planTitle: "Sample plan",
-  seriesTitle: null,
-  serviceDate: day,
-  serviceTimeId: null,
-  serviceTimeStartsAt: `${day}T15:00:00.000Z`,
-  startedAt: `${day}T15:00:00.000Z`,
-  endedAt: `${day}T16:30:00.000Z`,
-  samples: [],
-  attendanceBaseline: 0,
-  totalAttendance: 200 + i * 10,
-  peakAttendance: 200 + i * 10,
-  peakOccupancy: 200 + i * 10,
-  minOccupancy: 0,
-  lastAttendance: 200 + i * 10,
-  lastOccupancy: 200 + i * 10,
-}));
-
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
   const url = String(input);
-  const body = url.includes("/api/attendance/history") ? ATTENDANCE : [];
+  const body = url.includes("/api/attendance/history") ? WEEKEND_ATTENDANCE : [];
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
 

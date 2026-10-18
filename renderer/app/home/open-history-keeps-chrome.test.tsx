@@ -1,15 +1,11 @@
 // open-history-keeps-chrome.test.tsx — a link from inside the shell never lands
 // on a page the shell draws no chrome on.
 //
-// Home's Recent services card led to `/history`, the read-only page handed to
-// volunteers. That page renders with no sidebar and no way back, so an operator
-// who pressed "Open History" lost the app and had only the browser's Back.
-// `/history/manage` is History in the rail.
-//
-// Driven through the real card, the app's REAL route table and a real router.
-// jsdom cannot see whether the sidebar is on screen, so chromelessness is asserted
-// through hidesChrome, the function the shell asks; the pictures are in the
-// browser run.
+// Home's Recent services card linked to the chromeless /history, which has no
+// sidebar and no way back; /history/manage is History in the rail. Driven through
+// the real card, the app's real route table and a real router. jsdom cannot see
+// the sidebar, so chromelessness is asserted through hidesChrome, the function
+// the shell asks; the pictures are in the browser run.
 //
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND.
 
@@ -20,6 +16,7 @@ import { DRILLDOWN } from "@main/types/object-capabilities";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
+import { WEEKEND_ATTENDANCE } from "../../test-fixtures/weekend-attendance.js";
 
 const teardown = installRenderDom();
 
@@ -34,29 +31,6 @@ const { RouterProvider, createMemoryHistory, createRootRoute, createRoute, creat
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
-
-const WEEKENDS = ["2026-08-16", "2026-08-23", "2026-08-30"];
-const ATTENDANCE = WEEKENDS.map((day, i) => ({
-  serviceKey: `st-1:plan-${day}:${day}`,
-  serviceTypeId: "st-1",
-  serviceTypeName: "Weekend",
-  planId: `plan-${day}`,
-  planTitle: "Sample plan",
-  seriesTitle: null,
-  serviceDate: day,
-  serviceTimeId: null,
-  serviceTimeStartsAt: `${day}T15:00:00.000Z`,
-  startedAt: `${day}T15:00:00.000Z`,
-  endedAt: `${day}T16:30:00.000Z`,
-  samples: [],
-  attendanceBaseline: 0,
-  totalAttendance: 200 + i * 10,
-  peakAttendance: 200 + i * 10,
-  peakOccupancy: 200 + i * 10,
-  minOccupancy: 0,
-  lastAttendance: 200 + i * 10,
-  lastOccupancy: 200 + i * 10,
-})) as ServiceAttendance[];
 
 /** Home hosting the card, beside every History page the app really routes. */
 function homeRouter() {
@@ -83,7 +57,7 @@ function homeRouter() {
 test("Home's Open History lands on the History in the shell, not the chromeless page", async () => {
   const f = stubFetchWithLog((url) => {
     if (url.includes("/api/service-timeline")) return ok([]);
-    if (url.includes("/api/attendance/history")) return ok(ATTENDANCE);
+    if (url.includes("/api/attendance/history")) return ok(WEEKEND_ATTENDANCE);
     if (url.includes("/api/spl/summary")) return ok([]);
     return ok({});
   });
@@ -107,8 +81,7 @@ test("Home's Open History lands on the History in the shell, not the chromeless 
 });
 
 test("no object's drill-down target is a page without the shell's chrome", () => {
-  // DRILLDOWN is where a press goes "in the operator shell", so a target that
-  // hides the chrome strands the operator exactly as the Home link did.
+  // DRILLDOWN is where a press goes in the operator shell.
   const stranded = Object.entries(DRILLDOWN)
     .filter(([, route]) => hidesChrome(route as string, undefined))
     .map(([type, route]) => `${type} -> ${route}`);
