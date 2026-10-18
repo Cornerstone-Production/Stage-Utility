@@ -339,9 +339,15 @@ class ConfigSnapshotService {
   /** Every uploaded image, as `<dir>/<file>` → base64. */
   private async readImages(): Promise<Record<string, string>> {
     const out: Record<string, string> = {};
+    // Named in the failure, and failed the same way as a store file: the
+    // backup must not succeed without it.
+    const orFail = <R>(name: string, read: Promise<R>) =>
+      read.catch((err: unknown) => {
+        throw new StoreReadError(name, err, "could not be read for the backup");
+      });
     for (const dir of IMAGE_DIRS) {
-      for (const file of await listImages(dir)) {
-        const img = await readImage(dir, file);
+      for (const file of await orFail(dir, listImages(dir))) {
+        const img = await orFail(`${dir}/${file}`, readImage(dir, file));
         if (img) out[`${dir}/${file}`] = img.data.toString("base64");
       }
     }

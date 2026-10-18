@@ -285,3 +285,38 @@ describe("a backup of a config store that cannot be read", () => {
     assert.equal(Object.hasOwn(bundle.files, TARGET), false);
   });
 });
+
+describe("a backup of an uploaded image that cannot be read", () => {
+  const dir = path.join(TMP, "layout-images");
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("fails, rather than leaving the image out", async () => {
+    // A directory where the image should be fails the read for root as well.
+    await fs.mkdir(path.join(dir, "abc.png"), { recursive: true });
+    await assert.rejects(configSnapshot.build(), { name: "StoreReadError", code: "EISDIR" });
+  });
+
+  it(
+    "fails when the image directory cannot be listed",
+    { skip: process.getuid?.() === 0 && "running as root, which can list a mode-000 directory" },
+    async () => {
+      await fs.mkdir(dir, { recursive: true });
+      await fs.chmod(dir, 0o000);
+      try {
+        await assert.rejects(configSnapshot.build(), { name: "StoreReadError", code: "EACCES" });
+      } finally {
+        await fs.chmod(dir, 0o700);
+      }
+    },
+  );
+
+  it("still carries an image it can read", async () => {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "abc.png"), "png");
+    const bundle = await configSnapshot.build();
+    assert.deepEqual(Object.keys(bundle.images ?? {}), ["layout-images/abc.png"]);
+  });
+});
