@@ -152,6 +152,18 @@ describe("GET /api/spl/history/:key/series", () => {
     assert.equal(r.status, 404);
   });
 
+  test("fails, rather than answering from the rows it could read, when a rolled file cannot be read", async () => {
+    // A directory where spl.2.csv should be: unreadable without depending on
+    // file permissions. The walk used to end at it and draw half a service.
+    const key = "75953:909:2254";
+    await splHistoryStore.upsert(record(key) as never);
+    const dir = serviceDirPath(key, DATE);
+    await fs.mkdir(path.join(dir, "spl.2.csv"), { recursive: true });
+    await fs.writeFile(path.join(dir, "spl.csv"), rolledCsv(30, 60), "utf8");
+    const r = await callRoute(statusRoutes, url(key));
+    assert.equal(r.status, 500, "answered from the rows it could read, as though that were the whole service");
+  });
+
   test("a rolled spl.2.csv is read into ONE series, in time order", async () => {
     // readArchiveRows walks spl.csv then spl.2.csv, so a service whose earlier
     // seconds live in the rolled file arrives back-to-front. Every bucket must

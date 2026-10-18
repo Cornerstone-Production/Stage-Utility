@@ -231,18 +231,30 @@ class SampleArchive {
    * Returns rows moved per source, for the caller to log. Throws: unlike the
    * record path this is an operator action with a caller waiting on the answer,
    * so a failure must reach them rather than be logged past.
+   *
+   * Every file on both sides is read before the first write, so a file that
+   * cannot be read refuses the whole merge with nothing changed. Read source by
+   * source, the sources before it were already rewritten when one failed, and a
+   * retry merged their rows in twice.
    */
   async mergeInto(source: ServiceCtx, target: ServiceCtx): Promise<Record<string, number>> {
     const srcDir = serviceDirPath(source.serviceKey, source.serviceDate);
     const tgtDir = serviceDirPath(target.serviceKey, target.serviceDate);
     if (srcDir === tgtDir) return {};
 
-    const moved: Record<string, number> = {};
+    const plan: { base: string; srcRows: ArchiveRow[]; tgtRows: ArchiveRow[]; tgtRolled: string[] }[] = [];
     for (const base of ARCHIVE_SOURCES) {
       const srcRows = await readArchiveRows(srcDir, base);
       if (!srcRows || srcRows.length === 0) continue;
       const tgtRows = (await readArchiveRows(tgtDir, base)) ?? [];
+      plan.push({ base, srcRows, tgtRows, tgtRolled: await rolledFiles(tgtDir, base) });
+    }
+    // The source directory is removed below. One that cannot be listed would
+    // fail that removal after the target was rewritten, so find out now.
+    await rolledFiles(srcDir, ARCHIVE_SOURCES[0]);
 
+    const moved: Record<string, number> = {};
+    for (const { base, srcRows, tgtRows, tgtRolled } of plan) {
       const all = rowsByTime([...tgtRows, ...srcRows]);
       const header = unionHeader(all);
       await fs.mkdir(tgtDir, { recursive: true });
@@ -250,7 +262,7 @@ class SampleArchive {
       await atomicWrite(path.join(tgtDir, `${base}.csv`), body);
       // The union lives in `${base}.csv` now, so every rolled file this source
       // had is stale. Left in place they would be read back as duplicate rows.
-      for (const name of await rolledFiles(tgtDir, base)) {
+      for (const name of tgtRolled) {
         if (name !== `${base}.csv`) await fs.rm(path.join(tgtDir, name), { force: true });
       }
       moved[base] = srcRows.length;

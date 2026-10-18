@@ -9,6 +9,8 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
+import { StoreReadError } from "../data-store.js";
+import { isNotFound } from "../errors.js";
 import { MAX_ROLL } from "./csv-appender.js";
 import { parseRows } from "../csv.js";
 
@@ -21,6 +23,10 @@ export type ArchiveRow = Record<string, string>;
  * Returns null when the source was never recorded, which is different from a
  * source that recorded a header and no rows — callers distinguish "nothing to
  * rebuild from" (leave the stored record alone) from "recorded, but empty".
+ *
+ * Throws a StoreReadError for a file that is there and cannot be read. Answering
+ * without it is how a history merge wrote the rows it could read into the
+ * target and then deleted the source directory, unread rows and all.
  */
 export async function readArchiveRows(dir: string, base: string): Promise<ArchiveRow[] | null> {
   const out: ArchiveRow[] = [];
@@ -30,7 +36,8 @@ export async function readArchiveRows(dir: string, base: string): Promise<Archiv
     let text: string;
     try {
       text = await fs.readFile(path.join(dir, name), "utf8");
-    } catch {
+    } catch (err) {
+      if (!isNotFound(err)) throw unreadableArchiveFile(dir, name, err);
       // A gap is not the end: `spl.csv` can be absent while `spl.2.csv` exists if
       // the first column set never produced a row. Only a gap after the first
       // ends the walk.
@@ -69,12 +76,15 @@ export function rowsByTime<T extends ArchiveRow>(rows: T[]): T[] {
   });
 }
 
-/** The rolled filenames actually present for one source, in roll order. */
+/** The rolled filenames actually present for one source, in roll order. Throws
+ *  a StoreReadError when the directory is there and cannot be listed: a merge
+ *  removes what this names, so it must not answer "none". */
 export async function rolledFiles(dir: string, base: string): Promise<string[]> {
   let names: string[];
   try {
     names = await fs.readdir(dir);
-  } catch {
+  } catch (err) {
+    if (!isNotFound(err)) throw unreadableArchiveFile(dir, "", err);
     return [];
   }
   const rolled = new RegExp(`^${base}\\.\\d+\\.csv$`);
@@ -86,4 +96,11 @@ export async function rolledFiles(dir: string, base: string): Promise<string[]> 
 function rollIndex(name: string, base: string): number {
   if (name === `${base}.csv`) return 1;
   return Number(name.slice(base.length + 1, -4)) || 0;
+}
+
+/** The failure for one raw file, or with no name its directory. Named by the
+ *  service folder rather than a path: the message reaches a LAN response. */
+function unreadableArchiveFile(dir: string, name: string, err: unknown): StoreReadError {
+  const folder = `archive folder ${path.basename(dir)}`;
+  return new StoreReadError(name ? `${name} in ${folder}` : `The ${folder}`, err);
 }

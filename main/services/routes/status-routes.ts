@@ -27,7 +27,7 @@ import { splRecorder } from "../spl-recorder.js";
 import { deleteServiceRecords } from "../history-edit.js";
 import { propresenterService, propresenterManager } from "../propresenter-service.js";
 import { serviceDirPath } from "../archive/archive-paths.js";
-import { readArchiveRows, rolledFiles } from "../archive/archive-rows.js";
+import { readArchiveRows } from "../archive/archive-rows.js";
 import { bucketSecFor, bucketSeries, clampBucketSec, metricsIn, type SplBucket } from "../spl-series.js";
 
 export async function statusRoutes(c: RouteCtx): Promise<void> {
@@ -277,16 +277,9 @@ async function splSeriesFor(
   if (!record) return null;
   const dir = serviceDirPath(serviceKey, record.serviceDate);
   const rows = await readArchiveRows(dir, "spl");
-  if (!rows || rows.length === 0) {
-    // readArchiveRows swallows a per-file read error and answers null, which is
-    // the same answer it gives for "no such file". Those are different things:
-    // an archive that EXISTS and cannot be read is a failure the operator needs
-    // told about, not a record that predates the raw layer. If files are there
-    // and nothing came back, say so.
-    const present = await rolledFiles(dir, "spl");
-    if (present.length > 0) throw new Error(`${present.length} raw file(s) present but no rows could be read`);
-    return null;
-  }
+  // An archive that exists and cannot be read throws above: a failure the
+  // operator needs told about, not a record that predates the raw layer.
+  if (!rows || rows.length === 0) return null;
 
   const metrics = metricsIn(rows);
   if (metrics.length === 0) return null;
