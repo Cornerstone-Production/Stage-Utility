@@ -128,6 +128,18 @@ describe("with a history record that could not be read", () => {
     await assert.rejects(buildArchive(), isStoreReadError);
   });
 
+  it("a scheduled backup with the archive writes nothing, rather than a config copy per retry", async (t) => {
+    captureConsole(t, "error");
+    const { backupScheduler, DEFAULT_BACKUP_SCHEDULE } = await import("./backup-scheduler.js");
+    const { settingsStore } = await import("./settings-store.js");
+    await settingsStore.patch({ backupSchedule: { ...DEFAULT_BACKUP_SCHEDULE, enabled: true, includeArchive: true } });
+    const dir = await backupScheduler.destinationDir();
+    const before = await fs.readdir(dir).catch(() => [] as string[]);
+    const result = await backupScheduler.runNow();
+    assert.match(result.lastError ?? "", /st1-p1-torn\.json in attendance-history/);
+    assert.deepEqual(await fs.readdir(dir).catch(() => [] as string[]), before, "a failed run left a file behind");
+  });
+
   it("the History workbook refuses rather than reading as complete", async () => {
     await assert.rejects(buildHistoryWorkbook({ include: ["services"] }), isStoreReadError);
   });

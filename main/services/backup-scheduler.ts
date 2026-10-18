@@ -128,12 +128,13 @@ class BackupScheduler {
       await fs.mkdir(dir, { recursive: true });
       const at = stamp(new Date());
 
+      // Both built before either is written. The archive refuses while a
+      // recorded file cannot be read, and a run that had written its config
+      // first left one more unpruned copy behind on every retry.
       const bundle = await configSnapshot.build(`Automatic ${at}`);
+      const archive = sched.includeArchive ? await buildArchive() : null;
       await atomicWrite(path.join(dir, `${CONFIG_PREFIX}${at}.json`), JSON.stringify(bundle, null, 2));
-
-      if (sched.includeArchive) {
-        await atomicWrite(path.join(dir, `${ARCHIVE_PREFIX}${at}.zip`), Buffer.from(await buildArchive()));
-      }
+      if (archive) await atomicWrite(path.join(dir, `${ARCHIVE_PREFIX}${at}.zip`), Buffer.from(archive));
 
       // Only after a successful write — a failed run must not delete the copies
       // that are still good.
