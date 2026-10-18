@@ -800,7 +800,11 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     blurb: "Fires a cue and shows whether its device is on",
     group: "Control",
     config: () => ({ type: "cue-button", cue: "", label: "", showDevice: true }),
-    style: () => PILL({ fontSize: 0.12 }),
+    // The size every other button starts at. It was 0.12, which is what the
+    // Ultritouch panel's strip wants (its templates set their own size, below)
+    // and is far too big for the box a new button arrives in: an unbound one
+    // drew "UNBOUND" at a size that clipped it to "UNBO".
+    style: () => PILL({ fontSize: 0.045 }),
   },
 
   // The newest three stage messages for the screen's groups. Sized so a message
