@@ -567,7 +567,7 @@ export function RecentServicesCard({
         <h2 className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">
           Recent {scope.toLowerCase()}
         </h2>
-        <AppLink to="/history" className="ml-auto text-caption1 text-accent hover:underline">
+        <AppLink to="/history/manage" className="ml-auto text-caption1 text-accent hover:underline">
           Open History
         </AppLink>
       </header>

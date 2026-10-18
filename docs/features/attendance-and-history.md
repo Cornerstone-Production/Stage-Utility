@@ -621,8 +621,10 @@ reduced motion; the live edge itself stays, because it is information.
 Home's **Recent services** widget is a glance with a way into History: four
 headline figures for the active service type (average attendance with its trend,
 peak, average length and average start), an attendance trend chart when the tile
-is tall enough to hold one, and **Open History**. It stays hidden until something
-has been recorded, and says so rather than hiding when the history cannot be read.
+is tall enough to hold one, and **Open History**, which goes to the operator's
+History in the sidebar rather than the shared read-only `/history` link, so the app's
+sidebar stays on screen. It stays hidden until something has been recorded, and says
+so rather than hiding when the history cannot be read.
 
 The chart can carry a second line, the **service SPL** for each date, drawn behind
 the attendance curve on its own dB scale. Right-click the widget — or tap and hold
