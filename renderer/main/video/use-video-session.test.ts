@@ -24,6 +24,7 @@ import {
   DROP_GRACE_MS,
   FIRST_FRAME_TIMEOUT_MS,
   FRAME_POLL_MS,
+  HLS_FIRST_FRAME_TIMEOUT_MS,
   PROBE_POLL_MS,
   PROBE_TIMEOUT_MS,
   RESET_AFTER_PLAYING_MS,
@@ -102,6 +103,14 @@ class FakeVideo extends EventTarget {
     if (name === "src") this.assignedSrc = "";
   }
   load(): void {}
+  /** Every play() call, and what each answers. A real element always has
+   *  play(); what it answers is the browser's to decide. */
+  playCalls = 0;
+  playAnswer: () => Promise<void> = () => Promise.resolve();
+  play(): Promise<void> {
+    this.playCalls++;
+    return this.playAnswer();
+  }
 }
 
 const EXTERNAL_WHEP: VideoFeedView = {
@@ -1640,6 +1649,71 @@ test("an HLS frame is the delayed phase, with hls.js's latency rounded for the b
   } finally {
     mock.timers.reset();
     undoHls();
+  }
+});
+
+// ── starting playback ─────────────────────────────────────────────────────
+//
+// Every attempt calls play() itself once its source is attached, rather than
+// leaving it to the element's `autoplay`: Safari's autoplay waits for
+// HAVE_ENOUGH_DATA, which held an HLS picture's first frame 2.3 to 2.6 s past
+// `canplay` (see startPlaying in use-video-session.ts). What these prove is
+// the call; the timing it buys exists only in a browser, and is measured there
+// (docs/integrations/video-feeds.md, "Measuring playback").
+
+test("an hls.js attempt calls play() once hls.js has the element, without waiting on autoplay", async () => {
+  const undoHls = installFakeHls();
+  const video = new FakeVideo();
+  const { cb } = makeCallbacks();
+  try {
+    const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "hls", url: "/video/p/index.m3u8" }, cb);
+    await flush();
+    assert.deepEqual(FakeHls.last!.calls, ["loadSource /video/p/index.m3u8", "attachMedia"]);
+    assert.equal(video.playCalls, 1, "the attempt must start playback itself");
+    attempt.stop();
+  } finally {
+    undoHls();
+  }
+});
+
+test("a native HLS attempt calls play() once its source is set", async () => {
+  const video = new FakeVideo();
+  const { cb } = makeCallbacks();
+  const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "hls", url: "/video/p/index.m3u8" }, cb);
+  await flush();
+  assert.equal(video.src, "/video/p/index.m3u8", "expected the native branch (Node has no MediaSource)");
+  assert.equal(video.playCalls, 1, "the attempt must start playback itself");
+  attempt.stop();
+});
+
+test("a WebRTC attempt calls play() once the answer is applied", async () => {
+  const g = stubGlobals("succeed");
+  const video = new FakeVideo();
+  const { cb } = makeCallbacks();
+  try {
+    const attempt = startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+    await flush();
+    assert.equal(video.playCalls, 1, "the attempt must start playback itself");
+    attempt.stop();
+  } finally {
+    g.restore();
+  }
+});
+
+test("a play() the browser refuses is named when no frame arrives over HLS", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const video = new FakeVideo();
+  video.playAnswer = () => Promise.reject(new DOMException("The request is not allowed by the user agent", "NotAllowedError"));
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "hls", url: "/video/p/index.m3u8" }, cb);
+    await flush();
+    mock.timers.tick(HLS_FIRST_FRAME_TIMEOUT_MS);
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [
+      { fn: "onDropped", arg: "no frame arrived over HLS; the browser refused to play (The request is not allowed by the user agent)" },
+    ]);
+  } finally {
+    mock.timers.reset();
   }
 });
 

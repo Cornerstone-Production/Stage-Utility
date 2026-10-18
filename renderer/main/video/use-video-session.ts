@@ -254,13 +254,37 @@ export function startPlaybackAttempt(
     }
   };
 
+  /**
+   * Starts playback the moment a source is attached, rather than leaving it
+   * to the element's `autoplay`. Safari's autoplay waits for HAVE_ENOUGH_DATA,
+   * and on the relay's low-latency HLS that held the first frame 2.3 to 2.6 s
+   * past `canplay` — long enough that the picture then sat that far behind
+   * and jumped back to live (a second hold, and a "fell behind" log line) on
+   * every Safari start, and in one start of six it never began at all. An
+   * explicit play() starts at `canplay`, as Chrome's autoplay already does.
+   * Measured in Safari 26.5; jsdom plays nothing, so the timing is not
+   * unit-tested — see "Measuring playback" in docs/integrations/video-feeds.md.
+   *
+   * A refused play() (autoplay blocked, say) is not an outcome by itself: the
+   * first-frame deadline decides that, and names the refusal in its reason.
+   */
+  let playRefused: string | null = null;
+  const startPlaying = () => {
+    Promise.resolve()
+      .then(() => video.play())
+      .catch((err: unknown) => {
+        if (!ended) playRefused = errorMessage(err);
+      });
+  };
+  const noFrame = (why: string) => (playRefused === null ? why : `${why}; the browser refused to play (${playRefused})`);
+
   /** The failure half: no frame within `timeoutMs` ends the attempt. */
   const firstFrameDeadline = (timeoutMs: number) => {
     clearTimeout(frameTimer);
     frameTimer = setTimeout(() => {
       if (gotFirstFrame) return;
-      if (choice.method === "webrtc") webrtcUnusable("connected, but no frame ever arrived");
-      else end(() => cb.onDropped("no frame arrived over HLS"));
+      if (choice.method === "webrtc") webrtcUnusable(noFrame("connected, but no frame ever arrived"));
+      else end(() => cb.onDropped(noFrame("no frame arrived over HLS")));
     }, timeoutMs);
   };
 
@@ -291,6 +315,7 @@ export function startPlaybackAttempt(
         cb.onSession?.({ method: "webrtc", pc: whep.pc });
         clearTimeout(connectTimer);
         watchForFirstFrame();
+        startPlaying();
         // A second, independent window: the handshake succeeded, so THIS
         // timer firing with no frame means WebRTC never delivered a picture on
         // this screen — that IS a verdict about WebRTC here. It fails the
@@ -298,7 +323,7 @@ export function startPlaybackAttempt(
         // "connected" with no frame is no less stuck than one that never did.
         connectTimer = setTimeout(() => {
           if (gotFirstFrame) return;
-          const why = whep.pc.connectionState === "connected" ? "connected, but no frame ever arrived" : "never connected after a successful handshake";
+          const why = whep.pc.connectionState === "connected" ? noFrame("connected, but no frame ever arrived") : "never connected after a successful handshake";
           webrtcUnusable(why);
         }, CONNECT_TIMEOUT_MS);
         whep.pc.addEventListener(
@@ -383,6 +408,7 @@ export function startPlaybackAttempt(
         session = { kind: "hls", s: hls };
         cb.onSession?.({ method: "hls" });
         watchForFirstFrame();
+        startPlaying();
         firstFrameDeadline(HLS_FIRST_FRAME_TIMEOUT_MS);
         video.addEventListener(
           "error",
