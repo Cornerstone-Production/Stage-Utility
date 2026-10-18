@@ -365,17 +365,17 @@ the inspector, each saying why, since neither is drawn in it. (Next cue is also
 unused by Compact, and Label by Full, and they grey out there too.)
 
 **Warn near the end**, off by default so an existing widget is unchanged, turns
-the time and the progress hairline amber at **Amber from** seconds left (default
-30) and red at **Red from** (default 10), in every layout. Both are inclusive —
+the time and the progress hairline amber at **Amber at** seconds left (default
+30) and red at **Red at** (default 10), in every layout. Both are inclusive —
 the time is amber from 0:30, red from 0:10 — and judged on the second the digits
-show. **Red from** is never above **Amber from**: the field holds a higher number
+show. **Red at** is never above **Amber at**: the field holds a higher number
 at the amber value, and a stored red above the amber is read as the amber, so
 the two colours arrive together. The thresholds are set in the layout editor's
 inspector; the Home card's right-click menu has the on/off switch only. The
 colours are the app's own caution and over tokens, the same ones a Home stat
 takes when it earns a state colour. A still counted down from a short hold
 starts inside the amber threshold, so with Warn near the end on it reads amber
-from its first frame; lower **Amber from** if that is not wanted.
+from its first frame; lower **Amber at** if that is not wanted.
 
 **Count down stills**, off by default, counts a STILL down the way a rolling clip
 already counts down — the value slot, the progress bar and (in the normal

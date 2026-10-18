@@ -117,24 +117,24 @@ describe("the Layout choice", () => {
 describe("Warn near the end", () => {
   test("the two thresholds appear only while it is on", async () => {
     await mount(base({ warnNearEnd: false }));
-    assert.equal(screen.queryByText("Amber from (seconds left)"), null);
-    assert.equal(screen.queryByText("Red from (seconds left)"), null);
+    assert.equal(screen.queryByText("Amber at"), null);
+    assert.equal(screen.queryByText("Red at"), null);
     cleanup();
     await mount(base({ warnNearEnd: true }));
-    assert.ok(screen.getByText("Amber from (seconds left)"));
-    assert.ok(screen.getByText("Red from (seconds left)"));
+    assert.ok(screen.getByText("Amber at"));
+    assert.ok(screen.getByText("Red at"));
   });
 
   test("they show 30 and 10 until set", async () => {
     await mount(base({ warnNearEnd: true, warnAmberSec: undefined, warnRedSec: undefined }));
-    assert.equal((rowOf("Amber from (seconds left)").querySelector("input") as HTMLInputElement).value, "30");
-    assert.equal((rowOf("Red from (seconds left)").querySelector("input") as HTMLInputElement).value, "10");
+    assert.equal((rowOf("Amber at").querySelector("input") as HTMLInputElement).value, "30");
+    assert.equal((rowOf("Red at").querySelector("input") as HTMLInputElement).value, "10");
   });
 
   test("a red typed above the amber is held at the amber", async () => {
     const got: { c: Record<string, unknown> | null } = { c: null };
     await mount(base({ warnNearEnd: true, warnAmberSec: 30, warnRedSec: 10 }), (c) => { got.c = c as unknown as Record<string, unknown>; });
-    fireEvent.change(rowOf("Red from (seconds left)").querySelector("input")!, { target: { value: "50" } });
+    fireEvent.change(rowOf("Red at").querySelector("input")!, { target: { value: "50" } });
     assert.ok(got.c, "nothing was written");
     assert.equal(got.c!.warnRedSec, 30, "red was stored above amber");
   });
@@ -142,14 +142,14 @@ describe("Warn near the end", () => {
   test("a stored red above the amber reads as the amber, and the stored number is left alone", async () => {
     let wrote = false;
     await mount(base({ warnNearEnd: true, warnAmberSec: 20, warnRedSec: 50 }), () => { wrote = true; });
-    assert.equal((rowOf("Red from (seconds left)").querySelector("input") as HTMLInputElement).value, "20");
+    assert.equal((rowOf("Red at").querySelector("input") as HTMLInputElement).value, "20");
     assert.equal(wrote, false, "merely showing the row rewrote the config");
   });
 
   test("editing amber writes only the amber", async () => {
     const got: { c: Record<string, unknown> | null } = { c: null };
     await mount(base({ warnNearEnd: true, warnAmberSec: 30, warnRedSec: 10 }), (c) => { got.c = c as unknown as Record<string, unknown>; });
-    fireEvent.change(rowOf("Amber from (seconds left)").querySelector("input")!, { target: { value: "45" } });
+    fireEvent.change(rowOf("Amber at").querySelector("input")!, { target: { value: "45" } });
     assert.equal(got.c!.warnAmberSec, 45);
     assert.equal(got.c!.warnRedSec, 10, "typing an amber rewrote the red");
   });

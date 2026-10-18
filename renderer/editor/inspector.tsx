@@ -784,7 +784,9 @@ export function PvpNowInspector({
       {(c.warnNearEnd ?? false) && (
         <>
           <RowNumber
-            label="Amber from (seconds left)"
+            label="Amber at"
+            hint="Seconds left when the time turns amber."
+            unit="s"
             value={amberSec}
             step={1}
             min={0}
@@ -792,13 +794,14 @@ export function PvpNowInspector({
             onChange={(v) => onConfig({ ...c, warnAmberSec: Math.round(v) })}
           />
           <RowNumber
-            label="Red from (seconds left)"
+            label="Red at"
+            unit="s"
             // Never above amber. The field's own `max` is the amber value, so
             // a higher number is held at it as it is typed; and if amber is
             // later lowered below a stored red, the reader holds red at amber
             // — the stored number is left alone, so raising amber again gives
             // it back.
-            hint="Never above Amber from — a higher number is held at the amber value."
+            hint="Seconds left when the time turns red. Never above Amber at: a higher number is held at the amber value."
             value={redSec}
             step={1}
             min={0}
