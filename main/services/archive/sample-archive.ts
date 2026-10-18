@@ -191,23 +191,14 @@ class SampleArchive {
     await Promise.all(waits);
   }
 
-  /** Record what this service produced, so an importer knows what to expect. */
+  /** Record what this service produced, so an importer knows what to expect.
+   *  From the directory, not this process's appenders: those miss what an
+   *  earlier run wrote before a restart, and a file one of them passed over. */
   async writeManifest(ctx: ServiceCtx): Promise<void> {
     const e = this.entry(ctx);
     if (!e) return;
     await this.flush(); // name the files that actually landed, not the ones queued
-    const files = [...new Set([...e.appenders.values()].flatMap((a) => a.files()))].sort();
-    if (files.length === 0) return; // nothing was recorded — leave no empty directory
-    await fs.mkdir(e.dir, { recursive: true });
-    await fs.writeFile(
-      path.join(e.dir, "manifest.json"),
-      JSON.stringify(
-        { version: MANIFEST_VERSION, serviceKey: ctx.serviceKey, serviceDate: ctx.serviceDate, files },
-        null,
-        2,
-      ),
-      "utf8",
-    );
+    await this.rewriteManifest(ctx, e.dir);
   }
 
   /**
@@ -274,8 +265,8 @@ class SampleArchive {
     return moved;
   }
 
-  /** Restate a manifest from what is actually on disk — after a merge the
-   *  appenders' record of what they wrote no longer describes the directory. */
+  /** State a manifest from what is actually on disk. Nothing recorded leaves
+   *  no directory and no manifest. */
   private async rewriteManifest(ctx: ServiceCtx, dir: string): Promise<void> {
     const files: string[] = [];
     for (const base of ARCHIVE_SOURCES) files.push(...(await rolledFiles(dir, base)));
