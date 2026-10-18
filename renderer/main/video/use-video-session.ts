@@ -267,13 +267,18 @@ export function startPlaybackAttempt(
    *
    * A refused play() (autoplay blocked, say) is not an outcome by itself: the
    * first-frame deadline decides that, and names the refusal in its reason.
+   * An AbortError is not a refusal — the source changed under a pending
+   * play(), and playback continues on the new one — so it names nothing.
    */
   let playRefused: string | null = null;
   const startPlaying = () => {
     Promise.resolve()
       .then(() => video.play())
       .catch((err: unknown) => {
-        if (!ended) playRefused = errorMessage(err);
+        if (ended) return;
+        const name = err instanceof Error ? err.name : "";
+        if (name === "AbortError") return;
+        playRefused = name && name !== "Error" ? `${name}: ${errorMessage(err)}` : errorMessage(err);
       });
   };
   const noFrame = (why: string) => (playRefused === null ? why : `${why}; the browser refused to play (${playRefused})`);

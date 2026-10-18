@@ -652,9 +652,9 @@ Each screen writes its own `[video]` lines from the browser:
 
 - A feed failing on a screen, once per failing streak: its first failure and
   the reason (a picture that never arrived because the browser refused to
-  start it says so, with the browser's own words), a reminder at most every 5 minutes while it goes on failing
-  (with how many attempts and for how long), and a line when it is playing
-  again after holding for 10 seconds. Individual retries are not logged; the
+  start it says so, in the browser's own words), a reminder at most every 5
+  minutes while it goes on failing (with how many attempts and for how
+  long), and a line when it is playing again after holding for 10 seconds. Individual retries are not logged; the
   browser console shows each one, with its delay, at the Verbose level.
 - A relay feed falling back to HLS on a screen because WebRTC did not carry
   it there, once per outage, and a line when WebRTC is carrying it again.

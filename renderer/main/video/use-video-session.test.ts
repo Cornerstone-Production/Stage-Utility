@@ -1444,6 +1444,7 @@ test("a probe whose frames arrive is adopted: the picture moves to that session 
     });
     assert.equal(video.srcObject, probeStream, "expected the picture moved onto the probe's own stream");
     assert.equal(video.src, "", "expected HLS stopped once WebRTC carries the picture");
+    assert.equal(video.playCalls, 2, "the adopted stream must be started like any other source, not left to autoplay");
     assert.notEqual(
       result.current.phase,
       "connecting",
@@ -1710,8 +1711,23 @@ test("a play() the browser refuses is named when no frame arrives over HLS", asy
     await flush();
     mock.timers.tick(HLS_FIRST_FRAME_TIMEOUT_MS);
     assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [
-      { fn: "onDropped", arg: "no frame arrived over HLS; the browser refused to play (The request is not allowed by the user agent)" },
+      { fn: "onDropped", arg: "no frame arrived over HLS; the browser refused to play (NotAllowedError: The request is not allowed by the user agent)" },
     ]);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("a play() interrupted by a source change is not named as a refusal", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const video = new FakeVideo();
+  video.playAnswer = () => Promise.reject(new DOMException("The play() request was interrupted by a new load request", "AbortError"));
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "hls", url: "/video/p/index.m3u8" }, cb);
+    await flush();
+    mock.timers.tick(HLS_FIRST_FRAME_TIMEOUT_MS);
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [{ fn: "onDropped", arg: "no frame arrived over HLS" }]);
   } finally {
     mock.timers.reset();
   }
