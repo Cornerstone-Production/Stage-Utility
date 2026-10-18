@@ -28,6 +28,17 @@ import { invoke } from "../lib/api";
  *  is pressed by hand, and two accidental taps should not run it twice. */
 const MADE_CUE_COOLDOWN_SEC = 2;
 
+/** The label every action button was created with, before a blank one meant "use
+ *  the action's name". Saved buttons still carry it, and it names nothing. */
+const LEGACY_DEFAULT_LABEL = "Action";
+
+/** The label the operator actually chose, or undefined when it is blank or the old
+ *  default. The rule and cue are named from this, and the rebound button keeps it. */
+export function chosenLabel(label: string | undefined): string | undefined {
+  const t = (label ?? "").trim();
+  return t && t !== LEGACY_DEFAULT_LABEL ? t : undefined;
+}
+
 /** lower_snake_case from any text, by the Companion import's own slug with accents
  *  folded first. "" when nothing usable is left. */
 export function cueSlug(text: string): string {
@@ -128,13 +139,14 @@ type MakeCueResult =
  * or the server refused the rule.
  */
 export async function makeCueFromAction(opts: {
-  /** The Button's own label; blank falls back to the action's name. */
-  label: string;
+  /** The Button's own label; blank, or the old default "Action", falls back to the
+   *  action's name. */
+  label: string | undefined;
   actionId: string;
   actionLabel: string;
   params: Record<string, unknown> | undefined;
 }): Promise<MakeCueResult> {
-  const ruleName = opts.label.trim() || opts.actionLabel.trim() || opts.actionId;
+  const ruleName = chosenLabel(opts.label) ?? (opts.actionLabel.trim() || opts.actionId);
   try {
     const [{ rules }, manifest] = await Promise.all([
       invoke<{ rules: Rule[] }>("automation:rules"),

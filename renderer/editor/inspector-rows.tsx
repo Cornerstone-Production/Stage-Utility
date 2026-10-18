@@ -291,20 +291,24 @@ export function Segmented<T extends string>({
   value,
   options,
   onChange,
+  disabled,
 }: {
   /** Names the group for assistive tech; the visible label is the caller's. */
   label: string;
   value: T;
   options: { value: T; label: string }[];
   onChange: (v: T) => void;
+  /** Every segment inert, for a moment the choice must not change. */
+  disabled?: boolean;
 }) {
   return (
-    <div role="group" aria-label={label} className="flex flex-wrap gap-0.5 rounded-lg bg-fill p-0.5">
+    <div role="group" aria-label={label} className={cn("flex flex-wrap gap-0.5 rounded-lg bg-fill p-0.5", disabled && "opacity-50")}>
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
           aria-pressed={value === o.value}
+          disabled={disabled}
           onClick={() => onChange(o.value)}
           className={cn(
             "flex-1 whitespace-nowrap rounded-md px-2 py-1 text-caption1 font-medium transition-colors",

@@ -105,9 +105,11 @@ function serve(opts: {
       if (init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         posted.push(body);
-        if (opts.gate) return opts.gate.then(() => reply(201, { ...body, id: "rule-1", issues: [] }));
-        if (opts.refuse) return reply(400, { error: 'The cue name "walk_now" is already used by "Walk"' });
-        return reply(201, { ...body, id: "rule-1", issues: [] });
+        const answer = () =>
+          opts.refuse
+            ? reply(400, { error: 'The cue name "walk_now" is already used by "Walk"' })
+            : reply(201, { ...body, id: "rule-1", issues: [] });
+        return opts.gate ? opts.gate.then(answer) : answer();
       }
       if (opts.readRulesFails) throw new TypeError("fetch failed");
       return reply(200, { rules: opts.existingRules ?? [], settings: {} });
@@ -263,6 +265,37 @@ describe("Make it a cue", () => {
     release();
     await eventually(() => assert.equal((configs.at(-1) as { type: string }).type, "cue-button"));
     assert.equal((configs.at(-1) as { label?: string }).label, "Renamed", "the rebind used the label from before the click");
+  });
+
+  test("Does and Make it a cue are inert while the write is in flight, and free again after it lands", async () => {
+    for (const refuse of [false, true]) {
+      cleanup();
+      let release: () => void = () => {};
+      serve({ gate: new Promise<void>((r) => (release = r)), refuse });
+      const { container, configs } = mount(ACTION);
+      await makeIt(container);
+      assert.equal(press(container, "Run an action").hasAttribute("disabled"), true, "Does must be inert mid-write");
+      assert.equal(press(container, "Fire a cue").hasAttribute("disabled"), true);
+      assert.equal(press(container, "Making…").hasAttribute("disabled"), true, "Make it a cue must not be pressable twice");
+      fireEvent.click(press(container, "Fire a cue"));
+      assert.equal(configs.length, 0, "a flip mid-write must not be accepted: the rebind would overwrite it");
+      release();
+      await eventually(() => assert.equal(press(container, "Fire a cue").hasAttribute("disabled"), false, `still inert after the write (refuse=${refuse})`));
+      assert.equal(press(container, "Run an action").hasAttribute("disabled"), false);
+      assert.equal(configs.length, refuse ? 0 : 1);
+    }
+  });
+
+  test("the old default label Action names nothing: the rule, the cue and the rebound button use the action's name", async () => {
+    const s = serve();
+    const { container, configs } = mount({ type: "action-button", actionId: "display.refresh", params: {}, label: "Action" });
+    await makeIt(container);
+    await eventually(() => assert.equal(configs.length, 1));
+    const rule = s.posted[0] as { name: string; trigger: { params: { name: string; says: string } } };
+    assert.equal(rule.name, "Refresh displays");
+    assert.equal(rule.trigger.params.name, "refresh_displays");
+    assert.equal(rule.trigger.params.says, "Refresh displays");
+    assert.deepEqual(configs[0], { type: "cue-button", cue: "refresh_displays", showDevice: true });
   });
 
   test("a blank label names the rule after the action, and the button keeps no label", async () => {

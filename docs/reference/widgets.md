@@ -515,7 +515,8 @@ Assistant — and then **Built in**: the cues the app ships for OBS, REAPER,
 ProVideoPlayer and itself, which need no rule behind them
 ([built-in cues](../automation.md#built-in-cues)). **+ New manual cue…** opens
 the [Automation](../automation.md#cues) page in a new tab, and a cue made there
-appears in the dropdown without reloading the editor. The button shows the cue's
+appears in the dropdown without reloading the editor. Two cues that would read
+the same show their cue name beside the entry. The button shows the cue's
 state: on, off, settling after a press, stale when Companion has lost the
 device, dimmed when the cue refuses.
 
@@ -559,14 +560,16 @@ it is missing marks the button, not the whole layout.
 and points the button at it, so the Automation page's Run button, Home
 Assistant, voice and other consoles can fire it too. It is off until an action is
 chosen and its fields are complete. The cue is a **Called by name** rule named
-after the button's label (the action's name when the label is blank), with a
+after the button's label (the action's name when the label is blank, or is the
+default "Action" that older buttons were saved with), with a
 `lower_snake_case` cue name that is made unique against every cue name and former
 name — a name ending `_on` or `_off` gets `_cue` added, because a lone one would
 read as half of an ON/OFF pair and never appear in the list. It is saved enabled,
 with a **Cooldown** of 2 seconds, **Allowed during a service** on and **Home
 Assistant** off; change any of that on the Automation page. A cue obeys what a Button
 set to Run an action does not: Simulate mode (the button then says it sent nothing),
-Disarm, the cooldown, and the service guard if it is switched back on. If the server
+Disarm, the cooldown, and the service guard if it is switched back on. While the
+rule is being written, **Does** and **Make it a cue** are inert. If the server
 refuses the rule, the button is left as it was and the reason is shown under the
 button.
 

@@ -23,7 +23,7 @@ import type { CuesLive } from "../main/use-cue-live";
 import { ActionButtonInspector } from "./action-button-inspector";
 import { CuePicker } from "./cue-picker";
 import { RowSwitch, RowText, Segmented } from "./inspector-rows";
-import { makeCueFromAction } from "./make-it-a-cue";
+import { chosenLabel, makeCueFromAction } from "./make-it-a-cue";
 
 type CueButtonConfig = Extract<LayoutObjectConfig, { type: "cue-button" }>;
 type ActionButtonConfig = Extract<LayoutObjectConfig, { type: "action-button" }>;
@@ -68,6 +68,10 @@ export function ButtonInspector({
 }) {
   const cueMode = c.type === "cue-button";
   const does = cueMode ? "cue" : "action";
+  // Make it a cue's write is in flight. Held here, above both halves, so it
+  // survives the widget changing type and Does cannot be flipped under the write:
+  // the late rebind would overwrite the flip.
+  const [making, setMaking] = useState(false);
   return (
     <>
       <StackedField
@@ -81,6 +85,7 @@ export function ButtonInspector({
         <Segmented
           label="Does"
           value={does}
+          disabled={making}
           options={[
             { value: "cue", label: "Fire a cue" },
             { value: "action", label: "Run an action" },
@@ -123,7 +128,7 @@ export function ButtonInspector({
           />
         </>
       ) : (
-        <ActionButtonInspector c={c} onConfig={onConfig} beforeLabel={<MakeItACue c={c} onConfig={onConfig} />} />
+        <ActionButtonInspector c={c} onConfig={onConfig} beforeLabel={<MakeItACue c={c} onConfig={onConfig} busy={making} setBusy={setMaking} />} />
       )}
     </>
   );
@@ -136,11 +141,20 @@ export function ButtonInspector({
  * complete: the server would otherwise save the new rule turned off, and a Button
  * bound to a cue that refuses is worse than the Button it replaced.
  */
-function MakeItACue({ c, onConfig }: { c: ActionButtonConfig; onConfig: (c: LayoutObjectConfig) => void }) {
+function MakeItACue({
+  c,
+  onConfig,
+  busy,
+  setBusy,
+}: {
+  c: ActionButtonConfig;
+  onConfig: (c: LayoutObjectConfig) => void;
+  busy: boolean;
+  setBusy: (busy: boolean) => void;
+}) {
   const { data: registry } = useQuery(automationRegistryQuery);
   const action = registry?.actions.find((a) => a.id === c.actionId) ?? null;
   const ready = !!action && validateParams(action.params, (c.params ?? {}) as Record<string, string | number>).length === 0;
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The write takes a moment, and the label can be typed into meanwhile: the
   // rebind uses the widget as it is when the write lands, not as it was at the click.
@@ -151,7 +165,7 @@ function MakeItACue({ c, onConfig }: { c: ActionButtonConfig; onConfig: (c: Layo
     setBusy(true);
     setError(null);
     const made = await makeCueFromAction({
-      label: c.label ?? "",
+      label: c.label,
       actionId: c.actionId,
       actionLabel: action.label,
       params: c.params,
@@ -162,7 +176,9 @@ function MakeItACue({ c, onConfig }: { c: ActionButtonConfig; onConfig: (c: Layo
       setError(made.error);
       return;
     }
-    onConfig(toCueButton(latest.current, made.cue));
+    // The old default "Action" names nothing, so the button goes back to showing
+    // the cue's own name rather than keeping a label the operator never chose.
+    onConfig(toCueButton({ ...latest.current, label: chosenLabel(latest.current.label) }, made.cue));
     toast.success(`Made the cue "${made.cue}"`);
   }
 
