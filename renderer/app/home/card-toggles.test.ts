@@ -172,3 +172,20 @@ describe("a setting whose options come from an integration", () => {
     assert.equal(pickedValue(withToggle(c, "game", "auto"), "game"), "auto");
   });
 });
+
+describe("the SPL card's metric pick", () => {
+  test("an untouched SPL card reads as Automatic, the empty string", () => {
+    assert.equal(pickedValue(card({ type: "home-spl" }), "metricKey"), "");
+    assert.equal(pickedValue(card({ type: "home-spl", metricKey: null }), "metricKey"), "");
+  });
+
+  test("a pinned metric reads back as written", () => {
+    const c = withToggle(card({ type: "home-spl" }), "metricKey", "SPL C Slow");
+    assert.equal(pickedValue(c, "metricKey"), "SPL C Slow");
+  });
+
+  test("it is its own pick: Recent services' splMetric does not leak onto the SPL card or back", () => {
+    assert.equal(pickedValue(card({ type: "home-spl" }), "splMetric"), null);
+    assert.equal(pickedValue(card({ type: "home-recent-services" }), "metricKey"), null);
+  });
+});
