@@ -172,6 +172,20 @@ public final class OutputStateStore {
     try update(key, \.boundTo, to: server)
   }
 
+  /// Give `key`'s output a new secret, saved, and return it; nil when there is no
+  /// such output. The old one keeps working on the server until the output is
+  /// released there and set up again, because the server keeps the secret it pinned
+  /// (`TokenRotation`). The output keeps its id, `boundTo` and everything else:
+  /// `boundTo` is what stops another server on the network being handed the new
+  /// secret, and the server the output is released from still answers it.
+  /// Throws when it cannot be saved, or when the file was not read at launch.
+  public func newToken(key: String) throws -> String? {
+    guard records[key] != nil else { return nil }
+    let token = makeToken()
+    try update(key, \.token, to: token)
+    return token
+  }
+
   /// Set one field of `key`'s record and save. Nothing is done for a key with no
   /// record, or a field that already holds `value`. Throws when it cannot be saved;
   /// the change is kept in memory regardless.

@@ -448,7 +448,7 @@ output runs 20 ms behind its page at 1080p59.94, and its line in the window says
 far behind it is.
 
 Flags, for a Mac nobody is looking at: `--show-window`, `--list-outputs` (reads the
-stored state and exits), `--dump-frames <dir>` (a PNG of every output and of the window
+stored state and exits), `--new-token <output key>` (below), `--dump-frames <dir>` (a PNG of every output and of the window
 every 5 s, with no Screen Recording permission), `--discovery-port <n>`, `--log-stderr`,
 and, for development, `--virtual-sdi <n>` (n SDI outputs with no card behind them,
 offering every format, so the whole card path runs on any Mac), `--test-pattern
@@ -467,6 +467,17 @@ page, which printed the whole address, the output's secret token included. When 
 failure looks like Local Network access being off (no route to a server on the local
 network that has answered the helper, or every broadcast refused), a second line says
 where to turn it on. The helper's log has one line per run of failures, with the error.
+
+**Replacing an output's token.** If an output's token has been seen (an older helper
+showed it on air in Chromium's error page), give that output a new one: quit the
+helper from its window, run
+`/Applications/StageUtilityOutput.app/Contents/MacOS/StageUtilityOutput --new-token <output key>`
+(the key is the first column of `--list-outputs`), and start the helper again. The
+server still holds the old token, so the output shows the holding screen and the server
+logs `[output-helper] <device id> showed a token other than the one pinned`. **Release**
+the screen in its Screen settings, which drops the old token, then set the output up
+on that screen again when it appears under *Not set up yet*: the server pins the new
+one. Until the release, the old token still opens the screen.
 
 Where `/Library/Application Support/StageUtility/migrated-from-kiosk` exists, the Mac
 was a Chrome kiosk and keeps its screen: its main display takes over the kiosk's device

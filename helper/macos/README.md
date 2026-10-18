@@ -112,6 +112,7 @@ next login with the real state.
 | `--show-window` | Open the window at launch. Without it the window opens only on a first run (no `outputs.json` yet) or from the menu bar icon. |
 | `--dump-frames <dir>` | Every 5 s, write a PNG of what each output is showing (`<output key>-NNNN.png`) and of the helper's own window (`window-NNNN.png`). It is how to check rendering on a Mac nobody is looking at, with the screen locked; nothing needs Screen Recording permission. A display output's picture comes from Chromium's DevTools (`Page.captureScreenshot`), turned as the window turns it. A card output's is the next new frame exactly as the card is sent it, 8-bit UYVY decoded back to RGB, so it shows the Metal conversion, the turn and the scaling. The copy is taken as the page hands the picture over; decoding, encoding and writing are off the main thread. A card output whose page draws nothing new has no dump that round. Leave it off when measuring. |
 | `--list-outputs` | Print the stored state and exit: each display's and DeckLink port's output key, device id, and whether it is on (stored) or what it would default to. It only reads; a Mac with no device id yet is told so, not given one. |
+| `--new-token <output key>` | Give one output a new secret, save it, and exit. The helper must not be running. See [Replacing an output's token](#replacing-an-outputs-token). |
 | `--discovery-port <n>` | The UDP port to probe. Default 8789, or `STAGE_KIOSK_PORT`. |
 | `--log-stderr` | Also print the log to the terminal. |
 | `--virtual-sdi <n>` | For development: add n card outputs, 1 to 16, with no card behind them (below). Without it, none are shown. |
@@ -287,6 +288,33 @@ be listed). That is the output's own problem: **only its** posts pause, retried 
 line in the window says "not recognised by the server, health paused". Other outputs keep
 posting. Only the first pause is logged. Any other refusal or silence is logged once and
 posting carries on; three silent posts in a row make the output look for the server again.
+
+## Replacing an output's token
+
+An output's token is its secret: the server pins the one the output showed when it was
+set up, and serves the screen only to that. If it has been seen where it should not
+have been (on air in an old build's error page, in a photo, a screenshot), replace it:
+
+1. Quit the helper from its window (**Quit Stage Utility Output**). A deliberate quit is
+   not restarted by the LaunchAgent. The helper has to be stopped because it keeps
+   `outputs.json` in memory and would write the old token back; `--new-token` refuses
+   to run while it is.
+2. Find the output's key with `--list-outputs` (the first column), and run
+   `/Applications/StageUtilityOutput.app/Contents/MacOS/StageUtilityOutput --new-token <output key>`.
+   It saves a new token for that output only, and prints what is left to do; it never
+   prints the token. Nothing else about the output changes: its device id, its server
+   (`boundTo`, which keeps another server from being handed the new token), its format.
+3. Start the helper again (`open -a "Stage Utility Output"`). The output shows the
+   server's holding screen: the server still holds the old token, and logs once
+   `[output-helper] <device id> showed a token other than the one pinned for screen
+   <screen>`. The old token still opens that screen until the next step.
+4. In Stage Utility, open the screen's settings and **Release** it (Device). That drops
+   the old token. Within 30 s the output appears under *Not set up yet*.
+5. Set it up on the same screen again. The server pins the token the output last
+   showed it, the new one, and the screen comes back.
+
+The output that took over a Chrome kiosk's identity keeps the Mac's bare device id and
+gets a token of its own; the installer's `token` file is not changed.
 
 ## Rotation
 
