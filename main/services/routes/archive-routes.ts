@@ -9,6 +9,7 @@
 import { errorMessage } from "../errors.js";
 import { buildArchive, importArchive, inspectArchive } from "../archive/archive-bundle.js";
 import { StoreReadError } from "../data-store.js";
+import { ServiceNotSavedError } from "../history-edit.js";
 import { BodyTooLargeError, error, json, readRawBody, type RouteCtx } from "./context.js";
 import { zonedDateKey } from "../app-timezone.js";
 
@@ -21,10 +22,11 @@ export function archiveExportFilename(at: number): string {
  * An uploaded archive that will not import is a 400 naming why. Not every
  * failure is the upload's: an oversized one keeps its 413 (flattened to 400, it
  * told the operator their archive was malformed when it was simply too big),
- * and a history file this box cannot read keeps its 503.
+ * a history file this box cannot read keeps its 503, and a service a recorder
+ * has not saved yet keeps its 409.
  */
 function failUpload(res: RouteCtx["res"], err: unknown): void {
-  if (err instanceof BodyTooLargeError || err instanceof StoreReadError) throw err;
+  if (err instanceof BodyTooLargeError || err instanceof StoreReadError || err instanceof ServiceNotSavedError) throw err;
   error(res, errorMessage(err));
 }
 

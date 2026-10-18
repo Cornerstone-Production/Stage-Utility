@@ -371,10 +371,20 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * before it lands loses it, and the log says so.
    */
   protected async saveClosed(record: T): Promise<void> {
+    // `record` is `current` at both callers, so forget() of it bumps this.
+    const gen = this.generation;
     try {
       await this.store.upsert(record);
       this.unsaved.delete(record.serviceKey);
     } catch (err) {
+      if (gen !== this.generation) {
+        // Deleted or edited in History while the write was out. Holding it
+        // would write it back over the operator's change once the disk recovers.
+        console.error(
+          `[${this.label}] could not save ${scrub(record.serviceKey)} (${scrubError(err)}), and it was changed in History meanwhile; not retried`,
+        );
+        return;
+      }
       if (!this.unsaved.has(record.serviceKey)) {
         this.stillFailingLoggedAt = Date.now();
         console.error(

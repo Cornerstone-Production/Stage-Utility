@@ -271,7 +271,8 @@ saved again every few seconds (every minute for SPL) until it lands. Until then:
 
 Held in memory only: a restart before the save lands loses that service's record.
 For SPL and the rundown timing, **Rebuild from raw** recovers it from the raw
-archive, if that was writable. A write that hangs rather than fails, such as a
+archive when an earlier copy of the record reached disk; a service with nothing
+saved has no History row to rebuild. A write that hangs rather than fails, such as a
 stalled network mount, still holds up the tick it is on.
 
 ```

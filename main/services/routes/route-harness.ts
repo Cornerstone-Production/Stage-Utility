@@ -78,7 +78,7 @@ export interface RequestOptions {
   /** Sent as a JSON body. Mutually exclusive with `raw`. */
   body?: unknown;
   /** Sent verbatim — for malformed-JSON and binary cases. */
-  raw?: string;
+  raw?: string | Uint8Array;
   headers?: Record<string, string>;
 }
 
@@ -97,7 +97,7 @@ export async function callRoute(
 
   const payload = opts.raw ?? (opts.body === undefined ? "" : JSON.stringify(opts.body));
   // readBody consumes the request as a stream, so the fake has to be one.
-  const req = Readable.from(payload ? [Buffer.from(payload)] : []) as unknown as http.IncomingMessage;
+  const req = Readable.from(payload.length ? [Buffer.from(payload)] : []) as unknown as http.IncomingMessage;
   req.method = opts.method ?? "GET";
   req.url = path;
   req.headers = opts.headers ?? {};

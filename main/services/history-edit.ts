@@ -60,9 +60,9 @@ export class ServiceIsLiveError extends Error {
 export class ServiceNotSavedError extends Error {
   readonly status = 409;
   readonly code = "unsaved";
-  constructor(action: string) {
+  constructor(action: string, serviceKey: string) {
     super(
-      `That service has not been saved yet — the disk refused it, and it is retried every few seconds. It cannot be ${action} until it is.`,
+      `The service ${scrub(serviceKey)} has not been saved yet — the disk refused its last save, which keeps being retried. It cannot be ${action} until it is saved.`,
     );
     this.name = "ServiceNotSavedError";
   }
@@ -74,7 +74,7 @@ export class ServiceNotSavedError extends Error {
  * would work from that and forget() would drop the only current one.
  */
 export function assertSaved(action: string, ...serviceKeys: string[]): void {
-  for (const k of serviceKeys) if (RECORDERS.some((r) => r.isHolding(k))) throw new ServiceNotSavedError(action);
+  for (const k of serviceKeys) if (RECORDERS.some((r) => r.isHolding(k))) throw new ServiceNotSavedError(action, k);
 }
 
 /**
@@ -135,8 +135,11 @@ async function assertEditable(action: string, ...serviceKeys: string[]): Promise
 
 /** Release every recorder's copy of these keys. Called BEFORE the first awaited
  *  write, never after: a debounce that fires mid-await writes the pre-edit
- *  record back over the one just saved. */
+ *  record back over the one just saved. Checks again that none is held
+ *  unsaved, with no await in between: a split during assertEditable's awaits
+ *  can hold one, and forget() would drop the only current copy. */
 function forgetAll(...serviceKeys: string[]): void {
+  assertSaved("changed", ...serviceKeys);
   for (const r of RECORDERS) for (const k of serviceKeys) r.forget(k);
 }
 

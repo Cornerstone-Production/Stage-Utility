@@ -36,6 +36,9 @@ const { attendanceStore } = await import("./attendance-store.js");
 const { splHistoryStore } = await import("./spl-history-store.js");
 const { editServiceWindow, deleteServiceRecords } = await import("./history-edit.js");
 const { buildArchive, importArchive } = await import("./archive/archive-bundle.js");
+const { archiveRoutes } = await import("./routes/archive-routes.js");
+const { callRoute } = await import("./routes/route-harness.js");
+const { handlerErrorStatus, handlerErrorCode } = await import("./remote-server.js");
 
 type Rec = { serviceKey: string; endedAt: string | null };
 type Held = {
@@ -45,6 +48,7 @@ type Held = {
   forget(key: string): boolean;
   getCurrent(): Rec | null;
   getRecord(key: string): Promise<Rec | null>;
+  isHolding(key: string): boolean;
 };
 
 const RECORDERS: { name: string; dir: string; channel: string; rec: Held }[] = [
@@ -338,6 +342,17 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
     );
     await assert.rejects(() => deleteServiceRecords(key1), (err: Error & { code?: string }) => err.code === "unsaved");
     await assert.rejects(() => importArchive(zip), (err: Error & { code?: string }) => err.code === "unsaved");
+    // And through the route, which once flattened every import failure to a 400.
+    await assert.rejects(
+      () => callRoute(archiveRoutes, "/api/archive/import", { method: "POST", raw: zip }),
+      (err: Error) => {
+        const status = handlerErrorStatus(err);
+        assert.equal(status, 409);
+        assert.equal(handlerErrorCode(err, status), "unsaved");
+        assert.match(err.message, new RegExp(key1.replace(/[^A-Za-z0-9]/g, ".")));
+        return true;
+      },
+    );
     for (const { name, rec } of RECORDERS) {
       assert.ok((await rec.getRecord(key1))?.endedAt, `${name}: lost the held copy`);
     }
@@ -360,5 +375,54 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
     const current = serviceTimelineRecorder.getCurrent();
     assert.equal(current?.serviceKey, key1);
     assert.equal(current?.startedAt, "2026-10-18T18:10:00.000Z", "resumed a held copy that was forgotten");
+  });
+
+  it("does not hold a record forgotten while its failing save was out", async (t) => {
+    const key1 = `75953:${planId}:occ-a`;
+    await tick("2026-10-18T14:00:00.000Z", "occ-a", "doors");
+
+    // The save of the outgoing record waits until released, then fails.
+    let release!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    const realUpsert = serviceTimelineStore.upsert.bind(serviceTimelineStore);
+    t.mock.method(serviceTimelineStore, "upsert", async (r: { serviceKey: string }) => {
+      if (r.serviceKey !== key1) return realUpsert(r as never);
+      await released;
+      throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+    });
+
+    const splitting = tick("2026-10-18T16:05:00.000Z", "occ-b", "welcome");
+    await settle();
+    serviceTimelineRecorder.forget(key1); // the operator deletes it meanwhile
+    release();
+    await splitting;
+
+    assert.equal(serviceTimelineRecorder.isHolding(key1), false, "held a forgotten record for retry");
+    assert.ok(errors.some((e) => e.includes("changed in History meanwhile; not retried")));
+  });
+
+  it("refuses an edit when the service becomes held during the edit's own checks", async (t) => {
+    const key1 = `75953:${planId}:occ-a`;
+    await tick("2026-10-18T14:00:00.000Z", "occ-a", "doors");
+    mock.timers.setTime(Date.parse("2026-10-18T14:30:00.000Z")); // no longer live
+
+    // A split, with the folders read-only, lands inside assertEditable's awaits.
+    const realAssert = splHistoryStore.assertReadable.bind(splHistoryStore);
+    let fired = false;
+    t.mock.method(splHistoryStore, "assertReadable", async (k: string) => {
+      if (!fired) {
+        fired = true;
+        await setWritable(false);
+        await tick("2026-10-18T14:30:00.000Z", "occ-b", "welcome");
+        await setWritable(true);
+      }
+      return realAssert(k);
+    });
+
+    await assert.rejects(
+      () => editServiceWindow(key1, { endedAt: "2026-10-18T14:20:00.000Z" }),
+      (err: Error & { code?: string }) => err.code === "unsaved",
+    );
+    for (const { name, rec } of RECORDERS) assert.ok(rec.isHolding(key1), `${name}: dropped the held copy`);
   });
 });
