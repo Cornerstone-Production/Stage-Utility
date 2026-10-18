@@ -284,7 +284,8 @@ installer on the device.
 
 ![The Screens page with two screens found on the network, each offered Set up or Dismiss, and the count beside Screens in the sidebar](images/screens-overview.png)
 
-- A device bound to **this** server is always answered, so a display re-finds its
+- A device bound to **this** server is answered, unless the bindings cannot be
+  read (below), so a display re-finds its
   server after an IP change with nobody present.
 - An **unclaimed** device is always **listed**: the server records every one it
   hears, with no scan to open, so the banner, *Not set up yet* and the sidebar
@@ -295,6 +296,10 @@ installer on the device.
   it, so a server answering every new device at all times would race any other
   Stage Utility on the network for it. The answer is also what puts the holding
   screen, with its id, address and MAC, on the physical screen.
+- While the server cannot read its record of which devices are bound to it,
+  it answers **nothing** and lists nothing, rather than taking every device
+  for unclaimed, and the device routes fail (`503`): a screen loading its page
+  gets an error rather than the holding screen. To the screens it looks like the server being down. See [When a store file cannot be read](ops/reliability.md#when-a-store-file-cannot-be-read).
 
 Where broadcast does not cross a VLAN, write the server address into a `server`
 file beside the device id and discovery is skipped.
