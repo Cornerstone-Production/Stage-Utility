@@ -137,6 +137,16 @@ import Testing
     #expect(r == DiscoveryReply(serverId: "s-1", name: "Stage Utility", url: "http://192.0.2.10:8788"))
   }
 
+  @Test func readsWhetherTheOutputIsClaimed() {
+    let base = #"{"stageUtility":"server","v":1,"serverId":"s-1","name":"S","url":"http://192.0.2.10:8788""#
+    #expect(DiscoveryReply.parse(data(base + #","claimed":true}"#))?.claimed == true)
+    #expect(DiscoveryReply.parse(data(base + #","claimed":false}"#))?.claimed == false)
+    // An older server, and anything that is not a JSON boolean.
+    #expect(DiscoveryReply.parse(data(base + "}"))?.claimed == nil)
+    #expect(DiscoveryReply.parse(data(base + #","claimed":1}"#))?.claimed == nil)
+    #expect(DiscoveryReply.parse(data(base + #","claimed":"true"}"#))?.claimed == nil)
+  }
+
   @Test func nameDefaultsToTheServerId() {
     let r = DiscoveryReply.parse(data(#"{"stageUtility":"server","v":1,"serverId":"s-1","url":"http://h:1"}"#))
     #expect(r?.name == "s-1")

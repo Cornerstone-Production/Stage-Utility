@@ -29,9 +29,9 @@ final class OutputDiscovery {
   private var link = ProbeLinkState()
   private var filter = ReplyFilter()
 
-  /// The server answered. Called on the main queue, for every answer from the server
-  /// this output is bound to (or, while it is bound to none, from anyone).
-  var onReply: ((DiscoveryReply) -> Void)?
+  /// The server answered. Called on the main queue, for every answer the filter
+  /// believes, with what it does to the server this output remembers.
+  var onReply: ((DiscoveryReply, OutputBinding) -> Void)?
   /// Every broadcast probe failed to send with "no route to host", which is what a
   /// refused Local Network permission looks like.
   var onLocalNetworkSuspected: (() -> Void)?
@@ -153,9 +153,19 @@ final class OutputDiscovery {
       return
     }
     let bound = boundTo()
-    if case .ignore(let firstTime) = filter.decide(reply, boundTo: bound) {
+    let change: OutputBinding
+    switch filter.decide(reply, boundTo: bound) {
+    case .accept(let c):
+      change = c
+    case .ignore(let firstTime):
       if firstTime {
-        Log.error(.discovery, "\(label): ignored an answer from \"\(reply.name)\" (\(reply.serverId)) at \(Redact.url(reply.url)): this output is bound to server \(bound ?? "?"). Another host on the network may be answering for it")
+        let from = "\(label): ignored an answer from \"\(reply.name)\" (\(reply.serverId)) at \(Redact.url(reply.url))"
+        if let bound {
+          Log.error(.discovery, "\(from): this output is bound to server \(bound). Another host on the network may be answering for it")
+        } else {
+          // Two servers on their Screens page at once: ordinary, so not an error.
+          Log.notice(.discovery, "\(from): this output is set up on no server and follows \(filter.following ?? "?"), which answered first, until a server sets it up")
+        }
       }
       return
     }
@@ -163,6 +173,6 @@ final class OutputDiscovery {
       answered = true
       Log.notice(.discovery, "\(label): answered by \"\(reply.name)\" (\(reply.serverId)) at \(Redact.url(reply.url))")
     }
-    onReply?(reply)
+    onReply?(reply, change)
   }
 }

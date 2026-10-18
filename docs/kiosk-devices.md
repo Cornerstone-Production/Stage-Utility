@@ -265,7 +265,34 @@ other's way:
 
 - an **unclaimed** device shows on every server that hears it, which is harmless;
 - the moment you claim it on one, its probe says so and every **other** server
-  ignores it.
+  ignores it;
+- **release** it, and the next answer from that server says it is no longer set
+  up there. The device forgets that server, its probes stop naming it, and it
+  shows on every server again, ready to set up on any of them.
+
+A device learns all of this from the server's answer to its probe, which says
+whether the device is set up on the server answering. It remembers a server only
+once one says yes: a server that merely answered it, with a Screens page open, has
+claimed nothing. When more than one server answers the same probe, the answer from
+the server it remembers wins, then one from a server it is set up on.
+
+A Mac output helper output keeps probing every 30 s, so it hears a release within
+half a minute. A Pi, Linux, macOS or Windows kiosk probes only when it starts, and
+hands over to the browser once a server answers. To move one: release it, open
+Screens on the other server, and restart the screen. Told at that probe that it is
+released, it forgets the old server and probes again straight away, and the server
+with Screens open answers it. A helper output set up nowhere follows the first
+server that answered, so two Screens pages open at once do not pass its holding
+screen back and forth, until a server sets it up.
+
+A Mac output helper, macOS or Windows kiosk installed before servers said whether
+a device is set up there remembers any server that answers it. Re-run its
+installer (or update the helper) before releasing it, or it stays out of other
+servers' reach. An older Pi or Linux kiosk never sent a binding, so it is free as
+it is. Likewise a server that old is remembered on any answer by the helper and
+the macOS and Windows agents, never by the Linux agent, until it is updated or the
+device's `bound-to` file (`boundTo` in the helper's `outputs.json`) is removed by
+hand.
 
 No coordination between servers, and nothing to get out of sync.
 
@@ -292,9 +319,9 @@ installer on the device.
   count are filled the moment anyone looks. A device not heard for 90 seconds
   drops out, and the list holds at most 256 unclaimed devices: the first heard are the ones kept, and the log says when it is full.
 - An unclaimed device is **answered** only while a scan is open, which is for as
-  long as a Screens page is open. A device binds to the first server that answers
-  it, so a server answering every new device at all times would race any other
-  Stage Utility on the network for it. The answer is also what puts the holding
+  long as a Screens page is open. A device loads its holding screen from the
+  first server that answers it, so a server answering every new device at all
+  times would race any other Stage Utility on the network for it. The answer is also what puts the holding
   screen, with its id, address and MAC, on the physical screen.
 - While the server cannot read its record of which devices are bound to it,
   it answers **nothing** and lists nothing, rather than taking every device

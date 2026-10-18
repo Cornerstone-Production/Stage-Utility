@@ -11,7 +11,7 @@ import * as dgram from "node:dgram";
 import { networkInterfaces } from "node:os";
 
 import { decodeProbe, encodeReply, decideProbe, listedBoundTo, isFromThisMachine } from "./kiosk-discovery.js";
-import { recordSeen, scanning, forgetSeen } from "./kiosk-presence.js";
+import { recordSeen, scanning, forgetSeen, noteReleased } from "./kiosk-presence.js";
 import { kioskDevicesStore, findById, touch, updateDevices } from "./kiosk-devices-store.js";
 import { DEFAULT_DISCOVERY_PORT } from "../types/kiosk.js";
 
@@ -75,6 +75,7 @@ export function startKioskResponder(opts: ResponderOptions): void {
     bindingsUnreadable = false;
     const bound = !!findById(devices, probe.id);
     const decision = decideProbe(probe, opts.serverId, { scanning: scanning(), bound });
+    if (!bound && probe.boundTo === opts.serverId) noteReleased(probe.id);
 
     // Listed means somebody could set it up, or it cannot reach its own server.
     // Which is which is decideProbe's call; this only records it. A new device is
@@ -128,7 +129,7 @@ export function startKioskResponder(opts: ResponderOptions): void {
 
     if (!decision.answer) return;
     const reply = Buffer.from(
-      encodeReply({ serverId: opts.serverId, name: opts.serverName, url: opts.url() }),
+      encodeReply({ serverId: opts.serverId, name: opts.serverName, url: opts.url(), claimed: bound }),
     );
     sock.send(reply, rinfo.port, rinfo.address, (err) => {
       if (err) console.warn("[kiosk-responder] reply failed:", err.message);
