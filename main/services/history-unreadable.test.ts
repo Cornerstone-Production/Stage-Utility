@@ -15,7 +15,7 @@
 // why this has a file of its own.
 
 import assert from "node:assert/strict";
-import { before, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -71,6 +71,7 @@ const { StoreReadError } = await import("./data-store.js");
 const { handlerErrorStatus } = await import("./remote-server.js");
 const { historyRoutes } = await import("./routes/history-routes.js");
 const { callRoute } = await import("./routes/route-harness.js");
+const { captureConsole } = await import("./fixtures/capture-console.js");
 
 /** An archive holding the torn service, as if from another box. */
 function archiveOfTorn(): Uint8Array {
@@ -107,19 +108,9 @@ async function untouched(): Promise<void> {
   );
 }
 
-before(async () => {
-  // The store says so once, at its first load; keep the test output to results.
-  const orig = console.error;
-  console.error = () => {};
-  try {
-    await attendanceStore.list();
-  } finally {
-    console.error = orig;
-  }
-});
-
 describe("with a history record that could not be read", () => {
-  it("an import refuses, rather than taking that service for new", async () => {
+  it("an import refuses, rather than taking that service for new", async (t) => {
+    captureConsole(t, "error"); // the store says so at its first load
     await assert.rejects(importArchive(archiveOfTorn(), { mode: "skip" }), isStoreReadError);
     await untouched();
   });
@@ -162,14 +153,9 @@ describe("with a history record that could not be read", () => {
     assert.deepEqual(await deleteServiceRecords(OK), { deleted: true, records: ["attendance"] });
   });
 
-  it("a recorder's save for that service is held beside the file, not refused", async () => {
-    const orig = console.error;
-    console.error = () => {};
-    try {
-      await attendanceStore.upsert(attendance(TORN, `${DATE}T14:50:00.000Z`));
-    } finally {
-      console.error = orig;
-    }
+  it("a recorder's save for that service is held beside the file, not refused", async (t) => {
+    captureConsole(t, "error");
+    await attendanceStore.upsert(attendance(TORN, `${DATE}T14:50:00.000Z`));
     await untouched();
     const held = (await fs.readdir(path.dirname(TORN_FILE))).filter((n) => n.startsWith("st1-p1-torn.json.held-"));
     assert.equal(held.length, 1, held.join());

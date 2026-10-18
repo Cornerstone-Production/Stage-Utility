@@ -14,6 +14,7 @@ import { sampleArchive } from "./archive/sample-archive.js";
 import { addLeqSample } from "./spl-leq.js";
 import { broadcast } from "./broadcaster.js";
 import { shouldRecordLive } from "./live-service-gate.js";
+import { errorMessage } from "./errors.js";
 import { scrub, scrubError } from "./scrub.js";
 import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
@@ -98,7 +99,7 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
   protected override async resumeRecord(existing: ServiceSplHistory): Promise<ServiceSplHistory> {
     const rebuilt = await rebuildSplRecord(existing).catch((err: unknown) => {
       console.error(
-        `[spl-recorder] could not rebuild ${scrub(existing.serviceKey)} from the archive on resume (${scrub(err instanceof Error ? err.message : err)}); resuming the stored record`,
+        `[spl-recorder] could not rebuild ${scrub(existing.serviceKey)} from the archive on resume (${scrub(errorMessage(err))}); resuming the stored record`,
       );
       return null;
     });

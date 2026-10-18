@@ -29,6 +29,7 @@ import { serviceTimelineStore } from "../service-timeline-store.js";
 import { splHistoryStore } from "../spl-history-store.js";
 import { StoreReadError } from "../data-store.js";
 import { archiveRoot, isInside, serviceDirName } from "./archive-paths.js";
+import { unreadableArchiveFile } from "./archive-rows.js";
 import { atomicWrite } from "../write-queue.js";
 import { encodeRow, parseRows } from "../csv.js";
 import {
@@ -145,7 +146,7 @@ async function readDirInto(root: string, prefix: string, into: Record<string, Ui
     // that is there and cannot be listed fails the export rather than leaving
     // every raw file out of it.
     if (isNotFound(err)) return;
-    throw new StoreReadError(`The archive folder ${path.basename(root)}`, err);
+    throw unreadableArchiveFile(root, "", err);
   }
   for (const e of entries) {
     const full = path.join(root, e.name);
@@ -156,9 +157,7 @@ async function readDirInto(root: string, prefix: string, into: Record<string, Ui
     try {
       into[`${prefix}${e.name}`] = new Uint8Array(await fs.readFile(full));
     } catch (err) {
-      // Named, not the errno's own message: that carries the absolute path,
-      // and this answers a LAN request.
-      throw new StoreReadError(`${e.name} in archive folder ${path.basename(root)}`, err);
+      throw unreadableArchiveFile(root, e.name, err);
     }
   }
 }

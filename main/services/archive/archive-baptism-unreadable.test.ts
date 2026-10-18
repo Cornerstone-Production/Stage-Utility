@@ -22,6 +22,7 @@ await fs.mkdir(path.join(TMP, "baptism.json"));
 
 const { buildArchive, importArchive } = await import("./archive-bundle.js");
 const { splHistoryStore } = await import("../spl-history-store.js");
+const { captureConsole } = await import("../fixtures/capture-console.js");
 
 const KEY = "st1:p1:t1";
 const DATE = "2026-10-18";
@@ -42,31 +43,20 @@ function archive(sessions: { id: string }[]): Uint8Array {
   });
 }
 
-async function quietly<R>(fn: () => Promise<R>): Promise<R> {
-  const orig = console.error;
-  console.error = () => {};
-  try {
-    return await fn();
-  } finally {
-    console.error = orig;
-  }
-}
-
 describe("with baptism.json there and unreadable", () => {
   it("an export fails rather than shipping without it", async () => {
     await assert.rejects(buildArchive(), { name: "StoreReadError", code: "EISDIR", message: /^baptism\.json could not be read/ });
   });
 
-  it("an import that would add sessions refuses before writing anything", async () => {
-    await assert.rejects(
-      quietly(() => importArchive(archive([{ id: "b1" }]))),
-      /baptism\.json/,
-    );
+  it("an import that would add sessions refuses before writing anything", async (t) => {
+    captureConsole(t, "error");
+    await assert.rejects(importArchive(archive([{ id: "b1" }])), /baptism\.json/);
     assert.equal(await splHistoryStore.get(KEY), null, "a record was written before the refusal");
   });
 
-  it("an import with no sessions to add still runs", async () => {
-    const res = await quietly(() => importArchive(archive([])));
+  it("an import with no sessions to add still runs", async (t) => {
+    captureConsole(t, "error");
+    const res = await importArchive(archive([]));
     assert.deepEqual(res.added, [KEY]);
   });
 });

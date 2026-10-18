@@ -277,8 +277,9 @@ async function splSeriesFor(
   if (!record) return null;
   const dir = serviceDirPath(serviceKey, record.serviceDate);
   const rows = await readArchiveRows(dir, "spl");
-  // An archive that exists and cannot be read throws above: a failure the
-  // operator needs told about, not a record that predates the raw layer.
+  // An archive that exists and cannot be read throws in readArchiveRows: a
+  // failure the operator needs told about, not a record that predates the raw
+  // layer.
   if (!rows || rows.length === 0) return null;
 
   const metrics = metricsIn(rows);

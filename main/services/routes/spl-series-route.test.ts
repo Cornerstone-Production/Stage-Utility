@@ -154,7 +154,8 @@ describe("GET /api/spl/history/:key/series", () => {
 
   test("fails, rather than answering from the rows it could read, when a rolled file cannot be read", async () => {
     // A directory where spl.2.csv should be: unreadable without depending on
-    // file permissions. The walk used to end at it and draw half a service.
+    // file permissions. Answered from spl.csv alone, the chart draws half a
+    // service as though it were the whole.
     const key = "75953:909:2254";
     await splHistoryStore.upsert(record(key) as never);
     const dir = serviceDirPath(key, DATE);

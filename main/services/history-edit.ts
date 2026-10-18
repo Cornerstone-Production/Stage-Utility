@@ -100,10 +100,9 @@ export function assertNotLive(serviceKey: string, action: string): void {
 /**
  * Refuse to touch a service that is live, or whose record is on disk and
  * could not be read. Every edit here reads the record and writes back what it
- * derived, and one it could not read answers as absent: a delete removed
- * nothing and said so, a merge re-keyed the source onto a target it took for
- * empty. The store keeps such a file as it is (see keyed-record-store.ts);
- * this keeps the edits off it until the server restarts with it readable.
+ * derived, and one it could not read answers as absent (see
+ * keyed-record-store.ts), so the edits stay off it until the server restarts
+ * with it readable.
  */
 async function assertEditable(action: string, ...serviceKeys: string[]): Promise<void> {
   for (const k of serviceKeys) assertNotLive(k, action);
