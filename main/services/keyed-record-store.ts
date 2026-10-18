@@ -25,7 +25,7 @@ import * as path from "node:path";
 
 import { getUserDataPath } from "./app-paths.js";
 import { StoreReadError } from "./data-store.js";
-import { isNotFound } from "./errors.js";
+import { errorMessage, isNotFound } from "./errors.js";
 import { scrub } from "./scrub.js";
 import { registerStore, type StoreClass } from "./store-registry.js";
 import { atomicWrite } from "./write-queue.js";
@@ -118,10 +118,7 @@ export class KeyedRecordStore<T extends Keyed> {
       raw = await fs.readFile(legacy, "utf8");
     } catch (err) {
       if (isNotFound(err)) return; // already migrated, or nothing was ever recorded
-      this.legacyFailure ??= new StoreReadError(this.legacyFile, err);
-      console.error(
-        `[${this.dirName}] ${this.legacyFailure.message}: the services in it are missing from history, and it is left in place. Fix the permissions or the disk, then restart.`,
-      );
+      this.legacyUnread(new StoreReadError(this.legacyFile, err));
       return;
     }
     // The split files are written into a directory that could not be listed,
@@ -130,8 +127,8 @@ export class KeyedRecordStore<T extends Keyed> {
     let parsed: { services?: Record<string, T> };
     try {
       parsed = JSON.parse(raw);
-    } catch {
-      console.error(`[${this.dirName}] legacy ${this.legacyFile} will not parse — leaving it in place`);
+    } catch (err) {
+      this.legacyUnread(new StoreReadError(this.legacyFile, err, "will not parse"));
       return;
     }
     const records = Object.values(parsed.services ?? {});
@@ -193,10 +190,10 @@ export class KeyedRecordStore<T extends Keyed> {
     try {
       names = await fs.readdir(this.dir());
     } catch (err) {
-      if (!isNotFound(err)) {
-        this.dirFailure ??= new StoreReadError(`The ${this.dirName} folder`, err);
+      if (!isNotFound(err) && !this.dirFailure) {
+        this.dirFailure = new StoreReadError(`The ${this.dirName} folder`, err);
         console.error(
-          `[${this.dirName}] ${this.dirFailure.message}: history from it is missing, and every save to it goes to a .held file beside the one it would replace until the server restarts. Fix the permissions or the disk, then restart.`,
+          `[${this.dirName}] ${this.dirFailure.message}: ${errorMessage(err)}. History from it is missing, and every save to it goes to a .held file beside the one it would replace until the server restarts. Fix the permissions or the disk, then restart.`,
         );
       }
     }
@@ -225,10 +222,20 @@ export class KeyedRecordStore<T extends Keyed> {
   private markUnread(name: string, failure: StoreReadError): void {
     if (!this.unread.has(name)) {
       console.error(
-        `[${this.dirName}] ${failure.message}: left as it is, missing from history, and a save for that service goes to a .held file beside it until the server restarts. Fix the file, then restart.`,
+        `[${this.dirName}] ${failure.message}: ${errorMessage(failure.cause)}. Left as it is, missing from history, and a save for that service goes to a .held file beside it until the server restarts. Fix the file, then restart.`,
       );
     }
     this.unread.set(name, failure);
+  }
+
+  /** The legacy file could not be read or parsed: left in place, and the
+   *  history is incomplete without it. Said once. */
+  private legacyUnread(failure: StoreReadError): void {
+    if (this.legacyFailure) return;
+    this.legacyFailure = failure;
+    console.error(
+      `[${this.dirName}] ${failure.message}: ${errorMessage(failure.cause)}. The services in it are missing from history, and it is left in place. Fix it, then restart.`,
+    );
   }
 
   /** Why a save for this key may not replace its file, or null when it may. */
