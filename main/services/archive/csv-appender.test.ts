@@ -59,7 +59,7 @@ test("a changed column set rolls to a new file rather than a ragged one", async 
     ["t2", "91", "95"],
     ["t3", "92", "96"],
   ]);
-  assert.deepEqual(a.files(), ["spl.csv", "spl.2.csv"]);
+  assert.deepEqual((await fs.readdir(dir)).sort(), ["spl.2.csv", "spl.csv"]);
 });
 
 test("resumes an existing file without repeating the header", async () => {
@@ -142,7 +142,6 @@ test("a directory where spl.csv should be is passed over, and the rows go to spl
     ["t1", "90"],
     ["t2", "91"],
   ]);
-  assert.deepEqual(a.files(), ["spl.2.csv"]);
   assert.equal(lines.length, 1, `logged ${lines.length} times, not once:\n${lines.join("\n")}`);
   assert.match(lines[0], /^\[archive\] \S+\/spl\.csv could not be read \(EISDIR\)\. Recording spl into the next file/);
 });
@@ -194,7 +193,7 @@ test("a file that stops taking appends mid-service hands the same row to the nex
     ],
     "a row was lost",
   );
-  assert.deepEqual(a.files(), ["spl.csv", "spl.2.csv"]);
+  assert.deepEqual((await fs.readdir(dir)).sort(), ["spl.2.csv", "spl.csv"]);
 });
 
 test("a read failure that is not about the file passes nothing over, and the appender recovers", { skip: asRoot }, async (t) => {
@@ -216,5 +215,47 @@ test("a read failure that is not about the file passes nothing over, and the app
   assert.deepEqual(await rows(dir, "spl.csv"), [
     ["at", "db"],
     ["t2", "91"],
+  ]);
+});
+
+test("running out of file handles passes no file over, on a read or an append", async (t) => {
+  // EMFILE is the machine, not the file: lstat still finds the file, and
+  // passing it over rolled it to a new one on every blip. That row is lost
+  // and the next one goes on in the same file.
+  captureConsole(t, "error");
+  const { syncBuiltinESMExports } = await import("node:module");
+  const fsp = (await import("node:fs/promises")).default;
+  const dir = await tmp();
+  await new CsvAppender(dir, "spl").append(["at", "db"], ["t1", 90]);
+  const emfile = Object.assign(new Error("EMFILE: too many open files"), { code: "EMFILE" });
+  const fail = <F extends (...a: never[]) => unknown>(name: "readFile" | "appendFile") => {
+    const real = fsp[name] as unknown as F;
+    let once = true;
+    t.mock.method(fsp, name, (async (...args: Parameters<F>) => {
+      if (once) {
+        once = false;
+        throw emfile;
+      }
+      return real(...args);
+    }) as never);
+    syncBuiltinESMExports();
+  };
+
+  const reopened = new CsvAppender(dir, "spl"); // reads the header first
+  fail("readFile");
+  await reopened.append(["at", "db"], ["t2", 91]); // lost
+  await reopened.append(["at", "db"], ["t3", 92]);
+  fail("appendFile");
+  await reopened.append(["at", "db"], ["t4", 93]); // lost
+  await reopened.append(["at", "db"], ["t5", 94]);
+  t.mock.restoreAll();
+  syncBuiltinESMExports();
+
+  assert.deepEqual(await fs.readdir(dir), ["spl.csv"], "a file was rolled for a machine failure");
+  assert.deepEqual(await rows(dir, "spl.csv"), [
+    ["at", "db"],
+    ["t1", "90"],
+    ["t3", "92"],
+    ["t5", "94"],
   ]);
 });
