@@ -1655,12 +1655,10 @@ test("an HLS frame is the delayed phase, with hls.js's latency rounded for the b
 
 // ── starting playback ─────────────────────────────────────────────────────
 //
-// Every attempt calls play() itself once its source is attached, rather than
-// leaving it to the element's `autoplay`: Safari's autoplay waits for
-// HAVE_ENOUGH_DATA, which held an HLS picture's first frame 2.3 to 2.6 s past
-// `canplay` (see startPlaying in use-video-session.ts). What these prove is
-// the call; the timing it buys exists only in a browser, and is measured there
-// (docs/integrations/video-feeds.md, "Measuring playback").
+// Every attempt calls play() itself once its source is attached rather than
+// leaving it to `autoplay` (see startPlaying in use-video-session.ts). These
+// prove the call; the timing it buys exists only in a browser, and is
+// measured there (docs/integrations/video-feeds.md, "Measuring playback").
 
 test("an hls.js attempt calls play() once hls.js has the element, without waiting on autoplay", async () => {
   const undoHls = installFakeHls();
@@ -1715,6 +1713,27 @@ test("a play() the browser refuses is named when no frame arrives over HLS", asy
     ]);
   } finally {
     mock.timers.reset();
+  }
+});
+
+test("a play() the browser refuses is named when a connected WebRTC session shows no frame", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const video = new FakeVideo();
+  video.playAnswer = () => Promise.reject(new DOMException("The request is not allowed by the user agent", "NotAllowedError"));
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video as unknown as HTMLVideoElement, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+    await flush();
+    FakePeerConnection.instances[0]!.setConnectionState("connected");
+    mock.timers.tick(FIRST_FRAME_TIMEOUT_MS);
+    await flush();
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [
+      { fn: "onWebrtcUnusable", arg: "connected, but no frame ever arrived; the browser refused to play (NotAllowedError: The request is not allowed by the user agent)" },
+    ]);
+  } finally {
+    mock.timers.reset();
+    g.restore();
   }
 });
 

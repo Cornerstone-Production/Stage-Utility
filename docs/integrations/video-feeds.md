@@ -420,10 +420,9 @@ the player depends on what the browser has:
 | Safari on iPhone before iOS 17.1 | Safari's own HLS player |
 
 The widget starts the picture itself as soon as the browser can play it,
-rather than leaving that to the browser's autoplay. Safari's autoplay waits
-until it judges enough is buffered, which on the relay's low-latency HLS held
-the first frame for about 2.5 seconds, after which the picture was that far
-behind and jumped back to live.
+rather than leaving that to the browser's autoplay, which in Safari waits
+until it judges enough is buffered (about 2.5 seconds on the relay's
+low-latency HLS).
 
 Send the encoder's full frame rate, 59.94 or 60, rather than a setting that
 halves it to 30 (some encoders call it Auto). On a 60 Hz screen Safari
@@ -434,9 +433,8 @@ evenly. Chrome and Firefox show either rate evenly.
 ### Measuring playback
 
 What a unit test cannot see, a browser has to: jsdom plays nothing, so
-playback timing and cadence are measured on a running server instead. The
-method used for the numbers above, which also fits a stutter reported on a
-real device:
+playback timing and cadence are measured on a running server instead, the
+same way as a stutter reported on a real device:
 
 - **Cadence**: `requestVideoFrameCallback` on the widget's `<video>`, the
   wall-clock interval between presented frames as a histogram. An even

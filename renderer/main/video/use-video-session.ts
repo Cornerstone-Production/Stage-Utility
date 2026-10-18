@@ -254,23 +254,21 @@ export function startPlaybackAttempt(
     }
   };
 
-  /**
-   * Starts playback the moment a source is attached, rather than leaving it
-   * to the element's `autoplay`. Safari's autoplay waits for HAVE_ENOUGH_DATA,
-   * and on the relay's low-latency HLS that held the first frame 2.3 to 2.6 s
-   * past `canplay` — long enough that the picture then sat that far behind
-   * and jumped back to live (a second hold, and a "fell behind" log line) on
-   * every Safari start, and in one start of six it never began at all. An
-   * explicit play() starts at `canplay`, as Chrome's autoplay already does.
-   * Measured in Safari 26.5; jsdom plays nothing, so the timing is not
-   * unit-tested — see "Measuring playback" in docs/integrations/video-feeds.md.
-   *
-   * A refused play() (autoplay blocked, say) is not an outcome by itself: the
-   * first-frame deadline decides that, and names the refusal in its reason.
-   * An AbortError is not a refusal — the source changed under a pending
-   * play(), and playback continues on the new one — so it names nothing.
-   */
+  /** Why the browser refused play(), so the first-frame deadline can name it. */
   let playRefused: string | null = null;
+  /**
+   * Starts playback as soon as a source is attached instead of leaving it to
+   * the element's `autoplay`: Safari's autoplay waits for HAVE_ENOUGH_DATA,
+   * which on the relay's low-latency HLS holds the first frame about 2.5 s past
+   * `canplay`. jsdom plays nothing, so that timing is measured in a browser —
+   * see "Measuring playback" in docs/integrations/video-feeds.md.
+   *
+   * A refused play() is not an outcome by itself; the first-frame deadline
+   * decides that and names the refusal. An AbortError is not a refusal (the
+   * source changed under a pending play() and playback continues on the new
+   * one), so it is not recorded. Called through a promise so that a throwing
+   * or promise-less play() can never end the attempt.
+   */
   const startPlaying = () => {
     Promise.resolve()
       .then(() => video.play())

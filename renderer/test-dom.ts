@@ -123,9 +123,9 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
   win.scrollTo = () => {};
 
   // The same for a media element's play(): jsdom plays nothing, reports "not
-  // implemented" and returns no promise. A Video widget calls it once a source
-  // is attached (use-video-session.ts), so every widget render printed the
-  // warning. Resolving is the honest stub: there is no playback to refuse.
+  // implemented" and returns no promise, and a Video widget calls it once a
+  // source is attached (use-video-session.ts). Resolving is the honest stub:
+  // there is no playback to refuse.
   (win.HTMLMediaElement as { prototype: { play: () => Promise<void> } }).prototype.play = () => Promise.resolve();
 
   for (const key of EXPOSED) {
