@@ -6,7 +6,8 @@
 // an import took a service whose only record would not parse for new and
 // replaced that record and its raw files with the archive's; a merge re-keyed
 // the source onto a target it took for empty, over the target's file; an export
-// and the History workbook left the service out and read as complete.
+// and the History workbook left the service out and read as complete; the
+// per-service reads answered that it was never recorded.
 //
 // A record that will not parse is the unreadable case here, so the test does
 // not depend on running as a user that file permissions apply to. The stores
@@ -68,6 +69,8 @@ const { deleteServiceRecords, mergeServiceRecords } = await import("./history-ed
 const { buildHistoryWorkbook } = await import("./history-export.js");
 const { StoreReadError } = await import("./data-store.js");
 const { handlerErrorStatus } = await import("./remote-server.js");
+const { historyRoutes } = await import("./routes/history-routes.js");
+const { callRoute } = await import("./routes/route-harness.js");
 
 /** An archive holding the torn service, as if from another box. */
 function archiveOfTorn(): Uint8Array {
@@ -147,6 +150,12 @@ describe("with a history record that could not be read", () => {
   it("deleting that service refuses", async () => {
     await assert.rejects(deleteServiceRecords(TORN), isStoreReadError);
     await untouched();
+  });
+
+  it("reading that service's record fails, rather than answering it was never recorded", async () => {
+    await assert.rejects(callRoute(historyRoutes, `/api/attendance/history/${encodeURIComponent(TORN)}`), isStoreReadError);
+    const other = await callRoute(historyRoutes, `/api/attendance/history/${encodeURIComponent("st1:p1:never")}`);
+    assert.equal(other.status, 200, "a key with no file at all still answers");
   });
 
   it("a service whose records all read can still be edited", async () => {
