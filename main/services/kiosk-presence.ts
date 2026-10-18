@@ -54,6 +54,15 @@ const seen = new Map<string, SeenDevice>();
 const secrets = new Map<string, string>();
 
 /**
+ * Bound helper outputs that showed /enroll a secret other than the one pinned, so
+ * the line saying so is written once, not on every reload of the holding screen.
+ * An output whose token was replaced on its Mac (`--new-token`) lands here until it
+ * is released and set up again. Only ids this server holds a binding for are added
+ * (the route checks), so it is no bigger than the bindings.
+ */
+const mismatched = new Set<string>();
+
+/**
  * The last health each output helper device reported. RUNTIME, like everything
  * here: a reading of how an output is doing now, gone on restart and aged out
  * when the reports stop. Keyed by device id, which has been through authorise()
@@ -232,6 +241,20 @@ export function secretFor(id: string): string | undefined {
   return secrets.get(id);
 }
 
+/** A binding's device showed a secret that does not match its pin. True the first
+ *  time only, until it matches again or the binding is released or claimed. */
+export function firstSecretMismatch(id: string): boolean {
+  if (mismatched.has(id)) return false;
+  mismatched.add(id);
+  return true;
+}
+
+/** The device matched its pin again, or its binding went: a mismatch after this is
+ *  news again. */
+export function forgetSecretMismatch(id: string): void {
+  mismatched.delete(id);
+}
+
 /** Record the size a device reported over HTTP from its holding screen. Merged
  *  rather than replaced, so it does not wipe the physical mode the probe carried.
  *  A device that has not been heard from over UDP yet is not invented here — an
@@ -250,6 +273,7 @@ export function rememberScreen(id: string, size: { w: number; h: number; dpr?: n
  *  candidate the moment the binding exists rather than a minute and a half later. */
 export function forgetSeen(id: string): void {
   secrets.delete(id);
+  mismatched.delete(id);
   if (seen.delete(id)) announce();
 }
 
@@ -323,6 +347,7 @@ function ensureSweep(): void {
 /** Tests only: drop all state so cases cannot leak into each other. */
 export function resetKioskPresence(): void {
   secrets.clear();
+  mismatched.clear();
   health.clear();
   seen.clear();
   scans.clear();
