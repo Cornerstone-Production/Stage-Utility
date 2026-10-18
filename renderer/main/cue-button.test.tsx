@@ -162,6 +162,18 @@ describe("cue button", () => {
     assert.equal(calls, 0);
   });
 
+  test("a press answered as simulated says nothing was sent", async () => {
+    // Automation's Simulate mode accepts the call and sends nothing. A Button made
+    // from an action button starts answering this way (an action button runs for
+    // real whatever Simulate says), and a press that did nothing must not look
+    // like one that did.
+    cueButtonDeps.call = async () => ({ status: 200, ok: true, detail: "stage reset fired", simulated: true });
+    const { container } = mount(live(), "confetti");
+    fireEvent.click(container.querySelector("button")!);
+    await settle();
+    assert.match(container.textContent ?? "", /Simulated: nothing was sent/);
+  });
+
   test("a refusal is shown, not swallowed", async () => {
     cueButtonDeps.call = async () => ({
       status: 409,

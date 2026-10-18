@@ -22,6 +22,8 @@ export interface CallAnswer {
   error?: string;
   reason?: string;
   skipped?: boolean;
+  /** Automation is in Simulate mode: the cue was accepted and nothing reached a device. */
+  simulated?: boolean;
 }
 
 /** The seam a test replaces; production posts the cue. */
@@ -118,6 +120,10 @@ export function CueButton({
       const r = await cueButtonDeps.call(target);
       if (r.status === 200) {
         if (r.skipped) setSaid(r.detail ?? "Already there");
+        // Said, not silent: a press that reached no device must not look like one
+        // that did. An action button runs for real whatever Simulate says, so a
+        // button turned into a cue starts answering this way on a Simulate install.
+        else if (r.simulated) setSaid("Simulated: nothing was sent");
       } else if (r.status === 202) setSaid("Needs confirmation; use the rules page");
       else setSaid(r.error ?? r.detail ?? "Refused");
     } catch {
