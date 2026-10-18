@@ -25,7 +25,8 @@ a config export or backup. See
 [When a store file cannot be read](../ops/reliability.md#when-a-store-file-cannot-be-read).
 A recorded file the server cannot read answers `503` the same way from the data
 archive's export, inspect and import, the History workbook, and a read of or
-edit to that service, its baptism lane included: see
+edit to that service, its baptism lane included (its SPL series answers `500`,
+which the chart shows as samples unavailable): see
 [When a recorded file cannot be read](../ops/reliability.md#when-a-recorded-file-cannot-be-read).
 A `500` means this app broke, and only that.
 
