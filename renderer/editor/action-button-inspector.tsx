@@ -10,6 +10,7 @@
 // registry, one set of field widgets, so a param this repo already knows how
 // to edit does not grow a second, differently-behaved copy here.
 
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { automationRegistryQuery } from "../lib/automation-registry";
@@ -23,9 +24,13 @@ import { validateParams } from "@main/services/automation-param-validation";
 export function ActionButtonInspector({
   c,
   onConfig,
+  beforeLabel,
 }: {
   c: Extract<LayoutObjectConfig, { type: "action-button" }>;
   onConfig: (c: LayoutObjectConfig) => void;
+  /** Rows between the parameter fields and Label: the Button inspector puts
+   *  "Make it a cue" there, so the Label stays the last thing in the panel. */
+  beforeLabel?: ReactNode;
 }) {
   // The SAME registry the rule editor reads (GET /api/automation/registry) —
   // same query key, so react-query shares one answer if both are ever open at
@@ -75,6 +80,7 @@ export function ActionButtonInspector({
         issues={issueMap}
         attempted
       />
+      {beforeLabel}
       <RowText
         label="Label"
         hint="Blank uses the action's own label."

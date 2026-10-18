@@ -324,7 +324,9 @@ happening in the building. It runs only when something calls
 `POST /api/cues/<name>` with a bearer token, so it is how a voice assistant, a
 script or Home Assistant reaches Stage Utility. A page on this app's own origin
 needs no token — that is how a [Button](reference/widgets.md#control) set to Fire a
-cue on a console fires, and such a call is logged as `console`.
+cue on a console fires, and such a call is logged as `console`. A Button set to
+Run an action has **Make it a cue**, which creates a cue like this one from its
+action and points the button at it.
 
 Getting cues into Home Assistant — and from there into Apple Home — is the
 [Home Assistant integration](integrations/companion.md#the-integration): install

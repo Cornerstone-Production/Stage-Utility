@@ -554,6 +554,19 @@ console never shows it, and pressing the button there keeps refusing exactly as
 it always has. The layout still saves — a button is part of a screen, so a field
 it is missing marks the button, not the whole layout.
 
+**Make it a cue**, under an action's fields, turns the action into a manual cue
+and points the button at it, so the Automation page's Run button, Home
+Assistant, voice and other consoles can fire it too. It is off until an action is
+chosen and its fields are complete. The cue is a **Called by name** rule named
+after the button's label (the action's name when the label is blank), with a
+`lower_snake_case` cue name that is made unique against every cue name and former
+name — a name ending `_on` or `_off` gets `_cue` added, because a lone one would
+read as half of an ON/OFF pair and never appear in the list. It is saved enabled,
+with a **Cooldown** of 2 seconds, **Allowed during a service** on and **Home
+Assistant** off; change any of that on the Automation page. If the server
+refuses the rule, the button is left as it was and the reason is shown under the
+button.
+
 **Label** is blank by default, which draws the cue's name (or, for an action, the
 action's own name).
 
@@ -709,7 +722,7 @@ chooses which; with one, it is not shown.
 | **ProVideoPlayer layers**, **ProVideoPlayer now** | See [ProVideoPlayer](#provideoplayer) |
 | **OSC button** | **Target**, **Label**, **Address**, **Arguments** (int, float, string, true or false, in order), **Feedback** (off; when on, **Watch address**, **Active when =** and **Active color**) |
 | **RossTalk button** | **Target**, **Command** and its parameters, **Label** |
-| **Button** | **Does** (Fire a cue or Run an action). Fire a cue: **Cue**, **Show device** (on), **Label** (blank uses the cue's name). Run an action: **Action**, its parameters, **Label** (blank uses the action's name). See [Control](#control) |
+| **Button** | **Does** (Fire a cue or Run an action). Fire a cue: **Cue**, **Show device** (on), **Label** (blank uses the cue's name). Run an action: **Action**, its parameters, **Make it a cue**, **Label** (blank uses the action's name). See [Control](#control) |
 | **Messages** | **Groups**: see [Control](#control) |
 | **Checklist**, **Notes** | Nothing beyond the look; their content is typed into the widget |
 | **Shape** | **Shape**: Rect or Ellipse |
