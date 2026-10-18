@@ -396,12 +396,26 @@ test("merge leaves a CSV this box cannot read as it is, and reports it", { skip:
   assert.match(res.rawFilesFailed[0].reason, /EACCES/);
 });
 
+test("an export fails, naming the file and no path, on a raw file it cannot read", { skip: asRoot }, async () => {
+  const dir = await writeRaw("2026-10-12_st1-pRaw-t1", "at,db\n09:00,80\n");
+  await fs.chmod(path.join(dir, "spl.csv"), 0o000);
+  try {
+    await assert.rejects(buildArchive(), (err: Error) => {
+      assert.equal(err.name, "StoreReadError");
+      assert.equal(err.message, "spl.csv in archive folder 2026-10-12_st1-pRaw-t1 could not be read (EACCES)");
+      return true;
+    });
+  } finally {
+    await fs.chmod(path.join(dir, "spl.csv"), 0o644);
+  }
+});
+
 test("an export fails rather than leaving out a raw archive it cannot list", { skip: asRoot }, async () => {
   const root = path.join(dataDir, "archive");
   await fs.mkdir(root, { recursive: true });
   await fs.chmod(root, 0o000);
   try {
-    await assert.rejects(buildArchive(), { code: "EACCES" });
+    await assert.rejects(buildArchive(), { name: "StoreReadError", code: "EACCES", message: /^The archive folder archive could not be read/ });
   } finally {
     await fs.chmod(root, 0o755);
   }

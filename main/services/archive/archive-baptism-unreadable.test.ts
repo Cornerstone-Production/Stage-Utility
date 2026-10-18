@@ -54,7 +54,7 @@ async function quietly<R>(fn: () => Promise<R>): Promise<R> {
 
 describe("with baptism.json there and unreadable", () => {
   it("an export fails rather than shipping without it", async () => {
-    await assert.rejects(buildArchive(), { code: "EISDIR" });
+    await assert.rejects(buildArchive(), { name: "StoreReadError", code: "EISDIR", message: /^baptism\.json could not be read/ });
   });
 
   it("an import that would add sessions refuses before writing anything", async () => {

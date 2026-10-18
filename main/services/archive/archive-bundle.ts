@@ -27,6 +27,7 @@ import { attendanceStore } from "../attendance-store.js";
 import { baptismStore } from "../baptism-store.js";
 import { serviceTimelineStore } from "../service-timeline-store.js";
 import { splHistoryStore } from "../spl-history-store.js";
+import { StoreReadError } from "../data-store.js";
 import { archiveRoot, isInside, serviceDirName } from "./archive-paths.js";
 import { atomicWrite } from "../write-queue.js";
 import { encodeRow, parseRows } from "../csv.js";
@@ -144,12 +145,21 @@ async function readDirInto(root: string, prefix: string, into: Record<string, Ui
     // that is there and cannot be listed fails the export rather than leaving
     // every raw file out of it.
     if (isNotFound(err)) return;
-    throw err;
+    throw new StoreReadError(`The archive folder ${path.basename(root)}`, err);
   }
   for (const e of entries) {
     const full = path.join(root, e.name);
-    if (e.isDirectory()) await readDirInto(full, `${prefix}${e.name}/`, into);
-    else into[`${prefix}${e.name}`] = new Uint8Array(await fs.readFile(full));
+    if (e.isDirectory()) {
+      await readDirInto(full, `${prefix}${e.name}/`, into);
+      continue;
+    }
+    try {
+      into[`${prefix}${e.name}`] = new Uint8Array(await fs.readFile(full));
+    } catch (err) {
+      // Named, not the errno's own message: that carries the absolute path,
+      // and this answers a LAN request.
+      throw new StoreReadError(`${e.name} in archive folder ${path.basename(root)}`, err);
+    }
   }
 }
 
@@ -173,7 +183,7 @@ export async function buildArchive(): Promise<Uint8Array> {
   try {
     files["stores/baptism.json"] = new Uint8Array(await fs.readFile(path.join(getUserDataPath(), "baptism.json")));
   } catch (err) {
-    if (!isNotFound(err)) throw err; // else nothing recorded yet
+    if (!isNotFound(err)) throw new StoreReadError("baptism.json", err); // else nothing recorded yet
   }
 
   const local = await localServices();
