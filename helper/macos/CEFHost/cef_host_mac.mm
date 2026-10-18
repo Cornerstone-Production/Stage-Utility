@@ -15,6 +15,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "include/base/cef_callback.h"
@@ -106,21 +107,24 @@ namespace {
 
 class App : public CefApp, public CefBrowserProcessHandler {
  public:
-  App(void* context, void (*initialized)(void*)) : context_(context), initialized_(initialized) {}
+  App(void* context, void (*initialized)(void*), std::vector<std::string> switches)
+      : context_(context), initialized_(initialized), switches_(std::move(switches)) {}
 
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
 
+  // The app's switches (ChromiumSwitches in the Swift core says what each is for),
+  // for the browser process only: Chromium hands its children what they need.
   void OnBeforeCommandLineProcessing(const CefString& process_type,
                                      CefRefPtr<CefCommandLine> command_line) override {
     if (!process_type.empty()) return;
-    // os_crypt would otherwise ask for the login keychain, a prompt nobody at an
-    // output Mac is there to answer.
-    command_line->AppendSwitch("use-mock-keychain");
-    // A display output keeps drawing when macOS thinks its window is hidden: a
-    // locked screen, an asleep display. These are public Chromium switches.
-    command_line->AppendSwitch("disable-backgrounding-occluded-windows");
-    command_line->AppendSwitch("disable-renderer-backgrounding");
-    command_line->AppendSwitch("disable-background-timer-throttling");
+    for (const std::string& s : switches_) {
+      size_t eq = s.find('=');
+      if (eq == std::string::npos) {
+        command_line->AppendSwitch(s);
+      } else {
+        command_line->AppendSwitchWithValue(s.substr(0, eq), s.substr(eq + 1));
+      }
+    }
   }
 
   void OnContextInitialized() override {
@@ -131,6 +135,7 @@ class App : public CefApp, public CefBrowserProcessHandler {
  private:
   void* context_;
   void (*initialized_)(void*);
+  std::vector<std::string> switches_;
   IMPLEMENT_REFCOUNTING(App);
 };
 
@@ -377,7 +382,11 @@ bool Initialize(const su_cef_settings* s, char* error, size_t error_size) {
   }
   if (s->log_file) CefString(&settings.log_file) = s->log_file;
 
-  CefRefPtr<App> app(new App(s->context, s->context_initialized));
+  std::vector<std::string> switches;
+  for (size_t i = 0; i < s->switch_count; i++) {
+    if (s->switches[i]) switches.emplace_back(s->switches[i]);
+  }
+  CefRefPtr<App> app(new App(s->context, s->context_initialized, std::move(switches)));
   if (!CefInitialize(args, settings, app.get(), nullptr)) {
     CopyError(error, error_size, "CefInitialize failed, exit code " + std::to_string(CefGetExitCode()));
     return false;

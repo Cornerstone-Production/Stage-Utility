@@ -602,7 +602,9 @@ final class AppModel: ObservableObject {
 
   private func suspectLocalNetwork() {
     if noteTable["local-network"] == nil {
-      Log.error(.app, "Local Network access may be off for this app")
+      // The version, so a refusal that starts with an update can be told from one that
+      // did not (README, "After an update").
+      Log.error(.app, "Local Network access may be off for this app (version \(version))")
     }
     setNote("local-network", LocalNetworkAccess.windowMessage)
   }

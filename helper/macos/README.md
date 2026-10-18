@@ -367,6 +367,17 @@ sandbox (seatbelt; each is started with `--seatbelt-client`). It needs no entitl
 works with the ad hoc signature. It matters here because the pages are the server's own,
 but a layout can embed outside content: a web page, a video.
 
+**The network service runs in the app's own process** (`NetworkServiceInProcess2`),
+not in a helper app as it does in Chrome, so that the app's Local Network permission
+covers every page's connections; see [Local Network
+permission](#local-network-permission). The browser process is not sandboxed in any
+case, so this moves no network code out of a sandbox; a crash in the network service
+now ends the app, which the LaunchAgent starts again. If a network service process ever
+appears anyway (a CEF update that drops the feature), the log says so once:
+"Chromium's network service runs in a helper process". The switches the app gives
+Chromium are listed, with why, in `ChromiumSwitches` (core), and the host applies them
+as they are.
+
 **Display outputs** are windowed browsers, a child of a view in the output's borderless
 window, so Chromium takes clicks, touches, scrolling and typing itself and a display
 output can be a control surface. They keep drawing when macOS thinks their window is
@@ -434,17 +445,40 @@ should be checked for it before the helper is on many Macs.
 
 Since macOS Sequoia an app that sends broadcasts or connects to machines on the LAN
 asks once: "Allow Stage Utility Output to find devices on local networks?" Someone at
-the Mac has to answer it. When it is refused, every broadcast probe fails with "no
-route to host"; the helper logs that and says in its window that Local Network access
-may be off, with where to turn it on (System Settings > Privacy & Security > Local
-Network). Only that, a broadcast that failed on every interface, raises the warning. A
-page that cannot load or a health post that gets "no route to host" does not: a server
-that is switched off on the same subnet gives the same error.
+the Mac has to answer it, and it is the one entry for the helper in System Settings >
+Privacy & Security > Local Network. Loopback is exempt, and so is the Mac's own LAN
+address: a server on the same Mac never needs it.
 
-The answer is tied to the app's code signature, and the app has to run from
-`/Applications` for it to hold. An ad hoc signature is different on every build, so
-after an update macOS may ask again. A Developer ID signature keeps the identity
-stable across updates.
+**One permission covers everything.** macOS checks each connection against the
+executable that makes it: the permission it keeps for the app lists the app's own
+executable (the Mach-O UUID of `Contents/MacOS/StageUtilityOutput`). Chromium makes a
+page's connections in its network service, which Chrome and CEF run in a helper app
+(`StageUtilityOutput Helper.app`, a different executable). With the network service
+there, the permission given to the app did not cover a page: discovery, from the app
+itself, found the server, while every page load from it failed with
+ERR_ADDRESS_UNREACHABLE and no prompt, because the helper apps have no usage string of
+their own and are not registered with LaunchServices (`nehelper` logs "Failed to find
+com.stageutility.output.helper using neagent"). The helper therefore runs the network
+service in the app's own process (see [Chromium](#chromium)), and pages, discovery and
+health posts all go out under the app's permission.
+
+**When it is refused**, every broadcast probe fails with "no route to host"; the helper
+logs that, with its version, and says in its window that Local Network access may be
+off, with where to turn it on. A page that cannot load then shows "Can't reach" with
+the same instruction on the output itself (see [Discovery](#discovery-and-what-the-server-hears)).
+A health post that gets "no route to host" raises nothing: a server that is switched
+off on the same subnet gives the same error.
+
+**After an update.** macOS keeps the answer by bundle id and caches the UUIDs of the
+app's executable. When an app with that bundle id is installed, `nehelper` logs "apps
+installed notification" and reads the new executable's UUID ("Populating the cache with
+1 UUID(s) for com.stageutility.output"); a running copy whose UUID it does not hold is
+re-read the same way ("allowed by preference ... but received prompt. Clearing cached
+UUIDs"). So an ad hoc signed update keeps the answer and does not ask again, as far as
+the logs on a Mac running it show; the signature is not what is checked. If it ever does
+ask again, the window, the log line with the version, and the output's screen all say
+so. The app has to run from `/Applications`, where the installer puts it, for the answer
+to stay with it.
 
 ## Logging
 
@@ -460,7 +494,7 @@ retried, health posts refused or paused, a rotation applied, a foreign server's 
 ignored, a state file that could not be read or saved. Chromium's own (category `cef`):
 whether it started, with its version and whether the sandbox is on, or why not; a page's
 renderer process ending, and the reload; the GPU process ending (Chromium starts
-another). The DeckLink layer's (category `decklink`): a port opened in a mode, refused
+another); a network service running in a helper process, once. The DeckLink layer's (category `decklink`): a port opened in a mode, refused
 one, lost or reopened, and a card output falling behind (a second with 5% or more of
 its frames repeated, the server's own line, or any dropped) and keeping up again after
 5 good seconds, on the change only. A page that drew nothing new for 5 s being reloaded

@@ -207,8 +207,9 @@ rather than running them.
   needs a logged-in session;
 - answer the **Local Network** prompt the first time the helper opens ("Allow Stage
   Utility Output to find devices on local networks?"). Without it the helper cannot
-  find the server, and says so in its own window. The answer is tied to the app's
-  signature, so after an update macOS may ask again;
+  find the server or load its pages, and says so in its own window and on each output.
+  It is the helper's one entry in System Settings > Privacy & Security > Local Network,
+  and an update keeps the answer;
 - check **Lock Screen**: require a password after the screen saver or display off is
   *Never*, and the screen saver and display-off times read *Never*. The installer sets
   them where macOS accepts it, and a managed Mac may not.

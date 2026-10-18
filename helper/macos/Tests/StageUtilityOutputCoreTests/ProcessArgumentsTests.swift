@@ -22,6 +22,14 @@ import Testing
     #expect(!ProcessArguments.isGPUProcess(["X Helper", "--type=renderer"]))
   }
 
+  /// As CEF 154 starts it when it runs out of the app's process.
+  @Test func findsANetworkServiceProcess() {
+    #expect(ProcessArguments.isNetworkServiceProcess(
+      ["X Helper", "--type=utility", "--utility-sub-type=network.mojom.NetworkService", "--service-sandbox-type=network"]))
+    #expect(!ProcessArguments.isNetworkServiceProcess(
+      ["X Helper", "--type=utility", "--utility-sub-type=storage.mojom.StorageService"]))
+  }
+
   /// A buffer cut short gives what it holds; one too short for argc, nothing.
   @Test func aShortBufferGivesWhatItHolds() {
     let b = Self.buffer(argc: 4, path: "/bin/x", padding: 1, ["x", "--type=gpu-process"])
