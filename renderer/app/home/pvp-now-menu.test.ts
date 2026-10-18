@@ -8,7 +8,7 @@ import { describe, test } from "node:test";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects.js";
 import type { LayoutObject } from "@main/types/views";
 
-import { PICK_OPTIONS, pickedValue, togglesFor, withToggle } from "./card-toggles.js";
+import { pickedValue, togglesFor, withToggle } from "./card-toggles.js";
 import { pvpNowMenuItems } from "./pvp-now-menu.js";
 
 describe("Home's card menu", () => {
@@ -51,7 +51,6 @@ describe("Home's card menu", () => {
     assert.deepEqual(layoutRows.map((i) => [i.label, i.checked]), [
       ["Full", false], ["Compact", false], ["Countdown only", true],
     ]);
-    assert.deepEqual(Object.values(PICK_OPTIONS.layout!), ["Full", "Compact", "Countdown only"]);
   });
 
   test("a card saved with the old Compact switch on is ticked Compact", () => {

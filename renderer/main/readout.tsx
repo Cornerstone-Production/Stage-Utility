@@ -113,6 +113,12 @@ function useShrinkToWidth(deps: unknown[]): {
   return { wrapRef, elRef, scale };
 }
 
+/** A horizontal alignment as the flex cross-axis value that sets it. Shared with
+ *  the Countdown only layout, which aligns its number the same way. */
+export function readoutAlignItems(side: LayoutHAlign): "flex-start" | "center" | "flex-end" {
+  return side === "right" ? "flex-end" : side === "center" ? "center" : "flex-start";
+}
+
 /**
  * The three pieces of a line that carries an end slot.
  *
@@ -269,7 +275,7 @@ export function Readout({
   // One value drives BOTH the flex cross-axis and text-align. The lines are
   // different widths, so aligning the boxes without aligning the text leaves a
   // centred caption sitting over a left-set value.
-  const items = side === "right" ? "flex-end" : side === "center" ? "center" : "flex-start";
+  const items = readoutAlignItems(side);
   const [ref, boxH, boxW] = useBoxSize();
   // Lines are dropped rather than clipped when the box cannot hold them — see
   // fitComposition. A caption cut in half is not a caption.

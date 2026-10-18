@@ -131,7 +131,6 @@ function pvpLayerNamed(layers: readonly { name: string }[], name: string): { nam
 
 const PVP_CUSTOM_LAYER = "__pvp-custom__";
 
-
 /**
  * The Layer row both `pvp-now` and `pvp-layers` ("one layer") use: a Select
  * fed by PVP's own live layer list, each option carrying its current state
@@ -739,7 +738,9 @@ export function PvpNowInspector({
   pvp: PvpStatusDTO | null;
   onConfig: (c: LayoutObjectConfig) => void;
 }) {
-  const rows = pvpNowRowStates(pvpNowLayout(c));
+  const layout = pvpNowLayout(c);
+  const rows = pvpNowRowStates(layout);
+  const { amberSec, redSec } = pvpWarnThresholds(c);
   return (
     <>
       <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{pvpSummary(pvp)}</span></Row>
@@ -754,7 +755,7 @@ export function PvpNowInspector({
         />
       )}
       <PvpLayoutRow
-        value={pvpNowLayout(c)}
+        value={layout}
         onChange={(v) => onConfig(withPvpNowLayout(c, v))}
       />
       <RowSwitch label="Progress bar" checked={c.showProgress ?? true} onChange={(v) => onConfig({ ...c, showProgress: v })} />
@@ -780,35 +781,32 @@ export function PvpNowInspector({
         checked={c.warnNearEnd ?? false}
         onChange={(v) => onConfig({ ...c, warnNearEnd: v })}
       />
-      {(c.warnNearEnd ?? false) && (() => {
-        const { amberSec, redSec } = pvpWarnThresholds(c);
-        return (
-          <>
-            <RowNumber
-              label="Amber from (seconds left)"
-              value={amberSec}
-              step={1}
-              min={0}
-              max={WARN_MAX_SEC}
-              onChange={(v) => onConfig({ ...c, warnAmberSec: Math.round(v) })}
-            />
-            <RowNumber
-              label="Red from (seconds left)"
-              // Never above amber. The field's own `max` is the amber value, so
-              // a higher number is held at it as it is typed; and if amber is
-              // later lowered below a stored red, the reader holds red at amber
-              // — the stored number is left alone, so raising amber again gives
-              // it back.
-              hint="Never above Amber from — a higher number is held at the amber value."
-              value={redSec}
-              step={1}
-              min={0}
-              max={amberSec}
-              onChange={(v) => onConfig({ ...c, warnRedSec: Math.round(v) })}
-            />
-          </>
-        );
-      })()}
+      {(c.warnNearEnd ?? false) && (
+        <>
+          <RowNumber
+            label="Amber from (seconds left)"
+            value={amberSec}
+            step={1}
+            min={0}
+            max={WARN_MAX_SEC}
+            onChange={(v) => onConfig({ ...c, warnAmberSec: Math.round(v) })}
+          />
+          <RowNumber
+            label="Red from (seconds left)"
+            // Never above amber. The field's own `max` is the amber value, so
+            // a higher number is held at it as it is typed; and if amber is
+            // later lowered below a stored red, the reader holds red at amber
+            // — the stored number is left alone, so raising amber again gives
+            // it back.
+            hint="Never above Amber from — a higher number is held at the amber value."
+            value={redSec}
+            step={1}
+            min={0}
+            max={amberSec}
+            onChange={(v) => onConfig({ ...c, warnRedSec: Math.round(v) })}
+          />
+        </>
+      )}
       <RowSwitch
         label="Count down stills"
         hint="Counts a still down from the image duration on the ProVideoPlayer card, or the hold below. For a layer whose cue advances on it, like a rotating pre-roll; off for a graphic that stays up."

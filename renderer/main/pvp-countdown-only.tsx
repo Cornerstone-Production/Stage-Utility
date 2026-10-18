@@ -8,30 +8,21 @@
 // one thing it asks for: `useBoxSize` is Readout's own, so a resize reaches it
 // through the same ResizeObserver.
 //
-// WHAT NO UNIT TEST CAN SEE: the fit. jsdom loads no layout engine, so the
-// measured box is 0 x 0 and the arithmetic (countdownFontPx, tested) answers 0.
-// That the number really is as tall as 62% of the box, never wider than it, and
-// follows a resize, was driven in a browser — see the PR description. What a
-// test CAN reach, and pvp-now.test.tsx does, is what this layout draws and what
-// it leaves out.
+// The fit itself is browser-only (jsdom measures every box as 0 x 0); the
+// arithmetic is countdownFontPx, tested, and pvp-countdown-layout.test.tsx says
+// what was driven in a browser.
 
 import { DEFAULT_READOUT_ALIGN } from "@main/types/readout-types";
 import type { LayoutHAlign } from "@main/types/views";
 
-import { useBoxSize } from "./readout";
+import { readoutAlignItems, useBoxSize } from "./readout";
 import { MeterFill } from "./readout-meter";
-import { METER_MIN_PX, METER_SCALE } from "./readout-size";
+import { meterHeightPx } from "./readout-size";
 import { countdownFontPx } from "./pvp-now-config";
-
-const ALIGN_ITEMS: Record<LayoutHAlign, "flex-start" | "center" | "flex-end"> = {
-  left: "flex-start",
-  center: "center",
-  right: "flex-end",
-};
 
 /** What stands in for a time when nothing is counting. A dash, dimmed, so a
  *  widget with nothing to count never reads as one that has frozen. */
-export const COUNTDOWN_NONE = "—";
+const COUNTDOWN_NONE = "—";
 
 export function PvpCountdownOnly({
   time,
@@ -58,7 +49,7 @@ export function PvpCountdownOnly({
   const [ref, boxH, boxW] = useBoxSize();
   const text = time ?? COUNTDOWN_NONE;
   const ink = color ?? "var(--readout-value-color, var(--color-fg))";
-  const ruleH = Math.max(METER_MIN_PX, boxH * METER_SCALE);
+  const ruleH = meterHeightPx(boxH);
   return (
     <div
       ref={ref}
@@ -71,7 +62,7 @@ export function PvpCountdownOnly({
         display: "flex",
         flexDirection: "column",
         justifyContent: "var(--readout-v-align, center)",
-        alignItems: ALIGN_ITEMS[align ?? DEFAULT_READOUT_ALIGN],
+        alignItems: readoutAlignItems(align ?? DEFAULT_READOUT_ALIGN),
         overflow: "hidden",
         borderRadius: "inherit",
         boxSizing: "border-box",

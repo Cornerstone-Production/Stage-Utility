@@ -23,7 +23,7 @@ import type { LayoutObject, LayoutObjectConfig, PvpNowLayout } from "@main/types
 
 import { LOUDEST_METER, RECORDER_FOR, STREAMER_FOR } from "../recording-status";
 import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS, type PvpNowConfig } from "../../main/pvp-now";
-import { PVP_NOW_LAYOUT_OPTIONS, pvpNowLayout, withPvpNowLayout } from "../../main/pvp-now-config";
+import { PVP_NOW_LAYOUT_OPTIONS, pvpNowLayout, pvpNowRowStates, withPvpNowLayout } from "../../main/pvp-now-config";
 
 /** The members of the config union that declare `K`, by their `type`. */
 type TypesWith<K extends PropertyKey, T = LayoutObjectConfig> = T extends { type: infer N }
@@ -166,9 +166,10 @@ const PICK_FALLBACK: Record<PickKey, string> = {
   // drawn rather than a placeholder nobody chose.
   splMetric: "",
   nowLabel: DEFAULT_PVP_NOW_LABEL,
-  // Read through `pvpNowLayout` in `pickedValue`, which also turns a widget
-  // saved with the old Compact switch into "compact"; this is only the answer
-  // for a type that never had either.
+  // Unreachable for a type that carries `layout` — `pickedValue` reads it through
+  // `pvpNowLayout`, which also turns a widget saved with the old Compact switch
+  // into "compact" — and null for every other type. It is here because the
+  // record is exhaustive over PickKey.
   layout: "full",
 };
 
@@ -347,7 +348,7 @@ export function togglesFor(card: LayoutObject): CardToggle[] {
     // Only Full draws the next cue; Compact and Countdown only never do, so a
     // switch for it would tick and change nothing — the inspector greys the same
     // row for the same reason (pvpNowRowStates).
-    if (spec.key === "showNextCue" && pvpNowLayout(config as PvpNowConfig) !== "full") continue;
+    if (spec.key === "showNextCue" && pvpNowRowStates(pvpNowLayout(config as PvpNowConfig)).nextCue) continue;
     if (spec.choice) {
       const checked = valueOf(spec) === spec.choice.on;
       out.push({

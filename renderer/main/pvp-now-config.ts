@@ -4,7 +4,7 @@
 // differently from the others.
 //
 // No React, no DOM: every rule here is arithmetic or a lookup, which is what
-// lets pvp-now.test.tsx pin the boundaries (30 s is amber, 31 s is not) without
+// lets pvp-countdown-layout.test.tsx pin the boundaries (30 s is amber, 31 s is not) without
 // a render.
 
 import type { PvpNowLayout } from "@main/types/views";
@@ -100,7 +100,7 @@ export function pvpWarnThresholds(config: { warnAmberSec?: number; warnRedSec?: 
   return { amberSec, redSec: Math.min(red, amberSec) };
 }
 
-export type PvpWarnTone = "caution" | "over";
+type PvpWarnTone = "caution" | "over";
 
 /**
  * The tone the time reads in, or null for the ordinary ink.
@@ -137,9 +137,9 @@ export function pvpWarnColor(tone: PvpWarnTone | null): string | null {
   return null;
 }
 
-export const COUNTDOWN_HEIGHT_SHARE = 0.62;
-export const COUNTDOWN_WIDTH_SHARE = 0.9;
-export const MONO_ADVANCE_EM = 0.62;
+const COUNTDOWN_HEIGHT_SHARE = 0.62;
+const COUNTDOWN_WIDTH_SHARE = 0.9;
+const MONO_ADVANCE_EM = 0.62;
 
 /**
  * The number's font size in Countdown only: as tall as the box allows, never
@@ -153,8 +153,7 @@ export const MONO_ADVANCE_EM = 0.62;
  * back to are within a few thousandths of it, so 0.62 is a margin rather than
  * a fudge.
  *
- * Pure arithmetic over the MEASURED box: jsdom reports 0 for both and the answer
- * is 0, which the caller treats as "not measured yet".
+ * Pure arithmetic over the MEASURED box; an unmeasured (0 x 0) box answers 0.
  */
 export function countdownFontPx(boxW: number, boxH: number, chars: number): number {
   if (!(boxW > 0) || !(boxH > 0) || chars < 1) return 0;

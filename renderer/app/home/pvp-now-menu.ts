@@ -5,9 +5,10 @@
 // needs the whole route mounted, and these two decisions — what is ticked, and
 // when Label is offered at all — are the ones worth pinning.
 
-import type { LayoutObject } from "@main/types/views";
+import type { LayoutObject, PvpNowLayout } from "@main/types/views";
 
 import type { ContextMenuItem } from "../../components/ui/context-menu";
+import { pvpNowRowStates } from "../../main/pvp-now-config";
 import { sourceOptions } from "../recording-status";
 import { PICK_OPTIONS, pickedValue, withToggle } from "./card-toggles";
 
@@ -38,7 +39,7 @@ export function pvpNowMenuItems(card: LayoutObject, write: (next: LayoutObject) 
   }
   const nowLabel = pickedValue(card, "nowLabel");
   const labelMap = PICK_OPTIONS.nowLabel;
-  if (nowLabel != null && labelMap && layout === "compact") {
+  if (nowLabel != null && labelMap && layout != null && !pvpNowRowStates(layout as PvpNowLayout).label) {
     items.push({
       label: "Label",
       items: sourceOptions(labelMap, "Cue").map((o) => ({

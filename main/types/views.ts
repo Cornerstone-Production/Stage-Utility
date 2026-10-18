@@ -323,10 +323,10 @@ export interface LayoutCanvas {
 }
 
 export type LayoutHAlign = "left" | "center" | "right";
+export type LayoutVAlign = "top" | "middle" | "bottom";
 
 /** How much a ProVideoPlayer "now" widget draws — see `pvp-now`'s `layout`. */
 export type PvpNowLayout = "full" | "compact" | "countdown";
-export type LayoutVAlign = "top" | "middle" | "bottom";
 
 /** Generic visual styling. Every field optional; the renderer applies defaults. */
 export interface LayoutStyle {
