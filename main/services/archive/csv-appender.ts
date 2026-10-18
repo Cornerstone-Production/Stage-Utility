@@ -12,10 +12,16 @@
 //   silently misaligned against the header, so a changed set moves to `spl.2.csv`
 //   and both files go in the manifest.
 //
+//   A file it cannot use. One that is there and cannot be read, or stops taking
+//   appends mid-service, is passed over the same way: the rows go on into the
+//   next file beside it, and the one passed over is left exactly as it was.
+//   Taking it for absent wrote a second header into the middle of a file this
+//   service had already recorded, or dropped every row for the rest of it.
+//
 // Nothing here throws at the caller. The recorders run on the live tick, and a gap
 // in the raw layer is recoverable where a crashed live service is not.
 
-import { errorMessage } from "../errors.js";
+import { errnoCode, errorMessage, isNotFound } from "../errors.js";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
@@ -29,6 +35,9 @@ export class CsvAppender {
   private written: string[] = [];
   private activeHeaders: string[] | null = null;
   private activeFile: string | null = null;
+  /** Files this appender could not read or append to. Not tried again until
+   *  the server restarts: one that fails on every row would log on every row. */
+  private passedOver = new Set<string>();
 
   constructor(
     private readonly dir: string,
@@ -55,7 +64,27 @@ export class CsvAppender {
 
   private async write(headers: string[], row: (string | number | null)[]): Promise<void> {
     if (!this.activeHeaders || !sameColumns(this.activeHeaders, headers)) await this.open(headers);
-    await fs.appendFile(path.join(this.dir, this.activeFile as string), encodeRow(row), "utf8");
+    const file = this.activeFile as string;
+    try {
+      await fs.appendFile(path.join(this.dir, file), encodeRow(row), "utf8");
+    } catch (err) {
+      // The file this service has been appending to stopped taking rows. The
+      // same row goes into the next file rather than every row after it being
+      // lost; if that fails too, the chain logs it.
+      this.passOver(file, err, "could not be appended to");
+      await this.open(headers);
+      await fs.appendFile(path.join(this.dir, this.activeFile as string), encodeRow(row), "utf8");
+    }
+  }
+
+  private passOver(name: string, err: unknown, what: string): void {
+    this.passedOver.add(name);
+    this.activeHeaders = null;
+    this.activeFile = null;
+    console.error(
+      `[archive] ${path.basename(this.dir)}/${name} ${what} (${errnoCode(err) ?? errorMessage(err)}). ` +
+        `Recording ${this.base} into the next file beside it, and leaving this one as it is.`,
+    );
   }
 
   /**
@@ -70,7 +99,14 @@ export class CsvAppender {
     await fs.mkdir(this.dir, { recursive: true });
     for (let i = 1; i <= MAX_ROLL; i++) {
       const name = i === 1 ? `${this.base}.csv` : `${this.base}.${i}.csv`;
-      const existing = await readHeader(path.join(this.dir, name));
+      if (this.passedOver.has(name)) continue;
+      let existing: string[] | null;
+      try {
+        existing = await readHeader(path.join(this.dir, name));
+      } catch (err) {
+        this.passOver(name, err, "could not be read");
+        continue;
+      }
       if (existing == null) {
         await fs.appendFile(path.join(this.dir, name), encodeRow(headers), "utf8");
       } else if (!sameColumns(existing, headers)) {
@@ -90,13 +126,15 @@ function sameColumns(a: string[], b: string[]): boolean {
 }
 
 /** The header row of an existing file, or null when it does not exist or is empty
- *  (a file holding only a partial first write has no complete row yet). */
+ *  (a file holding only a partial first write has no complete row yet). Throws
+ *  for a file that is there and cannot be read. */
 async function readHeader(file: string): Promise<string[] | null> {
   let text: string;
   try {
     text = await fs.readFile(file, "utf8");
-  } catch {
-    return null; // does not exist
+  } catch (err) {
+    if (isNotFound(err)) return null;
+    throw err;
   }
   return parseRows(text)[0] ?? null;
 }
