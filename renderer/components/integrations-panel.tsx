@@ -770,7 +770,7 @@ export function IntegrationDialog({
                     href={docsUrl(descriptor, updateStatus?.branch)}
                     target="_blank"
                     rel="noreferrer"
-                    className="whitespace-nowrap text-accent-11 underline underline-offset-2 hover:text-accent-12"
+                    className="whitespace-nowrap text-accent underline underline-offset-2 hover:text-accent-hover"
                   >
                     Setup guide
                   </a>
