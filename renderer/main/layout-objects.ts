@@ -771,10 +771,16 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     integration: { id: "rosstalk", label: "RossTalk" },
   },
 
+  // One "Button" in the palette covers this and the cue button: the inspector's
+  // Does control switches a button between the two stored types. This one stays
+  // a full registry entry (every saved layout holds them, and the renderer, the
+  // capability table and the type union all key on it) but is not offered on its
+  // own, and carries the same label so the layer list and the inspector header
+  // read "Button" whichever way a widget is set.
   "action-button": {
-    label: "Action button",
+    label: "Button",
     blurb: "Runs one of the app's own actions",
-    group: "Control",
+    group: null,
     config: () => ({ type: "action-button", actionId: "", params: {}, label: "Action" }),
     style: () => PILL({ fontSize: 0.045 }),
   },
@@ -795,14 +801,16 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: () => CARD({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
   },
 
+  // The palette's Button: it arrives firing a cue, and the inspector's Does
+  // control turns it into an action button (and back). See action-button above.
   "cue-button": {
-    label: "Cue button",
-    blurb: "Fires a cue and shows whether its device is on",
+    label: "Button",
+    blurb: "Fires a cue, or runs an action, from a console",
     group: "Control",
     config: () => ({ type: "cue-button", cue: "", label: "", showDevice: true }),
     // The size every other button starts at. It was 0.12, which is what the
     // Ultritouch panel's strip wants (its templates set their own size, below)
-    // and is far too big for the box a new button arrives in: an unbound one
+    // and is far too big for the box a palette Button arrives in: an unbound one
     // drew "UNBOUND" at a size that clipped it to "UNBO".
     style: () => PILL({ fontSize: 0.045 }),
   },

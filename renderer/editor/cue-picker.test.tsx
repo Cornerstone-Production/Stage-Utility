@@ -7,8 +7,9 @@
 //
 // What is guarded, and why each is a bug rather than a nicety:
 //
-//  - BOTH GROUPS, BUILT IN FIRST. That order is the point: the cues the app
-//    ships need no rule behind them and are what most buttons are bound to.
+//  - BOTH GROUPS, "YOUR CUES" FIRST. That order is the point: the owner approved
+//    the dropdown with the operator's own cues above the ones the app ships, so
+//    the cue somebody just made is the first thing in the list.
 //  - EVERY CUE IS STILL IN THE LIST. A filter that dropped one would be a cue
 //    that cannot be bound to a button at all, with nothing saying why.
 //  - AN EMPTY GROUP IS NOT RENDERED. An install with no cues of its own must
@@ -72,7 +73,7 @@ function mount(
 }
 
 describe("the cue picker", () => {
-  test("renders two groups, built in first, with every cue in one of them", () => {
+  test("renders two groups, your cues first, with every cue in one of them", () => {
     const { container } = mount(
       [
         sw({ id: "haze", name: "Haze" }),
@@ -84,21 +85,21 @@ describe("the cue picker", () => {
       ],
     );
     const groups = [...container.querySelectorAll("optgroup")];
-    assert.deepEqual(groups.map((g) => g.label), ["Built in", "Your cues"]);
+    assert.deepEqual(groups.map((g) => g.label), ["Your cues", "Built in"]);
     assert.deepEqual(
       groups.map((g) => [...g.querySelectorAll("option")].map((o) => o.value)),
       [
-        ["obs_record", "display_refresh"],
         ["haze", "confetti"],
+        ["obs_record", "display_refresh"],
       ],
     );
     // The reading is unchanged: name, room, and which kind it is.
     const labels = [...container.querySelectorAll("optgroup option")].map((o) => o.textContent);
     assert.deepEqual(labels, [
-      "OBS recording (switch)",
-      "Refresh displays (button)",
       "Haze · Stage (switch)",
       "Confetti (button)",
+      "OBS recording (switch)",
+      "Refresh displays (button)",
     ]);
   });
 

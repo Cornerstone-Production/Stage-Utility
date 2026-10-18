@@ -1,10 +1,11 @@
 // cue-picker.tsx — the Cue select on a cue-button object.
 //
-// TWO GROUPS, built in first. The cues the app ships (OBS, REAPER,
-// ProVideoPlayer and the app itself; see main/services/builtin-cues.ts) need no
-// automation rule behind them and are what most buttons are bound to, so they
-// are offered before the operator's own. Each entry reads the same either way:
-// the name, the room, and whether it is a switch or a button.
+// TWO GROUPS, the operator's own first. "Your cues" are the ones somebody here
+// wrote, so they are what a button is most likely bound to and are offered
+// before the cues the app ships (OBS, REAPER, ProVideoPlayer and the app itself;
+// see main/services/builtin-cues.ts), which need no automation rule behind them.
+// Each entry reads the same either way: the name, the room, and whether it is a
+// switch or a button.
 //
 // Its own component rather than an expression inside the inspector so it can be
 // RENDERED in a test — the inspector reads the manifest through a hook that
@@ -71,20 +72,20 @@ export function CuePicker({
   );
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger>
+      <SelectTrigger aria-label="Cue" className="w-full">
         <SelectValue placeholder={cues ? "Select a cue" : "Loading cues…"} />
       </SelectTrigger>
       <SelectContent>
-        {builtIn.length > 0 && (
-          <SelectGroup>
-            <SelectLabel>Built in</SelectLabel>
-            {builtIn.map(item)}
-          </SelectGroup>
-        )}
         {mine.length > 0 && (
           <SelectGroup>
             <SelectLabel>Your cues</SelectLabel>
             {mine.map(item)}
+          </SelectGroup>
+        )}
+        {builtIn.length > 0 && (
+          <SelectGroup>
+            <SelectLabel>Built in</SelectLabel>
+            {builtIn.map(item)}
           </SelectGroup>
         )}
       </SelectContent>
