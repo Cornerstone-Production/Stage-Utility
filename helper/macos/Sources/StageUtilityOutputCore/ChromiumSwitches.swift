@@ -17,7 +17,7 @@ public enum ChromiumSwitches {
   /// in System Settings. Loopback is exempt, which is why a server on the same Mac
   /// never showed it. `GPUProcessWatch` logs it if a network service process appears
   /// anyway.
-  public static let networkServiceInProcess = "enable-features=NetworkServiceInProcess2"
+  static let networkServiceInProcess = "enable-features=NetworkServiceInProcess2"
 
   public static let browser: [String] = [
     // os_crypt would otherwise ask for the login keychain, a prompt nobody at an

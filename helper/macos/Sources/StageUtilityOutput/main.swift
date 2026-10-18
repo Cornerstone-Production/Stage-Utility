@@ -30,7 +30,6 @@ if options.listOutputs {
 }
 
 if let key = options.newTokenFor {
-  _ = NSApplication.shared
   // The running copy holds outputs.json in memory and would write the old token back.
   if SingleInstance.otherCopy() != nil {
     FileHandle.standardError.write(

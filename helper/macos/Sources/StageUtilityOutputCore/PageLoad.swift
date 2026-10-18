@@ -68,7 +68,7 @@ public struct PageLoadTracker: Equatable {
 
   /// The main frame's response arrived with this HTTP status.
   public mutating func responded(status: Int) -> Outcome {
-    guard !showingFailurePage, status >= 500 else { return .none }
+    guard status >= 500 else { return .none }
     responseFailed = true
     return fail("server answered \(status)")
   }

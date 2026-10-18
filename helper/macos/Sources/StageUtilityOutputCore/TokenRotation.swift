@@ -29,7 +29,8 @@ public enum TokenRotation {
         lines: ["No output \(key) is stored. --list-outputs shows each output's key (the first column)."],
         succeeded: false)
     }
-    let deviceId = macDeviceId.map { record.deviceId(mac: $0, key: key) } ?? key
+    // With no Mac id stored there is no device id to name; say "this output".
+    let device = macDeviceId.map { record.deviceId(mac: $0, key: key) }
     do {
       _ = try store.newToken(key: key)
     } catch {
@@ -39,11 +40,11 @@ public enum TokenRotation {
     }
     return Result(
       lines: [
-        "\(key) (device \(deviceId)) has a new token, saved in \(store.file.path).",
+        "\(key)\(device.map { " (device \($0))" } ?? "") has a new token, saved in \(store.file.path).",
         "The server still holds the old one, and it still opens the screen until you:",
         "  1. start the helper again;",
         "  2. in Stage Utility, open the screen this output showed, and Release it (Screen settings > Device);",
-        "  3. set it up on that screen again when \(deviceId) appears under Not set up yet.",
+        "  3. set it up on that screen again when \(device ?? "this output") appears under Not set up yet.",
       ],
       succeeded: true)
   }

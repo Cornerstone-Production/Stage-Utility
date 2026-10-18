@@ -38,11 +38,11 @@ final class GPUProcessWatch {
 
   private func look() {
     let children = GPUProcessWatch.children()
-    if !networkServiceLogged, let (pid, _) = children.first(where: { ProcessArguments.isNetworkServiceProcess($0.1) }) {
+    if !networkServiceLogged, let child = children.first(where: { ProcessArguments.isNetworkServiceProcess($0.arguments) }) {
       networkServiceLogged = true
       Log.error(
         .cef,
-        "Chromium's network service runs in a helper process (pid \(pid)), not in the app: macOS does not count it under the app's Local Network permission, so pages from a server on the local network may not load")
+        "Chromium's network service runs in a helper process (pid \(child.pid)), not in the app: macOS does not count it under the app's Local Network permission, so pages from a server on the local network may not load")
     }
     for (pid, arguments) in children where ProcessArguments.isGPUProcess(arguments) && watched[pid] == nil {
       let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
@@ -62,11 +62,11 @@ final class GPUProcessWatch {
   }
 
   /// The app's child processes, each with its arguments.
-  private static func children() -> [(pid_t, [String])] {
+  private static func children() -> [(pid: pid_t, arguments: [String])] {
     var pids = [pid_t](repeating: 0, count: 256)
     let returned = proc_listchildpids(getpid(), &pids, Int32(pids.count * MemoryLayout<pid_t>.size))
     let count = ProcessArguments.childCount(returned: returned, capacity: pids.count)
-    return pids.prefix(count).filter { $0 > 0 }.map { ($0, arguments(of: $0)) }
+    return pids.prefix(count).filter { $0 > 0 }.map { (pid: $0, arguments: arguments(of: $0)) }
   }
 
   /// A process's arguments, empty when they cannot be read (`ProcessArguments`).
