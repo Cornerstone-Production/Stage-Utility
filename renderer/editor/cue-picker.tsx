@@ -71,7 +71,7 @@ export function CuePicker({
   );
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger>
+      <SelectTrigger aria-label="Cue">
         <SelectValue placeholder={cues ? "Select a cue" : "Loading cues…"} />
       </SelectTrigger>
       <SelectContent>

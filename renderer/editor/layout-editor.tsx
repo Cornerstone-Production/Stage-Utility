@@ -2228,9 +2228,9 @@ export function LayoutEditor({
                     so without min-w-0 the second field ran off the popover's
                     right edge. */}
                 <div className="flex items-center gap-1">
-                  <NumberField className="min-w-0 flex-1" value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
+                  <NumberField aria-label="Canvas width" className="min-w-0 flex-1" value={canvas.width} step={10} min={100} onChange={(w) => { if (w >= 100) { setCanvas({ ...canvas, width: Math.round(w) }); setDirty(true); } }} />
                   <span className="text-caption2 text-fg-subtle">×</span>
-                  <NumberField className="min-w-0 flex-1" value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
+                  <NumberField aria-label="Canvas height" className="min-w-0 flex-1" value={canvas.height} step={10} min={100} onChange={(h) => { if (h >= 100) { setCanvas({ ...canvas, height: Math.round(h) }); setDirty(true); } }} />
                 </div>
               </div>
               <div className="flex flex-col gap-1.5">
@@ -2331,6 +2331,7 @@ export function LayoutEditor({
           onConfirm={async () => { await onSaveTemplate(tplName.trim(), currentLayout()); setTplName(""); }}
         >
           <Input
+            aria-label="Layout name"
             value={tplName}
             onChange={(e) => setTplName(e.target.value)}
             placeholder="Layout name (e.g. Lyrics + Timer)"
@@ -2704,6 +2705,7 @@ export function LayoutEditor({
             </DialogDescription>
           </DialogHeader>
           <Input
+            aria-label="Group name"
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
             placeholder="Group name (e.g. Vocal notes panel)"

@@ -28,7 +28,7 @@ export function ActionPicker({
 }) {
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="w-full">
+      <SelectTrigger aria-label="Action" className="w-full">
         <SelectValue placeholder={actions ? "Pick an action…" : "Loading actions…"} />
       </SelectTrigger>
       <SelectContent>
