@@ -808,10 +808,9 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     blurb: "Fires a cue, or runs an action, from a console",
     group: "Control",
     config: () => ({ type: "cue-button", cue: "", label: "", showDevice: true }),
-    // The size every other button starts at. It was 0.12, which is what the
-    // Ultritouch panel's strip wants (its templates set their own size, below)
-    // and is far too big for the box a palette Button arrives in: an unbound one
-    // drew "UNBOUND" at a size that clipped it to "UNBO".
+    // The size every other button starts at, small enough that the lamp, label and
+    // room line fit the box a new button is placed in (default-size.test.tsx). The
+    // Ultritouch strips set their own, larger size.
     style: () => PILL({ fontSize: 0.045 }),
   },
 

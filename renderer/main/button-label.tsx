@@ -1,26 +1,18 @@
-// The label on a console button, drawn the same way by every button widget.
-//
-// The cue button, the action button, the OSC button and the RossTalk button each
-// drew their own label as a bare text node or span inside a flex button, and so
-// each broke the same way: a long label ran to the button's edges with no room
-// around it, an unbroken word pushed past the edge, and the line alignment
-// followed the widget's text-align setting, so a wrapped label could sit left of
-// the button's centre. One component, so a fifth button does not start from a
-// bare span.
+// The label on a console button, drawn the same way by every button widget (cue,
+// action, OSC, RossTalk). One component, so a new button does not start from a bare
+// span.
 //
 // The button around it supplies the centring of the BLOCK (a flex container with
-// both axes centred); this supplies the rest: the line alignment, the padding,
-// the wrap, and a hard stop at the button's own size. A label too long for the
-// button shows its first lines and loses the end, rather than spilling over the
-// edge or losing both ends to a centred overflow.
+// both axes centred); this supplies the rest: centred lines whatever the widget's
+// text-align says, a margin, a wrap, and a hard stop at the button's own size. A
+// label too long for the button shows its first lines and loses the end, rather
+// than spilling over the edge or losing both ends to a centred overflow.
 //
-// Not unit-tested, and cannot be: it is all CSS, and jsdom loads no stylesheet and
-// reports every box as 0 by 0. It is verified in a browser; see
-// button-label.test.tsx for what a test CAN see and for how it was checked.
+// The layout itself is verified in a browser; see button-label.test.tsx.
 
 import type { CSSProperties, ReactNode } from "react";
 
-export const BUTTON_LABEL_STYLE: CSSProperties = {
+const BUTTON_LABEL_STYLE: CSSProperties = {
   // The label is as wide as its text and no wider than the button, so a short
   // one stays a centred block and a long one wraps inside the button's edges.
   maxWidth: "100%",

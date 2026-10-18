@@ -335,8 +335,8 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   { type: "screen-embed", label: "Embedded screen", group: "PCO / service", after: "view-embed" },
   // The general form of the two buttons above: bound to any entry in the
   // automation action registry rather than one integration. Folded into the
-  // palette's one "Button" since (see FOLDED): its `group` is null now, so the
-  // placement claims below skip it and `notes` follows `rosstalk-button`.
+  // palette's one "Button" (see FOLDED): its `group` is null, so the placement
+  // claims below skip it and `notes` follows `rosstalk-button`.
   { type: "action-button", label: "Button", group: "Control", after: "rosstalk-button" },
   // The operator's own work product, stored outside the layout in notes.json.
   { type: "notes", label: "Notes", group: "Control", after: "rosstalk-button" },
@@ -434,7 +434,7 @@ const FOLDED: { type: string; into: string }[] = [
 
 /** Retirements and folds, by type — the two assertions over ADDED_SINCE that only
  *  hold while a type is still ON the palette skip these. Its label is still pinned. */
-const IS_RETIRED = new Set([...RETIRED.map((r) => r.type), ...FOLDED.map((f) => f.type)]);
+const OFF_PALETTE = new Set([...RETIRED.map((r) => r.type), ...FOLDED.map((f) => f.type)]);
 
 // ── Assertions ────────────────────────────────────────────────────────────────
 
@@ -452,7 +452,7 @@ describe("layout-object registry vs. the structures it replaced", () => {
       // only while it is. A retired type's group is null by definition, which
       // `retired types leave the palette but stay renderable` asserts instead.
       assert.equal(typeLabel(a.type as never), a.label);
-      if (IS_RETIRED.has(a.type)) continue;
+      if (OFF_PALETTE.has(a.type)) continue;
       assert.equal(LAYOUT_OBJECTS[a.type as LayoutObjectType].group, a.group);
     }
   });
@@ -509,7 +509,7 @@ describe("layout-object registry vs. the structures it replaced", () => {
     // Pins placement too, so a new object cannot silently reorder the palette.
     // `after: null` means it leads its group.
     for (const a of ADDED_SINCE) {
-      if (IS_RETIRED.has(a.type)) continue;
+      if (OFF_PALETTE.has(a.type)) continue;
       if (a.after === null) {
         const g = PALETTE_GROUPS.find((x) => (x.types as string[]).includes(a.type));
         assert.ok(g, `${a.type} is not in the palette`);

@@ -69,16 +69,15 @@ describe("the widget palette", () => {
 
   test("searching for either old name still finds the Button", () => {
     // The blurb names both halves, so "action" and "cue" each land on it.
+    const { container, getByLabelText } = render(
+      React.createElement(Palette as never, {
+        types: ALL_TYPES,
+        onAdd: noop,
+        onDragStart: noop,
+        onDragEnd: noop,
+      }),
+    );
     for (const q of ["action", "cue"]) {
-      cleanup();
-      const { container, getByLabelText } = render(
-        React.createElement(Palette as never, {
-          types: ALL_TYPES,
-          onAdd: noop,
-          onDragStart: noop,
-          onDragEnd: noop,
-        }),
-      );
       fireEvent.change(getByLabelText("Search widgets"), { target: { value: q } });
       assert.equal(BUTTON_TILES(container).length, 1, `searching "${q}" should find the Button`);
     }

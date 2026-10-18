@@ -11,9 +11,9 @@
 //  - DOES FLIPS THE STORED TYPE AND KEEPS THE LABEL. Losing the label on a switch
 //    would blank a button an operator had already named; keeping the cue or the
 //    action across it would leave a config carrying fields its type does not read.
-//  - THE CUE DROPDOWN IS GROUPED "YOUR CUES" THEN "BUILT IN". The owner approved
-//    that order; the cue just made is the first thing in the list.
-//  - MAKE IT A CUE CREATES EXACTLY ONE RULE, WITH THE FIELDS THE OWNER SPECIFIED,
+//  - THE CUE DROPDOWN IS GROUPED "YOUR CUES" THEN "BUILT IN", which puts the cue
+//    somebody just made first in the list.
+//  - MAKE IT A CUE CREATES EXACTLY ONE RULE, WITH THE SPECIFIED FIELDS,
 //    AND REBINDS THE WIDGET. Each field is one the operator would otherwise find
 //    out about at a service: a cooldown of 0 lets a double tap run it twice, a
 //    condition left on refuses it mid-service, Home Assistant left on puts a new
@@ -57,7 +57,7 @@ const ACTIONS: { id: string; label: string; params: ParamDef[] }[] = [
   },
 ];
 
-const manifest = (over: Partial<CuesLive["manifest"]> = {}): CuesLive => ({
+const manifest = (): CuesLive => ({
   manifest: {
     version: 1,
     server: { name: "t", lanUrl: null },
@@ -68,16 +68,20 @@ const manifest = (over: Partial<CuesLive["manifest"]> = {}): CuesLive => ({
       { id: "stage_reset", name: "Stage reset", room: "", cue: "stage_reset", available: true },
       { id: "display_refresh", name: "Refresh displays", room: "", cue: "display_refresh", available: true, builtin: true },
     ],
-    ...over,
   },
   states: new Map(),
 });
 
+/** Every body POSTed to /api/automation/rules. */
 interface Server {
-  /** Every body POSTed to /api/automation/rules. */
   posted: unknown[];
-  restore: () => void;
 }
+
+// serve() puts the real fetch back after the test, last stub first.
+const restores: (() => void)[] = [];
+afterEach(() => {
+  while (restores.length) restores.pop()!();
+});
 
 /**
  * The server this panel talks to. `existingRules` is what the rule list answers;
@@ -85,8 +89,8 @@ interface Server {
  */
 function serve(opts: {
   existingRules?: unknown[];
-  cues?: CuesLive["manifest"];
-  write?: "ok" | "refuse";
+  /** The rule write is refused with a name clash. */
+  refuse?: boolean;
   readRulesFails?: boolean;
   /** Holds the rule write until this settles, so a test can act while it is in flight. */
   gate?: Promise<void>;
@@ -96,13 +100,13 @@ function serve(opts: {
     if (url.includes("/api/automation/registry")) {
       return reply(200, { triggers: [], conditions: [], actions: ACTIONS });
     }
-    if (url.includes("/api/cues/manifest")) return reply(200, opts.cues ?? manifest().manifest);
+    if (url.includes("/api/cues/manifest")) return reply(200, manifest().manifest);
     if (url.endsWith("/api/automation/rules")) {
       if (init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         posted.push(body);
         if (opts.gate) return opts.gate.then(() => reply(201, { ...body, id: "rule-1", issues: [] }));
-        if (opts.write === "refuse") return reply(400, { error: 'The cue name "walk_now" is already used by "Walk"' });
+        if (opts.refuse) return reply(400, { error: 'The cue name "walk_now" is already used by "Walk"' });
         return reply(201, { ...body, id: "rule-1", issues: [] });
       }
       if (opts.readRulesFails) throw new TypeError("fetch failed");
@@ -110,11 +114,13 @@ function serve(opts: {
     }
     return reply(200, {});
   });
-  return { posted, restore: f.restore };
+  restores.push(f.restore);
+  return { posted };
 }
 
 /** The panel with a real useState behind onConfig; `configs` is every write. */
-function mount(initial: ButtonConfig, cues: CuesLive | null = manifest()) {
+function mount(initial: ButtonConfig) {
+  const cues = manifest();
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const configs: LayoutObjectConfig[] = [];
   function Harness() {
@@ -133,19 +139,21 @@ function mount(initial: ButtonConfig, cues: CuesLive | null = manifest()) {
 }
 
 // Every test gets a server, so the action half's registry read never reaches the
-// real fetch. A test that needs different answers calls serve() again; stubs
-// restore last-in first-out.
-let baseline: Server;
+// real fetch. A test that needs different answers calls serve() again.
 beforeEach(() => {
-  baseline = serve();
+  serve();
 });
-afterEach(() => baseline.restore());
 
 const press = (root: HTMLElement, name: string) => {
   const b = [...root.querySelectorAll("button")].find((x) => x.textContent === name);
   assert.ok(b, `no "${name}" button`);
   return b;
 };
+/** Waits for the registry to load, then presses Make it a cue. */
+async function makeIt(root: HTMLElement) {
+  await eventually(() => assert.equal(press(root, "Make it a cue").hasAttribute("disabled"), false));
+  fireEvent.click(press(root, "Make it a cue"));
+}
 const pressed = (root: HTMLElement, name: string) => press(root, name).getAttribute("aria-pressed");
 
 describe("the Does control", () => {
@@ -220,152 +228,113 @@ describe("Make it a cue", () => {
 
   test("creates exactly one manual cue with the specified fields, and rebinds the widget", async () => {
     const s = serve();
-    try {
-      const { container, configs } = mount(ACTION);
-      await eventually(() => assert.equal(press(container, "Make it a cue").hasAttribute("disabled"), false));
-      fireEvent.click(press(container, "Make it a cue"));
-      await eventually(() => assert.equal(configs.length, 1, "the widget was never rebound"));
+    const { container, configs } = mount(ACTION);
+    await makeIt(container);
+    await eventually(() => assert.equal(configs.length, 1, "the widget was never rebound"));
 
-      assert.deepEqual(s.posted, [
-        {
-          name: "Walk now",
-          enabled: true,
-          trigger: {
-            id: "call.by-name",
-            // Home Assistant OFF is the stored word `hidden`; `says` is what the
-            // picker shows the cue as.
-            params: { name: "walk_now", says: "Walk now", homeAssistant: "hidden" },
-          },
-          // Allowed during a service ON: no service.is-not-live condition.
-          conditions: [],
-          action: { id: "osc.send", params: { argument: 3 } },
-          cooldownSec: 2,
-          oncePerService: false,
+    assert.deepEqual(s.posted, [
+      {
+        name: "Walk now",
+        enabled: true,
+        trigger: {
+          id: "call.by-name",
+          // Home Assistant OFF is the stored word `hidden`; `says` is what the
+          // picker shows the cue as.
+          params: { name: "walk_now", says: "Walk now", homeAssistant: "hidden" },
         },
-      ]);
-      assert.deepEqual(configs, [{ type: "cue-button", cue: "walk_now", label: "Walk now", showDevice: true }]);
-      assert.equal(pressed(container, "Fire a cue"), "true", "the panel must now show the cue half");
-    } finally {
-      s.restore();
-    }
+        // Allowed during a service ON: no service.is-not-live condition.
+        conditions: [],
+        action: { id: "osc.send", params: { argument: 3 } },
+        cooldownSec: 2,
+        oncePerService: false,
+      },
+    ]);
+    assert.deepEqual(configs, [{ type: "cue-button", cue: "walk_now", label: "Walk now", showDevice: true }]);
+    assert.equal(pressed(container, "Fire a cue"), "true", "the panel must now show the cue half");
   });
 
   test("a label typed while the write is in flight is the one the button keeps", async () => {
     let release: () => void = () => {};
     const s = serve({ gate: new Promise<void>((r) => (release = r)) });
-    try {
-      const { container, configs } = mount(ACTION);
-      await eventually(() => assert.equal(press(container, "Make it a cue").hasAttribute("disabled"), false));
-      fireEvent.click(press(container, "Make it a cue"));
-      await eventually(() => assert.equal(s.posted.length, 1, "the write has not started"));
-      fireEvent.change(container.querySelector("input[placeholder='Send an OSC message']")!, { target: { value: "Renamed" } });
-      release();
-      await eventually(() => assert.equal((configs.at(-1) as { type: string }).type, "cue-button"));
-      assert.equal((configs.at(-1) as { label?: string }).label, "Renamed", "the rebind used the label from before the click");
-    } finally {
-      s.restore();
-    }
+    const { container, configs } = mount(ACTION);
+    await makeIt(container);
+    await eventually(() => assert.equal(s.posted.length, 1, "the write has not started"));
+    fireEvent.change(container.querySelector("input[placeholder='Send an OSC message']")!, { target: { value: "Renamed" } });
+    release();
+    await eventually(() => assert.equal((configs.at(-1) as { type: string }).type, "cue-button"));
+    assert.equal((configs.at(-1) as { label?: string }).label, "Renamed", "the rebind used the label from before the click");
   });
 
   test("a blank label names the rule after the action, and the button keeps no label", async () => {
     const s = serve();
-    try {
-      const { container, configs } = mount({ type: "action-button", actionId: "display.refresh", params: {} });
-      await eventually(() => assert.equal(press(container, "Make it a cue").hasAttribute("disabled"), false));
-      fireEvent.click(press(container, "Make it a cue"));
-      await eventually(() => assert.equal(configs.length, 1));
-      const rule = s.posted[0] as { name: string; trigger: { params: { name: string } } };
-      assert.equal(rule.name, "Refresh displays");
-      assert.equal(rule.trigger.params.name, "refresh_displays");
-      assert.deepEqual(configs[0], { type: "cue-button", cue: "refresh_displays", showDevice: true });
-    } finally {
-      s.restore();
-    }
+    const { container, configs } = mount({ type: "action-button", actionId: "display.refresh", params: {} });
+    await makeIt(container);
+    await eventually(() => assert.equal(configs.length, 1));
+    const rule = s.posted[0] as { name: string; trigger: { params: { name: string } } };
+    assert.equal(rule.name, "Refresh displays");
+    assert.equal(rule.trigger.params.name, "refresh_displays");
+    assert.deepEqual(configs[0], { type: "cue-button", cue: "refresh_displays", showDevice: true });
   });
 
   test("the cue name is de-duplicated against cue names, former names and the manifest", async () => {
-    const s = serve({
+    serve({
       existingRules: [
         { id: "a", name: "Walk", trigger: { id: "call.by-name", params: { name: "walk_now", aliases: "walk_now_2" } } },
         // Not a cue: its params.name must not be read as one.
         { id: "b", name: "Other", trigger: { id: "clock.at", params: { name: "walk_now_3" } } },
       ],
     });
-    try {
-      const { container, configs } = mount(ACTION);
-      await eventually(() => assert.equal(press(container, "Make it a cue").hasAttribute("disabled"), false));
-      fireEvent.click(press(container, "Make it a cue"));
-      await eventually(() => assert.equal(configs.length, 1));
-      assert.equal((configs[0] as { cue: string }).cue, "walk_now_3");
-    } finally {
-      s.restore();
-    }
+    const { container, configs } = mount(ACTION);
+    await makeIt(container);
+    await eventually(() => assert.equal(configs.length, 1));
+    assert.equal((configs[0] as { cue: string }).cue, "walk_now_3");
   });
 
   test("a label ending in on or off does not become half of a pair", async () => {
-    const s = serve();
-    try {
-      const { container, configs } = mount({ type: "action-button", actionId: "display.refresh", params: {}, label: "Projectors on" });
-      await eventually(() => assert.equal(press(container, "Make it a cue").hasAttribute("disabled"), false));
-      fireEvent.click(press(container, "Make it a cue"));
-      await eventually(() => assert.equal(configs.length, 1));
-      // projectors_on alone is an orphan half, which the manifest drops, so a
-      // button bound to it would find no cue.
-      assert.equal((configs[0] as { cue: string }).cue, "projectors_on_cue");
-    } finally {
-      s.restore();
-    }
+    serve();
+    const { container, configs } = mount({ type: "action-button", actionId: "display.refresh", params: {}, label: "Projectors on" });
+    await makeIt(container);
+    await eventually(() => assert.equal(configs.length, 1));
+    // projectors_on alone is an orphan half, which the manifest drops, so a
+    // button bound to it would find no cue.
+    assert.equal((configs[0] as { cue: string }).cue, "projectors_on_cue");
   });
 
   test("a refused write leaves the widget unchanged and says why", async () => {
-    const s = serve({ write: "refuse" });
-    try {
-      const { container, configs } = mount(ACTION);
-      await eventually(() => assert.equal(press(container, "Make it a cue").hasAttribute("disabled"), false));
-      fireEvent.click(press(container, "Make it a cue"));
-      await eventually(() =>
-        assert.match(container.querySelector('[role="alert"]')?.textContent ?? "", /already used by "Walk"/),
-      );
-      assert.equal(s.posted.length, 1, "exactly one attempt");
-      assert.equal(configs.length, 0, "the widget must not be rebound to a cue that was never created");
-      assert.equal(pressed(container, "Run an action"), "true", "the panel must still be the action half");
-      assert.equal(press(container, "Make it a cue").hasAttribute("disabled"), false, "and may be tried again");
-    } finally {
-      s.restore();
-    }
+    const s = serve({ refuse: true });
+    const { container, configs } = mount(ACTION);
+    await makeIt(container);
+    await eventually(() =>
+      assert.match(container.querySelector('[role="alert"]')?.textContent ?? "", /already used by "Walk"/),
+    );
+    assert.equal(s.posted.length, 1, "exactly one attempt");
+    assert.equal(configs.length, 0, "the widget must not be rebound to a cue that was never created");
+    assert.equal(pressed(container, "Run an action"), "true", "the panel must still be the action half");
+    assert.equal(press(container, "Make it a cue").hasAttribute("disabled"), false, "and may be tried again");
   });
 
   test("a rule list that cannot be read writes nothing and says so", async () => {
     const s = serve({ readRulesFails: true });
-    try {
-      const { container, configs } = mount(ACTION);
-      await eventually(() => assert.equal(press(container, "Make it a cue").hasAttribute("disabled"), false));
-      fireEvent.click(press(container, "Make it a cue"));
-      await eventually(() => assert.ok(container.querySelector('[role="alert"]'), "the failure was not shown"));
-      assert.equal(s.posted.length, 0, "a name that could not be checked must not be written");
-      assert.equal(configs.length, 0);
-    } finally {
-      s.restore();
-    }
+    const { container, configs } = mount(ACTION);
+    await makeIt(container);
+    await eventually(() => assert.ok(container.querySelector('[role="alert"]'), "the failure was not shown"));
+    assert.equal(s.posted.length, 0, "a name that could not be checked must not be written");
+    assert.equal(configs.length, 0);
   });
 
   test("is not offered until an action is chosen and its fields are complete", async () => {
     const s = serve();
-    try {
-      const empty = mount({ type: "action-button", actionId: "", params: {} });
-      await eventually(() => assert.ok(empty.container.querySelectorAll("option").length > 1, "the registry has not loaded"));
-      assert.equal(press(empty.container, "Make it a cue").hasAttribute("disabled"), true);
-      fireEvent.click(press(empty.container, "Make it a cue"));
-      assert.equal(s.posted.length, 0);
-      assert.match(empty.container.textContent ?? "", /Choose an action and fill in its fields first/);
-      cleanup();
+    const empty = mount({ type: "action-button", actionId: "", params: {} });
+    await eventually(() => assert.ok(empty.container.querySelectorAll("option").length > 1, "the registry has not loaded"));
+    assert.equal(press(empty.container, "Make it a cue").hasAttribute("disabled"), true);
+    fireEvent.click(press(empty.container, "Make it a cue"));
+    assert.equal(s.posted.length, 0);
+    assert.match(empty.container.textContent ?? "", /Choose an action and fill in its fields first/);
+    cleanup();
 
-      // An action whose number field is unset: the server would save it turned off.
-      const incomplete = mount({ type: "action-button", actionId: "osc.send", params: {} });
-      await eventually(() => assert.ok(incomplete.container.textContent?.includes("Argument")));
-      assert.equal(press(incomplete.container, "Make it a cue").hasAttribute("disabled"), true);
-    } finally {
-      s.restore();
-    }
+    // An action whose number field is unset: the server would save it turned off.
+    const incomplete = mount({ type: "action-button", actionId: "osc.send", params: {} });
+    await eventually(() => assert.ok(incomplete.container.textContent?.includes("Argument")));
+    assert.equal(press(incomplete.container, "Make it a cue").hasAttribute("disabled"), true);
   });
 });

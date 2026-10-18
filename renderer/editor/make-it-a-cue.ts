@@ -19,23 +19,19 @@ import { CALL_TRIGGER_ID, parseAliases } from "@main/services/cue-aliases";
 import { homeVisibilityParams, isPairHalfName } from "@main/services/cue-pairs";
 import type { CueManifest } from "@main/services/cue-manifest";
 import type { Rule } from "@main/types/automation";
+import { slugForCue } from "@main/services/companion-export";
 import { errorMessage } from "@main/services/errors";
 
 import { invoke } from "../lib/api";
 
 /** Seconds a cue made this way waits before it may fire again. Short: a Button
  *  is pressed by hand, and two accidental taps should not run it twice. */
-export const MADE_CUE_COOLDOWN_SEC = 2;
+const MADE_CUE_COOLDOWN_SEC = 2;
 
-/** lower_snake_case from any text: accents folded, runs of anything else one
- *  underscore, none at either end. "" when nothing usable is left. */
+/** lower_snake_case from any text, by the Companion import's own slug with accents
+ *  folded first. "" when nothing usable is left. */
 export function cueSlug(text: string): string {
-  return text
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+  return slugForCue(text.normalize("NFKD").replace(/[\u0300-\u036f]/g, ""));
 }
 
 /**
@@ -98,7 +94,7 @@ function ruleParams(params: Record<string, unknown> | undefined): Record<string,
 /** The manual cue: Called by name, enabled, a short cooldown, allowed during a
  *  service (no `service.is-not-live` condition), and kept out of Home Assistant
  *  until the operator chooses otherwise. */
-export function manualCueRule(opts: {
+function manualCueRule(opts: {
   name: string;
   cueName: string;
   actionId: string;
@@ -118,21 +114,13 @@ export function manualCueRule(opts: {
   };
 }
 
-export type MakeCueResult =
+type MakeCueResult =
   | {
       ok: true;
       /** The new cue's name, which is what a cue-button's `cue` holds. */
       cue: string;
-      ruleName: string;
     }
   | { ok: false; error: string };
-
-/** The seam a test replaces; production reads and writes through `invoke`. */
-export const makeCueDeps = {
-  rules: () => invoke<{ rules: Rule[] }>("automation:rules"),
-  manifest: () => invoke<CueManifest>("cues:manifest"),
-  addRule: (rule: Omit<Rule, "id">) => invoke<Rule>("automation:addRule", rule),
-};
 
 /**
  * Create the manual cue for a Button's action. Resolves with the new cue's name,
@@ -148,14 +136,16 @@ export async function makeCueFromAction(opts: {
 }): Promise<MakeCueResult> {
   const ruleName = opts.label.trim() || opts.actionLabel.trim() || opts.actionId;
   try {
-    const [{ rules }, manifest] = await Promise.all([makeCueDeps.rules(), makeCueDeps.manifest()]);
+    const [{ rules }, manifest] = await Promise.all([
+      invoke<{ rules: Rule[] }>("automation:rules"),
+      invoke<CueManifest>("cues:manifest"),
+    ]);
     const taken = takenCueNames(rules, manifest);
     // The label first, the action's name when the label has no letters in it.
     const cueName = cueNameFor(cueSlug(ruleName) ? ruleName : opts.actionLabel, taken);
-    await makeCueDeps.addRule(
-      manualCueRule({ name: ruleName, cueName, actionId: opts.actionId, params: opts.params }),
-    );
-    return { ok: true, cue: cueName, ruleName };
+    const rule = manualCueRule({ name: ruleName, cueName, actionId: opts.actionId, params: opts.params });
+    await invoke<Rule>("automation:addRule", rule);
+    return { ok: true, cue: cueName };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };
   }

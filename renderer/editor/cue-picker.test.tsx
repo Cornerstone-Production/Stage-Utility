@@ -7,9 +7,9 @@
 //
 // What is guarded, and why each is a bug rather than a nicety:
 //
-//  - BOTH GROUPS, "YOUR CUES" FIRST. That order is the point: the owner approved
-//    the dropdown with the operator's own cues above the ones the app ships, so
-//    the cue somebody just made is the first thing in the list.
+//  - BOTH GROUPS, "YOUR CUES" FIRST. That order is the point: the operator's own
+//    cues sit above the ones the app ships, so the cue somebody just made is the
+//    first thing in the list.
 //  - EVERY CUE IS STILL IN THE LIST. A filter that dropped one would be a cue
 //    that cannot be bound to a button at all, with nothing saying why.
 //  - AN EMPTY GROUP IS NOT RENDERED. An install with no cues of its own must

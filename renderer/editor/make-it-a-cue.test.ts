@@ -4,11 +4,12 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
+import { CALL_TRIGGER_ID } from "@main/services/cue-aliases.js";
 import { cueNameFor, cueSlug, takenCueNames } from "./make-it-a-cue.js";
 import type { CueManifest } from "@main/services/cue-manifest.js";
 import type { Rule } from "@main/types/automation.js";
 
-const rule = (params: Record<string, string | number>, trigger = "call.by-name"): Rule => ({
+const rule = (params: Record<string, string | number>, trigger: string = CALL_TRIGGER_ID): Rule => ({
   id: "r",
   name: "r",
   enabled: true,

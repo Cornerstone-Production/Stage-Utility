@@ -1,20 +1,15 @@
 // button-inspector.tsx — the Button widget's config editor.
 //
-// The palette offers ONE Button. Underneath it are two stored types that still
-// exist exactly as before — a cue-button (fires a cue, shows its device) and an
-// action-button (runs one registry action inline) — and the Does control at the
-// top of this panel is what switches a widget between them. Nothing is migrated:
-// a saved layout's widgets load as whichever type they were, and this panel reads
-// the type to decide which half of itself to draw.
+// The palette offers ONE Button over two stored types: a cue-button (fires a cue,
+// shows its device) and an action-button (runs one registry action inline). The
+// Does control at the top switches a widget between them by rewriting its config
+// with the other `type`; this panel reads the type to decide which half to draw.
+// The label carries over; the cue and Show device, or the action and its
+// parameters, do not. Look and place are `style` and geometry, not config, and
+// are untouched.
 //
-// Switching rewrites the stored config with the new `type` and keeps the label.
-// What cannot carry over is dropped: going to Run an action loses the cue and
-// Show device; going to Fire a cue loses the action and its parameters. The
-// look and the place are not in the config at all (they are `style` and
-// geometry), so they are untouched.
-//
-// "Make it a cue" is the one-way bridge: it lifts the action into a manual cue
-// (make-it-a-cue.ts) and rebinds this widget to it.
+// "Make it a cue" lifts the action into a manual cue (make-it-a-cue.ts) and
+// rebinds this widget to it.
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -34,13 +29,14 @@ type CueButtonConfig = Extract<LayoutObjectConfig, { type: "cue-button" }>;
 type ActionButtonConfig = Extract<LayoutObjectConfig, { type: "action-button" }>;
 export type ButtonConfig = CueButtonConfig | ActionButtonConfig;
 
-/** Where "+ New manual cue…" goes. The Automation page opens its creation flow
- *  for `new=manual` and shows the page as it is on a build that predates that. */
+/** Where "+ New manual cue…" goes: the Automation page, which opens its cue
+ *  creation flow for `new=manual` once it handles that, and is just the page until
+ *  then. */
 export const NEW_MANUAL_CUE_HREF = "/automation?new=manual";
 
 /** The same widget set to Fire a cue: the label is kept, the cue starts unbound
  *  unless one is given, and the action and its parameters are dropped. */
-export function toCueButton(c: ButtonConfig, cue = ""): CueButtonConfig {
+function toCueButton(c: ButtonConfig, cue = ""): CueButtonConfig {
   return {
     type: "cue-button",
     cue,
@@ -51,7 +47,7 @@ export function toCueButton(c: ButtonConfig, cue = ""): CueButtonConfig {
 
 /** The same widget set to Run an action: the label is kept, and the cue and Show
  *  device are dropped. */
-export function toActionButton(c: ButtonConfig): ActionButtonConfig {
+function toActionButton(c: ButtonConfig): ActionButtonConfig {
   return {
     type: "action-button",
     actionId: "",
@@ -71,6 +67,7 @@ export function ButtonInspector({
   onConfig: (c: LayoutObjectConfig) => void;
 }) {
   const cueMode = c.type === "cue-button";
+  const does = cueMode ? "cue" : "action";
   return (
     <>
       <StackedField
@@ -83,19 +80,19 @@ export function ButtonInspector({
       >
         <Segmented
           label="Does"
-          value={cueMode ? "cue" : "action"}
+          value={does}
           options={[
             { value: "cue", label: "Fire a cue" },
             { value: "action", label: "Run an action" },
           ]}
           onChange={(v) => {
-            if ((v === "cue") === cueMode) return;
+            if (v === does) return;
             onConfig(v === "cue" ? toCueButton(c) : toActionButton(c));
           }}
         />
       </StackedField>
 
-      {c.type === "cue-button" ? (
+      {cueMode ? (
         <>
           <StackedField
             label="Cue"
