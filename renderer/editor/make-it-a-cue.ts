@@ -146,8 +146,8 @@ export async function makeCueFromAction(opts: {
   actionLabel: string;
   params: Record<string, unknown> | undefined;
 }): Promise<MakeCueResult> {
-  const ruleName = chosenLabel(opts.label) ?? (opts.actionLabel.trim() || opts.actionId);
   try {
+    const ruleName = chosenLabel(opts.label) ?? (opts.actionLabel.trim() || opts.actionId);
     const [{ rules }, manifest] = await Promise.all([
       invoke<{ rules: Rule[] }>("automation:rules"),
       invoke<CueManifest>("cues:manifest"),
