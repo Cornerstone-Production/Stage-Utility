@@ -80,7 +80,8 @@ counts down. See [Widgets](../reference/widgets.md) for what it uses as the hold
 it defaults off. **On screen now** is its Home card.
 
 Home's cards take their settings from a right-click on the card (or tap and
-hold it), not from the layout editor. See [Widgets](../reference/widgets.md)
+hold it). The one setting the menu leaves out is a number: the Warn near the
+end thresholds, which are set in the layout editor's inspector. See [Widgets](../reference/widgets.md)
 for what each line means.
 
 ## Four things that will otherwise surprise you

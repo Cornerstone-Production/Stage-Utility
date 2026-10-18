@@ -356,7 +356,9 @@ tall as 62% of its height allows, and never wider than its width allows for the
 digits it is showing — and follows a resize. It reads `m:ss`, or `h:mm:ss` past
 an hour. With nothing counting — nothing on the layer, a layer PVP does not
 report, a still with **Count down stills** off, an ended clip — it shows a dim
-dash, so a blank widget never looks like a frozen one. **Progress bar**,
+dash, so a blank widget never looks like a frozen one. A paused clip is the
+reverse: it draws its frozen time with no state word, since there is no room for
+one here — switch to Full or Compact to see **paused**. **Progress bar**,
 **Layer**, **Count down stills** and the **Align** pad still apply (the bar is a
 hairline along the bottom edge). **Next cue** and **Label** are greyed out in
 the inspector, each saying why, since neither is drawn in it. (Next cue is also

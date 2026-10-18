@@ -76,12 +76,14 @@ describe("which rows a layout greys out, and why", () => {
     assert.equal(switchIn("Next cue").disabled, true);
   });
 
-  test("Progress bar, Warn near the end and Count down stills stay live in every layout", async () => {
-    await mount(base({ layout: "countdown" }));
-    assert.equal(switchIn("Progress bar").disabled, false);
-    assert.equal(switchIn("Count down stills").disabled, false);
-    assert.equal(switchIn("Warn near the end").disabled, false);
-  });
+  for (const layout of ["full", "compact", "countdown"] as const) {
+    test(`Progress bar, Warn near the end and Count down stills stay live in ${layout}`, async () => {
+      await mount(base({ layout }));
+      assert.equal(switchIn("Progress bar").disabled, false);
+      assert.equal(switchIn("Count down stills").disabled, false);
+      assert.equal(switchIn("Warn near the end").disabled, false);
+    });
+  }
 });
 
 describe("the Layout choice", () => {
