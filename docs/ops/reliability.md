@@ -259,21 +259,30 @@ A save that fails outright — the record folder not writable, the disk full —
 does not stop recording either. When a service closes, at the split to the next
 service on the same plan or when the plan leaves item mode, the closed record is
 published to History and the next service's record opens on that same tick,
-whether or not the save landed. A record that did not save is held in memory,
-answers for that service in History, and is saved again every few seconds (every
-minute for SPL) until it lands. A service that comes back resumes from the held
-copy. Deleting or merging the service in History drops it.
+whether or not the save landed. A record that did not save is held in memory and
+saved again every few seconds (every minute for SPL) until it lands. Until then:
+
+- Opening that service shows the held copy, and a service that comes back
+  resumes from it. The History list, exports and backups read what is on disk,
+  so they leave the service out, or show the copy from before the failure.
+- History edits to it, delete included, and an archive import over it are
+  refused with a 409 (`code: "unsaved"`): each would work from the copy on disk
+  and drop the held one.
 
 Held in memory only: a restart before the save lands loses that service's record.
 For SPL and the rundown timing, **Rebuild from raw** recovers it from the raw
-archive, if that was writable.
+archive, if that was writable. A write that hangs rather than fails, such as a
+stalled network mount, still holds up the tick it is on.
 
 ```
 [service-timeline-recorder] could not save st1:p1:t1 (EACCES: permission denied,
 open '…'); recording carries on, and the save is retried every 4 s. A restart
 before it lands loses that service.
+[service-timeline-recorder] still could not save st1:p1:t1 (EACCES: …); still retrying
 [service-timeline-recorder] saved st1:p1:t1 on retry
 ```
+
+The "still could not save" line repeats every ten minutes while it fails.
 
 ### When a credential could not be moved out of `settings.json`
 

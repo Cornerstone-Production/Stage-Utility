@@ -31,6 +31,11 @@ const { splRecorder } = await import("./spl-recorder.js");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
 const { addBroadcastListener } = await import("./broadcaster.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
+const { serviceTimelineStore } = await import("./service-timeline-store.js");
+const { attendanceStore } = await import("./attendance-store.js");
+const { splHistoryStore } = await import("./spl-history-store.js");
+const { editServiceWindow, deleteServiceRecords } = await import("./history-edit.js");
+const { buildArchive, importArchive } = await import("./archive/archive-bundle.js");
 
 type Rec = { serviceKey: string; endedAt: string | null };
 type Held = {
@@ -120,6 +125,18 @@ async function setWritable(writable: boolean): Promise<void> {
  *  still yields to real file I/O. */
 const settle = () => new Promise((r) => setImmediate(r));
 
+/** Wait out any write already queued on the three stores: each store runs its
+ *  writes one at a time, so a write queued now finishes after them. */
+async function drainStores(): Promise<void> {
+  const barrier = { serviceKey: "barrier", startedAt: "2026-10-18T00:00:00.000Z" } as never;
+  const stores = [serviceTimelineStore, attendanceStore, splHistoryStore];
+  try {
+    await Promise.all(stores.map((s) => s.upsert(barrier)));
+  } finally {
+    await Promise.allSettled(stores.map((s) => s.delete("barrier")));
+  }
+}
+
 /** Fire every retry timer, then let the real file writes they start finish. */
 async function runRetries(until: () => Promise<boolean>): Promise<void> {
   mock.timers.tick(PAST_EVERY_RETRY_MS);
@@ -161,9 +178,13 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
     for (const { rec } of RECORDERS) {
       rec.forget(`75953:${planId}:occ-a`);
       rec.forget(`75953:${planId}:occ-b`);
+      rec.forget(`75953:${planId}:occ-c`);
       rec.current = null;
       rec.currentKey = null;
     }
+    // Run the retry timer out with nothing held, so it is not left pending on
+    // these singletons when the mocked timers are dropped.
+    mock.timers.tick(PAST_EVERY_RETRY_MS);
     mock.timers.reset();
   });
 
@@ -197,6 +218,15 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
       assert.equal(rec.getCurrent()?.serviceKey, key2, `${name}: fell back off the next service`);
     }
 
+    // Retries that keep failing are mentioned again, but not on every attempt.
+    const stillFailing = (name: string) => errors.filter((e) => e.includes(`[${name}] still could not save`)).length;
+    mock.timers.tick(PAST_EVERY_RETRY_MS);
+    await drainStores().catch(() => {});
+    for (const { name } of RECORDERS) assert.equal(stillFailing(name), 0, `${name}: repeated within ten minutes`);
+    mock.timers.setTime(Date.parse("2026-10-18T16:20:00.000Z"));
+    await runRetries(async () => RECORDERS.every(({ name }) => stillFailing(name) > 0));
+    for (const { name } of RECORDERS) assert.equal(stillFailing(name), 1, `${name}: never said the save is still failing`);
+
     await setWritable(true);
     await runRetries(async () => {
       for (const { dir } of RECORDERS) if (!(await readRecord(dir, key1))?.endedAt) return false;
@@ -218,11 +248,8 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
     await setWritable(false);
     const results = await tick("2026-10-18T15:10:00.000Z", "occ-a", null);
 
-    // Attendance closes on this path only once it has a phase to leave; it has
-    // no SenSource feed here, so it is the timeline and SPL closes that count.
     for (const [i, { name, channel, rec, dir }] of RECORDERS.entries()) {
       assert.equal(results[i]!.status, "fulfilled", `${name}: the closing tick threw`);
-      if (name === "attendance-recorder") continue;
       assert.ok(
         pushes.some((p) => p.channel === channel && p.payload.serviceKey === key1 && p.payload.endedAt),
         `${name}: never broadcast the close`,
@@ -233,13 +260,10 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
 
     await setWritable(true);
     await runRetries(async () => {
-      for (const { name, dir } of RECORDERS) {
-        if (name !== "attendance-recorder" && !(await readRecord(dir, key1))?.endedAt) return false;
-      }
+      for (const { dir } of RECORDERS) if (!(await readRecord(dir, key1))?.endedAt) return false;
       return true;
     });
     for (const { name, dir } of RECORDERS) {
-      if (name === "attendance-recorder") continue;
       assert.ok((await readRecord(dir, key1))?.endedAt, `${name}: the closed record never reached disk`);
     }
   });
@@ -253,8 +277,7 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
 
     await setWritable(true);
     mock.timers.tick(PAST_EVERY_RETRY_MS);
-    // Absence can only be shown by waiting; 50 turns is far past a file write.
-    for (let i = 0; i < 50; i++) await settle();
+    await drainStores();
     for (const { name, dir } of RECORDERS) {
       assert.equal(await readRecord(dir, key1), null, `${name}: wrote a forgotten record back`);
     }
@@ -271,5 +294,71 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
     const resumed = serviceTimelineRecorder.getCurrent();
     assert.equal(resumed?.serviceKey, key1);
     assert.equal(resumed?.startedAt, "2026-10-18T14:00:00.000Z", "opened a fresh record instead of resuming the held one");
+  });
+
+  it("does not reopen the closed record when a held one is forgotten mid-split", async () => {
+    const keyB = `75953:${planId}:occ-b`;
+    const keyC = `75953:${planId}:occ-c`;
+    await tick("2026-10-18T14:00:00.000Z", "occ-a", "doors");
+    await setWritable(false);
+    await tick("2026-10-18T16:05:00.000Z", "occ-b", "welcome-b");
+    await setWritable(true);
+
+    // The operator deletes occ-a while the occ-c split is saving occ-b.
+    const splitting = tick("2026-10-18T18:10:00.000Z", "occ-c", "welcome-c");
+    for (const { rec } of RECORDERS) rec.forget(`75953:${planId}:occ-a`);
+    await splitting;
+
+    const timeline = serviceTimelineRecorder.getCurrent();
+    assert.equal(timeline?.serviceKey, keyC, "abandoned the split to the next service");
+    const closed = (await serviceTimelineRecorder.getRecord(keyB))!;
+    assert.ok(closed.endedAt, "the closed record was reopened");
+    assert.deepEqual(
+      closed.items.map((it) => it.itemId),
+      ["welcome-b"],
+      "the next service's item went into the closed record",
+    );
+  });
+
+  it("refuses a history edit or an import over a held service, keeping the held copy", async () => {
+    const key1 = `75953:${planId}:occ-a`;
+    await tick("2026-10-18T14:00:00.000Z", "occ-a", "doors");
+    // An archive holding this service, taken before it was ever saved here.
+    await splHistoryStore.upsert(splRecorder.getCurrent()!);
+    const zip = await buildArchive();
+    await splHistoryStore.delete(key1);
+
+    await setWritable(false);
+    await tick("2026-10-18T16:05:00.000Z", "occ-b", "welcome");
+    await setWritable(true);
+
+    await assert.rejects(
+      () => editServiceWindow(key1, { endedAt: "2026-10-18T15:00:00.000Z" }),
+      (err: Error & { code?: string }) => err.code === "unsaved",
+    );
+    await assert.rejects(() => deleteServiceRecords(key1), (err: Error & { code?: string }) => err.code === "unsaved");
+    await assert.rejects(() => importArchive(zip), (err: Error & { code?: string }) => err.code === "unsaved");
+    for (const { name, rec } of RECORDERS) {
+      assert.ok((await rec.getRecord(key1))?.endedAt, `${name}: lost the held copy`);
+    }
+  });
+
+  it("starts afresh when a held copy is forgotten while it is being resumed", async () => {
+    const key1 = `75953:${planId}:occ-a`;
+    await tick("2026-10-18T14:00:00.000Z", "occ-a", "doors");
+    await setWritable(false);
+    await tick("2026-10-18T16:05:00.000Z", "occ-b", "welcome");
+    await setWritable(true);
+
+    // resumeRecord is the await between taking the held copy and adopting it.
+    const rec = serviceTimelineRecorder as unknown as { resumeRecord(r: unknown): Promise<unknown> };
+    mock.method(rec, "resumeRecord", async (r: unknown) => {
+      serviceTimelineRecorder.forget(key1);
+      return r;
+    });
+    await tick("2026-10-18T18:10:00.000Z", "occ-a", "doors");
+    const current = serviceTimelineRecorder.getCurrent();
+    assert.equal(current?.serviceKey, key1);
+    assert.equal(current?.startedAt, "2026-10-18T18:10:00.000Z", "resumed a held copy that was forgotten");
   });
 });

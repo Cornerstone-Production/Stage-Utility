@@ -134,6 +134,10 @@ an archive, and it treats the raw layer differently in each direction:
 - **Nor can one whose record could not be read.** Every edit rewrites the
   record from what it read, so History refuses until the file reads and the
   server restarts.
+- **Nor one whose record could not be saved yet.** The recorder holds the only
+  current copy and retries the save; History and an import over that service
+  refuse until it lands. See
+  [When a recorded service cannot be saved](ops/reliability.md#when-a-recorded-service-cannot-be-saved).
 
 ### Rebuild from raw
 
