@@ -132,6 +132,17 @@ const PICKS = {
   // not because a wall object is expected on Home. If one ever is, offering the
   // same choice there is the honest thing anyway.
   meterId: { "home-spl": true, "spl-meter": true },
+  // Which Smaart metric the SPL card reads. A NEW key rather than `splMetric`:
+  // that one is Recent services' history-trend metric, chosen from the keys the
+  // history store holds, gated on that card's `showSpl` switch, and the page
+  // fetches the history summary whenever any card carries it. Reusing it would
+  // have made every SPL card fetch history it never draws and forced the
+  // Recent-services menu block to tell the two apart. `metricKey` is the name the
+  // wall `spl-meter` already stores its metric under, so it is listed here
+  // because the record is exhaustive. The Home menu offers it on `home-spl` only:
+  // the wall object's automatic rule and default meter differ (resolveSplValue),
+  // and its inspector already has a Metric picker.
+  metricKey: { "home-spl": true, "spl-meter": true },
   // Which recorder the Home card answers for. This is what retires the OBS and
   // REAPER cards: they were `<RecordingCard recorder="OBS" />` and
   // `recorder="REAPER"` — one component, one prop — so the prop becomes a choice
@@ -146,7 +157,7 @@ const PICKS = {
   splMetric: { "home-recent-services": true },
 } satisfies { [K in PickKey]: Record<TypesWith<K>, true> };
 
-type PickKey = "game" | "meterId" | "recorder" | "platform" | "splMetric" | "nowLabel" | "layout";
+type PickKey = "game" | "meterId" | "metricKey" | "recorder" | "platform" | "splMetric" | "nowLabel" | "layout";
 
 /**
  * What a card is doing when it has never been given a value for a pick.
@@ -159,6 +170,8 @@ type PickKey = "game" | "meterId" | "recorder" | "platform" | "splMetric" | "now
 const PICK_FALLBACK: Record<PickKey, string> = {
   game: "auto",
   meterId: LOUDEST_METER,
+  // Automatic: the card's own rule, which the menu names beside the row.
+  metricKey: "",
   recorder: "any",
   platform: "any",
   // The empty string is "follow the preferred default" — the menu ticks the
@@ -173,9 +186,9 @@ const PICK_FALLBACK: Record<PickKey, string> = {
   layout: "full",
 };
 
-/** The choices each pick offers, for the picks whose list is FIXED. `game` and
- *  `meterId` are absent because their options come from live data the menu
- *  fetches; these two are the app's own vocabulary and cannot change at runtime. */
+/** The choices each pick offers, for the picks whose list is FIXED. `game`,
+ *  `meterId`, `metricKey` and `splMetric` are absent because their options come
+ *  from live data the menu fetches; these are the app's own vocabulary and cannot change at runtime. */
 export const PICK_OPTIONS: Partial<Record<PickKey, Readonly<Record<string, string | null>>>> = {
   recorder: RECORDER_FOR,
   platform: STREAMER_FOR,

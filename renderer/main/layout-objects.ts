@@ -610,7 +610,7 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "home-spl": {
     homeCardFor: "spl-meter",
     label: "Sound level",
-    blurb: "The loudest meter right now, and which one",
+    blurb: "The loudest level right now, its metric and meter",
     group: "Audio (SPL)",
     config: () => ({ type: "home-spl" }),
     style: BARE,

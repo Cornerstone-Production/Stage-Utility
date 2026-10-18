@@ -483,7 +483,13 @@ export type LayoutObjectConfig =
   // null falls back to the FIRST meter. Two cards, two defaults, because the
   // wall object is one chosen instrument and this one answers "how loud is it
   // in here" without being told where.
-  | { type: "home-spl"; meterId?: string | null }
+  //
+  // `metricKey` pins which Smaart metric the card reads, named exactly as Smaart
+  // names it. ABSENT or "" is Automatic: the A-weighted metric when the meter
+  // has one, else its first. A pinned metric the meter stops reporting reads "—"
+  // naming it; the card never substitutes another. Same field name `spl-meter`
+  // uses, with a different automatic rule (see resolveSplValue).
+  | { type: "home-spl"; meterId?: string | null; metricKey?: string | null }
   | { type: "home-screens" }
   // `showSpl` draws the service-level SPL line under the attendance curve;
   // `splMetric` names which Smaart metric it plots (null = the preferred

@@ -34,18 +34,12 @@ import { HOME_VIEW_ID, defaultHomeLayout } from "@main/services/home-view";
 import type { LayoutObject } from "@main/types/views";
 import { computePcoTimer } from "../../main/pco-timer";
 import { homeMode } from "./home-mode";
-import { addCard, cardsForNow, removeCard, replaceCard, setSize, setWhen } from "./home-cards";
-import { SIZES, SIZE_ORDER, WHEN_LABELS, sizeOf, whenOf } from "./home-cards";
-import { PICK_OPTIONS, pickedValue, togglesFor, withToggle } from "./card-toggles";
-import { pvpNowMenuItems } from "./pvp-now-menu";
-import { gameOptions } from "../../main/scores-object";
-import { meterOptions, sourceOptions } from "../recording-status";
-import { preferredSplMetric } from "../../settings/sections/overview-data";
+import { addCard, cardsForNow, removeCard, setSize, setWhen } from "./home-cards";
+import { pickedValue } from "./card-toggles";
+import { buildCardMenu } from "./card-menu";
 import { useSplState } from "../../main/use-spl-state";
 import { invoke } from "../../lib/api";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
-import { LAYOUT_OBJECTS } from "../../main/layout-objects";
-import type { HomeCardSize, HomeVisibility } from "@main/types/views";
 import { ROW_PX, GRID_GAP_PX } from "./home-grid";
 import { COLUMNS } from "./home-cards";
 import {
@@ -220,7 +214,7 @@ export function HomeRoute() {
     retry: 1,
   });
   /**
-   * The Smaart meters, for the "Meter" submenu on an SPL card.
+   * The Smaart meters, for the "Meter" and "Metric" submenus on an SPL card.
    *
    * Gated exactly like the favourites above, and for the same reason: Home is
    * the page every operator lands on, and opening an SPL subscription for a card
@@ -357,152 +351,15 @@ export function HomeRoute() {
       });
   }
 
-  /**
-   * The right-click menu for one card.
-   *
-   * Available WITHOUT entering edit mode, which is the point of it: reaching for
-   * seconds on the clock should not mean putting the whole page into an editing
-   * state first. Rebuilt on every open so the ticks show the current values.
-   *
-   * The settings themselves are derived — see card-toggles.
-   */
+  /** The right-click menu for one card — see buildCardMenu. */
   function cardMenu(card: LayoutObject): ContextMenuItem[] {
-    const type = (card.config as { type: string }).type;
-    const label = LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS]?.label ?? type;
-    const toggles = togglesFor(card);
-    const items: ContextMenuItem[] = [];
-
-    for (const t of toggles) {
-      items.push({
-        label: t.label,
-        checked: t.checked,
-        // A checkable item leaves the menu open, so this fires repeatedly. It is
-        // safe to: `card` is the one this render read from the live list, and
-        // the next render rebuilds the whole menu from the saved result.
-        onSelect: () => save((objs) => replaceCard(objs, withToggle(card, t.key, t.next))),
-      });
-    }
-    // The scores card's "which game", the same choice and the same options the
-    // layout inspector offers the wall object. A submenu rather than a row of
-    // ticks because the list is as long as the operator's favourites, and it
-    // sits with the toggles because it is a setting of the WIDGET, not of the
-    // card's place on the page like Size and Show below.
-    const pinned = pickedValue(card, "game");
-    if (pinned != null) {
-      items.push({
-        label: "Game",
-        items: gameOptions(scoresConfig?.favourites ?? []).map((o) => ({
-          label: o.label,
-          checked: pinned === o.value,
-          onSelect: () => {
-            save((objs) => replaceCard(objs, withToggle(card, "game", o.value)));
-            setMenu(null);
-          },
-        })),
-      });
-    }
-    // The picks whose options are the app's own vocabulary rather than something
-    // fetched: which recorder the Recording card answers for, which platform the
-    // Streaming card watches. ONE block for both, driven by PICK_OPTIONS, because
-    // a second hand-written submenu is how the two would drift apart.
-    for (const [key, label, anyLabel] of [
-      ["recorder", "Recorder", "Every recorder"],
-      ["platform", "Platform", "Every platform"],
-    ] as const) {
-      const current = pickedValue(card, key);
-      const map = PICK_OPTIONS[key];
-      if (current == null || !map) continue;
-      items.push({
-        label,
-        items: sourceOptions(map, anyLabel).map((o) => ({
-          label: o.label,
-          checked: current === o.value,
-          onSelect: () => {
-            save((objs) => replaceCard(objs, withToggle(card, key, o.value)));
-            setMenu(null);
-          },
-        })),
-      });
-    }
-    // The PVP "now" card's Layout choice, and its Label while Compact — see
-    // pvpNowMenuItems.
-    items.push(
-      ...pvpNowMenuItems(card, (next) => {
-        save((objs) => replaceCard(objs, next));
-        setMenu(null);
-      }),
-    );
-    // Which metric the Recent services card's trend line plots. Offered only
-    // while the line is ON — a metric picker above a switch that is off is a
-    // setting for something the operator cannot see.
-    const splMetric = pickedValue(card, "splMetric");
-    if (splMetric != null && (card.config as { showSpl?: boolean }).showSpl) {
-      const keys = [...new Set((splSummary ?? []).flatMap((r) => Object.keys(r.metrics)))].sort();
-      const chosen = splMetric || (preferredSplMetric(keys) ?? "");
-      if (keys.length > 0) {
-        items.push({
-          label: "Metric",
-          items: keys.map((k) => ({
-            label: k,
-            checked: chosen === k,
-            onSelect: () => {
-              save((objs) => replaceCard(objs, withToggle(card, "splMetric", k)));
-              setMenu(null);
-            },
-          })),
-        });
-      }
-    }
-    // The SPL card's "which meter", beside the scores card's "which game" and
-    // for the same reason: a setting of the WIDGET, from a list this page has to
-    // fetch. The default reads the loudest meter, so an operator who never opens
-    // this menu is on exactly the behaviour the card has always had.
-    const meter = pickedValue(card, "meterId");
-    if (meter != null) {
-      items.push({
-        label: "Meter",
-        items: meterOptions(spl, meter).map((o) => ({
-          label: o.label,
-          checked: meter === o.value,
-          onSelect: () => {
-            save((objs) => replaceCard(objs, withToggle(card, "meterId", o.value)));
-            setMenu(null);
-          },
-        })),
-      });
-    }
-
-    if (items.length) items.push({ separator: true });
-
-    items.push({
-      label: "Size",
-      items: SIZE_ORDER.map((s) => ({
-        label: SIZES[s].label,
-        checked: sizeOf(card) === s,
-        onSelect: () => {
-          save((objs) => setSize(objs, card.id, s as HomeCardSize));
-          setMenu(null);
-        },
-      })),
+    return buildCardMenu(card, {
+      scoresFavourites: scoresConfig?.favourites ?? [],
+      spl,
+      splSummary,
+      save,
+      close: () => setMenu(null),
     });
-    items.push({
-      label: "Show",
-      items: (Object.keys(WHEN_LABELS) as HomeVisibility[]).map((w) => ({
-        label: WHEN_LABELS[w],
-        checked: whenOf(card) === w,
-        onSelect: () => {
-          save((objs) => setWhen(objs, card.id, w));
-          setMenu(null);
-        },
-      })),
-    });
-    items.push({ separator: true });
-    items.push({
-      label: `Remove ${label}`,
-      danger: true,
-      onSelect: () => save((objs) => removeCard(objs, card.id)),
-    });
-    return items;
   }
 
   // Editing shows EVERY card, including ones whose mood is not the current one —
