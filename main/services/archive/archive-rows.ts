@@ -11,7 +11,6 @@ import * as path from "node:path";
 
 import { StoreReadError } from "../data-store.js";
 import { isNotFound } from "../errors.js";
-import { MAX_ROLL } from "./csv-appender.js";
 import { parseRows } from "../csv.js";
 
 /** A parsed row keyed by its file's header. Key order is the header's order. */
@@ -24,25 +23,24 @@ export type ArchiveRow = Record<string, string>;
  * source that recorded a header and no rows — callers distinguish "nothing to
  * rebuild from" (leave the stored record alone) from "recorded, but empty".
  *
- * Throws a StoreReadError for a file that is there and cannot be read. Answering
- * without it is how a history merge wrote the rows it could read into the
- * target and then deleted the source directory, unread rows and all.
+ * Throws a StoreReadError for a file that is there and cannot be read, rather
+ * than answering from the rest: a merge removes the source directory after
+ * moving what this returned.
  */
 export async function readArchiveRows(dir: string, base: string): Promise<ArchiveRow[] | null> {
   const out: ArchiveRow[] = [];
   let found = false;
-  for (let i = 1; i <= MAX_ROLL; i++) {
-    const name = i === 1 ? `${base}.csv` : `${base}.${i}.csv`;
+  // Every rolled file that is there, not a walk that stops at the first
+  // missing number: a gap (`spl.csv` absent while `spl.2.csv` exists, or a
+  // file the appender passed over) must not hide the rows after it, or a
+  // merge would delete them with the source directory.
+  for (const name of await rolledFiles(dir, base)) {
     let text: string;
     try {
       text = await fs.readFile(path.join(dir, name), "utf8");
     } catch (err) {
-      if (!isNotFound(err)) throw unreadableArchiveFile(dir, name, err);
-      // A gap is not the end: `spl.csv` can be absent while `spl.2.csv` exists if
-      // the first column set never produced a row. Only a gap after the first
-      // ends the walk.
-      if (i === 1) continue;
-      break;
+      if (isNotFound(err)) continue; // removed since the listing
+      throw unreadableArchiveFile(dir, name, err);
     }
     found = true;
     const rows = parseRows(text);
@@ -100,7 +98,7 @@ function rollIndex(name: string, base: string): number {
 
 /** The failure for one raw file, or with no name its directory. Named by the
  *  service folder rather than a path: the message reaches a LAN response. */
-function unreadableArchiveFile(dir: string, name: string, err: unknown): StoreReadError {
+export function unreadableArchiveFile(dir: string, name: string, err: unknown): StoreReadError {
   const folder = `archive folder ${path.basename(dir)}`;
   return new StoreReadError(name ? `${name} in ${folder}` : `The ${folder}`, err);
 }

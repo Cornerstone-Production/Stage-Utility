@@ -104,6 +104,12 @@ export class CsvAppender {
       try {
         existing = await readHeader(path.join(this.dir, name));
       } catch (err) {
+        // Passed over only when the file is there. A read that failed for a
+        // reason that is not about this file (EMFILE, an EIO across the disk)
+        // says nothing about the name: passing it over anyway walked every
+        // name to the roll limit, ending the archive until a restart, and a
+        // name skipped without a file left a gap in the roll.
+        if (!(await isThere(path.join(this.dir, name)))) throw err;
         this.passOver(name, err, "could not be read");
         continue;
       }
@@ -118,6 +124,16 @@ export class CsvAppender {
       return;
     }
     throw new Error(`${this.base}: more than ${MAX_ROLL} rolled files`);
+  }
+}
+
+/** Whether something is at this path. False when that cannot be told either. */
+async function isThere(file: string): Promise<boolean> {
+  try {
+    await fs.lstat(file);
+    return true;
+  } catch {
+    return false;
   }
 }
 

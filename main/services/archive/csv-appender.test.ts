@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 
 import { CsvAppender } from "./csv-appender.js";
+import { captureConsole } from "../fixtures/capture-console.js";
 import { parseRows } from "../csv.js";
 
 async function tmp(): Promise<string> {
@@ -128,25 +129,13 @@ test("settled resolves once queued appends have landed", async () => {
 /** File permissions do not stop root, so the permission cases skip there. */
 const asRoot = process.getuid?.() === 0;
 
-async function captureErrors<T>(fn: () => Promise<T>): Promise<{ result: T; lines: string[] }> {
-  const lines: string[] = [];
-  const orig = console.error;
-  console.error = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
-  try {
-    return { result: await fn(), lines };
-  } finally {
-    console.error = orig;
-  }
-}
-
-test("a directory where spl.csv should be is passed over, and the rows go to spl.2.csv", async () => {
+test("a directory where spl.csv should be is passed over, and the rows go to spl.2.csv", async (t) => {
+  const lines = captureConsole(t, "error");
   const dir = await tmp();
   await fs.mkdir(path.join(dir, "spl.csv"));
   const a = new CsvAppender(dir, "spl");
-  const { lines } = await captureErrors(async () => {
-    await a.append(["at", "db"], ["t1", 90]);
-    await a.append(["at", "db"], ["t2", 91]);
-  });
+  await a.append(["at", "db"], ["t1", 90]);
+  await a.append(["at", "db"], ["t2", 91]);
   assert.ok((await fs.stat(path.join(dir, "spl.csv"))).isDirectory(), "spl.csv was touched");
   assert.deepEqual(await rows(dir, "spl.2.csv"), [
     ["at", "db"],
@@ -158,15 +147,15 @@ test("a directory where spl.csv should be is passed over, and the rows go to spl
   assert.match(lines[0], /^\[archive\] \S+\/spl\.csv could not be read \(EISDIR\)\. Recording spl into the next file/);
 });
 
-test("an spl.csv that can be written but not read is left as it was", { skip: asRoot }, async () => {
+test("an spl.csv that can be written but not read is left as it was", { skip: asRoot }, async (t) => {
+  captureConsole(t, "error");
   const dir = await tmp();
   const file = path.join(dir, "spl.csv");
   const before = "at,db\nt0,80\n";
   await fs.writeFile(file, before);
   await fs.chmod(file, 0o200);
   try {
-    const a = new CsvAppender(dir, "spl");
-    await captureErrors(() => a.append(["at", "db"], ["t1", 90]));
+    await new CsvAppender(dir, "spl").append(["at", "db"], ["t1", 90]);
   } finally {
     await fs.chmod(file, 0o644);
   }
@@ -177,22 +166,21 @@ test("an spl.csv that can be written but not read is left as it was", { skip: as
   ]);
 });
 
-test("a file that stops taking appends mid-service hands the same row to the next file", { skip: asRoot }, async () => {
+test("a file that stops taking appends mid-service hands the same row to the next file", { skip: asRoot }, async (t) => {
+  const lines = captureConsole(t, "error");
   const dir = await tmp();
   const file = path.join(dir, "spl.csv");
   const a = new CsvAppender(dir, "spl");
   await a.append(["at", "db"], ["t1", 90]);
   await fs.chmod(file, 0o444);
   try {
-    const { lines } = await captureErrors(async () => {
-      await a.append(["at", "db"], ["t2", 91]);
-      await a.append(["at", "db"], ["t3", 92]);
-    });
-    assert.equal(lines.length, 1, `logged ${lines.length} times, not once:\n${lines.join("\n")}`);
-    assert.match(lines[0], /spl\.csv could not be appended to \(EACCES\)/);
+    await a.append(["at", "db"], ["t2", 91]);
+    await a.append(["at", "db"], ["t3", 92]);
   } finally {
     await fs.chmod(file, 0o644);
   }
+  assert.equal(lines.length, 1, `logged ${lines.length} times, not once:\n${lines.join("\n")}`);
+  assert.match(lines[0], /spl\.csv could not be appended to \(EACCES\)/);
   assert.deepEqual(await rows(dir, "spl.csv"), [
     ["at", "db"],
     ["t1", "90"],
@@ -207,4 +195,26 @@ test("a file that stops taking appends mid-service hands the same row to the nex
     "a row was lost",
   );
   assert.deepEqual(a.files(), ["spl.csv", "spl.2.csv"]);
+});
+
+test("a read failure that is not about the file passes nothing over, and the appender recovers", { skip: asRoot }, async (t) => {
+  // Every name fails to read (here: the folder cannot be searched, as with
+  // EMFILE or an EIO across the disk), including names with no file. Passing
+  // those over walked all of them to the roll limit, logged each, and ended
+  // this appender's archive until a restart.
+  const lines = captureConsole(t, "error");
+  const dir = await tmp();
+  const a = new CsvAppender(dir, "spl");
+  await fs.chmod(dir, 0o200);
+  try {
+    await a.append(["at", "db"], ["t1", 90]);
+  } finally {
+    await fs.chmod(dir, 0o755);
+  }
+  assert.equal(lines.length, 1, `logged ${lines.length} lines for one row`);
+  await a.append(["at", "db"], ["t2", 91]);
+  assert.deepEqual(await rows(dir, "spl.csv"), [
+    ["at", "db"],
+    ["t2", "91"],
+  ]);
 });

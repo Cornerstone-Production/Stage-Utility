@@ -56,6 +56,20 @@ describe("readArchiveRows", () => {
     await assert.rejects(readArchiveRows(dir, "spl"), StoreReadError);
   });
 
+  it("reads every rolled file there, past a gap in the numbers", async () => {
+    // A file the appender passed over, or one never written, leaves a gap. The
+    // rows after it were invisible to every reader, and a merge then removed
+    // them with the source directory.
+    const dir = await dirWith({
+      "spl.csv": "at,a\n2026-10-18T14:00:00Z,1\n",
+      "spl.3.csv": "at,a,b\n2026-10-18T14:20:00Z,3,3\n",
+    });
+    assert.deepEqual(await readArchiveRows(dir, "spl"), [
+      { at: "2026-10-18T14:00:00Z", a: "1" },
+      { at: "2026-10-18T14:20:00Z", a: "3", b: "3" },
+    ]);
+  });
+
   it("still answers null for a source that was never recorded, and reads past a missing first file", async () => {
     const dir = await dirWith({ "spl.2.csv": "at,a\n2026-10-18T14:10:00Z,2\n" });
     assert.equal(await readArchiveRows(dir, "baptism"), null);

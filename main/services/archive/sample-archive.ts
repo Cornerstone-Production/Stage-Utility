@@ -233,9 +233,8 @@ class SampleArchive {
    * so a failure must reach them rather than be logged past.
    *
    * Every file on both sides is read before the first write, so a file that
-   * cannot be read refuses the whole merge with nothing changed. Read source by
-   * source, the sources before it were already rewritten when one failed, and a
-   * retry merged their rows in twice.
+   * cannot be read refuses the whole merge with nothing changed, rather than
+   * leaving the sources before it rewritten for a retry to merge in twice.
    */
   async mergeInto(source: ServiceCtx, target: ServiceCtx): Promise<Record<string, number>> {
     const srcDir = serviceDirPath(source.serviceKey, source.serviceDate);
@@ -249,9 +248,6 @@ class SampleArchive {
       const tgtRows = (await readArchiveRows(tgtDir, base)) ?? [];
       plan.push({ base, srcRows, tgtRows, tgtRolled: await rolledFiles(tgtDir, base) });
     }
-    // The source directory is removed below. One that cannot be listed would
-    // fail that removal after the target was rewritten, so find out now.
-    await rolledFiles(srcDir, ARCHIVE_SOURCES[0]);
 
     const moved: Record<string, number> = {};
     for (const { base, srcRows, tgtRows, tgtRolled } of plan) {
