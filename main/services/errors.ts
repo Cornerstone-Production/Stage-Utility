@@ -32,6 +32,18 @@ export function errorMessage(err: unknown): string {
   return typeof err === "symbol" ? err.toString() : `${err as string}`;
 }
 
+/** A caught value's errno code ("ENOENT", "EACCES"), when it carries one. */
+export function errnoCode(err: unknown): string | undefined {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return typeof code === "string" ? code : undefined;
+}
+
+/** Whether a failed file operation failed because the path does not exist —
+ *  the one read failure that means "nothing there" rather than "could not look". */
+export function isNotFound(err: unknown): boolean {
+  return errnoCode(err) === "ENOENT";
+}
+
 /**
  * A caught value as an Error, for a caller that hands the failure back or
  * rejects with it: the value itself when it already is one, else an Error

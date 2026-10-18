@@ -167,6 +167,62 @@ describe("DataStore", () => {
     );
   });
 
+  // Only a missing file means "first run". Anything else is data that is there
+  // and could not be read: served as the defaults so the server keeps running,
+  // but flagged, never cached, and never saved over by this process.
+  test("a path that exists but cannot be read is flagged, and its defaults are not cached", async () => {
+    const { store, file } = freshStore();
+    // A directory where the file should be: EISDIR, and unlike chmod it holds
+    // for root too, so this runs on any CI box.
+    await fs.mkdir(file, { recursive: true });
+
+    assert.deepEqual(await store.load(), DEFAULTS);
+    assert.equal(store.unreadable()?.code, "EISDIR", "an unreadable file read as a first run");
+    // Not cached: the next read tries the disk again.
+    await fs.rm(file, { recursive: true });
+    await fs.writeFile(file, JSON.stringify({ count: 5, items: [] }), "utf8");
+    assert.deepEqual(await store.load(), { count: 5, items: [] }, "the defaults were cached for an unreadable file");
+    assert.equal(store.unreadable(), null);
+  });
+
+  test(
+    "after a failed read, saves are refused until a restart and the file is left as it was",
+    // Root reads a mode-000 file regardless, so there is nothing to test there.
+    { skip: process.getuid?.() === 0 && "running as root, which can read a mode-000 file" },
+    async () => {
+      const { store, file } = freshStore();
+      const precious = JSON.stringify({ count: 42, items: ["precious"] });
+      await fs.mkdir(DATA_DIR, { recursive: true });
+      await fs.writeFile(file, precious, "utf8");
+      await fs.chmod(file, 0o000);
+      try {
+        assert.deepEqual(await store.load(), DEFAULTS);
+        assert.equal(store.unreadable()?.code, "EACCES");
+        // atomicWrite renames over the file, which needs only the directory to be
+        // writable, so without the refusal this would replace it with defaults.
+        await assert.rejects(store.save(DEFAULTS), { name: "StoreReadError", code: "EACCES" });
+        await assert.rejects(store.update((d) => ({ ...d, count: 1 })), { name: "StoreReadError" });
+      } finally {
+        await fs.chmod(file, 0o600);
+      }
+      assert.equal(await fs.readFile(file, "utf8"), precious, "the file must not have been replaced");
+
+      // Readable again: the next read serves the real data, but saves stay
+      // refused for this process. What it built from the defaults is still
+      // in memory, and saved whole it would replace the file.
+      assert.deepEqual(await store.load(), { count: 42, items: ["precious"] });
+      assert.equal(store.unreadable(), null);
+      await assert.rejects(store.save(DEFAULTS), { name: "StoreReadError" });
+      assert.equal(await fs.readFile(file, "utf8"), precious);
+
+      // A restart, which is a fresh store, saves again.
+      const restarted = new DataStore<Doc>(path.basename(file), DEFAULTS, "runtime");
+      await restarted.load();
+      await restarted.save({ count: 43, items: [] });
+      assert.equal((JSON.parse(await fs.readFile(file, "utf8")) as Doc).count, 43);
+    },
+  );
+
   test("reload discards the in-memory cache and re-reads from disk", async () => {
     const { store, file } = freshStore();
     await store.save({ count: 1, items: [] });
