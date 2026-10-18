@@ -49,6 +49,8 @@ final class AppModel: ObservableObject {
     var discovery: OutputDiscovery?
     var serverURL: String?
     var serverName: String?
+    /// When the server last answered this output's probe.
+    var answeredAt: Date?
     var loaded = false
     var unreachable = false
     /// What the committed page is. Not what is being loaded: see `ScreenPage`.
@@ -347,6 +349,10 @@ final class AppModel: ObservableObject {
       guard let self, let rt else { return }
       self.pageMoved(rt, to: url)
     }
+    sink.surface.localNetworkEvidence = { [weak self, weak rt] in
+      guard let self, let rt else { return .none }
+      return self.localNetworkEvidence(rt)
+    }
 
     // With a `server` file the page loads from it at once and the probes go to that
     // server alone, so the output still shows up under "Not set up yet". The latency
@@ -378,6 +384,7 @@ final class AppModel: ObservableObject {
     rt.sink = nil
     rt.loaded = false
     rt.unreachable = false
+    rt.answeredAt = nil
     rt.page = .other
     rt.rotation = .none
     rt.videoMode = nil
@@ -409,6 +416,7 @@ final class AppModel: ObservableObject {
 
   private func heard(_ key: String, _ rt: Runtime, _ reply: DiscoveryReply) {
     rt.serverName = reply.name
+    rt.answeredAt = Date()
     clearLocalNetworkSuspicion()
     // A server file names the server; an answer from it only says it is there.
     if identity.server == nil, rt.serverURL != reply.url {
@@ -607,6 +615,17 @@ final class AppModel: ObservableObject {
       Log.error(.app, "Local Network access may be off for this app (version \(version))")
     }
     setNote("local-network", LocalNetworkAccess.windowMessage)
+  }
+
+  /// How long an answer from the server counts as the server being up, for the
+  /// page shown when a load fails: three probe intervals once it has answered.
+  static let answerFreshFor: TimeInterval = 3 * ProbeSchedule.interval(unanswered: 0, answered: true)
+
+  /// What says a failed load is Local Network access rather than the server being
+  /// off: the server answered this output lately, or every broadcast was refused.
+  private func localNetworkEvidence(_ rt: Runtime) -> UnreachablePage.Evidence {
+    let answered = rt.answeredAt.map { Date().timeIntervalSince($0) < AppModel.answerFreshFor } ?? false
+    return .init(serverAnswered: answered, broadcastsBlocked: noteTable["local-network"] != nil)
   }
 
   private func clearLocalNetworkSuspicion() {

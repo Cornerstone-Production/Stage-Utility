@@ -456,6 +456,18 @@ latency` (a clock on every output, to photograph two side by side), `--frame-tim
 <file>` and `--head-start`/`--fill-lead <ms>`. The log is the unified log, subsystem
 `com.stageutility.output`.
 
+**Local Network permission.** One permission, for the app, covers the helper: it finds
+the server, loads every output's page and posts health under it. It is asked for the
+first time the helper reaches the network, and lives in System Settings > Privacy &
+Security > Local Network. A server on the same Mac does not need it.
+
+**When an output cannot load its page** it shows "Can't reach `<server host:port>`",
+and keeps trying (after 2, 4, 8, 16, then every 30 s). It never shows Chromium's error
+page, which printed the whole address, the output's secret token included. When the
+failure looks like Local Network access being off (no route to a server on the local
+network that has answered the helper, or every broadcast refused), a second line says
+where to turn it on. The helper's log has one line per run of failures, with the error.
+
 Where `/Library/Application Support/StageUtility/migrated-from-kiosk` exists, the Mac
 was a Chrome kiosk and keeps its screen: its main display takes over the kiosk's device
 id and secret. The installer writes the marker, see

@@ -106,4 +106,47 @@ import Testing
     t.loadStarted()
     #expect(t.finished() == .loaded(afterFailures: 1))
   }
+
+  /// The helper's own page goes up in place of a failed load. The browser reports it
+  /// committing and finishing like any page; that is not the server coming back, so
+  /// the run and its backoff go on, and its address is not a screen to classify.
+  /// Chromium may also finish the failed navigation itself first: both finishes are
+  /// reported, and neither is a load.
+  @Test func theFailurePageIsNotThePageComingBack() {
+    var t = PageLoadTracker()
+    for n in 1...3 {
+      t.loadStarted()
+      #expect(failure(t.navigationFailed(NSError(domain: "net", code: -109)))?.failures == n)
+      t.failurePageShown()
+      #expect(!t.reportsCommit)
+      #expect(t.responded(status: 0) == .none)
+      #expect(t.finished() == .none)  // the failed navigation's
+      #expect(t.finished() == .none)  // the failure page's
+      #expect(t.navigationFailed(NSError(domain: "net", code: -2)) == .none)
+    }
+    #expect(t.failures == 3)
+    // The retry is a new load: it reports again.
+    t.loadStarted()
+    #expect(t.reportsCommit)
+    #expect(t.finished() == .loaded(afterFailures: 3))
+  }
+
+  /// A run of failures is written once, and again only when its reason changes: a
+  /// retry every 30 s for an hour is not 120 lines.
+  @Test func aRunOfFailuresIsLoggedOncePerReason() {
+    var t = PageLoadTracker()
+    let unreachable = PageLoadTracker.navigationError(code: -109, text: "ERR_ADDRESS_UNREACHABLE", url: "http://192.0.2.1:8788/enroll?token=s")
+    let refused = PageLoadTracker.navigationError(code: -102, text: "ERR_CONNECTION_REFUSED", url: "http://192.0.2.1:8788/enroll?token=s")
+    var logged: [Bool] = []
+    for error in [unreachable, unreachable, unreachable, refused, refused, unreachable] {
+      t.loadStarted()
+      logged.append(failure(t.navigationFailed(error))?.log ?? false)
+    }
+    #expect(logged == [true, false, false, true, false, true])
+    // The page coming back ends the run: the next failure is a new run, and logged.
+    t.loadStarted()
+    _ = t.finished()
+    t.loadStarted()
+    #expect(failure(t.navigationFailed(unreachable))?.log == true)
+  }
 }

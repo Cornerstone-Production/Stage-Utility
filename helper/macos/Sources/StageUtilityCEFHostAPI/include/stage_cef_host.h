@@ -42,6 +42,9 @@ typedef struct su_browser_events {
   void (*finished)(void* context, int http_status);
   /// A main-frame navigation failed or was cancelled. `error_code` is Chromium's
   /// net error (net_error_list.h): -3 is ERR_ABORTED, a load that was replaced.
+  /// Chromium's error page for any other is never shown: the host hides the browser
+  /// (a windowless one hands over no pictures) until a page commits without an
+  /// error, which the app makes happen by loading its own.
   void (*failed)(void* context, int error_code, const char* error_text, const char* url);
   /// The page's renderer process ended: crashed, killed, out of memory. The page
   /// is gone until it is loaded again.

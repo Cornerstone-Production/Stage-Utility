@@ -229,6 +229,26 @@ server may have moved. Whether an output shows the holding screen or a set-up sc
 is read from the page that has **committed**, not the one being loaded, so a retry
 that fails against a server that is down changes nothing.
 
+**A page that did not load** is never shown as Chromium shows it. Chromium's error
+page prints the whole address it could not load, and the address carries the output's
+token, so it would put the secret on air. The browser host hides that page the moment
+the load fails (a card output drops its pictures and repeats the last one; a display
+output's browser view is hidden over the window's black), and the output shows the
+helper's own screen instead:
+
+> **Can't reach 192.0.2.10:8788**
+> Trying again.
+
+It names the server's host and port and nothing else of the address. When the error is
+ERR_ADDRESS_UNREACHABLE ("No route to host"), the server's address is on the local
+network (a private or link-local address, or a `.local` name), and something says the
+server is not simply switched off, a second line says where to turn Local Network
+access on (see [Local Network permission](#local-network-permission)). That something
+is the server having answered this output's probe in the last 90 s, or every broadcast
+probe having been refused. A server switched off on the same subnet gives the same
+error and neither holds, so it gets the first line only. The retries go on underneath;
+the screen goes when the page loads.
+
 **Only the server it is bound to.** Once an output has heard a server it keeps that
 server's id as `boundTo` and ignores answers from any other: anything on the network
 can answer a broadcast, and the answer names the address the output sends its token
@@ -489,8 +509,10 @@ log stream --level info --predicate 'subsystem == "com.stageutility.output"'
 ```
 
 It logs decisions and failures: an output appearing, going or switching, an answer from
-a server, a probe that could not be sent, a page that did not load and when it will be
-retried, health posts refused or paused, a rotation applied, a foreign server's answer
+a server, a probe that could not be sent, a page that did not load (once per run of
+failures, with why, the address cut to its host and path, and what the output shows
+instead; again only if the reason changes) and the page loading again after it, health
+posts refused or paused, a rotation applied, a foreign server's answer
 ignored, a state file that could not be read or saved. Chromium's own (category `cef`):
 whether it started, with its version and whether the sandbox is on, or why not; a page's
 renderer process ending, and the reload; the GPU process ending (Chromium starts

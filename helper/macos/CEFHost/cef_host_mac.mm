@@ -190,6 +190,9 @@ class Client : public CefClient,
 
   // CefLoadHandler
   void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType) override {
+    // CEF calls this only for a page that committed without an error, so whatever
+    // is on the screen now is the app's to show.
+    if (frame->IsMain()) Blank(browser, false);
     if (detached_ || !frame->IsMain() || !events_.committed) return;
     // The entry on screen now is the one that committed, with its response status.
     int status = 0;
@@ -204,8 +207,14 @@ class Client : public CefClient,
     events_.finished(events_.context, status);
   }
 
-  void OnLoadError(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, ErrorCode code, const CefString& text,
+  void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, ErrorCode code, const CefString& text,
                    const CefString& failed_url) override {
+    // Chromium commits its own error page for a failed load, and that page prints
+    // the whole address it could not load: an output's token, on air. Nothing of it
+    // is shown. The app loads its own page in its place from `failed`, and that
+    // page's commit (OnLoadStart) shows the browser again. ERR_ABORTED commits no
+    // error page: it is a load replaced by another.
+    if (frame->IsMain() && code != ERR_ABORTED) Blank(browser, true);
     if (detached_ || !frame->IsMain() || !events_.failed) return;
     std::string t = text.ToString(), u = failed_url.ToString();
     events_.failed(events_.context, static_cast<int>(code), t.c_str(), u.c_str());
@@ -255,6 +264,8 @@ class Client : public CefClient,
 
   void OnAcceleratedPaint(CefRefPtr<CefBrowser>, PaintElementType type, const RectList&,
                           const CefAcceleratedPaintInfo& info) override {
+    // A card output repeats its last picture meanwhile.
+    if (blanked_) return;
     if (detached_ || type != PET_VIEW || !events_.painted || !info.shared_texture_io_surface) return;
     events_.painted(events_.context, info.shared_texture_io_surface);
   }
@@ -302,9 +313,21 @@ class Client : public CefClient,
     su_devtools_done done;
   };
 
+  // While Chromium's error page is the committed page: a windowless browser's
+  // pictures are dropped, and a windowed browser's view is hidden, so the output
+  // shows its window's black. Set and cleared on the UI thread.
+  void Blank(CefRefPtr<CefBrowser> browser, bool on) {
+    if (blanked_ == on) return;
+    blanked_ = on;
+    if (windowless_) return;
+    NSView* view = (__bridge NSView*)browser->GetHost()->GetWindowHandle();
+    view.hidden = on ? YES : NO;
+  }
+
   su_browser* owner_;
   su_browser_events events_;
   bool windowless_;
+  std::atomic<bool> blanked_{false};
   std::atomic<int> width_, height_;
   bool detached_ = false;
   CefRefPtr<CefRegistration> registration_;

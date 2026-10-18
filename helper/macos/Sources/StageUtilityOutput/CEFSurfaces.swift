@@ -96,6 +96,10 @@ class CEFPage {
     get { loader.onProcessGone }
     set { loader.onProcessGone = newValue }
   }
+  var localNetworkEvidence: (@MainActor () -> UnreachablePage.Evidence)? {
+    get { loader.localNetworkEvidence }
+    set { loader.localNetworkEvidence = newValue }
+  }
 
   init(api: UnsafePointer<su_cef_api>, label: String) {
     self.api = api
