@@ -258,6 +258,11 @@ export const settingsStore = {
     return syncTimeZone(await store.load());
   },
 
+  /** Why saves to settings.json are refused: see DataStore.refusingSaves(). */
+  refusingSaves() {
+    return store.refusingSaves();
+  },
+
   // There is deliberately no `save`. A whole-object write is a read-modify-write
   // that is not serialized against anything, so it undoes every field written
   // between the read and the write -- and one of those fields is idFloors, the
