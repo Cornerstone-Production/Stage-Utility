@@ -12,6 +12,7 @@ import { useState, type CSSProperties } from "react";
 import { Loader2Icon } from "lucide-react";
 
 import { invoke } from "../lib/api";
+import { ButtonLabel } from "./button-label";
 import { cueEntry, type CuesLive } from "./use-cue-live";
 
 export interface CallAnswer {
@@ -150,6 +151,9 @@ export function CueButton({
         gap: "0.15em",
         border: "none",
         borderRadius: "inherit",
+        // A long label wraps inside the button (ButtonLabel); what still does
+        // not fit is clipped here rather than drawn over the neighbouring widget.
+        overflow: "hidden",
         cursor: canFire ? "pointer" : "default",
         pointerEvents: interactive ? "auto" : "none",
         opacity: state === "unavailable" ? 0.4 : 1,
@@ -173,6 +177,7 @@ export function CueButton({
       <span
         aria-hidden
         style={{
+          flexShrink: 0,
           width: "0.55em",
           height: "0.55em",
           borderRadius: "50%",
@@ -185,7 +190,7 @@ export function CueButton({
                 : "var(--su-fg-faint)",
         }}
       />
-      <span
+      <ButtonLabel
         style={{
           fontWeight: 600,
           letterSpacing: "0.02em",
@@ -194,10 +199,12 @@ export function CueButton({
         }}
       >
         {busy ? <Loader2Icon className="size-[1em] animate-spin" /> : label}
-      </span>
+      </ButtonLabel>
       {line2 && (
         <span
           style={{
+            flexShrink: 0,
+            textAlign: "center",
             fontSize: "0.55em",
             opacity: 0.75,
             color: state === "stale" ? "var(--amber-9)" : undefined,

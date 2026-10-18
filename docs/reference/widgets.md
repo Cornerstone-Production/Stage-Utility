@@ -503,6 +503,11 @@ wherever it is placed.
 
 See [OSC](../integrations/osc.md) and [RossTalk](../integrations/rosstalk.md).
 
+A button's label is centred on it, in the middle both ways, and wraps inside it
+with a margin on every side. A word longer than the button breaks, and text that
+still does not fit is clipped at the button's edge rather than drawn over its
+neighbours. The OSC, RossTalk, action and cue buttons all draw it the same way.
+
 **Action button** picks an **Action** from the same registry the
 [automation rules editor](../automation.md) offers — every action in
 [Actions](../automation.md#actions), including advancing or stepping back
