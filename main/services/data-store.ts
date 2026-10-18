@@ -16,6 +16,9 @@ import { WriteQueue, atomicWrite } from "./write-queue.js";
  */
 export class StoreReadError extends Error {
   readonly code: string;
+  /** What a route that throws it answers: the server cannot serve this now,
+   *  which is not a bug in it (500). */
+  readonly status = 503;
 
   constructor(
     readonly filename: string,
