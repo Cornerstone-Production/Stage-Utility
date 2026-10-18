@@ -21,7 +21,7 @@ process.env.HOME = path.join(TMP, "home");
 const { kioskDeviceRoutes } = await import("./kiosk-device-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { kioskDevicesStore } = await import("../kiosk-devices-store.js");
-const { recordSeen, resetKioskPresence } = await import("../kiosk-presence.js");
+const { recordSeen, resetKioskPresence, forgetSeen } = await import("../kiosk-presence.js");
 
 const ID = "mac-1.decklink-ab-0";
 const OLD = "old-secret-0123456789abcdef";
@@ -82,7 +82,11 @@ describe("a helper output's token replaced on its Mac", () => {
 
   it("logs the mismatch once, and again only after it has matched", async () => {
     const first = await logged(async () => {
-      for (let i = 0; i < 3; i++) assert.equal(await enroll(NEW), "holding");
+      for (let i = 0; i < 3; i++) {
+        assert.equal(await enroll(NEW), "holding");
+        // What the discovery responder does on every probe from a bound device.
+        forgetSeen(ID);
+      }
     });
     assert.equal(first.length, 1, first.join("\n"));
     assert.match(first[0], /^\[output-helper\] mac-1\.decklink-ab-0 showed a token other than the one pinned for screen display-1, so it gets the holding screen; if its token was replaced on its Mac, release it from that screen and set it up again$/);

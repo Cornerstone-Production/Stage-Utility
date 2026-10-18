@@ -354,8 +354,12 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // lingers in the unclaimed list for the whole TTL, which reads as the
       // claim not having worked.
       forgetSeen(id);
+      forgetSecretMismatch(id);
       // What a displaced device reported was about the screen it no longer shows.
-      if (displacedId) forgetHealth(displacedId);
+      if (displacedId) {
+        forgetHealth(displacedId);
+        forgetSecretMismatch(displacedId);
+      }
       if (seen?.output) {
         console.log(
           `[output-helper] claimed: ${scrub(id)} (${scrub(seen.output.kind)} "${scrub(seen.output.name)}") now shows screen ${scrub(outputId)}`

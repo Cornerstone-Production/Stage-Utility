@@ -56,6 +56,8 @@ const secrets = new Map<string, string>();
 /**
  * Bound helper outputs that showed /enroll a secret other than the one pinned, so
  * the line saying so is written once, not on every reload of the holding screen.
+ * Cleared by the routes only (a match, a release, a claim), never by forgetSeen:
+ * the responder calls that on every probe from a bound device.
  * An output whose token was replaced on its Mac (`--new-token`) lands here until it
  * is released and set up again. Only ids this server holds a binding for are added
  * (the route checks), so it is no bigger than the bindings.
@@ -273,7 +275,6 @@ export function rememberScreen(id: string, size: { w: number; h: number; dpr?: n
  *  candidate the moment the binding exists rather than a minute and a half later. */
 export function forgetSeen(id: string): void {
   secrets.delete(id);
-  mismatched.delete(id);
   if (seen.delete(id)) announce();
 }
 
