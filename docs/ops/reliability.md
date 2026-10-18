@@ -18,7 +18,9 @@ Built for a room full of always-on screens.
   for recordings,
   [When a recorded file cannot be read](#when-a-recorded-file-cannot-be-read).
   Recorded services are one file each, so persisting a live service does not
-  rewrite your whole history.
+  rewrite your whole history, and one that cannot be saved does not stop the next
+  from recording: see
+  [When a recorded service cannot be saved](#when-a-recorded-service-cannot-be-saved).
 - **Disk caches are pruned.** Photos and plan attachments go by age and size, and
   the Mac output helper's downloads (`cache/output-helper/`) are cut back to the
   running version. Images are served immutable so a screen fetches each one once.
@@ -250,6 +252,28 @@ the part of that service recorded while the record could not be read, so compare
 the two and keep what you want. For SPL and the rundown timing,
 **Rebuild from raw** on the service page derives the record again from the raw
 rows, which hold the whole service.
+
+### When a recorded service cannot be saved
+
+A save that fails outright — the record folder not writable, the disk full —
+does not stop recording either. When a service closes, at the split to the next
+service on the same plan or when the plan leaves item mode, the closed record is
+published to History and the next service's record opens on that same tick,
+whether or not the save landed. A record that did not save is held in memory,
+answers for that service in History, and is saved again every few seconds (every
+minute for SPL) until it lands. A service that comes back resumes from the held
+copy. Deleting or merging the service in History drops it.
+
+Held in memory only: a restart before the save lands loses that service's record.
+For SPL and the rundown timing, **Rebuild from raw** recovers it from the raw
+archive, if that was writable.
+
+```
+[service-timeline-recorder] could not save st1:p1:t1 (EACCES: permission denied,
+open '…'); recording carries on, and the save is retried every 4 s. A restart
+before it lands loses that service.
+[service-timeline-recorder] saved st1:p1:t1 on retry
+```
 
 ### When a credential could not be moved out of `settings.json`
 

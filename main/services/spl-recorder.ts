@@ -183,7 +183,7 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
         // showing it as live. Self-healing: an item going live above reopens it.
         this.finalizeRecord();
         this.lastItemId = null;
-        await splHistoryStore.upsert(this.current);
+        await this.saveClosed(this.current);
         broadcast("spl:history", this.current);
       }
     } finally {
