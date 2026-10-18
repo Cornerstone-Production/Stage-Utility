@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { recordIndicator, lateBySec, streamIndicator, loudestSpl, pinnedSpl, meterOptions, LOUDEST_METER, STREAMER_FOR, RECORDER_FOR, sourceOptions } from "./recording-status.js";
+import { recordIndicator, lateBySec, streamIndicator, loudestSpl, pinnedSpl, meterOptions, metricOptions, autoSplMetric, LOUDEST_METER, STREAMER_FOR, RECORDER_FOR, sourceOptions } from "./recording-status.js";
 import type { Streamer } from "./recording-status.js";
 
 // Mid-service, recording and SPL are the two things you cannot recover after the
@@ -32,7 +32,7 @@ describe("loudestSpl", () => {
       },
     });
     assert.equal(r.value, "92 dB");
-    assert.equal(r.sub, "FOH");
+    assert.equal(r.sub, "SPL A Slow \u00b7 FOH", "the caption names the metric as well as the meter");
   });
 
   test("prefers the A-weighted metric when a meter reports several", () => {
@@ -58,7 +58,7 @@ describe("pinning one SPL meter", () => {
   test("reads the meter it was given, not the loudest one", () => {
     const r = pinnedSpl(two, "dev::Balcony");
     assert.equal(r.value, "71 dB", "a pinned quiet channel must not report the loud one");
-    assert.equal(r.sub, "Balcony");
+    assert.equal(r.sub, "SPL A Slow \u00b7 Balcony");
   });
 
   test("a pinned meter that stopped reporting says so instead of quietly showing another", () => {
@@ -83,6 +83,122 @@ describe("pinning one SPL meter", () => {
       "dev::FOH",
     );
     assert.equal(r.value, "90 dB", "pinning must change WHICH meter is read, not what SPL means");
+  });
+});
+
+describe("pinning one SPL metric", () => {
+  const meter = (metrics: Record<string, number>) => ({ metrics });
+  // FOH is louder on A, Stage is louder on C: "loudest" must depend on the metric.
+  const rig = {
+    connected: true,
+    meters: {
+      "dev::FOH": meter({ "SPL A Slow": 92, "SPL C Slow": 95, "LAeq 10": 88 }),
+      "dev::Stage": meter({ "SPL A Slow": 80, "SPL C Slow": 101 }),
+    },
+  };
+
+  test("Automatic is the A-weighted metric, else the meter's first", () => {
+    assert.equal(autoSplMetric({ "SPL C Slow": 1, "SPL A Slow": 2 }), "SPL A Slow");
+    assert.equal(autoSplMetric({ "LAeq 10": 1, "SPL C Slow": 2 }), "LAeq 10");
+    assert.equal(autoSplMetric({}), null);
+    assert.equal(autoSplMetric(undefined), null);
+  });
+
+  test("the loudest meter is judged on the pinned metric, not on A-weighted", () => {
+    assert.equal(loudestSpl(rig).sub, "SPL A Slow \u00b7 FOH");
+    const r = loudestSpl(rig, "SPL C Slow");
+    assert.equal(r.value, "101 dB", "Stage is loudest on C even though FOH is loudest on A");
+    assert.equal(r.sub, "SPL C Slow \u00b7 Stage");
+  });
+
+  test("a meter that lacks the pinned metric is skipped, not read as something else", () => {
+    const r = loudestSpl(rig, "LAeq 10");
+    assert.equal(r.value, "88 dB");
+    assert.equal(r.sub, "LAeq 10 \u00b7 FOH");
+  });
+
+  test("a pinned meter shows the pinned metric", () => {
+    const r = pinnedSpl(rig, "dev::Stage", "SPL C Slow");
+    assert.equal(r.value, "101 dB");
+    assert.equal(r.sub, "SPL C Slow \u00b7 Stage");
+  });
+
+  test("a pinned metric no meter reports reads a dash naming it, never another metric", () => {
+    // The failure this exists for: Smaart is reconfigured and drops the metric.
+    // Falling back to the A-weighted number would put a real figure about a
+    // different quantity under a caption naming the one that was asked for.
+    const loud = loudestSpl(rig, "SPL Z Peak");
+    assert.equal(loud.value, "\u2014");
+    assert.equal(loud.sub, "SPL Z Peak not reporting");
+    const one = pinnedSpl(rig, "dev::Stage", "LAeq 10");
+    assert.equal(one.value, "\u2014");
+    assert.equal(one.sub, "LAeq 10 not reporting");
+  });
+
+  test("a pinned key that is an Object.prototype member is just a missing metric", () => {
+    assert.equal(pinnedSpl(rig, "dev::FOH", "constructor").value, "\u2014");
+    assert.equal(loudestSpl(rig, "toString").value, "\u2014");
+  });
+
+  test("Smaart offline and no readings keep their own wording under a pin", () => {
+    assert.equal(loudestSpl(null, "SPL C Slow").sub, "Smaart offline");
+    assert.equal(pinnedSpl({ connected: false, meters: {} }, "dev::FOH", "SPL C Slow").sub, "Smaart offline");
+    assert.equal(loudestSpl({ connected: true, meters: {} }, "SPL C Slow").sub, "no readings yet");
+    assert.equal(pinnedSpl({ connected: true, meters: { "dev::FOH": meter({}) } }, "dev::FOH", "SPL C Slow").sub, "no readings yet");
+  });
+
+  test("an empty pin is Automatic, as the card saves it", () => {
+    // SplCard hands the saved value straight through, and Automatic is saved as "".
+    assert.deepEqual(loudestSpl(rig, ""), loudestSpl(rig));
+    assert.deepEqual(pinnedSpl(rig, "dev::Stage", ""), pinnedSpl(rig, "dev::Stage"));
+  });
+});
+
+describe("the metric submenu's content", () => {
+  const rig = {
+    connected: true,
+    meters: {
+      "dev::FOH": { deviceName: "Console", channelName: "FOH L", metrics: { "SPL A Slow": 92, "SPL C Slow": 95 } },
+      "dev::Stage": { deviceName: "Console", channelName: "Wedge", metrics: { "SPL A Slow": 80, "SPL C Slow": 101, "LAeq 10": 79 } },
+    },
+  };
+
+  test("for a named meter: its own keys, in Smaart's order, with its own values", () => {
+    const m = metricOptions(rig, "dev::Stage", "");
+    assert.equal(m.from, "Wedge");
+    assert.equal(m.automatic, "SPL A Slow");
+    assert.deepEqual(m.options, [
+      { metric: "SPL A Slow", value: 80 },
+      { metric: "SPL C Slow", value: 101 },
+      { metric: "LAeq 10", value: 79 },
+    ]);
+  });
+
+  test("for the loudest meter: the keys of the meter the card is reading", () => {
+    // FOH is loudest on A, so its two keys; Stage's LAeq 10 must not appear.
+    const a = metricOptions(rig, LOUDEST_METER, "");
+    assert.equal(a.from, "Loudest meter");
+    assert.deepEqual(a.options.map((o) => o.metric), ["SPL A Slow", "SPL C Slow"]);
+    // Pinned to C, Stage is the loudest meter and the list follows it.
+    const c = metricOptions(rig, LOUDEST_METER, "SPL C Slow");
+    assert.deepEqual(c.options.map((o) => o.metric), ["SPL A Slow", "SPL C Slow", "LAeq 10"]);
+    assert.equal(c.options.find((o) => o.metric === "SPL C Slow")?.value, 101);
+  });
+
+  test("a pinned metric that is gone stays listed with no value, so the menu is not blank", () => {
+    const m = metricOptions(rig, "dev::FOH", "SPL Z Peak");
+    assert.deepEqual(m.options.at(-1), { metric: "SPL Z Peak", value: null });
+    assert.equal(m.options.length, 3);
+  });
+
+  test("offline Smaart lists nothing live, rather than a stale meter's numbers", () => {
+    const m = metricOptions({ ...rig, connected: false }, LOUDEST_METER, "");
+    assert.deepEqual(m.options, []);
+    assert.equal(m.automatic, null);
+  });
+
+  test("a vanished pinned meter is named as not reporting", () => {
+    assert.equal(metricOptions(rig, "dev::Gone", "").from, "Gone (not reporting)");
   });
 });
 

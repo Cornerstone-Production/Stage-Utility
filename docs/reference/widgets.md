@@ -456,15 +456,17 @@ See [Wireless Gear](../integrations/wireless.md) and [Mic slots](../slots.md).
 | Widget | What it shows | Source |
 |---|---|---|
 | **SPL meter** | The live sound level | Smaart |
-| **Sound level** *(Home)* | The loudest meter right now, and which one | Smaart |
+| **Sound level** *(Home)* | The loudest level right now, its metric and meter | Smaart |
 
 **SPL meter** picks its meter and which metric to read, and can colour itself past
 thresholds you set. See [Smaart](../integrations/smaart.md).
 
 **Sound level** reads whichever meter is loudest. To watch one instead,
-right-click the tile — or tap and hold it — and pick it under **Meter**. A
-pinned meter that stops reporting says so rather than falling back to another
-one, so the number on the tile is always the channel it names.
+right-click the tile — or tap and hold it — and pick it under **Meter**; pick
+which Smaart metric it reads under **Metric** (Automatic prefers the A-weighted
+one). A pinned meter or metric that stops reporting says so rather than falling
+back to another one, so the number on the tile is always the channel and metric
+its caption names.
 
 ## People
 

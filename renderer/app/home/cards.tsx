@@ -745,15 +745,17 @@ export function StreamingCard({
   );
 }
 
-/** The loudest meter right now, and which one. */
-export function SplCard({ meterId }: { meterId?: string | null } = {}) {
+/** The loudest meter right now, its metric and which meter it is — or the one meter and metric the operator pinned. */
+export function SplCard({ meterId, metricKey }: { meterId?: string | null; metricKey?: string | null } = {}) {
   const { value: spl, known } = useSplStatus();
   // Unknown is its own state: loudestSpl/pinnedSpl read "Smaart offline" off a
   // `null` spl, which is also what the hook returns before its first answer.
   if (!known) return <Stat label="SPL" value="—" />;
-  // Unpinned is the untouched path: same call, same output as before the setting
-  // existed. Pinning changes WHICH meter is read, never the composition.
-  const r = meterId && meterId !== LOUDEST_METER ? pinnedSpl(spl, meterId) : loudestSpl(spl);
+  // Unpinned takes the loudest-meter path. Pinning a meter or a metric changes
+  // WHICH reading is taken, never how it is composed. An empty or null metric is
+  // Automatic.
+  const metric = metricKey ?? undefined;
+  const r = meterId && meterId !== LOUDEST_METER ? pinnedSpl(spl, meterId, metric) : loudestSpl(spl, metric);
   return <Stat label="SPL" value={r.value} sub={r.sub} />;
 }
 
@@ -1105,7 +1107,7 @@ export function HomeCard({
     case "home-streaming-youtube":
       return <StreamingCard platform="YouTube" now={now} showElapsed={c.showElapsed ?? true} />;
     case "home-spl":
-      return <SplCard meterId={c.meterId} />;
+      return <SplCard meterId={c.meterId} metricKey={c.metricKey} />;
     case "home-pvp":
       return <PvpCard now={now} showProgress={c.showProgress ?? false} />;
     case "home-pvp-now":

@@ -153,14 +153,14 @@ const SPL_SUMMARY: SplServiceSummary[] = WEEKENDS.map((day, i) => ({
   },
 }));
 
-/** Two calibrated meters at DIFFERENT levels, so "loudest" and a pinned quiet
+/** Two calibrated meters, each reporting an A- and a C-weighted metric, at DIFFERENT levels, so "loudest" and a pinned quiet
  *  channel cannot come out the same number. Balcony is the quiet one. */
 const SPL_LIVE: SplMetricsDTO = {
   connected: true,
   apiVersion: "4",
   meters: {
-    "Console::Main": { deviceName: "Console", channelName: "Main", metrics: { "SPL A Slow": 92.4 }, ts: SINCE },
-    "Console::Balcony": { deviceName: "Console", channelName: "Balcony", metrics: { "SPL A Slow": 78.1 }, ts: SINCE },
+    "Console::Main": { deviceName: "Console", channelName: "Main", metrics: { "SPL A Slow": 92.4, "SPL C Slow": 101.2 }, ts: SINCE },
+    "Console::Balcony": { deviceName: "Console", channelName: "Balcony", metrics: { "SPL A Slow": 78.1, "SPL C Slow": 88.6 }, ts: SINCE },
   },
 };
 /** Connected, reporting nothing — the loudest-meter path says "no readings yet"
@@ -480,6 +480,9 @@ describe("every setting Home's card menu offers changes what the widget draws", 
  */
 const PICK_VALUES: Record<string, [unknown, unknown]> = {
   meterId: ["loudest", "Console::Balcony"],
+  // Automatic reads the A-weighted metric; the pin names the C-weighted one the
+  // fixture meters also report, at levels well clear of the A-weighted ones.
+  metricKey: ["", "SPL C Slow"],
   // "auto" takes the first followed game; the pin names the second.
   game: ["auto", "mlb:t-200"],
   // Every recorder at once vs one of them. REAPER is idle in the LIVE fixture
