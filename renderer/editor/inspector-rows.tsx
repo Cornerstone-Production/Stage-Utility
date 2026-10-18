@@ -298,7 +298,9 @@ export function Segmented<T extends string>({
   value: T;
   options: { value: T; label: string }[];
   onChange: (v: T) => void;
-  /** Every segment inert, for a moment the choice must not change. */
+  /** Every segment inert, for a moment the choice must not change. Marked with
+   *  aria-disabled rather than the disabled attribute, so a segment that holds
+   *  keyboard focus keeps it. */
   disabled?: boolean;
 }) {
   return (
@@ -308,8 +310,10 @@ export function Segmented<T extends string>({
           key={o.value}
           type="button"
           aria-pressed={value === o.value}
-          disabled={disabled}
-          onClick={() => onChange(o.value)}
+          aria-disabled={disabled || undefined}
+          onClick={() => {
+            if (!disabled) onChange(o.value);
+          }}
           className={cn(
             "flex-1 whitespace-nowrap rounded-md px-2 py-1 text-caption1 font-medium transition-colors",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",

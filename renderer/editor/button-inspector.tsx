@@ -11,7 +11,7 @@
 // "Make it a cue" lifts the action into a manual cue (make-it-a-cue.ts) and
 // rebinds this widget to it.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { Button, ErrorNote, StackedField, toast } from "../components/ui";
@@ -72,8 +72,17 @@ export function ButtonInspector({
   // survives the widget changing type and Does cannot be flipped under the write:
   // the late rebind would overwrite the flip.
   const [making, setMaking] = useState(false);
+  // Make it a cue's button unmounts when the widget becomes a cue button. If it
+  // held focus, focus goes to the Cue dropdown then, instead of to the page.
+  const root = useRef<HTMLDivElement>(null);
+  const focusCueNext = useRef(false);
+  useEffect(() => {
+    if (!cueMode || !focusCueNext.current) return;
+    focusCueNext.current = false;
+    root.current?.querySelector("select")?.focus();
+  }, [cueMode]);
   return (
-    <>
+    <div ref={root} className="contents">
       <StackedField
         label="Does"
         description={
@@ -128,9 +137,9 @@ export function ButtonInspector({
           />
         </>
       ) : (
-        <ActionButtonInspector c={c} onConfig={onConfig} beforeLabel={<MakeItACue c={c} onConfig={onConfig} busy={making} setBusy={setMaking} />} />
+        <ActionButtonInspector c={c} onConfig={onConfig} beforeLabel={<MakeItACue c={c} onConfig={onConfig} busy={making} setBusy={setMaking} onMadeFromFocus={() => (focusCueNext.current = true)} />} />
       )}
-    </>
+    </div>
   );
 }
 
@@ -146,11 +155,14 @@ function MakeItACue({
   onConfig,
   busy,
   setBusy,
+  onMadeFromFocus,
 }: {
   c: ActionButtonConfig;
   onConfig: (c: LayoutObjectConfig) => void;
   busy: boolean;
   setBusy: (busy: boolean) => void;
+  /** The cue was made while this button held keyboard focus. */
+  onMadeFromFocus: () => void;
 }) {
   const { data: registry } = useQuery(automationRegistryQuery);
   const action = registry?.actions.find((a) => a.id === c.actionId) ?? null;
@@ -159,9 +171,10 @@ function MakeItACue({
   // The write takes a moment, and the label can be typed into meanwhile: the
   // rebind uses the widget as it is when the write lands, not as it was at the click.
   const latest = useLatestRef(c);
+  const root = useRef<HTMLDivElement>(null);
 
   async function make() {
-    if (!action || busy) return;
+    if (!action || !ready || busy) return;
     setBusy(true);
     setError(null);
     const made = await makeCueFromAction({
@@ -178,13 +191,16 @@ function MakeItACue({
     }
     // The old default "Action" names nothing, so the button goes back to showing
     // the cue's own name rather than keeping a label the operator never chose.
+    if (root.current?.contains(document.activeElement)) onMadeFromFocus();
     onConfig(toCueButton({ ...latest.current, label: chosenLabel(latest.current.label) }, made.cue));
     toast.success(`Made the cue "${made.cue}"`);
   }
 
   return (
-    <div className="flex min-w-0 flex-col items-start gap-1.5">
-      <Button variant="filled" size="small" disabled={!ready || busy} onClick={make}>
+    <div ref={root} className="flex min-w-0 flex-col items-start gap-1.5">
+      {/* aria-disabled while writing, not disabled: a disabled button drops
+          keyboard focus, and the press is refused by make() instead. */}
+      <Button variant="filled" size="small" disabled={!ready} aria-disabled={busy || undefined} onClick={make} className="aria-disabled:opacity-40">
         {busy ? "Making…" : "Make it a cue"}
       </Button>
       <span className="text-caption2 leading-snug text-fg-muted">

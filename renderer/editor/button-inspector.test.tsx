@@ -268,21 +268,33 @@ describe("Make it a cue", () => {
   });
 
   test("Does and Make it a cue are inert while the write is in flight, and free again after it lands", async () => {
+    // aria-disabled, not the disabled attribute: a disabled button drops keyboard
+    // focus, and these are inert only in the sense that their press does nothing.
+    const inert = (root: HTMLElement, name: string) => press(root, name).getAttribute("aria-disabled") === "true";
     for (const refuse of [false, true]) {
       cleanup();
       let release: () => void = () => {};
-      serve({ gate: new Promise<void>((r) => (release = r)), refuse });
+      const server = serve({ gate: new Promise<void>((r) => (release = r)), refuse });
       const { container, configs } = mount(ACTION);
-      await makeIt(container);
-      assert.equal(press(container, "Run an action").hasAttribute("disabled"), true, "Does must be inert mid-write");
-      assert.equal(press(container, "Fire a cue").hasAttribute("disabled"), true);
-      assert.equal(press(container, "Making…").hasAttribute("disabled"), true, "Make it a cue must not be pressable twice");
+      await eventually(() => assert.equal(press(container, "Make it a cue").hasAttribute("disabled"), false));
+      press(container, "Make it a cue").focus();
+      fireEvent.click(press(container, "Make it a cue"));
+      assert.equal(inert(container, "Run an action"), true, "Does must be inert mid-write");
+      assert.equal(inert(container, "Fire a cue"), true);
+      const making = press(container, "Making…");
+      assert.equal(making.getAttribute("aria-disabled"), "true", "Make it a cue must not be pressable twice");
+      assert.equal(making.hasAttribute("disabled"), false, "a disabled button would drop keyboard focus");
+      assert.equal(document.activeElement, making, "focus must stay on Make it a cue through the write");
+      fireEvent.click(making);
       fireEvent.click(press(container, "Fire a cue"));
       assert.equal(configs.length, 0, "a flip mid-write must not be accepted: the rebind would overwrite it");
       release();
-      await eventually(() => assert.equal(press(container, "Fire a cue").hasAttribute("disabled"), false, `still inert after the write (refuse=${refuse})`));
-      assert.equal(press(container, "Run an action").hasAttribute("disabled"), false);
+      await eventually(() => assert.equal(inert(container, "Fire a cue"), false, `still inert after the write (refuse=${refuse})`));
+      assert.equal(inert(container, "Run an action"), false);
       assert.equal(configs.length, refuse ? 0 : 1);
+      assert.equal(server.posted.length, 1, "pressing it again mid-write must not start a second write");
+      if (refuse) assert.equal(document.activeElement, press(container, "Make it a cue"), "focus stays on the button after a refusal");
+      else assert.equal(document.activeElement, container.querySelector('select[aria-label="Cue"]'), "focus moves to the Cue dropdown once the button is gone");
     }
   });
 
