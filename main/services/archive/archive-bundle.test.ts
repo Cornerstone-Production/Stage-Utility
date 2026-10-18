@@ -365,3 +365,44 @@ test("a merge whose write tears leaves this box's own CSV whole", async () => {
   assert.equal(await fs.readFile(path.join(dir, "spl.csv"), "utf8"), mine, "the rows this box recorded survived the failed write");
   assert.deepEqual((await fs.readdir(dir)).filter((n) => n.endsWith(".tmp")), [], "no scratch file left beside it");
 });
+
+// ── A raw file this box cannot read ──
+
+/** File permissions do not stop root, so these skip there. */
+const asRoot = process.getuid?.() === 0;
+
+test("merge leaves a CSV this box cannot read as it is, and reports it", { skip: asRoot }, async () => {
+  // Taken for "nothing here yet", the archive's rows replaced the box's own.
+  await splHistoryStore.upsert(record("st1:pUnread:t1", "2026-10-11"));
+  const dir = await writeRaw("2026-10-11_st1-pUnread-t1", "at,db\n09:00,80\n");
+  const zip = await buildArchive();
+  // This box's copy has since moved on, so the service differs and merges.
+  await splHistoryStore.upsert({ ...(record("st1:pUnread:t1", "2026-10-11") as object), meterId: "m2" } as never);
+  const mine = "at,db\n09:00,80\n09:05,91\n";
+  const file = path.join(dir, "spl.csv");
+  await fs.writeFile(file, mine);
+  await fs.chmod(file, 0o000);
+  let res;
+  try {
+    res = await importArchive(zip, { merge: ["st1:pUnread:t1"] });
+  } finally {
+    await fs.chmod(file, 0o644);
+  }
+  assert.equal(await fs.readFile(file, "utf8"), mine, "the rows this box recorded were replaced");
+  assert.deepEqual(
+    res.rawFilesFailed.map((f) => f.file),
+    ["2026-10-11_st1-pUnread-t1/spl.csv"],
+  );
+  assert.match(res.rawFilesFailed[0].reason, /EACCES/);
+});
+
+test("an export fails rather than leaving out a raw archive it cannot list", { skip: asRoot }, async () => {
+  const root = path.join(dataDir, "archive");
+  await fs.mkdir(root, { recursive: true });
+  await fs.chmod(root, 0o000);
+  try {
+    await assert.rejects(buildArchive(), { code: "EACCES" });
+  } finally {
+    await fs.chmod(root, 0o755);
+  }
+});

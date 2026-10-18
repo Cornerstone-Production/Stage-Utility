@@ -11,7 +11,7 @@
 // reported. See `importArchive` for the ordering that keeps a corrupt file from
 // leaving half a year behind.
 
-import { errorMessage } from "../errors.js";
+import { errorMessage, isNotFound } from "../errors.js";
 import { scrub } from "../scrub.js";
 import { readFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
@@ -139,8 +139,12 @@ async function readDirInto(root: string, prefix: string, into: Record<string, Ui
   let entries: Dirent[];
   try {
     entries = await fs.readdir(root, { withFileTypes: true });
-  } catch {
-    return; // no archive dir yet — a box that has not recorded since this shipped
+  } catch (err) {
+    // No archive dir yet — a box that has not recorded since this shipped. One
+    // that is there and cannot be listed fails the export rather than leaving
+    // every raw file out of it.
+    if (isNotFound(err)) return;
+    throw err;
   }
   for (const e of entries) {
     const full = path.join(root, e.name);
@@ -168,8 +172,8 @@ export async function buildArchive(): Promise<Uint8Array> {
   files["stores/service-timeline.json"] = encode({ services: byKey(await serviceTimelineStore.listStrict()) });
   try {
     files["stores/baptism.json"] = new Uint8Array(await fs.readFile(path.join(getUserDataPath(), "baptism.json")));
-  } catch {
-    /* nothing recorded yet */
+  } catch (err) {
+    if (!isNotFound(err)) throw err; // else nothing recorded yet
   }
 
   const local = await localServices();
@@ -384,6 +388,10 @@ export async function importArchive(
 
   const localBaptismIds = new Set((await baptismStore.listSessions()).map((s) => s.id));
   const freshSessions = (baptisms?.sessions ?? []).filter((s) => !localBaptismIds.has(s.id));
+  // The sessions are added last, so a refusal there would come after every
+  // record and raw file above was already written.
+  const baptismRefused = freshSessions.length > 0 ? baptismStore.refusingSaves() : null;
+  if (baptismRefused) throw baptismRefused;
 
   // ── Write phase: everything below is known-good. ──
   // A merged service fills its gaps from the archive; a new or replaced one takes
@@ -481,8 +489,11 @@ export async function importArchive(
           let existing = "";
           try {
             existing = await fs.readFile(dest, "utf8");
-          } catch {
-            /* nothing here yet — take theirs whole */
+          } catch (err) {
+            // Nothing here yet: take theirs whole. A file that is there and
+            // cannot be read is not nothing, and taking theirs whole replaced
+            // the rows this box recorded. It fails this member instead.
+            if (!isNotFound(err)) throw err;
           }
           // A null merge means the column sets disagree, so the rows cannot be
           // interleaved. Keep what is here rather than produce a ragged file.

@@ -73,6 +73,12 @@ class BaptismStore {
    * already gives a corrected re-finish. Logged on a tagged line when
    * duplicates are present, once per distinct count rather than on every read.
    */
+  /** Why a save here is refused, or null: see DataStore.refusingSaves. For a
+   *  caller that must know before it writes anything else. */
+  refusingSaves(): Error | null {
+    return this.store.refusingSaves();
+  }
+
   async listSessions(): Promise<BaptismSession[]> {
     const file = await this.store.load();
     const byId = new Map<string, BaptismSession>();
