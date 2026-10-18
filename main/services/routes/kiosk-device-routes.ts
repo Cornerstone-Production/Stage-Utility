@@ -53,7 +53,9 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       res.end(holdingScreen({ id: null, reason: "no-device" }));
       return;
     }
-    const devices = await kioskDevicesStore.load();
+    // Strict here and below: while the bindings cannot be read, an empty list
+    // would show a bound screen the unclaimed holding screen. A failure says so.
+    const devices = await kioskDevicesStore.loadStrict();
     // Remember it even when unclaimed: this is what claim() pins, and it is the
     // only channel a shell-script-and-a-browser agent has to tell us its secret.
     if (token) rememberSecret(id, token);
@@ -172,7 +174,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
 
   // ── Devices page ────────────────────────────────────────────────────────
   if (method === "GET" && pathname === "/api/devices") {
-    const bound = await kioskDevicesStore.load();
+    const bound = await kioskDevicesStore.loadStrict();
     const seen = seenDevices();
     json(res, {
       scanning: scanning(),
@@ -219,7 +221,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       error(res, "the device id in the path is not valid", 400);
       return;
     }
-    const devices = await kioskDevicesStore.load();
+    const devices = await kioskDevicesStore.loadStrict();
     const known = findById(devices, id);
     const secret = clean(headerValue(req.headers, "x-device-token") || null);
     // authorise() trusts the first secret an UNPINNED binding is shown, which is
@@ -286,7 +288,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // the screen it shows. Moving it is the operator naming the screen
       // (`outputId`), which stays allowed. Nothing else sends a claim without
       // one: the Screens page lists only devices that are not bound here.
-      const already = findById(await kioskDevicesStore.load(), id);
+      const already = findById(await kioskDevicesStore.loadStrict(), id);
       if (already) {
         error(res, alreadyBound(already.outputId), 409);
         return;
@@ -378,7 +380,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     try {
-      const output = findById(await kioskDevicesStore.load(), id)?.output;
+      const output = findById(await kioskDevicesStore.loadStrict(), id)?.output;
       await updateDevices((current) => release(current, id));
       forgetHealth(id);
       if (output) {
@@ -395,7 +397,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   // Which output a device is on, for the Screens page's per-output line.
   if (method === "GET" && pathname.startsWith("/api/devices/for-output/")) {
     const outputId = decodeURIComponent(pathname.slice("/api/devices/for-output/".length));
-    const bound = await kioskDevicesStore.load();
+    const bound = await kioskDevicesStore.loadStrict();
     const device = findByOutput(bound, outputId);
     json(res, { device: device ? withoutTokens([device])[0] : null });
     return;
