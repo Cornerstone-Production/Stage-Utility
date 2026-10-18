@@ -103,6 +103,23 @@ describe("the cue picker", () => {
     ]);
   });
 
+  test("entries that read the same are told apart by their cue name", () => {
+    const { container } = mount(
+      [],
+      [
+        button({ id: "projectors_on_cue", name: "Projectors" }),
+        button({ id: "projectors_on_cue_2", name: "Projectors" }),
+        button({ id: "confetti", name: "Confetti" }),
+      ],
+    );
+    const labels = [...container.querySelectorAll("optgroup option")].map((o) => o.textContent);
+    assert.deepEqual(labels, [
+      "Projectors (button) · projectors_on_cue",
+      "Projectors (button) · projectors_on_cue_2",
+      "Confetti (button)",
+    ]);
+  });
+
   test("an empty group is left out", () => {
     const onlyBuiltin = mount([sw({ id: "obs_record", name: "OBS recording", builtin: true })], []);
     assert.deepEqual(

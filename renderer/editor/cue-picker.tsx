@@ -64,10 +64,16 @@ export function CuePicker({
   const entries = cuePickerEntries(cues);
   const builtIn = entries.filter((e) => e.builtin);
   const mine = entries.filter((e) => !e.builtin);
+  const label = (e: Entry) => `${e.name}${e.room ? ` · ${e.room}` : ""} (${e.kind})`;
+  // Two cues can read the same: the name is the operator's own words, and "Make it
+  // a cue" run twice on one label makes two. The cue name is what tells them apart,
+  // so it is shown beside any entry whose reading another entry shares.
+  const reads = new Map<string, number>();
+  for (const e of entries) reads.set(label(e), (reads.get(label(e)) ?? 0) + 1);
   const item = (e: Entry) => (
     <SelectItem key={e.id} value={e.id}>
-      {e.name}
-      {e.room ? ` · ${e.room}` : ""} ({e.kind})
+      {label(e)}
+      {(reads.get(label(e)) ?? 0) > 1 ? ` · ${e.id}` : ""}
     </SelectItem>
   );
   return (
