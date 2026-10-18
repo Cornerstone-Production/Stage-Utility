@@ -194,7 +194,7 @@ const PVP_IDLE: PvpStatusDTO = { connected: true, layers: [], sampledAt: null, i
  * A STILL, for `countStills` alone.
  *
  * `LAYER` above is a rolling video on purpose — it is what every OTHER pvp-now
- * setting (showProgress, showNextCue, compact, nowLabel) is proven against, and
+ * setting (showProgress, showNextCue, layout, nowLabel) is proven against, and
  * `countStills` has no effect at all on a video. Swapping the shared fixture for
  * a still would have broken `showProgress`'s own pair test: a still draws no bar
  * unless it is counting down, so with `countStills` untouched (its own
@@ -371,7 +371,7 @@ const PREREQ: Record<string, Record<string, unknown>> = {
   splMetric: { showSpl: true },
   // Label only has an effect in compact mode — the normal composition's value
   // stays the media name regardless of it.
-  nowLabel: { compact: true },
+  nowLabel: { layout: "compact" },
 };
 
 /**
@@ -380,6 +380,15 @@ const PREREQ: Record<string, Record<string, unknown>> = {
  */
 const PVP_LIVE_FOR: Record<string, PvpStatusDTO> = {
   countStills: PVP_LIVE_STILL,
+  // Warn near the end only changes anything INSIDE a threshold: 90 s left, the
+  // shared video's, is white either way. 20 s left is amber (the default
+  // threshold is 30).
+  warnNearEnd: {
+    connected: true,
+    layers: [{ ...LAYER, anchorElapsedSec: 70 }],
+    sampledAt: new Date(NOW).toISOString(),
+    imageDurationSec: 20,
+  },
 };
 
 /** One render of one object, as markup. */
@@ -478,6 +487,8 @@ const PICK_VALUES: Record<string, [unknown, unknown]> = {
   // deliberately different strings, so the two labels cannot draw the same
   // caption.
   nowLabel: ["cue", "file"],
+  // Full draws a caption and a name; Countdown only draws neither.
+  layout: ["full", "countdown"],
 };
 
 describe("every CHOICE Home's card menu offers changes what the widget draws", () => {

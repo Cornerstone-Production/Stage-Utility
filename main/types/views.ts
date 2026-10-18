@@ -323,6 +323,9 @@ export interface LayoutCanvas {
 }
 
 export type LayoutHAlign = "left" | "center" | "right";
+
+/** How much a ProVideoPlayer "now" widget draws — see `pvp-now`'s `layout`. */
+export type PvpNowLayout = "full" | "compact" | "countdown";
 export type LayoutVAlign = "top" | "middle" | "bottom";
 
 /** Generic visual styling. Every field optional; the renderer applies defaults. */
@@ -728,18 +731,27 @@ export type LayoutObjectConfig =
        */
       showNextCue?: boolean;
       /**
-       * Two lines instead of four: caption + countdown, nothing else.
-       *
-       * The countdown-first treatment for a small tile — the caption becomes
-       * `PVP · <label>` (see `nowLabel`), the value is the remaining time alone
-       * (no "remaining" word), and the next-cue footer never draws. Off by
-       * default: the three-line composition above is what the mockup approved
-       * first, and this is the alternative for a tile too small for it.
+       * How much the widget draws. `"full"` is the three-line composition the
+       * mockup approved first; `"compact"` is two lines, caption + countdown
+       * (the caption becomes `PVP · <label>` — see `nowLabel` — the value is the
+       * remaining time alone, and the next-cue footer never draws);
+       * `"countdown"` draws the time left and NOTHING else, as large as the box
+       * allows. Absent reads as `"full"`, unless the object still carries the
+       * legacy `compact` below — see `pvpNowLayout` in renderer/main/pvp-now.tsx.
+       */
+      layout?: PvpNowLayout;
+      /**
+       * LEGACY, read-only: the two-way switch `layout` replaced. An object saved
+       * before then has `compact: true` and no `layout`, and `pvpNowLayout` reads
+       * that as `"compact"`. Nothing writes it any more; `layout`, once set,
+       * wins over it. Kept in the type only so the one reader that migrates it
+       * type-checks.
+       * @deprecated use `layout`
        */
       compact?: boolean;
       /**
-       * Which name `compact`'s caption borrows. Ignored outside compact mode —
-       * the normal composition's value stays the media name, always.
+       * Which name the compact layout's caption borrows. Ignored in the other
+       * layouts — the full composition's value stays the media name, always.
        *
        * Named `nowLabel`, not `label`: `label` is already a required string on
        * several other members of this union — a button's own caption — and
@@ -747,6 +759,18 @@ export type LayoutObjectConfig =
        * so reusing it would have pulled every button type into this setting.
        */
       nowLabel?: "cue" | "file" | "file-ext" | "layer";
+      /**
+       * Turn the time (and the progress rule) amber, then red, as a clip runs
+       * out. Off by default, so a widget saved before this existed is unchanged.
+       * Every layout. Thresholds below.
+       */
+      warnNearEnd?: boolean;
+      /** Seconds left at or under which the time reads amber. Default 30. */
+      warnAmberSec?: number;
+      /** Seconds left at or under which the time reads red. Default 10. Never
+       *  above `warnAmberSec`: the reader clamps it, so a red that would come
+       *  before the amber is read as the amber. */
+      warnRedSec?: number;
       /**
        * Count a STILL down, the same way a rolling clip already counts down.
        *
@@ -777,9 +801,16 @@ export type LayoutObjectConfig =
       showProgress?: boolean;
       showNextCue?: boolean;
       /** Same meaning as the wall object's — see `pvp-now`. */
+      layout?: PvpNowLayout;
+      /** Legacy, read-only — see `pvp-now`. @deprecated use `layout` */
       compact?: boolean;
       /** Same meaning as the wall object's — see `pvp-now`. */
       nowLabel?: "cue" | "file" | "file-ext" | "layer";
+      /** Same meaning as the wall object's — see `pvp-now`. The switch is on
+       *  Home's card menu; the thresholds are the inspector's. */
+      warnNearEnd?: boolean;
+      warnAmberSec?: number;
+      warnRedSec?: number;
       /** Same meaning as the wall object's — see `pvp-now`. No `stillHoldSec`
        *  here: that field is inspector-only on the wall object too. */
       countStills?: boolean;

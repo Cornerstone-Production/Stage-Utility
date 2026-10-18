@@ -91,14 +91,39 @@ export function MoreControls({ children }: { children: React.ReactNode }) {
  * A container query on the PANEL, not a media query: the inspector's width is
  * dragged, and the window's says nothing about it.
  */
-export function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 @max-[288px]/insp:flex-col @max-[288px]/insp:items-stretch @max-[288px]/insp:gap-1">
+export function Row({
+  label,
+  hint,
+  disabled,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  /** Greys the row. A string is also said, under it, as the reason: "Not shown
+   *  in Countdown only." The caller disables its own control; this is the look
+   *  and the explanation, so a greyed row is never a mystery. */
+  disabled?: boolean | string;
+  children: React.ReactNode;
+}) {
+  const row = (
+    <div
+      className={cn(
+        "flex items-center gap-2 @max-[288px]/insp:flex-col @max-[288px]/insp:items-stretch @max-[288px]/insp:gap-1",
+        disabled && "opacity-45",
+      )}
+    >
       <span className="text-caption2 text-fg-muted w-24 shrink-0 flex items-center gap-1 @max-[288px]/insp:w-auto">
-        <span className="truncate">{label}</span>
+        <span className="truncate" title={label}>{label}</span>
         {hint && <InfoHint className="shrink-0">{hint}</InfoHint>}
       </span>
       <div className="flex-1 min-w-0 flex items-center gap-1 @max-[288px]/insp:flex-wrap">{children}</div>
+    </div>
+  );
+  if (typeof disabled !== "string") return row;
+  return (
+    <div className="flex flex-col gap-0.5">
+      {row}
+      <span className="text-caption2 text-fg-subtle">{disabled}</span>
     </div>
   );
 }
@@ -162,8 +187,8 @@ export function AlignPad({
 // of options and every control is laid out consistently. Bespoke controls
 // (live-data selects, list editors) still use <Row> directly.
 
-export function RowSwitch({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return <Row label={label} hint={hint}><Switch checked={checked} onCheckedChange={onChange} /></Row>;
+export function RowSwitch({ label, hint, checked, onChange, disabled }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean | string }) {
+  return <Row label={label} hint={hint} disabled={disabled}><Switch checked={checked} onCheckedChange={onChange} disabled={!!disabled} /></Row>;
 }
 
 export function RowText({ label, hint, value, placeholder, onChange }: { label: string; hint?: string; value: string; placeholder?: string; onChange: (v: string) => void }) {
@@ -320,10 +345,10 @@ export function Segmented<T extends string>({
 }
 
 /** A labeled dropdown row (for when there are more options than fit a toggle). */
-export function RowSelect({ label, hint, value, options, onChange }: { label: string; hint?: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void }) {
+export function RowSelect({ label, hint, value, options, onChange, disabled }: { label: string; hint?: string; value: string; options: { value: string; label: string }[]; onChange: (v: string) => void; disabled?: boolean | string }) {
   return (
-    <Row label={label} hint={hint}>
-      <Select value={value} onValueChange={onChange}>
+    <Row label={label} hint={hint} disabled={disabled}>
+      <Select value={value} onValueChange={onChange} disabled={!!disabled}>
         <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
           {options.map((o) => (

@@ -14,8 +14,10 @@
 
 import { fmtDuration } from "./pco-timer";
 import { computePvpProgress, computeStillProgress, pvpMeterKey, pvpUnavailableReason, stillOnScreenSec } from "./pvp-progress";
+import { PvpCountdownOnly } from "./pvp-countdown-only";
+import { pvpNowLayout, pvpWarnColor, pvpWarnTone } from "./pvp-now-config";
 import { Readout } from "./readout";
-import type { LayoutHAlign } from "@main/types/views";
+import type { LayoutHAlign, PvpNowLayout } from "@main/types/views";
 import { hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
 
 /** Both surfaces' configs, which differ only in whether a layer can be named. */
@@ -23,7 +25,13 @@ export type PvpNowConfig = {
   layerName?: string | null;
   showProgress?: boolean;
   showNextCue?: boolean;
+  layout?: PvpNowLayout;
+  /** LEGACY: what `layout` replaced. Read only by `pvpNowLayout`. */
   compact?: boolean;
+  /** Turn the time and the rule amber, then red, near the end. */
+  warnNearEnd?: boolean;
+  warnAmberSec?: number;
+  warnRedSec?: number;
   // Named `nowLabel`, not the shorter `label`: half the button-type objects in
   // this same config union already carry a required `label: string` of their
   // own (a button's caption), and card-toggles.ts derives its exhaustive
@@ -288,12 +296,33 @@ export function PvpNowObject({
   // slot, and a second clock beside it would answer the same question twice.
   const onScreenSec = !progress && layer ? stillOnScreenSec(layer, now) : null;
   const badge = nowBadge(layer, found);
-  const compact = config.compact ?? false;
+  const layout = pvpNowLayout(config);
+  const compact = layout === "compact";
+  // The warning colour of the TIME, which is the countdown and only the
+  // countdown: a cue name standing where the time would be (a still not being
+  // counted) is not a clock running out, so it takes no tone.
+  const warnColor = progress ? pvpWarnColor(pvpWarnTone(progress.remainingSec, config)) : null;
+  const meter = progress && (config.showProgress ?? true) ? progress.fraction : null;
   const label = config.nowLabel ?? DEFAULT_PVP_NOW_LABEL;
   // The pinned-layer name, once, since both the caption and the compact value's
   // fallback rule need to know whether a name is pinned at all.
   const pinned = (config.layerName ?? "").trim();
   const caption = pvpNowCaption(config.layerName, compact, layer, label);
+
+  // Countdown only draws the time and nothing else, so it answers before the
+  // empty branch: nothing counting (an empty layer, a pinned name that is not
+  // there, a still with Count down stills off, an ended clip) is a dim dash,
+  // and the sentence the other layouts give it has no place to go.
+  if (layout === "countdown") {
+    return (
+      <PvpCountdownOnly
+        time={progress ? fmtDuration(progress.remainingSec) : null}
+        color={warnColor}
+        meter={meter}
+        meterKey={pvpMeterKey(layer)}
+      />
+    );
+  }
 
   if (badge === "empty" || badge === "not found") {
     return (
@@ -336,10 +365,12 @@ export function PvpNowObject({
         // lines, not three or four, whenever content is up.
         value={valueText}
         mono={!!progress}
+        valueColor={warnColor}
         // NEVER dimmed here: whatever is showing (a countdown, a cue name, a
         // file name) is real content, unlike the empty/not-found dash above.
-        meter={progress && (config.showProgress ?? true) ? progress.fraction : null}
+        meter={meter}
         meterKey={pvpMeterKey(layer)}
+        meterColor={warnColor}
         align={align}
         uniform={uniform}
       />
@@ -392,12 +423,14 @@ export function PvpNowObject({
       captionEnd={<Badge badge={badge} />}
       value={value}
       mono={!!progress}
+      valueColor={warnColor}
       sub={sub}
       subEnd={progress ? fmtDuration(progress.durationSec) : onScreenSec != null ? fmtDuration(onScreenSec) : null}
-      meter={progress && (config.showProgress ?? true) ? progress.fraction : null}
+      meter={meter}
       // Which clip the fraction above is a fraction of, so the rule can tell a
       // second of a clip playing from a cut to a different one.
       meterKey={pvpMeterKey(layer)}
+      meterColor={warnColor}
       footer={next}
       align={align}
       uniform={uniform}

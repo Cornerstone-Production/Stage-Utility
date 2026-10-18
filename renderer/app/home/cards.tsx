@@ -22,7 +22,7 @@ import { AppLink } from "../app-link";
 import { AttendanceTrendChart } from "../../components/attendance-trend-chart";
 import { readinessChecks, outstanding, splitByPresence, type ReadinessCheck } from "./readiness";
 import { usePlanChecklist } from "../../main/use-plan-checklist";
-import type { LayoutObjectConfig } from "@main/types/views";
+import type { LayoutObjectConfig, PvpNowLayout } from "@main/types/views";
 /**
  * The cards Home draws with its own markup. Derived from the config union so a
  * new home-* type cannot be silently left out of the switch below.
@@ -47,7 +47,8 @@ import { useObsStatus } from "../../main/use-obs-state";
 import { usePvpState } from "../../main/use-pvp-state";
 import { PvpLayerRow } from "../../main/pvp-layer-row";
 import { visibleLayers } from "../../main/pvp-object";
-import { PvpNowObject, type PvpNowLabel } from "../../main/pvp-now";
+import { PvpNowObject, type PvpNowConfig, type PvpNowLabel } from "../../main/pvp-now";
+import { pvpNowLayout } from "../../main/pvp-now-config";
 import { useReaperStatus } from "../../main/use-reaper-state";
 import { useSplStatus } from "../../main/use-spl-state";
 import { recordIndicator, recorders, streamIndicator, streamers, loudestSpl, pinnedSpl, LOUDEST_METER, RECORDER_FOR, STREAMER_FOR } from "../recording-status";
@@ -849,15 +850,18 @@ export function PvpNowCard({
   now,
   showProgress = true,
   showNextCue = true,
-  compact = false,
+  layout = "full",
   nowLabel,
+  warn,
   countStills = false,
 }: {
   now: number;
   showProgress?: boolean;
   showNextCue?: boolean;
-  compact?: boolean;
+  layout?: PvpNowLayout;
   nowLabel?: PvpNowLabel;
+  /** The Warn near the end switch and its thresholds. */
+  warn?: Pick<PvpNowConfig, "warnNearEnd" | "warnAmberSec" | "warnRedSec">;
   countStills?: boolean;
 }) {
   const pvp = usePvpState();
@@ -868,7 +872,7 @@ export function PvpNowCard({
           was what made this card render left while its Align pad said centre and
           every cell in that pad did nothing. */}
       <PvpNowObject
-        config={{ showProgress, showNextCue, compact, nowLabel, countStills }}
+        config={{ showProgress, showNextCue, layout, nowLabel, ...warn, countStills }}
         status={pvp}
         now={now}
         align="center"
@@ -1110,8 +1114,9 @@ export function HomeCard({
           now={now}
           showProgress={c.showProgress ?? true}
           showNextCue={c.showNextCue ?? true}
-          compact={c.compact ?? false}
+          layout={pvpNowLayout(c)}
           nowLabel={c.nowLabel}
+          warn={{ warnNearEnd: c.warnNearEnd, warnAmberSec: c.warnAmberSec, warnRedSec: c.warnRedSec }}
           countStills={c.countStills ?? false}
         />
       );

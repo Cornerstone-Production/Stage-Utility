@@ -261,9 +261,9 @@ describe("countStills — opting a still into the countdown", () => {
   });
 
   test("compact mode: countStills on counts down; off shows nothing extra", () => {
-    const on = draw(status([layer(countingStill)], { imageDurationSec: 20 }), { countStills: true, compact: true });
+    const on = draw(status([layer(countingStill)], { imageDurationSec: 20 }), { countStills: true, layout: "compact" });
     assert.ok(on.includes("0:15"), on);
-    const off = draw(status([layer(countingStill)], { imageDurationSec: 20 }), { countStills: false, compact: true });
+    const off = draw(status([layer(countingStill)], { imageDurationSec: 20 }), { countStills: false, layout: "compact" });
     assert.ok(!off.includes("on screen"), `compact mode should show nothing extra for a non-counting still:\n${off}`);
     assert.ok(!/[0-9]:[0-9][0-9]/.test(off), `compact mode drew a countdown with countStills off:\n${off}`);
   });
@@ -327,7 +327,7 @@ const COMPACT_LAYER = layer({
 
 describe("compact mode", () => {
   test("a playing clip: `PVP · <cue>`, the badge, and the countdown alone", () => {
-    const html = draw(status([COMPACT_LAYER]), { compact: true });
+    const html = draw(status([COMPACT_LAYER]), { layout: "compact" });
     assert.ok(html.includes("PVP · Mark Vance"), html);
     assert.ok(html.includes("playing"), html);
     assert.ok(html.includes("4:37"), html);
@@ -343,7 +343,7 @@ describe("compact mode", () => {
     // GUARD: this is the guard for the "never the literal 'no duration'" rule.
     // Revert pvpNowCompactValue to `progress ? ... : "no duration"` and this
     // goes red.
-    const html = draw(status([layer({ ...COMPACT_LAYER, ...STILL })]), { compact: true });
+    const html = draw(status([layer({ ...COMPACT_LAYER, ...STILL })]), { layout: "compact" });
     assert.ok(html.includes("PVP · Mark Vance"), `caption should still be the cue:\n${html}`);
     assert.ok(html.includes("slide"), `value should fall back to the file name:\n${html}`);
     assert.ok(html.includes("still"), html);
@@ -352,14 +352,14 @@ describe("compact mode", () => {
   });
 
   test("a still with Label = layer: the caption's OTHER name (cue) takes the value", () => {
-    const html = draw(status([layer({ ...COMPACT_LAYER, ...STILL })]), { compact: true, nowLabel: "layer" });
+    const html = draw(status([layer({ ...COMPACT_LAYER, ...STILL })]), { layout: "compact", nowLabel: "layer" });
     assert.ok(html.includes("PVP · Graphics (1s)"), html);
     assert.ok(html.includes("Mark Vance"), `value should fall back to the cue name:\n${html}`);
     assert.ok(!html.includes("no duration"), html);
   });
 
   test("empty: caption is bare `PVP`, value is a dash, sub is the empty reason", () => {
-    const html = draw(status([layer({ ...COMPACT_LAYER, ...EMPTY })]), { compact: true });
+    const html = draw(status([layer({ ...COMPACT_LAYER, ...EMPTY })]), { layout: "compact" });
     assert.ok(html.includes(">PVP<"), `compact empty caption was not bare "PVP":\n${html}`);
     assert.ok(!html.includes("PVP ·"), html);
     assert.ok(html.includes("empty"), html);
@@ -388,7 +388,7 @@ describe("compact mode", () => {
     });
     test("each choice reaches the drawn caption", () => {
       const withLabel = (nowLabel: "cue" | "file" | "file-ext" | "layer") =>
-        draw(status([COMPACT_LAYER]), { compact: true, nowLabel });
+        draw(status([COMPACT_LAYER]), { layout: "compact", nowLabel });
       assert.ok(withLabel("cue").includes("PVP · Mark Vance"), withLabel("cue"));
       assert.ok(withLabel("file").includes("PVP · Mark Vance - Lead Pastor"), withLabel("file"));
       assert.ok(withLabel("file-ext").includes("PVP · Mark Vance - Lead Pastor.mov"), withLabel("file-ext"));
@@ -445,7 +445,7 @@ describe("a pinned layer", () => {
     // which tile this is, and it does not stop doing that just because the
     // layer is empty.
     const html = draw(status([layer({ name: "Exit screen", ...EMPTY })]), {
-      layerName: "Exit screen", compact: true,
+      layerName: "Exit screen", layout: "compact",
     });
     assert.ok(html.includes("PVP · Exit screen"), html);
     assert.ok(html.includes("empty"), html);
