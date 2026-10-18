@@ -118,16 +118,20 @@ function pkgVersion(): string {
 }
 
 /** serviceKey → date + a human label, for everything this box knows about. The three
- *  keyed stores are unioned: a service may have SPL but no attendance, or vice versa. */
+ *  keyed stores are unioned: a service may have SPL but no attendance, or vice versa.
+ *
+ *  Strict, here and in localRecordsByKey: a service whose record could not be
+ *  read is not absent. Taken for absent, an export left it out, and an import
+ *  took it for new and replaced its record and raw files with the archive's. */
 async function localServices(): Promise<Map<string, { serviceDate: string; label: string | null }>> {
   const out = new Map<string, { serviceDate: string; label: string | null }>();
   const put = (r: { serviceKey: string; serviceDate: string; planTitle?: string | null }) => {
     const prev = out.get(r.serviceKey);
     out.set(r.serviceKey, { serviceDate: r.serviceDate, label: prev?.label ?? r.planTitle ?? null });
   };
-  for (const r of await splHistoryStore.list()) put(r);
-  for (const r of await attendanceStore.list()) put(r);
-  for (const r of await serviceTimelineStore.list()) put(r);
+  for (const r of await splHistoryStore.listStrict()) put(r);
+  for (const r of await attendanceStore.listStrict()) put(r);
+  for (const r of await serviceTimelineStore.listStrict()) put(r);
   return out;
 }
 
@@ -153,15 +157,15 @@ export async function buildArchive(): Promise<Uint8Array> {
   // the same shape regardless of how the stores lay themselves out. (They are one
   // file per service now; they used to be one document for all of them.)
   const encode = (v: unknown) => strToU8(JSON.stringify(v, null, 2));
-  files["stores/spl-history.json"] = encode({ services: byKey(await splHistoryStore.list()) });
-  files["stores/attendance-history.json"] = encode({ services: byKey(await attendanceStore.list()) });
+  files["stores/spl-history.json"] = encode({ services: byKey(await splHistoryStore.listStrict()) });
+  files["stores/attendance-history.json"] = encode({ services: byKey(await attendanceStore.listStrict()) });
   // RAW records, deliberately — including `itemTimeEdits` rather than the times
   // they resolve to. This bundle round-trips back into the store, so baking an
   // operator's item time correction into the items would make it permanent and
   // take Reset (and a rebuild from events.csv) with it. The History workbook
   // does the opposite and exports the effective times, because that one is a
   // report, not a backup.
-  files["stores/service-timeline.json"] = encode({ services: byKey(await serviceTimelineStore.list()) });
+  files["stores/service-timeline.json"] = encode({ services: byKey(await serviceTimelineStore.listStrict()) });
   try {
     files["stores/baptism.json"] = new Uint8Array(await fs.readFile(path.join(getUserDataPath(), "baptism.json")));
   } catch {
@@ -275,9 +279,9 @@ async function localRecordsByKey(): Promise<Map<string, Record<string, unknown>>
     e[store] = r;
     out.set(r.serviceKey, e);
   };
-  for (const r of await splHistoryStore.list()) put("spl", r);
-  for (const r of await attendanceStore.list()) put("attendance", r);
-  for (const r of await serviceTimelineStore.list()) put("timeline", r);
+  for (const r of await splHistoryStore.listStrict()) put("spl", r);
+  for (const r of await attendanceStore.listStrict()) put("attendance", r);
+  for (const r of await serviceTimelineStore.listStrict()) put("timeline", r);
   return out;
 }
 
