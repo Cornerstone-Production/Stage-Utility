@@ -524,8 +524,9 @@ and a pair whose reading is unknown presses ON. In the eight seconds after a
 press it shows what was asked for and says it is settling. A dashed amber ring
 means Companion has lost the device and the reading cannot be trusted. A cue that
 refuses — switched off, disarmed, not allowed during a service — says why on the
-button. One that needs a confirmation cannot be fired from a panel; the rules
-page has the Test button for that. A press is recorded in the
+button. In Automation's Simulate mode a press is accepted and sends nothing, and
+the button says *Simulated: nothing was sent*. One that needs a confirmation
+cannot be fired from a panel; the rules page has the Test button for that. A press is recorded in the
 [automation log](../automation.md) with the caller `console`.
 
 Two colour schemes, by what the switch means:
@@ -563,7 +564,9 @@ after the button's label (the action's name when the label is blank), with a
 name — a name ending `_on` or `_off` gets `_cue` added, because a lone one would
 read as half of an ON/OFF pair and never appear in the list. It is saved enabled,
 with a **Cooldown** of 2 seconds, **Allowed during a service** on and **Home
-Assistant** off; change any of that on the Automation page. If the server
+Assistant** off; change any of that on the Automation page. A cue obeys what an
+action button does not: Simulate mode (the button then says it sent nothing),
+Disarm, the cooldown, and the service guard if it is switched back on. If the server
 refuses the rule, the button is left as it was and the reason is shown under the
 button.
 

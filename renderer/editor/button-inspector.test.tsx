@@ -86,8 +86,10 @@ interface Server {
 function serve(opts: {
   existingRules?: unknown[];
   cues?: CuesLive["manifest"];
-  write?: "ok" | "refuse" | "turned-off";
+  write?: "ok" | "refuse";
   readRulesFails?: boolean;
+  /** Holds the rule write until this settles, so a test can act while it is in flight. */
+  gate?: Promise<void>;
 } = {}): Server {
   const posted: unknown[] = [];
   const f = stubFetchWithLog((url, init) => {
@@ -99,8 +101,9 @@ function serve(opts: {
       if (init?.method === "POST") {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         posted.push(body);
+        if (opts.gate) return opts.gate.then(() => reply(201, { ...body, id: "rule-1", issues: [] }));
         if (opts.write === "refuse") return reply(400, { error: 'The cue name "walk_now" is already used by "Walk"' });
-        return reply(201, { ...body, id: "rule-1", enabled: opts.write === "turned-off" ? false : body.enabled, issues: [] });
+        return reply(201, { ...body, id: "rule-1", issues: [] });
       }
       if (opts.readRulesFails) throw new TypeError("fetch failed");
       return reply(200, { rules: opts.existingRules ?? [], settings: {} });
@@ -242,6 +245,23 @@ describe("Make it a cue", () => {
       ]);
       assert.deepEqual(configs, [{ type: "cue-button", cue: "walk_now", label: "Walk now", showDevice: true }]);
       assert.equal(pressed(container, "Fire a cue"), "true", "the panel must now show the cue half");
+    } finally {
+      s.restore();
+    }
+  });
+
+  test("a label typed while the write is in flight is the one the button keeps", async () => {
+    let release: () => void = () => {};
+    const s = serve({ gate: new Promise<void>((r) => (release = r)) });
+    try {
+      const { container, configs } = mount(ACTION);
+      await eventually(() => assert.equal(press(container, "Make it a cue").hasAttribute("disabled"), false));
+      fireEvent.click(press(container, "Make it a cue"));
+      await eventually(() => assert.equal(s.posted.length, 1, "the write has not started"));
+      fireEvent.change(container.querySelector("input[placeholder='Send an OSC message']")!, { target: { value: "Renamed" } });
+      release();
+      await eventually(() => assert.equal((configs.at(-1) as { type: string }).type, "cue-button"));
+      assert.equal((configs.at(-1) as { label?: string }).label, "Renamed", "the rebind used the label from before the click");
     } finally {
       s.restore();
     }

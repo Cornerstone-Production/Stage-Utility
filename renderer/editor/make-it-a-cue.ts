@@ -7,8 +7,10 @@
 //
 // This file is the pure half (naming, the rule's shape) plus the one write. The
 // write goes through the same `automation:addRule` the Automation page uses, so
-// the server's own validation, its forced-off rule for a rule with issues and its
-// `[automation] rule added` log line all apply; nothing here reimplements them.
+// the server's own validation and its `[automation] rule added` log line apply;
+// nothing here reimplements them. The rule is posted enabled, and the server
+// refuses an enabled rule that has issues (409), so a rule that needs setup comes
+// back as a failure rather than as one saved turned off.
 //
 // A failure is RETURNED, never thrown and never logged away: the caller leaves the
 // widget as it was and tells the operator what the server said.
@@ -122,8 +124,6 @@ export type MakeCueResult =
       /** The new cue's name, which is what a cue-button's `cue` holds. */
       cue: string;
       ruleName: string;
-      /** False when the server saved the rule turned off because it has issues. */
-      enabled: boolean;
     }
   | { ok: false; error: string };
 
@@ -152,10 +152,10 @@ export async function makeCueFromAction(opts: {
     const taken = takenCueNames(rules, manifest);
     // The label first, the action's name when the label has no letters in it.
     const cueName = cueNameFor(cueSlug(ruleName) ? ruleName : opts.actionLabel, taken);
-    const created = await makeCueDeps.addRule(
+    await makeCueDeps.addRule(
       manualCueRule({ name: ruleName, cueName, actionId: opts.actionId, params: opts.params }),
     );
-    return { ok: true, cue: cueName, ruleName, enabled: created.enabled !== false };
+    return { ok: true, cue: cueName, ruleName };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };
   }

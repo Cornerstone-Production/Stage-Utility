@@ -23,6 +23,7 @@ import { Button, ErrorNote, StackedField, toast } from "../components/ui";
 import { validateParams } from "@main/services/automation-param-validation";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { automationRegistryQuery } from "../lib/automation-registry";
+import { useLatestRef } from "../lib/use-latest-ref";
 import type { CuesLive } from "../main/use-cue-live";
 import { ActionButtonInspector } from "./action-button-inspector";
 import { CuePicker } from "./cue-picker";
@@ -144,6 +145,9 @@ function MakeItACue({ c, onConfig }: { c: ActionButtonConfig; onConfig: (c: Layo
   const ready = !!action && validateParams(action.params, (c.params ?? {}) as Record<string, string | number>).length === 0;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The write takes a moment, and the label can be typed into meanwhile: the
+  // rebind uses the widget as it is when the write lands, not as it was at the click.
+  const latest = useLatestRef(c);
 
   async function make() {
     if (!action || busy) return;
@@ -161,9 +165,8 @@ function MakeItACue({ c, onConfig }: { c: ActionButtonConfig; onConfig: (c: Layo
       setError(made.error);
       return;
     }
-    onConfig(toCueButton(c, made.cue));
-    if (made.enabled) toast.success(`Made the cue "${made.cue}"`);
-    else toast.info(`Made the cue "${made.cue}", turned off: it needs setup on the Automation page`);
+    onConfig(toCueButton(latest.current, made.cue));
+    toast.success(`Made the cue "${made.cue}"`);
   }
 
   return (
