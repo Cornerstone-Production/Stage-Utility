@@ -6,7 +6,7 @@
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
-import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch } from "../kiosk-presence.js";
+import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret } from "../kiosk-presence.js";
 import { parseHealthReport } from "../output-health.js";
 import { headerValue } from "../http-origin.js";
 import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
@@ -396,6 +396,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       await updateDevices((current) => release(current, id));
       forgetHealth(id);
       forgetSecretMismatch(id);
+      forgetSecret(id);
       if (output) {
         console.log(`[output-helper] released: ${scrub(id)} (${scrub(output.kind)} "${scrub(output.name)}") is not set up again`);
       }

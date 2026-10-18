@@ -238,6 +238,13 @@ export function rememberSecret(id: string, secret: string): void {
   secrets.set(id, secret);
 }
 
+/** Forget the secret a device presented: its binding was released, and what it
+ *  showed before then (perhaps a leaked token, shown by someone else) must not be
+ *  what the next claim pins. */
+export function forgetSecret(id: string): void {
+  secrets.delete(id);
+}
+
 /** The secret a device presented, for pinning at claim. */
 export function secretFor(id: string): string | undefined {
   return secrets.get(id);

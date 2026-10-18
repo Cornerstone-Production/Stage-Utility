@@ -311,8 +311,10 @@ have been (on air in an old build's error page, in a photo, a screenshot), repla
    <screen>`. The old token still opens that screen until the next step.
 4. In Stage Utility, open the screen's settings and **Release** it (Device). That drops
    the old token. Within 30 s the output appears under *Not set up yet*.
-5. Set it up on the same screen again. The server pins the token the output last
-   showed it, the new one, and the screen comes back.
+5. Set it up on the same screen again. The server pins the token the output showed it
+   since the release, the new one, and the screen comes back. If the output stays on
+   the holding screen and the server logs the mismatch line again, something else
+   showed the old token first after the release: release and set it up again.
 
 The output that took over a Chrome kiosk's identity keeps the Mac's bare device id and
 gets a token of its own; the installer's `token` file is not changed.

@@ -80,6 +80,16 @@ describe("a helper output's token replaced on its Mac", () => {
     assert.equal(await enroll(OLD), "holding", "the old token still opened the screen after it was set up again");
   });
 
+  it("does not pin, after a release, a token shown before it", async () => {
+    // Someone holding the leaked token asks /enroll before the operator releases.
+    assert.equal(await enroll(OLD), `screen /display-1?device=${encodeURIComponent(ID)}`);
+    const released = await callRoute(kioskDeviceRoutes, "/api/devices/release", { method: "POST", body: { deviceId: ID } });
+    assert.equal(released.status, 200, released.body);
+    const claimed = await callRoute(kioskDeviceRoutes, "/api/devices/claim", { method: "POST", body: { deviceId: ID, outputId: "display-1" } });
+    assert.equal(claimed.status, 200, claimed.body);
+    assert.equal((await kioskDevicesStore.load()).find((d) => d.id === ID)?.token, "", "a token shown before the release was pinned");
+  });
+
   it("logs the mismatch once, and again only after it has matched", async () => {
     const first = await logged(async () => {
       for (let i = 0; i < 3; i++) {

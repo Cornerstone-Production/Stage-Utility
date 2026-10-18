@@ -476,8 +476,10 @@ helper from its window, run
 server still holds the old token, so the output shows the holding screen and the server
 logs `[output-helper] <device id> showed a token other than the one pinned`. **Release**
 the screen in its Screen settings, which drops the old token, then set the output up
-on that screen again when it appears under *Not set up yet*: the server pins the new
-one. Until the release, the old token still opens the screen.
+on that screen again when it appears under *Not set up yet*: the server pins the token
+the output showed it since the release. Until the release, the old token still opens
+the screen; if the output stays on the holding screen and the mismatch line comes
+back, something else showed the old token first, so release and set it up again.
 
 Where `/Library/Application Support/StageUtility/migrated-from-kiosk` exists, the Mac
 was a Chrome kiosk and keeps its screen: its main display takes over the kiosk's device
