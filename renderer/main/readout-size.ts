@@ -127,6 +127,10 @@ export interface ReadoutExtras {
  *  on a wall and stays visible in a small tile. */
 export const METER_SCALE = 0.014;
 export const METER_MIN_PX = 2;
+/** The rule's height in a box `boxH` tall. One rule for every drawer of the hairline. */
+export function meterHeightPx(boxH: number): number {
+  return Math.max(METER_MIN_PX, boxH * METER_SCALE);
+}
 
 /**
  * How much bigger than its sub-line the value stays once the extras are drawn.
@@ -184,7 +188,7 @@ export function fitComposition(
 
   const fullCaptionPx = Math.max(CAPTION_MIN_PX, boxH * CAPTION_SCALE);
   const fullSubPx = Math.max(SUB_MIN_PX, boxH * SUB_SCALE);
-  const fullMeterPx = Math.max(METER_MIN_PX, boxH * METER_SCALE);
+  const fullMeterPx = meterHeightPx(boxH);
 
   const attempt = (caption: boolean, sub: boolean, meter: boolean, footer: boolean) => {
     const captionPx = caption ? fullCaptionPx : 0;

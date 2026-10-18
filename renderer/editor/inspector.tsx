@@ -53,6 +53,8 @@ import { usePeopleCountState } from "../main/use-people-count-state";
 import { useObsStatus } from "../main/use-obs-state";
 import { hasContent, type PvpStatusDTO } from "@main/types/pvp";
 import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS, pvpLayerStateWord, type PvpNowLabel } from "../main/pvp-now";
+import { WARN_MAX_SEC, pvpNowLayout, pvpNowRowStates, pvpWarnThresholds, withPvpNowLayout } from "../main/pvp-now-config";
+import { PvpLayoutRow } from "./pvp-layout-row";
 import { usePvpState } from "../main/use-pvp-state";
 import { useQuery } from "@tanstack/react-query";
 import { useReaperStatus } from "../main/use-reaper-state";
@@ -711,6 +713,113 @@ export function ObsLiveLabel({ mode }: { mode: string }) {
         ? "Active now"
         : "Connected · idle";
   return <span className="text-caption2 text-fg-muted">{label}</span>;
+}
+
+/**
+ * The ProVideoPlayer "now" settings, for the wall object and its Home card.
+ * Exported so a test can drive the rows themselves — which are greyed under
+ * which layout, and what the Warn thresholds write.
+ */
+export function PvpNowInspector({
+  c,
+  pvp,
+  onConfig,
+}: {
+  c: Extract<LayoutObjectConfig, { type: "pvp-now" | "home-pvp-now" }>;
+  pvp: PvpStatusDTO | null;
+  onConfig: (c: LayoutObjectConfig) => void;
+}) {
+  const layout = pvpNowLayout(c);
+  const rows = pvpNowRowStates(layout);
+  const { amberSec, redSec } = pvpWarnThresholds(c);
+  return (
+    <>
+      <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{pvpSummary(pvp)}</span></Row>
+      {c.type === "pvp-now" && (
+        <PvpLayerPicker
+          label="Layer"
+          emptyLabel="Any layer with content"
+          hint="Leave on Any layer with content to follow whichever layer has something on it — pinning a layer also names it in the widget's caption, in every state."
+          value={c.layerName ?? ""}
+          pvp={pvp}
+          onChange={(v) => onConfig({ ...c, layerName: v })}
+        />
+      )}
+      <PvpLayoutRow
+        value={layout}
+        onChange={(v) => onConfig(withPvpNowLayout(c, v))}
+      />
+      <RowSwitch label="Progress bar" checked={c.showProgress ?? true} onChange={(v) => onConfig({ ...c, showProgress: v })} />
+      <RowSwitch
+        label="Next cue"
+        // The caveat, where the operator makes the decision. It is the
+        // reason this is a switch at all.
+        hint="The next entry in the playlist — what plays next only while the playlist keeps auto-advancing. A cue fired by hand makes it wrong until the next poll."
+        checked={c.showNextCue ?? true}
+        onChange={(v) => onConfig({ ...c, showNextCue: v })}
+        disabled={rows.nextCue}
+      />
+      <RowSelect
+        label="Label"
+        value={c.nowLabel ?? DEFAULT_PVP_NOW_LABEL}
+        options={PVP_NOW_LABEL_OPTIONS}
+        onChange={(v) => onConfig({ ...c, nowLabel: v as PvpNowLabel })}
+        disabled={rows.label}
+      />
+      <RowSwitch
+        label="Warn near the end"
+        hint="The time turns amber, then red, as a clip runs out. Every layout."
+        checked={c.warnNearEnd ?? false}
+        onChange={(v) => onConfig({ ...c, warnNearEnd: v })}
+      />
+      {(c.warnNearEnd ?? false) && (
+        <>
+          <RowNumber
+            label="Amber at"
+            hint="Seconds left when the time turns amber."
+            suffix="s"
+            value={amberSec}
+            step={1}
+            min={0}
+            max={WARN_MAX_SEC}
+            onChange={(v) => onConfig({ ...c, warnAmberSec: Math.round(v) })}
+          />
+          <RowNumber
+            label="Red at"
+            suffix="s"
+            // Never above amber. The field's own `max` is the amber value, so
+            // a higher number is held at it as it is typed; and if amber is
+            // later lowered below a stored red, the reader holds red at amber
+            // — the stored number is left alone, so raising amber again gives
+            // it back.
+            hint="Seconds left when the time turns red. Never above Amber at: a higher number is held at the amber value."
+            value={redSec}
+            step={1}
+            min={0}
+            max={amberSec}
+            onChange={(v) => onConfig({ ...c, warnRedSec: Math.round(v) })}
+          />
+        </>
+      )}
+      <RowSwitch
+        label="Count down stills"
+        hint="Counts a still down from the image duration on the ProVideoPlayer card, or the hold below. For a layer whose cue advances on it, like a rotating pre-roll; off for a graphic that stays up."
+        checked={c.countStills ?? false}
+        onChange={(v) => onConfig({ ...c, countStills: v })}
+      />
+      {c.type === "pvp-now" && (c.countStills ?? false) && (
+        <RowNumber
+          label="Still hold (seconds)"
+          hint={`Left alone, it follows the card's Image duration (${pvp?.imageDurationSec ?? 20}s). Editing it pins this widget to its own number.`}
+          value={c.stillHoldSec ?? pvp?.imageDurationSec ?? 20}
+          step={1}
+          min={1}
+          max={3600}
+          onChange={(v) => onConfig({ ...c, stillHoldSec: Math.round(v) })}
+        />
+      )}
+    </>
+  );
 }
 
 /** REAPER's live state, under the REAPER status settings — as ObsLiveLabel. */
@@ -1413,59 +1522,7 @@ export function Inspector({
       {c.type === "home-pvp" && (
         <RowSwitch label="Progress bar" hint="A hairline rule under each rolling clip. The time remaining is always shown." checked={c.showProgress ?? false} onChange={(v) => onConfig({ ...c, showProgress: v })} />
       )}
-      {(c.type === "pvp-now" || c.type === "home-pvp-now") && (
-          <>
-            <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{pvpSummary(pvp)}</span></Row>
-            {c.type === "pvp-now" && (
-              <PvpLayerPicker
-                label="Layer"
-                emptyLabel="Any layer with content"
-                hint="Leave on Any layer with content to follow whichever layer has something on it — pinning a layer also names it in the widget's caption, in every state."
-                value={c.layerName ?? ""}
-                pvp={pvp}
-                onChange={(v) => onConfig({ ...c, layerName: v })}
-              />
-            )}
-            <RowSwitch label="Progress bar" checked={c.showProgress ?? true} onChange={(v) => onConfig({ ...c, showProgress: v })} />
-            <RowSwitch
-              label="Next cue"
-              // The caveat, where the operator makes the decision. It is the
-              // reason this is a switch at all.
-              hint="The next entry in the playlist — what plays next only while the playlist keeps auto-advancing. A cue fired by hand makes it wrong until the next poll."
-              checked={c.showNextCue ?? true}
-              onChange={(v) => onConfig({ ...c, showNextCue: v })}
-            />
-            <RowSwitch
-              label="Compact"
-              hint="Two lines instead of three or four: the caption becomes PVP · <label>, and the value is the countdown alone."
-              checked={c.compact ?? false}
-              onChange={(v) => onConfig({ ...c, compact: v })}
-            />
-            <RowSelect
-              label="Label"
-              value={c.nowLabel ?? DEFAULT_PVP_NOW_LABEL}
-              options={PVP_NOW_LABEL_OPTIONS}
-              onChange={(v) => onConfig({ ...c, nowLabel: v as PvpNowLabel })}
-            />
-            <RowSwitch
-              label="Count down stills"
-              hint="Counts a still down from the image duration on the ProVideoPlayer card, or the hold below. For a layer whose cue advances on it, like a rotating pre-roll; off for a graphic that stays up."
-              checked={c.countStills ?? false}
-              onChange={(v) => onConfig({ ...c, countStills: v })}
-            />
-            {c.type === "pvp-now" && (c.countStills ?? false) && (
-              <RowNumber
-                label="Still hold (seconds)"
-                hint={`Left alone, it follows the card's Image duration (${pvp?.imageDurationSec ?? 20}s). Editing it pins this widget to its own number.`}
-                value={c.stillHoldSec ?? pvp?.imageDurationSec ?? 20}
-                step={1}
-                min={1}
-                max={3600}
-                onChange={(v) => onConfig({ ...c, stillHoldSec: Math.round(v) })}
-              />
-            )}
-          </>
-      )}
+      {(c.type === "pvp-now" || c.type === "home-pvp-now") && <PvpNowInspector c={c} pvp={pvp} onConfig={onConfig} />}
       {/* Both scores widgets, because both carry `game` and it means the same
           thing on each. The sport-detail switch below is the wall object's
           alone — the Home card draws a list of rows, not a strip with a
