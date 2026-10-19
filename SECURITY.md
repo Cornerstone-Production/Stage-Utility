@@ -123,7 +123,7 @@ When reporting, please include:
 
 ## Code scanning
 
-CodeQL runs on every change. Two of its rules, `js/file-access-to-http` and
+CodeQL runs on every pull request. Two of its rules, `js/file-access-to-http` and
 `js/http-to-file-access`, flag what this product is for, and the alerts for the
 known flows are dismissed with a link to
 [Code scanning decisions](docs/reference/code-scanning.md#code-scanning-decisions),
