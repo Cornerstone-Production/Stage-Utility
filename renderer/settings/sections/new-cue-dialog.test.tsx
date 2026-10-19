@@ -107,6 +107,8 @@ function seedViews() {
       { id: "booth", name: "Booth", kind: "custom", createdAt: "", surface: "console", layout: layoutWith(clockObject), layoutRev: 1 },
       { id: "wall", name: "Lobby wall", kind: "custom", createdAt: "", surface: "display", layout: layoutWith(clockObject) },
       { id: "cal", name: "Calendar console", kind: "calendar", createdAt: "", surface: "console" },
+      // Home: a seeded console on every install, laid out on a grid and not a canvas.
+      { id: "home", name: "Home", kind: "custom", createdAt: "", surface: "console", layout: layoutWith(clockObject), layoutRev: 1 },
     ] as View[],
   };
 }
@@ -435,7 +437,7 @@ describe("On a console", () => {
     if (label) await typeInto(labelledInput("Button label"), label, "Button label");
   }
 
-  test("lists consoles with a layout, not wall views or calendar consoles", async () => {
+  test("lists consoles with a canvas layout, not wall views, calendar consoles or Home", async () => {
     await toConsoleStep("x", []);
     const offered = [...document.querySelectorAll("[data-console]")].map((el) => el.getAttribute("data-console"));
     assert.deepEqual(offered, ["foh", "booth"]);

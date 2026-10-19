@@ -16,6 +16,7 @@
 // one result per console and says which failed. See addCueButtonToConsoles.
 
 import { errorMessage } from "@main/services/errors";
+import { screensListViews } from "@main/services/home-view";
 import { viewIsConsole, type LayoutDTO, type LayoutObject, type View } from "@main/types/views";
 
 import { uid } from "../editor/layout-templates";
@@ -35,9 +36,12 @@ export const DEFAULT_BUTTON_SIZE = { w: 0.3, h: 0.16 } as const;
 export const BUTTON_GAP = 0.02;
 
 /** The consoles a cue button can go on: a control surface with a layout of its
- *  own. A calendar console has no layout objects to add one to. */
+ *  own. A calendar console has no layout objects to add one to, and HOME is a
+ *  console with a layout that is not a canvas at all — it places cards on a grid
+ *  from `home` placements and ignores x/y/w/h, so a button added with a canvas
+ *  position would land on the grid at no place anybody chose. */
 export function consolesWithLayouts(views: readonly View[]): View[] {
-  return views.filter((v) => viewIsConsole(v) && v.kind === "custom");
+  return screensListViews(views).filter((v) => viewIsConsole(v) && v.kind === "custom");
 }
 
 export interface PlacedButton {

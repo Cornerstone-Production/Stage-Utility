@@ -107,12 +107,14 @@ describe("withCueButton", () => {
 
 describe("consolesWithLayouts", () => {
   const v = (id: string, over: Partial<View>): View => ({ id, name: id, kind: "custom", createdAt: "", ...over });
-  test("a custom console only: not a wall view, not a calendar console", () => {
+  test("a custom console only: not a wall view, not a calendar console, not Home", () => {
     const views = [
       v("a", { surface: "console" }),
       v("b", {}),
       v("c", { surface: "console", kind: "calendar" }),
       v("d", { surface: "console", kind: "slots" }),
+      // Home is a custom console with a layout, seeded on every install.
+      v("home", { surface: "console" }),
     ];
     assert.deepEqual(consolesWithLayouts(views).map((x) => x.id), ["a"]);
   });
