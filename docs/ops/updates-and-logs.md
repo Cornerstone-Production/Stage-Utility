@@ -21,6 +21,18 @@ result file, sleeps briefly, then **kills the server** — the service manager
 relaunches it on the new build. On failure it writes the result and leaves the
 server running on the old build.
 
+### The machines that show screens follow
+
+A Mac running the output helper, and a Windows kiosk, carry software of their own
+that the server's update does not replace: the helper app, and the kiosk's launcher.
+Each runs an updater that asks the server every five minutes and installs what the
+server runs, never during a service on a Mac (whose helper restarts for about two
+seconds), so updating the server is the whole job:
+[Keeping the helper on the server's version](../kiosk-devices.md#keeping-the-helper-on-the-servers-version).
+A machine installed before 1.27.0 needs its installer run once more to get the
+updater. Settings → Advanced → Server → *Update Mac output helpers and Windows kiosks
+with this server* turns it off.
+
 ### The update lock
 
 While a Planning Center service is live, or any recorder is open (SPL, attendance,
@@ -198,6 +210,7 @@ a path or a credential. If you see one, report it.
 | `[displays]` | A display's reported screen size failing to record: [Size](../kiosk-devices.md#size) |
 | `[encryption]` | The encryption key generated on first run, or rejected as the wrong length: [When credentials all read as "not configured"](reliability.md#when-credentials-all-read-as-not-configured) |
 | `[events]` | SSE and poll-transport clients connecting, closing, or expiring: [Polling transport](../display-urls.md#polling-transport) |
+| `[helper-update]` | Mac output helpers and Windows kiosks following this server's version: each machine's decision when it changes (waiting and why, going ahead, up to date), what it reports it did (updated, failed and why, waiting for a login, the helper quit at the Mac, Local Network refused after an update), Update now pressed, a machine that stopped checking: [Keeping the helper on the server's version](../kiosk-devices.md#keeping-the-helper-on-the-servers-version) |
 | `[history]` | A time correction refused, a rebuild's outcome; on the browser, History or Home cards failing to load: [Attendance and service history](../features/attendance-and-history.md) |
 | `[history-edit]` | Merging one recorded service into another: [The service page](../features/attendance-and-history.md#the-service-page) |
 | `[integration-manager]` | Config-key validation, and credentials migrating (or failing to migrate) out of `settings.json`: [When a credential could not be moved out of settings.json](reliability.md#when-a-credential-could-not-be-moved-out-of-settingsjson) |

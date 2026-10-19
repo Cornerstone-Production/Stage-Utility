@@ -31,7 +31,8 @@ address already in it, is under *Setting up a screen* on the same card — click
 
 On a Mac the same command installs the [Mac output helper](#installing-the-mac-output-helper)
 instead of a browser. For a Mac the helper cannot run on, `-s -- --browser` after
-`sh` installs a Chrome kiosk instead.
+`sh` installs a Chrome kiosk instead. On Windows it installs a launcher that follows
+the server's version on its own: see [The Windows kiosk's launcher](#the-windows-kiosks-launcher).
 
 **3. Set it up.** Open **Screens**. A screen that has been heard and not set up
 is named in a banner at the top of the page, with **Set up** beside it, and again
@@ -101,6 +102,10 @@ curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
    nobody logged in the screen saver is left alone, since it is a per-account setting,
    and the token is readable by administrators until an account owns it: if the first
    account to log in is not one, run the installer again after it has.
+6. Installs the updater, so the helper follows the server's version from then on (see
+   [Keeping the helper on the server's version](#keeping-the-helper-on-the-servers-version)).
+   A failure here is said plainly and leaves the helper installed; run the installer
+   again to add it.
 
 Running it again upgrades in place.
 
@@ -153,6 +158,77 @@ A release whose helper build failed has no zips either, and the installer does n
 around that: a Mac whose server runs that version cannot install the helper, from the
 server or from GitHub, until the server updates to a release that has them.
 
+### Keeping the helper on the server's version
+
+The helper's version is the server's, so a helper is up to date exactly when it runs
+the version in the server's `/api/update/status`. When the server updates, each Mac
+installs the same version on its own, with nobody at it.
+
+The installer leaves an updater beside the helper: a copy of itself in
+`/Library/Application Support/StageUtilityUpdater/` (root's, apart from the
+state folder, which the logged-in account owns) and a LaunchDaemon,
+`/Library/LaunchDaemons/com.stageutility.output-updater.plist`, that runs it with
+`--check-update` every five minutes and at boot. Each run:
+
+1. Asks the server whether to update (`GET /api/machine-updates/check`), saying which
+   Mac it is, what it runs and what it last did. It asks the server in the `server`
+   file if the Mac has one, else the server the running helper is loading from (which
+   follows the server if it moves), else the one it was installed from.
+2. **The server decides when.** Never while Planning Center reports a service live,
+   and not within the window around a rehearsal or service (the same window integration
+   reconnects use, [Winding down between services](ops/reliability.md#winding-down-between-services):
+   *Lead time before rehearsal* and *Keep active after service ends* in Settings >
+   Advanced > Server). Not with *Update Mac output helpers and Windows kiosks with this
+   server* off (Settings > Advanced > Server; on by default), and not again for a
+   version that already failed on that Mac. **Update now** and **Try again** on the
+   screen's Device section override the switch, the window and a past failure, never
+   a live service. With no Planning Center, there is no window, and a Mac updates
+   within five minutes of the server.
+3. Downloads the zip and its SHA-256 from that server exactly as an install does,
+   checks the app in it is the version the server named, and clears any
+   set-user-id bit (root unpacks it).
+4. Stops the helper, swaps the new app in keeping the old one, and starts it through
+   launchd. The outputs go off air for the restart: measured on an M4 Mac mini with a
+   DeckLink 8K Pro, the SDI port reopened 0.8 s after the old helper stopped and
+   pictures were flowing again about 2 s after.
+5. Waits up to 90 s for the new helper to say, in `helper-status.json` in the
+   logged-in account's `~/Library/Application Support/StageUtilityOutput/`, that it
+   is the new version, with the pid launchd started, and that Chromium started. If it
+   does not, the old app goes back and is started again, and that version is not tried
+   again until someone presses Try again.
+
+It does not update a Mac nobody is logged in to (the new helper could not be started
+and checked), nor start a helper someone quit at the Mac (to free a card for another
+app, say): each waits, and Screens says why. It never runs anything it downloaded as
+root: it swaps the app, which runs as the logged-in account. A change to the installer
+itself, the agent file it writes for instance, reaches a Mac only when the installer is
+run again by hand, and a release that needs that says so in its notes.
+
+**Installed before this.** A helper installed by an installer older than 1.27.0 has no
+updater, and needs the installer run once more, at the Mac, to get it. Its screens say
+*Helper version unknown. Run the macOS installer once* once the server has been up
+longer than a check takes.
+
+**What Screens shows.** Each screen shown by a helper output has a line under its
+device saying what the Mac's helper runs and what it was told: up to date, waiting
+(with why, and until when), updating, updated, or failed and put back (with why).
+Screen settings > Device has the same as a **Helper** row, with **Update now** when
+automatic updates are off and **Try again** after a failure. Both act at the Mac's next
+check, within five minutes.
+
+**Local Network after an update.** macOS keeps the Local Network answer by bundle id,
+and the logs on a Mac running the helper show it kept across an ad hoc signed update.
+If it ever asks again, the helper says so in its window and on its outputs, and since it
+then cannot reach the server itself, the updater reports it: the screen's line and
+`/log` say someone at the Mac has to choose Allow.
+
+**Logs.** On the server, `[helper-update]` lines on `/log`: each Mac's decision when it
+changes (waiting and why, going ahead, up to date), what it reports it did (updated,
+failed and why, waiting for a login, the helper quit, Local Network refused), Update
+now pressed, and a Mac that stopped checking. Never one per check. On the Mac,
+`/Library/Logs/StageUtility/helper-update.log`, the same decisions as the updater saw
+them, with the download and the swap.
+
 **Coming from the Chrome kiosk.** If the earlier agent is there
 (`com.stageutility.kiosk`), the installer writes
 `/Library/Application Support/StageUtility/migrated-from-kiosk` before it stops, swaps
@@ -175,8 +251,10 @@ sudo ./scripts/uninstall.sh
 
 A Mac with no checkout fetches it:
 `curl -fsSL https://raw.githubusercontent.com/Cornerstone-Production/Stage-Utility/main/scripts/uninstall.sh | sudo bash`
-(`bash -s -- --dry-run` previews). It stops the helper with `launchctl bootout` in
-every account that has it loaded, then removes the LaunchAgent and the app. It also
+(`bash -s -- --dry-run` previews). It stops the updater and removes its LaunchDaemon
+and its folder first, so a run mid-update cannot put the app back, then stops the
+helper with `launchctl bootout` in every account that has it loaded, and removes the
+LaunchAgent and the app. It also
 removes the Chrome kiosk's agent and launcher where `--browser` installed them, and
 removes the Stage Utility server if one is on the same Mac (its launchd daemon,
 `com.stageutility.server`, or `com.cornerstone.stage-utility` from an install that
@@ -194,7 +272,10 @@ display sleep, system sleep and the screen saver's idle time and password, and d
 not record what they were. The script prints the commands to set them, or set them in
 System Settings > Lock Screen.
 
-By hand, as root: `launchctl bootout gui/<uid>/com.stageutility.output`, then remove
+By hand, as root: `launchctl bootout system/com.stageutility.output-updater` and remove
+`/Library/LaunchDaemons/com.stageutility.output-updater.plist` and
+`/Library/Application Support/StageUtilityUpdater`, then
+`launchctl bootout gui/<uid>/com.stageutility.output`, and remove
 `/Library/LaunchAgents/com.stageutility.output.plist` and
 `/Applications/StageUtilityOutput.app`. The plist is what starts the helper at every
 login, so removing only the app leaves an agent trying to launch a missing one.
@@ -218,6 +299,43 @@ rather than running them.
 The installer prints this list when it finishes. On a Mac that is not coming from the
 Chrome kiosk, the main display, the one with the menu bar, is off until you turn it on
 in the helper's window.
+
+## The Windows kiosk's launcher
+
+The Windows installer writes the device's identity to `%PROGRAMDATA%\StageUtility\`
+as before, and downloads the launcher, `kiosk-windows.ps1`, from the server it was
+fetched from into that folder as `kiosk.ps1`. The scheduled task `StageUtilityKiosk`
+runs it at every sign-in and every minute; it finds the server and opens the
+browser on the device's `/enroll` address. The discovery port is in the `port` file
+beside it (`STAGE_KIOSK_PORT` at install, 8789 by default).
+
+**Where it downloads from.** The address in `STAGE_DOWNLOAD_FROM` if set, else
+`STAGE_SERVER` (which also pins the PC to that server, as on a Mac), else the one the
+server stamped into the installer when it served it, else the `server` file of an
+earlier install. An installer saved and run by hand has no stamped address:
+`$env:STAGE_DOWNLOAD_FROM = 'http://<server>'` first. With none, it changes nothing
+and says so.
+
+**Keeping it on the server's version.** The installer also puts
+`kiosk-update-windows.ps1` in `%PROGRAMFILES%\StageUtility\kiosk-update.ps1` (only an
+administrator can write there; it runs as SYSTEM) and registers the task
+`StageUtilityKioskUpdate`, which runs it as SYSTEM every five minutes. Each run asks
+the server (`GET /api/machine-updates/check`, the same check a Mac's updater makes)
+whether its launcher, compared by SHA-256, is the server's. When the server says to
+replace it, it downloads `kiosk-windows.ps1`, checks its SHA-256 is the one the
+server named and that it parses, and moves it over `kiosk.ps1`. Nothing restarts:
+the new launcher runs at the next sign-in, or the next time the browser exits. Any
+failure leaves `kiosk.ps1` as it was, and the server does not offer that launcher
+again until someone presses **Try again** in Screen settings > Device. The switch
+*Update Mac output helpers and Windows kiosks with this server* (Settings > Advanced >
+Server) holds it, and **Update now** overrides that. Service times do not, since a
+file replaced restarts nothing.
+
+What it last did is `status.json` beside it, the server it asks is `update-from`
+(the `server` file pins it instead), and its log, `kiosk-update.log` beside it,
+says each decision when it changes, `[helper-update]`-tagged, as the server's `/log`
+does. A PC installed before 1.27.0 has no updater and a launcher written by the
+installer; run the installer once more to get both.
 
 ## Size
 
