@@ -92,7 +92,7 @@ import {
   toast,
 } from "../../components/ui";
 import { CompanionPressFields } from "./companion-cues";
-import { ActionPicker } from "../../editor/action-picker";
+import { PickerField } from "./automation-picker";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
 
@@ -162,25 +162,31 @@ export interface PairRowData {
 export function Row({
   label,
   hint,
+  plain,
   children,
 }: {
   label: string;
   hint?: string;
+  /** A div, not a label. A label hands a press on any of its blank space to its
+   *  first button, which for a row holding a whole picker panel is the button
+   *  that closes the panel. */
+  plain?: boolean;
   children: React.ReactNode;
 }) {
+  const Tag = plain ? "div" : "label";
   return (
-    <label className="flex items-center gap-3 py-1">
-      <span className="w-36 shrink-0 text-caption1 text-fg-muted">
+    <Tag className={"flex gap-3 py-1 " + (plain ? "items-start" : "items-center")}>
+      <span className={"w-36 shrink-0 text-caption1 text-fg-muted " + (plain ? "pt-1" : "")}>
         {label}
         {hint ? <InfoHint>{hint}</InfoHint> : null}
       </span>
       <span className="min-w-0 flex-1">{children}</span>
-    </label>
+    </Tag>
   );
 }
 
-const selectCls =
-  "h-7 w-full rounded-md border border-line-strong bg-field px-2.5 py-1 text-footnote text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus";
+/** The one trigger a picker never offers for a rule that is not already a cue. */
+const NOT_A_PICKED_TRIGGER: ReadonlySet<string> = new Set([CALL_TRIGGER_ID]);
 
 /** The saved JSON object as editable rows. Malformed config yields no rows rather
  *  than throwing — the operator can then just add them. */
@@ -1121,27 +1127,30 @@ export function RuleEditorBody({
 
       <Separator />
       <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">When</span>
-      <Row label="Trigger">
+      <Row label="Trigger" plain>
         {/* A rule saved under an older release can still name a trigger this
             version's registry no longer lists (a type renamed or retired) — the
-            Select keeps that id visible rather than silently swapping the rule
-            to whichever trigger the browser picks first. */}
-        <Select
+            picker keeps that id visible rather than silently swapping the rule
+            to whichever trigger the browser picks first.
+
+            Called by name is offered only where it already is the trigger: an
+            ON/OFF half is one, and the pair's editor is unchanged. Anywhere else
+            a rule becomes a manual cue through Make it manual, which also gives
+            it a cue name instead of leaving the field for somebody to fill in. */}
+        <PickerField
+          kind="trigger"
+          defs={registry.triggers}
           value={draft.trigger.id}
-          onValueChange={(id) =>
+          placeholder="Pick a trigger…"
+          ariaLabel="Trigger"
+          exclude={isCue ? undefined : NOT_A_PICKED_TRIGGER}
+          onChange={(id) =>
             setDraft({
               ...draft,
               trigger: { id, params: seededParams("trigger", id, registry.triggers.find((t) => t.id === id)?.params ?? []) },
             })
           }
-        >
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {registry.triggers.map((t) => (
-              <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        />
       </Row>
       {trigger?.params
         // `aliases` is a list, not a string to type. It renders below as one
@@ -1251,37 +1260,34 @@ export function RuleEditorBody({
           </div>
         );
       })}
-      <Row label="Add condition">
-        {/* Left as a raw <select>: its value is bound to "" permanently — a
-            transient picker that appends whatever id it is showing right now to
-            `draft.conditions` and immediately resets, never redisplaying a
-            stored value. It cannot render a value its own option list does not
-            carry. */}
-        <select
-          className={selectCls}
+      <Row label="Add condition" plain>
+        {/* A transient picker: choosing appends the condition to
+            `draft.conditions` and the field goes back to "Add…", never
+            redisplaying a stored value — which is why its `value` is "". */}
+        <PickerField
+          kind="condition"
+          defs={registry.conditions}
           value=""
-          onChange={(e) => {
-            if (!e.target.value) return;
-            const id = e.target.value;
+          placeholder="Add…"
+          ariaLabel="Add condition"
+          onChange={(id) => {
             const params = seededParams("condition", id, registry.conditions.find((c) => c.id === id)?.params ?? []);
             setDraft({ ...draft, conditions: [...draft.conditions, { id, params }] });
           }}
-        >
-          <option value="">Add…</option>
-          {registry.conditions.map((c) => (
-            <option key={c.id} value={c.id}>{c.label}</option>
-          ))}
-        </select>
+        />
       </Row>
 
       <Separator />
       <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Then</span>
-      <Row label="Action">
-        {/* Same staleness risk as the Trigger select above: an older release's
+      <Row label="Action" plain>
+        {/* Same staleness risk as the Trigger picker above: an older release's
             rule can still name an action this registry no longer lists. */}
-        <ActionPicker
-          actions={registry.actions}
+        <PickerField
+          kind="action"
+          defs={registry.actions}
           value={draft.action.id}
+          placeholder="Pick an action…"
+          ariaLabel="Action"
           onChange={(id) =>
             setDraft({
               ...draft,
