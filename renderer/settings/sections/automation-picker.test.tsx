@@ -23,7 +23,7 @@ const teardown = installRenderDom();
 
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
-const { AutomationPicker, PickerField, pickerEntries, pickerHeadings } = await import("./automation-picker.js");
+const { AutomationPicker, PickerField, oneLine, pickerEntries, pickerHeadings } = await import("./automation-picker.js");
 const { AUTOMATION_TRIGGERS } = await import("@main/services/automation-triggers.js");
 const { AUTOMATION_ACTIONS } = await import("@main/services/automation-actions.js");
 const { AUTOMATION_CONDITIONS } = await import("@main/services/automation-conditions.js");
@@ -139,6 +139,30 @@ describe("the panel", () => {
     assert.deepEqual(optionIds(), ["update.available"], "Called by name was offered");
     await search("called by name");
     assert.equal(optionIds().length, 0, "Called by name was found by search");
+  });
+});
+
+describe("oneLine", () => {
+  test("is the first sentence, whole, and the help itself when there is one", () => {
+    assert.equal(oneLine("Starts the recording. Does nothing when it is already rolling."), "Starts the recording.");
+    assert.equal(oneLine("A single thought, no full stop"), "A single thought, no full stop");
+    // A full stop inside a word or an abbreviation is not the end of the sentence.
+    assert.equal(oneLine("Matches e.g. a title. Then more."), "Matches e.g. a title.");
+    assert.equal(oneLine("Reads /ch/01/mix/on. Blank means any."), "Reads /ch/01/mix/on.");
+  });
+
+  test("every definition's first sentence is shown on its row, and the whole help is its tooltip", async () => {
+    render(React.createElement(AutomationPicker, { kind: "action", defs: actions, value: "", onChange: () => {} }));
+    await press(document.querySelector('[data-picker-group="OBS"]'), "OBS");
+    const row = document.querySelector('[data-picker-option="obs.record"]');
+    assert.ok(row);
+    assert.equal(row.getAttribute("title"), AUTOMATION_ACTIONS["obs.record"].help, "the whole help is not the tooltip");
+    assert.ok((row.textContent ?? "").includes(oneLine(AUTOMATION_ACTIONS["obs.record"].help)));
+    assert.equal(
+      (row.textContent ?? "").includes("Start does nothing when OBS is already recording"),
+      false,
+      "the row showed more than the first sentence",
+    );
   });
 });
 

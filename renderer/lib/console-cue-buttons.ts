@@ -44,6 +44,28 @@ export function consolesWithLayouts(views: readonly View[]): View[] {
   return screensListViews(views).filter((v) => viewIsConsole(v) && v.kind === "custom");
 }
 
+/**
+ * The font size (a fraction of canvas height) at which `text` fits a button this
+ * big, or the cue button's own default when it already does.
+ *
+ * The default, 0.12, is the size the widget starts at: a word or two in a box
+ * 0.3 of the canvas wide. A cue is named whatever somebody typed, and "Projectors
+ * on" at 0.12 in that box is clipped at both edges, which is what a first try
+ * showed. The cue button draws a state dot, the label in capitals at about 0.66em
+ * a letter, and a line beneath, so the box has to hold roughly 2.4em of height
+ * and the label's whole width. Nothing here reads the DOM: it is an estimate, and
+ * errs small, because a label that is a little small is still a label.
+ */
+export function fitFontSize(text: string, box: { w: number; h: number }, canvas: { width: number; height: number }): number {
+  const letters = Math.max(1, text.trim().length);
+  const byWidth = (0.9 * box.w * canvas.width) / (0.66 * letters * canvas.height);
+  const byHeight = (0.9 * box.h) / 2.4;
+  // The widget's own default is the ceiling: a short name is not made bigger than
+  // a button added by hand would be.
+  const ceiling = defaultStyleFor("cue-button", { hostDrawsFrame: false }).fontSize ?? 0.12;
+  return Math.max(0.02, Math.min(ceiling, byWidth, byHeight));
+}
+
 export interface PlacedButton {
   layout: LayoutDTO;
   /** There was no room below the existing content, so the button was put against
@@ -67,7 +89,13 @@ export interface PlacedButton {
  * overlaps (`overEdge`) — the canvas is a fixed shape, and growing it would move
  * every other object.
  */
-export function withCueButton(layout: LayoutDTO, cue: string, label: string): PlacedButton {
+export function withCueButton(
+  layout: LayoutDTO,
+  cue: string,
+  label: string,
+  /** What the button will say when `label` is blank, for sizing its text. */
+  shownAs: string = cue,
+): PlacedButton {
   const buttons = layout.objects.filter((o) => BUTTON_TYPES.has(o.config.type));
   const reference = buttons.at(-1);
   const w = reference?.w ?? DEFAULT_BUTTON_SIZE.w;
@@ -86,7 +114,12 @@ export function withCueButton(layout: LayoutDTO, cue: string, label: string): Pl
     h,
     z,
     config: { ...defaultConfig("cue-button"), type: "cue-button", cue, label, showDevice: true },
-    style: reference?.style ? { ...reference.style } : defaultStyleFor("cue-button", { hostDrawsFrame: false }),
+    style: reference?.style
+      ? { ...reference.style }
+      : {
+          ...defaultStyleFor("cue-button", { hostDrawsFrame: false }),
+          fontSize: fitFontSize(label || shownAs, { w, h }, layout.canvas),
+        },
   };
   return { layout: { ...layout, objects: [...layout.objects, added] }, overEdge };
 }
@@ -111,7 +144,7 @@ export const consoleButtonDeps = {
   },
 };
 
-async function addToOne(viewId: string, cue: string, label: string): Promise<ConsoleResult> {
+async function addToOne(viewId: string, cue: string, label: string, shownAs: string): Promise<ConsoleResult> {
   // One retry, from a fresh read, on a stale revision. See the header.
   for (let attempt = 0; ; attempt++) {
     const view = (await consoleButtonDeps.readViews()).find((v) => v.id === viewId);
@@ -119,7 +152,7 @@ async function addToOne(viewId: string, cue: string, label: string): Promise<Con
     if (!viewIsConsole(view) || view.kind !== "custom" || !view.layout) {
       return { viewId, name: view.name, ok: false, error: "it is no longer a console with a layout" };
     }
-    const placed = withCueButton(view.layout, cue, label);
+    const placed = withCueButton(view.layout, cue, label, shownAs);
     try {
       await consoleButtonDeps.writeLayout(viewId, placed.layout, view.layoutRev);
       return { viewId, name: view.name, ok: true, ...(placed.overEdge ? { overEdge: true } : {}) };
@@ -141,11 +174,13 @@ export async function addCueButtonToConsoles(
   viewIds: readonly string[],
   cue: string,
   label: string,
+  /** The cue's name as people read it, for a blank label. */
+  shownAs: string = cue,
 ): Promise<ConsoleResult[]> {
   const results: ConsoleResult[] = [];
   for (const id of viewIds) {
     try {
-      results.push(await addToOne(id, cue, label));
+      results.push(await addToOne(id, cue, label, shownAs));
     } catch (err) {
       results.push({ viewId: id, name: id, ok: false, error: errorMessage(err) });
     }

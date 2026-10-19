@@ -169,7 +169,7 @@ export function NewCueDialog({
     const name = String(created.trigger.params.name ?? "");
     let results: ConsoleResult[] = [];
     if (draft.kind === "manual" && draft.consoleIds.length > 0) {
-      results = await addCueButtonToConsoles(draft.consoleIds, name, draft.buttonLabel.trim());
+      results = await addCueButtonToConsoles(draft.consoleIds, name, draft.buttonLabel.trim(), ruleName);
       logConsoleButtons(name, results);
     }
     setBusy(false);

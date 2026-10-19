@@ -94,6 +94,17 @@ export function pickerHeadings(entries: readonly Entry[]): { name: string; count
   return out;
 }
 
+/**
+ * The first sentence of a definition's help, which is its one-line description.
+ *
+ * Several helps run to a paragraph (a recorder's, a macro's); a row that cut
+ * that off mid-clause read worse than one that stopped at the end of the first
+ * thought. The whole text stays on the row as its tooltip.
+ */
+export function oneLine(help: string): string {
+  return help.split(/(?<=[.!?])\s+(?=[A-Z])/)[0] ?? help;
+}
+
 /** What a search matches: the name and the one-line description, in any case. */
 export function pickerMatches(entries: readonly Entry[], query: string): Entry[] {
   const q = query.trim().toLowerCase();
@@ -194,7 +205,7 @@ export function AutomationPicker({
                 <span className="text-footnote font-medium text-fg">{e.label}</span>
                 <span className="truncate text-caption1 text-fg-muted">
                   {searching ? <span data-picker-group-name="">{e.group} · </span> : null}
-                  {e.help}
+                  {oneLine(e.help)}
                 </span>
               </button>
             ))

@@ -15,6 +15,7 @@ import {
   addCueButtonToConsoles,
   consoleButtonDeps,
   consolesWithLayouts,
+  fitFontSize,
   withCueButton,
 } from "./console-cue-buttons.js";
 
@@ -69,6 +70,33 @@ describe("withCueButton", () => {
     assert.ok(Math.abs(b.y - (0.25 + BUTTON_GAP)) < 1e-9, `at y ${b.y}`);
     assert.equal(b.config.type, "cue-button");
     assert.ok(b.style && Object.keys(b.style).length > 0, "no default style");
+  });
+
+  test("a button with nothing to copy has its text sized to fit, and a longer name is smaller", () => {
+    const canvas = { width: 1920, height: 1080 };
+    const short = fitFontSize("Go", DEFAULT_BUTTON_SIZE, canvas);
+    const long = fitFontSize("Foyer televisions and lobby lights off", DEFAULT_BUTTON_SIZE, canvas);
+    assert.ok(short <= 0.12, "bigger than a button added by hand");
+    assert.ok(long < short, `${long} is not smaller than ${short}`);
+    // The estimate the box has to hold: the label's width at 0.66em a letter.
+    const letters = "Foyer televisions and lobby lights off".length;
+    assert.ok(0.66 * letters * long * canvas.height <= DEFAULT_BUTTON_SIZE.w * canvas.width, "the long label still overflows");
+    const placed = added(withCueButton(layoutOf(), "x", "", "Projectors on").layout);
+    assert.equal(placed.style?.fontSize, fitFontSize("Projectors on", DEFAULT_BUTTON_SIZE, canvas));
+    assert.ok((placed.style?.fontSize ?? 1) < 0.12, "Projectors on at the full default size is clipped in this box");
+  });
+
+  test("a label typed by the operator, not the cue's name, is what is fitted", () => {
+    const named = fitFontSize("Projectors on", DEFAULT_BUTTON_SIZE, { width: 1920, height: 1080 });
+    const labelled = added(withCueButton(layoutOf(), "x", "On", "Projectors on").layout);
+    assert.equal(labelled.style?.fontSize, fitFontSize("On", DEFAULT_BUTTON_SIZE, { width: 1920, height: 1080 }));
+    assert.ok((labelled.style?.fontSize ?? 0) > named);
+  });
+
+  test("an existing button's style is copied as it is, not refitted", () => {
+    const ref = button("b1", { w: 0.2, h: 0.1, style: { fontSize: 0.5 } });
+    const b = added(withCueButton(layoutOf(ref), "x", "A very long name that would never fit", "").layout);
+    assert.deepEqual(b.style, { fontSize: 0.5 });
   });
 
   test("an empty layout puts it along the bottom edge", () => {
