@@ -394,6 +394,7 @@ export function ParamField({
       <Row label={spec.label} hint={spec.help}>
         <>
           <NumberInput
+            aria-label={spec.label}
             value={Number(value ?? numberParamDefault(spec))}
             min={spec.min}
             max={spec.max}
@@ -452,7 +453,7 @@ export function ParamField({
             rather than rendering blank — see missingValue in select.tsx. */}
         <>
           <Select value={current} onValueChange={onChange}>
-            <SelectTrigger className={invalidClass("w-full", invalid)}><SelectValue /></SelectTrigger>
+            <SelectTrigger aria-label={spec.label} className={invalidClass("w-full", invalid)}><SelectValue /></SelectTrigger>
             <SelectContent>
               {!spec.default && <SelectItem value="">{spec.optional ? "(any)" : "Pick one…"}</SelectItem>}
               {options.map((o) => (
@@ -477,6 +478,7 @@ export function ParamField({
       <Row label={spec.label} hint={spec.help}>
         <>
           <Input
+            aria-label={spec.label}
             value={String(value ?? "")}
             list={hasList ? listId : undefined}
             onChange={(e) => onChange(e.target.value)}
@@ -499,6 +501,7 @@ export function ParamField({
     <Row label={spec.label} hint={spec.help}>
       <>
         <Input
+          aria-label={spec.label}
           value={String(value ?? "")}
           onChange={(e) => onChange(e.target.value)}
           className={invalidClass("h-7 text-footnote", invalid)}
@@ -1308,6 +1311,7 @@ export function RuleEditorBody({
         hint="Seconds before this rule may fire again. Stops a value that oscillates across a threshold firing repeatedly."
       >
         <NumberInput
+          aria-label="Cooldown"
           value={draft.cooldownSec}
           min={0}
           max={86400}

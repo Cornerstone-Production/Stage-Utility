@@ -186,15 +186,22 @@ export function AlignPad({
 // Thin label+control wrappers so each object's inspector block reads as a list
 // of options and every control is laid out consistently. Bespoke controls
 // (live-data selects, list editors) still use <Row> directly.
+//
+// Each helper names its control after its label (`aria-label`), because <Row>
+// only sits the label NEXT to the control and joins the two with nothing. A
+// control built directly from the ui primitives inside a <Row> has to pass its
+// own `aria-label`; inspector-names.test.tsx mounts every object type's
+// inspector (and the branches a default config does not draw) and fails on any
+// control it reaches that is left without one.
 
 export function RowSwitch({ label, hint, checked, onChange, disabled }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean | string }) {
-  return <Row label={label} hint={hint} disabled={disabled}><Switch checked={checked} onCheckedChange={onChange} disabled={!!disabled} /></Row>;
+  return <Row label={label} hint={hint} disabled={disabled}><Switch aria-label={label} checked={checked} onCheckedChange={onChange} disabled={!!disabled} /></Row>;
 }
 
 export function RowText({ label, hint, value, placeholder, onChange }: { label: string; hint?: string; value: string; placeholder?: string; onChange: (v: string) => void }) {
   return (
     <Row label={label} hint={hint}>
-      <Input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className="text-fg" />
+      <Input aria-label={label} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className="text-fg" />
     </Row>
   );
 }
@@ -248,13 +255,13 @@ export function ImageConfig({ src, onChange }: { src: string; onChange: (v: stri
 
 /** `onUnset` and `placeholder` are NumberInput's: pass `onUnset` for a field
  *  where blank is a real setting, and `value: null` then shows the placeholder. */
-export function RowNumber({ label, hint, value, step, min, max, onChange, onUnset, placeholder, unit }: { label: string; hint?: string; value: number | null; step?: number; min?: number; max?: number; onChange: (v: number) => void; onUnset?: () => void; placeholder?: string; unit?: string }) {
+export function RowNumber({ label, hint, value, step, min, max, suffix, onChange, onUnset, placeholder }: { label: string; hint?: string; value: number | null; step?: number; min?: number; max?: number; suffix?: string; onChange: (v: number) => void; onUnset?: () => void; placeholder?: string }) {
   // Straight to the themed field: the editor's own wrappers coerce a missing
   // value to 0, which is exactly what a blank-means-something field must not do.
   const shown = onUnset ? value : typeof value === "number" && Number.isFinite(value) ? value : 0;
   return (
     <Row label={label} hint={hint}>
-      <UiNumberInput value={shown} step={step ?? 0.01} min={min} max={max} onChange={onChange} onUnset={onUnset} placeholder={placeholder} suffix={unit} />
+      <UiNumberInput aria-label={label} value={shown} step={step ?? 0.01} min={min} max={max} suffix={suffix} onChange={onChange} onUnset={onUnset} placeholder={placeholder} />
     </Row>
   );
 }
@@ -282,19 +289,18 @@ export function RowToggle<T extends string>({
   // of the seven call sites, so they cannot drift into disagreeing about it.
   if (options.length > 2) {
     return (
-      <Row label={label} hint={hint}>
-        <Select value={String(value)} onValueChange={(v: string) => onChange(v as T)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {options.map((o) => <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </Row>
+      <RowSelect
+        label={label}
+        hint={hint}
+        value={String(value)}
+        options={options.map((o) => ({ value: String(o.value), label: o.label }))}
+        onChange={(v) => onChange(v as T)}
+      />
     );
   }
   return (
     <Row label={label} hint={hint}>
-      <ButtonGroup>
+      <ButtonGroup role="group" aria-label={label}>
         {options.map((o) => (
           <Button key={o.value} variant={value === o.value ? "accent" : "filled"} size="small" onClick={() => onChange(o.value)}>
             {o.label}
@@ -349,7 +355,7 @@ export function RowSelect({ label, hint, value, options, onChange, disabled }: {
   return (
     <Row label={label} hint={hint} disabled={disabled}>
       <Select value={value} onValueChange={onChange} disabled={!!disabled}>
-        <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+        <SelectTrigger aria-label={label} className="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
           {options.map((o) => (
             <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
@@ -362,13 +368,13 @@ export function RowSelect({ label, hint, value, options, onChange, disabled }: {
 
 /** Thin wrappers over the shared themed NumberInput, kept so existing call sites
  *  and PixelField do not change. */
-export function NumberField({ value, onChange, step = 1, min, max, suffix, className }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number; suffix?: string; className?: string }) {
-  return <UiNumberInput value={Number.isFinite(value) ? value : 0} onChange={onChange} step={step} min={min} max={max} suffix={suffix} className={className} />;
+export function NumberField({ value, onChange, step = 1, min, max, suffix, className, "aria-label": ariaLabel }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number; suffix?: string; className?: string; "aria-label"?: string }) {
+  return <UiNumberInput aria-label={ariaLabel} value={Number.isFinite(value) ? value : 0} onChange={onChange} step={step} min={min} max={max} suffix={suffix} className={className} />;
 }
 
 /** Style-row number (fraction value). */
-export function NumberInput({ value, onChange, step = 0.01, min, max }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number }) {
-  return <NumberField value={Number.isFinite(value) ? value : 0} onChange={onChange} step={step} min={min} max={max} />;
+export function NumberInput({ value, onChange, step = 0.01, min, max, "aria-label": ariaLabel }: { value: number; onChange: (v: number) => void; step?: number; min?: number; max?: number; "aria-label"?: string }) {
+  return <NumberField aria-label={ariaLabel} value={Number.isFinite(value) ? value : 0} onChange={onChange} step={step} min={min} max={max} />;
 }
 
 /** X/Y/W/H field shown as whole design-canvas pixels (stored as a 0..1 fraction). */
@@ -377,6 +383,7 @@ export function PixelField({ label, value, dim, onChange }: { label: string; val
     <label className="flex items-center gap-2">
       <span className="text-caption2 text-fg-muted w-3.5 shrink-0">{label}</span>
       <NumberField
+        aria-label={label}
         value={Math.round((Number.isFinite(value) ? value : 0) * dim)}
         step={1}
         min={0}
@@ -456,22 +463,21 @@ export function TypeSizeRows({
   const px = Math.round((style.fontSize ?? defaultStyle(type).fontSize ?? 0.05) * canvasHeight * 10) / 10;
   return (
     <>
-      <Row label="Font size">
-        <NumberField
-          value={px}
-          step={1}
-          min={1}
-          max={Math.round(0.5 * canvasHeight)}
-          suffix="px"
-          onChange={(v) => onStyle({ fontSize: v / canvasHeight })}
-        />
-      </Row>
-      <Row label="Weight">
-        <Select value={String(style.fontWeight ?? 400)} onValueChange={(v: string) => onStyle({ fontWeight: parseInt(v, 10) })}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>{WEIGHTS.map((w) => <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
-        </Select>
-      </Row>
+      <RowNumber
+        label="Font size"
+        value={px}
+        step={1}
+        min={1}
+        max={Math.round(0.5 * canvasHeight)}
+        suffix="px"
+        onChange={(v) => onStyle({ fontSize: v / canvasHeight })}
+      />
+      <RowSelect
+        label="Weight"
+        value={String(style.fontWeight ?? 400)}
+        options={WEIGHTS.map((w) => ({ value: String(w), label: String(w) }))}
+        onChange={(v) => onStyle({ fontWeight: parseInt(v, 10) })}
+      />
     </>
   );
 }
