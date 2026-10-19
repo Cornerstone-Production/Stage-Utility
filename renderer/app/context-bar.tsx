@@ -338,8 +338,8 @@ export function ContextBar({ active }: { active: ActivePage | null }) {
         style={trigger.style}
       >
         {/* FIRST CHILD, so the name sits where the header's h1 sat — the strip's
-            20px inset is the same one the header used, so nothing moved
-            sideways when the band went. It is also the only shrinkable element
+            inset is the page gutter, so the name lines up with the content
+            below it. It is also the only shrinkable element
             on the row, which is what makes it the first thing to give way. */}
         <PageTitle active={active} />
         <BarStripRows rows={rows} ctx={ctx} />
