@@ -44,10 +44,12 @@ export type UpdatePlatform = (typeof UPDATE_PLATFORMS)[number];
  *                  installed is still `have`, and `detail` says why
  *   no-session     an update is due but nobody is logged in at the Mac, so the new
  *                  helper could not be started and checked
+ *   not-running    an update is due but the helper was quit at the Mac, and an
+ *                  update does not start it again behind someone's back
  *   local-network  `target` is installed and running, but macOS refuses it Local
  *                  Network access, so someone at the Mac has to answer the prompt
  */
-export const MACHINE_STATES = ["idle", "updated", "failed", "no-session", "local-network"] as const;
+export const MACHINE_STATES = ["idle", "updated", "failed", "no-session", "not-running", "local-network"] as const;
 export type MachineState = (typeof MACHINE_STATES)[number];
 
 /** Why a machine is told not to update now. */
@@ -193,6 +195,9 @@ export function describe(platform: UpdatePlatform, have: string, want: string, d
     }
   }
   if (state === "local-network") return `Helper ${have}. macOS asks for Local Network access again since the update: someone at the Mac has to choose Allow`;
+  // The server says go, and the Mac cannot yet: say what it is waiting for.
+  if (d.update && state === "no-session") return `Helper ${have}. Updates to ${want} once someone is logged in at the Mac`;
+  if (d.update && state === "not-running") return `Helper ${have}. Updates to ${want} once the helper is running again (it was quit at the Mac)`;
   if (d.update) return `Helper ${have}. Updating to ${want}`;
   switch (d.why) {
     case "current":
@@ -312,6 +317,7 @@ export class MachineUpdates {
         updated: `updated ${next.platform === "macos" ? `to ${t}` : "its launcher; it takes effect at the next sign-in"}`,
         failed: `the update${next.platform === "macos" ? ` to ${t}` : ""} failed${why}; it is not tried again until someone asks from Screens`,
         "no-session": "an update is due, but nobody is logged in at the Mac to start and check the new helper; it waits for a login",
+        "not-running": "an update is due, but the helper was quit at the Mac; it updates once it runs again",
         "local-network": `macOS refuses the helper Local Network access since the update to ${t}; answer the prompt at the Mac`,
       }[next.state];
       console.log(`[helper-update] ${name}: ${line}`);

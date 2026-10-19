@@ -13,6 +13,10 @@
 #                Mac the helper cannot run on.
 #                curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh -s -- --browser
 #   --dry-run    print every step and change nothing. Needs no sudo.
+#   --check-update
+#                what the updater this installs runs every five minutes, as root:
+#                ask the server whether to update the helper, and do it. Not for
+#                typing; see "Updating itself" below.
 #   --help       this text
 #
 #   STAGE_DOWNLOAD_FROM=http://<server>
@@ -27,6 +31,16 @@
 #   STAGE_KIOSK_PORT=8789          the discovery port of the Chrome kiosk
 #
 # Running it again upgrades in place. It never mints a second device id.
+#
+# Updating itself: the helper install also puts a copy of this script in
+# /Library/Application Support/StageUtilityUpdater and a LaunchDaemon,
+# com.stageutility.output-updater, that runs it with --check-update every five
+# minutes. That asks the server whether to update (the server decides: never while a
+# service is live or near one), downloads and verifies the new app exactly as an
+# install does, swaps it in keeping the old one, restarts the helper, and puts the
+# old one back if the new one does not say it started. It never runs anything it
+# downloaded as root: it swaps the app, which runs as the logged-in user. A change to
+# this script itself reaches a Mac only when the installer is run again by hand.
 #
 # Best-effort, and honestly so: a Mac is a general-purpose machine that sleeps,
 # locks and reboots for updates on its own schedule. For a permanent wall screen
@@ -69,6 +83,24 @@ HELPER_LABEL=com.stageutility.output
 HELPER_PLIST="$AGENT_DIR/$HELPER_LABEL.plist"
 GITHUB_BASE="${STAGE_INSTALL_GITHUB_BASE:-https://github.com/Cornerstone-Production/Stage-Utility/releases/download}"
 
+# The updater: root-owned, apart from STATE_DIR, which the console user owns and so
+# could plant a script in. Its copy of this script, the server it was installed from,
+# and what it last did, in `status`.
+UPDATER_LABEL=com.stageutility.output-updater
+UPDATER_DIR="$ROOT/Library/Application Support/StageUtilityUpdater"
+UPDATER_SCRIPT="$UPDATER_DIR/install-macos.sh"
+UPDATER_ORIGIN="$UPDATER_DIR/server"
+UPDATER_STATUS="$UPDATER_DIR/status"
+UPDATER_PLIST="$ROOT/Library/LaunchDaemons/$UPDATER_LABEL.plist"
+UPDATE_LOG="$ROOT/Library/Logs/StageUtility/helper-update.log"
+UPDATE_EVERY=300
+# What the helper writes for the updater (HelperStatus.swift), in the logged-in
+# user's home. Both names are checked against the Swift (InstallerContractTests).
+HELPER_USER_DIR="Library/Application Support/StageUtilityOutput"
+HELPER_STATUS_NAME=helper-status.json
+# How long a new helper has to say it started before the old one goes back.
+START_TIMEOUT="${STAGE_INSTALL_TEST_START_TIMEOUT:-90}"
+
 # The ceiling on one zip download, seconds. The server's own fetch of the zip from
 # GitHub may take up to two hours (its watchdog's ceiling, in
 # main/services/output-helper-download.ts), during which it sends this script
@@ -77,6 +109,9 @@ ZIP_CEILING=7800
 
 MODE=helper
 DRY=0
+# Set in --check-update: the update in progress, so a failure records itself.
+UPDATING=""
+UPDATE_FAILED=""
 ARCH=""
 ZIP_NAME=""
 WHY=""
@@ -102,10 +137,16 @@ MIGRATED=0
 # kiosk's binding (the bare device id and the installer's token) and starts on.
 MARKER="$STATE_DIR/migrated-from-kiosk"
 
-say() { printf '%s\n' "$*"; }
-warn() { printf 'install-macos.sh: %s\n' "$*" >&2; }
+# In --check-update every line goes to the updater's log file (launchd's stdout and
+# stderr), so it carries the time and the tag a person greps for.
+stamp() {
+  if [ "$MODE" = check ]; then printf '%s [helper-update] ' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"; fi
+}
+say() { printf '%s%s\n' "$(stamp)" "$*"; }
+warn() { printf '%sinstall-macos.sh: %s\n' "$(stamp)" "$*" >&2; }
 die() {
   warn "$*"
+  UPDATE_FAILED="$*"
   exit 1
 }
 # What a dry run would have done.
@@ -115,9 +156,12 @@ usage() {
   cat <<'USAGE'
 Usage: install-macos.sh [--browser] [--dry-run]
 
-  (default)   install the Stage Utility Output helper (macOS 14 or later)
+  (default)   install the Stage Utility Output helper (macOS 14 or later), and
+              the updater that keeps it on the server's version
   --browser   install the Chrome kiosk instead
   --dry-run   print every step and change nothing; needs no sudo
+  --check-update
+              what the updater runs every five minutes; not for typing
   --help      this text
 
 Run as root: curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
@@ -181,6 +225,8 @@ on_exit() {
   set +e
   if [ "$FINISHED" -ne 1 ]; then
     roll_back
+    # After the roll back, so what it says is what the Mac has now.
+    if [ -n "$UPDATING" ]; then record_update_failure; fi
   elif [ -n "$OLD_APP" ]; then
     rm -rf "$OLD_APP"
   fi
@@ -411,7 +457,10 @@ try_source() {
   fi
   say "    downloading $ZIP_NAME from $label"
   say "    (a server that has not fetched it yet downloads it from GitHub first; that can take a few minutes)"
-  if ! fetch_to "$zip_url" "$WORK/$ZIP_NAME" "$ZIP_CEILING" 1 "$zip_idle"; then
+  # A progress bar for a person; none in the updater's log file.
+  bar=1
+  if [ "$MODE" = check ]; then bar=0; fi
+  if ! fetch_to "$zip_url" "$WORK/$ZIP_NAME" "$ZIP_CEILING" "$bar" "$zip_idle"; then
     WHY="$label: the download $WHY"
     return 1
   fi
@@ -475,6 +524,23 @@ stage_app() {
   if ! grep -A1 '<key>CFBundleIdentifier</key>' "$STAGING/$APP_NAME/Contents/Info.plist" 2>/dev/null | grep -q "<string>$HELPER_LABEL</string>"; then
     die "the app in $ZIP_NAME is not $HELPER_LABEL."
   fi
+  clear_setid "$STAGING" || die "could not clear set-user-id bits in the unpacked $APP_NAME."
+}
+
+# Unpacked as root, so a set-user-id bit in the zip would be a root program for
+# anyone at the Mac. The app needs none. find does not follow links. (ditto keeps
+# the bit only for root, so a test cannot see it through a zip: it calls this.)
+clear_setid() {
+  find "$1" -type f \( -perm -4000 -o -perm -2000 \) -exec chmod ug-s {} +
+}
+
+# CFBundleShortVersionString of an app's Info.plist, which build-app.sh writes as
+# XML: the key, then the string on the next line or the same one. Empty when there
+# is none.
+app_version() {
+  plist="$1/Contents/Info.plist"
+  [ -r "$plist" ] || return 0
+  tr -d '\n' <"$plist" | sed -n 's:.*<key>CFBundleShortVersionString</key>[[:space:]]*<string>\([^<]*\)</string>.*:\1:p'
 }
 
 # The old copy is moved aside, the new one renamed in, and the old one deleted
@@ -706,6 +772,289 @@ notes() {
   fi
 }
 
+# ── The updater ────────────────────────────────────────────────────────────
+# Installed with the helper, after it: the helper works without it, so a failure
+# here is said plainly and the install still stands. Run the installer again to
+# retry.
+write_updater_plist() {
+  cat >"$1" <<PLIST || return 1
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$UPDATER_LABEL</string>
+  <key>ProgramArguments</key><array><string>/bin/sh</string><string>/Library/Application Support/StageUtilityUpdater/install-macos.sh</string><string>--check-update</string></array>
+  <!-- Every five minutes, and once at boot. launchd never starts a second run
+       while one is still going, so a long download cannot overlap the next. -->
+  <key>StartInterval</key><integer>$UPDATE_EVERY</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Library/Logs/StageUtility/helper-update.log</string>
+  <key>StandardErrorPath</key><string>/Library/Logs/StageUtility/helper-update.log</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>
+PLIST
+  chown root:wheel "$1" && chmod 644 "$1"
+}
+
+# The copy of this script the daemon runs. From the file this run is reading when
+# there is one (sh install-macos.sh), else from the server, as `curl | sh` leaves
+# nothing on disk to copy.
+copy_updater_script() {
+  if [ -f "$0" ] && grep -q '^UPDATER_LABEL=' "$0" 2>/dev/null; then
+    cp "$0" "$UPDATER_SCRIPT.new" || return 1
+  else
+    origin="$(server_origin)"
+    [ -n "$origin" ] || return 1
+    fetch_to "${origin%/}/kiosk/install-macos.sh" "$UPDATER_SCRIPT.new" 60 0 || return 1
+  fi
+  # Only something this script would run: it parses, and it is this updater.
+  sh -n "$UPDATER_SCRIPT.new" && grep -q '^UPDATER_LABEL=' "$UPDATER_SCRIPT.new" || return 1
+  chown root:wheel "$UPDATER_SCRIPT.new" && chmod 755 "$UPDATER_SCRIPT.new" && mv -f "$UPDATER_SCRIPT.new" "$UPDATER_SCRIPT"
+}
+
+# Everything install_updater writes, failing with the reason in WHY.
+updater_files() {
+  origin="$(server_origin)"
+  [ -n "$origin" ] || { WHY="no server address to ask"; return 1; }
+  [ ! -L "$UPDATER_DIR" ] || { WHY="$UPDATER_DIR is a symbolic link"; return 1; }
+  mkdir -p "$UPDATER_DIR" "$(dirname "$UPDATE_LOG")" "$(dirname "$UPDATER_PLIST")" || { WHY="could not create $UPDATER_DIR"; return 1; }
+  { chown root:wheel "$UPDATER_DIR" && chmod 755 "$UPDATER_DIR"; } || { WHY="could not make $UPDATER_DIR root's"; return 1; }
+  copy_updater_script || { WHY="could not put a copy of this installer in $UPDATER_DIR${WHY:+ ($WHY)}"; return 1; }
+  printf '%s\n' "${origin%/}" | put_file "$UPDATER_ORIGIN" 644 || { WHY="could not write $UPDATER_ORIGIN"; return 1; }
+  write_updater_plist "$UPDATER_PLIST" || { WHY="could not write $UPDATER_PLIST"; return 1; }
+  if command -v plutil >/dev/null 2>&1; then
+    plutil -lint "$UPDATER_PLIST" >/dev/null || { WHY="$UPDATER_PLIST is not a valid property list"; return 1; }
+  fi
+}
+
+install_updater() {
+  say "==> Installing the updater, so this helper follows the server's version"
+  WHY=""
+  if ! updater_files; then
+    rm -f "$UPDATER_SCRIPT.new"
+    warn "automatic updates are NOT installed: ${WHY:-could not write the updater}. The helper is installed and works; run this installer again to add them."
+    return 0
+  fi
+  if launchctl print "system/$UPDATER_LABEL" >/dev/null 2>&1; then
+    launchctl bootout "system/$UPDATER_LABEL" || warn "could not stop the updater that was running; the new one starts at the next boot"
+  fi
+  if launchctl bootstrap system "$UPDATER_PLIST"; then
+    say "    it asks $(cat "$UPDATER_ORIGIN") every five minutes whether to update, and never"
+    say "    during a service. Its log: /Library/Logs/StageUtility/helper-update.log"
+  else
+    warn "the updater is installed but could not be started; it starts at the next boot"
+  fi
+}
+
+# ── --check-update ─────────────────────────────────────────────────────────
+# One field of the updater's status file (key=value lines), or empty.
+status_field() {
+  [ -r "$UPDATER_STATUS" ] || return 0
+  sed -n "s/^$1=//p" "$UPDATER_STATUS" | head -n 1
+}
+
+# What the updater did, kept for the next check to tell the server: one line each,
+# and none of them may hold a newline.
+write_status() { # state target detail answer
+  {
+    printf 'state=%s\n' "$1"
+    printf 'target=%s\n' "$2"
+    printf 'detail=%s\n' "$(printf '%s' "$3" | tr '\r\n' '  ' | cut -c 1-200)"
+    printf 'answer=%s\n' "$(printf '%s' "$4" | tr '\r\n' '  ' | cut -c 1-300)"
+  } | put_file "$UPDATER_STATUS" 644 || warn "could not write $UPDATER_STATUS"
+}
+
+# The logged-in user's home, where the helper writes its status.
+console_home() {
+  if [ -n "${STAGE_INSTALL_TEST_HOME:-}" ]; then
+    printf '%s' "$STAGE_INSTALL_TEST_HOME"
+    return 0
+  fi
+  [ -n "$CONSOLE_USER" ] || return 0
+  dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{ print $2 }'
+}
+
+helper_status_file() {
+  home="$(console_home)"
+  [ -n "$home" ] && printf '%s/%s/%s' "$home" "$HELPER_USER_DIR" "$HELPER_STATUS_NAME"
+}
+
+# One field of a one-line JSON object: helper-status.json, which
+# HelperStatus.encoded() writes with sorted keys, or the server's answer. A string
+# comes back without its quotes. Values here never hold a quote or a comma.
+json_field() { # file key
+  [ -r "$1" ] && [ ! -L "$1" ] || return 0
+  tr -d '\n' <"$1" | sed -n "s/.*\"$2\":\"\{0,1\}\([^\",}]*\)\"\{0,1\}[,}].*/\1/p" | head -n 1
+}
+
+# launchd's pid for the helper in the console user's session, or empty.
+helper_pid() {
+  launchctl print "gui/$CONSOLE_UID/$HELPER_LABEL" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }'
+}
+
+is_origin() {
+  printf '%s\n' "$1" | grep -Eq '^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$'
+}
+
+# The servers to ask, best first, one per line. A `server` file pins the Mac, as it
+# pins the helper, so it is the only one. Else the server the running helper is
+# loading from (it follows discovery, so it is right after the server moves), then
+# the one this updater was installed from.
+update_servers() {
+  if [ -r "$STATE_DIR/server" ] && [ ! -L "$STATE_DIR/server" ]; then
+    pinned="$(tr -d '\r\n' <"$STATE_DIR/server")"
+    if is_origin "${pinned%/}"; then printf '%s\n' "${pinned%/}"; fi
+    return 0
+  fi
+  seen=""
+  file="$(helper_status_file || true)"
+  if [ -n "$file" ]; then
+    seen="$(json_field "$file" server)"
+    if [ -n "$seen" ] && is_origin "$seen"; then printf '%s\n' "$seen"; fi
+  fi
+  if [ -r "$UPDATER_ORIGIN" ]; then
+    installed_from="$(tr -d '\r\n' <"$UPDATER_ORIGIN")"
+    if is_origin "$installed_from" && [ "$installed_from" != "$seen" ]; then printf '%s\n' "$installed_from"; fi
+  fi
+}
+
+# Ask one server. Leaves the answer in $WORK/answer and returns 0 on a 200.
+ask_server() { # origin have state target detail
+  code="$(curl -sS -G --connect-timeout 10 --max-time 30 -o "$WORK/answer" -w '%{http_code}' \
+    --data-urlencode "machine=$MACHINE" --data-urlencode "platform=macos" --data-urlencode "arch=$ARCH" \
+    --data-urlencode "have=$2" --data-urlencode "host=$HOST_NAME" --data-urlencode "state=$3" \
+    --data-urlencode "target=$4" --data-urlencode "detail=$5" \
+    "$1/api/machine-updates/check" 2>/dev/null)" || return 1
+  [ "$code" = 200 ]
+}
+
+# Wait for the helper launchd started to say it is the new one and its Chromium
+# started. Sets WHY and returns 1 when it does not.
+wait_for_helper() { # version
+  file="$(helper_status_file || true)"
+  [ -n "$file" ] || { WHY="could not find $CONSOLE_USER's home folder to read whether the new helper started"; return 1; }
+  waited=0
+  while [ "$waited" -lt "$START_TIMEOUT" ]; do
+    pid="$(helper_pid)"
+    if [ -n "$pid" ] && [ "$(json_field "$file" pid)" = "$pid" ] && [ "$(json_field "$file" version)" = "$1" ]; then
+      if [ "$(json_field "$file" chromium)" = started ]; then return 0; fi
+      WHY="Chromium did not start: $(json_field "$file" chromiumProblem)"
+      return 1
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  WHY="the new helper did not say it started within $START_TIMEOUT s"
+  return 1
+}
+
+# From on_exit, after the roll back: what failed, and what the Mac runs now.
+record_update_failure() {
+  now="$(app_version "$APPS_DIR/$APP_NAME")"
+  why="${UPDATE_FAILED:-the update stopped part way}"
+  if [ "$APP_SWAPPED" -eq 1 ] && [ -n "$now" ] && [ "$now" != "$UPDATING" ]; then why="$why; put $now back"; fi
+  write_status failed "$UPDATING" "$why" "$(status_field answer)"
+  say "the update to $UPDATING failed: $why. It is not tried again until someone asks from Screens."
+}
+
+check_update() {
+  find_console_user
+  detect_arch
+  MACHINE="$(cat "$STATE_DIR/device-id" 2>/dev/null || true)"
+  [ -n "$MACHINE" ] || die "no device id in $STATE_DIR; run the installer by hand."
+  HOST_NAME="$(scutil --get ComputerName 2>/dev/null || hostname -s)"
+  WORK="$(mktemp -d "${TMPDIR:-/tmp}/stage-utility-update.XXXXXX")"
+  # An app removed by hand is not this updater's to put back.
+  if [ ! -d "$APPS_DIR/$APP_NAME" ]; then
+    if [ "$(status_field answer)" != not-installed ]; then say "$APPS_DIR/$APP_NAME is not there, so there is nothing to update"; fi
+    write_status idle "" "" not-installed
+    return 0
+  fi
+  have="$(app_version "$APPS_DIR/$APP_NAME")"
+  have="${have:-unknown}"
+  state="$(status_field state)"
+  state="${state:-idle}"
+  target="$(status_field target)"
+  detail="$(status_field detail)"
+  # After an update, the helper itself says when macOS refuses it the network: it
+  # cannot reach the server to say so, so this does.
+  if [ "$state" = updated ] || [ "$state" = local-network ]; then
+    file="$(helper_status_file || true)"
+    if [ -n "$file" ] && [ "$(json_field "$file" localNetworkRefused)" = true ]; then
+      [ "$state" = local-network ] || say "macOS refuses the helper Local Network access since the update to $target; someone at the Mac has to choose Allow"
+      state=local-network
+    elif [ "$state" = local-network ]; then
+      say "the helper reaches the network again"
+      state=updated
+    fi
+  fi
+  # A wait for a login is only true while nobody is logged in.
+  if [ "$state" = no-session ] && [ -n "$CONSOLE_USER" ]; then state=idle; fi
+
+  origin=""
+  for candidate in $(update_servers); do
+    if ask_server "$candidate" "$have" "$state" "$target" "$detail"; then
+      origin="$candidate"
+      break
+    fi
+  done
+  if [ -z "$origin" ]; then
+    if [ "$(status_field answer)" != unreachable ]; then
+      say "no server answered the update check ($(update_servers | tr '\n' ' ')); trying again in five minutes"
+    fi
+    write_status "$state" "$target" "$detail" unreachable
+    return 0
+  fi
+  want="$(json_field "$WORK/answer" version)"
+  go="$(json_field "$WORK/answer" update)"
+  reason="$(json_field "$WORK/answer" reason)"
+  # Said when the answer changes, not every five minutes.
+  if [ "$reason" != "$(status_field answer)" ]; then say "$origin: $reason"; fi
+  write_status "$state" "$target" "$detail" "$reason"
+  [ "$go" = true ] || return 0
+  [ -n "$want" ] || die "$origin said to update but named no version."
+
+  # A new helper that nobody's session can start cannot be checked, and could not
+  # be put back if it failed, so the update waits for someone to log in.
+  if [ -z "$CONSOLE_USER" ]; then
+    [ "$state" = no-session ] || say "an update to $want is due, but nobody is logged in to start and check it; waiting for a login"
+    write_status no-session "$want" "" "$reason"
+    return 0
+  fi
+
+  # Quit from its window on purpose (to free a card for another app, say): an update
+  # must not start it again behind somebody's back. It updates when it runs again.
+  if [ -z "$(helper_pid)" ]; then
+    [ "$state" = not-running ] || say "an update to $want is due, but the helper is not running (it was quit at the Mac); it updates once it runs again"
+    write_status not-running "$want" "" "$reason"
+    return 0
+  fi
+  if [ "$state" = not-running ]; then state=idle; fi
+
+  say "updating the helper from $have to $want, from $origin"
+  UPDATING="$want"
+  # What starts the new helper. Without it a swapped app would wait for a login
+  # that may be days off, unchecked.
+  [ -f "$HELPER_PLIST" ] || die "$HELPER_PLIST is missing, so the new helper could not be started; run the installer by hand"
+  DOWNLOAD_FROM="$origin"
+  fetch_helper
+  stage_app
+  got="$(app_version "$STAGING/$APP_NAME")"
+  [ "$got" = "$want" ] || die "the server sent version ${got:-unknown}, not $want"
+  stop_helper_agent
+  swap_app
+  # The previous helper's file must not read as the new one's.
+  file="$(helper_status_file || true)"
+  if [ -n "$file" ]; then rm -f "$file"; fi
+  if start_helper_agent; then AGENT_STARTED=1; else die "launchd would not start the new helper"; fi
+  wait_for_helper "$want" || die "$WHY"
+  FINISHED=1
+  UPDATING=""
+  write_status updated "$want" "" "$reason"
+  say "updated the helper from $have to $want; it is running"
+}
+
 # ── The two installs ───────────────────────────────────────────────────────
 install_helper() {
   say "==> Installing the Stage Utility Output helper"
@@ -722,6 +1071,7 @@ install_helper() {
     would "refuse a zip whose SHA-256 differs from the published one"
     would "unpack beside $APPS_DIR/$APP_NAME, check it is $HELPER_LABEL, then swap it in, keeping the old copy until that worked"
     would "write $HELPER_PLIST, root-owned, which starts the helper at every login"
+    would "copy this installer to $UPDATER_SCRIPT and write $UPDATER_PLIST, a LaunchDaemon that runs it with --check-update every five minutes: the helper then follows $origin's version, never during a service"
     if [ -n "$CONSOLE_USER" ]; then
       would "start the helper now for $CONSOLE_USER"
     else
@@ -748,8 +1098,10 @@ install_helper() {
   say "    installed $APPS_DIR/$APP_NAME"
   install_helper_agent
   retire_kiosk
-  # Done: nothing after this is undone by a failure. set_power only warns.
+  # Done: nothing after this is undone by a failure. set_power and the updater
+  # only warn.
   FINISHED=1
+  install_updater
   set_power
   say
   say "==> Done. This Mac is device $(cat "$STATE_DIR/device-id")"
@@ -943,6 +1295,7 @@ main() {
     case "$arg" in
       --browser) MODE=browser ;;
       --dry-run) DRY=1 ;;
+      --check-update) MODE=check ;;
       -h | --help)
         usage
         exit 0
@@ -962,7 +1315,10 @@ main() {
     die "run with sudo — the device id lives outside your home directory so a profile reset cannot cost you a claim."
   fi
 
-  if [ "$MODE" = browser ]; then
+  if [ "$MODE" = check ]; then
+    check_update
+    FINISHED=1
+  elif [ "$MODE" = browser ]; then
     install_browser
   else
     install_helper
