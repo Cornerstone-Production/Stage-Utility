@@ -1954,6 +1954,9 @@ export function RuleEditorDialog({
               {target.pair.onName} / {target.pair.offName}
             </p>
           )}
+          {!isPair && onDraft.trigger.id === CALL_TRIGGER_ID && (
+            <p className="text-caption1 text-fg-subtle" data-manual-kind="">Manual cue</p>
+          )}
         </DialogHeader>
 
         {/* The BODY scrolls, not the page behind it: the editor is taller than

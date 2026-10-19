@@ -163,6 +163,7 @@ describe("the two faces", () => {
     await mount();
     await openRow("Stage reset");
     assert.equal(manualBox(), true, "no manual box");
+    assert.equal(document.querySelector("[data-rule-editor] [data-manual-kind]")?.textContent, "Manual cue", "the title does not say what kind it is");
     assert.ok(document.body.textContent?.includes("Runs only when called"));
     assert.ok(button("Make it automatic"), "no Make it automatic");
     assert.equal(button("Make it manual") === null, true, "a manual cue offered Make it manual");
@@ -185,6 +186,7 @@ describe("the two faces", () => {
     await mount();
     await openRow("Stage reset");
     assert.equal(manualBox(), false);
+    assert.equal(document.querySelector("[data-manual-kind]") === null, true, "an automatic rule was titled a manual cue");
     assert.ok(button("Make it manual"), "no Make it manual");
     assert.equal(button("Make it automatic") === null, true);
     assert.ok(pickerField("Trigger"));
