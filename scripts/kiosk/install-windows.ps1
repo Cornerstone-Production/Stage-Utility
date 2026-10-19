@@ -173,7 +173,7 @@ if ($updaterWhy) {
   Write-Warning "automatic launcher updates are NOT installed: $updaterWhy; run the installer again"
 } else {
   Write-Output "==> The launcher now follows $Origin's version: it is checked every five minutes,"
-  Write-Output '    and never replaced during a service.'
+  Write-Output '    and a new one takes effect at the next sign-in.'
 }
 
 # Display sleep is the difference between a display and a black rectangle.

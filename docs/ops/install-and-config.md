@@ -433,7 +433,7 @@ own variables, set on the command line of the machine being set up:
 | `STAGE_SERVER` | Pin the device to one server's address, for a network where discovery does not reach it. All three installers |
 | `STAGE_KIOSK_PORT` | The UDP port the device broadcasts its discovery probe to. Default `8789` |
 | `STAGE_KIOSK_UID` | Linux only: the numeric id of the account the kiosk browser runs as. Default `1000` |
-| `STAGE_DOWNLOAD_FROM` | macOS only: the server to fetch the output helper from for this run only. See [Installing the Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper) |
+| `STAGE_DOWNLOAD_FROM` | macOS and Windows: the server to download the output helper, or the Windows launcher, from, without pinning the device to it. The device's updater asks that server from then on. See [Installing the Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper) and [The Windows kiosk's launcher](../kiosk-devices.md#the-windows-kiosks-launcher) |
 
 **Tooling and tests.** `STAGE_UTILITY_TEST_RELEASE_BASE` points the Mac output
 helper download at a test server instead of GitHub's releases, and the server

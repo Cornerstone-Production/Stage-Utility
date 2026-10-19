@@ -113,8 +113,10 @@ Running it again upgrades in place.
 `STAGE_DOWNLOAD_FROM` if set, else `STAGE_SERVER`, else the one the server stamped into
 the script when it served it, else the `server` file of an earlier install. A script
 saved and run by hand has no stamped address, so it needs one of the first two:
-`sudo STAGE_DOWNLOAD_FROM=http://<server> sh install-macos.sh`. That names the server for
-this run and saves nothing. `STAGE_SERVER` is a different choice: it also writes the
+`sudo STAGE_DOWNLOAD_FROM=http://<server> sh install-macos.sh`. That names the server to
+download from without pinning the Mac to it; the updater installed with the helper asks
+that server from then on, as it asks whichever server an install came from, so run it
+from the server the Mac belongs to. `STAGE_SERVER` is a different choice: it also writes the
 `server` file, which pins the Mac to that server and skips discovery for good, so the
 Mac does not follow the server if it moves. Use it only where discovery's broadcast
 does not cross. If that server cannot supply a zip
@@ -192,9 +194,10 @@ folder, which the logged-in account owns. Each run:
    checks the app in it is the version the server named, and clears any
    set-user-id bit (root unpacks it).
 4. Stops the helper, swaps the new app in keeping the old one, and starts it through
-   launchd. The outputs go off air for the restart: measured on an M4 Mac mini with a
-   DeckLink 8K Pro, the SDI port reopened 0.8 s after the old helper stopped and
-   pictures were flowing again about 2 s after.
+   launchd. The download, the check and the unpacking all happen while the old helper
+   is still on air; only the restart takes the outputs off. Measured on an automatic
+   update on an M4 Mac mini with a DeckLink 8K Pro, the SDI port reopened 2.7 s after
+   launchd had the old helper gone, and the screen was showing again 0.1 s later.
 5. Waits up to 90 s for the new helper to say, in `helper-status.json` in the
    logged-in account's `~/Library/Application Support/StageUtilityOutput/` (only a
    regular file that account owns is read), that it is the new version, with the pid
@@ -207,8 +210,11 @@ not start, the server sent another version, the zip is not the helper) holds tha
 version until someone presses Try again. A failure that does not (the download did not
 finish, the Mac shut down in the middle) is tried again on its own, half an hour later,
 then an hour, two, four, and every six hours after, and Screens shows it as retrying.
-An install run by hand and an update never overlap: whichever starts second waits for
-the first (an install by hand up to three minutes).
+A failed update keeps the outputs off air longer than a good one: the new helper is
+given its chance to start before the old one goes back. Measured with a build whose
+browser host was missing, on the Mac above, it was 22 s from the old helper stopping to
+its picture being back. An install run by hand and an update never overlap: whichever
+starts second waits for the first (an install by hand up to three minutes).
 
 It does not update a Mac nobody is logged in to (the new helper could not be started
 and checked), nor start a helper someone quit at the Mac (to free a card for another
@@ -375,6 +381,20 @@ updater, and its log, `kiosk-update.log` beside it, says each decision when it
 changes, `[helper-update]`-tagged, as the server's `/log` does. A PC installed before
 1.27.0 has no updater and a launcher written by the installer; run the installer once
 more to get both.
+
+**Removing it**, in an elevated PowerShell. The updater first, so it does not put the
+launcher back:
+
+```powershell
+Unregister-ScheduledTask -TaskName StageUtilityKioskUpdate -Confirm:$false
+Remove-Item -Recurse -Force "$env:ProgramFiles\StageUtility"
+Unregister-ScheduledTask -TaskName StageUtilityKiosk -Confirm:$false
+Remove-Item -Force "$env:ProgramData\StageUtility\kiosk.ps1", "$env:ProgramData\StageUtility\port"
+```
+
+That leaves the PC's `device-id` and `token` in `%PROGRAMDATA%\StageUtility`: with them
+kept, installing again keeps the PC's binding, and removing them makes it a new device
+whose screen is set up again.
 
 ## Size
 

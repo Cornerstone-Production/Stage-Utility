@@ -20,8 +20,10 @@
 #   --help       this text
 #
 #   STAGE_DOWNLOAD_FROM=http://<server>
-#                                  where to download the helper from, for this run
-#                                  only. Nothing is saved.
+#                                  where to download the helper from. The Mac is not
+#                                  pinned to it (the helper still finds its server by
+#                                  discovery), but the updater asks it from then on,
+#                                  as it asks whichever server an install came from.
 #   STAGE_SERVER=http://<server>   a separate choice: pin this Mac to that server.
 #                                  Written to the `server` file, which skips
 #                                  discovery for good, so the Mac will not follow the
@@ -166,7 +168,7 @@ would() { printf '    [dry-run] %s\n' "$*"; }
 
 usage() {
   cat <<'USAGE'
-Usage: install-macos.sh [--browser] [--dry-run]
+Usage: install-macos.sh [--browser] [--dry-run] [--check-update]
 
   (default)   install the Stage Utility Output helper (macOS 14 or later), and
               the updater that keeps it on the server's version
@@ -178,7 +180,7 @@ Usage: install-macos.sh [--browser] [--dry-run]
 
 Run as root: curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
 Options go after -s --:  ... | sudo sh -s -- --dry-run
-STAGE_DOWNLOAD_FROM=http://<server> names the server to download from, for this run only.
+STAGE_DOWNLOAD_FROM=http://<server> names the server to download from; the updater then asks it too.
 STAGE_SERVER=http://<server> pins this Mac to a server (see the top of this file).
 USAGE
 }

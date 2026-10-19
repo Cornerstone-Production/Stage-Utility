@@ -180,7 +180,7 @@ export interface Gate {
  * Whether a machine should update now. The one place this is decided.
  *
  * A Mac restarts its helper to finish, which takes every output it drives off air
- * for about two seconds, so it never does while a service is live or within the
+ * for about three seconds, so it never does while a service is live or within the
  * window around one (the app's one definition of "near a service", service-window
  * .ts), nor while Planning Center is set up and those times are not known yet.
  * Update now overrides the switch, the window and not knowing, because a person

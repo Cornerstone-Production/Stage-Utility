@@ -1298,7 +1298,7 @@ export function AdvancedSection({
                   <FieldDescription>
                     When this server updates, each Mac running the output helper installs the same
                     version on its own. Never during a service, or within the window around one. The
-                    helper restarts to finish, which takes its outputs off air for about two seconds.
+                    helper restarts to finish, which takes its outputs off air for about three seconds.
                     A Windows kiosk takes the new launcher at its next sign-in.
                   </FieldDescription>
                 </FieldContent>
