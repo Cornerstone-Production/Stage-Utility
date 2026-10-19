@@ -54,7 +54,7 @@ import { isCompanionVariableRef } from "./companion-export.js";
 import { STATE_ANY_OTHER } from "./companion-state-source.js";
 // From cue-aliases, NOT from the trigger registry: the registry reaches
 // node:url, and this module is imported by the settings page.
-import { CALL_TRIGGER_ID, parseAliases } from "./cue-aliases.js";
+import { CALL_TRIGGER_ID, calledCueName, parseAliases } from "./cue-aliases.js";
 import type { Rule } from "../types/automation.js";
 
 /** The values a bound pair's variable is expected to hold, absent anything else. */
@@ -293,7 +293,7 @@ export function cuePairs(rules: readonly Rule[]): CuePair[] {
   const seen = new Set<string>();
   for (const rule of rules) {
     if (rule.trigger.id !== CALL_TRIGGER_ID) continue;
-    const name = String(rule.trigger.params.name ?? "").trim().toLowerCase();
+    const name = calledCueName(rule.trigger);
     if (!name || seen.has(name)) continue;
     seen.add(name);
     cues.push({ rule, name, keys: [name, ...parseAliases(rule.trigger.params)] });

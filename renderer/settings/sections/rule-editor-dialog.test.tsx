@@ -17,9 +17,8 @@
 //  - A DELETE THAT LEAVES HALF A PAIR. `projectors_off` alone is a cue that
 //    turns something off and nothing that turns it on, and it is still a live
 //    URL.
-//  - ADD RULE THAT LANDS NOWHERE. "Rule 7" with a log action is the start of a
-//    rule; an operator left looking at a list of two hundred has to find it
-//    again to say what it does.
+//  (Add rule, which saved "Rule 7" before the operator saw anything, is gone:
+//  New cue saves nothing until Create. See new-cue-dialog.test.tsx.)
 //
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND. node:assert builds its
 // failure message by inspecting `actual`, and inspecting a live jsdom element
@@ -133,8 +132,6 @@ const cue = (name: string, params: Record<string, string | number> = {}): StubRu
 
 let RULES: StubRule[] = [];
 let requests: { method: string; url: string; body: string | null }[] = [];
-/** What POST /api/automation/rules answers with, so Add rule has an id. */
-let CREATED: StubRule | null = null;
 /** A rule id the server refuses to update, as it refuses a duplicate cue name. */
 let REFUSE: { id: string; error: string } | null = null;
 /** Answer POST .../run the way the server does for a confirm rule: 428 until the
@@ -185,11 +182,6 @@ let RUN_NEEDS_CONFIRM = false;
       return { ok: true, status: 200, json: async () => done, text: async () => JSON.stringify(done) };
     }
     if (method === "DELETE") RULES = RULES.filter((r) => r.id !== id);
-    if (method === "POST" && url.endsWith("/api/automation/rules") && CREATED) {
-      RULES = [...RULES, CREATED];
-      const created = { ...CREATED, issues: [] };
-      return { ok: true, status: 201, json: async () => created, text: async () => JSON.stringify(created) };
-    }
   }
   let body: unknown = {};
   if (url.includes("/api/automation/registry")) body = REGISTRY;
@@ -275,6 +267,32 @@ function selectField(label: string): HTMLSelectElement | null {
   return row?.querySelector("select") ?? null;
 }
 
+/** Choose `id` in one of the editor's grouped pickers: open it by the label on its
+ *  button, then press the option. */
+async function pickFrom(label: string, id: string) {
+  await press(document.querySelector(`[data-picker-field][aria-label="${label}"]`), `the ${label} picker`);
+  // The panel opens on the chosen one's heading; walk the headings to the option.
+  for (const heading of [...document.querySelectorAll("[data-picker-group]")]) {
+    if (document.querySelector(`[data-picker-option="${id}"]`)) break;
+    await press(heading, "a picker heading");
+  }
+  await press(document.querySelector(`[data-picker-option="${id}"]`), `${id} in the ${label} picker`);
+}
+
+/** A rule that is not a cue: what the picker tests start from, since a cue's
+ *  editor has no trigger to pick. */
+const planRule = (over: Partial<StubRule> = {}): StubRule => ({
+  id: "rule-plan-item",
+  name: "Lights at item 3",
+  enabled: true,
+  trigger: { id: "pco.plan-item", params: {} },
+  conditions: [],
+  action: { id: "log.message", params: { message: "x" } },
+  cooldownSec: 0,
+  oncePerService: false,
+  ...over,
+});
+
 const button = (text: string): HTMLButtonElement | null =>
   [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === text) ?? null;
 
@@ -301,7 +319,6 @@ const writes = () => requests.filter((r) => r.url.includes("/api/automation/rule
 
 beforeEach(() => {
   RULES = [];
-  CREATED = null;
   REFUSE = null;
   RUN_NEEDS_CONFIRM = false;
   requests = [];
@@ -447,16 +464,7 @@ describe("one rule", () => {
     // put 1/0/1 back — a box reading 0 and a save writing 1.
     await mount();
     await openRow("Rule take_screens");
-    const actionSelect = () =>
-      [...document.querySelectorAll("select")].find((s) =>
-        [...s.options].some((o) => o.value === "companion.press"),
-      ) ?? null;
-    for (const id of ["log.message", "companion.press"]) {
-      await act(async () => {
-        fireEvent.change(actionSelect()!, { target: { value: id } });
-      });
-      await settle();
-    }
+    for (const id of ["log.message", "companion.press"]) await pickFrom("Action", id);
     await press(button("Save"), "Save");
 
     const body = JSON.parse(String(writes()[0]?.body)) as Partial<StubRule>;
@@ -765,26 +773,6 @@ describe("a pair", () => {
   });
 });
 
-describe("Add rule", () => {
-  test("opens the new rule's editor", async () => {
-    RULES = [cue("take_screens")];
-    CREATED = {
-      id: "rule-new",
-      name: "Rule 2",
-      enabled: false,
-      trigger: { id: CALL_TRIGGER_ID, params: {} },
-      conditions: [],
-      action: { id: "log.message", params: { message: "rule matched" } },
-      cooldownSec: 30,
-      oncePerService: false,
-    };
-    await mount();
-    await press(button("Add rule"), "Add rule");
-    assert.equal(editor(), "rule-new", "the new rule was added with nowhere to say what it does");
-    assert.equal(field("Name")?.value, "Rule 2");
-  });
-});
-
 // The class of bug this guards: a native <select> whose value matches no
 // <option> renders BLANK rather than the value it was given (see select.tsx).
 // A rule saved under an older release can still name a trigger, action or enum
@@ -793,7 +781,7 @@ describe("Add rule", () => {
 // (rule-editor-dialog.tsx's Trigger row, Action row, or ParamField's
 // enum/multi-enum branch) turns these tests red.
 describe("a rule naming a trigger, action or param value the registry no longer lists", () => {
-  test("the Trigger and Action selects still show the stored ids, not blank", async () => {
+  test("the Trigger and Action pickers still show the stored ids, not blank", async () => {
     RULES = [
       {
         id: "rule-retired",
@@ -809,20 +797,10 @@ describe("a rule naming a trigger, action or param value the registry no longer 
     await mount();
     await openRow("Rule retired");
 
-    const trigger = selectField("Trigger");
-    assert.ok(trigger, "no Trigger select rendered");
-    assert.notEqual(trigger!.selectedIndex, -1, "the Trigger control rendered blank");
-    assert.equal(trigger!.value, "obs.retired-trigger", "the stored trigger id must be what the control reads");
-    const triggerOpt = [...trigger!.options].find((o) => o.value === "obs.retired-trigger");
-    assert.ok(
-      triggerOpt?.textContent?.includes("not found"),
-      `the stored trigger id must be labelled as no longer offered, got ${JSON.stringify(triggerOpt?.textContent)}`,
-    );
-
-    const action = selectField("Action");
-    assert.ok(action, "no Action select rendered");
-    assert.notEqual(action!.selectedIndex, -1, "the Action control rendered blank");
-    assert.equal(action!.value, "action.retired", "the stored action id must be what the control reads");
+    const shown = (label: string) =>
+      document.querySelector(`[data-picker-field][aria-label="${label}"]`)?.textContent?.trim() ?? null;
+    assert.equal(shown("Trigger"), "obs.retired-trigger · not found", "the stored trigger id must be shown, and labelled as no longer offered");
+    assert.equal(shown("Action"), "action.retired · not found", "the stored action id must be shown, and labelled as no longer offered");
   });
 
   test("a stale enum param value is shown on its ParamField Select, not blank", async () => {
@@ -862,13 +840,10 @@ describe("a rule naming a trigger, action or param value the registry no longer 
 // back to `params: {}` turns its test red.
 describe("picking a trigger, condition or action seeds its number params at once", () => {
   test("picking a trigger with a number param stores it, not just displays it", async () => {
-    RULES = [cue("take_screens")];
+    RULES = [planRule()];
     await mount();
-    await openRow("Rule take_screens");
-    await act(async () => {
-      fireEvent.change(selectField("Trigger")!, { target: { value: "occupancy.threshold" } });
-    });
-    await settle();
+    await openRow("Lights at item 3");
+    await pickFrom("Trigger", "occupancy.threshold");
     await press(button("Save"), "Save");
     const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as { trigger?: { params?: Record<string, unknown> } };
     assert.equal(
@@ -879,14 +854,10 @@ describe("picking a trigger, condition or action seeds its number params at once
   });
 
   test("picking an action with a number param stores it, not just displays it", async () => {
-    RULES = [cue("take_screens")];
+    RULES = [planRule()];
     await mount();
-    await openRow("Rule take_screens");
-    const actionSelect = () => selectField("Action");
-    await act(async () => {
-      fireEvent.change(actionSelect()!, { target: { value: "osc.send" } });
-    });
-    await settle();
+    await openRow("Lights at item 3");
+    await pickFrom("Action", "osc.send");
     await press(button("Save"), "Save");
     const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as { action?: { params?: Record<string, unknown> } };
     assert.equal(
@@ -901,13 +872,10 @@ describe("picking a trigger, condition or action seeds its number params at once
   // hours before the item was due, never landing in a live snapshot window
   // during the service. The field must both DISPLAY and SAVE 0.
   test("picking a trigger with a negative-floored number param seeds 0, not the floor", async () => {
-    RULES = [cue("take_screens")];
+    RULES = [planRule()];
     await mount();
-    await openRow("Rule take_screens");
-    await act(async () => {
-      fireEvent.change(selectField("Trigger")!, { target: { value: "pco.item-due" } });
-    });
-    await settle();
+    await openRow("Lights at item 3");
+    await pickFrom("Trigger", "pco.item-due");
     assert.equal(field("Offset (minutes)")?.value, "0", "the offset field must show 0, not the -720 floor");
     await press(button("Save"), "Save");
     const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as { trigger?: { params?: Record<string, unknown> } };
@@ -919,17 +887,10 @@ describe("picking a trigger, condition or action seeds its number params at once
   });
 
   test("adding a condition with a number param stores it, not just displays it", async () => {
-    RULES = [cue("take_screens")];
+    RULES = [planRule()];
     await mount();
-    await openRow("Rule take_screens");
-    const addCondition = () =>
-      [...document.querySelectorAll("select")].find((s) =>
-        [...s.options].some((o) => o.value === "battery.below"),
-      ) as HTMLSelectElement | undefined;
-    await act(async () => {
-      fireEvent.change(addCondition()!, { target: { value: "battery.below" } });
-    });
-    await settle();
+    await openRow("Lights at item 3");
+    await pickFrom("Add condition", "battery.below");
     await press(button("Save"), "Save");
     const patch = JSON.parse(writes().at(-1)?.body ?? "{}") as {
       conditions?: { id: string; params?: Record<string, unknown> }[];
@@ -959,10 +920,7 @@ describe("companion.press has its own picker, and is never number-seeded", () =>
     ];
     await mount();
     await openRow("Rule take_screens");
-    await act(async () => {
-      fireEvent.change(selectField("Action")!, { target: { value: "companion.press" } });
-    });
-    await settle();
+    await pickFrom("Action", "companion.press");
     assert.ok(
       button("Choose Companion button…"),
       "an unpicked companion.press button must read 'Choose Companion button…', not a seeded coordinate",

@@ -43,7 +43,7 @@ import {
 import { readFingerprint } from "./companion-fingerprint.js";
 import { scrub } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
-import { CALL_TRIGGER_ID } from "./cue-aliases.js";
+import { CALL_TRIGGER_ID, calledCueName } from "./cue-aliases.js";
 import { builtinTone, isBuiltinRule, type CueTone } from "./builtin-cues.js";
 import type { CueStateName, CueStatesAnswer } from "./cue-states.js";
 import type { Rule } from "../types/automation.js";
@@ -225,7 +225,7 @@ export async function cueManifest(opts: { includeHidden?: boolean } = {}): Promi
   const buttons: ManifestButton[] = [];
   for (const rule of rules) {
     if (rule.trigger.id !== CALL_TRIGGER_ID || paired.has(rule.id)) continue;
-    const cue = String(rule.trigger.params.name ?? "").trim().toLowerCase();
+    const cue = calledCueName(rule.trigger);
     if (!cue) continue;
     // A cue named like half of a pair whose partner is not here is an ORPHAN,
     // not a button: deleting a pair one half at a time exposed the survivor as

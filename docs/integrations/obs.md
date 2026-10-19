@@ -86,7 +86,7 @@ disconnected the action fails with `OBS is not connected` and sends nothing.
 Stage Utility offers `obs_record_on` / `obs_record_off`, `obs_stream_on` /
 `obs_stream_off` and `obs_virtual_cam_on` / `obs_virtual_cam_off` as
 [built-in cues](../automation.md#built-in-cues) — a switch in Home Assistant, a
-cue button on a panel, a name to call — with no rule to write and those names
+Button on a panel, a name to call — with no rule to write and those names
 reserved. Each reports what OBS is actually doing, from the
 `RecordStateChanged` event OBS pushes the instant it changes, rather than what
 the cue asked for: the pair binds itself to `app:obs.recording`,

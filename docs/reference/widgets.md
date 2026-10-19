@@ -21,7 +21,7 @@ hide those: **Hide widgets whose integration is not set up**.
 
 A status readout also draws that dash on a screen that has just loaded, until its
 source answers for the first time. Offline, No recorder, No teams followed,
-ProPresenter offline, No live service, No service plan, a cue button's Unbound, a
+ProPresenter offline, No live service, No service plan, a Button's Unbound, a
 baptism count of 0 and a screen tile's dark dot are each a claim, and none is
 drawn before the answer that makes it true. A plan that could not be read says
 **Couldn't load the plan** rather than that there is none.
@@ -521,8 +521,7 @@ nothing.
 |---|---|---|
 | **OSC button** | Sends an OSC message, and can reflect the device's state back | LAN gear over UDP |
 | **RossTalk button** | Fires a RossTalk command | A Ross switcher |
-| **Action button** | Runs one of the app's own actions | This app |
-| **Cue button** | Fires a cue and shows its device's state: on, off, settling after a press, stale when Companion has lost the device, dimmed when the cue refuses | This app, via Companion |
+| **Button** | Fires a cue, or runs one of the app's own actions. Set under **Does**: see [below](#control) | This app, via Companion for a cue |
 | **Notes** | A note typed on a console and shown wherever the widget is | This app |
 | **Checklist** | The plan's own checklist, ticked off here ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center |
 | **Message composer** | Where a producer sends [stage messages](../features/stage-messages.md): who it goes to, quick messages, the text, an alert switch, and the day's thread with its replies | This app |
@@ -541,33 +540,32 @@ wherever it is placed.
 
 See [OSC](../integrations/osc.md) and [RossTalk](../integrations/rosstalk.md).
 
-**Action button** picks an **Action** from the same registry the
-[automation rules editor](../automation.md) offers — every action in
-[Actions](../automation.md#actions), including advancing or stepping back
-through the [baptism timer](../features/servicecue-and-baptisms.md). Choosing
-one that takes parameters (a Companion button coordinate, a RossTalk command)
-shows the same fields the rule editor would show for it. **Label** is blank by
-default, which draws the action's own name; type one to override it. A button
-saved against an action that has since been removed or renamed still shows its
-stored id, marked as unknown, rather than doing nothing when pressed. One with
-a required field left blank — see [Needs setup](../automation.md#needs-setup)
-— shows a **Needs setup** marker over the tile in the layout editor's own
-canvas only; a live display or a console never shows it, and pressing the
-button there keeps refusing exactly as it always has. The layout still saves —
-a button is part of a screen, so a field it is missing marks the button, not
-the whole layout.
+A button's label is centred on it, in the middle both ways, and wraps inside it
+with a margin on every side. A word longer than the button breaks, and text that
+still does not fit is clipped at the button's edge rather than drawn over its
+neighbours. The OSC button, the RossTalk button and both kinds of Button draw it the same way.
 
-**Cue button** binds to a cue. The picker lists **Built in** first — the cues
-the app ships for OBS, REAPER, ProVideoPlayer and itself, which need no rule
-behind them ([built-in cues](../automation.md#built-in-cues)) — and then **Your
-cues**, from the rules list, including pairs hidden from Home Assistant. A pair
-shows on or off from its state variable; a tap presses the opposite half, and a
-pair whose reading is unknown presses ON. In the eight seconds after a press it
-shows what was asked for and says it is settling. A dashed amber ring means
-Companion has lost the device and the reading cannot be trusted. A cue that
+**Button** is one widget with a **Does** choice at the top of its settings.
+
+**Fire a cue** binds the button to a cue. The **Cue** dropdown lists **Your cues**
+first — the ones from the rules list, including those hidden from Home
+Assistant — and then **Built in**: the cues the app ships for OBS, REAPER,
+ProVideoPlayer and itself, which need no rule behind them
+([built-in cues](../automation.md#built-in-cues)). **+ New manual cue…** opens
+the [Automation](../automation.md#cues) page in a new tab, and a cue made there
+appears in the dropdown without reloading the editor. Two cues that would read
+the same show their cue name beside the entry. The button shows the cue's
+state: on, off, settling after a press, stale when Companion has lost the
+device, dimmed when the cue refuses.
+
+A pair shows on or off from its state variable; a tap presses the opposite half,
+and a pair whose reading is unknown presses ON. In the eight seconds after a
+press it shows what was asked for and says it is settling. A dashed amber ring
+means Companion has lost the device and the reading cannot be trusted. A cue that
 refuses — switched off, disarmed, not allowed during a service — says why on the
-button. One that needs a confirmation cannot be fired from a panel; the rules
-page has the Test button for that. A press is recorded in the
+button. In Automation's Simulate mode a press is accepted and sends nothing, and
+the button says *Simulated: nothing was sent*. One that needs a confirmation
+cannot be fired from a panel; the rules page has the Test button for that. A press is recorded in the
 [automation log](../automation.md) with the caller `console`.
 
 Two colour schemes, by what the switch means:
@@ -580,6 +578,48 @@ Two colour schemes, by what the switch means:
 The live scheme is carried by the OBS recording, OBS stream and REAPER recording
 built-ins. Everything else draws the ordinary way, and both draw an unreadable
 state as the amber dashed ring.
+
+**Run an action** picks an **Action** from the same registry the
+[automation rules editor](../automation.md) offers — every action in
+[Actions](../automation.md#actions), including advancing or stepping back
+through the [baptism timer](../features/servicecue-and-baptisms.md). Choosing
+one that takes parameters (a Companion button coordinate, a RossTalk command)
+shows the same fields the rule editor would show for it. The action belongs to
+this button alone; nothing else can fire it. A button saved against an action
+that has since been removed or renamed still shows its stored id, marked as
+unknown, rather than doing nothing when pressed. One with a required field left
+blank — see [Needs setup](../automation.md#needs-setup) — shows a **Needs setup**
+marker over the tile in the layout editor's own canvas only; a live display or a
+console never shows it, and pressing the button there keeps refusing exactly as
+it always has. The layout still saves — a button is part of a screen, so a field
+it is missing marks the button, not the whole layout.
+
+**Make it a cue**, under an action's fields, turns the action into a manual cue
+and points the button at it, so the Automation page's Run button, Home
+Assistant, voice and other consoles can fire it too. It is off until an action is
+chosen and its fields are complete. The cue is a **Called by name** rule named
+after the button's label (the action's name when the label is blank, or is the
+default "Action" that older buttons were saved with), with a
+`lower_snake_case` cue name that is made unique against every cue name and former
+name — a name ending `_on` or `_off` gets `_cue` added, because a lone one would
+read as half of an ON/OFF pair and never appear in the list. It is saved enabled,
+with a **Cooldown** of 2 seconds, **Allowed during a service** on and **Home
+Assistant** off; change any of that on the Automation page. A cue obeys what a Button
+set to Run an action does not: Simulate mode (the button then says it sent nothing),
+Disarm, the cooldown, and the service guard if it is switched back on. While the
+rule is being written, **Does** and **Make it a cue** are inert. If the server
+refuses the rule, the button is left as it was and the reason is shown under the
+button.
+
+**Label** is blank by default, which draws the cue's name (or, for an action, the
+action's own name).
+
+Switching **Does** rewrites the widget in place. The label, the look and the
+position stay. Going to **Run an action** drops the cue and **Show device**;
+going to **Fire a cue** drops the action and its parameters. **Undo** brings them
+back. What **Does** shows is simply the widget's stored type, so nothing is
+migrated: a stored cue button opens on **Fire a cue**, a stored action button on
+**Run an action**.
 
 **Message composer** has no options. It draws, top to bottom: a header with the
 name **Messages** and who a message from it is signed as, **To** (Everyone and
@@ -726,8 +766,7 @@ chooses which; with one, it is not shown.
 | **ProVideoPlayer layers**, **ProVideoPlayer now** | See [ProVideoPlayer](#provideoplayer) |
 | **OSC button** | **Target**, **Label**, **Address**, **Arguments** (int, float, string, true or false, in order), **Feedback** (off; when on, **Watch address**, **Active when =** and **Active color**) |
 | **RossTalk button** | **Target**, **Command** and its parameters, **Label** |
-| **Action button** | **Action**, its parameters, **Label**: see [Control](#control) |
-| **Cue button** | **Cue**, **Label** (blank uses the cue's name), **Show device** (on) |
+| **Button** | **Does** (Fire a cue or Run an action). Fire a cue: **Cue**, **Show device** (on), **Label** (blank uses the cue's name). Run an action: **Action**, its parameters, **Make it a cue**, **Label** (blank uses the action's name). See [Control](#control) |
 | **Messages** | **Groups**: see [Control](#control) |
 | **Checklist**, **Notes** | Nothing beyond the look; their content is typed into the widget |
 | **Shape** | **Shape**: Rect or Ellipse |

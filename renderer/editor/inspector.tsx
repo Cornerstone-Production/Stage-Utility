@@ -91,9 +91,8 @@ import {
   ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, sizesTypeFromItsBox,
 } from "./inspector-rows";
 import { ResponsiveControls } from "./responsive-controls";
-import { CuePicker } from "./cue-picker";
 import { MessagesGroupsPicker } from "./messages-groups-picker";
-import { ActionButtonInspector } from "./action-button-inspector";
+import { ButtonInspector } from "./button-inspector";
 import { cn } from "../lib/cn";
 import { ColorField } from "../components/ui/color-field";
 import {
@@ -1627,18 +1626,7 @@ export function Inspector({
           </>
         );
       })()}
-      {c.type === "action-button" && <ActionButtonInspector c={c} onConfig={onConfig} />}
-      {c.type === "cue-button" && (() => {
-        return (
-          <>
-            <Row label="Cue" hint="Built in cues drive OBS, REAPER, ProVideoPlayer and the app itself with no rule behind them. Your own cues come from the rules list: a pair shows on and off, a lone cue is a momentary button. Pairs hidden from Home Assistant are listed too.">
-              <CuePicker cues={cues} value={c.cue} onChange={(v) => onConfig({ ...c, cue: v })} />
-            </Row>
-            <RowText label="Label" hint="Blank uses the cue's own name." value={c.label ?? ""} placeholder="Cue's name" onChange={(v) => onConfig({ ...c, label: v })} />
-            <RowSwitch label="Show device" hint="The room or device under the label, and the reason when a reading is stale." checked={c.showDevice !== false} onChange={(v) => onConfig({ ...c, showDevice: v })} />
-          </>
-        );
-      })()}
+      {(c.type === "action-button" || c.type === "cue-button") && <ButtonInspector c={c} cues={cues} onConfig={onConfig} />}
       {c.type === "people-counter" && (() => {
         const zones = peopleCount?.zones ?? [];
         const metric = c.metric ?? "attendance";

@@ -5,11 +5,12 @@
 // registry read and the write-back into config can be rendered in a test
 // without mounting the whole Inspector and every other object type's hooks.
 //
-// The action select and the per-parameter fields are the SAME components the
-// automation rule editor uses (ActionPicker, ActionParamsFields) — one
-// registry, one set of field widgets, so a param this repo already knows how
-// to edit does not grow a second, differently-behaved copy here.
+// The action list comes from the SAME registry the automation rule editor reads,
+// and the per-parameter fields are the same component (ActionParamsFields): a
+// param this repo already knows how to edit does not grow a second,
+// differently-behaved copy here.
 
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { automationRegistryQuery } from "../lib/automation-registry";
@@ -23,9 +24,13 @@ import { validateParams } from "@main/services/automation-param-validation";
 export function ActionButtonInspector({
   c,
   onConfig,
+  beforeLabel,
 }: {
   c: Extract<LayoutObjectConfig, { type: "action-button" }>;
   onConfig: (c: LayoutObjectConfig) => void;
+  /** Rows between the parameter fields and Label: the Button inspector puts
+   *  "Make it a cue" there, so the Label stays the last thing in the panel. */
+  beforeLabel?: ReactNode;
 }) {
   // The SAME registry the rule editor reads (GET /api/automation/registry) —
   // same query key, so react-query shares one answer if both are ever open at
@@ -75,6 +80,7 @@ export function ActionButtonInspector({
         issues={issueMap}
         attempted
       />
+      {beforeLabel}
       <RowText
         label="Label"
         hint="Blank uses the action's own label."

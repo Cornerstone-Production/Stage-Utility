@@ -774,10 +774,16 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     integration: { id: "rosstalk", label: "RossTalk" },
   },
 
+  // One "Button" in the palette covers this and the cue button: the inspector's
+  // Does control switches a button between the two stored types. This one stays
+  // a full registry entry (every saved layout holds them, and the renderer, the
+  // capability table and the type union all key on it) but is not offered on its
+  // own, and carries the same label so the layer list and the inspector header
+  // read "Button" whichever way a widget is set.
   "action-button": {
-    label: "Action button",
+    label: "Button",
     blurb: "Runs one of the app's own actions",
-    group: "Control",
+    group: null,
     config: () => ({ type: "action-button", actionId: "", params: {}, label: "Action" }),
     style: () => PILL({ fontSize: 0.045 }),
   },
@@ -798,12 +804,17 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: () => CARD({ fontSize: 0.035, textAlign: "left", vAlign: "top" }),
   },
 
+  // The palette's Button: it arrives firing a cue, and the inspector's Does
+  // control turns it into an action button (and back). See action-button above.
   "cue-button": {
-    label: "Cue button",
-    blurb: "Fires a cue and shows whether its device is on",
+    label: "Button",
+    blurb: "Fires a cue, or runs an action, from a console",
     group: "Control",
     config: () => ({ type: "cue-button", cue: "", label: "", showDevice: true }),
-    style: () => PILL({ fontSize: 0.12 }),
+    // The size every other button starts at, small enough that the lamp, label and
+    // room line fit the box a new button is placed in (default-size.test.tsx). The
+    // Ultritouch strips set their own, larger size.
+    style: () => PILL({ fontSize: 0.045 }),
   },
 
   // The newest three stage messages for the screen's groups. Sized so a message

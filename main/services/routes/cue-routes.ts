@@ -58,6 +58,7 @@ import { homeAssistantYaml } from "../home-assistant-yaml.js";
 import { cueStates, cueStatesBody } from "../cue-states.js";
 import { cueManifest } from "../cue-manifest.js";
 import { reservedCueNames } from "../builtin-cues.js";
+import { takenCueNames } from "../cue-aliases.js";
 import { stageController } from "../stage-controller.js";
 import type { Rule } from "../../types/automation.js";
 
@@ -292,7 +293,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // is the ordinary case after a relabel: a button renamed "Screens ON" and
     // then back to "Projectors ON" is offered as `projectors_on`, which is now
     // the cue's former name.
-    const taken = takenCueNames();
+    const taken = cueNamesInUse();
     // The single buttons are worked out HERE rather than below, because the cue
     // names of the pairs and of the singles are resolved together: uniqueness is
     // a property of the whole offer, and counted per family a lone "House Lights
@@ -390,19 +391,13 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
  * show a name as free and then be refused by addRule. One copy, for the offer
  * and for the toggle import both.
  */
-function takenCueNames(): Set<string> {
+function cueNamesInUse(): Set<string> {
   // The BUILT-INS first: the app ships rules answering to those names and
   // `assertCueValid` refuses a stored rule that takes one, so an offer that
   // left them out would show `obs_record_on` as free, tick it, and then be
   // refused at the moment the operator pressed Import. Every name in the
   // table, whatever is enabled right now — see reservedCueNames.
-  const taken = new Set<string>(reservedCueNames());
-  for (const rule of automationEngine.listRules()) {
-    const name = automationEngine.cueNameOf(rule);
-    if (name) taken.add(name);
-    for (const alias of automationEngine.cueAliasesOf(rule)) taken.add(alias);
-  }
-  return taken;
+  return takenCueNames(automationEngine.listRules(), reservedCueNames());
 }
 
 /**
@@ -700,7 +695,7 @@ async function importButtons(raw: unknown[]): Promise<ImportResult> {
       // cue that then pairs itself with whatever unrelated `<base>_on` was
       // already there, and the generated switch turns that stranger on and this
       // button off.
-      const taken = takenCueNames();
+      const taken = cueNamesInUse();
       const clash = ["on", "off"].map((half) => `${pairSlug}_${half}`).find((n) => taken.has(n));
       if (clash) {
         skipped.push({

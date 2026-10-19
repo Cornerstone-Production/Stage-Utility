@@ -226,7 +226,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/automation/registry` | Every trigger, condition and action this build offers: `{triggers, conditions, actions}`, each `{id, label, params, help}` (a trigger also carries its `channel`) |
+| GET | `/api/automation/registry` | Every trigger, condition and action this build offers: `{triggers, conditions, actions, reservedCueNames}`, each definition `{id, label, params, help}` (a trigger also carries its `channel`). `reservedCueNames` is the sorted list of cue names the app ships, which no rule may take |
 | GET | `/api/automation/plan-items` | The current plan's items, for the item pickers: `{items: [{value, label, dueAt, exact}]}`, `value` the item's title. Empty, never an error, with no plan loaded |
 | GET | `/api/automation/propresenter-instances` | Every ProPresenter a rule can address, as `{items: [{value, label}]}` |
 | GET | `/api/automation/propresenter-macros` | Macro names across every configured instance, unioned: `{items, unreachable}`. Empty, never an error, when one is unreachable, and `unreachable` names the instances that did not answer. A name only some instances have is labelled `DOORS (Main only)` — but only while every instance answered, since "only" is a claim about the machines that did |
