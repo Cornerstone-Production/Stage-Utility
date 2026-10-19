@@ -199,35 +199,48 @@ fi
 
 write_progress install
 say "Verifying"
+# The digest the releases API lists for asset $1 in the release JSON $2, or nothing.
+#
 # Within an asset object the API emits "name" before "digest", so the digest we
-# want is the first one after this archive's name. Anchoring on the exact name
-# is what stops another platform's hash being read as this one's — and the
-# response is pretty-printed, so the two fields are never on the same line.
-# Same here-string reason as above, and this is the one that actually bit: awk
-# `exit`s the moment it has the digest — which for the newest release is in the
-# first few KB — so the writer was still pushing 275 KB into a closed pipe.
-# Observed as `printf: write error: Broken pipe` on a real beta install, with
-# the script dying before it verified anything.
+# want is the first one after this archive's name. Anchoring on the exact name is
+# what stops another platform's hash being read as this one's, and every "name"
+# line resets the match, so an asset that lists no digest of its own (null, or no
+# key) never takes the NEXT asset's. The response is pretty-printed, so the two
+# fields are never on the same line, and this reads that form: a record in any
+# other layout finds nothing, and the install refuses rather than guesses.
+#
+# The JSON arrives by here-string and awk `exit`s the moment it has the digest —
+# which for the newest release is in the first few KB — so a pipe's writer was
+# still pushing 275 KB into a closed pipe. Observed as `printf: write error:
+# Broken pipe` on a real beta install, with the script dying before it verified
+# anything.
+#
 # No interval expression (`{64}`) anywhere below. mawk — the DEFAULT awk on
 # Debian and Ubuntu, i.e. most Linux servers — does not support them and offers
 # no flag to enable them, so `match($0, /[0-9a-f]{64}/)` simply never matched
-# there. The extraction returned empty, and the install died on the line under
-# this one with "publishes no checksum … refusing to install unverified": the
-# one-line installer could not install on a stock Debian or Ubuntu box at all.
-# It failed safe, which is why it stayed quiet; GitHub's runners and any machine
-# with gawk installed take the same path and pass.
+# there. The extraction returned empty, and the install died with "publishes no
+# checksum … refusing to install unverified": the one-line installer could not
+# install on a stock Debian or Ubuntu box at all. It failed safe, which is why it
+# stayed quiet; GitHub's runners and any machine with gawk installed take the same
+# path and pass.
 #
 # So: strip the prefix, strip anything from the first non-hex character, and
 # check the length. Plain POSIX awk, identical result under mawk and gawk.
-WANT=$(awk -v want="\"name\": \"${ARCHIVE}\"" '
-  index($0, want) { found = 1; next }
-  found && /"digest": "sha256:/ {
-    line = $0
-    sub(/.*sha256:/, "", line)
-    sub(/[^0-9a-f].*$/, "", line)
-    if (length(line) == 64) { print line; exit }
-  }
-' <<<"$RELEASE_JSON")
+#
+# The same extraction as digest_from_release in scripts/kiosk/install-macos.sh;
+# scripts/kiosk-install-macos.test.ts runs both over the same fixtures.
+release_digest() {
+  awk -v want="\"name\": \"$1\"" '
+    /"name": "/ { found = (index($0, want) > 0); next }
+    found && /"digest": "sha256:/ {
+      line = $0
+      sub(/.*sha256:/, "", line)
+      sub(/[^0-9a-f].*$/, "", line)
+      if (length(line) == 64) { print line; exit }
+    }
+  ' <<<"$2"
+}
+WANT=$(release_digest "$ARCHIVE" "$RELEASE_JSON")
 
 [ -n "${WANT:-}" ] \
   || die "Release ${TAG} publishes no checksum for ${ARCHIVE}; refusing to install unverified."
