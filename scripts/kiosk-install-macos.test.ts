@@ -968,7 +968,6 @@ describe("--check-update", { skip: !(has("zip") && has("uuidgen") && has("xxd"))
     const [q] = checks();
     assert.equal(q.get("machine"), MACHINE);
     assert.equal(q.get("platform"), "macos");
-    assert.equal(q.get("arch"), "arm64");
     assert.equal(q.get("have"), "1.26.0");
     assert.equal(q.get("state"), "idle");
     assert.ok(!server.hits.some((h) => h.includes(".zip")), "nothing downloaded");
@@ -978,6 +977,13 @@ describe("--check-update", { skip: !(has("zip") && has("uuidgen") && has("xxd"))
     // The same answer again is not said again.
     const again = await run();
     assert.doesNotMatch(again.out, /when the service is no longer live/);
+  });
+
+  it("reads the server's whole sentence, commas and all", async () => {
+    answer({ update: false, reason: "Helper 1.27.0, the same as this server" });
+    const r = await run();
+    assert.match(r.out, /: Helper 1\.27\.0, the same as this server$/m);
+    assert.match(updaterStatus(), /^answer=Helper 1\.27\.0, the same as this server$/m);
   });
 
   it("updates: downloads, verifies, swaps, restarts the helper, and keeps the new one once it says it started", async () => {
@@ -999,7 +1005,7 @@ describe("--check-update", { skip: !(has("zip") && has("uuidgen") && has("xxd"))
 
   it("puts the previous helper back, and starts it, when the new one says Chromium did not start", async () => {
     answer({ update: true });
-    const r = await run({ SHIM_STARTS_BODY: started({ chromium: "failed", chromiumProblem: "the browser host could not be opened" }) });
+    const r = await run({ SHIM_STARTS_BODY: started({ chromium: "failed", chromiumProblem: "the browser host could not be opened, so nothing renders" }) });
     assert.equal(r.status, 1, r.out + r.err);
     assert.equal(which(), "build-old");
     assert.deepEqual(leftovers(), []);
@@ -1012,8 +1018,8 @@ describe("--check-update", { skip: !(has("zip") && has("uuidgen") && has("xxd"))
     ]);
     assert.match(updaterStatus(), /^state=failed$/m);
     assert.match(updaterStatus(), /^target=1\.27\.0$/m);
-    assert.match(updaterStatus(), /^detail=Chromium did not start: the browser host could not be opened$/m);
-    assert.match(r.out, /the update to 1\.27\.0 failed: Chromium did not start: the browser host could not be opened\. Put 1\.26\.0 back\./);
+    assert.match(updaterStatus(), /^detail=Chromium did not start: the browser host could not be opened, so nothing renders$/m);
+    assert.match(r.out, /the update to 1\.27\.0 failed: Chromium did not start: the browser host could not be opened, so nothing renders\. Put 1\.26\.0 back\./);
     // The next check tells the server, which then holds the version back.
     answer({ update: false });
     await run();

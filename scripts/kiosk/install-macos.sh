@@ -882,10 +882,17 @@ helper_status_file() {
 
 # One field of a one-line JSON object: helper-status.json, which
 # HelperStatus.encoded() writes with sorted keys, or the server's answer. A string
-# comes back without its quotes. Values here never hold a quote or a comma.
+# comes back without its quotes and with any escape left as it is (\" stays \"),
+# commas and all: the server's sentences have them. Anything else (a number, a
+# bool) comes back as written.
 json_field() { # file key
   [ -r "$1" ] && [ ! -L "$1" ] || return 0
-  tr -d '\n' <"$1" | sed -n "s/.*\"$2\":\"\{0,1\}\([^\",}]*\)\"\{0,1\}[,}].*/\1/p" | head -n 1
+  flat="$(tr -d '\n' <"$1")"
+  value="$(printf '%s' "$flat" | sed -nE "s/.*\"$2\":\"(([^\"\\\\]|\\\\.)*)\".*/\1/p" | head -n 1)"
+  if [ -z "$value" ]; then
+    value="$(printf '%s' "$flat" | sed -nE "s/.*\"$2\":([^\",}]+)[,}].*/\1/p" | head -n 1)"
+  fi
+  printf '%s' "$value"
 }
 
 # launchd's pid for the helper in the console user's session, or empty.
@@ -893,8 +900,16 @@ helper_pid() {
   launchctl print "gui/$CONSOLE_UID/$HELPER_LABEL" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }'
 }
 
+# A server root and nothing else: the shape HOST_RE in
+# main/services/kiosk-installer-origin.ts admits, and kiosk-update-windows.ps1's
+# Read-Origin too. Keep the three the same.
 is_origin() {
   printf '%s\n' "$1" | grep -Eq '^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$'
+}
+
+# Print $1, without a trailing slash, when it is a server root.
+emit_origin() {
+  if is_origin "${1%/}"; then printf '%s\n' "${1%/}"; fi
 }
 
 # The servers to ask, best first, one per line. A `server` file pins the Mac, as it
@@ -903,26 +918,33 @@ is_origin() {
 # the one this updater was installed from.
 update_servers() {
   if [ -r "$STATE_DIR/server" ] && [ ! -L "$STATE_DIR/server" ]; then
-    pinned="$(tr -d '\r\n' <"$STATE_DIR/server")"
-    if is_origin "${pinned%/}"; then printf '%s\n' "${pinned%/}"; fi
+    emit_origin "$(tr -d '\r\n' <"$STATE_DIR/server")"
     return 0
   fi
   seen=""
   file="$(helper_status_file || true)"
   if [ -n "$file" ]; then
     seen="$(json_field "$file" server)"
-    if [ -n "$seen" ] && is_origin "$seen"; then printf '%s\n' "$seen"; fi
+    emit_origin "$seen"
   fi
   if [ -r "$UPDATER_ORIGIN" ]; then
     installed_from="$(tr -d '\r\n' <"$UPDATER_ORIGIN")"
-    if is_origin "$installed_from" && [ "$installed_from" != "$seen" ]; then printf '%s\n' "$installed_from"; fi
+    if [ "$installed_from" != "$seen" ]; then emit_origin "$installed_from"; fi
   fi
+}
+
+# Record this check's answer (the server's reason, or why there was none), and say
+# it only when it differs from the last one: a check every five minutes must not
+# be a log line every five minutes.
+settle() { # answer message state target detail
+  if [ "$1" != "$(status_field answer)" ]; then say "$2"; fi
+  write_status "$3" "$4" "$5" "$1"
 }
 
 # Ask one server. Leaves the answer in $WORK/answer and returns 0 on a 200.
 ask_server() { # origin have state target detail
   code="$(curl -sS -G --connect-timeout 10 --max-time 30 -o "$WORK/answer" -w '%{http_code}' \
-    --data-urlencode "machine=$MACHINE" --data-urlencode "platform=macos" --data-urlencode "arch=$ARCH" \
+    --data-urlencode "machine=$MACHINE" --data-urlencode "platform=macos" \
     --data-urlencode "have=$2" --data-urlencode "host=$HOST_NAME" --data-urlencode "state=$3" \
     --data-urlencode "target=$4" --data-urlencode "detail=$5" \
     "$1/api/machine-updates/check" 2>/dev/null)" || return 1
@@ -969,8 +991,7 @@ check_update() {
   WORK="$(mktemp -d "${TMPDIR:-/tmp}/stage-utility-update.XXXXXX")"
   # An app removed by hand is not this updater's to put back.
   if [ ! -d "$APPS_DIR/$APP_NAME" ]; then
-    if [ "$(status_field answer)" != not-installed ]; then say "$APPS_DIR/$APP_NAME is not there, so there is nothing to update"; fi
-    write_status idle "" "" not-installed
+    settle not-installed "$APPS_DIR/$APP_NAME is not there, so there is nothing to update" idle "" ""
     return 0
   fi
   have="$(app_version "$APPS_DIR/$APP_NAME")"
@@ -1002,18 +1023,13 @@ check_update() {
     fi
   done
   if [ -z "$origin" ]; then
-    if [ "$(status_field answer)" != unreachable ]; then
-      say "no server answered the update check ($(update_servers | tr '\n' ' ')); trying again in five minutes"
-    fi
-    write_status "$state" "$target" "$detail" unreachable
+    settle unreachable "no server answered the update check ($(update_servers | tr '\n' ' ')); trying again in five minutes" "$state" "$target" "$detail"
     return 0
   fi
   want="$(json_field "$WORK/answer" version)"
   go="$(json_field "$WORK/answer" update)"
   reason="$(json_field "$WORK/answer" reason)"
-  # Said when the answer changes, not every five minutes.
-  if [ "$reason" != "$(status_field answer)" ]; then say "$origin: $reason"; fi
-  write_status "$state" "$target" "$detail" "$reason"
+  settle "$reason" "$origin: $reason" "$state" "$target" "$detail"
   [ "$go" = true ] || return 0
   [ -n "$want" ] || die "$origin said to update but named no version."
 
