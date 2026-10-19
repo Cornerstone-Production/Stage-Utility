@@ -247,19 +247,22 @@ Actions tab once the workflow is on `main`.
 Not every check runs on every pull request. The secret scan, the commit
 convention check and the public-hygiene check (below) run on all of them,
 docs-only included. The script and workflow checks (below) run only when the files
-they read change. CodeQL (`codeql.yml`, the extended query suite) runs on pull
-requests to `beta` or `main`, on pushes to them, weekly, and by hand. JavaScript/TypeScript is analysed
-every time; the other languages only when a change touches what they analyse:
-Swift and C/C++ for `helper/macos/`, Ruby for a `.rb` file, and the workflows for
-`.github/`. A change to either CodeQL workflow runs all of them, and so does every
-push to `main`, the weekly run and a manual one. A language that does not run
-shows as skipped, and on a pull request uploads an empty result under its own
-category, so the `CodeQL` check still finds every configuration the base branch
-has instead of reporting "configurations not found". What the scanner flags, and
-what is dismissed, is in [Code scanning](reference/code-scanning.md). No check is
-a required status check on `beta` or `main`: the release workflow pushes its
-version bump to both directly, which a required check would refuse, so a merge is
-gated by review of a green PR. The build and tests skip a PR that touches only `docs/` and Markdown; dependency
+they read change. CodeQL (`codeql.yml`, the extended query suite; see
+[CodeQL](#codeql)) runs on pull requests to `beta` or `main`, on pushes to them,
+weekly, and by hand. JavaScript/TypeScript is analysed every time; the other
+languages only when a change touches what they analyse: Swift and C/C++ for
+`helper/macos/` or the Xcode selection (`.github/actions/select-xcode`), Ruby for a
+`.rb` file, and the workflows for `.github/`. A change to either CodeQL workflow,
+or to the configuration they share, runs all of them, and so does every push to
+`main`, the weekly run and a manual one. A change under `.github/codeql/` also runs
+the model tests. A language that does not run shows as skipped, and on a pull
+request uploads an empty result under its own category, so the `CodeQL` check still
+finds every configuration the base branch has instead of reporting "configurations
+not found". What the scanner flags, and what is dismissed, is in
+[Code scanning](reference/code-scanning.md). No check is a required status check on
+`beta` or `main`: the release workflow pushes its version bump to both directly,
+which a required check would refuse, so a merge is gated by review of a green PR.
+The build and tests skip a PR that touches only `docs/` and Markdown; dependency
 review runs only when `package.json` or the lockfile changes; the updater
 survival matrix runs only for the updater, the installers and its own scripts;
 and the Mac output helper's Swift build and tests (`helper-macos.yml`, on a
@@ -343,6 +346,91 @@ different entry touch different lines and merge without a conflict; a bare
 count sits on the same line every time, so the second PR to land always
 conflicts with the first. A count is also a weaker guard on its own: two
 additions and one removal leave the number unchanged and the test still green.
+
+## CodeQL
+
+Code scanning is a workflow in this repository, not GitHub's default setup, so its
+configuration is reviewed like code.
+
+| File | What it is |
+|---|---|
+| `.github/workflows/codeql.yml` | Decides which languages a change touches, calls one analysis per language, and runs the model tests |
+| `.github/workflows/codeql-language.yml` | One language's analysis, or an empty result for a language that was skipped |
+| `.github/codeql/codeql-config.yml` | The query suite (`security-extended`) and the paths ignored, read by every language |
+| `.github/codeql/extensions/stage-utility-models/` | The model pack: data extensions that teach the JavaScript analysis about this code |
+| `.github/codeql/tests/` | The model pack's own CodeQL tests |
+
+An alert is fixed in the code, not dismissed. [Code scanning decisions](reference/code-scanning.md)
+lists the two rules whose alerts are dismissed once each, with the reason.
+
+### Paths ignored
+
+`paths-ignore` lists tests and their support code, the vendored DeckLink SDK
+(`helper/macos/Vendor`), the model pack's own test fixtures, the docs screenshot
+tool, and the output of builds. For JavaScript/TypeScript an ignored file is not
+extracted at all: it raises no alert and no flow runs through it. Swift and C/C++ do
+not support path filtering, and CodeQL says so in their logs, so the helper entries
+are inert and an alert under them would still be reported.
+
+Ignoring the tests has a cost. They call route handlers directly, and that is the
+only path CodeQL has into a handler's `c: RouteCtx` (see Models). With the tests
+out of the database, a query parameter or header a future handler logs or writes to
+a path has no source, and only request bodies are covered. The alerts on the tree
+are the same either way today.
+
+Add a path to the config and to the sorted list in `scripts/codeql-workflow.test.ts`.
+That test also fails when a test or a test harness is not covered, when a pattern
+covers product code, and when a pattern matches nothing and is not a build's output.
+
+### Swift and C/C++
+
+Both are built by hand on macOS (`build-mode: manual`) on the runner the helper's own
+CI uses, so the tracer watches a build CI already proves. The C/C++ leg builds only
+the DeckLink shim, not the whole package. Both run only when a change touches
+`helper/macos/` or the Xcode selection.
+
+### Models
+
+The model pack extends `codeql/javascript-all`. The action has no input for a
+repository's own model pack, so the JavaScript run passes it to the CLI through
+`CODEQL_ACTION_EXTRA_OPTIONS`. It holds two kinds of model, in
+`extensions/stage-utility-models/models/`:
+
+- **Sources.** The three body readers in `main/services/routes/context.ts` return
+  remote data: every route handler reads its request body through one of them.
+- **Barriers for `js/log-injection`.** Functions whose result cannot hold a newline
+  or a terminal escape, each with its reason in the model file. `js/log-injection`
+  honours a barrier, not a barrier guard, so a predicate such as `isPcoId` cannot be
+  modelled for it.
+
+A route handler's `c: RouteCtx` cannot be a source. A data extension can name a
+function's parameter only when the function is passed to a library call, and
+handlers are called through a loop over an array, which CodeQL does not resolve.
+Making `c.url` and `c.req` reachable would mean changing how handlers are dispatched.
+
+A model's type is `file:<path>`, relative to the source root, naming the module the
+calling code imports.
+
+To add a model:
+
+1. Add the row to a file under `extensions/stage-utility-models/models/`, with a
+   comment saying why the function qualifies. A barrier belongs there only if it
+   neutralises every newline and control character.
+2. Add the row to the sorted list in `scripts/codeql-workflow.test.ts`. That test
+   checks that the file exports the function and that a fixture stands in for it.
+3. Add the stand-in under `.github/codeql/tests/models/`, at the same path as the real
+   file, and a call to it in `log-barriers.ts` or `route-sources.ts` there.
+4. Record the alerts and read the diff of `LogInjection.expected`: a barrier's call
+   shows no alert, a source's call shows one.
+5. Delete the row and run the test again. It must fail.
+
+```bash
+codeql test run .github/codeql/tests --additional-packs=$PWD/.github/codeql/extensions --learn
+```
+
+Drop `--learn` to run the tests. CI runs them whenever `.github/codeql/` changes, with
+the CLI version the `models` job prints at the start. Record with that version: a
+newer CLI can change how the expected output is written.
 
 ## React state
 
