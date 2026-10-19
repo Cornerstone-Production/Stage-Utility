@@ -18,7 +18,7 @@ import Testing
     let (o, problems) = parse([
       "--show-window", "--list-outputs", "--log-stderr", "--dump-frames", "/tmp/frames", "--discovery-port", "9000",
       "--virtual-sdi", "4", "--test-pattern", "latency", "--frame-timings", "/tmp/t.csv", "--head-start", "10.5",
-      "--fill-lead", "5",
+      "--fill-lead", "5", "--new-token", "decklink-ab-0",
     ])
     #expect(o.showWindow && o.listOutputs && o.logToStderr)
     #expect(o.virtualSDI == 4)
@@ -28,7 +28,14 @@ import Testing
     #expect(o.fillLeadMs == 5)
     #expect(o.dumpFramesDir?.path == "/tmp/frames")
     #expect(o.discoveryPort == 9000)
+    #expect(o.newTokenFor == "decklink-ab-0")
     #expect(problems.isEmpty)
+  }
+
+  @Test func newTokenNeedsAnOutputKey() {
+    let (o, problems) = parse(["--new-token"])
+    #expect(o.newTokenFor == nil)
+    #expect(problems == ["--new-token needs a value"])
   }
 
   @Test func theInstallersPortVariableIsUsedAndTheFlagWinsOverIt() {

@@ -6,7 +6,7 @@
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
-import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, healthList, forgetHealth } from "../kiosk-presence.js";
+import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret } from "../kiosk-presence.js";
 import { parseHealthReport } from "../output-health.js";
 import { headerValue } from "../http-origin.js";
 import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
@@ -61,6 +61,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     if (token) rememberSecret(id, token);
     const device = authorise(devices, id, token);
     if (device) {
+      forgetSecretMismatch(id);
       // Claimed before it had ever enrolled — pin what it just showed us.
       if (device.token === "" && token) {
         await updateDevices((current) => pinSecret(current, id, token));
@@ -81,6 +82,15 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     }
     // Unbound, or a token that does not match. Both are the same thing from
     // here: this device is not (yet) allowed to show a display.
+    //
+    // A helper output whose token was replaced on its Mac is the second, and its
+    // screen only says "waiting to be assigned", so the log says why, once.
+    const pinned = findById(devices, id);
+    if (token && pinned?.output && firstSecretMismatch(id)) {
+      console.log(
+        `[output-helper] ${scrub(id)} showed a token other than the one pinned for screen ${scrub(pinned.outputId)}, so it gets the holding screen; if its token was replaced on its Mac, release it from that screen and set it up again`,
+      );
+    }
     // The holding screen puts its own size on the reload URL. It is the only
     // way a Mac or a PC reports one before it is claimed — the physical mode in
     // the probe comes from /sys/class/drm, which is Linux only.
@@ -346,8 +356,12 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // lingers in the unclaimed list for the whole TTL, which reads as the
       // claim not having worked.
       forgetSeen(id);
+      forgetSecretMismatch(id);
       // What a displaced device reported was about the screen it no longer shows.
-      if (displacedId) forgetHealth(displacedId);
+      if (displacedId) {
+        forgetHealth(displacedId);
+        forgetSecretMismatch(displacedId);
+      }
       if (seen?.output) {
         console.log(
           `[output-helper] claimed: ${scrub(id)} (${scrub(seen.output.kind)} "${scrub(seen.output.name)}") now shows screen ${scrub(outputId)}`
@@ -383,6 +397,8 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       const output = findById(await kioskDevicesStore.loadStrict(), id)?.output;
       await updateDevices((current) => release(current, id));
       forgetHealth(id);
+      forgetSecretMismatch(id);
+      forgetSecret(id);
       if (output) {
         console.log(`[output-helper] released: ${scrub(id)} (${scrub(output.kind)} "${scrub(output.name)}") is not set up again`);
       }

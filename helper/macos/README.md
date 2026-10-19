@@ -112,6 +112,7 @@ next login with the real state.
 | `--show-window` | Open the window at launch. Without it the window opens only on a first run (no `outputs.json` yet) or from the menu bar icon. |
 | `--dump-frames <dir>` | Every 5 s, write a PNG of what each output is showing (`<output key>-NNNN.png`) and of the helper's own window (`window-NNNN.png`). It is how to check rendering on a Mac nobody is looking at, with the screen locked; nothing needs Screen Recording permission. A display output's picture comes from Chromium's DevTools (`Page.captureScreenshot`), turned as the window turns it. A card output's is the next new frame exactly as the card is sent it, 8-bit UYVY decoded back to RGB, so it shows the Metal conversion, the turn and the scaling. The copy is taken as the page hands the picture over; decoding, encoding and writing are off the main thread. A card output whose page draws nothing new has no dump that round. Leave it off when measuring. |
 | `--list-outputs` | Print the stored state and exit: each display's and DeckLink port's output key, device id, and whether it is on (stored) or what it would default to. It only reads; a Mac with no device id yet is told so, not given one. |
+| `--new-token <output key>` | Give one output a new secret, save it, and exit. The helper must not be running. See [Replacing an output's token](#replacing-an-outputs-token). |
 | `--discovery-port <n>` | The UDP port to probe. Default 8789, or `STAGE_KIOSK_PORT`. |
 | `--log-stderr` | Also print the log to the terminal. |
 | `--virtual-sdi <n>` | For development: add n card outputs, 1 to 16, with no card behind them (below). Without it, none are shown. |
@@ -230,6 +231,27 @@ server may have moved. Whether an output shows the holding screen or a set-up sc
 is read from the page that has **committed**, not the one being loaded, so a retry
 that fails against a server that is down changes nothing.
 
+**A page that did not load** is never shown as Chromium shows it. Chromium's error
+page prints the whole address it could not load, and the address carries the output's
+token, so it would put the secret on air. The browser host hides that page the moment
+the load fails (a card output drops its pictures and repeats the last one; a display
+output's browser view is hidden over the window's black), and the output shows the
+helper's own screen instead:
+
+> **Can't reach 192.0.2.10:8788**
+> Trying again.
+
+It names the server's host and port and nothing else of the address. When the error is
+ERR_ADDRESS_UNREACHABLE ("No route to host"), the server's address is on the local
+network (a private or link-local address, or a `.local` name), and something says the
+server is not simply switched off, a second line says where to turn Local Network
+access on (see [Local Network permission](#local-network-permission)). That something
+is the server having answered this output's probe since its loads began failing (probes
+go on every 30 s, so the line can appear from the second or third retry), or every
+broadcast probe having been refused. A server switched off on the same subnet gives the same
+error and neither holds, so it gets the first line only. The retries go on underneath;
+the screen goes when the page loads.
+
 **Only the server it is bound to.** Once a server says an output is set up there
 (`claimed: true`), the output keeps that server's id as `boundTo`, sends it in every
 probe, and ignores answers from any other: anything on the network can answer a
@@ -274,6 +296,35 @@ be listed). That is the output's own problem: **only its** posts pause, retried 
 line in the window says "not recognised by the server, health paused". Other outputs keep
 posting. Only the first pause is logged. Any other refusal or silence is logged once and
 posting carries on; three silent posts in a row make the output look for the server again.
+
+## Replacing an output's token
+
+An output's token is its secret: the server pins the one the output showed when it was
+set up, and serves the screen only to that. If it has been seen where it should not
+have been (on air in an old build's error page, in a photo, a screenshot), replace it:
+
+1. Quit the helper from its window (**Quit Stage Utility Output**). A deliberate quit is
+   not restarted by the LaunchAgent. The helper has to be stopped because it keeps
+   `outputs.json` in memory and would write the old token back; `--new-token` refuses
+   to run while it is.
+2. Find the output's key with `--list-outputs` (the first column), and run
+   `/Applications/StageUtilityOutput.app/Contents/MacOS/StageUtilityOutput --new-token <output key>`.
+   It saves a new token for that output only, and prints what is left to do; it never
+   prints the token. Nothing else about the output changes: its device id, its server
+   (`boundTo`, which keeps another server from being handed the new token), its format.
+3. Start the helper again (`open -a "Stage Utility Output"`). The output shows the
+   server's holding screen: the server still holds the old token, and logs once
+   `[output-helper] <device id> showed a token other than the one pinned for screen
+   <screen>`. The old token still opens that screen until the next step.
+4. In Stage Utility, open the screen's settings and **Release** it (Device). That drops
+   the old token. Within 30 s the output appears under *Not set up yet*.
+5. Set it up on the same screen again. The server pins the token the output showed it
+   since the release, the new one, and the screen comes back. If the output stays on
+   the holding screen and the server logs the mismatch line again, something else
+   showed the old token first after the release: release and set it up again.
+
+The output that took over a Chrome kiosk's identity keeps the Mac's bare device id and
+gets a token of its own; the installer's `token` file is not changed.
 
 ## Rotation
 
@@ -374,6 +425,17 @@ sandbox (seatbelt; each is started with `--seatbelt-client`). It needs no entitl
 works with the ad hoc signature. It matters here because the pages are the server's own,
 but a layout can embed outside content: a web page, a video.
 
+**The network service runs in the app's own process** (`NetworkServiceInProcess2`),
+not in a helper app as it does in Chrome, so that the app's Local Network permission
+covers every page's connections; see [Local Network
+permission](#local-network-permission). The browser process is not sandboxed in any
+case, so this moves no network code out of a sandbox; a crash in the network service
+now ends the app, which the LaunchAgent starts again. If a network service process ever
+appears anyway (a CEF update that drops the feature), the log says so once:
+"Chromium's network service runs in a helper process". The switches the app gives
+Chromium are listed, with why, in `ChromiumSwitches` (core), and the host applies them
+as they are.
+
 **Display outputs** are windowed browsers, a child of a view in the output's borderless
 window, so Chromium takes clicks, touches, scrolling and typing itself and a display
 output can be a control surface. They keep drawing when macOS thinks their window is
@@ -441,17 +503,40 @@ should be checked for it before the helper is on many Macs.
 
 Since macOS Sequoia an app that sends broadcasts or connects to machines on the LAN
 asks once: "Allow Stage Utility Output to find devices on local networks?" Someone at
-the Mac has to answer it. When it is refused, every broadcast probe fails with "no
-route to host"; the helper logs that and says in its window that Local Network access
-may be off, with where to turn it on (System Settings > Privacy & Security > Local
-Network). Only that, a broadcast that failed on every interface, raises the warning. A
-page that cannot load or a health post that gets "no route to host" does not: a server
-that is switched off on the same subnet gives the same error.
+the Mac has to answer it, and it is the one entry for the helper in System Settings >
+Privacy & Security > Local Network. Loopback is exempt, and so is the Mac's own LAN
+address: a server on the same Mac never needs it.
 
-The answer is tied to the app's code signature, and the app has to run from
-`/Applications` for it to hold. An ad hoc signature is different on every build, so
-after an update macOS may ask again. A Developer ID signature keeps the identity
-stable across updates.
+**One permission covers everything.** macOS checks each connection against the
+executable that makes it: the permission it keeps for the app lists the app's own
+executable (the Mach-O UUID of `Contents/MacOS/StageUtilityOutput`). Chromium makes a
+page's connections in its network service, which Chrome and CEF run in a helper app
+(`StageUtilityOutput Helper.app`, a different executable). With the network service
+there, the permission given to the app did not cover a page: discovery, from the app
+itself, found the server, while every page load from it failed with
+ERR_ADDRESS_UNREACHABLE and no prompt, because the helper apps have no usage string of
+their own and are not registered with LaunchServices (`nehelper` logs "Failed to find
+com.stageutility.output.helper using neagent"). The helper therefore runs the network
+service in the app's own process (see [Chromium](#chromium)), and pages, discovery and
+health posts all go out under the app's permission.
+
+**When it is refused**, every broadcast probe fails with "no route to host"; the helper
+logs that, with its version, and says in its window that Local Network access may be
+off, with where to turn it on. A page that cannot load then shows "Can't reach" with
+the same instruction on the output itself (see [Discovery](#discovery-and-what-the-server-hears)).
+A health post that gets "no route to host" raises nothing: a server that is switched
+off on the same subnet gives the same error.
+
+**After an update.** macOS keeps the answer by bundle id and caches the UUIDs of the
+app's executable. When an app with that bundle id is installed, `nehelper` logs "apps
+installed notification" and reads the new executable's UUID ("Populating the cache with
+1 UUID(s) for com.stageutility.output"); a running copy whose UUID it does not hold is
+re-read the same way ("allowed by preference ... but received prompt. Clearing cached
+UUIDs"). So an ad hoc signed update keeps the answer and does not ask again, as far as
+the logs on a Mac running it show; the signature is not what is checked. If it ever does
+ask again, the window, the log line with the version, and the output's screen all say
+so. The app has to run from `/Applications`, where the installer puts it, for the answer
+to stay with it.
 
 ## Logging
 
@@ -462,12 +547,15 @@ log stream --level info --predicate 'subsystem == "com.stageutility.output"'
 ```
 
 It logs decisions and failures: an output appearing, going or switching, an answer from
-a server, a probe that could not be sent, a page that did not load and when it will be
-retried, health posts refused or paused, a rotation applied, a foreign server's answer
+a server, a probe that could not be sent, a page that did not load (once per run of
+failures, with why, the address cut to its host and path, and what the output shows
+instead; again only if the reason changes, and once when the screen starts saying where
+to turn on Local Network access) and the page loading again after it, health
+posts refused or paused, a rotation applied, a foreign server's answer
 ignored, a state file that could not be read or saved. Chromium's own (category `cef`):
 whether it started, with its version and whether the sandbox is on, or why not; a page's
 renderer process ending, and the reload; the GPU process ending (Chromium starts
-another). The DeckLink layer's (category `decklink`): a port opened in a mode, refused
+another); a network service running in a helper process, once. The DeckLink layer's (category `decklink`): a port opened in a mode, refused
 one, lost or reopened, and a card output falling behind (a second with 5% or more of
 its frames repeated, the server's own line, or any dropped) and keeping up again after
 5 good seconds, on the change only. A page that drew nothing new for 5 s being reloaded

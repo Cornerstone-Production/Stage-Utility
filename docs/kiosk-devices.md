@@ -207,8 +207,10 @@ rather than running them.
   needs a logged-in session;
 - answer the **Local Network** prompt the first time the helper opens ("Allow Stage
   Utility Output to find devices on local networks?"). Without it the helper cannot
-  find the server, and says so in its own window. The answer is tied to the app's
-  signature, so after an update macOS may ask again;
+  find the server or load its pages, and says so in its own window and on each output.
+  It is the helper's one entry in System Settings > Privacy & Security > Local Network.
+  macOS keeps the answer by bundle id, and the logs on a Mac running the helper show it
+  kept across an update;
 - check **Lock Screen**: require a password after the screen saver or display off is
   *Never*, and the screen saver and display-off times read *Never*. The installer sets
   them where macOS accepts it, and a managed Mac may not.
@@ -479,13 +481,39 @@ output runs 20 ms behind its page at 1080p59.94, and its line in the window says
 far behind it is.
 
 Flags, for a Mac nobody is looking at: `--show-window`, `--list-outputs` (reads the
-stored state and exits), `--dump-frames <dir>` (a PNG of every output and of the window
+stored state and exits), `--new-token <output key>` (below), `--dump-frames <dir>` (a PNG of every output and of the window
 every 5 s, with no Screen Recording permission), `--discovery-port <n>`, `--log-stderr`,
 and, for development, `--virtual-sdi <n>` (n SDI outputs with no card behind them,
 offering every format, so the whole card path runs on any Mac), `--test-pattern
 latency` (a clock on every output, to photograph two side by side), `--frame-timings
 <file>` and `--head-start`/`--fill-lead <ms>`. The log is the unified log, subsystem
 `com.stageutility.output`.
+
+**Local Network permission.** One permission, for the app, covers the helper: it finds
+the server, loads every output's page and posts health under it. It is asked for the
+first time the helper reaches the network, and lives in System Settings > Privacy &
+Security > Local Network. A server on the same Mac does not need it.
+
+**When an output cannot load its page** it shows "Can't reach `<server host:port>`",
+and keeps trying (after 2, 4, 8, 16, then every 30 s). It never shows Chromium's error
+page, which printed the whole address, the output's secret token included. When the
+failure looks like Local Network access being off (no route to a server on the local
+network that has answered this output's probes since its loads began failing, or every
+broadcast probe refused), a second line says
+where to turn it on. The helper's log has one line per run of failures, with the error.
+
+**Replacing an output's token.** If an output's token has been seen (an older helper
+showed it on air in Chromium's error page), give that output a new one: quit the
+helper from its window, run
+`/Applications/StageUtilityOutput.app/Contents/MacOS/StageUtilityOutput --new-token <output key>`
+(the key is the first column of `--list-outputs`), and start the helper again. The
+server still holds the old token, so the output shows the holding screen and the server
+logs `[output-helper] <device id> showed a token other than the one pinned`. **Release**
+the screen in its Screen settings, which drops the old token, then set the output up
+on that screen again when it appears under *Not set up yet*: the server pins the token
+the output showed it since the release. Until the release, the old token still opens
+the screen; if the output stays on the holding screen and the mismatch line comes
+back, something else showed the old token first, so release and set it up again.
 
 Where `/Library/Application Support/StageUtility/migrated-from-kiosk` exists, the Mac
 was a Chrome kiosk and keeps its screen: its main display takes over the kiosk's device

@@ -24,6 +24,10 @@ protocol WebSurface: AnyObject {
   /// The page's renderer process ended (crashed, killed, out of memory), and why.
   /// The surface reloads it by itself; this is for telling the operator.
   var onProcessGone: (@MainActor (String) -> Void)? { get set }
+  /// Asked when a load fails, for what the rest of the app knows about Local Network
+  /// access since the run of failures began (`UnreachablePage.Evidence`). Unset is
+  /// no evidence.
+  var localNetworkEvidence: (@MainActor (_ since: Date) -> UnreachablePage.Evidence)? { get set }
   /// Show this address. The same address again does nothing.
   func load(_ url: URL)
   /// Load the current address again now.
@@ -35,13 +39,15 @@ protocol WebSurface: AnyObject {
 }
 
 /// The part of loading that is the same in every engine: the address asked for, the
-/// run of failures, the reload after a wait, and what a 5xx means. The engine calls
-/// the events; this calls `navigate` and the callbacks.
+/// run of failures, the reload after a wait, what a 5xx means, and the page shown in
+/// place of a failed load. The engine calls the events; this calls `navigate` and the
+/// callbacks.
 @MainActor
 final class SurfaceLoader {
   var onLoadResult: (@MainActor (_ failures: Int) -> Void)?
   var onCommitted: (@MainActor (URL) -> Void)?
   var onProcessGone: (@MainActor (String) -> Void)?
+  var localNetworkEvidence: (@MainActor (_ since: Date) -> UnreachablePage.Evidence)?
 
   private let label: String
   private let navigate: @MainActor (URL) -> Void
@@ -80,25 +86,53 @@ final class SurfaceLoader {
   func responded(status: Int) { apply(tracker.responded(status: status)) }
 
   /// A page committed at `url`. A 5xx page is on the screen too, but its URL says
-  /// nothing about whether the output is set up, so it is not reported.
+  /// nothing about whether the output is set up, so it is not reported; nor is the
+  /// helper's own page for a failed load, even when its commit arrives after a
+  /// reload has begun.
   func committed(_ url: URL) {
-    guard !tracker.responseFailed else { return }
+    guard tracker.reportsCommit(of: url) else { return }
     onCommitted?(url)
   }
 
   func finished() { apply(tracker.finished()) }
-  func failed(_ error: NSError) { apply(tracker.navigationFailed(error)) }
+
+  /// The failure page is up, or about to be: Chromium's error page may still be the
+  /// renderer's document, hidden on screen but not to a DevTools screenshot.
+  var showingFailurePage: Bool { tracker.showingFailurePage }
+
+  /// A navigation failed. A Chromium net error is replaced on the screen by
+  /// `UnreachablePage` (`PageLoadTracker.failed` says when).
+  func failed(_ error: NSError) {
+    let (outcome, showPage) = tracker.failed(error)
+    guard showPage, let requested else { return apply(outcome) }
+    let page = UnreachablePage.content(
+      target: requested, netError: error.code,
+      evidence: localNetworkEvidence?(tracker.failingSince ?? Date()) ?? .none)
+    apply(outcome, note: page.logNote)
+    if page.localNetwork, tracker.localNetworkHintShown() {
+      Log.error(.output, "\(label): the server answers this output's probes but its page will not load; the output now says where to turn on Local Network access")
+    }
+    navigate(UnreachablePage.url(page))
+  }
+
   func processEnded(_ why: String) {
     onProcessGone?(why)
     apply(tracker.processTerminated())
   }
 
-  private func apply(_ outcome: PageLoadTracker.Outcome) {
+  /// `note` ends the failure's log line: what the output shows instead.
+  private func apply(_ outcome: PageLoadTracker.Outcome, note: String = "") {
     switch outcome {
     case .none:
       return
     case .failed(let f):
-      Log.error(.output, "\(label): page did not load (\(f.reason)); reload \(f.failures) in \(Int(f.delay)) s")
+      // Once per run of failures, and again only when the reason changes: the
+      // retries are on a fixed schedule, and the recovery is its own line.
+      if f.log {
+        Log.error(
+          .output,
+          "\(label): page did not load (\(f.reason)); retrying in \(Int(f.delay)) s, backing off to every \(Int(Backoff.reloadCap)) s\(note)")
+      }
       onLoadResult?(f.failures)
       reloadWork?.cancel()
       let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.reload() } }
@@ -121,6 +155,7 @@ final class DeadSurface: WebSurface {
   var onLoadResult: (@MainActor (Int) -> Void)?
   var onCommitted: (@MainActor (URL) -> Void)?
   var onProcessGone: (@MainActor (String) -> Void)?
+  var localNetworkEvidence: (@MainActor (_ since: Date) -> UnreachablePage.Evidence)?
 
   init(size: CGSize) {
     hostView = NSView(frame: NSRect(origin: .zero, size: size))

@@ -49,6 +49,8 @@ final class AppModel: ObservableObject {
     var discovery: OutputDiscovery?
     var serverURL: String?
     var serverName: String?
+    /// When the server last answered this output's probe.
+    var answeredAt: Date?
     var loaded = false
     var unreachable = false
     /// What the committed page is. Not what is being loaded: see `ScreenPage`.
@@ -347,6 +349,10 @@ final class AppModel: ObservableObject {
       guard let self, let rt else { return }
       self.pageMoved(rt, to: url)
     }
+    sink.surface.localNetworkEvidence = { [weak self, weak rt] since in
+      guard let self, let rt else { return .none }
+      return self.localNetworkEvidence(rt, since: since)
+    }
 
     // With a `server` file the page loads from it at once and the probes go to that
     // server alone, so the output still shows up under "Not set up yet". The latency
@@ -378,6 +384,7 @@ final class AppModel: ObservableObject {
     rt.sink = nil
     rt.loaded = false
     rt.unreachable = false
+    rt.answeredAt = nil
     rt.page = .other
     rt.rotation = .none
     rt.videoMode = nil
@@ -409,6 +416,7 @@ final class AppModel: ObservableObject {
 
   private func heard(_ key: String, _ rt: Runtime, _ reply: DiscoveryReply, _ change: OutputBinding) {
     rt.serverName = reply.name
+    rt.answeredAt = Date()
     clearLocalNetworkSuspicion()
     // A server file names the server; an answer from it only says it is there.
     if identity.server == nil, rt.serverURL != reply.url {
@@ -605,9 +613,19 @@ final class AppModel: ObservableObject {
 
   private func suspectLocalNetwork() {
     if noteTable["local-network"] == nil {
-      Log.error(.app, "Local Network access may be off for this app")
+      // The version, so a refusal that starts with an update can be told from one that
+      // did not (README, "After an update").
+      Log.error(.app, "Local Network access may be off for this app (version \(version))")
     }
     setNote("local-network", LocalNetworkAccess.windowMessage)
+  }
+
+  /// What says a failed load is Local Network access rather than the server being
+  /// off: the server answered this output's probe after the loads began failing (an
+  /// answer from before could be a server switched off since), or every broadcast
+  /// was refused.
+  private func localNetworkEvidence(_ rt: Runtime, since: Date) -> UnreachablePage.Evidence {
+    .init(answeredAt: rt.answeredAt, failingSince: since, broadcastsBlocked: noteTable["local-network"] != nil)
   }
 
   private func clearLocalNetworkSuspicion() {

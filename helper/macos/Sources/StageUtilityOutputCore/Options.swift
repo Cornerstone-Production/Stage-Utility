@@ -16,6 +16,9 @@ public struct Options: Equatable {
   public var showWindow = false
   /// `--list-outputs`: print each display's key, id and default, then exit.
   public var listOutputs = false
+  /// `--new-token <output key>`: give that output a new secret, then exit
+  /// (`TokenRotation`).
+  public var newTokenFor: String?
   /// `--discovery-port <n>`, else STAGE_KIOSK_PORT (the installer's variable), else 8789.
   /// The flag wins over the variable.
   public var discoveryPort: UInt16 = 8789
@@ -76,6 +79,8 @@ public struct Options: Equatable {
             problems.append("--test-pattern takes \(TestPattern.allCases.map(\.rawValue).joined(separator: ", ")): \(v)")
           }
         }
+      case "--new-token":
+        if let v = value("--new-token") { o.newTokenFor = v }
       case "--frame-timings":
         if let v = value("--frame-timings") { o.frameTimingsFile = URL(fileURLWithPath: v) }
       case "--head-start", "--fill-lead":
