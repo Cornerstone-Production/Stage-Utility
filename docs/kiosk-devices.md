@@ -346,20 +346,35 @@ administrator can write there; it runs as SYSTEM) and registers the task
 `StageUtilityKioskUpdate`, which runs it as SYSTEM every five minutes. Each run asks
 the server (`GET /api/machine-updates/check`, the same check a Mac's updater makes)
 whether its launcher, compared by SHA-256, is the server's. When the server says to
-replace it, it downloads `kiosk-windows.ps1`, checks its SHA-256 is the one the
-server named and that it parses, and moves it over `kiosk.ps1`. Nothing restarts:
-the new launcher runs at the next sign-in, or the next time the browser exits. Any
-failure leaves `kiosk.ps1` as it was, and the server does not offer that launcher
-again until someone presses **Try again** in Screen settings > Device. The switch
-*Update Mac output helpers and Windows kiosks with this server* (Settings > Advanced >
-Server) holds it, and **Update now** overrides that. Service times do not, since a
-file replaced restarts nothing.
+replace it, it downloads `kiosk-windows.ps1` to a temporary file in
+`%PROGRAMFILES%\StageUtility`, checks its SHA-256 is the one the server named and
+that it parses, and moves it over `kiosk.ps1`. Nothing restarts: the new launcher
+runs at the next sign-in, or the next time the browser exits. The installer stages
+its own downloads in the same folder, never in `%PROGRAMDATA%`, where any user can
+create files. Any failure leaves `kiosk.ps1` as it was. The switch *Update Mac output
+helpers and Windows kiosks with this server* (Settings > Advanced > Server) holds
+it, and **Update now** overrides that. Service times do not, since a file replaced
+restarts nothing.
 
-What it last did is `status.json` beside it, the server it asks is `update-from`
-(the `server` file pins it instead), and its log, `kiosk-update.log` beside it,
-says each decision when it changes, `[helper-update]`-tagged, as the server's `/log`
-does. A PC installed before 1.27.0 has no updater and a launcher written by the
-installer; run the installer once more to get both.
+How a failure is held depends on whether it would happen again:
+
+| Failure | Reported as | Then |
+|---|---|---|
+| The download itself fails or times out | `retrying`, with the reason | Not downloaded again for 30 minutes, then 1, 2, 4 and at most 6 hours between tries while it keeps failing; the wait starts over on success or a new launcher. The PC still checks in every five minutes, so it stays listed |
+| The SHA-256 does not match, the download does not parse, the server named no SHA-256, or `kiosk.ps1` is a link | `failed` | The server does not offer that launcher again until someone presses **Try again** in Screen settings > Device |
+
+A launcher updated more than a day ago is reported as `idle` again, so Screens stops
+saying it takes effect at the next sign-in.
+
+The server it asks is the address in `update-from`, beside the updater in Program
+Files. The installer writes it from the address it downloaded from, which is
+`STAGE_SERVER` when that pins the PC, so a pinned PC asks its pinned server. The
+updater does not read the `server` file in `%PROGRAMDATA%`: it runs as SYSTEM, and
+that folder is writable by any user. What it last did is `status.json` beside the
+updater, and its log, `kiosk-update.log` beside it, says each decision when it
+changes, `[helper-update]`-tagged, as the server's `/log` does. A PC installed before
+1.27.0 has no updater and a launcher written by the installer; run the installer once
+more to get both.
 
 ## Size
 

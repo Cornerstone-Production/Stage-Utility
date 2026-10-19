@@ -11,8 +11,11 @@
 //
 // NOT covered here, and not by anything in CI: the scheduled tasks, SYSTEM, Windows
 // PowerShell 5.1 (these run under pwsh, which accepts everything the scripts use),
-// and install-windows.ps1 itself, which needs the ScheduledTasks module and an
-// elevated token. Those need a Windows PC; the installer is only checked to parse.
+// file ownership and ACLs (a standard user pre-creating a file in ProgramData is
+// modelled as a file this test plants, which says where the script reads and
+// writes, not who owns what), and install-windows.ps1 itself, which needs the
+// ScheduledTasks module and an elevated token. Those need a Windows PC. Of the
+// installer only Save-KioskScript is run, lifted out of the file by its parser.
 
 import assert from "node:assert/strict";
 import * as crypto from "node:crypto";
@@ -46,10 +49,14 @@ interface Fake {
   answer: Record<string, unknown>;
   /** The bytes served as the launcher. */
   launcher: Buffer;
+  /** True to drop the connection instead of serving the launcher. */
+  failDownload: boolean;
+  /** Called as the launcher is requested, before it is answered. */
+  onDownload?: () => void;
 }
 
 async function fakeServer(): Promise<Fake> {
-  const fake = { checks: [], downloads: 0, answer: {}, launcher: NEW } as unknown as Fake;
+  const fake = { checks: [], downloads: 0, answer: {}, launcher: NEW, failDownload: false } as unknown as Fake;
   fake.server = http.createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
     if (url.pathname === "/api/machine-updates/check") {
@@ -58,6 +65,11 @@ async function fakeServer(): Promise<Fake> {
       res.end(JSON.stringify(fake.answer));
     } else if (url.pathname === "/kiosk/kiosk-windows.ps1") {
       fake.downloads++;
+      fake.onDownload?.();
+      if (fake.failDownload) {
+        req.socket.destroy();
+        return;
+      }
       res.writeHead(200, { "content-type": "text/plain" });
       res.end(fake.launcher);
     } else {
@@ -125,6 +137,11 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
     return fs.existsSync(file) ? fs.readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
   };
   const leftovers = () => fs.readdirSync(app).filter((n) => n.endsWith(".tmp"));
+  const statusFile = () => path.join(app, "status.json");
+  const readStatus = () => JSON.parse(fs.readFileSync(statusFile(), "utf8")) as Record<string, string | number>;
+  const writeStatus = (s: Record<string, string | number>) =>
+    fs.writeFileSync(statusFile(), JSON.stringify({ state: "idle", target: "", detail: "", answer: "", at: 0, retryAfter: 0, failures: 0, ...s }));
+  const nowSec = () => Math.floor(Date.now() / 1000);
 
   describe("the scripts", () => {
     const SCRIPTS = ["install-windows.ps1", "kiosk-windows.ps1", "kiosk-update-windows.ps1"];
@@ -281,6 +298,127 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       assert.equal(f.checks[1].target, named);
       assert.match(f.checks[1].detail, /^the download has SHA-256 [0-9a-f]{64}, expected [0-9a-f]{64}$/, "the whole reason survives the 200 characters the server keeps");
       assert.equal(f.checks[1].have, sha(OLD), "what is installed has not changed");
+      assert.equal(readStatus().retryAfter, 0, "a digest mismatch would happen again, so it is not retried on a timer");
+    });
+
+    describe("a download that fails on the network", () => {
+      it("is retrying, with the reason and a retryAfter 30 minutes on, tells the server, and downloads nothing before then", async () => {
+        const f = await serve();
+        f.answer = updateToNew();
+        f.failDownload = true;
+        pointAt(f.base);
+        const r = await runUpdater();
+        assert.equal(r.status, 0, r.out + r.err);
+        // The HTTP client may retry a reset connection itself, so count attempts as a change, not as 1.
+        assert.ok(f.downloads >= 1, "it tried the download");
+        const attempted = f.downloads;
+        assert.deepEqual(launcher(), OLD);
+        assert.deepEqual(leftovers(), []);
+        const saved = readStatus();
+        assert.equal(saved.state, "retrying", "not failed: the server would never offer this launcher again");
+        assert.equal(saved.target, sha(NEW));
+        assert.ok(String(saved.detail).length > 0, "the reason is kept");
+        assert.equal(saved.failures, 1);
+        assert.ok(Math.abs(Number(saved.retryAfter) - (nowSec() + 1800)) < 120, `retryAfter ${saved.retryAfter} is not about 30 minutes on`);
+        assert.equal(log().filter((l) => /could not download the launcher \(.+\); trying again after \d\d:\d\d UTC$/.test(l)).length, 1, log().join("\n"));
+
+        // Before retryAfter: it checks in, so the PC stays listed, and does not download.
+        for (let i = 0; i < 2; i++) assert.equal((await runUpdater()).status, 0);
+        assert.equal(f.checks.length, 3, "it still asked every time");
+        assert.equal(f.downloads, attempted, "and did not download again before retryAfter");
+        assert.equal(f.checks[1].state, "retrying");
+        assert.equal(f.checks[1].target, sha(NEW));
+        assert.ok(f.checks[1].detail.length > 0, "the server is told why");
+      });
+
+      it("is tried again once retryAfter has passed, and the wait doubles each time in a row", async () => {
+        const f = await serve();
+        f.answer = updateToNew();
+        f.failDownload = true;
+        pointAt(f.base);
+        await runUpdater();
+        assert.equal(readStatus().failures, 1);
+        const attempted = f.downloads;
+        writeStatus({ ...readStatus(), retryAfter: nowSec() - 1 });
+        await runUpdater();
+        assert.ok(f.downloads > attempted, "past retryAfter it downloads again");
+        const second = readStatus();
+        assert.equal(second.failures, 2);
+        assert.ok(Math.abs(Number(second.retryAfter) - (nowSec() + 3600)) < 120, `retryAfter ${second.retryAfter} is not about an hour on`);
+      });
+
+      it("never waits more than 6 hours", async () => {
+        const f = await serve();
+        f.answer = updateToNew();
+        f.failDownload = true;
+        pointAt(f.base);
+        writeStatus({ target: sha(NEW), failures: 9, retryAfter: nowSec() - 1 });
+        await runUpdater();
+        const saved = readStatus();
+        assert.equal(saved.failures, 10);
+        assert.ok(Math.abs(Number(saved.retryAfter) - (nowSec() + 6 * 3600)) < 120, `retryAfter ${saved.retryAfter} is not about 6 hours on`);
+      });
+
+      it("starts over for a new target, whatever the old one was waiting on", async () => {
+        const f = await serve();
+        f.answer = updateToNew();
+        f.failDownload = true;
+        pointAt(f.base);
+        writeStatus({ target: "f".repeat(64), failures: 4, retryAfter: nowSec() + 5 * 3600 });
+        await runUpdater();
+        assert.ok(f.downloads >= 1, "a new target is not held by the old one's timer");
+        const saved = readStatus();
+        assert.equal(saved.failures, 1);
+        assert.equal(saved.target, sha(NEW));
+        assert.ok(Math.abs(Number(saved.retryAfter) - (nowSec() + 1800)) < 120);
+      });
+
+      it("stops reporting retrying once the launcher is the server's", async () => {
+        const f = await serve();
+        f.answer = upToDate();
+        pointAt(f.base);
+        writeStatus({ state: "retrying", target: sha(NEW), failures: 2, retryAfter: nowSec() + 3600, detail: "earlier" });
+        await runUpdater();
+        assert.equal(f.checks[0].state, "retrying", "first report is still what it last did");
+        const saved = readStatus();
+        assert.equal(saved.state, "idle");
+        assert.equal(saved.retryAfter, 0);
+        assert.equal(saved.failures, 0);
+      });
+
+      it("success clears the backoff", async () => {
+        const f = await serve();
+        f.answer = updateToNew();
+        pointAt(f.base);
+        writeStatus({ target: sha(NEW), failures: 3, retryAfter: nowSec() - 1, detail: "earlier" });
+        await runUpdater();
+        assert.deepEqual(launcher(), NEW);
+        const saved = readStatus();
+        assert.equal(saved.state, "updated");
+        assert.equal(saved.failures, 0);
+        assert.equal(saved.retryAfter, 0);
+        assert.equal(saved.detail, "");
+        assert.ok(Math.abs(Number(saved.at) - nowSec()) < 120, "when it updated is recorded");
+      });
+    });
+
+    describe("updated", () => {
+      const checkAfter = async (at: number): Promise<Record<string, string>> => {
+        const f = await serve();
+        fs.writeFileSync(path.join(state, "kiosk.ps1"), NEW);
+        f.answer = { version: sha(NEW), update: false, reason: "This PC is on the server's launcher." };
+        pointAt(f.base);
+        writeStatus({ state: "updated", target: sha(NEW), at });
+        await runUpdater();
+        return f.checks[0];
+      };
+
+      it("is still reported within a day of the update", async () => {
+        assert.equal((await checkAfter(nowSec() - 23 * 3600)).state, "updated");
+      });
+      it("is reported as idle once a day has passed, since it no longer takes effect 'at the next sign-in' news", async () => {
+        assert.equal((await checkAfter(nowSec() - 25 * 3600)).state, "idle");
+      });
     });
 
     it("a download with the right digest that does not parse is refused too", async () => {
@@ -320,31 +458,38 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       assert.match(log().join("\n"), /is a link, not a file/);
     });
 
-    it("the server file pins the PC: it asks that server, not the one it was installed from", async () => {
+    it("asks the server in update-from, and never one named by a server file in the state folder, which any user can write", async () => {
       const installedFrom = await serve();
-      const pinned = await serve();
+      const planted = await serve();
       installedFrom.answer = upToDate();
-      pinned.answer = upToDate();
+      planted.answer = upToDate();
       pointAt(installedFrom.base);
+      pointAt(`${planted.base}/`, path.join(state, "server"));
       await runUpdater();
       assert.equal(installedFrom.checks.length, 1);
-      assert.equal(pinned.checks.length, 0);
+      assert.equal(planted.checks.length, 0, "a server file in ProgramData must not decide which server SYSTEM asks");
+    });
 
-      pointAt(`${pinned.base}/`, path.join(state, "server"));
+    it("with only a planted server file and no update-from, asks nobody", async () => {
+      const planted = await serve();
+      planted.answer = updateToNew();
+      pointAt(planted.base, path.join(state, "server"));
       await runUpdater();
-      assert.equal(installedFrom.checks.length, 1, "the installed-from server is not asked once the PC is pinned");
-      assert.equal(pinned.checks.length, 1);
+      assert.equal(planted.checks.length, 0);
+      assert.equal(planted.downloads, 0);
+      assert.deepEqual(launcher(), OLD);
+      assert.match(log().join("\n"), /there is no server to ask/);
     });
 
     it("downloads the launcher from the server that told it to update", async () => {
       const installedFrom = await serve();
-      const pinned = await serve();
-      pinned.answer = updateToNew();
-      installedFrom.launcher = Buffer.from("Write-Output 'wrong server'\r\n");
+      const planted = await serve();
+      installedFrom.answer = updateToNew();
+      planted.launcher = Buffer.from("Write-Output 'wrong server'\r\n");
       pointAt(installedFrom.base);
-      pointAt(pinned.base, path.join(state, "server"));
+      pointAt(planted.base, path.join(state, "server"));
       await runUpdater();
-      assert.equal(installedFrom.downloads, 0);
+      assert.equal(planted.downloads, 0);
       assert.deepEqual(launcher(), NEW);
     });
 
@@ -363,6 +508,44 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       assert.equal(f.checks.length, 0);
       assert.ok(!fs.existsSync(path.join(state, "kiosk.ps1")));
       assert.equal(log().length, 1, log().join("\n"));
+    });
+  });
+
+  describe("install-windows.ps1's Save-KioskScript", () => {
+    // The function is lifted out of the installer by its parser and run for real: the
+    // installer as a whole needs an elevated Windows session.
+    const save = (base: string): Promise<{ status: number | null; out: string; err: string }> =>
+      pwsh(
+        [
+          "-Command",
+          `$t = $null; $e = $null; $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:INSTALLER, [ref]$t, [ref]$e);` +
+            `$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Save-KioskScript' }, $true);` +
+            `if (-not $fn) { throw 'Save-KioskScript is gone' };` +
+            `$AppDir = $env:APP_DIR; Invoke-Expression $fn.Extent.Text;` +
+            `Save-KioskScript -From $env:FROM -Name 'kiosk-windows.ps1' -To $env:TO`,
+        ],
+        { INSTALLER: path.join(KIOSK, "install-windows.ps1"), APP_DIR: app, FROM: base, TO: path.join(state, "kiosk.ps1") },
+      );
+
+    it("stages the download in Program Files, never in the state folder, and puts it in place byte for byte", async () => {
+      const f = await serve();
+      fs.rmSync(app, { recursive: true });
+      let appExisted: boolean | null = null;
+      f.onDownload = () => {
+        appExisted = fs.existsSync(app);
+      };
+      // What a standard user could plant beforehand to keep ownership of the result.
+      const planted = path.join(state, "kiosk.ps1.download");
+      fs.writeFileSync(planted, "planted");
+      const r = await save(f.base);
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.equal(f.downloads, 1);
+      assert.deepEqual(launcher(), NEW);
+      assert.equal(appExisted, true, "Program Files\\StageUtility is made before the download starts, since that is where it is staged");
+      assert.equal(fs.readFileSync(planted, "utf8"), "planted", "the planted file was neither written through nor moved");
+      assert.notEqual(fs.statSync(planted).ino, fs.statSync(path.join(state, "kiosk.ps1")).ino, "kiosk.ps1 is not the file that was planted");
+      assert.deepEqual(fs.readdirSync(state).filter((n) => /\.(download|tmp)$/.test(n) && n !== "kiosk.ps1.download"), [], "nothing else was staged in the state folder");
+      assert.deepEqual(fs.readdirSync(app), [], "the staging file is gone afterwards");
     });
   });
 });

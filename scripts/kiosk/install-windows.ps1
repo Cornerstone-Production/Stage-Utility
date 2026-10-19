@@ -53,9 +53,13 @@ function Get-DownloadOrigin {
   return ''
 }
 
-# One script from the server, parsed before it replaces anything.
+# One script from the server, parsed before it replaces anything. It is staged in
+# Program Files, under a name nobody could have guessed, never beside $To: the state
+# folder in ProgramData lets any user create files, and one who pre-created the
+# staging file would still own it after it was moved into place.
 function Save-KioskScript([string]$From, [string]$Name, [string]$To) {
-  $temp = "$To.download"
+  New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
+  $temp = Join-Path $AppDir ('{0}.{1}.tmp' -f $Name, [guid]::NewGuid().ToString('N'))
   try {
     Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -Uri "$From/kiosk/$Name" -OutFile $temp
     $tokens = $null
