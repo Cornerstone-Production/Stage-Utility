@@ -33,7 +33,7 @@ Orientation for working in the codebase.
 │   ├── settings/sections/     # Settings and tool pages rendered by app/ routes
 │   ├── components/            # Shared components + ui/ primitives
 │   └── lib/api.ts             # REST + SSE client
-├── public/                    # App icon, web manifest, and a fallback remote page
+├── public/                    # Built-in app icons and a fallback remote page; the web manifest is served by the app
 ├── packaging/homebrew/        # The Homebrew formula
 ├── helper/macos/              # The Mac output helper (Swift)
 ├── .github/                   # CI and release workflows, shared actions

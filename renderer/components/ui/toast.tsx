@@ -42,7 +42,17 @@ function notify() {
 
 function addToast(type: ToastEntry["type"], message: string, opts?: { action?: ToastAction }) {
   const id = String(_nextId++);
-  _toasts = [..._toasts, { id, type, message, action: opts?.action }].slice(-MAX_HELD);
+  const entry: ToastEntry = { id, type, message, action: opts?.action };
+  // The same message again while its toast is still up REPLACES it: the old one
+  // goes, and the new one takes the newest place with a fresh id, so it remounts and
+  // its countdown starts over. Writes that confirm themselves ("Branding updated.")
+  // fire once per change, and a colour dragged through five swatches used to leave
+  // five identical toasts. A toast that carries a button is never merged: its action
+  // is its own.
+  const kept = opts?.action
+    ? _toasts
+    : _toasts.filter((t) => !(t.type === type && t.message === message && !t.action));
+  _toasts = [...kept, entry].slice(-MAX_HELD);
   notify();
   // No timer of our own: the countdown is Radix's (the `duration` on the Root
   // below), which stops while the pointer is over the toasts or focus is in them.

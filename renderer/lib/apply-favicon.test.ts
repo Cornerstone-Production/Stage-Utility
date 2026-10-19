@@ -21,7 +21,7 @@ import { JSDOM } from "jsdom";
 import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
-const { applyFavicon, STOCK_FAVICON, STOCK_FAVICON_TYPE, INK, CACHE_MAX, __resetForTests, __cacheSize } = await import("./apply-favicon.js");
+const { applyFavicon, customIconHref, STOCK_FAVICON, STOCK_FAVICON_TYPE, INK, CACHE_MAX, __resetForTests, __cacheSize } = await import("./apply-favicon.js");
 
 after(() => teardown());
 
@@ -123,6 +123,69 @@ describe("applyFavicon without recoloring", () => {
     await tick();
     assert.equal(href(), LOGO);
     assert.equal(r.calls.length, 0, "a logo that is not recolored was rasterized anyway");
+  });
+});
+
+describe("a custom tab and home-screen icon", () => {
+  const ICON = "/branding-images/cc.png";
+
+  test("points at the route that falls back to the built-in icon, never at the stored file", () => {
+    // A restore that carried settings.json and not branding-images/ leaves the
+    // stored URL a 404; the route answers with the built-in icon instead.
+    applyFavicon(LOGO, false, ICON);
+    assert.match(href() ?? "", /^\/icon-192\.png\?v=/);
+    assert.ok(!(href() ?? "").includes("/branding-images/"), `the tab points at ${href()}`);
+  });
+
+  test("a changed icon is a new URL, so the tab shows it at once", () => {
+    applyFavicon(LOGO, false, "/branding-images/0123456789abcdef.png");
+    const first = href();
+    applyFavicon(LOGO, false, "/branding-images/fedcba9876543210.png");
+    assert.notEqual(href(), first);
+    assert.equal(customIconHref("/branding-images/0123456789abcdef.png"), "/icon-192.png?v=0123456789abcdef");
+  });
+
+  test("wins over the logo, and is declared as the PNG it is", () => {
+    applyFavicon(LOGO, false, ICON);
+    assert.equal(href(), customIconHref(ICON));
+    assert.equal(links()[0]?.getAttribute("type"), "image/png");
+  });
+
+  test("is never recolored, with Recolor on, and never rasterizes the logo", async () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(LOGO, true, ICON);
+    await tick();
+    assert.equal(href(), customIconHref(ICON), "the icon was replaced by a tinted logo");
+    assert.equal(r.calls.length, 0, "the logo was rasterized although the icon is what shows");
+  });
+
+  test("with no logo at all, still shows the icon rather than the stock one", () => {
+    applyFavicon(null, true, ICON);
+    assert.equal(href(), customIconHref(ICON));
+  });
+
+  test("removing it falls back to the logo with today's logic, then to the stock icon", async () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(LOGO, true, ICON);
+    applyFavicon(LOGO, false, null);
+    assert.equal(href(), LOGO, "removing the icon did not bring the logo back");
+    assert.equal(links()[0]?.hasAttribute("type"), false);
+    applyFavicon(LOGO, true, ICON);
+    applyFavicon(null, true, null);
+    assert.equal(href(), STOCK_FAVICON);
+    assert.equal(links()[0]?.getAttribute("type"), STOCK_FAVICON_TYPE);
+  });
+
+  test("a raster still loading does not override an icon set meanwhile", async () => {
+    const r = controlled();
+    __resetForTests(r.fn);
+    applyFavicon(LOGO, true);
+    applyFavicon(LOGO, true, ICON);
+    r.calls[0]!.resolve("data:image/png;base64,LATE");
+    await tick();
+    assert.equal(href(), customIconHref(ICON), "a late tint replaced the custom icon");
   });
 });
 

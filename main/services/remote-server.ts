@@ -36,6 +36,8 @@ import { isOperatorPath } from "./routes/operator-paths.js";
 import { legacyApiRoutes } from "./routes/legacy-api-routes.js";
 import { legacyPageRoutes } from "./routes/legacy-page-routes.js";
 import { logRoutes } from "./routes/log-routes.js";
+import { appIconRoutes } from "./routes/app-icon-routes.js";
+import { brandHtml } from "./install-metadata.js";
 
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
@@ -152,7 +154,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
  * (/scriptview…, /api/scriptview…) is redirected before anything else looks at
  * it, so no later module is asked about the old path.
  */
-export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [legacyPageRoutes, legacyApiRoutes, logRoutes, videoProxyRoutes] as const;
+export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [legacyPageRoutes, legacyApiRoutes, logRoutes, videoProxyRoutes, appIconRoutes] as const;
 
 // ── Static renderer build path candidates ──────────────────────────────────────
 // Resolved against the install root, NOT the working directory. A packaged
@@ -600,10 +602,11 @@ export class RemoteServer {
       // (see useStageState). Content-hashed /assets are never rewritten.
       let out = data;
       if (ext === ".html") {
-        out = Buffer.from(
-          data.toString("utf-8").replace("</head>", `<script>window.__APP_VERSION__=${JSON.stringify(SERVER_VERSION)}</script></head>`),
-          "utf-8",
-        );
+        const stamped = data.toString("utf-8").replace("</head>", `<script>window.__APP_VERSION__=${JSON.stringify(SERVER_VERSION)}</script></head>`);
+        // Only the two app documents carry the operator's name: control.html is a
+        // different page with a title of its own.
+        const named = urlPath === "/index.html" || urlPath === "/app.html";
+        out = Buffer.from(named ? brandHtml(stamped, stageController.getState().appName) : stamped, "utf-8");
       }
       sendStatic(res, out, mime, cacheControl, ext, acceptEncoding, immutable ? candidate : null);
       return true;
@@ -615,7 +618,9 @@ export class RemoteServer {
     if (!path.extname(urlPath)) {
       const fallback = path.join(RENDERER_BUILD_DIR, "index.html");
       try {
-        const html = await fs.readFile(fallback);
+        // Branded like the entry documents above: /display-1 is the kiosk shell too,
+        // and an install from there reads the same home-screen label.
+        const html = Buffer.from(brandHtml((await fs.readFile(fallback)).toString("utf-8"), stageController.getState().appName), "utf-8");
         sendStatic(res, html, "text/html; charset=utf-8", "no-cache", ".html", acceptEncoding, null);
         return true;
       } catch {

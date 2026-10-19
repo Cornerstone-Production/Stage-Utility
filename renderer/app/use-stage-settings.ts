@@ -23,6 +23,7 @@
 import { useState, useEffect } from "react";
 import { screenName, type CreateScreenInput, type ViewSurface } from "@main/types/views";
 import type { Rotation } from "@main/types/output-format";
+import type { AppIconInput } from "@main/services/app-icon";
 import { MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { useQueryClient } from "@tanstack/react-query";
@@ -393,8 +394,11 @@ export function useStageSettings(pinnedViewId?: string) {
     avatar?: string | null;
     avatarOriginal?: string | null;
     avatarCrop?: { scale: number; x: number; y: number } | null;
-  }) {
-    await writeState("stage:setBranding", partial, {
+    icon?: AppIconInput | null;
+  }): Promise<boolean> {
+    // The write's result goes back to the caller: a dialog that closes on success
+    // must not close on a refusal, and the toast alone says nothing to the dialog.
+    return writeState("stage:setBranding", partial, {
       fail: "Failed to update branding",
       ok: "Branding updated.",
     });
