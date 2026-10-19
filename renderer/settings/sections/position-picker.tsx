@@ -344,7 +344,7 @@ function PositionRow({
           title={tag}
           className={cn(
             "ml-auto max-w-[45%] shrink-0 truncate rounded-full px-1.5 text-caption2 font-medium",
-            tagTone === "warn" ? "bg-warn-2 text-warn-11" : "bg-gray-a3 text-gray-11",
+            tagTone === "warn" ? "bg-warn-9/15 text-warn-11" : "bg-gray-a3 text-gray-11",
           )}
         >
           {tag}
