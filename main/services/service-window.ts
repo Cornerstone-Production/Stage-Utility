@@ -63,6 +63,25 @@ class ServiceWindowService {
     return this.windows.some((w) => now >= w.open && now <= w.close);
   }
 
+  /** When the window open now closes, or null outside one. Windows can overlap (a
+   *  rehearsal's tail running into the service's lead), so it is the latest close
+   *  of every window holding `now`, and a run of overlapping ones reads as one. */
+  activeUntil(now = Date.now()): number | null {
+    let until: number | null = null;
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const w of this.windows) {
+        const holds = until === null ? now >= w.open && now <= w.close : w.open <= until && w.close > until;
+        if (holds) {
+          until = w.close;
+          grew = true;
+        }
+      }
+    }
+    return until;
+  }
+
   /** ms until the next window opens (0 if inside one, Infinity if none known). */
   msUntilNextOpen(now = Date.now()): number {
     if (this.isActive(now)) return 0;

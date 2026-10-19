@@ -72,6 +72,10 @@ export interface SettingsData extends AppIconSettings {
    * leave a screen dark until somebody opened settings.
    */
   kioskDiscovery: boolean;
+  /** Mac output helpers and Windows kiosks install this server's version on their
+   *  own when it updates (machine-updates.ts). On unless switched off: a helper
+   *  behind its server is the failure this exists to end. */
+  autoUpdateMachines: boolean;
   /** Port for the discovery exchange. Adjustable because AV gear is fond of odd
    *  UDP ports and a collision should be a settings change, not a rebuild. */
   kioskDiscoveryPort: number;
@@ -216,6 +220,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   wirelessMeterRateMs: 1000,
   appName: "Stage Utility",
   kioskDiscovery: false,
+  autoUpdateMachines: true,
   kioskDiscoveryPort: 8789,
   serverId: null,
   accentColor: null,

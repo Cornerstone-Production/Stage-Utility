@@ -7,7 +7,7 @@
 // dead integration that never retries (delay becomes Infinity). Both are covered.
 
 import assert from "node:assert/strict";
-import { test, describe, beforeEach } from "node:test";
+import { test, describe, it, beforeEach } from "node:test";
 
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 
@@ -179,4 +179,25 @@ test("the dormant delay is never shorter than the active cadence", () => {
   serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
   serviceWindow.setWindows([{ open: now + 500, close: now + 3600_000 }]);
   assert.ok(serviceWindow.pollDelayMs(4000, 300_000, now) >= 4000);
+});
+
+describe("activeUntil", () => {
+  it("is null outside every window", () => {
+    const s = serviceWindow;
+    s.setWindows([{ open: 100, close: 200 }]);
+    assert.equal(s.activeUntil(50), null);
+    assert.equal(s.activeUntil(250), null);
+  });
+
+  it("is the close of the window holding now", () => {
+    const s = serviceWindow;
+    s.setWindows([{ open: 100, close: 200 }, { open: 500, close: 600 }]);
+    assert.equal(s.activeUntil(150), 200);
+  });
+
+  it("runs through windows that overlap, so a rehearsal's tail into the service's lead reads as one", () => {
+    const s = serviceWindow;
+    s.setWindows([{ open: 300, close: 450 }, { open: 100, close: 320 }, { open: 900, close: 950 }]);
+    assert.equal(s.activeUntil(150), 450);
+  });
 });

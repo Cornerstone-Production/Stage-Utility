@@ -422,6 +422,7 @@ export class StageController {
     lanUrl: null,
     showQr: true,
     kioskDiscovery: false,
+    autoUpdateMachines: true,
     allowedServiceTypeIds: [],
     planSwitcherMode: "upcoming",
     checklistNoteCategories: [],
@@ -620,6 +621,7 @@ export class StageController {
 
     const showQr = settings.showQr ?? true;
     const kioskDiscovery = settings.kioskDiscovery ?? false;
+    const autoUpdateMachines = settings.autoUpdateMachines ?? true;
 
     const { views, outputs } = await this.loadOrMigrateViewsAndOutputs(settings);
 
@@ -668,6 +670,7 @@ export class StageController {
       outputs,
       showQr,
       kioskDiscovery,
+      autoUpdateMachines,
       allowedServiceTypeIds,
       planSwitcherMode: settings.planSwitcherMode === "within-type" ? "within-type" : "upcoming",
       checklistNoteCategories: settings.checklistNoteCategories ?? [],
@@ -2622,6 +2625,16 @@ export class StageController {
     console.log(`[stage-controller] setKioskDiscovery → ${scrub(on)}`);
     this.state = { ...this.state, kioskDiscovery: on };
     await settingsStore.patch({ kioskDiscovery: on });
+    this.broadcast();
+    return this.state;
+  }
+
+  /** Let Mac output helpers and Windows kiosks update themselves, or stop them.
+   *  Read on every machine's next check; nothing is pushed. */
+  async setAutoUpdateMachines(on: boolean): Promise<StageState> {
+    console.log(`[stage-controller] setAutoUpdateMachines → ${scrub(on)}`);
+    this.state = { ...this.state, autoUpdateMachines: on };
+    await settingsStore.patch({ autoUpdateMachines: on });
     this.broadcast();
     return this.state;
   }

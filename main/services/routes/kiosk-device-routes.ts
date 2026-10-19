@@ -6,7 +6,9 @@
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
-import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret } from "../kiosk-presence.js";
+import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret, announceDevices } from "../kiosk-presence.js";
+import { MachineUpdates, parseCheck } from "../machine-updates.js";
+import { serviceWindow } from "../service-window.js";
 import { parseHealthReport } from "../output-health.js";
 import { headerValue } from "../http-origin.js";
 import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
@@ -17,6 +19,7 @@ import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, readCreateScreenBody, r
 import { errorMessage } from "../errors.js";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
+import * as crypto from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import * as path from "node:path";
 import { APP_ROOT } from "../app-root.js";
@@ -24,11 +27,29 @@ import { getUserDataPath } from "../app-paths.js";
 import { OutputHelperDownloads, parseHelperPath } from "../output-helper-download.js";
 import { pkgVersion } from "../updater.js";
 import { scrub } from "../scrub.js";
-import { originFromHost, stampOrigin } from "../kiosk-installer-origin.js";
+import { isStamped, originFromHost, stampOrigin } from "../kiosk-installer-origin.js";
 
 /** Exactly what may be served from scripts/kiosk. An allowlist rather than a
  *  path join, because this reads a file from disk on request. */
-const KIOSK_INSTALLERS = new Set(["install-linux.sh", "install-macos.sh", "install-windows.ps1"]);
+const KIOSK_INSTALLERS = new Set(["install-linux.sh", "install-macos.sh", "install-windows.ps1", "kiosk-windows.ps1"]);
+
+/** What each Mac helper and Windows kiosk last said about its updates. Runtime;
+ *  see machine-updates.ts. A change pushes a `kiosk:devices` frame, which is the
+ *  channel Screens already refetches on. */
+export const machineUpdates = new MachineUpdates(() => announceDevices());
+
+/** The Windows launcher this build serves, and its digest: what a Windows kiosk
+ *  compares its own against. Read once: it is part of the build, not of the data. */
+let windowsLauncher: Promise<{ body: string; sha256: string }> | null = null;
+function readWindowsLauncher(): Promise<{ body: string; sha256: string }> {
+  windowsLauncher ??= readFile(path.join(APP_ROOT, "scripts", "kiosk", "kiosk-windows.ps1"), "utf8").then((body) => ({
+    body,
+    sha256: crypto.createHash("sha256").update(body, "utf8").digest("hex"),
+  }));
+  // A failed read is not kept, so the next check tries the disk again.
+  windowsLauncher.catch(() => (windowsLauncher = null));
+  return windowsLauncher;
+}
 
 /** The Mac output helper's zips, fetched from the release on first request and
  *  kept in the data directory. See output-helper-download.ts. */
@@ -112,7 +133,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   // ── The installer, served by the server it installs against ─────────────
   // So the whole setup is one line typed at the screen, and the URL in it is the
   // server you are standing in front of.
-  if (method === "GET" && pathname.startsWith("/kiosk/install-")) {
+  if (method === "GET" && (pathname.startsWith("/kiosk/install-") || pathname === "/kiosk/kiosk-windows.ps1")) {
     const name = pathname.slice("/kiosk/".length);
     // Allowlist, not a path join: this reads a file from disk on request.
     if (!KIOSK_INSTALLERS.has(name)) {
@@ -132,12 +153,13 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     // The Mac installer downloads the output helper from the server it came
-    // from, and is told which that is here. The others carry no address. A
-    // missing marker throws, and is the server's fault, not a missing file.
-    if (name === "install-macos.sh") {
+    // from, and the Windows one its launcher, and each is told which that is
+    // here. The Linux one carries no address. A missing marker throws, and is the
+    // server's fault, not a missing file.
+    if (isStamped(name)) {
       const secure = "encrypted" in req.socket && req.socket.encrypted === true;
       try {
-        body = stampOrigin(body, originFromHost(req.headers.host, secure));
+        body = stampOrigin(body, originFromHost(req.headers.host, secure), name);
       } catch (err) {
         console.error(`[output-helper] could not prepare ${scrub(name)}: ${scrub(err)}`);
         error(res, "installer could not be prepared", 500);
@@ -201,6 +223,8 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // What each helper output last reported about itself, for the ones that
       // are still reporting. Runtime: never stored, gone on restart.
       health: healthList(),
+      // Each Mac helper and Windows kiosk that has checked for updates lately.
+      updates: machineUpdates.list(),
       // For each unclaimed device, which bound devices share a MAC — the
       // "this looks like Left Mic Display" hint. A suggestion, never a binding.
       matches: Object.fromEntries(
@@ -247,6 +271,62 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     }
     recordHealth(id, parsed.report, known.output?.kind);
     json(res, { ok: true });
+    return;
+  }
+
+  // ── Updates for the machines that show screens ─────────────────────────
+  // Asked every five minutes by the updater a Mac or a Windows kiosk installed
+  // with it. The answer decides; the machine only does what it says. Not
+  // authenticated: see machine-updates.ts for why, and what that limits it to.
+  if (method === "GET" && pathname === "/api/machine-updates/check") {
+    const input = parseCheck(url.searchParams);
+    if ("error" in input) {
+      error(res, input.error, 400);
+      return;
+    }
+    let launcherSha: string | undefined;
+    if (input.platform === "windows") {
+      try {
+        launcherSha = (await readWindowsLauncher()).sha256;
+      } catch (err) {
+        console.error(`[helper-update] could not read kiosk-windows.ps1 to answer a Windows kiosk: ${scrub(err)}`);
+        error(res, "this build has no Windows launcher to offer", 500);
+        return;
+      }
+    }
+    const want = launcherSha ?? pkgVersion();
+    const m = machineUpdates.check(input, {
+      want,
+      auto: stageController.getState().autoUpdateMachines,
+      live: stageController.isServiceLive(),
+      windowCloses: serviceWindow.activeUntil(),
+    });
+    json(res, { version: want, update: m.update, reason: m.reason, ...(launcherSha ? { sha256: launcherSha } : {}) });
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/machine-updates/request") {
+    const body = (await readBody(req)) as Record<string, unknown>;
+    const machine = typeof body.machine === "string" ? body.machine : "";
+    if (!machine) {
+      error(res, "body.machine is required");
+      return;
+    }
+    if (!machineUpdates.request(machine)) {
+      error(res, "That machine has not checked for updates in the last 20 minutes, so there is nothing to tell. Check it is on, and that its updater is installed (run the installer once).", 404);
+      return;
+    }
+    json(res, { ok: true });
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/machine-updates/auto") {
+    const body = (await readBody(req)) as Record<string, unknown>;
+    if (typeof body.enabled !== "boolean") {
+      error(res, "body.enabled (boolean) required");
+      return;
+    }
+    json(res, await stageController.setAutoUpdateMachines(body.enabled));
     return;
   }
 
