@@ -500,6 +500,26 @@ describe("On a console", () => {
     await eventually(() => assert.equal(dialog() === null, true));
   });
 
+  test("the dialog cannot be closed while Create is writing, so a refusal is always seen", async () => {
+    await toConsoleStep("Stage reset", ["booth"]);
+    await press(button("Next"), "Next to Review");
+    let release: () => void = () => {};
+    bridge.holdWritesTo = { prefix: "/api/views/", until: new Promise<void>((resolve) => (release = resolve)) };
+    await act(async () => {
+      fireEvent.click(button("Create")!);
+    });
+    for (let i = 0; i < 4; i++) await settle();
+    assert.ok(button("Creating…"), "Create finished before the held write did");
+    await press(document.querySelector('[aria-label="Close"]'), "the close button");
+    await act(async () => {
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    });
+    await settle();
+    assert.ok(dialog(), "the dialog closed while its buttons were still being written");
+    release();
+    await eventually(() => assert.equal(dialog() === null, true));
+  });
+
   test("Skip adds nothing", async () => {
     await mount();
     await manualToName();

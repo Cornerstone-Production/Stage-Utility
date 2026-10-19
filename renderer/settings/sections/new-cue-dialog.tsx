@@ -492,8 +492,11 @@ export function NewCueDialog({
 
   const skippable = step.optional === true && (step.id === "if" ? draft.conditions.length === 0 : draft.consoleIds.length === 0);
 
+  // The dialog cannot be closed while Create is writing: the rule is made and the
+  // buttons are being written, and a dialog closed under them could never say which
+  // console refused — the failure this dialog exists to name.
   return (
-    <DialogRoot open onOpenChange={(o) => !o && onClose()}>
+    <DialogRoot open onOpenChange={(o) => !o && !busy && onClose()}>
       <DialogContent
         aria-describedby={undefined}
         data-new-cue=""
