@@ -1,0 +1,53 @@
+# PSScriptAnalyzer over the Windows kiosk installer.
+#
+# scripts/kiosk/install-windows.ps1 runs in an elevated PowerShell on a display
+# machine, fetched from the server it enrols with. scripts/lint-powershell.ps1
+# holds the file list, which scripts are deferred and why; this only installs the
+# analyzer and calls it, so the check you run locally is this one. Any .ps1
+# change triggers it, so a new script cannot skip the decision.
+#
+# PSScriptAnalyzer has no SARIF output, so there is no code-scanning upload for
+# it: a failure is annotated on the PR diff and the full report is in the job log.
+#
+# Runs when PowerShell changes, on every push to main, and weekly: a new
+# analyzer release can flag a script nobody touched.
+
+name: PSScriptAnalyzer
+
+on:
+  pull_request:
+    paths:
+      - "*.ps1"
+      - "**/*.ps1"
+      - ".github/workflows/psscriptanalyzer.yml"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "43 6 * * 1" # Mondays, off the hour to avoid the rush
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PSSCRIPTANALYZER_VERSION: 1.25.0
+
+jobs:
+  psscriptanalyzer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -RequiredVersion $env:PSSCRIPTANALYZER_VERSION -Scope CurrentUser -Force
+          (Get-Module -ListAvailable PSScriptAnalyzer).Version.ToString()
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: ./scripts/lint-powershell.ps1
