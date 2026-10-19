@@ -1,8 +1,10 @@
-import { useState } from "react";
-import { Trash2Icon, PlusIcon, ListOrderedIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Trash2Icon, PlusIcon, ChevronRightIcon } from "lucide-react";
 
-import { Button, NumberInput, Input, Collapsible } from "../../components/ui";
+import { Button, NumberInput, Input } from "../../components/ui";
+import { cn } from "../../lib/cn";
 import { uid } from "../../lib/uid";
+import { DeviceDot } from "./patch-dot";
 import { generateLabels } from "../../lib/patch-ripple";
 
 const KINDS: { value: PatchDeviceKind; label: string }[] = [
@@ -24,156 +26,189 @@ function labelSummary(labels: string[] | undefined): string | null {
   return labels.length === 1 ? labels[0] : `${labels[0]}…${labels[labels.length - 1]}`;
 }
 
+export const EYEBROW = "text-caption2 font-semibold uppercase tracking-wider text-fg-subtle";
+
 /**
- * Device manager for the patch editor — add/remove racks and stage boxes and set
- * their input/output channel counts. Racks are the endpoint spine; the others
- * (snakes, pockets, drops, RF) are referenced by each endpoint's From/To path.
- *
- * Each device can also generate sequential connector labels (prefix + 1..N, e.g.
- * "B-1…B-12"), which then autocomplete in the From/To path cells and ripple
- * cleanly ("B-1" → "B-2") in the patch table.
+ * Everything editable about one device, shown under its row in the list: name,
+ * kind, channel counts, the color it tints its channels with, and the connector
+ * labels that autocomplete in the From/To cells and ripple cleanly in the table.
  */
-export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice[]; onChange: (d: PatchDevice[]) => void }) {
-  // Inline panels: which device has its label-generator / color panel open.
-  const [labelFor, setLabelFor] = useState<string | null>(null);
-  const [colorFor, setColorFor] = useState<string | null>(null);
+function DeviceEditor({ device: d, focusName, onUpdate, onRemove }: { device: PatchDevice; focusName: boolean; onUpdate: (patch: Partial<PatchDevice>) => void; onRemove: () => void }) {
+  const nameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (focusName) {
+      nameRef.current?.focus();
+      nameRef.current?.select();
+    }
+    // Once, when the editor opens: a device just added is named next.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // The label generator's inputs are the editor's own, so opening another
+  // device does not inherit the last one's prefix.
   const [prefix, setPrefix] = useState("");
   const [start, setStart] = useState(1);
+  const inSum = labelSummary(d.inLabels);
+  const outSum = labelSummary(d.outLabels);
 
-  // The two inline panels are mutually exclusive per row.
-  const openLabel = (id: string) => { setLabelFor((v) => (v === id ? null : id)); setColorFor(null); };
-  const openColor = (id: string) => { setColorFor((v) => (v === id ? null : id)); setLabelFor(null); };
+  return (
+    <div className="mb-1.5 mt-0.5 flex flex-col gap-3 rounded-lg border border-line bg-surface-raised p-2.5">
+      <div className="flex flex-col gap-2">
+        <Input ref={nameRef} value={d.name} onChange={(e) => onUpdate({ name: e.target.value })} placeholder="Device name" aria-label="Device name" />
+        {/* Left as a raw <select>: KINDS is a fixed, exhaustive list of
+            main/types/patch.ts's PatchDeviceKind union, which has never
+            dropped a member — a device's kind cannot hold a value this
+            list does not carry. */}
+        <select
+          value={d.kind}
+          onChange={(e) => onUpdate({ kind: e.target.value as PatchDeviceKind })}
+          aria-label="Device kind"
+          className="h-7 w-full rounded-md border border-line-strong bg-field px-2 text-footnote text-fg focus:border-focus focus:outline-none"
+        >
+          {KINDS.map((k) => (
+            <option key={k.value} value={k.value}>{k.label}</option>
+          ))}
+        </select>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
+            In
+            <NumberInput value={d.inputs} min={0} max={256} onChange={(v) => onUpdate({ inputs: v })} />
+          </label>
+          <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
+            Out
+            <NumberInput value={d.outputs} min={0} max={256} onChange={(v) => onUpdate({ outputs: v })} />
+          </label>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className={EYEBROW}>Color</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {PATCH_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => onUpdate({ color: c })}
+              className={cn("size-5 rounded-full transition-transform hover:scale-110", d.color === c && "ring-2 ring-fg ring-offset-2 ring-offset-surface-raised")}
+              style={{ background: c }}
+              aria-label={`Use ${c}`}
+              aria-pressed={d.color === c}
+            />
+          ))}
+          {d.color && (
+            <button type="button" onClick={() => onUpdate({ color: undefined })} className="rounded-md px-2 py-1 text-caption2 text-fg-subtle hover:text-fg">
+              None
+            </button>
+          )}
+        </div>
+        <p className="text-caption2 text-fg-faint">Tints every channel sourced from this device in the table and the /patch view.</p>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <span className={EYEBROW}>Connector labels</span>
+        {(inSum || outSum) && (
+          <span className="text-caption2 tabular-nums text-fg-muted">
+            {inSum && `in ${inSum}`}{inSum && outSum && " · "}{outSum && `out ${outSum}`}
+          </span>
+        )}
+        <div className="flex items-end gap-2">
+          <label className="flex min-w-0 flex-1 flex-col gap-1 text-caption2 text-fg-subtle">
+            Prefix
+            <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="e.g. B-" />
+          </label>
+          <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
+            Start #
+            <NumberInput className="w-24 flex-none" value={start} min={0} max={999} onChange={setStart} />
+          </label>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button variant="filled" size="small" disabled={d.inputs <= 0} onClick={() => onUpdate({ inLabels: generateLabels(d.inputs, prefix, start) })}>
+            Label {d.inputs} inputs
+          </Button>
+          <Button variant="filled" size="small" disabled={d.outputs <= 0} onClick={() => onUpdate({ outLabels: generateLabels(d.outputs, prefix, start) })}>
+            Label {d.outputs} outputs
+          </Button>
+          {(inSum || outSum) && (
+            <Button variant="transparent" size="small" onClick={() => onUpdate({ inLabels: undefined, outLabels: undefined })}>
+              Clear
+            </Button>
+          )}
+        </div>
+        <p className="text-caption2 text-fg-faint">
+          Generates connectors {prefix}{start}…{prefix}{start + Math.max(d.inputs, d.outputs, 1) - 1}. They autocomplete in From/To cells and ripple cleanly in the table.
+        </p>
+      </div>
+
+      <div className="border-t border-line pt-2">
+        <Button variant="transparent" size="small" onClick={onRemove} className="text-fg-subtle hover:text-danger-11">
+          <Trash2Icon className="size-3.5" /> Remove device
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The Devices card: every rack and stage box in the sheet, one line each — color,
+ * name, kind and channel counts. Racks are the endpoint spine; the others
+ * (snakes, pockets, drops, RF) are referenced by each endpoint's From/To path.
+ * A click opens that device's editor under its row; one is open at a time.
+ */
+export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice[]; onChange: (d: PatchDevice[]) => void }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  // Set by Add device, so the new device's name is selected for typing.
+  const [addedId, setAddedId] = useState<string | null>(null);
 
   function update(id: string, patch: Partial<PatchDevice>) {
     onChange(devices.map((d) => (d.id === id ? { ...d, ...patch } : d)));
   }
   function add() {
-    onChange([...devices, { id: uid("dev"), name: `Device ${devices.length + 1}`, kind: "rack", inputs: 8, outputs: 0 }]);
+    const id = uid("dev");
+    onChange([...devices, { id, name: `Device ${devices.length + 1}`, kind: "rack", inputs: 8, outputs: 0 }]);
+    setOpenId(id);
+    setAddedId(id);
   }
   function remove(id: string) {
     onChange(devices.filter((d) => d.id !== id));
-    if (labelFor === id) setLabelFor(null);
-    if (colorFor === id) setColorFor(null);
+    if (openId === id) setOpenId(null);
   }
 
   return (
-    <div className="rounded-xl border border-line bg-surface">
-      <Collapsible label="Devices" summary={`${devices.length}`} defaultOpen={devices.length === 0} headerClassName="px-4 py-2.5">
-        <div className="flex flex-col gap-2 px-3 pb-3">
-          {devices.map((d) => {
-            const inSum = labelSummary(d.inLabels);
-            const outSum = labelSummary(d.outLabels);
-            const open = labelFor === d.id;
-            return (
-              <div key={d.id} className="rounded-lg border border-line bg-surface-raised">
-                <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-                  <Input value={d.name} onChange={(e) => update(d.id, { name: e.target.value })} className="w-44" placeholder="Device name" />
-                  {/* Left as a raw <select>: KINDS is a fixed, exhaustive list of
-                      main/types/patch.ts's PatchDeviceKind union, which has never
-                      dropped a member — a device's kind cannot hold a value this
-                      list does not carry. */}
-                  <select
-                    value={d.kind}
-                    onChange={(e) => update(d.id, { kind: e.target.value as PatchDeviceKind })}
-                    className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote text-fg focus:outline-none focus:border-focus"
-                  >
-                    {KINDS.map((k) => (
-                      <option key={k.value} value={k.value}>{k.label}</option>
-                    ))}
-                  </select>
-                  <label className="flex items-center gap-1.5 text-caption2 text-fg-muted">
-                    in <NumberInput value={d.inputs} min={0} max={256} onChange={(v) => update(d.id, { inputs: v })} />
-                  </label>
-                  <label className="flex items-center gap-1.5 text-caption2 text-fg-muted">
-                    out <NumberInput value={d.outputs} min={0} max={256} onChange={(v) => update(d.id, { outputs: v })} />
-                  </label>
-                  {(inSum || outSum) && (
-                    <span className="text-caption2 tabular-nums text-fg-faint">
-                      {inSum && `in ${inSum}`}{inSum && outSum && " · "}{outSum && `out ${outSum}`}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => openColor(d.id)}
-                    className={`ml-auto flex size-7 items-center justify-center rounded-md transition-colors ${colorFor === d.id ? "bg-fill" : "hover:bg-fill"}`}
-                    aria-label={`Set color for ${d.name}`}
-                    aria-expanded={colorFor === d.id}
-                  >
-                    <span className="size-4 rounded-full border" style={{ background: d.color ?? "transparent", borderColor: d.color ?? "var(--su-line-strong)" }} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openLabel(d.id)}
-                    className={`touch-target-y rounded-md p-1.5 transition-colors ${open ? "bg-fill text-fg" : "text-fg-subtle hover:bg-fill hover:text-fg"}`}
-                    aria-label={`Generate connector labels for ${d.name}`}
-                    aria-expanded={open}
-                  >
-                    <ListOrderedIcon className="size-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => remove(d.id)}
-                    className="touch-target-y rounded-md p-1.5 text-fg-subtle hover:bg-fill hover:text-warn-11 transition-colors"
-                    aria-label={`Remove ${d.name}`}
-                  >
-                    <Trash2Icon className="size-4" />
-                  </button>
-                </div>
-                {colorFor === d.id && (
-                  <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2.5">
-                    <span className="text-caption2 text-fg-subtle">Color</span>
-                    {PATCH_COLORS.map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        onClick={() => update(d.id, { color: c })}
-                        className={`size-5 rounded-full transition-transform hover:scale-110 ${d.color === c ? "ring-2 ring-fg ring-offset-2 ring-offset-surface-raised" : ""}`}
-                        style={{ background: c }}
-                        aria-label={`Use ${c}`}
-                      />
-                    ))}
-                    {d.color && (
-                      <button type="button" onClick={() => update(d.id, { color: undefined })} className="rounded-md px-2 py-1 text-caption2 text-fg-subtle hover:text-fg">
-                        None
-                      </button>
-                    )}
-                    <span className="w-full text-caption2 text-fg-faint">Tints every channel sourced from this device in the table and the /patch view.</span>
-                  </div>
-                )}
-                {open && (
-                  <div className="flex flex-wrap items-end gap-2 border-t border-line px-3 py-2.5">
-                    <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
-                      Prefix
-                      <Input value={prefix} onChange={(e) => setPrefix(e.target.value)} className="w-24" placeholder="e.g. B-" />
-                    </label>
-                    <label className="flex flex-col gap-1 text-caption2 text-fg-subtle">
-                      Start #
-                      <NumberInput value={start} min={0} max={999} onChange={setStart} />
-                    </label>
-                    <Button variant="filled" size="small" disabled={d.inputs <= 0} onClick={() => update(d.id, { inLabels: generateLabels(d.inputs, prefix, start) })}>
-                      Label {d.inputs} inputs
-                    </Button>
-                    <Button variant="filled" size="small" disabled={d.outputs <= 0} onClick={() => update(d.id, { outLabels: generateLabels(d.outputs, prefix, start) })}>
-                      Label {d.outputs} outputs
-                    </Button>
-                    {(inSum || outSum) && (
-                      <Button variant="transparent" size="small" onClick={() => update(d.id, { inLabels: undefined, outLabels: undefined })}>
-                        Clear
-                      </Button>
-                    )}
-                    <p className="w-full text-caption2 text-fg-faint">
-                      Generates connectors {prefix}{start}…{prefix}{start + Math.max(d.inputs, d.outputs, 1) - 1}. They autocomplete in From/To cells and ripple cleanly in the table.
-                    </p>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          <Button variant="filled" size="small" onClick={add}>
-            <PlusIcon className="size-3.5" /> Add device
-          </Button>
-        </div>
-      </Collapsible>
-    </div>
+    <section aria-label="Devices" className="rounded-xl border border-line bg-surface p-2.5">
+      <div className="flex items-center px-1.5 pb-2 pt-1">
+        <span className={EYEBROW}>Devices</span>
+        <span className="ml-auto font-mono text-caption1 text-fg-subtle">{devices.length}</span>
+      </div>
+      {devices.map((d) => {
+        const open = openId === d.id;
+        return (
+          <div key={d.id}>
+            <button
+              type="button"
+              onClick={() => {
+                setOpenId(open ? null : d.id);
+                // Only the opening that Add device caused selects the name.
+                setAddedId(null);
+              }}
+              aria-expanded={open}
+              className={cn("grid w-full grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left transition-colors hover:bg-fill", open && "bg-fill")}
+            >
+              <DeviceDot color={d.color} className="size-2.5" />
+              <span className="min-w-0">
+                <span className="block truncate text-footnote text-fg">{d.name || "Unnamed device"}</span>
+                <span className="block text-caption1 text-fg-subtle">{KINDS.find((k) => k.value === d.kind)?.label ?? d.kind}</span>
+              </span>
+              <span className="flex items-center gap-1 font-mono text-caption2 text-fg-muted">
+                {d.inputs} / {d.outputs}
+                <ChevronRightIcon className={cn("size-3 text-fg-subtle transition-transform", open && "rotate-90")} />
+              </span>
+            </button>
+            {open && <DeviceEditor device={d} focusName={addedId === d.id} onUpdate={(patch) => update(d.id, patch)} onRemove={() => remove(d.id)} />}
+          </div>
+        );
+      })}
+      <Button variant="transparent" size="small" onClick={add} className="mt-1.5">
+        <PlusIcon className="size-3.5" /> Add device
+      </Button>
+    </section>
   );
 }

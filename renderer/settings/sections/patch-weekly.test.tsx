@@ -23,7 +23,7 @@ import { alerts, ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-l
 
 const teardown = installRenderDom();
 
-const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, screen, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { PatchWeekly } = await import("./patch-weekly.js");
 const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
@@ -71,8 +71,8 @@ function stubFetch({ pcoConfigured = true, failing, types = TYPES, allowed = [] 
   return { ...f, asked };
 }
 
-/** Mount, let the reads settle, and open the panel — its body is not in the
- *  DOM while it is collapsed. */
+/** Mount and let the reads settle. The panel is always open: it is a card in the
+ *  editor's left column, not a disclosure. */
 async function mount(): Promise<void> {
   render(
     React.createElement(PatchWeekly, {
@@ -84,8 +84,6 @@ async function mount(): Promise<void> {
   );
   await settle();
   await settle();
-  await settle();
-  fireEvent.click(screen.getByRole("button", { name: /Weekly assignment/i }));
   await settle();
 }
 
