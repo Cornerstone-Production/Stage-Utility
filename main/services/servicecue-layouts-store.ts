@@ -22,6 +22,10 @@ export const serviceCueLayoutsStore = {
     const raw = await store.load();
     const list = Array.isArray(raw) ? raw : [];
     const roles = await serviceCueRolesStore.load();
+    // Migrated against roles served as the defaults, the layouts would be saved
+    // pointing at roles the real file does not hold. And once either file has
+    // failed a read, its save is refused, so the migration would stop half-way.
+    if (store.refusingSaves() || serviceCueRolesStore.refusingSaves()) return list;
     const out = migrateLayouts(list, roles);
     // Runs on every load rather than behind a version stamp, so it must be idempotent —
     // only persist when it actually changed something.

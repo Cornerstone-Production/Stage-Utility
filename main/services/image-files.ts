@@ -16,6 +16,7 @@ import * as path from "path";
 import { getUserDataPath } from "./app-paths.js";
 import { externKeyed } from "../types/extern-keyed.js";
 import { atomicWrite } from "./write-queue.js";
+import { isNotFound } from "./errors.js";
 
 // NOT externKeyed(), unlike MIME_BY_EXT below: the only lookup into this table
 // is `EXT_BY_MIME[m[1].toLowerCase()]`, and `m[1]` is a capture of
@@ -112,18 +113,24 @@ export async function readImage(
   if (!mime) return null;
   try {
     return { data: await fs.readFile(path.join(imageDir(dirName), file)), mime };
-  } catch {
-    return null;
+  } catch (err) {
+    // Only a missing file is "no such image". One that is there and cannot be
+    // read throws: a backup that took it for absent left it out and said it
+    // had succeeded.
+    if (isNotFound(err)) return null;
+    throw err;
   }
 }
 
-/** Every stored file in a directory, for backup or pruning. */
+/** Every stored file in a directory, for backup or pruning. Throws when the
+ *  directory is there and cannot be read, for the reason readImage does. */
 export async function listImages(dirName: string): Promise<string[]> {
   try {
     // Not a write in flight: atomicWrite's scratch file is a dotfile beside the image.
     return (await fs.readdir(imageDir(dirName))).filter((f) => !f.startsWith("."));
-  } catch {
-    return []; // nothing stored yet
+  } catch (err) {
+    if (isNotFound(err)) return []; // nothing stored yet
+    throw err;
   }
 }
 

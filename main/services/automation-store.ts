@@ -17,6 +17,10 @@ const settings = new DataStore<AutomationSettings>(
 );
 
 export const automationStore = {
+  /** Why automation-rules.json could not be read, while it cannot: see DataStore.unreadable(). */
+  rulesUnreadable() {
+    return rules.unreadable();
+  },
   async loadRules(): Promise<Rule[]> {
     return rules.load();
   },

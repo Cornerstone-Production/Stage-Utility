@@ -364,3 +364,32 @@ describe("an output released on one server is set up on another", () => {
     assert.deepEqual(seenDevices().map((d) => d.id), [], "the output B claimed stayed in B's not-set-up list");
   });
 });
+
+// Last in this file, deliberately: once a store has served defaults it refuses
+// saves for the rest of the process (DataStore.servedDefaults), so any test after
+// this one could not save a binding. Node runs each test file in its own process.
+//
+// A bindings file that is there but cannot be read is not an empty one, though
+// the store serves its defaults so the server keeps running. Answered from them,
+// a device bound here that names us reads as released, and is answered and
+// listed as one: the reply that makes a device forget its server.
+describe("bindings that cannot be read", () => {
+  const file = path.join(TMP, "kiosk-devices.json");
+
+  afterEach(async () => {
+    await fs.rm(file, { recursive: true, force: true });
+    await kioskDevicesStore.reload();
+  });
+
+  test("a device naming this server is neither answered nor listed", async () => {
+    await fs.rm(file, { force: true });
+    // A directory where the file should be fails the read for root as well.
+    await fs.mkdir(file);
+    await kioskDevicesStore.reload();
+    assert.equal(kioskDevicesStore.unreadable()?.code, "EISDIR");
+
+    await send({ id: "bound-pi", macs: [OTHER_MAC], hostname: "pi", boundTo: "srv-test" });
+    assert.equal(await answered(400), false, "the server answered from bindings it could not read");
+    assert.deepEqual(seenDevices().map((d) => d.id), [], "a device was listed from bindings that could not be read");
+  });
+});

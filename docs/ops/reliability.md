@@ -12,8 +12,11 @@ Built for a room full of always-on screens.
 - **Planning Center requests are pooled and cached** in tiers, with backoff on rate
   limits. The live countdown stays uncached.
 - **Writes are atomic** — temp file then rename — and a file that will not parse is
-  backed up rather than overwritten. Recorded services are one file each, so
-  persisting a live service does not rewrite your whole history.
+  backed up rather than overwritten. One that cannot be read at all is never
+  taken for empty: see
+  [When a store file cannot be read](#when-a-store-file-cannot-be-read).
+  Recorded services are one file each, so persisting a live service does not
+  rewrite your whole history.
 - **Disk caches are pruned.** Photos and plan attachments go by age and size, and
   the Mac output helper's downloads (`cache/output-helper/`) are cut back to the
   running version. Images are served immutable so a screen fetches each one once.
@@ -148,6 +151,50 @@ still holds. Fix the permissions or the mount and save again.
 Fix the cause and save again — the retry is an ordinary save, with nothing left
 over from the attempt that failed.
 
+### When a store file cannot be read
+
+Every JSON store in the data directory (`settings.json`, `views.json`,
+`kiosk-devices.json` and the rest) is read once and then served from memory. A
+missing file is a first run and starts from defaults. A file that is there and
+cannot be read — permissions after running the server as another user, a failing
+card, a directory where the file should be — is never treated as empty:
+
+- **The server keeps running.** That store is served as its defaults, in memory
+  only, and every read retries the file. A store needed at startup does not stop
+  the server starting, so `/log` stays reachable.
+- **Nothing is saved to it** once a read has failed, until the server restarts.
+  A save reports the failure, and the file is left exactly as it was. Not when
+  the file reads again either: what the server built from the defaults at boot,
+  the screens for one, would replace the real file on the next save.
+- **Nothing is decided from the defaults.** Start-up migrations of views and
+  screens are skipped, layout images are not pruned, kiosk discovery answers no
+  probe while `kiosk-devices.json` cannot be read (a screen that hears no answer
+  keeps its server and probes again), and the device routes fail rather than
+  answer from an empty list. With `automation-rules.json` unreadable the cue
+  manifest, states and YAML fail rather than list no cues, so Home Assistant
+  marks the cue entities unavailable instead of removing them, the app's own
+  cue buttons are gone, and rule edits are refused.
+- **A backup** fails rather than leaving the file out, and the same goes for an
+  uploaded image it cannot read.
+
+Expect the pages backed by that store to look empty while it lasts. That is the
+defaults, not your data, which is still on disk. With `settings.json` unreadable
+the app also follows the host clock rather than its configured time zone, so
+schedules and history days run in the host's zone, which is UTC on most servers.
+
+The reason is on `/log` under `[data-store]`, once per file until it reads again:
+
+```
+[data-store] settings.json could not be read (EACCES): EACCES: permission denied,
+open '…/settings.json'. Running on its defaults without saving them, and refusing
+saves to it until the server restarts. Fix the permissions or the disk, then
+restart.
+```
+
+Fix the cause, then restart the server. A read after the fix logs
+`[data-store] … is readable again; restart the server to save to it`, and some
+pages show the real data from then on, but saves stay refused until the restart.
+
 ### When a credential could not be moved out of `settings.json`
 
 A box upgrading from a build that stored a credential as ordinary config moves it
@@ -190,8 +237,10 @@ off the machine; the app only writes to a path, so anything the OS can mount
 works — SMB, NFS, an external disk — with no credentials stored here.
 
 A failed run leaves the existing backups untouched and is retried on the next
-check rather than skipping an interval, and a machine that was switched off runs
-one backup when it returns rather than one per interval it missed.
+check rather than skipping an interval. A config file or uploaded image that is
+there but cannot be read fails the run rather than being left out of it. A
+machine that was switched off runs one backup when it returns rather than one per
+interval it missed.
 
 **Keeping the key out of a synced backup.** By default the key sits beside
 `secrets.bin` so the service can decrypt unattended at boot, which means it travels

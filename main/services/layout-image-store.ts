@@ -15,6 +15,7 @@ import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { layoutGroupsStore } from "./layout-groups-store.js";
 import { externKeyed } from "../types/extern-keyed.js";
 import { atomicWrite } from "./write-queue.js";
+import { errorMessage, isNotFound } from "./errors.js";
 
 // NOT externKeyed(), unlike MIME_BY_EXT below: the only lookup into this table
 // is `EXT_BY_MIME[m[1].toLowerCase()]`, and `m[1]` is a capture of
@@ -119,17 +120,26 @@ function collectRefs(objs: LayoutObject[] | undefined, into: Set<string>): void 
 export async function pruneLayoutImages(): Promise<number> {
   const refs = new Set<string>();
   try {
-    for (const v of await viewsStore.load()) collectRefs(v.layout?.objects, refs);
-    for (const t of await layoutTemplatesStore.load()) collectRefs(t.layout?.objects, refs);
-    for (const g of await layoutGroupsStore.load()) collectRefs(g.object ? [g.object] : [], refs);
-  } catch {
-    return 0; // couldn't read a store — never risk deleting a referenced image
+    // Strict: a store that cannot be read is served as its defaults, which
+    // reference nothing, and every image would be pruned as an orphan.
+    for (const v of await viewsStore.loadStrict()) collectRefs(v.layout?.objects, refs);
+    for (const t of await layoutTemplatesStore.loadStrict()) collectRefs(t.layout?.objects, refs);
+    for (const g of await layoutGroupsStore.loadStrict()) collectRefs(g.object ? [g.object] : [], refs);
+  } catch (err) {
+    // Never risk deleting a referenced image. Said, because a prune that never
+    // runs is otherwise invisible.
+    console.warn("[layout-images] prune skipped, a layout store could not be read:", errorMessage(err));
+    return 0;
   }
   let files: string[];
   try {
     files = await fs.readdir(dir());
-  } catch {
-    return 0; // no dir yet
+  } catch (err) {
+    // No directory yet is nothing to prune; one that cannot be listed is said.
+    if (!isNotFound(err)) {
+      console.warn("[layout-images] prune skipped, the image directory could not be read:", errorMessage(err));
+    }
+    return 0;
   }
   const now = Date.now();
   let removed = 0;

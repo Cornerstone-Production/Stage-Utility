@@ -212,7 +212,7 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  */
 export function handlerErrorStatus(err: unknown): number {
   const declared = (err as { status?: number } | null)?.status;
-  return declared === 413 || declared === 409 || declared === 400 ? declared : 500;
+  return declared === 413 || declared === 409 || declared === 400 || declared === 503 ? declared : 500;
 }
 
 /**
@@ -235,7 +235,8 @@ export function handlerErrorStatus(err: unknown): number {
  * test that restates the mapping and then agrees with itself.
  */
 export function handlerErrorCode(err: unknown, status: number): string | undefined {
-  if (status === 500) return undefined;
+  // 503 is a data file the server could not read; its code is that errno.
+  if (status === 500 || status === 503) return undefined;
   const code = (err as { code?: unknown } | null)?.code;
   return typeof code === "string" ? code : undefined;
 }

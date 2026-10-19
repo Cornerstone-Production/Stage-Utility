@@ -627,10 +627,15 @@ export class StageController {
     // floor falls back to `max(existing) + 1` — the bug. Seeding here, from what
     // was just loaded, is what stops the FIRST delete-then-create after an update
     // reissuing the highest id. Only kinds with no floor recorded are touched.
-    await settingsStore.seedIdFloors({
-      view: views.map((v) => v.id),
-      output: outputs.map((o) => o.id),
-    });
+    // Skipped once either file has failed a read: the views may be the
+    // defaults, and the save would be refused, which here, at a top-level
+    // await, would keep the server from starting.
+    if (!settingsStore.refusingSaves() && !viewsStore.refusingSaves()) {
+      await settingsStore.seedIdFloors({
+        view: views.map((v) => v.id),
+        output: outputs.map((o) => o.id),
+      });
+    }
 
     // An EMPTY list means "all allowed" and is passed through as such.
     //
@@ -736,6 +741,19 @@ export class StageController {
   ): Promise<{ views: View[]; outputs: Output[] }> {
     const storedViews = await viewsStore.load();
     const storedOutputs = settings.outputs;
+
+    // Either file unreadable is served as its defaults, which every pass below
+    // reads as a first run: it would rebuild the screens from the legacy
+    // displays and patch them over the real ones in settings.json. Show what
+    // could be read and change nothing; the passes run on the next start that
+    // reads both.
+    const unreadable = viewsStore.refusingSaves() ?? settingsStore.refusingSaves();
+    if (unreadable) {
+      console.error(
+        `[stage-controller] ${scrub(unreadable.message)}; start-up migrations of views and screens skipped until a restart reads it`,
+      );
+      return { views: storedViews, outputs: storedOutputs ?? [] };
+    }
 
     if (storedOutputs && storedOutputs.length > 0 && storedViews.length > 0) {
       const { views, changed } = retuneEmbedFontSize(storedViews);

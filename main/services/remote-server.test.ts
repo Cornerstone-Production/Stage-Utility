@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import { isCrossOrigin, handlerErrorStatus, handlerErrorCode } from "./remote-server.js";
+import { StoreReadError } from "./data-store.js";
 import { ServiceIsLiveError, NoRawRowsError } from "./history-edit.js";
 
 const HOST = "192.168.1.50:8788";
@@ -33,6 +34,13 @@ describe("what a thrown route error puts on the wire", () => {
     const status = handlerErrorStatus(err);
     assert.equal(status, 409);
     assert.equal(handlerErrorCode(err, status), "no-raw-rows");
+  });
+
+  test("a store file the server cannot read becomes a 503 with no code, not a 500", () => {
+    const err = new StoreReadError("kiosk-devices.json", Object.assign(new Error("EACCES"), { code: "EACCES" }));
+    const status = handlerErrorStatus(err);
+    assert.equal(status, 503, "an unreadable data file is not a bug in this app");
+    assert.equal(handlerErrorCode(err, status), undefined, "its errno must not reach the wire");
   });
 
   test("an ordinary failure becomes a 500 with NO code — a Node errno must never reach the wire", () => {

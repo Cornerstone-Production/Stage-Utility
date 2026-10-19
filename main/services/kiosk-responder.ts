@@ -29,6 +29,8 @@ export interface ResponderOptions {
 }
 
 let socket: dgram.Socket | null = null;
+/** Whether the last read of the bindings failed, so the log says so once. */
+let bindingsUnreadable = false;
 
 /** Our own MACs, so we never treat this machine as a kiosk device. */
 function ownMacs(): ReadonlySet<string> {
@@ -60,8 +62,17 @@ export function startKioskResponder(opts: ResponderOptions): void {
     if (isFromThisMachine(probe, mine)) return;
 
     // load() is cached after the first read, so this is not a file read per
-    // datagram.
+    // datagram — except while the file cannot be read, when each probe retries.
     const devices = await kioskDevicesStore.load();
+    // Not knowing which devices are bound is not the same as none being bound:
+    // answered from the defaults, every device bound here would be told this
+    // server does not know it, and forget it. Silence keeps it probing.
+    if (kioskDevicesStore.unreadable()) {
+      if (!bindingsUnreadable) console.error("[kiosk-responder] device bindings unreadable; not answering probes until they read");
+      bindingsUnreadable = true;
+      return;
+    }
+    bindingsUnreadable = false;
     const bound = !!findById(devices, probe.id);
     const decision = decideProbe(probe, opts.serverId, { scanning: scanning(), bound });
     if (!bound && probe.boundTo === opts.serverId) noteReleased(probe.id);
@@ -95,18 +106,22 @@ export function startKioskResponder(opts: ResponderOptions): void {
       // landing while an operator is claiming cannot lose one of the two.
       // touch() returns the SAME array when nothing changed, so a probe every
       // two seconds does not become a file write every two seconds.
-      try {
-        await updateDevices((current) =>
-          touch(current, probe.id, {
-            macs: probe.macs, hostname: probe.hostname, os: probe.os, ip: rinfo.address,
-            mode: probe.mode, output: probe.output, now: Date.now(),
-          }),
-        );
-      } catch (err) {
-        // Reported, not swallowed, and not fatal: the probe is still answered
-        // below and the next one tries again. Losing a hostname is not worth
-        // failing enrolment over.
-        console.warn("[kiosk-responder] could not record device details:", err);
+      // Skipped while saves to the bindings are refused (DataStore.refusingSaves):
+      // [data-store] has said so once, and each probe would warn again.
+      if (!kioskDevicesStore.refusingSaves()) {
+        try {
+          await updateDevices((current) =>
+            touch(current, probe.id, {
+              macs: probe.macs, hostname: probe.hostname, os: probe.os, ip: rinfo.address,
+              mode: probe.mode, output: probe.output, now: Date.now(),
+            }),
+          );
+        } catch (err) {
+          // Reported, not swallowed, and not fatal: the probe is still answered
+          // below and the next one tries again. Losing a hostname is not worth
+          // failing enrolment over.
+          console.warn("[kiosk-responder] could not record device details:", err);
+        }
       }
       // A device that is bound is no longer a candidate to claim.
       forgetSeen(probe.id);
