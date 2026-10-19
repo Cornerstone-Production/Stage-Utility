@@ -13,6 +13,7 @@ import { gameOptions } from "../../main/scores-object";
 import { preferredSplMetric } from "../../settings/sections/overview-data";
 import { metricOptions, meterOptions, sourceOptions, type SplMeters } from "../recording-status";
 import { PICK_OPTIONS, pickedValue, togglesFor, withToggle } from "./card-toggles";
+import { pvpNowMenuItems } from "./pvp-now-menu";
 import { SIZES, SIZE_ORDER, WHEN_LABELS, removeCard, replaceCard, setSize, setWhen, sizeOf, whenOf } from "./home-cards";
 import type { HomeCardSize, HomeVisibility } from "@main/types/views";
 
@@ -98,27 +99,14 @@ export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMe
       })),
     });
   }
-  // Which name the compact PVP "now" caption borrows. Offered only while
-  // Compact is ON, the same reason Recent services' Metric picker below is gated
-  // on its own switch — a Label picker for a mode the card is not drawing is a
-  // setting for something the operator cannot see.
-  const nowLabel = pickedValue(card, "nowLabel");
-  if (nowLabel != null && (card.config as { compact?: boolean }).compact) {
-    const map = PICK_OPTIONS.nowLabel;
-    if (map) {
-      items.push({
-        label: "Label",
-        items: sourceOptions(map, "Cue").map((o) => ({
-          label: o.label,
-          checked: nowLabel === o.value,
-          onSelect: () => {
-            save((objs) => replaceCard(objs, withToggle(card, "nowLabel", o.value)));
-            close();
-          },
-        })),
-      });
-    }
-  }
+  // The PVP "now" card's Layout choice, and its Label while Compact — see
+  // pvpNowMenuItems.
+  items.push(
+    ...pvpNowMenuItems(card, (next) => {
+      save((objs) => replaceCard(objs, next));
+      close();
+    }),
+  );
   // Which metric the Recent services card's trend line plots. Offered only
   // while the line is ON — a metric picker above a switch that is off is a
   // setting for something the operator cannot see.

@@ -100,7 +100,8 @@ gains a size picker, a visibility select, a remove button and a drag handle, and
 
 **Right-click a tile** — or tap and hold it — for its size, when it shows,
 remove, and the few settings that widget supports — seconds and the hour cycle
-on a clock, hide-when-idle and fill-when-recording on a status widget. No edit
+on a clock, hide-when-idle and fill-when-recording on a status widget, the
+layout of the ProVideoPlayer card. No edit
 mode needed, and ticking one leaves the menu open so several can be changed at
 once. On a touch device each tile also carries a small **⋯ button** in its
 corner, since there is no right-click to discover.

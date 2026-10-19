@@ -270,6 +270,11 @@ your own page. YouTube reports a real broadcast start, so its elapsed time is ex
 There is no preview image on any of them: ProVideoPlayer's network API offers no
 thumbnail or frame of any kind, so these report names, states and times only.
 
+**On screen now**'s right-click menu has the **Layout** choice (Full, Compact,
+Countdown only), **Label** while the layout is Compact, and the **Progress bar**,
+**Next cue**, **Warn near the end** and **Count down stills** switches. Next cue
+is offered only while the layout is Full, the one layout that draws it.
+
 ### The layer list
 
 One row per layer: the layer's name on the left, then the file it is holding and
@@ -314,7 +319,8 @@ layer list's Show uses (see above), or Any layer with content to follow whicheve
 layer has something on it. Naming a layer changes the caption itself: it reads
 `PVP · <layer name>` in every state, including empty and not found, so the tile
 says which one it is without waiting for content. With no layer named the
-caption is the fixed word "ProVideoPlayer" (compact: bare "PVP"). A named layer
+caption is the fixed word "ProVideoPlayer" (Compact: bare "PVP"; Countdown only
+draws no caption at all). A named layer
 PVP is not currently reporting reads **not found**, with its own sentence — never
 "empty", which is a different problem (the layer exists and has nothing on it).
 
@@ -330,16 +336,46 @@ this line is wrong until the next poll. It is the quietest line on the widget fo
 that reason, it is never drawn without a current cue to anchor it, and it can be
 switched off.
 
-**Compact** trades the composition above for two lines: the caption becomes
+**Layout** chooses how much the widget draws. **Full** is the composition above.
+**Compact** trades it for two lines: the caption becomes
 `PVP · <label>` (or `PVP · <layer name>` when a layer is pinned, in every state),
 and the value is the countdown alone while there is one. With nothing to count —
 a still, an ended clip, or an empty layer's dash — the value falls back to
 whichever of the cue name or the file name is NOT already the caption, so the
 tile never repeats itself and never reads the literal "no duration". **Label**
-chooses what the caption names when no layer is pinned: the layer's current cue,
-the media file's name with or without its extension, or the layer's own name. It
-falls back to the file name when there is no cue name to read, and it has no
-effect on a pinned tile, whose caption is always the layer's own name.
+chooses what the Compact caption names when no layer is pinned: the layer's
+current cue, the media file's name with or without its extension, or the
+layer's own name. It falls back to the file name when there is no cue name to
+read, and it has no effect on a pinned tile, whose caption is always the layer's
+own name. A widget saved before Layout existed with Compact switched on opens as
+Compact.
+
+**Countdown only** draws the time left and nothing else: no caption, no state
+word, no cue name, no sub-line, no next cue. The number fills the widget — as
+tall as 62% of its height allows, and never wider than its width allows for the
+digits it is showing — and follows a resize. It reads `m:ss`, or `h:mm:ss` past
+an hour. With nothing counting — nothing on the layer, a layer PVP does not
+report, a still with **Count down stills** off, an ended clip — it shows a dim
+dash, so a blank widget never looks like a frozen one. A paused clip is the
+reverse: it draws its frozen time with no state word, since there is no room for
+one here — switch to Full or Compact to see **paused**. **Progress bar**,
+**Layer**, **Count down stills** and the **Align** pad still apply (the bar is a
+hairline along the bottom edge). **Next cue** and **Label** are greyed out in
+the inspector, each saying why, since neither is drawn in it. (Next cue is also
+unused by Compact, and Label by Full, and they grey out there too.)
+
+**Warn near the end**, off by default so an existing widget is unchanged, turns
+the time and the progress hairline amber at **Amber at** seconds left (default
+30) and red at **Red at** (default 10), in every layout. Both are inclusive —
+the time is amber from 0:30, red from 0:10 — and judged on the second the digits
+show. **Red at** is never above **Amber at**: the field holds a higher number
+at the amber value, and a stored red above the amber is read as the amber, so
+the two colours arrive together. The thresholds are set in the layout editor's
+inspector; the Home card's right-click menu has the on/off switch only. The
+colours are the app's own caution and over tokens, the same ones a Home stat
+takes when it earns a state colour. A still counted down from a short hold
+starts inside the amber threshold, so with Warn near the end on it reads amber
+from its first frame; lower **Amber at** if that is not wanted.
 
 **Count down stills**, off by default, counts a STILL down the way a rolling clip
 already counts down — the value slot, the progress bar and (in the normal
@@ -358,7 +394,7 @@ countdown holds at 0:00 with a full bar rather than switching to another state.
 With **Count down stills** off, a still still gets one line the countdown steals
 otherwise: the normal composition's sub line gains **on screen**, counting UP
 from when the file first appeared, on the same clock the layer list's own **on
-screen** reads (compact mode shows nothing extra).
+screen** reads (Compact and Countdown only show nothing extra).
 
 The **last cue** a layer played is deliberately not shown on any of these. PVP
 reports it and it never clears, so four idle layers were observed all naming the

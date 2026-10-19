@@ -19,10 +19,11 @@
 // missing from the menu. A second copy of the inspector's per-type switch would
 // have had the same failure the first time somebody added a widget.
 
-import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
+import type { LayoutObject, LayoutObjectConfig, PvpNowLayout } from "@main/types/views";
 
 import { LOUDEST_METER, RECORDER_FOR, STREAMER_FOR } from "../recording-status";
-import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS } from "../../main/pvp-now";
+import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS, type PvpNowConfig } from "../../main/pvp-now";
+import { PVP_NOW_LAYOUT_OPTIONS, pvpNowLayout, pvpNowRowStates, withPvpNowLayout } from "../../main/pvp-now-config";
 
 /** The members of the config union that declare `K`, by their `type`. */
 type TypesWith<K extends PropertyKey, T = LayoutObjectConfig> = T extends { type: infer N }
@@ -88,9 +89,10 @@ const APPLIES = {
   // the output to differ.
   showProgress: { "pvp-layers": true, "home-pvp": true, "pvp-now": true, "home-pvp-now": true },
   showNextCue: { "pvp-now": true, "home-pvp-now": true },
-  // The countdown-first compact treatment, on both PVP "now" widgets. Off by
-  // default on both, agreeing with the renderer.
-  compact: { "pvp-now": true, "home-pvp-now": true },
+  // Turn the time amber, then red, near the end of a clip, on both PVP "now"
+  // widgets. Off by default on both, agreeing with the renderer. The two
+  // thresholds are numbers, so they stay inspector-only, like `stillHoldSec`.
+  warnNearEnd: { "pvp-now": true, "home-pvp-now": true },
   // Count a STILL down the same way a rolling clip already counts down. Off by
   // default: the same image duration is stored on every still in the library,
   // including ones that never advance, and a countdown on a graphic that stays
@@ -121,6 +123,8 @@ const APPLIES = {
  */
 const PICKS = {
   game: { scores: true, "home-scores": true },
+  // How much both PVP "now" widgets draw: Full, Compact or Countdown only.
+  layout: { "pvp-now": true, "home-pvp-now": true },
   // Which name compact mode's caption borrows, on both PVP "now" widgets.
   nowLabel: { "pvp-now": true, "home-pvp-now": true },
   // Which Smaart meter the SPL card reads. `spl-meter` is listed because it
@@ -153,7 +157,7 @@ const PICKS = {
   splMetric: { "home-recent-services": true },
 } satisfies { [K in PickKey]: Record<TypesWith<K>, true> };
 
-type PickKey = "game" | "meterId" | "metricKey" | "recorder" | "platform" | "splMetric" | "nowLabel";
+type PickKey = "game" | "meterId" | "metricKey" | "recorder" | "platform" | "splMetric" | "nowLabel" | "layout";
 
 /**
  * What a card is doing when it has never been given a value for a pick.
@@ -175,6 +179,11 @@ const PICK_FALLBACK: Record<PickKey, string> = {
   // drawn rather than a placeholder nobody chose.
   splMetric: "",
   nowLabel: DEFAULT_PVP_NOW_LABEL,
+  // Unreachable for a type that carries `layout` — `pickedValue` reads it through
+  // `pvpNowLayout`, which also turns a widget saved with the old Compact switch
+  // into "compact" — and null for every other type. It is here because the
+  // record is exhaustive over PickKey.
+  layout: "full",
 };
 
 /** The choices each pick offers, for the picks whose list is FIXED. `game`,
@@ -184,6 +193,7 @@ export const PICK_OPTIONS: Partial<Record<PickKey, Readonly<Record<string, strin
   recorder: RECORDER_FOR,
   platform: STREAMER_FOR,
   nowLabel: Object.fromEntries(PVP_NOW_LABEL_OPTIONS.map((o) => [o.value, o.label])),
+  layout: Object.fromEntries(PVP_NOW_LAYOUT_OPTIONS.map((o) => [o.value, o.label])),
 };
 
 /** Every (widget type, pick) pair the menu can write, flattened — the picks'
@@ -220,7 +230,10 @@ export function pickedValue(card: LayoutObject, key: PickKey): string | null {
   // support every picked setting. Same reasoning as isDisplayKind in
   // routes/context.ts and extern-keyed.ts.
   if (!Object.hasOwn(PICKS[key], config.type as string)) return null;
-  const value = config[key];
+  // `layout` is the one pick with a legacy spelling: a widget saved with the old
+  // Compact switch has no `layout` and reads as "compact", the same way the
+  // renderer reads it, so the menu ticks the layout actually being drawn.
+  const value = key === "layout" ? pvpNowLayout(config as PvpNowConfig) : config[key];
   // A card saved before the field existed has no value, and neither has one
   // explicitly set to null — both are doing whatever PICK_FALLBACK names.
   return typeof value === "string" ? value : PICK_FALLBACK[key];
@@ -240,7 +253,7 @@ type ToggleKey =
   | "fillWhenRecording"
   | "showProgress"
   | "showNextCue"
-  | "compact"
+  | "warnNearEnd"
   | "countStills"
   | "showSpl";
 
@@ -294,7 +307,9 @@ const SPECS: {
     fallbackFor: { "pvp-now": true, "home-pvp-now": true },
   },
   { key: "showNextCue", label: "Next cue", fallback: true },
-  { key: "compact", label: "Compact", fallback: false },
+  // `false` to agree with the renderer: a widget saved before the setting
+  // existed never warns.
+  { key: "warnNearEnd", label: "Warn near the end", fallback: false },
   { key: "countStills", label: "Count down stills", fallback: false },
   // `false` to agree with the renderer: a card that has never been told draws
   // attendance alone, exactly as it did before the line existed.
@@ -316,7 +331,8 @@ type Config = Record<string, unknown>;
  *
  * `showMeridiem` on a 24-hour clock is dropped rather than shown disabled: it
  * has no effect there, so a switch for it is worse than no switch. The inspector
- * hides it under the same condition.
+ * hides it under the same condition. Next cue is dropped the same way outside
+ * the Full layout, where the inspector greys it.
  */
 export function togglesFor(card: LayoutObject): CardToggle[] {
   const config = card.config as Config;
@@ -342,6 +358,10 @@ export function togglesFor(card: LayoutObject): CardToggle[] {
   for (const spec of SPECS) {
     if (!supports(spec.key)) continue;
     if (spec.key === "showMeridiem" && is24h) continue;
+    // Only Full draws the next cue; Compact and Countdown only never do, so a
+    // switch for it would tick and change nothing — the inspector greys the same
+    // row for the same reason (pvpNowRowStates).
+    if (spec.key === "showNextCue" && pvpNowRowStates(pvpNowLayout(config as PvpNowConfig)).nextCue) continue;
     if (spec.choice) {
       const checked = valueOf(spec) === spec.choice.on;
       out.push({
@@ -365,5 +385,9 @@ export function withToggle(
   key: SettingKey,
   next: boolean | string,
 ): LayoutObject {
-  return { ...card, config: { ...(card.config as Config), [key]: next } as LayoutObject["config"] };
+  const config = card.config as Config;
+  // A layout pick also retires the legacy Compact switch — see withPvpNowLayout.
+  const written =
+    key === "layout" ? withPvpNowLayout(config, next as PvpNowLayout) : { ...config, [key]: next };
+  return { ...card, config: written as LayoutObject["config"] };
 }
