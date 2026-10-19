@@ -24,7 +24,7 @@ import { parse } from "yaml";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOW = path.join(HERE, "..", ".github", "workflows", "helper-macos.yml");
 const RELEASE = path.join(HERE, "..", ".github", "workflows", "release.yml");
-const SELECT_XCODE = "./.github/actions/select-xcode";
+const SELECT_XCODE = "$/.github/actions/select-xcode";
 const SELECT_XCODE_FILE = path.join(HERE, "..", ".github", "actions", "select-xcode", "action.yml");
 
 interface Step {

@@ -26,15 +26,19 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: write # attach the image to a release, when a tag is given
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install pi-gen dependencies
         run: |
@@ -141,4 +145,6 @@ jobs:
         if: inputs.release_tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ inputs.release_tag }}" "${{ steps.img.outputs.path }}" --clobber
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          IMAGE_PATH: ${{ steps.img.outputs.path }}
+        run: gh release upload "$RELEASE_TAG" "$IMAGE_PATH" --clobber
