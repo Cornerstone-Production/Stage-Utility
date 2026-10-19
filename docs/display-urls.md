@@ -150,7 +150,10 @@ whole window. The operator's copy of the launcher is `/servicecue/manage`, in th
 sidebar under Content, with the app's usual chrome; `/servicecue/presets`, which
 edits layouts, keeps the chrome too. `?plan=<id>` on a rundown opens another plan
 of that type without changing the one the app follows; see
-[Plan switcher](features/servicecue-and-baptisms.md#plan-switcher).
+[Plan switcher](features/servicecue-and-baptisms.md#plan-switcher). `?from=<path>`
+names the launcher a rundown was opened from, `/servicecue` or
+`/servicecue/manage`, which its back arrow returns to; without it, or with any
+other path, the arrow goes to `/servicecue`.
 
 ## Polling transport
 
