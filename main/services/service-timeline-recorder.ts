@@ -92,7 +92,7 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
         // an item going live above reopens it.
         this.finalizeRecord();
         this.lastItemId = null;
-        await serviceTimelineStore.upsert(this.current);
+        await this.saveClosed(this.current);
         broadcastTimeline(this.current);
       }
     } finally {

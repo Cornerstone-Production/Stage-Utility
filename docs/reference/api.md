@@ -385,6 +385,9 @@ Two things to know:
   answer `409`. The recorder holds the same record and would write its own copy
   back over any change, and releasing it only makes the next live tick start a
   fresh empty record in its place. Correcting a recording is a post-hoc repair.
+  A service whose record a recorder could not save yet is refused the same way,
+  with `code: "unsaved"`, until the retried save lands: see
+  [When a recorded service cannot be saved](../ops/reliability.md#when-a-recorded-service-cannot-be-saved).
 - **An item time correction is an overlay.** The recorded stamps are never
   rewritten: the edit is stored on the record as `itemTimeEdits` and applied to
   `startedAt`, `endedAt` and `actualDurationSec` on every read, so a rebuild from

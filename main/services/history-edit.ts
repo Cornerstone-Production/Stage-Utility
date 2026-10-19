@@ -56,6 +56,27 @@ export class ServiceIsLiveError extends Error {
   }
 }
 
+/** Thrown when a recorder is holding a closed record it could not save yet. */
+export class ServiceNotSavedError extends Error {
+  readonly status = 409;
+  readonly code = "unsaved";
+  constructor(action: string, serviceKey: string) {
+    super(
+      `The service ${scrub(serviceKey)} has not been saved yet — the disk refused its last save, which keeps being retried. It cannot be ${action} until it is saved.`,
+    );
+    this.name = "ServiceNotSavedError";
+  }
+}
+
+/**
+ * Refuse a service a recorder is holding unsaved (see saveClosed in
+ * service-recorder.ts). The store has an older copy or none, so an edit
+ * would work from that and forget() would drop the only current one.
+ */
+export function assertSaved(action: string, ...serviceKeys: string[]): void {
+  for (const k of serviceKeys) if (RECORDERS.some((r) => r.isHolding(k))) throw new ServiceNotSavedError(action, k);
+}
+
 /**
  * Whether any recorder is actively writing this serviceKey right now — the
  * ONE definition of "live" for a service. `assertNotLive` refuses on it, and
@@ -98,14 +119,15 @@ export function assertNotLive(serviceKey: string, action: string): void {
 }
 
 /**
- * Refuse to touch a service that is live, or whose record is on disk and
- * could not be read. Every edit here reads the record and writes back what it
- * derived, and one it could not read answers as absent (see
+ * Refuse to touch a service that is live, held unsaved by a recorder, or whose
+ * record is on disk and could not be read. Every edit here reads the record and
+ * writes back what it derived, and one it could not read answers as absent (see
  * keyed-record-store.ts), so the edits stay off it until the server restarts
  * with it readable.
  */
 async function assertEditable(action: string, ...serviceKeys: string[]): Promise<void> {
   for (const k of serviceKeys) assertNotLive(k, action);
+  assertSaved(action, ...serviceKeys);
   for (const store of [serviceTimelineStore, attendanceStore, splHistoryStore]) {
     for (const k of serviceKeys) await store.assertReadable(k);
   }
@@ -113,8 +135,11 @@ async function assertEditable(action: string, ...serviceKeys: string[]): Promise
 
 /** Release every recorder's copy of these keys. Called BEFORE the first awaited
  *  write, never after: a debounce that fires mid-await writes the pre-edit
- *  record back over the one just saved. */
+ *  record back over the one just saved. Checks again that none is held
+ *  unsaved, with no await in between: a split during assertEditable's awaits
+ *  can hold one, and forget() would drop the only current copy. */
 function forgetAll(...serviceKeys: string[]): void {
+  assertSaved("changed", ...serviceKeys);
   for (const r of RECORDERS) for (const k of serviceKeys) r.forget(k);
 }
 

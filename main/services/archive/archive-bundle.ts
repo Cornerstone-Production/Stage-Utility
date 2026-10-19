@@ -31,6 +31,7 @@ import { StoreReadError } from "../data-store.js";
 import { archiveRoot, isInside, serviceDirName } from "./archive-paths.js";
 import { unreadableArchiveFile } from "./archive-rows.js";
 import { atomicWrite } from "../write-queue.js";
+import { assertSaved } from "../history-edit.js";
 import { encodeRow, parseRows } from "../csv.js";
 import {
   mergeAttendanceRecord,
@@ -387,6 +388,8 @@ export async function importArchive(
   const isNew = (k: string) => !local.has(k);
   const touched = services.filter((s) => isNew(s.serviceKey) || replace.has(s.serviceKey) || merge.has(s.serviceKey));
   const touchedKeys = new Set(touched.map((s) => s.serviceKey));
+  // A recorder's retry would write its held copy back over what lands here.
+  assertSaved("imported over", ...touchedKeys);
 
   const added = services.filter((s) => isNew(s.serviceKey)).map((s) => s.serviceKey);
   const replaced = services.filter((s) => !isNew(s.serviceKey) && replace.has(s.serviceKey)).map((s) => s.serviceKey);
