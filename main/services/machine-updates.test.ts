@@ -158,9 +158,8 @@ describe("MachineUpdates", () => {
     // What the button overrode no longer stands, so Screens offers it no longer.
     assert.equal(updates.list(1_000)[0].waitingOn, undefined);
     assert.equal(updates.check(check(), { ...gate, auto: false }, 300_000).update, true);
-    // A failure after it is not retried by itself.
-    updates.check(check({ state: "failed", target: "1.27.0", at: 1 }), { ...gate, auto: false }, 600_000);
-    assert.equal(updates.check(check({ state: "failed", target: "1.27.0", at: 1 }), { ...gate, auto: false }, 900_000).update, false);
+    // A failure after it is not retried by itself, from the check that reports it.
+    assert.equal(updates.check(check({ state: "failed", target: "1.27.0", at: 1 }), { ...gate, auto: false }, 600_000).update, false);
   });
 
   it("keeps Update now through a check the Mac could not act on", () => {
@@ -178,8 +177,9 @@ describe("MachineUpdates", () => {
     updates.request("5f1c09ab-7e22-4c1d", 1_000);
     // The same failure reported again is what Try again was pressed on.
     assert.equal(updates.check(failed, gate, 300_000).update, true);
-    // A failure at a new time is the retry's outcome, and holds the version again.
-    updates.check({ ...failed, at: 400 }, gate, 600_000);
+    // A failure at a new time is the retry's outcome: the very check that carries it
+    // holds the version again, so one press is one retry.
+    assert.equal(updates.check({ ...failed, at: 400 }, gate, 600_000).update, false);
     assert.equal(updates.check({ ...failed, at: 400 }, gate, 900_000).update, false);
   });
 

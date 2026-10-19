@@ -202,7 +202,7 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       assert.equal(f.checks.length, 1);
       assert.deepEqual(
         { ...f.checks[0], host: undefined },
-        { machine: "11111111-2222-3333-4444-555555555555", platform: "windows", have: sha(OLD), host: undefined, state: "idle", target: "", detail: "" },
+        { machine: "11111111-2222-3333-4444-555555555555", platform: "windows", have: sha(OLD), host: undefined, state: "idle", target: "", detail: "", at: "0" },
       );
     });
 
@@ -273,9 +273,10 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       await runUpdater();
       assert.equal(f.downloads, 1, "an updated PC downloads nothing more");
       assert.deepEqual(
-        { ...f.checks[1], host: undefined },
-        { machine: "11111111-2222-3333-4444-555555555555", platform: "windows", have: sha(NEW), host: undefined, state: "updated", target: sha(NEW), detail: "" },
+        { ...f.checks[1], host: undefined, at: undefined },
+        { machine: "11111111-2222-3333-4444-555555555555", platform: "windows", have: sha(NEW), host: undefined, state: "updated", target: sha(NEW), detail: "", at: undefined },
       );
+      assert.ok(Number(f.checks[1].at) > 0, "with when it updated");
     });
 
     it("a download whose digest is not the one named is refused: kiosk.ps1 is untouched, and the next check says it failed and why", async () => {
@@ -299,6 +300,10 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       assert.match(f.checks[1].detail, /^the download has SHA-256 [0-9a-f]{64}, expected [0-9a-f]{64}$/, "the whole reason survives the 200 characters the server keeps");
       assert.equal(f.checks[1].have, sha(OLD), "what is installed has not changed");
       assert.equal(readStatus().retryAfter, 0, "a digest mismatch would happen again, so it is not retried on a timer");
+      // When it failed, so the server can tell this failure from the next: one Try
+      // again is then one retry, not a retry every five minutes.
+      const at = Number(f.checks[1].at);
+      assert.ok(at > Date.now() / 1000 - 600 && at <= Date.now() / 1000 + 5, `at: ${f.checks[1].at}`);
     });
 
     describe("a download that fails on the network", () => {

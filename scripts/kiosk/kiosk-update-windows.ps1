@@ -138,6 +138,9 @@ function Invoke-Check([string]$Origin, [string]$Have, [string]$Machine, $Status)
     state    = $Status.state
     target   = $Status.target
     detail   = $Status.detail
+    # When it happened: the server tells a new failure from the same one again by
+    # this, so one Try again is one retry.
+    at       = $Status.at
   }
   $query = ($pairs.Keys | ForEach-Object { '{0}={1}' -f $_, [uri]::EscapeDataString([string]$pairs[$_]) }) -join '&'
   $response = Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Uri "$Origin/api/machine-updates/check?$query"
@@ -230,12 +233,12 @@ function Invoke-Updater {
       $failures = if ($status.target -eq $want) { $status.failures + 1 } else { [long]1 }
       $delay = [Math]::Min(1800 * [Math]::Pow(2, [Math]::Min($failures - 1, 10)), 21600)
       $retryAfter = (Get-UnixNow) + [long]$delay
-      Write-Status -State 'retrying' -Target $want -Detail $why -Answer $reason -RetryAfter $retryAfter -Failures $failures
+      Write-Status -State 'retrying' -Target $want -Detail $why -Answer $reason -At (Get-UnixNow) -RetryAfter $retryAfter -Failures $failures
       $when = [DateTimeOffset]::FromUnixTimeSeconds($retryAfter).ToString('HH:mm')
       Write-UpdateLog "could not download the launcher ($why); trying again after $when UTC"
       return
     }
-    Write-Status -State 'failed' -Target $want -Detail $why -Answer $reason
+    Write-Status -State 'failed' -Target $want -Detail $why -Answer $reason -At (Get-UnixNow)
     Write-UpdateLog "the update to $want failed: $why. kiosk.ps1 is unchanged, and it is not tried again until someone asks from Screens."
     return
   }

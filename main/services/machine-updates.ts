@@ -274,10 +274,13 @@ export class MachineUpdates {
   /** Answer one check, remember what the machine said, and log what changed. */
   check(input: CheckInput, gate: Omit<Gate, "requested">, now = Date.now()): MachineUpdate {
     this.prune(now);
+    // A press is spent by the outcome it led to, before this check is answered:
+    // the check carrying a retry's new failure must not start another retry.
     const asked = this.requested.get(input.machine);
-    const d = decide(input, { ...gate, requested: asked !== undefined });
-    const settled = (!d.update && d.why === "current") || ((input.state === "updated" || input.state === "failed") && outcomeOf(input) !== asked);
-    if (asked !== undefined && settled) this.requested.delete(input.machine);
+    const answered = asked !== undefined && (input.state === "updated" || input.state === "failed") && outcomeOf(input) !== asked;
+    if (answered) this.requested.delete(input.machine);
+    const d = decide(input, { ...gate, requested: asked !== undefined && !answered });
+    if (!d.update && d.why === "current") this.requested.delete(input.machine);
     const next: MachineUpdate = {
       machine: input.machine,
       platform: input.platform,
