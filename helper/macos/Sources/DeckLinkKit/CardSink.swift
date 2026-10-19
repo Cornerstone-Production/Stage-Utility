@@ -135,3 +135,4 @@ public protocol CardSink: AnyObject {
   func takeHealthSample() -> HealthSample
   func close()
 }
+// codeql gate verification, throwaway
