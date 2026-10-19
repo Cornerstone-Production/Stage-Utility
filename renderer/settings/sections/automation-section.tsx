@@ -1,5 +1,5 @@
 import { errorMessage } from "@main/services/errors";
-import { CALL_TRIGGER_ID, parseAliases } from "@main/services/cue-aliases";
+import { CALL_TRIGGER_ID, parseAliases, takenCueNames } from "@main/services/cue-aliases";
 import { APP_STATE_SOURCES, appStateRef } from "@main/services/app-state-sources";
 import {
   cuePairs,
@@ -36,6 +36,7 @@ import {
   type RuleEditorTarget,
 } from "./rule-editor-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParam } from "../../lib/use-search-param";
 import { useConfiguredIntegrations } from "../../main/use-integration-states";
 import { usePvpState } from "../../main/use-pvp-state";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -46,6 +47,8 @@ import { automationRegistryQuery } from "../../lib/automation-registry";
 import { Button, Collapsible, Input, Separator, Switch, toast } from "../../components/ui";
 import { formatClock } from "../../lib/clock-format";
 import { CueAccessCard, CueButtonStatus, ImportPairsDialog } from "./companion-cues";
+import { NewCueDialog } from "./new-cue-dialog";
+import type { CueKind } from "./new-cue-flow";
 import { plural } from "@main/services/plural";
 
 /**
@@ -612,11 +615,38 @@ function ListSection({
   );
 }
 
+// ── The deep link ─────────────────────────────────────────────────────────────
+
+/** The `new` search value that opens the New cue dialog on a manual cue. */
+export const NEW_CUE_PARAM = "new";
+export const NEW_MANUAL_CUE = "manual";
+
+/**
+ * `/automation?new=manual` opens the New cue dialog at the manual kind, for a link
+ * from another page. Read on arrival and on every resolved navigation, so a link
+ * pressed while this page is already showing works too. The parameter is DROPPED
+ * once it has opened the dialog, so a reload (or Back) does not open it a second
+ * time: it is a command, not state worth keeping in the URL.
+ */
+function useNewCueLink(open: (kind: CueKind) => void) {
+  const [asked, setAsked] = useSearchParam(NEW_CUE_PARAM);
+  useEffect(() => {
+    if (asked !== NEW_MANUAL_CUE) return;
+    open("manual");
+    setAsked(null, { replace: true });
+  }, [asked, open, setAsked]);
+}
+
 // ── Section ───────────────────────────────────────────────────────────────────
 
 export function AutomationSection() {
   const qc = useQueryClient();
   const [importing, setImporting] = useState(false);
+  // The New cue dialog: null while closed, and `kind` set when a link already says
+  // which. NOTHING is saved by opening it — see new-cue-dialog.tsx.
+  const [creating, setCreating] = useState<{ kind: CueKind | null } | null>(null);
+  const openNewCue = useCallback((kind: CueKind | null) => setCreating({ kind }), []);
+  useNewCueLink(openNewCue);
   const { data: registry } = useQuery(automationRegistryQuery);
   const { data } = useQuery({
     queryKey: ["automation:rules"],
@@ -860,6 +890,13 @@ export function AutomationSection() {
     return rule ? { kind: "rule", rule } : null;
   }, [editing, pairRows, rules, togglePairs, cueStateData]);
 
+  // Every cue name in use, with former names and the built-ins: what Make it manual
+  // must not derive a name equal to. The server refuses a clash either way.
+  const cueNamesTaken = useMemo(
+    () => takenCueNames(rules, registry?.reservedCueNames),
+    [rules, registry],
+  );
+
   // The last manual run of each rule, until the next one or a reload.
   // A Map, not a record: the key is a rule id, which arrives over the wire.
   const [lastRuns, setLastRuns] = useState<ReadonlyMap<string, RunResult>>(new Map());
@@ -1052,29 +1089,8 @@ export function AutomationSection() {
             </>
           )}
           <div className="flex items-center gap-2">
-            <Button
-              variant="filled"
-              size="small"
-              onClick={async () => {
-                // The new rule's own editor, at once. A rule called "Rule 7"
-                // with a log action and no trigger params is not a rule
-                // anybody wanted — it is the start of one, and an operator left
-                // looking at it in a list of two hundred has to find it again
-                // to say what it does.
-                const created = await invoke<RuleWithIssues>("automation:addRule", {
-                  name: `Rule ${rules.length + 1}`,
-                  enabled: false,
-                  trigger: { id: registry.triggers[0]?.id ?? "", params: {} },
-                  conditions: [],
-                  action: { id: "log.message", params: { message: "rule matched" } },
-                  cooldownSec: 30,
-                  oncePerService: false,
-                });
-                refresh();
-                setEditing({ kind: "rule", id: created.id });
-              }}
-            >
-              <PlusIcon className="size-3.5" /> Add rule
+            <Button variant="filled" size="small" onClick={() => openNewCue(null)}>
+              <PlusIcon className="size-3.5" /> New cue
             </Button>
             <Button variant="transparent" size="small" onClick={() => setImporting(true)}>
               <DownloadIcon className="size-3.5" /> Import from Companion…
@@ -1103,7 +1119,21 @@ export function AutomationSection() {
           appSources={appSources}
           pvpLayers={pvpLayers}
           inferredFor={inferredFor}
+          cueNamesTaken={cueNamesTaken}
           onChanged={refresh}
+        />
+      )}
+
+      {/* Mounted only while open, so its draft is a fresh one each time and goes
+          with it on close — Cancel, Escape and the overlay create nothing. */}
+      {registry && creating && (
+        <NewCueDialog
+          registry={registry}
+          optionSources={optionSources}
+          rules={rules}
+          initialKind={creating.kind}
+          onClose={() => setCreating(null)}
+          onCreated={refresh}
         />
       )}
 

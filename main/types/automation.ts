@@ -51,7 +51,10 @@ export interface TriggerDef {
    * MUST return false when `prev` is null — that is the restart guard.
    */
   didFire(prev: unknown | null, next: unknown, params: Record<string, unknown>, now: number): boolean;
-  help?: string;
+  /** One line for the picker: when this fires. Required, so a new trigger cannot
+   *  be written without it — a picker row with no description is a row nobody
+   *  can tell from its neighbour. */
+  help: string;
 }
 
 export interface ConditionDef {
@@ -75,6 +78,9 @@ export interface ConditionDef {
   params: ParamDef[];
   /** PURE. Does this qualifier hold right now? */
   holds(ctx: ConditionCtx, params: Record<string, unknown>, now: number): boolean;
+  /** One line for the picker: when this holds. Required for the reason a
+   *  trigger's is. */
+  help: string;
 }
 
 /** The current-state snapshot conditions are evaluated against. */
@@ -117,7 +123,9 @@ export interface ActionDef {
   /** NEVER throws — a failure is a returned result, so one bad provider cannot
    *  stop the engine or block other rules. */
   run(params: Record<string, unknown>, ctx: { simulate: boolean }): Promise<ActionResult>;
-  help?: string;
+  /** One line for the picker: what this does. Required for the reason a
+   *  trigger's is. */
+  help: string;
 }
 
 export interface Rule {

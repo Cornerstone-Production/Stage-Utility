@@ -41,6 +41,7 @@ describe("invokeAction", () => {
     AUTOMATION_ACTIONS["test.boom"] = {
       id: "test.boom",
       label: "boom",
+      help: "test",
       params: [],
       run: async () => { throw new Error("kaboom"); },
     };
@@ -54,6 +55,7 @@ describe("invokeAction", () => {
     AUTOMATION_ACTIONS["test.reject"] = {
       id: "test.reject",
       label: "reject",
+      help: "test",
       params: [],
       run: () => Promise.reject(new Error("nope")),
     };
@@ -97,6 +99,7 @@ describe("invokeAction — a refusal leaves a line on /log", () => {
     AUTOMATION_ACTIONS["test.refuse"] = {
       id: "test.refuse",
       label: "refuse",
+      help: "test",
       params: [],
       run: async () => ({ ok: false, detail: "nothing to do" }),
     };
@@ -116,6 +119,7 @@ describe("invokeAction — a refusal leaves a line on /log", () => {
     AUTOMATION_ACTIONS["test.boom"] = {
       id: "test.boom",
       label: "boom",
+      help: "test",
       params: [],
       run: async () => { throw new Error("kaboom"); },
     };
