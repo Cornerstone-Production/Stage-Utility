@@ -34,7 +34,9 @@
 // files that see HTTP REQUEST data. The wireless drivers log device replies from
 // the LAN — around 200 more interpolations — which is a different threat model
 // (a mic receiver, not a browser) and a different change. They are not covered
-// here and this file does not pretend otherwise.
+// here and this file does not pretend otherwise. ProdCom is the exception: its
+// frames carry text people type into an intercom, so prodcom-service.ts is
+// scanned.
 
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
@@ -134,6 +136,10 @@ const REQUEST_FACING = [
   // into Settings over HTTP.
   "pinned-origin.ts",
   "plan-export.ts",
+  // Its lines name a channel, a frame's type and keys, an entry's source, the raw
+  // PRODCOM_DEBUG frame and the error text ProdCom sends back, all off its socket
+  // or REST replies.
+  "prodcom-service.ts",
   // The path is one of four fixed keys and the reference is read from settings,
   // but both are scrubbed: settings.json is a file an operator can edit by hand.
   "routes/app-icon-routes.ts",
@@ -293,7 +299,6 @@ const NOT_SCANNED = new Map<string, string>([
   ["osc-manager.ts", DEVICE],
   ["pco-attachment-cache.ts", UNAUDITED],
   ["pco-calendar-service.ts", ELSEWHERE],
-  ["prodcom-service.ts", DEVICE],
   ["propresenter-service.ts", DEVICE],
   ["pvp-service.ts", DEVICE],
   ["reaper-service.ts", DEVICE],
@@ -463,6 +468,8 @@ function requestFacingFiles(): string[] {
     // A plan export's log line names the service type, which comes from Planning
     // Center over HTTP; the query that asks for it is an HTTP request.
     path.join(HERE, "plan-export.ts"),
+    // Off a ProdCom socket or REST reply; see REQUEST_FACING.
+    path.join(HERE, "prodcom-service.ts"),
     // Its one summary line names the serviceKey the replay was handed, which
     // arrives verbatim in an HTTP body wherever a baptism rebuild is triggered
     // — the same exposure history-edit.ts carries.
