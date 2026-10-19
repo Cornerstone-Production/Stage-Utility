@@ -26,7 +26,10 @@
 // helper outputs. So a report is what a machine on the network SAYS: it is bounded,
 // scrubbed, and drives nothing but a line of text and a log line. The decision it
 // gets back is public information (this server's version, and whether it would
-// update), and downloading still needs the published checksum to match.
+// update). The download it leads to is checked against a checksum this same server
+// publishes, which proves the file whole, not who sent it: a machine trusts the
+// server it was installed from, as its installer did (docs/kiosk-devices.md,
+// "What it trusts").
 
 import { scrub } from "./scrub.js";
 import { clockOf } from "./app-timezone.js";
@@ -41,7 +44,11 @@ export type UpdatePlatform = (typeof UPDATE_PLATFORMS)[number];
  *   idle           nothing to report
  *   updated        `target` is now installed
  *   failed         `target` could not be installed, or did not start; what is
- *                  installed is still `have`, and `detail` says why
+ *                  installed is still `have`, and `detail` says why. Held until
+ *                  someone presses Try again
+ *   retrying       `target` could not be downloaded, or the update was cut short
+ *                  (a shutdown); `detail` says why, and the machine tries again
+ *                  on its own, half an hour on and backing off
  *   no-session     an update is due but nobody is logged in at the Mac, so the new
  *                  helper could not be started and checked
  *   not-running    an update is due but the helper was quit at the Mac, and an
@@ -49,7 +56,7 @@ export type UpdatePlatform = (typeof UPDATE_PLATFORMS)[number];
  *   local-network  `target` is installed and running, but macOS refuses it Local
  *                  Network access, so someone at the Mac has to answer the prompt
  */
-export const MACHINE_STATES = ["idle", "updated", "failed", "no-session", "not-running", "local-network"] as const;
+export const MACHINE_STATES = ["idle", "updated", "failed", "retrying", "no-session", "not-running", "local-network"] as const;
 export type MachineState = (typeof MACHINE_STATES)[number];
 
 /** Why a machine is told not to update now. */
@@ -199,6 +206,7 @@ export function decide(input: Pick<CheckInput, "platform" | "have" | "state" | "
  *  which nobody can read, so it is never named. */
 export function describe({ platform, have, state, target, detail }: Pick<CheckInput, "platform" | "have" | "state" | "target" | "detail">, want: string, d: Decision): string {
   if (platform === "windows") {
+    if (d.update && state === "retrying") return `Kiosk launcher out of date. The update did not finish${detail ? `: ${detail}` : ""}. It is tried again later`;
     if (d.update) return "Kiosk launcher updating";
     switch (d.why) {
       case "current":
@@ -213,6 +221,7 @@ export function describe({ platform, have, state, target, detail }: Pick<CheckIn
   // The server says go, and the Mac cannot yet: say what it is waiting for.
   if (d.update && state === "no-session") return `Helper ${have}. Updates to ${want} once someone is logged in at the Mac`;
   if (d.update && state === "not-running") return `Helper ${have}. Updates to ${want} once the helper is running again (it was quit at the Mac)`;
+  if (d.update && state === "retrying") return `Helper ${have}. The update to ${want} did not finish${detail ? `: ${detail}` : ""}. It is tried again later`;
   if (d.update) return `Helper ${have}. Updating to ${want}`;
   switch (d.why) {
     case "current":
@@ -363,6 +372,9 @@ export class MachineUpdates {
           break;
         case "no-session":
           console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}): an update is due, but nobody is logged in at the Mac to start and check the new helper; it waits for a login`);
+          break;
+        case "retrying":
+          console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}): the update${mac ? ` to ${scrub(t)}` : ""} did not finish${scrub(why)}; it is tried again later`);
           break;
         case "not-running":
           console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}): an update is due, but the helper was quit at the Mac; it updates once it runs again`);

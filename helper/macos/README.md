@@ -128,7 +128,7 @@ next login with the real state.
 | Per-output state: `outputs.json` (enabled, token, the server it is bound to, whether it holds the kiosk's identity, a card output's format) | `~/Library/Application Support/StageUtilityOutput/` |
 | Chromium's profile (cookies, local storage, cache) and its own log, `chromium.log` | `Chromium/` and `chromium.log` in the same user folder |
 | A device id, when `device-id` is missing from the folder above | `generated-device-id` in the same user folder. The window says so. |
-| `helper-status.json`: for the updater, this copy's version and pid, whether Chromium started (and why not), the server it loads from, and whether Local Network access looks refused | The same user folder. Rewritten only when one of those changes. See [Updates](#updates) |
+| `helper-status.json`: for the updater, this copy's version and pid, whether Chromium started (and why not), and whether Local Network access looks refused | The same user folder. Rewritten only when one of those changes. See [Updates](#updates) |
 
 `STAGE_UTILITY_OUTPUT_STATE_DIR` replaces both folders, for tests and development, and the LaunchAgent is then looked for in its `LaunchAgents/`.
 Nothing then reads or writes the real ones, nor the per-user login item.
@@ -556,8 +556,9 @@ what Screens and `/log` show, is in
 line of JSON with sorted keys, which the installer reads with `sed`. Its name and
 folder are checked against the installer's (`InstallerContractTests`). A copy that
 cannot write it says so in its window and the log, because an update can then not
-tell it started, and is undone. The `server` in it is the root of the address a set-up
-screen loads from, never the address itself, which carries the output's token.
+tell it started, and is undone. It holds nothing secret, and nothing the updater acts
+on beyond those facts: which server to ask, and which Mac this is, the updater keeps
+in its own root-owned folder.
 
 The Local Network answer is kept across an update (below). If it is not, the helper
 says so as it always does, and the updater, which can still reach the server, reports

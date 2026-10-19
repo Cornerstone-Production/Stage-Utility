@@ -70,9 +70,24 @@ printf '%s | marker=%s\\n' "$line" "$here" >>"$SHIM_LOG"
 case "$name:\${1:-}" in
   launchctl:print)
     case "\${2:-}" in system/*) exit "\${SHIM_PRINT_SYSTEM_RC:-1}" ;; esac
+    # SHIM_PID_FILE models launchd: the helper runs while the file holds its pid.
+    if [ -n "\${SHIM_PID_FILE:-}" ]; then
+      if [ -s "$SHIM_PID_FILE" ]; then printf '\\tpid = %s\\n' "$(cat "$SHIM_PID_FILE")"; else printf '\\tstate = not running\\n'; fi
+      exit 0
+    fi
     if [ -n "\${SHIM_PRINT_OUT:-}" ]; then printf '%s\\n' "$SHIM_PRINT_OUT"; fi
     exit "\${SHIM_PRINT_RC:-1}" ;;
+  launchctl:bootout)
+    case "\${2:-}" in gui/*) if [ -n "\${SHIM_PID_FILE:-}" ]; then rm -f "$SHIM_PID_FILE"; fi ;; esac ;;
   launchctl:bootstrap)
+    case "\${2:-}" in gui/*)
+      if [ -n "\${SHIM_PID_FILE:-}" ]; then
+        n=$(( $(cat "$SHIM_PID_FILE.starts" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" >"$SHIM_PID_FILE.starts"
+        if [ "$n" -gt "\${SHIM_BOOTSTRAP_LIMIT:-99}" ]; then exit 1; fi
+        echo 4242 >"$SHIM_PID_FILE"
+      fi ;;
+    esac
     # Starting the helper: what it would write, once, as the copy just started.
     case "\${2:-}" in gui/*)
       if [ -n "\${SHIM_STARTS_WRITE:-}" ] && [ ! -e "$SHIM_STARTS_WRITE.done" ]; then
@@ -596,6 +611,19 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
     }
   });
 
+  it("clears that bit in every app it stages", async () => {
+    // Through stage_app itself, with the unpack replaced by a copy of a prepared
+    // tree, since ditto would not keep the bit for a test to find.
+    const tree = path.join(scratch, "prepared");
+    fs.mkdirSync(path.join(tree, "StageUtilityOutput.app", "Contents", "MacOS"), { recursive: true });
+    fs.writeFileSync(path.join(tree, "StageUtilityOutput.app", "Contents", "Info.plist"), "<plist><dict>\n<key>CFBundleIdentifier</key>\n<string>com.stageutility.output</string>\n</dict></plist>");
+    fs.writeFileSync(path.join(tree, "StageUtilityOutput.app", "Contents", "MacOS", "StageUtilityOutput"), "#!/bin/sh\n", { mode: 0o4755 });
+    fs.chmodSync(path.join(tree, "StageUtilityOutput.app", "Contents", "MacOS", "StageUtilityOutput"), 0o4755);
+    publish(stageServer, "/kiosk", zipA);
+    const r = await install(`detect_arch; fetch_helper; unpack_zip() { cp -Rp "${tree}/." "$2/"; }; stage_app; find "$STAGING" -perm -4000 | wc -l | tr -d ' '`);
+    assert.equal(r.out.trim().split("\n").at(-1), "0", r.out + r.err);
+  });
+
   it("refuses an app with another bundle id", async () => {
     const evil = path.join(scratch, "evil");
     fs.mkdirSync(path.join(evil, "StageUtilityOutput.app", "Contents", "MacOS"), { recursive: true });
@@ -747,6 +775,8 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
         assert.ok(calls.includes(`chown root:wheel ${updaterDir()}`), calls.join("\n"));
         assert.ok(calls.includes(`chown root:wheel ${daemon()}`), calls.join("\n"));
         assert.ok(calls.includes(`launchctl bootstrap system ${daemon()}`), calls.join("\n"));
+        // Root's own copies: the state folder is the console user's to rewrite.
+        assert.equal(fs.readFileSync(path.join(updaterDir(), "device-id"), "utf8"), fs.readFileSync(path.join(stateDir(), "device-id"), "utf8"));
         assert.match(r.out, /every five minutes whether to update, and never/);
       });
 
@@ -913,7 +943,7 @@ describe("--check-update", { skip: !(has("zip") && has("uuidgen") && has("xxd"))
   const leftovers = () => fs.readdirSync(path.join(scratch, "Applications")).filter((n) => n !== "StageUtilityOutput.app");
   const checks = () => server.hits.filter((h) => h.startsWith("/api/machine-updates/check?")).map((h) => new URL(h, "http://x").searchParams);
   const answer = (o: Record<string, unknown>) => server.routes.set("/api/machine-updates/check", { body: JSON.stringify({ version: "1.27.0", update: false, reason: "Helper 1.26.0, the same as this server", ...o }) });
-  const started = (o: Record<string, unknown> = {}) => JSON.stringify({ chromium: "started", localNetworkRefused: false, pid: 4242, server: server.base, version: "1.27.0", ...o });
+  const started = (o: Record<string, unknown> = {}) => JSON.stringify({ chromium: "started", localNetworkRefused: false, pid: 4242, version: "1.27.0", ...o });
   let uid = "";
 
   before(async () => {
@@ -932,12 +962,15 @@ describe("--check-update", { skip: !(has("zip") && has("uuidgen") && has("xxd"))
     // An installed helper on 1.26.0, a device id, and the server it came from.
     const state = path.join(scratch, "Library", "Application Support", "StageUtility");
     fs.mkdirSync(state, { recursive: true });
-    fs.writeFileSync(path.join(state, "device-id"), `${MACHINE}\n`);
+    // The state folder is the console user's: what is in it there is theirs to
+    // write, so the updater sends the id copied into its own folder at install.
+    fs.writeFileSync(path.join(state, "device-id"), "planted-by-the-user\n");
     fs.mkdirSync(path.join(scratch, "Applications"), { recursive: true });
     assert.equal(spawnSync("ditto", ["-x", "-k", old.file, path.join(scratch, "Applications")]).status, 0);
     const updater = path.join(scratch, "Library", "Application Support", "StageUtilityUpdater");
     fs.mkdirSync(updater, { recursive: true });
     fs.writeFileSync(path.join(updater, "server"), `${server.base}\n`);
+    fs.writeFileSync(path.join(updater, "device-id"), `${MACHINE}\n`);
     fs.mkdirSync(path.join(scratch, "Library", "LaunchAgents"), { recursive: true });
     fs.writeFileSync(path.join(scratch, "Library", "LaunchAgents", "com.stageutility.output.plist"), "<plist/>");
     server.routes.set("/kiosk/StageUtilityOutput-arm64.zip", { body: next.bytes });
@@ -1083,36 +1116,153 @@ describe("--check-update", { skip: !(has("zip") && has("uuidgen") && has("xxd"))
     assert.equal(checks().at(-1)?.get("state"), "local-network");
   });
 
-  describe("which server it asks", () => {
-    const pin = (v: string) => fs.writeFileSync(path.join(scratch, "Library", "Application Support", "StageUtility", "server"), v);
+  describe("only what root owns decides", () => {
+    const state = () => path.join(scratch, "Library", "Application Support", "StageUtility");
 
-    it("the one the running helper loads from, then the one it was installed from", async () => {
+    it("asks the server it was installed with, never the state folder's server file or the helper's word", async () => {
+      // Both of these the logged-in user can write.
+      fs.writeFileSync(path.join(state(), "server"), "http://127.0.0.1:9\n");
       fs.mkdirSync(path.dirname(statusFile()), { recursive: true });
       fs.writeFileSync(statusFile(), started({ server: "http://127.0.0.1:9", version: "1.26.0" }));
       answer({});
       const r = await run();
       assert.equal(r.status, 0, r.out + r.err);
-      // Port 9 refuses; the installed-from server answered.
-      assert.equal(checks().length, 1);
+      assert.equal(checks().length, 1, "the installed-with server was asked");
+      assert.equal(checks()[0].get("machine"), MACHINE, "with root's copy of the id, not the state folder's");
     });
 
-    it("only a pinned server, when the Mac has one", async () => {
-      pin("http://127.0.0.1:9");
+    it("sends nothing it would read through a link the user left, nor anything at all without its own id", async () => {
+      fs.rmSync(path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "device-id"));
+      fs.writeFileSync(path.join(scratch, "secret"), "ROOT-ONLY\n");
+      fs.rmSync(path.join(state(), "device-id"));
+      fs.symlinkSync(path.join(scratch, "secret"), path.join(state(), "device-id"));
       answer({});
       const r = await run();
-      assert.equal(r.status, 0, r.out + r.err);
+      assert.notEqual(r.status, 0);
       assert.equal(checks().length, 0);
-      assert.match(r.out, /no server answered the update check \(http:\/\/127\.0\.0\.1:9 \)/);
+      assert.match(r.err, /no usable device id/);
     });
 
     it("never an address that is not a server root", async () => {
-      fs.mkdirSync(path.dirname(statusFile()), { recursive: true });
-      fs.writeFileSync(statusFile(), started({ server: "http://evil;rm -rf" }));
       fs.writeFileSync(path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "server"), "file:///etc\n");
       const r = await run();
       assert.equal(r.status, 0, r.out + r.err);
-      assert.match(r.out, /no server answered the update check \( ?\)/);
+      assert.equal(checks().length, 0);
+      assert.match(r.out, /no server answered the update check \(none is recorded/);
     });
+
+    it("does not read the helper's status through a link", async () => {
+      answer({ update: true });
+      fs.mkdirSync(path.dirname(statusFile()), { recursive: true });
+      fs.writeFileSync(path.join(scratch, "elsewhere.json"), started());
+      fs.symlinkSync(path.join(scratch, "elsewhere.json"), statusFile());
+      const r = await run({ SHIM_STARTS_WRITE: "" });
+      assert.equal(r.status, 1, r.out + r.err);
+      assert.equal(which(), "build-old", "a linked file saying the new one started is not believed");
+    });
+  });
+
+  it("does not believe a status file the logged-in user does not own", async () => {
+    answer({ update: true });
+    // The console user is "nobody", and the file saying the new helper started is
+    // this test's, so it is not that user's own.
+    const r = await run({ STAGE_INSTALL_TEST_CONSOLE_USER: "nobody" });
+    assert.equal(r.status, 1, r.out + r.err);
+    assert.equal(which(), "build-old");
+  });
+
+  it("is skipped while an install or another check holds the lock", async () => {
+    const lock = path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "lock");
+    fs.mkdirSync(lock);
+    fs.writeFileSync(path.join(lock, "pid"), `${process.pid}\n`);
+    answer({ update: true });
+    const r = await run();
+    assert.equal(r.status, 0, r.out + r.err);
+    assert.equal(checks().length, 0);
+    assert.ok(fs.existsSync(lock), "and the holder's lock is left alone");
+  });
+
+  it("takes over a lock left by a process that is gone", async () => {
+    const lock = path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "lock");
+    fs.mkdirSync(lock);
+    fs.writeFileSync(path.join(lock, "pid"), "999999\n");
+    answer({});
+    const r = await run();
+    assert.equal(r.status, 0, r.out + r.err);
+    assert.equal(checks().length, 1);
+    assert.ok(!fs.existsSync(lock), "released when the check ends");
+  });
+
+  describe("what counts as the new helper starting", () => {
+    it("not a status from another pid", async () => {
+      answer({ update: true });
+      const r = await run({ SHIM_STARTS_BODY: started({ pid: 999 }) });
+      assert.equal(r.status, 1, r.out + r.err);
+      assert.equal(which(), "build-old");
+    });
+
+    it("not a status from another version", async () => {
+      answer({ update: true });
+      const r = await run({ SHIM_STARTS_BODY: started({ version: "1.26.0" }) });
+      assert.equal(r.status, 1, r.out + r.err);
+      assert.equal(which(), "build-old");
+    });
+  });
+
+  it("does not start an update with no agent file to start the new helper", async () => {
+    answer({ update: true });
+    fs.rmSync(path.join(scratch, "Library", "LaunchAgents", "com.stageutility.output.plist"));
+    const r = await run();
+    assert.equal(r.status, 1, r.out + r.err);
+    assert.equal(which(), "build-old");
+    assert.ok(!server.hits.some((h) => h.includes(".zip")), "nothing downloaded");
+    assert.match(updaterStatus(), /^state=failed$/m);
+  });
+
+  it("tries a download that failed again later, not at the next check, and does not hold the version", async () => {
+    answer({ update: true });
+    server.routes.delete("/kiosk/StageUtilityOutput-arm64.zip");
+    server.routes.delete("/kiosk/StageUtilityOutput-arm64.zip.sha256");
+    const r = await run({ STAGE_INSTALL_GITHUB_BASE: "http://127.0.0.1:9" });
+    assert.equal(r.status, 1, r.out + r.err);
+    assert.equal(which(), "build-old");
+    assert.match(updaterStatus(), /^state=retrying$/m);
+    assert.match(updaterStatus(), /^fails=1$/m);
+    const retry = Number(/^retry_after=(\d+)$/m.exec(updaterStatus())?.[1]);
+    assert.ok(retry > Date.now() / 1000 + 1700 && retry < Date.now() / 1000 + 1900, `half an hour on: ${retry}`);
+    assert.match(r.out, /did not finish: .*Trying again in 30 minutes/);
+    // The next check says so, and downloads nothing before then.
+    server.hits.length = 0;
+    await run({ STAGE_INSTALL_GITHUB_BASE: "http://127.0.0.1:9" });
+    assert.equal(checks().at(-1)?.get("state"), "retrying");
+    assert.ok(!server.hits.some((h) => h.includes(".zip")), "nothing downloaded inside the back-off");
+  });
+
+  it("says when the helper it put back could not be started again", async () => {
+    answer({ update: true });
+    const pidFile = path.join(scratch, "launchd-pid");
+    fs.writeFileSync(pidFile, "4242");
+    const r = await run({
+      SHIM_PID_FILE: pidFile,
+      // The new helper starts and says Chromium failed; the old one will not start.
+      SHIM_BOOTSTRAP_LIMIT: "1",
+      SHIM_STARTS_BODY: started({ chromium: "failed", chromiumProblem: "no host" }),
+      SHIM_PRINT_RC: "",
+      SHIM_PRINT_OUT: "",
+      STAGE_INSTALL_TEST_RESTART_WAIT: "2",
+    });
+    assert.equal(r.status, 1, r.out + r.err);
+    assert.equal(which(), "build-old");
+    assert.match(updaterStatus(), /^detail=Chromium did not start: no host; the previous helper could not be started again$/m);
+    assert.ok(shims.log().some((l) => l.startsWith("launchctl kickstart")), "it tried to start it again itself");
+  });
+
+  it("stops calling itself updated a day after", async () => {
+    const dir = path.join(scratch, "Library", "Application Support", "StageUtilityUpdater");
+    fs.writeFileSync(path.join(dir, "status"), `state=updated\ntarget=1.26.0\ndetail=\nanswer=x\nat=${Math.floor(Date.now() / 1000) - 90_000}\nretry_after=\nfails=0\n`);
+    answer({});
+    await run();
+    assert.equal(checks()[0].get("state"), "idle");
   });
 
   it("leaves a Mac whose app was removed by hand alone", async () => {

@@ -164,26 +164,30 @@ The helper's version is the server's, so a helper is up to date exactly when it 
 the version in the server's `/api/update/status`. When the server updates, each Mac
 installs the same version on its own, with nobody at it.
 
-The installer leaves an updater beside the helper: a copy of itself in
-`/Library/Application Support/StageUtilityUpdater/` (root's, apart from the
-state folder, which the logged-in account owns) and a LaunchDaemon,
-`/Library/LaunchDaemons/com.stageutility.output-updater.plist`, that runs it with
-`--check-update` every five minutes and at boot. Each run:
+The installer leaves an updater beside the helper: in
+`/Library/Application Support/StageUtilityUpdater/`, a folder only root can write, a
+copy of the installer, the Mac's device id, and the server the install downloaded
+from (the one `STAGE_SERVER` names, when the Mac is pinned); and a LaunchDaemon,
+`/Library/LaunchDaemons/com.stageutility.output-updater.plist`, that runs the copy with
+`--check-update` every five minutes and at boot. It reads nothing from the state
+folder, which the logged-in account owns. Each run:
 
-1. Asks the server whether to update (`GET /api/machine-updates/check`), saying which
-   Mac it is, what it runs and what it last did. It asks the server in the `server`
-   file if the Mac has one, else the server the running helper is loading from (which
-   follows the server if it moves), else the one it was installed from.
+1. Asks that server whether to update (`GET /api/machine-updates/check`), saying which
+   Mac it is, what it runs and what it last did. A server that moves to another
+   address is followed by the helper (discovery) but not by the updater: run the
+   installer again from the new address.
 2. **The server decides when.** Never while Planning Center reports a service live,
    and not within the window around a rehearsal or service (the same window integration
    reconnects use, [Winding down between services](ops/reliability.md#winding-down-between-services):
    *Lead time before rehearsal* and *Keep active after service ends* in Settings >
    Advanced > Server). Not with *Update Mac output helpers and Windows kiosks with this
    server* off (Settings > Advanced > Server; on by default), and not again for a
-   version that already failed on that Mac. **Update now** and **Try again** on the
-   screen's Device section override the switch, the window and a past failure, never
-   a live service. With no Planning Center, there is no window, and a Mac updates
-   within five minutes of the server.
+   version that already failed on that Mac. With Planning Center set up, not until its
+   service times and live state have been read: just after the server starts, and
+   while Planning Center cannot be reached, a Mac waits. **Update now** and **Try
+   again** override the switch, the window, not knowing and a past failure, never a
+   live service. With no Planning Center there is no window, and a Mac updates within
+   five minutes of the server.
 3. Downloads the zip and its SHA-256 from that server exactly as an install does,
    checks the app in it is the version the server named, and clears any
    set-user-id bit (root unpacks it).
@@ -192,10 +196,19 @@ state folder, which the logged-in account owns) and a LaunchDaemon,
    DeckLink 8K Pro, the SDI port reopened 0.8 s after the old helper stopped and
    pictures were flowing again about 2 s after.
 5. Waits up to 90 s for the new helper to say, in `helper-status.json` in the
-   logged-in account's `~/Library/Application Support/StageUtilityOutput/`, that it
-   is the new version, with the pid launchd started, and that Chromium started. If it
-   does not, the old app goes back and is started again, and that version is not tried
-   again until someone presses Try again.
+   logged-in account's `~/Library/Application Support/StageUtilityOutput/` (only a
+   regular file that account owns is read), that it is the new version, with the pid
+   launchd started, and that Chromium started. If it does not, the old app goes back
+   and is started again; if that one does not come back within 20 s the updater
+   restarts it itself, and says so if it still cannot.
+
+**When an update fails.** A failure that belongs to the version (the new helper did
+not start, the server sent another version, the zip is not the helper) holds that
+version until someone presses Try again. A failure that does not (the download did not
+finish, the Mac shut down in the middle) is tried again on its own, half an hour later,
+then an hour, two, four, and every six hours after, and Screens shows it as retrying.
+An install run by hand and an update never overlap: whichever starts second waits for
+the first (an install by hand up to three minutes).
 
 It does not update a Mac nobody is logged in to (the new helper could not be started
 and checked), nor start a helper someone quit at the Mac (to free a card for another
@@ -204,6 +217,15 @@ root: it swaps the app, which runs as the logged-in account. A change to the ins
 itself, the agent file it writes for instance, reaches a Mac only when the installer is
 run again by hand, and a release that needs that says so in its notes.
 
+**What it trusts.** The app is downloaded over the network from the server, and checked
+against the SHA-256 that same server publishes, exactly as `curl ... | sudo sh` already
+trusts the server it is pointed at. That checks the download is whole, not who sent it:
+anything that can answer as the server on its address can also offer an update. So the
+updater only ever asks the address recorded at install, in a folder only root can
+write, never one a logged-in account or the network can change (the state folder's
+`server` file, discovery); and what it installs runs as the logged-in account, as the
+helper always has.
+
 **Installed before this.** A helper installed by an installer older than 1.27.0 has no
 updater, and needs the installer run once more, at the Mac, to get it. Its screens say
 *Helper version unknown. Run the macOS installer once* once the server has been up
@@ -211,7 +233,8 @@ longer than a check takes.
 
 **What Screens shows.** Each screen shown by a helper output has a line under its
 device saying what the Mac's helper runs and what it was told: up to date, waiting
-(with why, and until when), updating, updated, or failed and put back (with why).
+(with why, and until when), updating, retrying, updated, or failed and put back
+(with why).
 Screen settings > Device has the same as a **Helper** row, with **Update now** when
 automatic updates are off and **Try again** after a failure. Both act at the Mac's next
 check, within five minutes.
@@ -224,7 +247,8 @@ then cannot reach the server itself, the updater reports it: the screen's line a
 
 **Logs.** On the server, `[helper-update]` lines on `/log`: each Mac's decision when it
 changes (waiting and why, going ahead, up to date), what it reports it did (updated,
-failed and why, waiting for a login, the helper quit, Local Network refused), Update
+failed and why, retrying and why, waiting for a login, the helper quit, Local Network
+refused), Update
 now pressed, and a Mac that stopped checking. Never one per check. On the Mac,
 `/Library/Logs/StageUtility/helper-update.log`, the same decisions as the updater saw
 them, with the download and the swap.

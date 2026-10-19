@@ -139,6 +139,13 @@ describe("MachineUpdates", () => {
     ]);
   });
 
+  it("says a download that did not finish is tried again, and keeps going ahead", () => {
+    const m = updates.check(check({ state: "retrying", target: "1.27.0", detail: "could not reach it (curl exit 7)", at: 5 }), gate, 0);
+    assert.equal(m.update, true);
+    assert.equal(m.reason, "Helper 1.26.0. The update to 1.27.0 did not finish: could not reach it (curl exit 7). It is tried again later");
+    assert.equal(lines[0], "[helper-update] Mac booth-mini (5f1c09ab): the update to 1.27.0 did not finish: could not reach it (curl exit 7); it is tried again later");
+  });
+
   it("logs a Local Network refusal after an update", () => {
     updates.check(check({ have: "1.27.0", state: "local-network", target: "1.27.0" }), gate, 0);
     assert.equal(lines[0], "[helper-update] Mac booth-mini (5f1c09ab): macOS refuses the helper Local Network access since the update to 1.27.0; answer the prompt at the Mac");

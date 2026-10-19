@@ -63,6 +63,7 @@ export function readUpdate(
   }
   if (m.state === "local-network") return { text: m.reason, tone: "warn", badge: "Updated", machine };
   if (m.update) {
+    if (m.state === "retrying") return { text: m.reason, tone: "warn", badge: "Retrying", machine };
     const waiting = m.state === "no-session" || m.state === "not-running";
     return { text: m.reason, tone: "info", badge: waiting ? "Waiting" : "Updating", machine };
   }

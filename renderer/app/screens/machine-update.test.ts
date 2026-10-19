@@ -56,6 +56,7 @@ describe("readUpdate", () => {
     assert.equal(badge({ update: true, waitingOn: undefined, state: "no-session" }), "Waiting");
     assert.equal(badge({ update: true, waitingOn: undefined, state: "not-running" }), "Waiting");
     assert.equal(badge({ waitingOn: "live" }), "Waiting");
+    assert.equal(badge({ update: true, waitingOn: undefined, state: "retrying" }), "Retrying");
     assert.equal(badge({ waitingOn: "off" }), "Behind");
     assert.equal(badge({ waitingOn: "failed" }), "Failed");
     assert.equal(readUpdate(output, heard({ state: "local-network" }))?.tone, "warn");

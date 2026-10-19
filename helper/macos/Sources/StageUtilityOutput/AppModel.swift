@@ -682,14 +682,10 @@ final class AppModel: ObservableObject {
   private var lastStatus: Data?
 
   /// `helper-status.json`, for the updater that installed this copy (`HelperStatus`).
-  /// The server is the one a set-up screen is loading from, else any that answered.
   private func writeStatus() {
-    let live = order.compactMap { runtimes[$0] }
-    let server = (live.first { $0.showingBound && $0.serverURL != nil } ?? live.first { $0.serverURL != nil })?.serverURL
     let status = HelperStatus(
       version: version, pid: getpid(), chromium: CEFEngine.failure == nil ? .started : .failed,
-      chromiumProblem: CEFEngine.failure, server: server.flatMap(HelperStatus.serverRoot(of:)),
-      localNetworkRefused: noteTable["local-network"] != nil)
+      chromiumProblem: CEFEngine.failure, localNetworkRefused: noteTable["local-network"] != nil)
     let data = status.encoded()
     guard data != lastStatus else { return }
     do {

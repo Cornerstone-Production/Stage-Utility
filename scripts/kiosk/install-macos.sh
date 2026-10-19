@@ -98,8 +98,12 @@ UPDATE_EVERY=300
 # user's home. Both names are checked against the Swift (InstallerContractTests).
 HELPER_USER_DIR="Library/Application Support/StageUtilityOutput"
 HELPER_STATUS_NAME=helper-status.json
-# How long a new helper has to say it started before the old one goes back.
+# How long a new helper has to say it started before the old one goes back, and
+# how long a rolled-back one has to be running again.
 START_TIMEOUT="${STAGE_INSTALL_TEST_START_TIMEOUT:-90}"
+RESTART_WAIT="${STAGE_INSTALL_TEST_RESTART_WAIT:-20}"
+# One install or update at a time: see take_lock.
+UPDATE_LOCK="$UPDATER_DIR/lock"
 
 # The ceiling on one zip download, seconds. The server's own fetch of the zip from
 # GitHub may take up to two hours (its watchdog's ceiling, in
@@ -109,9 +113,17 @@ ZIP_CEILING=7800
 
 MODE=helper
 DRY=0
-# Set in --check-update: the update in progress, so a failure records itself.
+# Set in --check-update: the update in progress, so a failure records itself;
+# whether a failure from here holds that version (see record_update_failure);
+# whether a signal ended the run; and what the status file carries alongside.
 UPDATING=""
 UPDATE_FAILED=""
+HOLD=0
+INTERRUPTED=0
+LOCKED=0
+ST_AT=""
+ST_RETRY=""
+ST_FAILS=0
 ARCH=""
 ZIP_NAME=""
 WHY=""
@@ -232,6 +244,7 @@ on_exit() {
   fi
   if [ -n "$STAGING" ]; then rm -rf "$STAGING"; fi
   if [ -n "$WORK" ]; then rm -rf "$WORK"; fi
+  release_lock
   exit "$status"
 }
 
@@ -815,13 +828,23 @@ copy_updater_script() {
 
 # Everything install_updater writes, failing with the reason in WHY.
 updater_files() {
+  # The server it will ask: the one this install downloaded from, which it printed
+  # (STAGE_SERVER, the pin, when one was given). Copied into root's folder, as is
+  # the device id, because the updater runs as root and the state folder is the
+  # console user's: a `server` file found there later is not the updater's to follow.
   origin="$(server_origin)"
+  origin="${origin%/}"
   [ -n "$origin" ] || { WHY="no server address to ask"; return 1; }
+  is_origin "$origin" || { WHY="$origin is not a server address (http://<host>:<port>, nothing after it)"; return 1; }
+  [ -f "$STATE_DIR/device-id" ] && [ ! -L "$STATE_DIR/device-id" ] || { WHY="$STATE_DIR/device-id is missing or a link"; return 1; }
+  machine="$(tr -d '\r\n' <"$STATE_DIR/device-id")"
+  printf '%s\n' "$machine" | grep -Eq '^[A-Za-z0-9._-]{1,128}$' || { WHY="$STATE_DIR/device-id is not a device id"; return 1; }
   [ ! -L "$UPDATER_DIR" ] || { WHY="$UPDATER_DIR is a symbolic link"; return 1; }
   mkdir -p "$UPDATER_DIR" "$(dirname "$UPDATE_LOG")" "$(dirname "$UPDATER_PLIST")" || { WHY="could not create $UPDATER_DIR"; return 1; }
   { chown root:wheel "$UPDATER_DIR" && chmod 755 "$UPDATER_DIR"; } || { WHY="could not make $UPDATER_DIR root's"; return 1; }
   copy_updater_script || { WHY="could not put a copy of this installer in $UPDATER_DIR${WHY:+ ($WHY)}"; return 1; }
-  printf '%s\n' "${origin%/}" | put_file "$UPDATER_ORIGIN" 644 || { WHY="could not write $UPDATER_ORIGIN"; return 1; }
+  printf '%s\n' "$origin" | put_file "$UPDATER_ORIGIN" 644 || { WHY="could not write $UPDATER_ORIGIN"; return 1; }
+  printf '%s\n' "$machine" | put_file "$UPDATER_DIR/device-id" 644 || { WHY="could not write $UPDATER_DIR/device-id"; return 1; }
   write_updater_plist "$UPDATER_PLIST" || { WHY="could not write $UPDATER_PLIST"; return 1; }
   if command -v plutil >/dev/null 2>&1; then
     plutil -lint "$UPDATER_PLIST" >/dev/null || { WHY="$UPDATER_PLIST is not a valid property list"; return 1; }
@@ -848,20 +871,30 @@ install_updater() {
 }
 
 # ── --check-update ─────────────────────────────────────────────────────────
+# Root runs this. What it acts on is root's own: the device id and the server in
+# UPDATER_DIR, copied there at install. The state folder, which the console user
+# owns, is never read here, and the user's home only for the helper's status file,
+# and then only a regular file that user owns, never a link.
+
 # One field of the updater's status file (key=value lines), or empty.
 status_field() {
   [ -r "$UPDATER_STATUS" ] || return 0
   sed -n "s/^$1=//p" "$UPDATER_STATUS" | head -n 1
 }
 
-# What the updater did, kept for the next check to tell the server: one line each,
-# and none of them may hold a newline.
+# What the updater did, for the next check to tell the server: one line each, and
+# none of them may hold a newline. ST_AT (when it happened, unix seconds),
+# ST_RETRY (when a download that failed may be tried again) and ST_FAILS (how many
+# have failed in a row) ride along.
 write_status() { # state target detail answer
   {
     printf 'state=%s\n' "$1"
     printf 'target=%s\n' "$2"
     printf 'detail=%s\n' "$(printf '%s' "$3" | tr '\r\n' '  ' | cut -c 1-200)"
     printf 'answer=%s\n' "$(printf '%s' "$4" | tr '\r\n' '  ' | cut -c 1-300)"
+    printf 'at=%s\n' "$ST_AT"
+    printf 'retry_after=%s\n' "$ST_RETRY"
+    printf 'fails=%s\n' "$ST_FAILS"
   } | put_file "$UPDATER_STATUS" 644 || warn "could not write $UPDATER_STATUS"
 }
 
@@ -895,6 +928,16 @@ json_field() { # file key
   printf '%s' "$value"
 }
 
+# One field of the helper's status file, read only when it is a regular file the
+# logged-in user owns: root following a link, or reading a file somebody else put
+# there, would read whatever it was pointed at.
+helper_field() { # key
+  file="$(helper_status_file || true)"
+  # find looks at a link itself, not what it points at, so -type f refuses one.
+  [ -n "$file" ] && [ -n "$(find "$file" -prune -type f -user "$CONSOLE_UID" 2>/dev/null)" ] || return 0
+  json_field "$file" "$1"
+}
+
 # launchd's pid for the helper in the console user's session, or empty.
 helper_pid() {
   launchctl print "gui/$CONSOLE_UID/$HELPER_LABEL" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }'
@@ -907,30 +950,13 @@ is_origin() {
   printf '%s\n' "$1" | grep -Eq '^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$'
 }
 
-# Print $1, without a trailing slash, when it is a server root.
-emit_origin() {
-  if is_origin "${1%/}"; then printf '%s\n' "${1%/}"; fi
-}
-
-# The servers to ask, best first, one per line. A `server` file pins the Mac, as it
-# pins the helper, so it is the only one. Else the server the running helper is
-# loading from (it follows discovery, so it is right after the server moves), then
-# the one this updater was installed from.
-update_servers() {
-  if [ -r "$STATE_DIR/server" ] && [ ! -L "$STATE_DIR/server" ]; then
-    emit_origin "$(tr -d '\r\n' <"$STATE_DIR/server")"
-    return 0
-  fi
-  seen=""
-  file="$(helper_status_file || true)"
-  if [ -n "$file" ]; then
-    seen="$(json_field "$file" server)"
-    emit_origin "$seen"
-  fi
-  if [ -r "$UPDATER_ORIGIN" ]; then
-    installed_from="$(tr -d '\r\n' <"$UPDATER_ORIGIN")"
-    if [ "$installed_from" != "$seen" ]; then emit_origin "$installed_from"; fi
-  fi
+# The server to ask: the one recorded at install, root's own copy. Never the state
+# folder's `server` file, nor the server the helper says it loads from: the
+# logged-in user can write both, and root installs what this server sends.
+update_server() {
+  [ -r "$UPDATER_ORIGIN" ] && [ ! -L "$UPDATER_ORIGIN" ] || return 0
+  origin="$(tr -d '\r\n' <"$UPDATER_ORIGIN")"
+  if is_origin "${origin%/}"; then printf '%s' "${origin%/}"; fi
 }
 
 # Record this check's answer (the server's reason, or why there was none), and say
@@ -941,12 +967,12 @@ settle() { # answer message state target detail
   write_status "$3" "$4" "$5" "$1"
 }
 
-# Ask one server. Leaves the answer in $WORK/answer and returns 0 on a 200.
+# Ask the server. Leaves the answer in $WORK/answer and returns 0 on a 200.
 ask_server() { # origin have state target detail
   code="$(curl -sS -G --connect-timeout 10 --max-time 30 -o "$WORK/answer" -w '%{http_code}' \
     --data-urlencode "machine=$MACHINE" --data-urlencode "platform=macos" \
     --data-urlencode "have=$2" --data-urlencode "host=$HOST_NAME" --data-urlencode "state=$3" \
-    --data-urlencode "target=$4" --data-urlencode "detail=$5" \
+    --data-urlencode "target=$4" --data-urlencode "detail=$5" --data-urlencode "at=$ST_AT" \
     "$1/api/machine-updates/check" 2>/dev/null)" || return 1
   [ "$code" = 200 ]
 }
@@ -954,14 +980,13 @@ ask_server() { # origin have state target detail
 # Wait for the helper launchd started to say it is the new one and its Chromium
 # started. Sets WHY and returns 1 when it does not.
 wait_for_helper() { # version
-  file="$(helper_status_file || true)"
-  [ -n "$file" ] || { WHY="could not find $CONSOLE_USER's home folder to read whether the new helper started"; return 1; }
+  [ -n "$(helper_status_file || true)" ] || { WHY="could not find $CONSOLE_USER's home folder to read whether the new helper started"; return 1; }
   waited=0
   while [ "$waited" -lt "$START_TIMEOUT" ]; do
     pid="$(helper_pid)"
-    if [ -n "$pid" ] && [ "$(json_field "$file" pid)" = "$pid" ] && [ "$(json_field "$file" version)" = "$1" ]; then
-      if [ "$(json_field "$file" chromium)" = started ]; then return 0; fi
-      WHY="Chromium did not start: $(json_field "$file" chromiumProblem)"
+    if [ -n "$pid" ] && [ "$(helper_field pid)" = "$pid" ] && [ "$(helper_field version)" = "$1" ]; then
+      if [ "$(helper_field chromium)" = started ]; then return 0; fi
+      WHY="Chromium did not start: $(helper_field chromiumProblem)"
       return 1
     fi
     sleep 2
@@ -971,24 +996,101 @@ wait_for_helper() { # version
   return 1
 }
 
+# After a roll back: the previous helper is running again, or is made to be. A Mac
+# that auto-logs in has no next login to start it at.
+helper_came_back() {
+  waited=0
+  while [ "$waited" -lt "$RESTART_WAIT" ]; do
+    [ -z "$(helper_pid)" ] || return 0
+    if [ "$waited" -eq $((RESTART_WAIT / 2)) ]; then launchctl kickstart "gui/$CONSOLE_UID/$HELPER_LABEL" >/dev/null 2>&1 || true; fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  [ -n "$(helper_pid)" ]
+}
+
 # From on_exit, after the roll back: what failed, and what the Mac runs now.
+#
+# A failure that is the version's (it would not start, the server sent the wrong
+# one, it is not the helper) holds that version until someone presses Try again. A
+# failure that is not (the download failed, the Mac shut down mid-update) is tried
+# again later, after half an hour, then an hour, up to six hours apart: a version
+# must not be shut out by a night without internet, and a download that keeps
+# failing must not be 145 MB every five minutes.
 record_update_failure() {
   now="$(app_version "$APPS_DIR/$APP_NAME")"
   why="${UPDATE_FAILED:-the update stopped part way}"
+  if [ "$INTERRUPTED" -eq 1 ]; then why="it was interrupted, as by a shutdown"; fi
   back=""
-  if [ "$APP_SWAPPED" -eq 1 ] && [ -n "$now" ] && [ "$now" != "$UPDATING" ]; then back=" Put $now back."; fi
-  # The reason alone: the server says what that means ("failed and was undone").
-  write_status failed "$UPDATING" "$why" "$(status_field answer)"
-  say "the update to $UPDATING failed: $why.$back It is not tried again until someone asks from Screens."
+  if [ "$APP_SWAPPED" -eq 1 ] && [ -n "$now" ] && [ "$now" != "$UPDATING" ]; then
+    back=" Put $now back."
+    if [ "$AGENT_STOPPED" -eq 1 ] && ! helper_came_back; then
+      why="$why; the previous helper could not be started again"
+      back=" Put $now back, but it could not be started again."
+    fi
+  fi
+  ST_AT="$(date +%s)"
+  if [ "$HOLD" -eq 1 ] && [ "$INTERRUPTED" -ne 1 ]; then
+    ST_RETRY=""
+    ST_FAILS=0
+    write_status failed "$UPDATING" "$why" "$(status_field answer)"
+    say "the update to $UPDATING failed: $why.$back It is not tried again until someone asks from Screens."
+    return 0
+  fi
+  ST_FAILS=$((${ST_FAILS:-0} + 1))
+  delay=21600
+  if [ "$ST_FAILS" -le 4 ]; then delay=$((1800 * (1 << (ST_FAILS - 1)))); fi
+  if [ "$delay" -gt 21600 ]; then delay=21600; fi
+  ST_RETRY=$((ST_AT + delay))
+  write_status retrying "$UPDATING" "$why" "$(status_field answer)"
+  say "the update to $UPDATING did not finish: $why.$back Trying again in $((delay / 60)) minutes."
+}
+
+# One install or update at a time. A manual install while an update waits for its
+# new helper would otherwise have that update's roll back undo the install. A lock
+# left by a process that is gone is taken over.
+take_lock() { # seconds to wait for it
+  waited=0
+  while ! mkdir "$UPDATE_LOCK" 2>/dev/null; do
+    holder="$(cat "$UPDATE_LOCK/pid" 2>/dev/null || true)"
+    # No pid yet is a lock being taken this moment, unless it stays that way.
+    if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } || { [ -z "$holder" ] && [ "$waited" -ge 10 ]; }; then
+      rm -rf "$UPDATE_LOCK"
+      continue
+    fi
+    [ "$waited" -lt "$1" ] || return 1
+    sleep 2
+    waited=$((waited + 2))
+  done
+  printf '%s\n' "$$" >"$UPDATE_LOCK/pid"
+  LOCKED=1
+}
+
+release_lock() {
+  if [ "$LOCKED" -eq 1 ]; then rm -rf "$UPDATE_LOCK"; fi
+  LOCKED=0
 }
 
 check_update() {
   find_console_user
   detect_arch
-  MACHINE="$(cat "$STATE_DIR/device-id" 2>/dev/null || true)"
-  [ -n "$MACHINE" ] || die "no device id in $STATE_DIR; run the installer by hand."
-  HOST_NAME="$(scutil --get ComputerName 2>/dev/null || hostname -s)"
   WORK="$(mktemp -d "${TMPDIR:-/tmp}/stage-utility-update.XXXXXX")"
+  # An install by hand, or another check, has the Mac: this one is skipped.
+  [ ! -L "$UPDATER_DIR" ] || die "$UPDATER_DIR is a symbolic link; run the installer by hand."
+  take_lock 0 || return 0
+  MACHINE="$(tr -d '\r\n' <"$UPDATER_DIR/device-id" 2>/dev/null || true)"
+  printf '%s\n' "$MACHINE" | grep -Eq '^[A-Za-z0-9._-]{1,128}$' ||
+    die "no usable device id in $UPDATER_DIR/device-id; run the installer by hand."
+  HOST_NAME="$(scutil --get ComputerName 2>/dev/null || hostname -s)"
+  state="$(status_field state)"
+  state="${state:-idle}"
+  target="$(status_field target)"
+  detail="$(status_field detail)"
+  ST_AT="$(status_field at)"
+  ST_RETRY="$(status_field retry_after)"
+  ST_FAILS="$(status_field fails)"
+  ST_FAILS="${ST_FAILS:-0}"
+  now="$(date +%s)"
   # An app removed by hand is not this updater's to put back.
   if [ ! -d "$APPS_DIR/$APP_NAME" ]; then
     settle not-installed "$APPS_DIR/$APP_NAME is not there, so there is nothing to update" idle "" ""
@@ -996,15 +1098,12 @@ check_update() {
   fi
   have="$(app_version "$APPS_DIR/$APP_NAME")"
   have="${have:-unknown}"
-  state="$(status_field state)"
-  state="${state:-idle}"
-  target="$(status_field target)"
-  detail="$(status_field detail)"
+  # Updated says so for a day; after that the Mac is simply on its version.
+  if [ "$state" = updated ] && [ -n "$ST_AT" ] && [ $((now - ST_AT)) -gt 86400 ]; then state=idle; fi
   # After an update, the helper itself says when macOS refuses it the network: it
   # cannot reach the server to say so, so this does.
   if [ "$state" = updated ] || [ "$state" = local-network ]; then
-    file="$(helper_status_file || true)"
-    if [ -n "$file" ] && [ "$(json_field "$file" localNetworkRefused)" = true ]; then
+    if [ "$(helper_field localNetworkRefused)" = true ]; then
       [ "$state" = local-network ] || say "macOS refuses the helper Local Network access since the update to $target; someone at the Mac has to choose Allow"
       state=local-network
     elif [ "$state" = local-network ]; then
@@ -1015,15 +1114,9 @@ check_update() {
   # A wait for a login is only true while nobody is logged in.
   if [ "$state" = no-session ] && [ -n "$CONSOLE_USER" ]; then state=idle; fi
 
-  origin=""
-  for candidate in $(update_servers); do
-    if ask_server "$candidate" "$have" "$state" "$target" "$detail"; then
-      origin="$candidate"
-      break
-    fi
-  done
-  if [ -z "$origin" ]; then
-    settle unreachable "no server answered the update check ($(update_servers | tr '\n' ' ')); trying again in five minutes" "$state" "$target" "$detail"
+  origin="$(update_server)"
+  if [ -z "$origin" ] || ! ask_server "$origin" "$have" "$state" "$target" "$detail"; then
+    settle unreachable "no server answered the update check (${origin:-none is recorded in $UPDATER_ORIGIN; run the installer by hand}); trying again in five minutes" "$state" "$target" "$detail"
     return 0
   fi
   want="$(json_field "$WORK/answer" version)"
@@ -1032,6 +1125,9 @@ check_update() {
   settle "$reason" "$origin: $reason" "$state" "$target" "$detail"
   [ "$go" = true ] || return 0
   [ -n "$want" ] || die "$origin said to update but named no version."
+  # A download that did not finish waits out its back-off, for the same version.
+  if [ "$state" = retrying ] && [ "$target" = "$want" ] && [ -n "$ST_RETRY" ] && [ "$now" -lt "$ST_RETRY" ]; then return 0; fi
+  if [ "$target" != "$want" ]; then ST_FAILS=0; fi
 
   # A new helper that nobody's session can start cannot be checked, and could not
   # be put back if it failed, so the update waits for someone to log in.
@@ -1040,7 +1136,6 @@ check_update() {
     write_status no-session "$want" "" "$reason"
     return 0
   fi
-
   # Quit from its window on purpose (to free a card for another app, say): an update
   # must not start it again behind somebody's back. It updates when it runs again.
   if [ -z "$(helper_pid)" ]; then
@@ -1048,15 +1143,19 @@ check_update() {
     write_status not-running "$want" "" "$reason"
     return 0
   fi
-  if [ "$state" = not-running ]; then state=idle; fi
 
   say "updating the helper from $have to $want, from $origin"
   UPDATING="$want"
   # What starts the new helper. Without it a swapped app would wait for a login
   # that may be days off, unchecked.
+  HOLD=1
   [ -f "$HELPER_PLIST" ] || die "$HELPER_PLIST is missing, so the new helper could not be started; run the installer by hand"
+  # A failed download is the network's, and is tried again later; everything after
+  # it is this version's.
+  HOLD=0
   DOWNLOAD_FROM="$origin"
   fetch_helper
+  HOLD=1
   stage_app
   got="$(app_version "$STAGING/$APP_NAME")"
   [ "$got" = "$want" ] || die "the server sent version ${got:-unknown}, not $want"
@@ -1064,11 +1163,14 @@ check_update() {
   swap_app
   # The previous helper's file must not read as the new one's.
   file="$(helper_status_file || true)"
-  if [ -n "$file" ]; then rm -f "$file"; fi
+  if [ -n "$file" ] && [ ! -L "$file" ]; then rm -f "$file"; fi
   if start_helper_agent; then AGENT_STARTED=1; else die "launchd would not start the new helper"; fi
   wait_for_helper "$want" || die "$WHY"
   FINISHED=1
   UPDATING=""
+  ST_AT="$(date +%s)"
+  ST_RETRY=""
+  ST_FAILS=0
   write_status updated "$want" "" "$reason"
   say "updated the helper from $have to $want; it is running"
 }
@@ -1104,6 +1206,13 @@ install_helper() {
   fi
 
   WORK="$(mktemp -d "${TMPDIR:-/tmp}/stage-utility-output.XXXXXX")"
+  # Not while an automatic update has the Mac: its roll back would undo this.
+  [ ! -L "$UPDATER_DIR" ] || die "$UPDATER_DIR is a symbolic link, which this installer will not write through as root. Remove it and run the installer again."
+  mkdir -p "$UPDATER_DIR" || die "could not create $UPDATER_DIR."
+  if ! take_lock 0; then
+    say "    an automatic update is running; waiting for it to finish"
+    take_lock 180 || die "an automatic update has held this Mac for three minutes; run the installer again in a few minutes."
+  fi
   fetch_helper
   stage_app
   # Apart from the device id and token write_state kept or made (a failed install
@@ -1326,7 +1435,7 @@ main() {
   done
 
   # A hang-up or Ctrl-C ends the script through the EXIT trap, so it rolls back too.
-  trap 'exit 1' HUP INT TERM
+  trap 'INTERRUPTED=1; exit 1' HUP INT TERM
   trap on_exit EXIT
   check_macos
   if [ "$DRY" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
