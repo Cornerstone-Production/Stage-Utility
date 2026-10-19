@@ -120,7 +120,7 @@ stage message's groups are required, so a blank one needs setup.
 | A ProVideoPlayer clip stops rolling | a clip has stopped, ended or been paused |
 | A ProVideoPlayer layer is hidden / unhidden | the layer's hidden flag flips |
 | A ProVideoPlayer layer is muted / unmuted | the layer's mute flag flips |
-| Called by name | something called `POST /api/cues/<name>` with a token, or a cue button on one of this app's own consoles. This one NEVER fires by itself — see [Cues](#cues) |
+| Called by name | something called `POST /api/cues/<name>` with a token, or a cue button on one of this app's own consoles. This one NEVER fires by itself, and is not in the picker: make it with **New cue** or **Make it manual** (see [Creating a cue](#creating-a-cue)) — see [Cues](#cues) |
 
 Every trigger fires on an **edge** — the moment something changes — never on a
 state that merely persists. The channels carry state snapshots, re-sent
@@ -382,6 +382,9 @@ asks first, naming the cues that go.
 
 Adds, edits and deletes are each logged on `/log` under `[automation]`, with the
 rule's name and id, so a bulk delete leaves a record of exactly which rules went.
+A cue's name is on its add line, and a line of its own says when a cue's name
+changes or a rule stops being a cue, which is where to look when a console button
+reads **Unbound**.
 
 A pair opens ONE dialog. **This pair** holds the settings that belong to the
 pair rather than to one direction of it — Home Assistant, Allowed during a
@@ -470,10 +473,12 @@ The steps that follow depend on the kind. An automatic rule: **When**, **If**
 cooldown, once per service), **Review**. A manual cue: **What it does**, **Name and
 where it fires** (name, **Home Assistant**, **Allowed during a service**), **On a
 console** (optional), **Review**. The sidebar shows each finished step's choice and
-goes back to any step before the one you are on; **Review** has a **Change** link
+goes to any step whose earlier steps are finished; **Review** has a **Change** link
 on each row. A step with a required field — a RossTalk target, a meter key — will
 not move on until it is filled, by the same check the editor's
 [Needs setup](#needs-setup) uses.
+
+**Review** shows what will be made and the **On** (a manual cue) or **Enabled** (an automatic rule) switch, which you can flip before Create. Switching an automatic rule on says it will fire on its own from the moment it exists; Simulate mode still applies.
 
 A manual cue is made with **Home Assistant off** and **Allowed during a service
 on**: it is voice-only and console-only until you switch Home Assistant on, and it
@@ -538,8 +543,8 @@ on asks as well, because Home Assistant gets a new entity a pasted YAML fragment
 will not have.
 
 **A conversion never renames a cue.** Making a cue automatic and then manual again
-before saving puts back the trigger exactly as the editor opened it — name, former
-names, spoken name and room.
+before saving puts back the trigger as it was when you left it — name, former
+names, spoken name and room, edits included.
 
 ### Built-in cues
 
