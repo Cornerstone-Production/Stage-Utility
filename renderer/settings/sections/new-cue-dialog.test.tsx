@@ -45,55 +45,19 @@ const { automationEngine } = await import("../../../main/services/automation-eng
 const { automationLog } = await import("../../../main/services/automation-log.js");
 const { stageController } = await import("../../../main/services/stage-controller.js");
 
-type RouteFn = typeof automationRoutes;
-
-/** What the app's own page sends: an Origin naming this server. */
-const browser = { origin: "http://stage.local:8788", host: "stage.local:8788" };
-
+const { installRealRoutesFetch, BROWSER: browser } = await import("../../test-fixtures/real-routes-fetch.js");
+const bridge = installRealRoutesFetch(
+  [
+    { prefix: "/api/automation/", handler: automationRoutes },
+    { prefix: "/api/cues", handler: cueRoutes },
+    { prefix: "/api/views", handler: viewRoutes },
+    { prefix: "/api/state", handler: stateRoutes },
+  ],
+  callRoute,
+);
 /** Every write the page sent, so "nothing was saved" is a statement about the wire
  *  as well as the store. */
-let writes: { method: string; url: string }[] = [];
-/** Replaces a route's answer for one URL. Unused by the cases below that use the
- *  real route's own refusals; kept for one that cannot. */
-let intercept: ((method: string, url: string) => { status: number; body: unknown } | null) | null = null;
-/** While set, a write to a view's layout is held after it has landed, so a test can
- *  look at the dialog in the moment between the rule existing and Create finishing. */
-let holdViewWrites: Promise<void> | null = null;
-
-(globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
-  const url = String(input);
-  const method = init?.method ?? "GET";
-  if (method !== "GET") writes.push({ method, url });
-  const forced = intercept?.(method, url) ?? null;
-  const pathOnly = url.split("?")[0];
-  const route: RouteFn | null = pathOnly.startsWith("/api/automation/")
-    ? automationRoutes
-    : pathOnly.startsWith("/api/cues")
-      ? cueRoutes
-      : pathOnly.startsWith("/api/views")
-        ? viewRoutes
-        : pathOnly === "/api/state"
-          ? stateRoutes
-          : null;
-  const out = forced
-    ? { status: forced.status, json: forced.body, body: JSON.stringify(forced.body) }
-    : route
-      ? await callRoute(route, url, {
-          method,
-          headers: browser,
-          ...(typeof init?.body === "string" && init.body ? { body: JSON.parse(init.body) } : {}),
-        })
-      : { status: 200, json: {}, body: "{}" };
-  if (method === "PATCH" && pathOnly.startsWith("/api/views/") && holdViewWrites) await holdViewWrites;
-  const status = out.status ?? 500;
-  return {
-    ok: status < 400,
-    status,
-    statusText: String(status),
-    json: async () => out.json,
-    text: async () => out.body,
-  };
-};
+const writes = (): { method: string; url: string; body: string | null }[] => bridge.writes;
 
 const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
@@ -239,9 +203,8 @@ beforeEach(async () => {
   await automationLog.clear();
   await automationEngine.setSettings({ simulate: true, disarmed: false });
   seedViews();
-  writes = [];
-  intercept = null;
-  holdViewWrites = null;
+  bridge.writes.length = 0;
+  bridge.holdWritesTo = null;
 });
 afterEach(async () => {
   Object.assign(consoleButtonDeps, realConsoleDeps);
@@ -250,7 +213,7 @@ afterEach(async () => {
   await settle();
 });
 
-const ruleWrites = () => writes.filter((w) => w.url.startsWith("/api/automation/rules"));
+const ruleWrites = () => writes().filter((w) => w.url.startsWith("/api/automation/rules"));
 
 describe("nothing is saved until Create", () => {
   test("Cancel after choosing a kind, an action and a name saves nothing", async () => {
@@ -523,7 +486,7 @@ describe("On a console", () => {
     const cueRow = () => document.querySelector('[data-review-row="Cue name"]')?.textContent ?? "";
     assert.ok(cueRow().includes("stage_reset") && !cueRow().includes("stage_reset_2"));
     let release: () => void = () => {};
-    holdViewWrites = new Promise<void>((resolve) => (release = resolve));
+    bridge.holdWritesTo = { prefix: "/api/views/", until: new Promise<void>((resolve) => (release = resolve)) };
     await act(async () => {
       fireEvent.click(button("Create")!);
     });

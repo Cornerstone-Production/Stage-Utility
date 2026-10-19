@@ -61,9 +61,9 @@ import {
   parseCandidates,
   parseLearning,
 } from "@main/services/companion-state-learn";
-import { hasServiceGuard, withServiceGuard } from "@main/services/service-guard";
+import { hasServiceGuard, SERVICE_GUARD_CONDITION_ID, withServiceGuard } from "@main/services/service-guard";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { HandIcon, PlayIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 import { invoke } from "../../lib/api";
 import {
@@ -92,6 +92,7 @@ import {
   toast,
 } from "../../components/ui";
 import { CompanionPressFields } from "./companion-cues";
+import { homeImpact, impactQuestion, makeAutomatic, makeManual } from "./rule-conversion";
 import { PickerField } from "./automation-picker";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
@@ -184,6 +185,8 @@ export function Row({
     </Tag>
   );
 }
+
+const NO_NAMES: ReadonlySet<string> = new Set();
 
 /** The one trigger a picker never offers for a rule that is not already a cue. */
 const NOT_A_PICKED_TRIGGER: ReadonlySet<string> = new Set([CALL_TRIGGER_ID]);
@@ -1069,6 +1072,9 @@ export function RuleEditorBody({
   pairFieldsElsewhere,
   issues,
   attempted,
+  onMakeManual,
+  onMakeAutomatic,
+  leavingCue,
 }: {
   draft: Rule;
   setDraft: (next: Rule) => void;
@@ -1094,6 +1100,14 @@ export function RuleEditorBody({
   /** Save has been pressed at least once this session. Nothing below marks a
    *  field before that — see RuleEditorDialog.save. */
   attempted: boolean;
+  /** Turn this automatic rule into a manual cue. Absent for a half of a pair,
+   *  which is not either: the pair's editor is unchanged. */
+  onMakeManual?: () => void;
+  /** Turn this manual cue into an automatic rule. Absent for a half of a pair. */
+  onMakeAutomatic?: () => void;
+  /** The cue name this rule is being converted AWAY from, while the trigger is
+   *  still to be picked. Null when it is not being converted. */
+  leavingCue?: string | null;
 }) {
   const trigger = registry.triggers.find((t) => t.id === draft.trigger.id) ?? null;
   const action = registry.actions.find((a) => a.id === draft.action.id) ?? null;
@@ -1107,26 +1121,263 @@ export function RuleEditorBody({
       issues.filter((i) => i.step === "condition" && i.index === index).map((i) => [i.key, i.message]),
     );
 
+  /**
+   * A MANUAL CUE: a called cue that is not half of an ON/OFF pair. It runs only
+   * when something calls it, so it has no When and no If to edit — one box says
+   * so, with the button that turns it into an automatic rule. A pair's half keeps
+   * the editor it has always had.
+   */
+  const manual = isCue && !pairFieldsElsewhere;
+  /** The trigger is not chosen yet: an operator pressed Make it automatic. */
+  const pickingTrigger = draft.trigger.id === "";
+
+  const nameRow = (
+    <Row label="Name">
+      <Input
+        value={draft.name}
+        onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+        className="h-7 text-footnote"
+        aria-label="Rule name"
+      />
+    </Row>
+  );
+  const enabledRow = (
+    <Row label={manual ? "On" : "Enabled"} hint="Off, the rule never runs — it is still called, and still logged as skipped.">
+      <Switch
+        checked={draft.enabled}
+        onCheckedChange={(v) => setDraft({ ...draft, enabled: v })}
+        aria-label="Rule enabled"
+      />
+    </Row>
+  );
+
+  /** The trigger's own fields. `aliases` is a list, not a string to type: it
+   *  renders as one chip per former name with a remove — a text field over a
+   *  comma-joined list of live URLs is a typo away from a switch in Home
+   *  Assistant that stops resolving. The three `state*` params are rendered by
+   *  CueStateFields, and only for a pair: three text fields on every cue that
+   *  cannot use them would read as three settings that do nothing. On a half of a
+   *  pair the pair's own params go with them. */
+  const triggerFieldRows = trigger?.params
+    .filter((p) => p.key !== "aliases" && !p.key.startsWith("state"))
+    .filter((p) => !(pairFieldsElsewhere && PAIR_PARAM_KEYS.includes(p.key)))
+    .map((p) => (
+      <ParamField
+        key={p.key}
+        spec={p}
+        value={draft.trigger.params[p.key]}
+        optionSources={optionSources}
+        onChange={(v) => setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, [p.key]: v } } })}
+        issue={triggerIssues[p.key]}
+        attempted={attempted}
+      />
+    ));
+  const formerNamesRow = isCue && (
+    <FormerNamesField
+      params={draft.trigger.params}
+      onChange={(aliases) =>
+        setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, aliases } } })
+      }
+    />
+  );
+
+  /** The single switch over `service.is-not-live`, for a cue only — the condition
+   *  means nothing on a rule with any other trigger. A view on the condition, not
+   *  a replacement for it: the condition is still in the list and still removable
+   *  by hand. A pair's is above, over both halves at once. */
+  const guardRow = isCue && !pairFieldsElsewhere && (
+    <ServiceGuardField
+      allowed={!hasServiceGuard(draft.conditions)}
+      onChange={(allowed) => setDraft({ ...draft, conditions: withServiceGuard(draft.conditions, !allowed) })}
+    />
+  );
+  const homeRow = isCue && !pairFieldsElsewhere && (
+    <HomeVisibilityField
+      hidden={isHiddenFromHome(draft.trigger.params)}
+      pairName={null}
+      onChange={(hidden) =>
+        setDraft({
+          ...draft,
+          trigger: { ...draft.trigger, params: { ...draft.trigger.params, ...homeVisibilityParams(hidden) } },
+        })
+      }
+    />
+  );
+
+  /** The conditions already on the rule, each with its fields and a remove. A
+   *  manual cue's service guard is its switch above, so it is not repeated here. */
+  const conditionRows = (skipGuard: boolean) =>
+    draft.conditions.map((c, i) => {
+      if (skipGuard && c.id === SERVICE_GUARD_CONDITION_ID) return null;
+      const spec = registry.conditions.find((x) => x.id === c.id);
+      return (
+        <div key={`${c.id}-${i}`} className="rounded-md border border-line px-2 py-1">
+          <div className="flex items-center gap-2">
+            <span className="flex-1 text-caption1 text-fg">{spec?.label ?? c.id}</span>
+            <Button
+              variant="transparent"
+              size="small"
+              iconOnly
+              aria-label="Remove condition"
+              onClick={() => setDraft({ ...draft, conditions: draft.conditions.filter((_, j) => j !== i) })}
+            >
+              <Trash2Icon className="size-3.5 text-fg-subtle" />
+            </Button>
+          </div>
+          {spec?.params.map((p) => (
+            <ParamField
+              key={p.key}
+              spec={p}
+              value={c.params[p.key]}
+              optionSources={optionSources}
+              onChange={(v) => {
+                const next = [...draft.conditions];
+                next[i] = { ...c, params: { ...c.params, [p.key]: v } };
+                setDraft({ ...draft, conditions: next });
+              }}
+              issue={conditionIssues(i)[p.key]}
+              attempted={attempted}
+            />
+          ))}
+        </div>
+      );
+    });
+
+  const actionRows = (
+    <>
+      <Row label="Action" plain>
+        {/* Same staleness risk as the Trigger picker: an older release's rule can
+            still name an action this registry no longer lists. */}
+        <PickerField
+          kind="action"
+          defs={registry.actions}
+          value={draft.action.id}
+          placeholder="Pick an action…"
+          ariaLabel="Action"
+          onChange={(id) =>
+            setDraft({
+              ...draft,
+              action: { id, params: seededParams("action", id, registry.actions.find((a) => a.id === id)?.params ?? []) },
+            })
+          }
+        />
+      </Row>
+      {/* One action renders its own params: three coordinates are not something an
+          operator can be expected to know, so companion.press gets a picker that
+          fills them in. The fields stay visible and editable — the picker is a
+          convenience over the same params, not a replacement for them, which is
+          what keeps a button that is not in Companion's export reachable. */}
+      <ActionParamsFields
+        actionId={draft.action.id}
+        action={action}
+        params={draft.action.params}
+        optionSources={optionSources}
+        onChange={(params) => setDraft({ ...draft, action: { ...draft.action, params } })}
+        issues={actionIssues}
+        attempted={attempted}
+      />
+    </>
+  );
+
+  const cooldownRow = (
+    <Row
+      label="Cooldown"
+      hint="Seconds before this rule may fire again. Stops a value that oscillates across a threshold firing repeatedly."
+    >
+      <NumberInput
+        value={draft.cooldownSec}
+        min={0}
+        max={86400}
+        onChange={(n) => setDraft({ ...draft, cooldownSec: n })}
+        className="h-7 text-footnote"
+      />
+    </Row>
+  );
+  const onceRow = (
+    <Row label="Once per service" hint="Fire at most once per PCO service occurrence.">
+      <Switch
+        checked={draft.oncePerService}
+        onCheckedChange={(v) => setDraft({ ...draft, oncePerService: v })}
+        aria-label="Once per service"
+      />
+    </Row>
+  );
+  /** Only for a called cue: there is nothing to confirm to when a rule fires
+   *  itself off a state change, and a switch that did nothing on every other rule
+   *  would be worse than absent. */
+  const askTwiceRow = isCue && (
+    <Row
+      label="Ask twice"
+      hint="The first call is answered with a confirmation and does nothing. A second call within 30 seconds runs it."
+    >
+      <Switch
+        checked={draft.confirmRequired === true}
+        onCheckedChange={(v) => setDraft({ ...draft, confirmRequired: v })}
+        aria-label="Ask twice before running"
+      />
+    </Row>
+  );
+
+  if (manual) {
+    const others = draft.conditions.some((c) => c.id !== SERVICE_GUARD_CONDITION_ID);
+    return (
+      <div className="flex flex-col gap-1" data-manual-cue="">
+        {nameRow}
+        {enabledRow}
+        <div className="my-1.5 flex items-center gap-3 rounded-[10px] border border-dashed border-line-strong px-3.5 py-3">
+          <HandIcon className="size-[18px] shrink-0 text-accent-text" />
+          <div className="min-w-0 flex-1">
+            <div className="text-footnote font-semibold text-fg">Runs only when called</div>
+            <div className="text-caption1 text-fg-muted">
+              Its Run button, a console cue button, Home Assistant or voice. No When, no If.
+            </div>
+          </div>
+          {onMakeAutomatic && (
+            <Button variant="filled" size="small" className="shrink-0 border border-line-strong" onClick={onMakeAutomatic}>
+              Make it automatic
+            </Button>
+          )}
+        </div>
+        {actionRows}
+        {homeRow}
+        {guardRow}
+        {cooldownRow}
+
+        <Separator />
+        <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Cue</span>
+        {triggerFieldRows}
+        {formerNamesRow}
+        {onceRow}
+        {askTwiceRow}
+        {/* Conditions an older release (or the API) put on this cue besides the
+            service guard. Shown so they can still be read and removed — a cue
+            quietly refusing for a reason the editor does not mention is worse than
+            a section — but not offered to add: the manual kind has no If. */}
+        {others && (
+          <>
+            <Separator />
+            <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Also only when</span>
+            {conditionRows(true)}
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-1">
-      <Row label="Name">
-        <Input
-          value={draft.name}
-          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          className="h-7 text-footnote"
-          aria-label="Rule name"
-        />
-      </Row>
-      <Row label="Enabled" hint="Off, the rule never runs — it is still called, and still logged as skipped.">
-        <Switch
-          checked={draft.enabled}
-          onCheckedChange={(v) => setDraft({ ...draft, enabled: v })}
-          aria-label="Rule enabled"
-        />
-      </Row>
+      {nameRow}
+      {enabledRow}
 
       <Separator />
-      <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">When</span>
+      <div className="flex items-center justify-between gap-2 pt-1">
+        <span className="text-caption2 font-semibold uppercase tracking-wider text-fg-muted">When</span>
+        {onMakeManual && (
+          <Button variant="filled" size="small" className="border border-line-strong" onClick={onMakeManual}>
+            Make it manual
+          </Button>
+        )}
+      </div>
       <Row label="Trigger" plain>
         {/* A rule saved under an older release can still name a trigger this
             version's registry no longer lists (a type renamed or retired) — the
@@ -1152,36 +1403,17 @@ export function RuleEditorBody({
           }
         />
       </Row>
-      {trigger?.params
-        // `aliases` is a list, not a string to type. It renders below as one
-        // chip per former name with a remove — a text field over a
-        // comma-joined list of live URLs is a typo away from a switch in
-        // Home Assistant that stops resolving.
-        // `aliases` is a list; the three `state*` params are rendered by
-        // CueStateFields, and only for a pair. Three text fields on every cue
-        // that cannot use them would read as three settings that do nothing.
-        // On a half of a pair the pair's own params go with them.
-        .filter((p) => p.key !== "aliases" && !p.key.startsWith("state"))
-        .filter((p) => !(pairFieldsElsewhere && PAIR_PARAM_KEYS.includes(p.key)))
-        .map((p) => (
-          <ParamField
-            key={p.key}
-            spec={p}
-            value={draft.trigger.params[p.key]}
-            optionSources={optionSources}
-            onChange={(v) => setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, [p.key]: v } } })}
-            issue={triggerIssues[p.key]}
-            attempted={attempted}
-          />
-        ))}
-      {isCue && (
-        <FormerNamesField
-          params={draft.trigger.params}
-          onChange={(aliases) =>
-            setDraft({ ...draft, trigger: { ...draft.trigger, params: { ...draft.trigger.params, aliases } } })
-          }
-        />
+      {pickingTrigger && (
+        <p role="status" data-picking-trigger="" className="rounded-lg bg-amber-3 px-3 py-2 text-caption1 text-amber-11">
+          Pick a trigger to finish making this automatic.
+          {leavingCue
+            ? ` Saving removes the cue ${leavingCue}: anything that calls it, Home Assistant included, stops finding it.`
+            : ""}
+          {onMakeManual ? " Make it manual puts it back." : ""}
+        </p>
       )}
+      {triggerFieldRows}
+      {formerNamesRow}
       {isCue && pairBase !== null && !pairFieldsElsewhere && (
         <CueStateFields
           params={draft.trigger.params}
@@ -1200,66 +1432,12 @@ export function RuleEditorBody({
 
       <Separator />
       <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">If</span>
-      {/* The single switch over `service.is-not-live`, for a cue only — the
-          condition means nothing on a rule with any other trigger. A view on
-          the condition below, not a replacement for it: the condition is still
-          there in the list and still removable by hand. A pair's is above, over
-          both halves at once. */}
-      {isCue && !pairFieldsElsewhere && (
-        <ServiceGuardField
-          allowed={!hasServiceGuard(draft.conditions)}
-          onChange={(allowed) => setDraft({ ...draft, conditions: withServiceGuard(draft.conditions, !allowed) })}
-        />
-      )}
-      {isCue && !pairFieldsElsewhere && (
-        <HomeVisibilityField
-          hidden={isHiddenFromHome(draft.trigger.params)}
-          pairName={null}
-          onChange={(hidden) =>
-            setDraft({
-              ...draft,
-              trigger: { ...draft.trigger, params: { ...draft.trigger.params, ...homeVisibilityParams(hidden) } },
-            })
-          }
-        />
-      )}
+      {guardRow}
+      {homeRow}
       {draft.conditions.length === 0 && (
         <p className="text-caption1 text-fg-subtle">No conditions — the rule fires whenever its trigger does.</p>
       )}
-      {draft.conditions.map((c, i) => {
-        const spec = registry.conditions.find((x) => x.id === c.id);
-        return (
-          <div key={`${c.id}-${i}`} className="rounded-md border border-line px-2 py-1">
-            <div className="flex items-center gap-2">
-              <span className="flex-1 text-caption1 text-fg">{spec?.label ?? c.id}</span>
-              <Button
-                variant="transparent"
-                size="small"
-                iconOnly
-                aria-label="Remove condition"
-                onClick={() => setDraft({ ...draft, conditions: draft.conditions.filter((_, j) => j !== i) })}
-              >
-                <Trash2Icon className="size-3.5 text-fg-subtle" />
-              </Button>
-            </div>
-            {spec?.params.map((p) => (
-              <ParamField
-                key={p.key}
-                spec={p}
-                value={c.params[p.key]}
-                optionSources={optionSources}
-                onChange={(v) => {
-                  const next = [...draft.conditions];
-                  next[i] = { ...c, params: { ...c.params, [p.key]: v } };
-                  setDraft({ ...draft, conditions: next });
-                }}
-                issue={conditionIssues(i)[p.key]}
-                attempted={attempted}
-              />
-            ))}
-          </div>
-        );
-      })}
+      {conditionRows(false)}
       <Row label="Add condition" plain>
         {/* A transient picker: choosing appends the condition to
             `draft.conditions` and the field goes back to "Add…", never
@@ -1279,74 +1457,12 @@ export function RuleEditorBody({
 
       <Separator />
       <span className="pt-1 text-caption2 font-semibold uppercase tracking-wider text-fg-muted">Then</span>
-      <Row label="Action" plain>
-        {/* Same staleness risk as the Trigger picker above: an older release's
-            rule can still name an action this registry no longer lists. */}
-        <PickerField
-          kind="action"
-          defs={registry.actions}
-          value={draft.action.id}
-          placeholder="Pick an action…"
-          ariaLabel="Action"
-          onChange={(id) =>
-            setDraft({
-              ...draft,
-              action: { id, params: seededParams("action", id, registry.actions.find((a) => a.id === id)?.params ?? []) },
-            })
-          }
-        />
-      </Row>
-      {/* One action renders its own params: three coordinates are not
-          something an operator can be expected to know, so companion.press
-          gets a picker that fills them in. The fields stay visible and
-          editable — the picker is a convenience over the same params, not a
-          replacement for them, which is what keeps a button that is not in
-          Companion's export reachable. */}
-      <ActionParamsFields
-        actionId={draft.action.id}
-        action={action}
-        params={draft.action.params}
-        optionSources={optionSources}
-        onChange={(params) => setDraft({ ...draft, action: { ...draft.action, params } })}
-        issues={actionIssues}
-        attempted={attempted}
-      />
+      {actionRows}
 
       <Separator />
-      <Row
-        label="Cooldown"
-        hint="Seconds before this rule may fire again. Stops a value that oscillates across a threshold firing repeatedly."
-      >
-        <NumberInput
-          value={draft.cooldownSec}
-          min={0}
-          max={86400}
-          onChange={(n) => setDraft({ ...draft, cooldownSec: n })}
-          className="h-7 text-footnote"
-        />
-      </Row>
-      <Row label="Once per service" hint="Fire at most once per PCO service occurrence.">
-        <Switch
-          checked={draft.oncePerService}
-          onCheckedChange={(v) => setDraft({ ...draft, oncePerService: v })}
-          aria-label="Once per service"
-        />
-      </Row>
-      {/* Only for a called cue: there is nothing to confirm to when a rule
-          fires itself off a state change, and a switch that did nothing on
-          every other rule would be worse than absent. */}
-      {isCue && (
-        <Row
-          label="Ask twice"
-          hint="The first call is answered with a confirmation and does nothing. A second call within 30 seconds runs it."
-        >
-          <Switch
-            checked={draft.confirmRequired === true}
-            onCheckedChange={(v) => setDraft({ ...draft, confirmRequired: v })}
-            aria-label="Ask twice before running"
-          />
-        </Row>
-      )}
+      {cooldownRow}
+      {onceRow}
+      {askTwiceRow}
     </div>
   );
 }
@@ -1470,6 +1586,7 @@ export function RuleEditorDialog({
   appSources,
   pvpLayers,
   inferredFor,
+  cueNamesTaken = NO_NAMES,
   onChanged,
 }: {
   target: RuleEditorTarget;
@@ -1481,6 +1598,9 @@ export function RuleEditorDialog({
   /** Every layer ProVideoPlayer currently has. See CueStateFields. */
   pvpLayers: string[];
   inferredFor: (rule: Rule) => InferredStateSource | null;
+  /** Every cue name in use, with former names and the built-ins: what Make it
+   *  manual must not derive a name equal to. */
+  cueNamesTaken?: ReadonlySet<string>;
   onChanged: () => void;
 }) {
   const isPair = target.kind === "pair";
@@ -1504,6 +1624,13 @@ export function RuleEditorDialog({
     on: isPair ? target.pair.on : target.rule,
     off: isPair ? target.pair.off : null,
   });
+  /**
+   * The rule as it OPENED, for what the render has to read of it (which cue a
+   * conversion is leaving). `seed` above is a ref for the handlers that diff
+   * against it; a ref may not be read while drawing, and a value that never
+   * changes is state's job as much as a ref's.
+   */
+  const [openedAs] = useState<Rule>(() => (isPair ? target.pair.on : target.rule));
   const [half, setHalf] = useState<"on" | "off">("on");
   const [busy, setBusy] = useState(false);
   // Save has been pressed at least once this dialog session. Fields stay
@@ -1528,7 +1655,12 @@ export function RuleEditorDialog({
   // the footer only promises that when at least one half actually would.
   const onWillReenable = forcedOff && onIssues.length === 0 && onDraft.enabled;
   const offWillReenable = forcedOff && offIssues.length === 0 && !!offDraft?.enabled;
-  const footer = !attempted
+  // Make it automatic leaves no trigger until one is picked, and a rule with none
+  // never fires, so Save waits for one. A pair's halves have no such button.
+  const pickingTrigger = !isPair && onDraft.trigger.id === "";
+  const footer = pickingTrigger
+    ? { text: "Pick a trigger to finish making this automatic.", danger: false }
+    : !attempted
     ? null
     : totalIssues > 0
       ? { text: `${fieldsNeedAttention(totalIssues)}. Saved turned off: it runs once these are fixed.`, danger: true }
@@ -1640,6 +1772,15 @@ export function RuleEditorDialog({
 
   async function save() {
     setAttempted(true);
+    // What this save does to Home Assistant, asked BEFORE anything is written: a
+    // cue it had an entity for that stops being one takes its automations with it,
+    // and a rule that becomes a shown cue gives it an entity nobody has pasted.
+    // Not asked for anything else — the editor has always saved a rename without
+    // a word, and this is only the conversions' question.
+    if (!isPair) {
+      const impact = homeImpact(openedAs, onHalfPatch());
+      if (impact && !(await confirm(impactQuestion(impact)))) return;
+    }
     setBusy(true);
     // Which half is being written, so a refusal says which — the server's
     // message is about a cue name and does not say which of the two it came
@@ -1899,6 +2040,14 @@ export function RuleEditorDialog({
             pairFieldsElsewhere={isPair}
             issues={editingOff ? offIssues : onIssues}
             attempted={attempted}
+            // A pair's halves are neither kind: its editor is unchanged.
+            onMakeAutomatic={isPair ? undefined : () => setOnDraft((d) => makeAutomatic(d))}
+            onMakeManual={isPair ? undefined : () => setOnDraft((d) => makeManual(d, openedAs, cueNamesTaken))}
+            leavingCue={
+              !isPair && openedAs.trigger.id === CALL_TRIGGER_ID && onDraft.trigger.id !== CALL_TRIGGER_ID
+                ? String(openedAs.trigger.params.name ?? "")
+                : null
+            }
           />
         </div>
 
@@ -1928,7 +2077,7 @@ export function RuleEditorDialog({
             <Button variant="transparent" size="small" onClick={onClose} disabled={busy}>
               Cancel
             </Button>
-            <Button variant="accent" size="small" onClick={() => void save()} disabled={busy}>
+            <Button variant="accent" size="small" onClick={() => void save()} disabled={busy || pickingTrigger}>
               {busy ? "Saving…" : "Save"}
             </Button>
           </span>

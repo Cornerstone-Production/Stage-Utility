@@ -48,7 +48,7 @@ import { Button, Collapsible, Input, Separator, Switch, toast } from "../../comp
 import { formatClock } from "../../lib/clock-format";
 import { CueAccessCard, CueButtonStatus, ImportPairsDialog } from "./companion-cues";
 import { NewCueDialog } from "./new-cue-dialog";
-import type { CueKind } from "./new-cue-flow";
+import { takenCueNames, type CueKind } from "./new-cue-flow";
 import { plural } from "@main/services/plural";
 
 /**
@@ -911,6 +911,13 @@ export function AutomationSection() {
     return rule ? { kind: "rule", rule } : null;
   }, [editing, pairRows, rules, togglePairs, cueStateData]);
 
+  // Every cue name in use, with former names and the built-ins: what Make it manual
+  // must not derive a name equal to. The server refuses a clash either way.
+  const cueNamesTaken = useMemo(
+    () => takenCueNames(rules, registry?.reservedCueNames),
+    [rules, registry],
+  );
+
   // The last manual run of each rule, until the next one or a reload.
   // A Map, not a record: the key is a rule id, which arrives over the wire.
   const [lastRuns, setLastRuns] = useState<ReadonlyMap<string, RunResult>>(new Map());
@@ -1133,6 +1140,7 @@ export function AutomationSection() {
           appSources={appSources}
           pvpLayers={pvpLayers}
           inferredFor={inferredFor}
+          cueNamesTaken={cueNamesTaken}
           onChanged={refresh}
         />
       )}
