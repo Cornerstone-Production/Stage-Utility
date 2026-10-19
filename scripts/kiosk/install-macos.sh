@@ -953,9 +953,11 @@ wait_for_helper() { # version
 record_update_failure() {
   now="$(app_version "$APPS_DIR/$APP_NAME")"
   why="${UPDATE_FAILED:-the update stopped part way}"
-  if [ "$APP_SWAPPED" -eq 1 ] && [ -n "$now" ] && [ "$now" != "$UPDATING" ]; then why="$why; put $now back"; fi
+  back=""
+  if [ "$APP_SWAPPED" -eq 1 ] && [ -n "$now" ] && [ "$now" != "$UPDATING" ]; then back=" Put $now back."; fi
+  # The reason alone: the server says what that means ("failed and was undone").
   write_status failed "$UPDATING" "$why" "$(status_field answer)"
-  say "the update to $UPDATING failed: $why. It is not tried again until someone asks from Screens."
+  say "the update to $UPDATING failed: $why.$back It is not tried again until someone asks from Screens."
 }
 
 check_update() {

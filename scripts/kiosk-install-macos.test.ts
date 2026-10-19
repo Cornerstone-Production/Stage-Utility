@@ -1012,7 +1012,8 @@ describe("--check-update", { skip: !(has("zip") && has("uuidgen") && has("xxd"))
     ]);
     assert.match(updaterStatus(), /^state=failed$/m);
     assert.match(updaterStatus(), /^target=1\.27\.0$/m);
-    assert.match(updaterStatus(), /^detail=Chromium did not start: the browser host could not be opened; put 1\.26\.0 back$/m);
+    assert.match(updaterStatus(), /^detail=Chromium did not start: the browser host could not be opened$/m);
+    assert.match(r.out, /the update to 1\.27\.0 failed: Chromium did not start: the browser host could not be opened\. Put 1\.26\.0 back\./);
     // The next check tells the server, which then holds the version back.
     answer({ update: false });
     await run();
@@ -1025,7 +1026,7 @@ describe("--check-update", { skip: !(has("zip") && has("uuidgen") && has("xxd"))
     const r = await run({ SHIM_STARTS_WRITE: "" });
     assert.equal(r.status, 1, r.out + r.err);
     assert.equal(which(), "build-old");
-    assert.match(updaterStatus(), /^detail=the new helper did not say it started within 4 s; put 1\.26\.0 back$/m);
+    assert.match(updaterStatus(), /^detail=the new helper did not say it started within 4 s$/m);
   });
 
   it("does not read the stopped helper's status file as the new one's", async () => {

@@ -36,6 +36,7 @@ import { useResyncOn } from "../../lib/use-resync-on";
 import { NONE, chooseViewForScreen } from "../screen-role-confirm";
 import { useDevices } from "../../app/screens/use-devices";
 import { releaseDevice } from "../../app/screens/screen-device";
+import { readUpdate, TONE_CLASS, UpdateButton, type UpdateReading } from "../../app/screens/machine-update";
 import { cardOf, outputModeLine } from "../../app/screens/output-helpers";
 import { modeChoices, ROTATIONS, type Rotation } from "@main/types/output-format";
 import type { DeviceOutput } from "@main/types/kiosk";
@@ -43,7 +44,7 @@ import type { OutputHealth } from "@main/types/output-health";
 import type { MessageGroups } from "../../main/use-message-groups";
 import type { CreateScreenOutcome } from "../types";
 import {
-  DangerButton, NameInput, OnlineBadge, OutlineButton, PanelFooter, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
+  DangerButton, NameInput, OnlineBadge, OutlineButton, PanelFooter, Pill, RoleLine, Section, SettingRow, SidebarRow, SlugInput, SwitchRow, ViewPicker, viewGroups,
 } from "./screen-panel-parts";
 import { NewScreenBody, STEP_TITLES, type Step } from "./new-screen-body";
 import { ViewBody } from "./view-settings-body";
@@ -245,13 +246,15 @@ function noHealthNote(online: boolean, reported: boolean): string {
  *
  * Format is DeckLink only: a display runs at whatever the Mac drives it at.
  */
-function OutputDeviceSection({ output, device, online, health, reported, actions }: {
+function OutputDeviceSection({ output, device, online, health, reported, update, actions }: {
   output: Output;
   device: { id: string; hostname?: string; ip?: string; label?: string; output: DeviceOutput };
   online: boolean;
   health: OutputHealth | undefined;
   /** Whether it has reported at any time since the page loaded. */
   reported: boolean;
+  /** The Mac helper's version and updates, when there is anything to say. */
+  update: UpdateReading | null;
   actions: ScreenPanelActions;
 }) {
   const [busy, setBusy] = useState(false);
@@ -270,6 +273,8 @@ function OutputDeviceSection({ output, device, online, health, reported, actions
         </div>
         <OnlineBadge online={online} />
       </div>
+
+      {update && <MachineUpdateRow label="Helper" update={update} />}
 
       {device.output.kind === "decklink" && (
         <SettingRow label="Format" help="What the port sends. The house standard is the default.">
@@ -364,9 +369,26 @@ function OutputDeviceSection({ output, device, online, health, reported, actions
   );
 }
 
+/** The machine's own software, and the button that changes what it was told. */
+function MachineUpdateRow({ label, update }: { label: string; update: UpdateReading }) {
+  return (
+    <div className="flex items-start justify-between gap-3 py-1.5">
+      <div className="min-w-0">
+        <div className="text-footnote font-medium text-fg">{label}</div>
+        <div className={cn("mt-px text-caption1", update.tone === "muted" ? "text-fg-subtle" : TONE_CLASS[update.tone])}>{update.text}</div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <Pill tone="muted">{update.badge}</Pill>
+        <UpdateButton reading={update} />
+      </div>
+    </div>
+  );
+}
+
 function DeviceSection({ output, online, actions }: { output: Output; online: boolean; actions: ScreenPanelActions }) {
   const outputId = output.id;
-  const { bound, health, reported } = useDevices();
+  const data = useDevices();
+  const { bound, health, reported } = data;
   const device = bound.find((d) => d.outputId === outputId);
   if (!device) {
     return <p className="text-caption1 text-fg-subtle">No device is set up for this screen.</p>;
@@ -379,10 +401,12 @@ function DeviceSection({ output, online, actions }: { output: Output; online: bo
         online={online}
         health={health.find((h) => h.deviceId === device.id)}
         reported={reported.includes(device.id)}
+        update={readUpdate(device, data)}
         actions={actions}
       />
     );
   }
+  const update = readUpdate(device, data);
   const who = [device.label || device.hostname || "Set up on a device", device.ip].filter(Boolean).join(" · ");
   return (
     <div className="py-0.5">
@@ -390,6 +414,7 @@ function DeviceSection({ output, online, actions }: { output: Output; online: bo
       <div className="mt-px text-caption1 text-fg-subtle">
         {online ? "Online. The device follows this screen." : "Offline. The device follows this screen when it is on."}
       </div>
+      {update && <MachineUpdateRow label="Launcher" update={update} />}
     </div>
   );
 }

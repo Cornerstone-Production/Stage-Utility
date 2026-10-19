@@ -121,10 +121,11 @@ describe("MachineUpdates", () => {
 
   it("logs what the Mac says it did, once", () => {
     updates.check(check(), gate, 0);
-    updates.check(check({ state: "failed", target: "1.27.0", detail: "Chromium did not start; put 1.26.0 back" }), gate, 300_000);
-    updates.check(check({ state: "failed", target: "1.27.0", detail: "Chromium did not start; put 1.26.0 back" }), gate, 600_000);
+    updates.check(check({ state: "failed", target: "1.27.0", detail: "Chromium did not start" }), gate, 300_000);
+    const m = updates.check(check({ state: "failed", target: "1.27.0", detail: "Chromium did not start" }), gate, 600_000);
+    assert.equal(m.reason, "Helper 1.26.0. The update to 1.27.0 failed and was undone: Chromium did not start");
     assert.deepEqual(lines.slice(1), [
-      "[helper-update] Mac booth-mini (5f1c09ab): the update to 1.27.0 failed: Chromium did not start; put 1.26.0 back; it is not tried again until someone asks from Screens",
+      "[helper-update] Mac booth-mini (5f1c09ab): the update to 1.27.0 failed: Chromium did not start; it is not tried again until someone asks from Screens",
       "[helper-update] Mac booth-mini (5f1c09ab) is on 1.26.0, this server is 1.27.0: waiting, this version failed here before",
     ]);
   });
@@ -138,6 +139,8 @@ describe("MachineUpdates", () => {
     updates.check(check(), { ...gate, auto: false }, 0);
     assert.equal(updates.request("5f1c09ab-7e22-4c1d", 1_000), true);
     assert.equal(updates.list(1_000)[0].reason, "Update asked for. It starts at the machine's next check, within five minutes");
+    // What the button overrode no longer stands, so Screens offers it no longer.
+    assert.equal(updates.list(1_000)[0].waitingOn, undefined);
     assert.equal(updates.check(check(), { ...gate, auto: false }, 300_000).update, true);
     // Asked once, answered once: a failure after it is not retried by itself.
     assert.equal(updates.check(check({ state: "failed", target: "1.27.0" }), { ...gate, auto: false }, 600_000).update, false);

@@ -98,6 +98,9 @@ export interface MachineUpdate {
  *  five minutes; three missed checks is a machine that is off, or an updater that
  *  is broken, and either way what it last said is no longer what it is doing. */
 export const REPORT_TTL_MS = 20 * 60_000;
+/** How often an updater asks: UPDATE_EVERY in install-macos.sh, and the Windows
+ *  task's interval. */
+export const CHECK_INTERVAL_MS = 5 * 60_000;
 /** The most machines remembered. The check is open, and a sender on the network
  *  must not be able to grow this without limit. A site has tens of these. */
 export const MAX_MACHINES = 256;
@@ -182,14 +185,13 @@ export function decide(input: Pick<CheckInput, "platform" | "have" | "state" | "
 /** The sentence Screens shows for a machine. A Windows launcher is a digest,
  *  which nobody can read, so it is never named. */
 export function describe(platform: UpdatePlatform, have: string, want: string, d: Decision, state: MachineState, target: string | undefined, detail: string | undefined): string {
-  const why = detail ? ` (${detail})` : "";
   if (platform === "windows") {
     if (d.update) return "Kiosk launcher updating";
     switch (d.why) {
       case "current":
         return state === "updated" ? "Kiosk launcher updated. It takes effect at the next sign-in" : "Kiosk launcher up to date";
       case "failed":
-        return `Kiosk launcher out of date. The update failed${why}, so it is not tried again until someone asks`;
+        return `Kiosk launcher out of date. The update failed${detail ? `: ${detail}` : ""}`;
       default:
         return "Kiosk launcher out of date. Automatic updates are off";
     }
@@ -203,7 +205,7 @@ export function describe(platform: UpdatePlatform, have: string, want: string, d
     case "current":
       return `Helper ${have}, the same as this server`;
     case "failed":
-      return `Helper ${have}. The update to ${target ?? want} failed${why}, so it is not tried again until someone asks`;
+      return `Helper ${have}. The update to ${target ?? want} failed and was undone${detail ? `: ${detail}` : ""}`;
     case "off":
       return `Helper ${have}. This server is ${want}; automatic updates are off`;
     case "live":
@@ -233,7 +235,14 @@ export class MachineUpdates {
    *  answer that tells the machine to go ahead. A Set: the key is request-derived. */
   private readonly requested = new Set<string>();
 
-  constructor(private readonly onChange: () => void = () => {}) {}
+  /** When this server began answering checks. A machine checks every five minutes,
+   *  so until one interval has passed, a machine not heard from may simply not have
+   *  asked yet: Screens does not call it a machine without an updater before then. */
+  readonly listeningSince: number;
+
+  constructor(private readonly onChange: () => void = () => {}, now = Date.now()) {
+    this.listeningSince = now;
+  }
 
   /** Answer one check, remember what the machine said, and log what changed. */
   check(input: CheckInput, gate: Omit<Gate, "requested">, now = Date.now()): MachineUpdate {
@@ -279,7 +288,9 @@ export class MachineUpdates {
     // "automatic updates are off" on screen until the machine next asks. A live
     // service still holds a Mac back (see decide), so that sentence stands.
     if (m.waitingOn !== "live") {
-      this.machines.set(machine, { ...m, reason: "Update asked for. It starts at the machine's next check, within five minutes" });
+      // No longer waiting on what the button just overrode, so no button and no
+      // failure colour either; the machine's next check says what came of it.
+      this.machines.set(machine, { ...m, reason: "Update asked for. It starts at the machine's next check, within five minutes", waitingOn: undefined, waitUntil: undefined });
       this.onChange();
     }
     return true;
