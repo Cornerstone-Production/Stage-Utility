@@ -406,6 +406,52 @@ reference: see [Video](../reference/widgets.md#video).
 A Raspberry Pi decodes WebRTC in software. Plan on one 720p feed per Pi 4
 screen; a Pi 5 or a computer handles 1080p.
 
+### How each browser plays a feed
+
+A relay feed plays over WebRTC wherever the stream allows it, in every
+browser. When it needs HLS (B-frames, or WebRTC not reaching this screen),
+the player depends on what the browser has:
+
+| Browser | HLS player |
+|---|---|
+| Chrome, Firefox, Edge on a computer or Android | hls.js, on Media Source Extensions |
+| Safari on macOS, Safari on iPadOS | hls.js, on Media Source Extensions |
+| Any browser on iPhone, iOS 17.1 or later | hls.js, on Managed Media Source |
+| Any browser on iPhone before iOS 17.1 | Safari's own HLS player |
+
+The widget starts the picture itself as soon as the browser can play it,
+rather than leaving that to the browser's autoplay, which in Safari waits
+until it judges enough is buffered (about 2.5 seconds on the relay's
+low-latency HLS).
+
+Send the encoder's full frame rate, 59.94 or 60, rather than a setting that
+halves it to 30 (some encoders call it Auto). On a 60 Hz screen Safari
+sometimes shows a 30 fps picture with an uneven cadence, alternating short
+and long frames, which reads as judder: in half the sessions measured,
+and in the worst more than half its frames were held a refresh too short or
+too long. At 59.94 it stayed as close to even as Chrome does at either
+rate.
+
+### Measuring playback
+
+Playback timing and cadence are measured in a browser on a running server,
+the same way as a stutter reported on a real device:
+
+- **Cadence**: `requestVideoFrameCallback` on the widget's `<video>`, the
+  wall-clock interval between presented frames as a histogram. An even
+  picture sits at one bucket (16.7 ms at 60 fps, 33.3 ms at 30 fps); judder
+  shows as a spread across neighbouring buckets.
+- **Decode and freezes**: on WebRTC, the `inbound-rtp` video report from the
+  peer connection's `getStats()`: `framesDecoded`, `framesDropped`,
+  `freezeCount`, `totalFreezesDuration`, and `jitterBufferDelay` over
+  `jitterBufferEmittedCount`. Safari reports zero from
+  `getVideoPlaybackQuality()` for a WebRTC picture, so read these instead.
+- **Start and stalls**: the `<video>` element's `seeking`, `playing`,
+  `waiting` and `ratechange` events, timed from the first.
+
+On an iPhone or iPad, the same readings can be taken from Safari's Web
+Inspector console for that device, opened from a Mac's Develop menu.
+
 ## Health from the screens
 
 Every Video widget reports its own playback on the same presence heartbeat
@@ -608,6 +654,9 @@ Each screen writes its own `[video]` lines from the browser:
   (with how many attempts and for how long), and a line when it is playing
   again after holding for 10 seconds. Individual retries are not logged; the
   browser console shows each one, with its delay, at the Verbose level.
+- When a picture never arrived because the browser refused to start it, the
+  reason on that line, or on the WebRTC fallback line below, ends with the
+  browser's own words.
 - A relay feed falling back to HLS on a screen because WebRTC did not carry
   it there, once per outage, and a line when WebRTC is carrying it again.
   Its retries every 5 minutes are not logged.
