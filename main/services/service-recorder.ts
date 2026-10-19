@@ -157,6 +157,8 @@ export interface ServiceRecord {
 export interface RecorderStore<T> {
   get(serviceKey: string): Promise<T | null>;
   upsert(record: T): Promise<void>;
+  /** Throws when this key's record is on disk and could not be read. */
+  assertReadable(serviceKey: string): Promise<void>;
 }
 
 /** Everything a fresh record needs that comes from the plan, not the recorder. */
@@ -254,10 +256,17 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * older copy from the store alone. A closed record is on disk as it closes,
    * and the store may since hold a newer copy (an archive import), so it is
    * never preferred. Every per-service read route answers through this.
+   *
+   * Throws, rather than answering null, for a record on disk that could not be
+   * read: null reads as "never recorded", and the baptism lane answered an
+   * unread service with no baptisms. The recorder's own lookup in ensureRecord
+   * does not come through here, so a recording is never stopped by it.
    */
   async getRecord(serviceKey: string): Promise<T | null> {
     const live = this.current;
-    return live?.serviceKey === serviceKey && live.endedAt == null ? live : this.store.get(serviceKey);
+    if (live?.serviceKey === serviceKey && live.endedAt == null) return live;
+    await this.store.assertReadable(serviceKey);
+    return this.store.get(serviceKey);
   }
 
   /**

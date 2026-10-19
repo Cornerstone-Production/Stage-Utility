@@ -14,7 +14,9 @@ Built for a room full of always-on screens.
 - **Writes are atomic** — temp file then rename — and a file that will not parse is
   backed up rather than overwritten. One that cannot be read at all is never
   taken for empty: see
-  [When a store file cannot be read](#when-a-store-file-cannot-be-read).
+  [When a store file cannot be read](#when-a-store-file-cannot-be-read), and
+  for recordings,
+  [When a recorded file cannot be read](#when-a-recorded-file-cannot-be-read).
   Recorded services are one file each, so persisting a live service does not
   rewrite your whole history.
 - **Disk caches are pruned.** Photos and plan attachments go by age and size, and
@@ -194,6 +196,60 @@ restart.
 Fix the cause, then restart the server. A read after the fix logs
 `[data-store] … is readable again; restart the server to save to it`, and some
 pages show the real data from then on, but saves stay refused until the restart.
+
+### When a recorded file cannot be read
+
+Recordings follow a different rule from the stores above, because nothing may
+stop a live service recording. A recorded file that is there and cannot be read
+is never written over, and recording carries on beside it:
+
+- **A service record** (one file per service in `spl-history/`,
+  `attendance-history/` and `service-timeline/`) that cannot be read or will not
+  parse is left as it is. The service is missing from History, and opening it
+  answers that its record could not be read rather than that it was never
+  recorded. Saves for
+  that service go to `<name>.json.held-<when the server started>` beside it until
+  the server restarts, and History shows that copy. A record still unreadable
+  after a restart starts another held file, each holding what its run recorded.
+  A folder that cannot be listed holds every save the same way.
+- **A raw CSV** (`archive/<date>_<service>/spl.csv` and the rest; see
+  [Data archive](../data-archive.md)) that cannot be read, or stops taking rows
+  mid-service, is passed over: rows go on into the next file of its roll
+  (`spl.2.csv`), which every reader already reads, starting with the row that
+  failed. A failure of the machine rather than the file (out of file handles,
+  memory or space) passes nothing over: that row is lost, and the next one
+  tries the same file again.
+- **Nothing is decided from the gap.** While any service record cannot be read,
+  the data archive's export, inspect and import refuse (an import took that
+  service for new and replaced it), and so does the History workbook; a
+  scheduled backup that includes the archive fails, writing nothing and keeping
+  its older copies.
+  That service cannot be edited in History (merge, delete, trim, rebuild,
+  recalculate, item times); every other service can. A raw file that cannot be
+  read refuses a merge with nothing moved, fails the SPL chart and the baptism
+  lane for that service rather than drawing part of it, and resumes SPL from
+  its stored record rather than rebuilding from the rows that did read. An
+  import merging into one leaves it as it is and lists it as not written.
+
+Each is on `/log`, once per file:
+
+```
+[attendance-history] st1-p1-t1.json in attendance-history could not be read
+(EACCES): EACCES: permission denied, open '…/st1-p1-t1.json'. Left as it is,
+missing from history, and a save for that service goes to a .held file beside it
+until the server restarts. Fix the file, then restart.
+[attendance-history] saving st1:p1:t1 to st1-p1-t1.json.held-2026-10-18T14-02-11-512Z
+rather than over st1-p1-t1.json, because …
+[archive] 2026-10-18_st1-p1-t1/spl.csv could not be read (EACCES). Recording spl
+into the next file beside it, and leaving this one as it is.
+```
+
+Fix the cause, then restart. A file passed over in the raw archive is read with
+the rest once it reads again. A held record is not folded back in for you: it is
+the part of that service recorded while the record could not be read, so compare
+the two and keep what you want. For SPL and the rundown timing,
+**Rebuild from raw** on the service page derives the record again from the raw
+rows, which hold the whole service.
 
 ### When a credential could not be moved out of `settings.json`
 

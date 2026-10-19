@@ -11,7 +11,7 @@
 // reported. See `importArchive` for the ordering that keeps a corrupt file from
 // leaving half a year behind.
 
-import { errorMessage } from "../errors.js";
+import { errorMessage, isNotFound } from "../errors.js";
 import { scrub } from "../scrub.js";
 import { readFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
@@ -27,7 +27,9 @@ import { attendanceStore } from "../attendance-store.js";
 import { baptismStore } from "../baptism-store.js";
 import { serviceTimelineStore } from "../service-timeline-store.js";
 import { splHistoryStore } from "../spl-history-store.js";
+import { StoreReadError } from "../data-store.js";
 import { archiveRoot, isInside, serviceDirName } from "./archive-paths.js";
+import { unreadableArchiveFile } from "./archive-rows.js";
 import { atomicWrite } from "../write-queue.js";
 import { encodeRow, parseRows } from "../csv.js";
 import {
@@ -118,16 +120,20 @@ function pkgVersion(): string {
 }
 
 /** serviceKey → date + a human label, for everything this box knows about. The three
- *  keyed stores are unioned: a service may have SPL but no attendance, or vice versa. */
+ *  keyed stores are unioned: a service may have SPL but no attendance, or vice versa.
+ *
+ *  Strict, here and in localRecordsByKey: a service whose record could not be
+ *  read is not absent. Taken for absent, an export left it out, and an import
+ *  took it for new and replaced its record and raw files with the archive's. */
 async function localServices(): Promise<Map<string, { serviceDate: string; label: string | null }>> {
   const out = new Map<string, { serviceDate: string; label: string | null }>();
   const put = (r: { serviceKey: string; serviceDate: string; planTitle?: string | null }) => {
     const prev = out.get(r.serviceKey);
     out.set(r.serviceKey, { serviceDate: r.serviceDate, label: prev?.label ?? r.planTitle ?? null });
   };
-  for (const r of await splHistoryStore.list()) put(r);
-  for (const r of await attendanceStore.list()) put(r);
-  for (const r of await serviceTimelineStore.list()) put(r);
+  for (const r of await splHistoryStore.listStrict()) put(r);
+  for (const r of await attendanceStore.listStrict()) put(r);
+  for (const r of await serviceTimelineStore.listStrict()) put(r);
   return out;
 }
 
@@ -135,13 +141,24 @@ async function readDirInto(root: string, prefix: string, into: Record<string, Ui
   let entries: Dirent[];
   try {
     entries = await fs.readdir(root, { withFileTypes: true });
-  } catch {
-    return; // no archive dir yet — a box that has not recorded since this shipped
+  } catch (err) {
+    // No archive dir yet — a box that has not recorded since this shipped. One
+    // that is there and cannot be listed fails the export rather than leaving
+    // every raw file out of it.
+    if (isNotFound(err)) return;
+    throw unreadableArchiveFile(root, "", err);
   }
   for (const e of entries) {
     const full = path.join(root, e.name);
-    if (e.isDirectory()) await readDirInto(full, `${prefix}${e.name}/`, into);
-    else into[`${prefix}${e.name}`] = new Uint8Array(await fs.readFile(full));
+    if (e.isDirectory()) {
+      await readDirInto(full, `${prefix}${e.name}/`, into);
+      continue;
+    }
+    try {
+      into[`${prefix}${e.name}`] = new Uint8Array(await fs.readFile(full));
+    } catch (err) {
+      throw unreadableArchiveFile(root, e.name, err);
+    }
   }
 }
 
@@ -153,19 +170,19 @@ export async function buildArchive(): Promise<Uint8Array> {
   // the same shape regardless of how the stores lay themselves out. (They are one
   // file per service now; they used to be one document for all of them.)
   const encode = (v: unknown) => strToU8(JSON.stringify(v, null, 2));
-  files["stores/spl-history.json"] = encode({ services: byKey(await splHistoryStore.list()) });
-  files["stores/attendance-history.json"] = encode({ services: byKey(await attendanceStore.list()) });
+  files["stores/spl-history.json"] = encode({ services: byKey(await splHistoryStore.listStrict()) });
+  files["stores/attendance-history.json"] = encode({ services: byKey(await attendanceStore.listStrict()) });
   // RAW records, deliberately — including `itemTimeEdits` rather than the times
   // they resolve to. This bundle round-trips back into the store, so baking an
   // operator's item time correction into the items would make it permanent and
   // take Reset (and a rebuild from events.csv) with it. The History workbook
   // does the opposite and exports the effective times, because that one is a
   // report, not a backup.
-  files["stores/service-timeline.json"] = encode({ services: byKey(await serviceTimelineStore.list()) });
+  files["stores/service-timeline.json"] = encode({ services: byKey(await serviceTimelineStore.listStrict()) });
   try {
     files["stores/baptism.json"] = new Uint8Array(await fs.readFile(path.join(getUserDataPath(), "baptism.json")));
-  } catch {
-    /* nothing recorded yet */
+  } catch (err) {
+    if (!isNotFound(err)) throw new StoreReadError("baptism.json", err); // else nothing recorded yet
   }
 
   const local = await localServices();
@@ -275,9 +292,9 @@ async function localRecordsByKey(): Promise<Map<string, Record<string, unknown>>
     e[store] = r;
     out.set(r.serviceKey, e);
   };
-  for (const r of await splHistoryStore.list()) put("spl", r);
-  for (const r of await attendanceStore.list()) put("attendance", r);
-  for (const r of await serviceTimelineStore.list()) put("timeline", r);
+  for (const r of await splHistoryStore.listStrict()) put("spl", r);
+  for (const r of await attendanceStore.listStrict()) put("attendance", r);
+  for (const r of await serviceTimelineStore.listStrict()) put("timeline", r);
   return out;
 }
 
@@ -380,6 +397,10 @@ export async function importArchive(
 
   const localBaptismIds = new Set((await baptismStore.listSessions()).map((s) => s.id));
   const freshSessions = (baptisms?.sessions ?? []).filter((s) => !localBaptismIds.has(s.id));
+  // The sessions are added last, so a refusal there would come after every
+  // record and raw file above was already written.
+  const baptismRefused = freshSessions.length > 0 ? baptismStore.refusingSaves() : null;
+  if (baptismRefused) throw baptismRefused;
 
   // ── Write phase: everything below is known-good. ──
   // A merged service fills its gaps from the archive; a new or replaced one takes
@@ -477,8 +498,11 @@ export async function importArchive(
           let existing = "";
           try {
             existing = await fs.readFile(dest, "utf8");
-          } catch {
-            /* nothing here yet — take theirs whole */
+          } catch (err) {
+            // Nothing here yet: take theirs whole. A file that is there and
+            // cannot be read is not nothing, and taking theirs whole replaced
+            // the rows this box recorded. It fails this member instead.
+            if (!isNotFound(err)) throw err;
           }
           // A null merge means the column sets disagree, so the rows cannot be
           // interleaved. Keep what is here rather than produce a ragged file.

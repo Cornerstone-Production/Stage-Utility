@@ -8,6 +8,7 @@ const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "keyed-store-"));
 process.env.STAGE_UTILITY_DATA = dataDir;
 
 const { KeyedRecordStore } = await import("./keyed-record-store.js");
+const { captureConsole } = await import("./fixtures/capture-console.js");
 
 interface Rec {
   serviceKey: string;
@@ -231,4 +232,131 @@ test("invalidate() beats a load already in flight", async () => {
   await inFlight;
 
   assert.equal((await fresh.get("a"))?.title, "after", "the stale load was cached over the import");
+});
+
+// ── A record file that is there and cannot be read ──
+//
+// Taken for absent, a recorder restarted mid-service found no record, began a
+// fresh one, and its first save renamed over the file that held everything
+// recorded before the restart. A file that will not parse went the same way.
+
+/** File permissions do not stop root, so the permission cases skip there. */
+const asRoot = process.getuid?.() === 0;
+
+async function heldFiles(dir: string): Promise<string[]> {
+  return (await fs.readdir(path.join(dataDir, dir))).filter((n) => n.includes(".held-")).sort();
+}
+
+test("a save for a record that could not be read goes beside it, never over it", { skip: asRoot }, async (t) => {
+  const lines = captureConsole(t, "error");
+  const first = make("u1", "u1.json");
+  await first.upsert(rec("svc", "2026-10-18T14:00:00.000Z", "FIRST HALF"));
+  const file = path.join(dataDir, "u1", "svc.json");
+  const before = await fs.readFile(file, "utf8");
+  await fs.chmod(file, 0o000);
+  try {
+    const s = make("u1", "u1.json"); // the restart
+    assert.equal(await s.get("svc"), null);
+    await s.upsert(rec("svc", "2026-10-18T14:50:00.000Z", "AFTER RESTART"));
+    await s.upsert(rec("svc", "2026-10-18T14:50:00.000Z", "AFTER RESTART, LATER"));
+    assert.equal(s.unreadable()?.code, "EACCES");
+    assert.equal((await s.get("svc"))?.title, "AFTER RESTART, LATER", "the held copy is what it answers with");
+    const held = await heldFiles("u1");
+    assert.equal(held.length, 1, held.join());
+    assert.match(held[0], /^svc\.json\.held-\d{4}-\d{2}-\d{2}T[\d-]+Z$/);
+    const heldRec = JSON.parse(await fs.readFile(path.join(dataDir, "u1", held[0]), "utf8")) as Rec;
+    assert.equal(heldRec.title, "AFTER RESTART, LATER");
+    assert.equal(lines.filter((l) => l.includes(".held-")).length, 1, `held twice in the log:\n${lines.join("\n")}`);
+  } finally {
+    await fs.chmod(file, 0o644);
+  }
+  assert.equal(await fs.readFile(file, "utf8"), before, "the record it could not read was replaced");
+});
+
+test("a record that will not parse is kept too, is not deleted, and the log says why", async (t) => {
+  const lines = captureConsole(t, "error");
+  const s0 = make("u2", "u2.json");
+  await s0.upsert(rec("ok", "2026-10-18T09:00:00.000Z"));
+  const file = path.join(dataDir, "u2", "torn.json");
+  await fs.writeFile(file, "{ torn");
+  const s = make("u2", "u2.json");
+  await s.upsert(rec("torn", "2026-10-18T10:00:00.000Z", "NEW"));
+  assert.equal(await fs.readFile(file, "utf8"), "{ torn", "a file that would not parse was replaced");
+  assert.equal((await heldFiles("u2")).length, 1);
+  await assert.rejects(s.delete("torn"), /torn\.json in u2 was not deleted/);
+  assert.equal(await fs.readFile(file, "utf8"), "{ torn");
+  assert.equal(await s.delete("ok"), true, "a record that did read still deletes");
+  assert.match(lines[0], /^\[u2\] torn\.json in u2 will not parse \(error\): .*JSON/);
+});
+
+test("listStrict and assertReadable refuse while any of it could not be read; list answers what did", async (t) => {
+  captureConsole(t, "error");
+  await fs.mkdir(path.join(dataDir, "u3"), { recursive: true });
+  await fs.writeFile(path.join(dataDir, "u3", "torn.json"), "{ torn");
+  await fs.writeFile(path.join(dataDir, "u3", "ok.json"), JSON.stringify(rec("ok", "2026-10-18T09:00:00.000Z")));
+  const s = make("u3", "u3.json");
+  assert.deepEqual((await s.list()).map((r) => r.serviceKey), ["ok"]);
+  await assert.rejects(s.listStrict(), /torn\.json in u3 will not parse/);
+  await assert.rejects(s.assertReadable("torn"), /torn\.json in u3/);
+  await s.assertReadable("ok");
+});
+
+test("a directory that cannot be listed holds every save beside the file it would replace", { skip: asRoot }, async (t) => {
+  const lines = captureConsole(t, "error");
+  const first = make("u4", "u4.json");
+  await first.upsert(rec("svc", "2026-10-18T14:00:00.000Z", "FIRST HALF"));
+  const dir = path.join(dataDir, "u4");
+  const before = await fs.readFile(path.join(dir, "svc.json"), "utf8");
+  await fs.chmod(dir, 0o300); // can write and enter, cannot list
+  try {
+    const s = make("u4", "u4.json");
+    await s.upsert(rec("svc", "2026-10-18T14:50:00.000Z", "AFTER RESTART"));
+    assert.match(s.unreadable()?.message ?? "", /^The u4 folder could not be read \(EACCES\)$/);
+    await assert.rejects(s.listStrict());
+    s.invalidate();
+    await s.list();
+  } finally {
+    await fs.chmod(dir, 0o755);
+  }
+  assert.equal(await fs.readFile(path.join(dir, "svc.json"), "utf8"), before, "a record it never read was replaced");
+  assert.equal((await heldFiles("u4")).length, 1);
+  assert.equal(lines.filter((l) => l.startsWith("[u4] The u4 folder")).length, 1, "said again on a reload");
+});
+
+test("migrating the legacy file never writes over a per-key file it could not read", async (t) => {
+  captureConsole(t, "error");
+  await fs.mkdir(path.join(dataDir, "u5"), { recursive: true });
+  await fs.writeFile(path.join(dataDir, "u5", "svc.json"), "{ torn");
+  await fs.writeFile(
+    path.join(dataDir, "u5.json"),
+    JSON.stringify({ services: { svc: rec("svc", "2026-01-01T00:00:00.000Z", "LEGACY") } }),
+  );
+  const s = make("u5", "u5.json");
+  await s.list();
+  assert.equal(await fs.readFile(path.join(dataDir, "u5", "svc.json"), "utf8"), "{ torn");
+  await fs.stat(path.join(dataDir, "u5.json")); // kept under its own name to try again
+});
+
+test("a legacy file that will not parse leaves the history incomplete, said once", async (t) => {
+  // Its services are missing from list(), so an export would leave them out
+  // and an import would take them for new.
+  const lines = captureConsole(t, "error");
+  await fs.writeFile(path.join(dataDir, "u6.json"), "{ not json");
+  const s = make("u6", "u6.json");
+  await assert.rejects(s.listStrict(), /^StoreReadError: u6\.json will not parse/);
+  s.invalidate();
+  await s.list();
+  assert.equal(lines.length, 1, lines.join("\n"));
+});
+
+test("a legacy file that cannot be read leaves the history incomplete", { skip: asRoot }, async (t) => {
+  captureConsole(t, "error");
+  const file = path.join(dataDir, "u7.json");
+  await fs.writeFile(file, JSON.stringify({ services: {} }));
+  await fs.chmod(file, 0o000);
+  try {
+    await assert.rejects(make("u7", "u7.json").listStrict(), { code: "EACCES" });
+  } finally {
+    await fs.chmod(file, 0o644);
+  }
 });

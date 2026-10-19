@@ -8,12 +8,24 @@
 
 import { errorMessage } from "../errors.js";
 import { buildArchive, importArchive, inspectArchive } from "../archive/archive-bundle.js";
+import { StoreReadError } from "../data-store.js";
 import { BodyTooLargeError, error, json, readRawBody, type RouteCtx } from "./context.js";
 import { zonedDateKey } from "../app-timezone.js";
 
 /** Dated in the app's zone, not the server's clock — see view-routes.exportFilename. */
 export function archiveExportFilename(at: number): string {
   return `stage-archive-${zonedDateKey(at)}.zip`;
+}
+
+/**
+ * An uploaded archive that will not import is a 400 naming why. Not every
+ * failure is the upload's: an oversized one keeps its 413 (flattened to 400, it
+ * told the operator their archive was malformed when it was simply too big),
+ * and a history file this box cannot read keeps its 503.
+ */
+function failUpload(res: RouteCtx["res"], err: unknown): void {
+  if (err instanceof BodyTooLargeError || err instanceof StoreReadError) throw err;
+  error(res, errorMessage(err));
 }
 
 export async function archiveRoutes({ req, res, pathname, method }: RouteCtx): Promise<void> {
@@ -34,10 +46,7 @@ export async function archiveRoutes({ req, res, pathname, method }: RouteCtx): P
     try {
       json(res, await inspectArchive(await readRawBody(req)));
     } catch (err) {
-      // An oversized upload must keep its 413 — flattening every failure to 400
-      // told the operator their archive was malformed when it was simply too big.
-      if (err instanceof BodyTooLargeError) throw err;
-      error(res, errorMessage(err));
+      failUpload(res, err);
     }
     return;
   }
@@ -52,10 +61,7 @@ export async function archiveRoutes({ req, res, pathname, method }: RouteCtx): P
       const mode = m === "merge" || m === "replace" ? m : "skip";
       json(res, await importArchive(raw, { mode }));
     } catch (err) {
-      // An oversized upload must keep its 413 — flattening every failure to 400
-      // told the operator their archive was malformed when it was simply too big.
-      if (err instanceof BodyTooLargeError) throw err;
-      error(res, errorMessage(err));
+      failUpload(res, err);
     }
     return;
   }

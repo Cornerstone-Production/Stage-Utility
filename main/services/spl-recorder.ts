@@ -14,6 +14,7 @@ import { sampleArchive } from "./archive/sample-archive.js";
 import { addLeqSample } from "./spl-leq.js";
 import { broadcast } from "./broadcaster.js";
 import { shouldRecordLive } from "./live-service-gate.js";
+import { errorMessage } from "./errors.js";
 import { scrub, scrubError } from "./scrub.js";
 import { smaartService } from "./smaart-service.js";
 import { splHistoryStore } from "./spl-history-store.js";
@@ -90,9 +91,18 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
    * here. The raw layer has every sample that arrived, so the aggregates are
    * recomputed from it. Returns the stored record unchanged for a service
    * recorded before the archive existed, which is the old behaviour.
+   *
+   * A raw file that cannot be read resumes the stored record too, rather than
+   * rebuilding from the rows that could: that would replace what is stored with
+   * less. Recording carries on either way.
    */
   protected override async resumeRecord(existing: ServiceSplHistory): Promise<ServiceSplHistory> {
-    const rebuilt = await rebuildSplRecord(existing).catch(() => null);
+    const rebuilt = await rebuildSplRecord(existing).catch((err: unknown) => {
+      console.error(
+        `[spl-recorder] could not rebuild ${scrub(existing.serviceKey)} from the archive on resume (${scrub(errorMessage(err))}); resuming the stored record`,
+      );
+      return null;
+    });
     if (rebuilt) console.log(`[spl-recorder] rebuilt ${scrub(existing.serviceKey)} from the archive on resume`);
     return rebuilt ?? existing;
   }
