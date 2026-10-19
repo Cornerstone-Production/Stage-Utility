@@ -151,7 +151,7 @@ const PVP_LAYER_PARAM: ParamDef = {
 function pvpEdgeTrigger(
   id: string,
   label: string,
-  help: string | undefined,
+  help: string,
   edge: (before: PvpLayer, after: PvpLayer) => boolean,
 ): TriggerDef {
   return def({
@@ -180,8 +180,12 @@ function pvpFlagTriggers(
   off: { slug: string; label: string },
 ): Record<string, TriggerDef> {
   const make = (id: string, label: string, want: boolean): TriggerDef =>
-    pvpEdgeTrigger(id, label, undefined, (before, after) =>
-      before[key] !== want && after[key] === want);
+    pvpEdgeTrigger(
+      id,
+      label,
+      `The layer's ${key === "hidden" ? "hidden" : "mute"} flag turns ${want ? "on" : "off"}.`,
+      (before, after) => before[key] !== want && after[key] === want,
+    );
   // The slug and the words are SEPARATE arguments, the way obsOutputTriggers
   // already keeps them, because the slug is a persisted rule id: a saved rule
   // stores `pvp.layer-hidden`, so deriving the id from the label would mean that
@@ -231,6 +235,7 @@ function connectionTriggers(id: string, label: string): Record<string, TriggerDe
       label: `${label} connects`,
       channel: "integrations:state-changed",
       params: [],
+      help: "Fires when the link comes up.",
       didFire: (prev, next) => {
         return connOf(prev, id) !== "connected" && connOf(next, id) === "connected";
       },
@@ -288,7 +293,7 @@ function outputTriggers(spec: {
   reachable: (snap: unknown) => boolean;
   /** The device's name, for the "unreachable is unknown" help. */
   device: string;
-  started: { id: string; label: string };
+  started: { id: string; label: string; help: string };
   stopped: { id: string; label: string };
 }): Record<string, TriggerDef> {
   const { channel, read, reachable, device, started, stopped } = spec;
@@ -298,6 +303,7 @@ function outputTriggers(spec: {
       label: started.label,
       channel,
       params: [],
+      help: started.help,
       didFire: (prev, next) => {
         return read(prev) !== true && read(next) === true;
       },
@@ -327,7 +333,7 @@ function obsOutputTriggers(
     read: (snap) => asObs(snap)[key],
     reachable: (snap) => asObs(snap).connected !== false,
     device: "OBS",
-    started: { id: `obs.${slug}-started`, label: `OBS starts ${label}` },
+    started: { id: `obs.${slug}-started`, label: `OBS starts ${label}`, help: `OBS's ${label} output starts.` },
     stopped: { id: `obs.${slug}-stopped`, label: `OBS stops ${label}` },
   });
 }
@@ -358,7 +364,7 @@ function recorderTriggers(
     read: (snap) => asRec(snap).recording,
     reachable: (snap) => asRec(snap).connected !== false,
     device,
-    started: { id: ids.started, label: `${device} starts recording` },
+    started: { id: ids.started, label: `${device} starts recording`, help: `${device} begins recording.` },
     stopped: { id: ids.stopped, label: `${device} stops recording` },
   });
 }
@@ -380,6 +386,7 @@ function streamTriggers(platform: string, channel: string, label: string): Recor
       label: `${label} goes live`,
       channel,
       params: [],
+      help: `${label} reports the stream is live.`,
       didFire: (prev, next) => {
         return asStream(prev).live !== true && asStream(next).live === true;
       },
@@ -959,6 +966,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "prodcom.phrase-said": def({
     id: "prodcom.phrase-said",
     label: "A phrase is said on ProdCom",
+    help: "Your text newly appears in a transcript line.",
     channel: "prodcom:transcript",
     params: [
       { key: "phrase", label: "Phrase", type: "string", help: "Case-insensitive, matches part of a line." },
@@ -988,6 +996,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "baptism.started": def({
     id: "baptism.started",
     label: "Baptism timer starts",
+    help: "The baptism timer leaves idle.",
     channel: "baptism:state",
     params: [],
     didFire: (prev, next) => {
@@ -998,6 +1007,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "baptism.phase-changed": def({
     id: "baptism.phase-changed",
     label: "Baptism moves to another phase",
+    help: "Testimony to baptism, or either back to idle.",
     channel: "baptism:state",
     params: [],
     didFire: (prev, next) => {
@@ -1010,6 +1020,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "baptism.finished": def({
     id: "baptism.finished",
     label: "Baptism timer finishes",
+    help: "The baptism timer returns to idle.",
     channel: "baptism:state",
     params: [],
     didFire: (prev, next) => {
@@ -1020,6 +1031,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "display.connected": def({
     id: "display.connected",
     label: "A display connects",
+    help: "A display arrives, or the one you name.",
     channel: "displays:presence",
     params: [DISPLAY_NAME],
     didFire: (prev, next, params) => {
@@ -1033,6 +1045,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "display.disconnected": def({
     id: "display.disconnected",
     label: "A display disconnects",
+    help: "A display goes, or the one you name.",
     channel: "displays:presence",
     params: [DISPLAY_NAME],
     didFire: (prev, next, params) => {
@@ -1046,6 +1059,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "spl.crossed-above": def({
     id: "spl.crossed-above",
     label: "SPL rises above",
+    help: "A Smaart meter crosses a level upward.",
     channel: "spl:metrics",
     params: [
       { key: "meter", label: "Meter", type: "string", help: 'The Smaart meter key, "device::channel".' },
@@ -1060,6 +1074,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "spl.crossed-below": def({
     id: "spl.crossed-below",
     label: "SPL falls below",
+    help: "A Smaart meter crosses a level downward.",
     channel: "spl:metrics",
     params: [
       { key: "meter", label: "Meter", type: "string", help: 'The Smaart meter key, "device::channel".' },
@@ -1118,6 +1133,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "update.available": def({
     id: "update.available",
     label: "An update becomes available",
+    help: "A new release appears. Not repeatedly while one waits.",
     channel: "update:status",
     params: [],
     didFire: (prev, next) => {
@@ -1154,6 +1170,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "pco.service-ended": def({
     id: "pco.service-ended",
     label: "Service ends",
+    help: "The plan finishes.",
     channel: "pco:live",
     params: [],
     didFire: (prev, next) => {
@@ -1164,6 +1181,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "pco.item-reached": def({
     id: "pco.item-reached",
     label: "Plan reaches an item",
+    help: "The live item's title starts matching your text.",
     channel: "pco:live",
     params: [{ key: "title", label: "Item title contains", type: "string", help: "Case-insensitive, matches part of the title" }],
     didFire: (prev, next, params) => {
@@ -1240,6 +1258,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "occupancy.crossed-above": def({
     id: "occupancy.crossed-above",
     label: "People count rises above",
+    help: "Attendance or occupancy crosses a threshold upward.",
     channel: "people:count",
     params: [{ key: "threshold", label: "Threshold", type: "number", min: 0, max: 100000 }, METRIC],
     didFire: (prev, next, params) => {
@@ -1251,6 +1270,7 @@ export const AUTOMATION_TRIGGERS: Record<string, TriggerDef> = externKeyed({
   "occupancy.crossed-below": def({
     id: "occupancy.crossed-below",
     label: "People count falls below",
+    help: "Attendance or occupancy crosses a threshold downward.",
     channel: "people:count",
     params: [{ key: "threshold", label: "Threshold", type: "number", min: 0, max: 100000 }, METRIC],
     didFire: (prev, next, params) => {

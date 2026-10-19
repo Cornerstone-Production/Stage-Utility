@@ -80,6 +80,7 @@ function isConnectedCondition(id: string, label: string): ConditionDef {
   return {
     id: `${id}.is-connected`,
     label: `${label} is connected`,
+    help: `${label}'s link is up right now.`,
     // Connection state is pushed by the integration manager whether anyone is
     // watching or not, so there is no throttled poll behind this one.
     channel: null,
@@ -109,11 +110,13 @@ function isConnectedCondition(id: string, label: string): ConditionDef {
 function pvpLayerCondition(
   id: string,
   label: string,
+  help: string,
   holds: (l: PvpLayerDTO) => boolean,
 ): ConditionDef {
   return {
     id,
     label,
+    help,
     // On the factory, so a fifth layer condition gets its demand for free.
     channel: "pvp:status",
     params: [
@@ -145,12 +148,14 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
     label: "OBS is recording",
     channel: "obs:status",
     params: [],
+    help: "OBS is recording right now.",
     holds: (ctx) => ctx.obsRecording === true,
   },
 
   "pvp.layer-has-content": pvpLayerCondition(
     "pvp.layer-has-content",
     "A ProVideoPlayer layer has content",
+    "The layer you name holds media. A blank layer name never holds.",
     // The PRESENCE of media, which parseWorkspace derived from the presence of
     // the playingMedia key. Never the cue name: it is residual and four idle
     // layers were observed all still naming the same cue.
@@ -159,6 +164,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
   "pvp.layer-is-playing": pvpLayerCondition(
     "pvp.layer-is-playing",
     "A ProVideoPlayer layer is playing a video",
+    "The layer you name is showing a video clip.",
     // `state`, which parseWorkspace derives from playbackRate and timeRemaining
     // — NOT PVP's own isPlaying, which a still image reports true. So "video"
     // covers a paused clip as well as a rolling one: both are a video on that
@@ -168,17 +174,20 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
   "pvp.layer-is-hidden": pvpLayerCondition(
     "pvp.layer-is-hidden",
     "A ProVideoPlayer layer is hidden",
+    "The layer you name has its hidden flag on.",
     (l) => l.hidden,
   ),
   "pvp.layer-is-muted": pvpLayerCondition(
     "pvp.layer-is-muted",
     "A ProVideoPlayer layer is muted",
+    "The layer you name has its mute flag on.",
     (l) => l.muted,
   ),
 
   "pvp.workspace-has-content": {
     id: "pvp.workspace-has-content",
     label: "ProVideoPlayer has something on screen",
+    help: "Any ProVideoPlayer layer holds media. Does not hold while PVP is unreachable.",
     channel: "pvp:status",
     // Deliberately no layer param — this is the "any layer at all" question, and
     // giving it one would duplicate pvp.layer-has-content with a worse label.
@@ -191,6 +200,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
     label: "REAPER is recording",
     channel: "reaper:status",
     params: [],
+    help: "REAPER's transport is recording right now.",
     holds: (ctx) => ctx.reaperRecording === true,
   },
 
@@ -199,6 +209,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
     label: "Resi is streaming",
     channel: "resi:status",
     params: [],
+    help: "A watched Resi encoder is live right now.",
     holds: (ctx) => ctx.resiStreaming === true,
   },
 
@@ -207,6 +218,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
     label: "YouTube is streaming",
     channel: "youtube:status",
     params: [],
+    help: "A broadcast on your channel is live right now.",
     holds: (ctx) => ctx.youtubeStreaming === true,
   },
 
@@ -214,6 +226,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
     id: "baptism.phase-is",
     label: "Baptism phase is",
     channel: "baptism:state",
+    help: "The baptism timer is in the phase you pick. Does not hold until the timer has run.",
     params: [{
       key: "phase", label: "Phase", type: "enum",
       options: [
@@ -230,6 +243,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
   "service.is-live": {
     id: "service.is-live",
     label: "A service is live",
+    help: "A plan item is live in Planning Center.",
     // Read from the controller's own state, which the live poller keeps current
     // for its own reasons -- nothing throttles it on a browser check.
     channel: null,
@@ -255,6 +269,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
     id: "service.is-not-live",
     label: "No service is live",
     channel: null,
+    help: "Nothing is running or about to start. Refuses while a service is live, or within the hour before one.",
     params: [],
     holds: (ctx, _params, now) => serviceQuietness(ctx, now) === "quiet",
   },
@@ -263,6 +278,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
     id: "service.type-is",
     label: "Service type is",
     channel: null,
+    help: "The plan being followed belongs to the service type you pick.",
     params: [{ key: "serviceTypeId", label: "Service type", type: "enum", optionsFrom: "service-types" }],
     holds: (ctx, params) => {
       const want = String(params.serviceTypeId ?? "");
@@ -274,6 +290,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
     id: "time.day-of-week",
     label: "Day of week is",
     channel: null,
+    help: "Today is one of the days you tick, in the app's time zone. Blank means every day.",
     params: [{
       key: "days",
       label: "Days",
@@ -297,6 +314,7 @@ export const AUTOMATION_CONDITIONS: Record<string, ConditionDef> = externKeyed({
     id: "time.between",
     label: "Time is between",
     channel: null,
+    help: "The time of day is inside a window, in the app's time zone. A window may cross midnight.",
     params: [
       { key: "from", label: "From", type: "string", help: "HH:MM, 24-hour" },
       { key: "to", label: "To", type: "string", help: "HH:MM, 24-hour" },

@@ -17,6 +17,7 @@ import {
   type RuleStepsLike,
   type StepSpecLookup,
 } from "../automation-param-validation.js";
+import { reservedCueNames } from "../builtin-cues.js";
 import { bearerOf, cueTokens, isSameOriginBrowser, refusalReason } from "../cue-tokens.js";
 import { propresenterManager } from "../propresenter-service.js";
 import { scrub } from "../scrub.js";
@@ -103,6 +104,10 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
       triggers: Object.values(AUTOMATION_TRIGGERS).map(({ id, label, channel, params, help }) => ({ id, label, channel, params, help })),
       conditions: shape(AUTOMATION_CONDITIONS),
       actions: shape(AUTOMATION_ACTIONS),
+      // The cue names the app ships, so the New cue dialog can derive a name
+      // that is not one of them. The write path refuses these (assertCueValid),
+      // but a name offered and then refused is a dialog that fails at Create.
+      reservedCueNames: [...reservedCueNames()].sort(),
     });
     return;
   }

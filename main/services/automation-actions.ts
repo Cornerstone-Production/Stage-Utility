@@ -267,6 +267,7 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
   "rosstalk.command": {
     id: "rosstalk.command",
     label: "Send a RossTalk command",
+    help: "A Carbonite or Ultrix command at a target.",
     params: [
       { key: "targetId", label: "Target", type: "enum", optionsFrom: "rosstalk-targets" },
       { key: "commandId", label: "Command", type: "enum", optionsFrom: "rosstalk-commands" },
@@ -290,6 +291,7 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
   "osc.send": {
     id: "osc.send",
     label: "Send an OSC message",
+    help: "An OSC message to a target.",
     params: [
       { key: "targetId", label: "Target", type: "enum", optionsFrom: "osc-targets" },
       { key: "address", label: "Address", type: "string", help: "e.g. /ch/01/mix/on" },
@@ -477,6 +479,7 @@ export const AUTOMATION_ACTIONS: Record<string, ActionDef> = externKeyed({
   "display.refresh": {
     id: "display.refresh",
     label: "Refresh all displays",
+    help: "Reloads every connected display.",
     params: [],
     run: async (_params, ctx) => {
       if (ctx.simulate) return ok("would refresh displays");

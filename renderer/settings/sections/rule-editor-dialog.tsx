@@ -119,6 +119,10 @@ export interface Registry {
   triggers: (Spec & { channel: string })[];
   conditions: Spec[];
   actions: Spec[];
+  /** The cue names the app ships, which no rule may take. Optional: a server
+   *  older than the page answers without it, and the server refuses a clash at
+   *  Create either way. */
+  reservedCueNames?: string[];
 }
 
 /** A registry, as a `StepSpecLookup` — the shape ruleIssues needs, over the

@@ -26,6 +26,7 @@ const { AUTOMATION_ACTIONS } = await import("./automation-actions.js");
 AUTOMATION_TRIGGERS["test.always"] = {
   id: "test.always",
   label: "Always (test only)",
+  help: "test",
   channel: "pco:live",
   params: [],
   didFire: () => true,
@@ -38,6 +39,7 @@ const sent: string[] = [];
 AUTOMATION_ACTIONS["test.record"] = {
   id: "test.record",
   label: "Record (test only)",
+  help: "test",
   params: [],
   run: async (_params, ctx) => {
     if (!ctx.simulate) sent.push("sent");
@@ -47,6 +49,7 @@ AUTOMATION_ACTIONS["test.record"] = {
 AUTOMATION_ACTIONS["test.fail"] = {
   id: "test.fail",
   label: "Fail (test only)",
+  help: "test",
   params: [],
   run: async () => ({ ok: false, detail: "the timer is idle, so there is no next person" }),
 };
