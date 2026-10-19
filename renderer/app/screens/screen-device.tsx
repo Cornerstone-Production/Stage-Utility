@@ -84,7 +84,14 @@ export function ScreenDevice({ outputId, name, videoMode }: { outputId: string; 
             </>
           )}
         </div>
-        {update && <div className={cn("mt-0.5 text-caption1", TONE_CLASS[update.tone])}>{update.text}</div>}
+        {/* A Mac's reason can carry a path with no break in it, and the card is
+            narrow: it wraps anywhere, stops at three lines, and says the rest on
+            hover. Screen settings shows it whole. */}
+        {update && (
+          <div title={update.text} className={cn("mt-0.5 line-clamp-3 text-caption1 [overflow-wrap:anywhere]", TONE_CLASS[update.tone])}>
+            {update.text}
+          </div>
+        )}
         <div className="truncate font-mono text-caption2 text-fg-faint">{device.id}</div>
       </div>
       <Tooltip label="Unbind the machine. The screen keeps its view and its URL.">

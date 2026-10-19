@@ -372,7 +372,7 @@ function OutputDeviceSection({ output, device, online, health, reported, update,
 /** The machine's own software, and the button that changes what it was told. */
 function MachineUpdateRow({ label, update }: { label: string; update: UpdateReading }) {
   return (
-    <SettingRow label={label} help={<span className={TONE_CLASS[update.tone]}>{update.text}</span>}>
+    <SettingRow label={label} help={<span className={cn("[overflow-wrap:anywhere]", TONE_CLASS[update.tone])}>{update.text}</span>}>
       <div className="flex shrink-0 items-center gap-1.5">
         <Pill tone="muted">{update.badge}</Pill>
         <UpdateButton reading={update} />
