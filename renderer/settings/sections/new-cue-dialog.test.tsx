@@ -184,8 +184,14 @@ async function manualToName(message = "hello") {
   await press(button("Next"), "Next past What it does");
 }
 
+/** Press Create and wait until it has finished: the dialog closed (every write
+ *  landed) or it shows its outcome panel (something failed). Reading the rules or
+ *  a console layout before then races the writes, which only shows under load. */
 async function create(): Promise<void> {
   await press(button("Create"), "Create");
+  await eventually(() =>
+    assert.ok(dialog() === null || document.querySelector("[data-outcome]") !== null, "Create did not finish"),
+  );
 }
 
 before(async () => {
