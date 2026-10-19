@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { decide, describe as sentence, MachineUpdates, MAX_MACHINES, parseCheck, REPORT_TTL_MS, type CheckInput, type Gate } from "./machine-updates.js";
 import { setAppTimeZone } from "./app-timezone.js";
 
-const OPEN: Gate = { want: "1.27.0", auto: true, requested: false, live: false, windowCloses: null };
+const OPEN: Gate = { want: "1.27.0", auto: true, requested: false, live: false, windowCloses: null, serviceTimesKnown: true };
 const MAC = { platform: "macos" as const, have: "1.26.0", state: "idle" as const, target: undefined };
 
 describe("decide", () => {
@@ -30,6 +30,13 @@ describe("decide", () => {
 
   it("waits out the service window, and says when it closes", () => {
     assert.deepEqual(decide(MAC, { ...OPEN, windowCloses: 1_000 }), { update: false, why: "window", until: 1_000 });
+  });
+
+  it("holds a Mac while Planning Center's times are not known, unless someone asked", () => {
+    assert.deepEqual(decide(MAC, { ...OPEN, serviceTimesKnown: false }), { update: false, why: "unknown" });
+    assert.deepEqual(decide(MAC, { ...OPEN, serviceTimesKnown: false, requested: true }), { update: true });
+    // A Windows kiosk restarts nothing, so it does not wait on them.
+    assert.deepEqual(decide({ ...MAC, platform: "windows" }, { ...OPEN, serviceTimesKnown: false }), { update: true });
   });
 
   it("lets Update now through the window", () => {
@@ -61,7 +68,7 @@ describe("parseCheck", () => {
 
   it("reads a Mac's check", () => {
     const r = parseCheck(q({ machine: "5f1c09ab-7e22", platform: "macos", have: "1.26.0", host: "booth-mini", state: "failed", target: "1.27.0", detail: "Chromium did not start" }));
-    assert.deepEqual(r, { machine: "5f1c09ab-7e22", platform: "macos", have: "1.26.0", host: "booth-mini", state: "failed", target: "1.27.0", detail: "Chromium did not start" });
+    assert.deepEqual(r, { machine: "5f1c09ab-7e22", platform: "macos", have: "1.26.0", host: "booth-mini", state: "failed", target: "1.27.0", detail: "Chromium did not start", at: undefined });
   });
 
   it("refuses what an updater must always send, and an unknown state", () => {
@@ -86,7 +93,7 @@ describe("MachineUpdates", () => {
   let updates: MachineUpdates;
   const realLog = console.log;
   const check = (over: Partial<CheckInput> = {}): CheckInput => ({ machine: "5f1c09ab-7e22-4c1d", platform: "macos", host: "booth-mini", have: "1.26.0", state: "idle", ...over });
-  const gate = { want: "1.27.0", auto: true, live: false, windowCloses: null };
+  const gate = { want: "1.27.0", auto: true, live: false, windowCloses: null, serviceTimesKnown: true };
 
   beforeEach(() => {
     lines = [];
@@ -112,11 +119,13 @@ describe("MachineUpdates", () => {
   });
 
   it("names the window's close in the app's zone, not the host's", () => {
-    // 17:30 UTC is 12:30 in Chicago in October.
+    // A zone no development Mac or UTC server is in, half an hour off the hour:
+    // 17:30 UTC is 23:00 in Kolkata, all year.
+    setAppTimeZone("Asia/Kolkata");
     const closes = Date.UTC(2026, 9, 18, 17, 30);
     const m = updates.check(check(), { ...gate, windowCloses: closes }, closes - 3_600_000);
-    assert.equal(m.reason, "Helper 1.26.0. Updates to 1.27.0 after the service window closes at 12:30");
-    assert.match(lines[0], /waiting, a service window is open until 12:30$/);
+    assert.equal(m.reason, "Helper 1.26.0. Updates to 1.27.0 after the service window closes at 23:00");
+    assert.match(lines[0], /waiting, a service window is open until 23:00$/);
   });
 
   it("logs what the Mac says it did, once", () => {
@@ -142,8 +151,29 @@ describe("MachineUpdates", () => {
     // What the button overrode no longer stands, so Screens offers it no longer.
     assert.equal(updates.list(1_000)[0].waitingOn, undefined);
     assert.equal(updates.check(check(), { ...gate, auto: false }, 300_000).update, true);
-    // Asked once, answered once: a failure after it is not retried by itself.
-    assert.equal(updates.check(check({ state: "failed", target: "1.27.0" }), { ...gate, auto: false }, 600_000).update, false);
+    // A failure after it is not retried by itself.
+    updates.check(check({ state: "failed", target: "1.27.0", at: 1 }), { ...gate, auto: false }, 600_000);
+    assert.equal(updates.check(check({ state: "failed", target: "1.27.0", at: 1 }), { ...gate, auto: false }, 900_000).update, false);
+  });
+
+  it("keeps Update now through a check the Mac could not act on", () => {
+    updates.check(check(), { ...gate, auto: false }, 0);
+    updates.request("5f1c09ab-7e22-4c1d", 1_000);
+    assert.equal(updates.check(check(), { ...gate, auto: false }, 300_000).update, true);
+    // Nobody logged in, or the helper quit: the press must still stand.
+    assert.equal(updates.check(check({ state: "not-running", target: "1.27.0" }), { ...gate, auto: false }, 600_000).update, true);
+    assert.equal(updates.check(check({ state: "no-session", target: "1.27.0" }), { ...gate, auto: false }, 900_000).update, true);
+  });
+
+  it("Try again stands until a new failure, not the one it was pressed on", () => {
+    const failed = check({ state: "failed", target: "1.27.0", detail: "Chromium did not start", at: 100 });
+    updates.check(failed, gate, 0);
+    updates.request("5f1c09ab-7e22-4c1d", 1_000);
+    // The same failure reported again is what Try again was pressed on.
+    assert.equal(updates.check(failed, gate, 300_000).update, true);
+    // A failure at a new time is the retry's outcome, and holds the version again.
+    updates.check({ ...failed, at: 400 }, gate, 600_000);
+    assert.equal(updates.check({ ...failed, at: 400 }, gate, 900_000).update, false);
   });
 
   it("refuses Update now for a machine that is not asking", () => {

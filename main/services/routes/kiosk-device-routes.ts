@@ -36,7 +36,20 @@ const KIOSK_INSTALLERS = new Set(["install-linux.sh", "install-macos.sh", "insta
 /** What each Mac helper and Windows kiosk last said about its updates. Runtime;
  *  see machine-updates.ts. A change pushes a `kiosk:devices` frame, which is the
  *  channel Screens already refetches on. */
-const machineUpdates = new MachineUpdates(() => announceDevices());
+const machineUpdates = new MachineUpdates(announceSoon);
+
+/** One `kiosk:devices` frame for a burst of machine changes, at most one a second:
+ *  the check is open, and a sender minting new machine ids must not turn each
+ *  into a broadcast to every Screens page. */
+let announceTimer: ReturnType<typeof setTimeout> | null = null;
+function announceSoon(): void {
+  if (announceTimer) return;
+  announceTimer = setTimeout(() => {
+    announceTimer = null;
+    announceDevices();
+  }, 1000);
+  announceTimer.unref?.();
+}
 
 /** Where every kiosk script this route serves lives. */
 const kioskScript = (name: string): string => path.join(APP_ROOT, "scripts", "kiosk", name);
@@ -298,6 +311,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       auto: stageController.getState().autoUpdateMachines,
       live: stageController.isServiceLive(),
       windowCloses: serviceWindow.activeUntil(),
+      serviceTimesKnown: stageController.serviceTimesKnown(),
     });
     json(res, { version: want, update: m.update, reason: m.reason });
     return;

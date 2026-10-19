@@ -1345,6 +1345,18 @@ export class StageController {
     return this.lastLive != null && this.lastLive.mode !== "none";
   }
 
+  /**
+   * Whether the service times and the live state are known well enough to restart
+   * a Mac's outputs on: always without Planning Center; with it, once the windows
+   * have been computed and, when a plan is followed, its live state read. Just
+   * after a restart, and while Planning Center cannot be reached, they are not.
+   */
+  serviceTimesKnown(): boolean {
+    if (!this.pcoAppId || !this.pcoSecret) return true;
+    if (!serviceWindow.isKnown()) return false;
+    return !this.state.serviceTypeId || !this.state.planId || this.lastLive !== null;
+  }
+
   /** Latest PCO live snapshot (null if none fetched yet) — for the update-lock guard. */
   getLastLive(): PcoLiveDTO | null {
     return this.lastLive;
@@ -2777,6 +2789,7 @@ export class StageController {
       serviceWindow.setWindows(windows);
       console.log(`[stage-controller] reconnect windows recomputed: ${scrub(windows.length)}`);
     } catch (err) {
+      serviceWindow.markUnknown();
       console.warn("[stage-controller] refreshServiceWindows failed:", scrubError(err));
     }
   }

@@ -63,7 +63,11 @@ export type WaitReason =
   /** Planning Center reports a service live. */
   | "live"
   /** Within the window around a rehearsal or service (service-window.ts). */
-  | "window";
+  | "window"
+  /** Planning Center is set up but its service times or live state have not been
+   *  read: just after the server starts, or while Planning Center cannot be
+   *  reached. Not knowing is not the same as knowing nothing is on. */
+  | "unknown";
 
 export type Decision = { update: true } | { update: false; why: WaitReason; until?: number };
 
@@ -82,6 +86,8 @@ export interface MachineUpdate {
   /** The version (or launcher digest) the state is about. */
   target?: string;
   detail?: string;
+  /** When the machine did what `state` says, by its own clock (unix seconds). */
+  at?: number;
   checkedAt: number;
   /** The answer it was given. */
   update: boolean;
@@ -115,6 +121,9 @@ export interface CheckInput {
   state: MachineState;
   target?: string;
   detail?: string;
+  /** When the machine's updater last did what `state` says (unix seconds), so two
+   *  failures with the same reason are told apart. */
+  at?: number;
 }
 
 /** A check's query string, read strictly: anything malformed is a 400, so a broken
@@ -142,6 +151,7 @@ export function parseCheck(q: URLSearchParams): CheckInput | { error: string } {
     target: text("target", MAX_VERSION),
     // A machine's own words, cut rather than refused: a long reason is still a reason.
     detail: q.get("detail")?.slice(0, MAX_TEXT) || undefined,
+    at: /^\d{1,12}$/.test(q.get("at") ?? "") ? Number(q.get("at")) : undefined,
   };
 }
 
@@ -154,6 +164,9 @@ export interface Gate {
   live: boolean;
   /** When the service window open now closes, or null when none is open. */
   windowCloses: number | null;
+  /** Whether the service times and live state are known: always, without
+   *  Planning Center; with it, once both have been read. */
+  serviceTimesKnown: boolean;
 }
 
 /**
@@ -162,9 +175,10 @@ export interface Gate {
  * A Mac restarts its helper to finish, which takes every output it drives off air
  * for about two seconds, so it never does while a service is live or within the
  * window around one (the app's one definition of "near a service", service-window
- * .ts). Update now overrides the switch and the window, because a person asked;
- * it does not override a live service, because a press on the wrong row must not
- * black out an SDI feed on air.
+ * .ts), nor while Planning Center is set up and those times are not known yet.
+ * Update now overrides the switch, the window and not knowing, because a person
+ * asked; it does not override a live service, because a press on the wrong row
+ * must not black out an SDI feed on air.
  *
  * A Windows kiosk replaces a file and restarts nothing (the new launcher runs at the
  * next sign-in), so only the switch applies to it.
@@ -175,7 +189,9 @@ export function decide(input: Pick<CheckInput, "platform" | "have" | "state" | "
   if (!gate.auto && !gate.requested) return { update: false, why: "off" };
   if (input.platform === "windows") return { update: true };
   if (gate.live) return { update: false, why: "live" };
-  if (gate.windowCloses !== null && !gate.requested) return { update: false, why: "window", until: gate.windowCloses };
+  if (gate.requested) return { update: true };
+  if (!gate.serviceTimesKnown) return { update: false, why: "unknown" };
+  if (gate.windowCloses !== null) return { update: false, why: "window", until: gate.windowCloses };
   return { update: true };
 }
 
@@ -209,6 +225,8 @@ export function describe({ platform, have, state, target, detail }: Pick<CheckIn
       return `Helper ${have}. Updates to ${want} when the service is no longer live`;
     case "window":
       return `Helper ${have}. Updates to ${want} after the service window closes at ${closing(d.until)}`;
+    case "unknown":
+      return `Helper ${have}. Updates to ${want} once Planning Center's service times are known`;
   }
 }
 
@@ -228,9 +246,12 @@ const idOf = (m: Pick<MachineUpdate, "machine">): string => m.machine.slice(0, 8
 
 export class MachineUpdates {
   private readonly machines = new Map<string, MachineUpdate>();
-  /** Machines someone pressed Update now or Try again for. Consumed by the first
-   *  answer that tells the machine to go ahead. A Set: the key is request-derived. */
-  private readonly requested = new Set<string>();
+  /** Machines someone pressed Update now or Try again for, each with what it had
+   *  last done when the button was pressed. A request stands until the machine
+   *  reports a new outcome (updated, or failed again) or is up to date, so a check
+   *  it could not act on (nobody logged in, the helper quit) does not spend it. A
+   *  Map: the key is request-derived. */
+  private readonly requested = new Map<string, string>();
 
   /** When this server began answering checks. A machine checks every five minutes,
    *  so until one interval has passed, a machine not heard from may simply not have
@@ -244,11 +265,10 @@ export class MachineUpdates {
   /** Answer one check, remember what the machine said, and log what changed. */
   check(input: CheckInput, gate: Omit<Gate, "requested">, now = Date.now()): MachineUpdate {
     this.prune(now);
-    const requested = this.requested.has(input.machine);
-    const d = decide(input, { ...gate, requested });
-    // Asked once, answered once; and a machine that has caught up has nothing
-    // left to be asked for.
-    if (d.update || d.why === "current") this.requested.delete(input.machine);
+    const asked = this.requested.get(input.machine);
+    const d = decide(input, { ...gate, requested: asked !== undefined });
+    const settled = (!d.update && d.why === "current") || ((input.state === "updated" || input.state === "failed") && outcomeOf(input) !== asked);
+    if (asked !== undefined && settled) this.requested.delete(input.machine);
     const next: MachineUpdate = {
       machine: input.machine,
       platform: input.platform,
@@ -258,6 +278,7 @@ export class MachineUpdates {
       state: input.state,
       target: input.target,
       detail: input.detail,
+      at: input.at,
       checkedAt: now,
       update: d.update,
       reason: describe(input, gate.want, d),
@@ -266,7 +287,16 @@ export class MachineUpdates {
     };
     const prev = this.machines.get(input.machine);
     this.machines.delete(input.machine);
-    if (this.machines.size >= MAX_MACHINES) this.machines.delete(this.machines.keys().next().value!);
+    if (this.machines.size >= MAX_MACHINES) {
+      const oldest = this.machines.keys().next().value!;
+      this.machines.delete(oldest);
+      this.requested.delete(oldest);
+      // Once per filling, not per check: a flood is one line.
+      if (!this.fullWarned) console.warn(`[helper-update] ${scrub(MAX_MACHINES)} machines are checking for updates; the longest-quiet ones are no longer listed`);
+      this.fullWarned = true;
+    } else if (this.machines.size < MAX_MACHINES - 1) {
+      this.fullWarned = false;
+    }
     this.machines.set(input.machine, next);
     this.logChange(prev, next);
     if (!prev || signature(prev) !== signature(next)) this.onChange();
@@ -279,7 +309,7 @@ export class MachineUpdates {
     this.prune(now);
     const m = this.machines.get(machine);
     if (!m) return false;
-    this.requested.add(machine);
+    this.requested.set(machine, outcomeOf(m));
     console.log(`[helper-update] ${scrub(kind(m))} ${scrub(hostOf(m))} (${scrub(idOf(m))}): an update to ${scrub(m.platform === "macos" ? m.want : "the current launcher")} was asked for from Screens; it starts at the machine's next check, within ${scrub(minutes(CHECK_INTERVAL_MS))}`);
     // Answer the button in the listing straight away, rather than leaving
     // "automatic updates are off" on screen until the machine next asks. A live
@@ -292,6 +322,8 @@ export class MachineUpdates {
     }
     return true;
   }
+
+  private fullWarned = false;
 
   list(now = Date.now()): MachineUpdate[] {
     this.prune(now);
@@ -359,13 +391,26 @@ export class MachineUpdates {
  *  which logs a line of its own. */
 function waitPhrase(m: MachineUpdate): string {
   if (m.waitingOn === "window") return `a service window is open until ${closing(m.waitUntil)}`;
-  return { off: "automatic updates are off", failed: "this version failed here before", live: "a service is live", current: "", none: "" }[m.waitingOn ?? "none"];
+  return {
+    off: "automatic updates are off",
+    failed: "this version failed here before",
+    live: "a service is live",
+    unknown: "Planning Center's service times are not known yet",
+    current: "",
+    none: "",
+  }[m.waitingOn ?? "none"];
 }
 
 /** "5 minutes", from a constant, so a sentence cannot outlive the number it names. */
 export function minutes(ms: number): string {
   const n = Math.round(ms / 60_000);
   return `${n} minute${n === 1 ? "" : "s"}`;
+}
+
+/** What a machine last did, as one value: the same failure reported again is the
+ *  same, a failure at a new time is not. */
+function outcomeOf(m: Pick<CheckInput, "state" | "target" | "detail" | "at">): string {
+  return JSON.stringify([m.state, m.target, m.detail, m.at]);
 }
 
 /** What a person reads of a machine: its listing changes only when this does. */
