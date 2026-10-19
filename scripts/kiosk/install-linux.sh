@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Turn this machine into a Stage Utility display.
 #
 #   curl -fsSL http://<server>/kiosk/install-linux.sh | sudo sh
@@ -96,7 +96,8 @@ chmod 600 "$STATE_DIR/token"
 # Raspberry Pi OS repo; nothing is fetched from anywhere else.
 if ! command -v chromium-browser >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1; then
   echo "==> Installing chromium"
-  apt-get update -qq && apt-get install -y -qq chromium-browser || apt-get install -y -qq chromium
+  apt-get update -qq || echo "==> apt-get update failed; installing from the package index already on disk"
+  apt-get install -y -qq chromium-browser || apt-get install -y -qq chromium
 fi
 command -v socat >/dev/null 2>&1 || { echo "==> Installing socat"; apt-get install -y -qq socat; }
 command -v unclutter >/dev/null 2>&1 || apt-get install -y -qq unclutter || true
