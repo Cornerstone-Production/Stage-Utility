@@ -70,6 +70,17 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
+    // ── Mac helpers and Windows kiosks follow this server's version ───────
+    if (method === "POST" && pathname === "/api/machine-updates/auto") {
+      const body = (await readBody(req)) as Record<string, unknown>;
+      if (typeof body.enabled !== "boolean") {
+        error(res, "body.enabled (boolean) required");
+        return;
+      }
+      json(res, await stageController.setAutoUpdateMachines(body.enabled));
+      return;
+    }
+
     // ── QR visibility ─────────────────────────────────────────────────────
     if (method === "POST" && pathname === "/api/show-qr") {
       const body = await readBody(req) as Record<string, unknown>;

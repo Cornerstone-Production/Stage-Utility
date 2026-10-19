@@ -86,11 +86,23 @@ function Write-Status([string]$State, [string]$Target, [string]$Detail, [string]
   [IO.File]::WriteAllText($StatusFile, $json, $Utf8)
 }
 
+# A server root and nothing else: the same shape as HOST_RE in
+# main/services/kiosk-installer-origin.ts and is_origin in install-macos.sh.
+$OriginPattern = '^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$'
+
 function Read-Origin([string]$File) {
   if (-not (Test-Path -LiteralPath $File)) { return '' }
   $text = ([string](Get-Content -LiteralPath $File -Raw)).Trim().TrimEnd('/')
-  if ($text -match '^https?://[^\s/]+$') { return $text }
+  if ($text -match $OriginPattern) { return $text }
   return ''
+}
+
+# Record this check's answer (the server's reason, or why there was none) and say
+# it only when it differs from the last one: a check every five minutes must not
+# be a log line every five minutes.
+function Write-Answer($Status, [string]$Answer, [string]$Message) {
+  if ($Status.answer -ne $Answer) { Write-UpdateLog $Message }
+  Write-Status -State $Status.state -Target $Status.target -Detail $Status.detail -Answer $Answer
 }
 
 # Ask the server what to do with the launcher whose digest is $Have.
@@ -139,8 +151,7 @@ function Invoke-Updater {
   $status = Read-Status
   $idFile = Join-Path $StateDir 'device-id'
   if (-not (Test-Path -LiteralPath $idFile) -or -not (Test-Path -LiteralPath $Launcher)) {
-    if ($status.answer -ne 'not-installed') { Write-UpdateLog "there is no device id or kiosk.ps1 in $StateDir, so there is nothing to update; run the installer again" }
-    Write-Status -State $status.state -Target $status.target -Detail $status.detail -Answer 'not-installed'
+    Write-Answer -Status $status -Answer 'not-installed' -Message "there is no device id or kiosk.ps1 in $StateDir, so there is nothing to update; run the installer again"
     return
   }
   $machine = ([string](Get-Content -LiteralPath $idFile -Raw)).Trim()
@@ -149,25 +160,22 @@ function Invoke-Updater {
   $pinned = Read-Origin -File (Join-Path $StateDir 'server')
   $origin = if ($pinned) { $pinned } else { Read-Origin -File (Join-Path $AppDir 'update-from') }
   if (-not $origin) {
-    if ($status.answer -ne 'no-server') { Write-UpdateLog "there is no server to ask: no server file in $StateDir and no update-from in $AppDir; run the installer again" }
-    Write-Status -State $status.state -Target $status.target -Detail $status.detail -Answer 'no-server'
+    Write-Answer -Status $status -Answer 'no-server' -Message "there is no server to ask: no server file in $StateDir and no update-from in $AppDir; run the installer again"
     return
   }
 
   try {
     $answer = Invoke-Check -Origin $origin -Have $have -Machine $machine -Status $status
   } catch {
-    # Said once, then not again until the server answers.
-    if ($status.answer -ne 'unreachable') { Write-UpdateLog "$origin did not answer the update check ($($_.Exception.Message)); trying again in five minutes" }
-    Write-Status -State $status.state -Target $status.target -Detail $status.detail -Answer 'unreachable'
+    Write-Answer -Status $status -Answer 'unreachable' -Message "$origin did not answer the update check ($($_.Exception.Message)); trying again in five minutes"
     return
   }
   $reason = [string]$answer.reason
-  if ($reason -ne $status.answer) { Write-UpdateLog "${origin}: $reason" }
-  Write-Status -State $status.state -Target $status.target -Detail $status.detail -Answer $reason
+  Write-Answer -Status $status -Answer $reason -Message "${origin}: $reason"
   if ($answer.update -ne $true) { return }
 
-  $want = [string]$answer.sha256
+  # For a Windows kiosk the server's version is the digest of its launcher.
+  $want = [string]$answer.version
   Write-UpdateLog "updating the launcher from $($have.Substring(0, 12)) to $($want.Substring(0, [Math]::Min(12, $want.Length))), from $origin"
   try {
     Install-NewLauncher -Origin $origin -Want $want

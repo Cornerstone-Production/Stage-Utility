@@ -72,11 +72,11 @@ async function fakeServer(): Promise<Fake> {
 
 /** The answer a server gives to say there is nothing to do. */
 const upToDate = (reason = "This PC is on the server's launcher."): Record<string, unknown> => ({
-  version: sha(OLD), update: false, reason, sha256: sha(OLD),
+  version: sha(OLD), update: false, reason,
 });
 /** The answer that says to update to NEW. */
 const updateToNew = (want = sha(NEW)): Record<string, unknown> => ({
-  version: want, update: true, reason: "An update is due.", sha256: want,
+  version: want, update: true, reason: "An update is due.",
 });
 
 function pwsh(args: string[], env: Record<string, string>): Promise<{ status: number | null; out: string; err: string }> {
@@ -252,7 +252,7 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       assert.deepEqual(leftovers(), []);
       assert.match(log().join("\n"), /updated kiosk\.ps1; the new launcher runs at the next sign-in/);
 
-      f.answer = { version: sha(NEW), update: false, reason: "This PC is on the server's launcher.", sha256: sha(NEW) };
+      f.answer = { version: sha(NEW), update: false, reason: "This PC is on the server's launcher." };
       await runUpdater();
       assert.equal(f.downloads, 1, "an updated PC downloads nothing more");
       assert.deepEqual(
@@ -275,7 +275,7 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       assert.deepEqual(leftovers(), [], "the rejected download is not left behind");
       assert.match(log().join("\n"), /the update to [0-9a-f]{64} failed: the download has SHA-256 [0-9a-f]{64}, expected [0-9a-f]{64}\. kiosk\.ps1 is unchanged/);
 
-      f.answer = { ...upToDate("This version failed here before."), version: named, sha256: named };
+      f.answer = { ...upToDate("This version failed here before."), version: named };
       await runUpdater();
       assert.equal(f.checks[1].state, "failed");
       assert.equal(f.checks[1].target, named);

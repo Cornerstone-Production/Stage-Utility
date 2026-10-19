@@ -111,7 +111,6 @@ export interface CheckInput {
   machine: string;
   platform: UpdatePlatform;
   host?: string;
-  arch?: string;
   have: string;
   state: MachineState;
   target?: string;
@@ -134,12 +133,10 @@ export function parseCheck(q: URLSearchParams): CheckInput | { error: string } {
   if (!have) return { error: "have (what is installed) is required" };
   const state = (q.get("state") || "idle") as MachineState;
   if (!MACHINE_STATES.includes(state)) return { error: `state must be one of ${MACHINE_STATES.join(", ")}` };
-  const arch = text("arch", 16);
   return {
     machine,
     platform: platform as UpdatePlatform,
     host: text("host", 128),
-    arch,
     have,
     state,
     target: text("target", MAX_VERSION),
@@ -184,7 +181,7 @@ export function decide(input: Pick<CheckInput, "platform" | "have" | "state" | "
 
 /** The sentence Screens shows for a machine. A Windows launcher is a digest,
  *  which nobody can read, so it is never named. */
-export function describe(platform: UpdatePlatform, have: string, want: string, d: Decision, state: MachineState, target: string | undefined, detail: string | undefined): string {
+export function describe({ platform, have, state, target, detail }: Pick<CheckInput, "platform" | "have" | "state" | "target" | "detail">, want: string, d: Decision): string {
   if (platform === "windows") {
     if (d.update) return "Kiosk launcher updating";
     switch (d.why) {
@@ -249,9 +246,9 @@ export class MachineUpdates {
     this.prune(now);
     const requested = this.requested.has(input.machine);
     const d = decide(input, { ...gate, requested });
-    if (d.update) this.requested.delete(input.machine);
-    // A machine that has caught up has nothing left to be asked for.
-    if (!d.update && d.why === "current") this.requested.delete(input.machine);
+    // Asked once, answered once; and a machine that has caught up has nothing
+    // left to be asked for.
+    if (d.update || d.why === "current") this.requested.delete(input.machine);
     const next: MachineUpdate = {
       machine: input.machine,
       platform: input.platform,
@@ -263,7 +260,7 @@ export class MachineUpdates {
       detail: input.detail,
       checkedAt: now,
       update: d.update,
-      reason: describe(input.platform, input.have, gate.want, d, input.state, input.target, input.detail),
+      reason: describe(input, gate.want, d),
       waitingOn: d.update ? undefined : d.why,
       waitUntil: d.update ? undefined : d.until,
     };
@@ -283,14 +280,14 @@ export class MachineUpdates {
     const m = this.machines.get(machine);
     if (!m) return false;
     this.requested.add(machine);
-    console.log(`[helper-update] ${scrub(kind(m))} ${scrub(hostOf(m))} (${scrub(idOf(m))}): an update to ${scrub(m.platform === "macos" ? m.want : "the current launcher")} was asked for from Screens; it starts at the machine's next check, within five minutes`);
+    console.log(`[helper-update] ${scrub(kind(m))} ${scrub(hostOf(m))} (${scrub(idOf(m))}): an update to ${scrub(m.platform === "macos" ? m.want : "the current launcher")} was asked for from Screens; it starts at the machine's next check, within ${scrub(minutes(CHECK_INTERVAL_MS))}`);
     // Answer the button in the listing straight away, rather than leaving
     // "automatic updates are off" on screen until the machine next asks. A live
     // service still holds a Mac back (see decide), so that sentence stands.
     if (m.waitingOn !== "live") {
       // No longer waiting on what the button just overrode, so no button and no
       // failure colour either; the machine's next check says what came of it.
-      this.machines.set(machine, { ...m, reason: "Update asked for. It starts at the machine's next check, within five minutes", waitingOn: undefined, waitUntil: undefined });
+      this.machines.set(machine, { ...m, reason: `Update asked for. It starts at the machine's next check, within ${minutes(CHECK_INTERVAL_MS)}`, waitingOn: undefined, waitUntil: undefined });
       this.onChange();
     }
     return true;
@@ -299,12 +296,6 @@ export class MachineUpdates {
   list(now = Date.now()): MachineUpdate[] {
     this.prune(now);
     return [...this.machines.values()];
-  }
-
-  /** Tests only. */
-  reset(): void {
-    this.machines.clear();
-    this.requested.clear();
   }
 
   private prune(now: number): void {
@@ -364,19 +355,17 @@ export class MachineUpdates {
   }
 }
 
+/** Why a machine was told to wait, for its log line. Never asked for `current`,
+ *  which logs a line of its own. */
 function waitPhrase(m: MachineUpdate): string {
-  switch (m.waitingOn) {
-    case "off":
-      return "automatic updates are off";
-    case "failed":
-      return "this version failed here before";
-    case "live":
-      return "a service is live";
-    case "window":
-      return `a service window is open until ${closing(m.waitUntil)}`;
-    default:
-      return m.reason;
-  }
+  if (m.waitingOn === "window") return `a service window is open until ${closing(m.waitUntil)}`;
+  return { off: "automatic updates are off", failed: "this version failed here before", live: "a service is live", current: "", none: "" }[m.waitingOn ?? "none"];
+}
+
+/** "5 minutes", from a constant, so a sentence cannot outlive the number it names. */
+export function minutes(ms: number): string {
+  const n = Math.round(ms / 60_000);
+  return `${n} minute${n === 1 ? "" : "s"}`;
 }
 
 /** What a person reads of a machine: its listing changes only when this does. */

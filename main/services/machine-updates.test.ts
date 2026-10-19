@@ -60,8 +60,8 @@ describe("parseCheck", () => {
   const q = (o: Record<string, string>) => new URLSearchParams(o);
 
   it("reads a Mac's check", () => {
-    const r = parseCheck(q({ machine: "5f1c09ab-7e22", platform: "macos", have: "1.26.0", arch: "arm64", host: "booth-mini", state: "failed", target: "1.27.0", detail: "Chromium did not start" }));
-    assert.deepEqual(r, { machine: "5f1c09ab-7e22", platform: "macos", have: "1.26.0", arch: "arm64", host: "booth-mini", state: "failed", target: "1.27.0", detail: "Chromium did not start" });
+    const r = parseCheck(q({ machine: "5f1c09ab-7e22", platform: "macos", have: "1.26.0", host: "booth-mini", state: "failed", target: "1.27.0", detail: "Chromium did not start" }));
+    assert.deepEqual(r, { machine: "5f1c09ab-7e22", platform: "macos", have: "1.26.0", host: "booth-mini", state: "failed", target: "1.27.0", detail: "Chromium did not start" });
   });
 
   it("refuses what an updater must always send, and an unknown state", () => {
@@ -138,7 +138,7 @@ describe("MachineUpdates", () => {
   it("Update now goes ahead at the next check, once", () => {
     updates.check(check(), { ...gate, auto: false }, 0);
     assert.equal(updates.request("5f1c09ab-7e22-4c1d", 1_000), true);
-    assert.equal(updates.list(1_000)[0].reason, "Update asked for. It starts at the machine's next check, within five minutes");
+    assert.equal(updates.list(1_000)[0].reason, "Update asked for. It starts at the machine's next check, within 5 minutes");
     // What the button overrode no longer stands, so Screens offers it no longer.
     assert.equal(updates.list(1_000)[0].waitingOn, undefined);
     assert.equal(updates.check(check(), { ...gate, auto: false }, 300_000).update, true);
@@ -172,7 +172,7 @@ describe("MachineUpdates", () => {
 describe("the sentence Screens shows", () => {
   it("names a Windows launcher without its digest", () => {
     const d = { update: false as const, why: "current" as const };
-    assert.equal(sentence("windows", "a".repeat(64), "a".repeat(64), d, "updated", undefined, undefined), "Kiosk launcher updated. It takes effect at the next sign-in");
-    assert.equal(sentence("windows", "a".repeat(64), "b".repeat(64), { update: false, why: "off" }, "idle", undefined, undefined), "Kiosk launcher out of date. Automatic updates are off");
+    assert.equal(sentence({ platform: "windows", have: "a".repeat(64), state: "updated", target: undefined, detail: undefined }, "a".repeat(64), d), "Kiosk launcher updated. It takes effect at the next sign-in");
+    assert.equal(sentence({ platform: "windows", have: "a".repeat(64), state: "idle", target: undefined, detail: undefined }, "b".repeat(64), { update: false, why: "off" }), "Kiosk launcher out of date. Automatic updates are off");
   });
 });

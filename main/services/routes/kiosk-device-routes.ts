@@ -7,7 +7,7 @@
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
 import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret, announceDevices } from "../kiosk-presence.js";
-import { MachineUpdates, parseCheck } from "../machine-updates.js";
+import { MachineUpdates, minutes, parseCheck, REPORT_TTL_MS } from "../machine-updates.js";
 import { serviceWindow } from "../service-window.js";
 import { parseHealthReport } from "../output-health.js";
 import { headerValue } from "../http-origin.js";
@@ -36,19 +36,15 @@ const KIOSK_INSTALLERS = new Set(["install-linux.sh", "install-macos.sh", "insta
 /** What each Mac helper and Windows kiosk last said about its updates. Runtime;
  *  see machine-updates.ts. A change pushes a `kiosk:devices` frame, which is the
  *  channel Screens already refetches on. */
-export const machineUpdates = new MachineUpdates(() => announceDevices());
+const machineUpdates = new MachineUpdates(() => announceDevices());
 
-/** The Windows launcher this build serves, and its digest: what a Windows kiosk
- *  compares its own against. Read once: it is part of the build, not of the data. */
-let windowsLauncher: Promise<{ body: string; sha256: string }> | null = null;
-function readWindowsLauncher(): Promise<{ body: string; sha256: string }> {
-  windowsLauncher ??= readFile(path.join(APP_ROOT, "scripts", "kiosk", "kiosk-windows.ps1"), "utf8").then((body) => ({
-    body,
-    sha256: crypto.createHash("sha256").update(body, "utf8").digest("hex"),
-  }));
-  // A failed read is not kept, so the next check tries the disk again.
-  windowsLauncher.catch(() => (windowsLauncher = null));
-  return windowsLauncher;
+/** Where every kiosk script this route serves lives. */
+const kioskScript = (name: string): string => path.join(APP_ROOT, "scripts", "kiosk", name);
+
+/** The SHA-256 of the Windows launcher as served, byte for byte: what a Windows
+ *  kiosk compares its own copy against. */
+async function windowsLauncherDigest(): Promise<string> {
+  return crypto.createHash("sha256").update(await readFile(kioskScript("kiosk-windows.ps1"))).digest("hex");
 }
 
 /** The Mac output helper's zips, fetched from the release on first request and
@@ -147,7 +143,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // install root, where "../../../scripts" resolves to file:///scripts and
       // 404s. app-root.ts exists for exactly this and is used in five other
       // places; this was the copy that drifted.
-      body = await readFile(path.join(APP_ROOT, "scripts", "kiosk", name), "utf8");
+      body = await readFile(kioskScript(name), "utf8");
     } catch {
       error(res, "installer not found in this build", 404);
       return;
@@ -285,24 +281,25 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       error(res, input.error, 400);
       return;
     }
-    let launcherSha: string | undefined;
+    // What a machine of this kind should have: the server's version, or for a
+    // Windows kiosk the digest of the launcher it serves.
+    let want = pkgVersion();
     if (input.platform === "windows") {
       try {
-        launcherSha = (await readWindowsLauncher()).sha256;
+        want = await windowsLauncherDigest();
       } catch (err) {
         console.error(`[helper-update] could not read kiosk-windows.ps1 to answer a Windows kiosk: ${scrub(err)}`);
         error(res, "this build has no Windows launcher to offer", 500);
         return;
       }
     }
-    const want = launcherSha ?? pkgVersion();
     const m = machineUpdates.check(input, {
       want,
       auto: stageController.getState().autoUpdateMachines,
       live: stageController.isServiceLive(),
       windowCloses: serviceWindow.activeUntil(),
     });
-    json(res, { version: want, update: m.update, reason: m.reason, ...(launcherSha ? { sha256: launcherSha } : {}) });
+    json(res, { version: want, update: m.update, reason: m.reason });
     return;
   }
 
@@ -314,20 +311,10 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (!machineUpdates.request(machine)) {
-      error(res, "That machine has not checked for updates in the last 20 minutes, so there is nothing to tell. Check it is on, and that its updater is installed (run the installer once).", 404);
+      error(res, `That machine has not checked for updates in the last ${minutes(REPORT_TTL_MS)}, so there is nothing to tell. Check it is on, and that its updater is installed (run the installer once).`, 404);
       return;
     }
     json(res, { ok: true });
-    return;
-  }
-
-  if (method === "POST" && pathname === "/api/machine-updates/auto") {
-    const body = (await readBody(req)) as Record<string, unknown>;
-    if (typeof body.enabled !== "boolean") {
-      error(res, "body.enabled (boolean) required");
-      return;
-    }
-    json(res, await stageController.setAutoUpdateMachines(body.enabled));
     return;
   }
 

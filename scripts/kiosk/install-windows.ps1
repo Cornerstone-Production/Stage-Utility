@@ -41,7 +41,14 @@ function Get-DownloadOrigin {
   $candidates = @($env:STAGE_DOWNLOAD_FROM, $env:STAGE_SERVER, $FetchedFrom)
   if (Test-Path -LiteralPath $pinned) { $candidates += ([string](Get-Content -LiteralPath $pinned -Raw)).Trim() }
   foreach ($candidate in $candidates) {
-    if ($candidate) { return $candidate.Trim().TrimEnd('/') }
+    if (-not $candidate) { continue }
+    $origin = $candidate.Trim().TrimEnd('/')
+    # A server root, the shape kiosk-update-windows.ps1 and the server's HOST_RE
+    # admit: anything else is refused here rather than downloaded from.
+    if ($origin -notmatch '^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$') {
+      throw "$origin is not a server address (http://<host>:<port>, nothing after it)"
+    }
+    return $origin
   }
   return ''
 }

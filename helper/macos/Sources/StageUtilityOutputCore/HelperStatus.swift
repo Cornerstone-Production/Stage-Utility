@@ -45,7 +45,7 @@ public struct HelperStatus: Codable, Equatable {
     self.localNetworkRefused = localNetworkRefused
   }
 
-  /// The file's name in the helper's own folder. `HELPER_STATUS` in
+  /// The file's name in the helper's own folder. `HELPER_STATUS_NAME` in
   /// scripts/kiosk/install-macos.sh (`InstallerContractTests`).
   public static let fileName = "helper-status.json"
 

@@ -10,6 +10,7 @@ import { useState } from "react";
 
 import { invoke } from "../../lib/api";
 import { toast } from "../../components/ui";
+import { Button } from "../../components/ui/button";
 import { errorMessage } from "@main/services/errors";
 import { CHECK_INTERVAL_MS, type MachineUpdate } from "@main/services/machine-updates";
 import type { PublicDevice } from "@main/services/kiosk-devices-store";
@@ -96,26 +97,26 @@ export async function requestUpdate(machine: string): Promise<void> {
   }
 }
 
-/** The button, with its own busy state. */
+/** The button, with its own busy state, in the look of the Device section's
+ *  Release. requestUpdate says its own failure, so nothing here can throw. */
 export function UpdateButton({ reading }: { reading: UpdateReading }) {
   const [busy, setBusy] = useState(false);
   const { action, machine } = reading;
   if (!action || !machine) return null;
   return (
-    <button
+    <Button
       type="button"
+      variant="transparent"
+      size="small"
+      className="border border-line-strong font-medium text-fg"
       disabled={busy}
       onClick={async () => {
         setBusy(true);
-        try {
-          await requestUpdate(machine);
-        } finally {
-          setBusy(false);
-        }
+        await requestUpdate(machine);
+        setBusy(false);
       }}
-      className="shrink-0 rounded-md border border-line-strong px-2 py-1 text-caption1 font-medium text-fg transition-colors hover:bg-fill disabled:opacity-50"
     >
       {action}
-    </button>
+    </Button>
   );
 }

@@ -39,7 +39,7 @@ export function FieldLabel({ htmlFor, children }: { htmlFor: string; children: R
 /** One setting: its name and what it does, and the control beside them.
  *  `htmlFor` makes the name the label of a control carrying that id; a control
  *  with no id (a Switch, the NumberInput) names itself with aria-label. */
-export function SettingRow({ label, help, htmlFor, children }: { label: string; help: string; htmlFor?: string; children: ReactNode }) {
+export function SettingRow({ label, help, htmlFor, children }: { label: string; help: ReactNode; htmlFor?: string; children: ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-3 py-1.5">
       <div className="min-w-0">

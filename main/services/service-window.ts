@@ -64,20 +64,13 @@ class ServiceWindowService {
   }
 
   /** When the window open now closes, or null outside one. Windows can overlap (a
-   *  rehearsal's tail running into the service's lead), so it is the latest close
-   *  of every window holding `now`, and a run of overlapping ones reads as one. */
+   *  rehearsal's tail running into the service's lead), so a run of overlapping
+   *  ones reads as one. One pass: the windows are sorted by when they open, so any
+   *  window that extends the run comes after the one it extends. */
   activeUntil(now = Date.now()): number | null {
     let until: number | null = null;
-    let grew = true;
-    while (grew) {
-      grew = false;
-      for (const w of this.windows) {
-        const holds = until === null ? now >= w.open && now <= w.close : w.open <= until && w.close > until;
-        if (holds) {
-          until = w.close;
-          grew = true;
-        }
-      }
+    for (const w of this.windows) {
+      if (until === null ? now >= w.open && now <= w.close : w.open <= until && w.close > until) until = w.close;
     }
     return until;
   }

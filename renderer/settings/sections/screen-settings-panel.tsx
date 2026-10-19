@@ -372,16 +372,12 @@ function OutputDeviceSection({ output, device, online, health, reported, update,
 /** The machine's own software, and the button that changes what it was told. */
 function MachineUpdateRow({ label, update }: { label: string; update: UpdateReading }) {
   return (
-    <div className="flex items-start justify-between gap-3 py-1.5">
-      <div className="min-w-0">
-        <div className="text-footnote font-medium text-fg">{label}</div>
-        <div className={cn("mt-px text-caption1", update.tone === "muted" ? "text-fg-subtle" : TONE_CLASS[update.tone])}>{update.text}</div>
-      </div>
+    <SettingRow label={label} help={<span className={TONE_CLASS[update.tone]}>{update.text}</span>}>
       <div className="flex shrink-0 items-center gap-1.5">
         <Pill tone="muted">{update.badge}</Pill>
         <UpdateButton reading={update} />
       </div>
-    </div>
+    </SettingRow>
   );
 }
 
@@ -393,6 +389,7 @@ function DeviceSection({ output, online, actions }: { output: Output; online: bo
   if (!device) {
     return <p className="text-caption1 text-fg-subtle">No device is set up for this screen.</p>;
   }
+  const update = readUpdate(device, data);
   if (device.output) {
     return (
       <OutputDeviceSection
@@ -401,12 +398,11 @@ function DeviceSection({ output, online, actions }: { output: Output; online: bo
         online={online}
         health={health.find((h) => h.deviceId === device.id)}
         reported={reported.includes(device.id)}
-        update={readUpdate(device, data)}
+        update={update}
         actions={actions}
       />
     );
   }
-  const update = readUpdate(device, data);
   const who = [device.label || device.hostname || "Set up on a device", device.ip].filter(Boolean).join(" · ");
   return (
     <div className="py-0.5">

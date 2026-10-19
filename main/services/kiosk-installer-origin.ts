@@ -43,18 +43,15 @@ export function originFromHost(host: string | undefined, secure: boolean): strin
  *  that is a change to the script this module has not been taught, and a silent
  *  pass-through would ship an installer that cannot download. Both installers'
  *  quotes hold the address safely: HOST_RE admits no quote of either kind. */
-export function stampOrigin(script: string, origin: string | null, name = "install-macos.sh"): string {
+export function stampOrigin(script: string, origin: string | null, name: string): string {
   const m = MARKERS.get(name);
   if (!m) throw new Error(`${name} is not an installer the server stamps`);
-  // A Windows script saved with CRLF line ends still has its marker as a line.
-  const lines = script.split("\n").map((l) => l.replace(/\r$/, ""));
-  if (!lines.includes(m.marker)) {
-    throw new Error(`${name} has no ${m.marker} line to stamp`);
-  }
+  // One lookup for both the check and the stamp, so a marker found is a marker
+  // stamped. A Windows script saved with CRLF line ends keeps them.
+  const lines = script.split("\n");
+  const at = lines.findIndex((l) => l.replace(/\r$/, "") === m.marker);
+  if (at < 0) throw new Error(`${name} has no ${m.marker} line to stamp`);
   if (origin === null) return script;
-  return script.replace(new RegExp(`(^|\n)${escapeRe(m.marker)}(\r?\n)`), (_all, before: string, after: string) => `${before}${m.line(origin)}${after}`);
-}
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  lines[at] = m.line(origin) + (lines[at].endsWith("\r") ? "\r" : "");
+  return lines.join("\n");
 }
