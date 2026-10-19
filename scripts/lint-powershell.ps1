@@ -11,7 +11,7 @@
 # Justification = 'why')] on the function or param block that owns it; a
 # repo-wide exclusion is never the answer.
 #
-# The installer is kept ASCII. PSUseBOMForUnicodeEncodedFile asks for a byte-order
+# The kiosk scripts are kept ASCII. PSUseBOMForUnicodeEncodedFile asks for a byte-order
 # mark on a file with other characters, but Windows PowerShell 5.1 reads a file
 # without one as ANSI, and a BOM on text fetched with `irm | iex` can break the
 # first line. ASCII needs neither.
@@ -19,6 +19,8 @@ $ErrorActionPreference = 'Stop'
 
 $Files = @(
   'scripts/kiosk/install-windows.ps1',
+  'scripts/kiosk/kiosk-update-windows.ps1',
+  'scripts/kiosk/kiosk-windows.ps1',
   'scripts/lint-powershell.ps1'
 )
 

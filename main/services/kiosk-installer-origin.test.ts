@@ -8,7 +8,7 @@ import * as path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { ORIGIN_MARKER, originFromHost, stampOrigin } from "./kiosk-installer-origin.js";
+import { ORIGIN_MARKER, WINDOWS_ORIGIN_MARKER, originFromHost, stampOrigin } from "./kiosk-installer-origin.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = readFileSync(path.join(HERE, "..", "..", "scripts", "kiosk", "install-macos.sh"), "utf8");
@@ -62,5 +62,28 @@ describe("stampOrigin on the real installer", () => {
 
   it("refuses to pass through a script it cannot stamp", () => {
     assert.throws(() => stampOrigin(SCRIPT.replace(ORIGIN_MARKER, "FETCHED_FROM=${X:-}"), "http://a"), /no FETCHED_FROM/);
+  });
+});
+
+describe("stampOrigin on the Windows installer", () => {
+  const WIN = readFileSync(path.join(HERE, "..", "..", "scripts", "kiosk", "install-windows.ps1"), "utf8");
+
+  it("finds its marker exactly once, as a whole line", () => {
+    assert.equal(WIN.split("\n").filter((l) => l.replace(/\r$/, "") === WINDOWS_ORIGIN_MARKER).length, 1);
+  });
+
+  it("puts the address in single quotes on that line", () => {
+    const stamped = stampOrigin(WIN, "http://192.0.2.10:8788", "install-windows.ps1");
+    assert.ok(stamped.split("\n").includes("$FetchedFrom = 'http://192.0.2.10:8788'"));
+    assert.ok(!stamped.split("\n").includes(WINDOWS_ORIGIN_MARKER));
+  });
+
+  it("keeps a CRLF script's line ends", () => {
+    const crlf = `a\r\n${WINDOWS_ORIGIN_MARKER}\r\nb\r\n`;
+    assert.equal(stampOrigin(crlf, "http://h", "install-windows.ps1"), "a\r\n$FetchedFrom = 'http://h'\r\nb\r\n");
+  });
+
+  it("refuses an installer it does not stamp", () => {
+    assert.throws(() => stampOrigin("x", "http://h", "install-linux.sh"), /not an installer the server stamps/);
   });
 });

@@ -31,7 +31,7 @@ import { isStamped, originFromHost, stampOrigin } from "../kiosk-installer-origi
 
 /** Exactly what may be served from scripts/kiosk. An allowlist rather than a
  *  path join, because this reads a file from disk on request. */
-const KIOSK_INSTALLERS = new Set(["install-linux.sh", "install-macos.sh", "install-windows.ps1", "kiosk-windows.ps1"]);
+const KIOSK_INSTALLERS = new Set(["install-linux.sh", "install-macos.sh", "install-windows.ps1", "kiosk-windows.ps1", "kiosk-update-windows.ps1"]);
 
 /** What each Mac helper and Windows kiosk last said about its updates. Runtime;
  *  see machine-updates.ts. A change pushes a `kiosk:devices` frame, which is the
@@ -133,7 +133,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   // ── The installer, served by the server it installs against ─────────────
   // So the whole setup is one line typed at the screen, and the URL in it is the
   // server you are standing in front of.
-  if (method === "GET" && (pathname.startsWith("/kiosk/install-") || pathname === "/kiosk/kiosk-windows.ps1")) {
+  if (method === "GET" && (pathname.startsWith("/kiosk/install-") || pathname === "/kiosk/kiosk-windows.ps1" || pathname === "/kiosk/kiosk-update-windows.ps1")) {
     const name = pathname.slice("/kiosk/".length);
     // Allowlist, not a path join: this reads a file from disk on request.
     if (!KIOSK_INSTALLERS.has(name)) {
