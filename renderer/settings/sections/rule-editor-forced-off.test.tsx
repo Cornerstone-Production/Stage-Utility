@@ -101,7 +101,7 @@ function patchesFor(id: string): Record<string, unknown>[] {
   return calls.filter((c) => c.id === id).map((c) => c.body);
 }
 
-const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
+const { render, cleanup, act, fireEvent, within } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
@@ -320,5 +320,15 @@ describe("a pair whose OFF half was forced off over its own issue", () => {
       false,
       `the off half's patch must ask for OFF, not re-add enabled:true, got ${JSON.stringify(last)}`,
     );
+  });
+});
+
+describe("the fields outside the rule's steps", () => {
+  // The Cooldown row is a <label> whose first control is its hint button, so
+  // the label names the hint and the number field beside it is left unnamed.
+  test("Cooldown is named, hint and all", async () => {
+    RULES = { r1: base(true) };
+    await mount();
+    assert.ok(within(document.body).getByRole("textbox", { name: "Cooldown" }));
   });
 });

@@ -68,7 +68,7 @@ unrelated field never turns it off. The list still shows the badge; the switch
 still refuses to re-enable it if you turn it off yourself. It is enforced the
 next time *you* save or enable it, not the moment this build starts.
 
-The layout editor's action-button object follows the same check, live as you
+The layout editor's **Button**, when set to **Run an action**, follows the same check, live as you
 edit — there is no Save step there. A button needing setup is marked in the
 editor's canvas only, never on a live display; pressing it on a display or a
 console keeps refusing exactly as it always has (`action-invoke.ts`) if nothing
@@ -120,7 +120,7 @@ stage message's groups are required, so a blank one needs setup.
 | A ProVideoPlayer clip stops rolling | a clip has stopped, ended or been paused |
 | A ProVideoPlayer layer is hidden / unhidden | the layer's hidden flag flips |
 | A ProVideoPlayer layer is muted / unmuted | the layer's mute flag flips |
-| Called by name | something called `POST /api/cues/<name>` with a token, or a cue button on one of this app's own consoles. This one NEVER fires by itself, and is not in the picker: make it with **New cue** or **Make it manual** (see [Creating a cue](#creating-a-cue)) — see [Cues](#cues) |
+| Called by name | something called `POST /api/cues/<name>` with a token, or a Button set to Fire a cue on one of this app's own consoles. This one NEVER fires by itself, and is not in the picker: make it with **New cue** or **Make it manual** (see [Creating a cue](#creating-a-cue)) — see [Cues](#cues) |
 
 Every trigger fires on an **edge** — the moment something changes — never on a
 state that merely persists. The channels carry state snapshots, re-sent
@@ -328,7 +328,7 @@ for "idle", because before it runs we do not know that it is idle.
 > [baptism timer's](features/servicecue-and-baptisms.md) own operator panel
 > would do right now — start a session, begin person 1 once a grouped session
 > arms, close a testimony or a baptism, move to the next person — so a single
-> [action button](reference/widgets.md#control) or Companion key runs the whole
+> [Button](reference/widgets.md#control) set to Run an action, or a Companion key, runs the whole
 > service and nobody has to know which press is legal in which phase.
 
 ## Cues
@@ -337,8 +337,10 @@ A **cue** is a rule triggered by **Called by name** rather than by anything
 happening in the building. It runs only when something calls
 `POST /api/cues/<name>` with a bearer token, so it is how a voice assistant, a
 script or Home Assistant reaches Stage Utility. A page on this app's own origin
-needs no token — that is how a cue button on a console fires, and such a call is
-logged as `console`.
+needs no token — that is how a [Button](reference/widgets.md#control) set to Fire a
+cue on a console fires, and such a call is logged as `console`. A Button set to
+Run an action has **Make it a cue**, which creates a cue like this one from its
+action and points the button at it.
 
 Getting cues into Home Assistant — and from there into Apple Home — is the
 [Home Assistant integration](integrations/companion.md#the-integration): install

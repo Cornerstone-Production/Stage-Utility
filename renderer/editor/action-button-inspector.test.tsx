@@ -11,7 +11,7 @@ import type { ParamDef } from "@main/types/automation.js";
 
 const teardown = installDom();
 
-const { render, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, cleanup, fireEvent, within } = await import("@testing-library/react");
 const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { ActionButtonInspector } = await import("./action-button-inspector.js");
@@ -47,6 +47,19 @@ const REGISTRY_ACTIONS: { id: string; label: string; params: ParamDef[]; help?: 
     id: "osc.send",
     label: "Send an OSC message",
     params: [{ key: "argument", label: "Argument", type: "number", min: 0, max: 7 }],
+  },
+  {
+    // One param of each generic kind, every one with a hint. The hint is a
+    // button inside the row's <label>, so the label points at the hint and the
+    // field beside it is left with no name.
+    id: "test.helped",
+    label: "A helped action",
+    params: [
+      { key: "count", label: "Count", type: "number", min: 0, max: 9, help: "How many times." },
+      { key: "mode", label: "Mode", type: "enum", options: [{ value: "a", label: "A" }, { value: "b", label: "B" }], help: "Which way." },
+      { key: "signal", label: "Signal", type: "string", help: "What to call it." },
+      { key: "target", label: "Device", type: "string", optionsFrom: "rosstalk-targets", help: "Where it goes." },
+    ],
   },
   {
     id: "rosstalk.command",
@@ -131,6 +144,14 @@ describe("the action-button inspector", () => {
     assert.equal(inputs.length, 3, `expected one input per parameter plus the label, saw ${inputs.length}`);
     fireEvent.change(inputs[0]!, { target: { value: "dante_tb" } });
     assert.equal(configs.at(-1)?.params?.signal, "dante_tb");
+  });
+
+  test("each parameter's field is named after its label, hint or no hint", async () => {
+    const { container } = mount({ type: "action-button", actionId: "test.helped", params: {} });
+    await eventually(() => assert.ok(within(container).queryByRole("textbox", { name: "Count" })));
+    assert.ok(within(container).getByRole("combobox", { name: "Mode" }));
+    assert.ok(within(container).getByRole("textbox", { name: "Signal" }));
+    assert.ok(within(container).getByRole("textbox", { name: "Device" }));
   });
 
   // The bug this guards: a number field DISPLAYS Number(value ?? spec.min ?? 0)

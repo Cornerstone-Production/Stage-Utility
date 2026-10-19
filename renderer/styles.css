@@ -659,11 +659,17 @@
        --amber-11 (#ab6400) → 4.29:1, under the 4.5:1 floor for the 11px type
        the calendar states a failure in. The dark #ffca16 is 12.93:1.
 
+     --red-11 (#ce2c31) is the same trap for the "over" colour: on this ground it
+     is 3.5:1 on the #141414 card, where the dark #ff9592 is 8.7:1. ProVideoPlayer now turns its
+     time red near the end of a clip, and the layout editor's preview in the
+     light app drew a dimmer red than the wall does.
+
      Literals, matching the .dark values of the same Radix steps, for the same
      reason the eleven above are literals: redefining --gray-a5 here would reach
      everything else derived from it. */
   --color-fill-active:    rgba(255, 255, 255, 0.13);
   --color-warn-11:        #ffca16;
+  --color-danger-11:      #ff9592;
 }
 
 /* The accent, on a kiosk surface embedded in the LIGHT app only.

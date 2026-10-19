@@ -87,10 +87,13 @@ describe("withCueButton", () => {
   });
 
   test("a label typed by the operator, not the cue's name, is what is fitted", () => {
-    const named = fitFontSize("Projectors on", DEFAULT_BUTTON_SIZE, { width: 1920, height: 1080 });
-    const labelled = added(withCueButton(layoutOf(), "x", "On", "Projectors on").layout);
+    // A name long enough to fit below the default size, so fitting the name
+    // instead of the label would come out smaller than the label's fit.
+    const name = "Foyer televisions and lobby lights off";
+    const named = fitFontSize(name, DEFAULT_BUTTON_SIZE, { width: 1920, height: 1080 });
+    const labelled = added(withCueButton(layoutOf(), "x", "On", name).layout);
     assert.equal(labelled.style?.fontSize, fitFontSize("On", DEFAULT_BUTTON_SIZE, { width: 1920, height: 1080 }));
-    assert.ok((labelled.style?.fontSize ?? 0) > named);
+    assert.ok((labelled.style?.fontSize ?? 0) > named, `the label's ${labelled.style?.fontSize} is not larger than the name's ${named}`);
   });
 
   test("an existing button's style is copied as it is, not refitted", () => {

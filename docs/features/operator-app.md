@@ -100,10 +100,19 @@ gains a size picker, a visibility select, a remove button and a drag handle, and
 
 **Right-click a tile** — or tap and hold it — for its size, when it shows,
 remove, and the few settings that widget supports — seconds and the hour cycle
-on a clock, hide-when-idle and fill-when-recording on a status widget. No edit
+on a clock, hide-when-idle and fill-when-recording on a status widget, the
+layout of the ProVideoPlayer card. No edit
 mode needed, and ticking one leaves the menu open so several can be changed at
 once. On a touch device each tile also carries a small **⋯ button** in its
 corner, since there is no right-click to discover.
+
+**The Sound level tile's menu** leads with two choices, **Meter** and **Metric**,
+above Size and Show. **Metric** has **Automatic** first, with the metric it is
+reading beside it, then every metric the chosen meter reports, each with its
+live value. Pick one and the tile shows that metric, captioned
+`<metric> · <meter>`. With **Loudest meter**, the list is the loudest meter's, and
+once a metric is picked, "loudest" is judged on that metric. A picked metric the
+meter stops reporting reads `—` and names it, never another metric's number.
 
 ### Sizes
 
@@ -315,7 +324,7 @@ control surface you operate** rather than *A wall view anyone can see*. A
 calendar can be a console too, and pages through months on it: the dialog does not
 offer that, so make the calendar view first and choose *Make it a control surface*
 in its card's menu (the card of a view no screen shows). Every other built-in kind
-has nothing to operate. A **cue button** on one fires a cue and shows what its
+has nothing to operate. A **Button** on one, set to Fire a cue, fires a cue and shows what its
 device is doing; see [Widgets](../reference/widgets.md#control). A console meant for a
 Ross Ultritouch panel has its own presets and a starter; see
 [Ultritouch](../integrations/ultritouch.md).

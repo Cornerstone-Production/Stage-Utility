@@ -70,15 +70,18 @@ content.
 layer, leading with the countdown while there is one and a state word beside the
 caption. Options: which layer (the same picker the layer list uses — naming one
 also puts its name in the caption, in every state), the progress bar, the next
-cue, Compact — a two-line treatment for a small tile, caption plus value, whose
-Label chooses what an UNPINNED caption names (the current cue, the file name with
-or without its extension, or the layer name) — and **Count down stills**, off by
-default, which counts a still down the same way a rolling clip already counts
-down. See [Widgets](../reference/widgets.md) for what it uses as the hold and why
+cue, a **Layout** — Full, Compact (two lines, caption plus value, whose Label
+chooses what an UNPINNED caption names: the current cue, the file name with or
+without its extension, or the layer name) or Countdown only (the time left and
+nothing else, as large as the widget allows) — **Warn near the end**, which
+turns the time amber and then red as a clip runs out, and **Count down stills**,
+off by default, which counts a still down the same way a rolling clip already
+counts down. See [Widgets](../reference/widgets.md) for what it uses as the hold and why
 it defaults off. **On screen now** is its Home card.
 
 Home's cards take their settings from a right-click on the card (or tap and
-hold it), not from the layout editor. See [Widgets](../reference/widgets.md)
+hold it). The one setting the menu leaves out is a number: the Warn near the
+end thresholds, which are set in the layout editor's inspector. See [Widgets](../reference/widgets.md)
 for what each line means.
 
 ## Four things that will otherwise surprise you
@@ -94,7 +97,7 @@ is the only thing PVP reports and it never clears — four idle layers were obse
 simultaneously naming the same cue while displaying nothing, and it disagrees with
 the file that is up even on a layer that is playing. The default view of every
 widget does not draw it, which is why they look different from PVP's own UI —
-**ProVideoPlayer now**'s compact mode is the one place it can appear, as the
+**ProVideoPlayer now**'s Compact layout is the one place it can appear, as the
 caption's Label, and only for a layer that HAS CONTENT, never an idle one. It is
 kept because a rule that fires a cue verifies itself against it, and because it is
 what anchors the next-cue lookup. "Has content" is decided by whether the layer

@@ -268,7 +268,7 @@ describe("Make it manual", () => {
     await openRow("Stage reset");
     await press(button("Make it manual"), "Make it manual");
     await save();
-    assert.equal(editorOpen(), false, "Save asked a question, or did not close");
+    await eventually(() => assert.equal(editorOpen(), false, "Save asked a question, or did not close"));
     const forHome = (await callRoute(cueRoutes, "/api/cues/manifest", { headers: browser })).json as {
       buttons: { id: string; builtin?: true }[];
     };
