@@ -112,6 +112,9 @@ const REQUEST_FACING = [
   // POST /api/devices/:id/health (the path and the body), and an output name and
   // hostname taken from a UDP probe.
   "kiosk-presence.ts",
+  // An unauthenticated update check: a machine's own host name, versions and
+  // failure reason, off the query string.
+  "machine-updates.ts",
   // Its sent line names the groups, the sender and the TEXT of a message, all
   // typed into POST /api/messages; its refusal line carries the reason, which
   // can name an id off the wire.
@@ -443,6 +446,10 @@ function requestFacingFiles(): string[] {
     // figures come out of that request body; the output seen line names what a UDP
     // probe said. All scrubbed at the logger.
     path.join(HERE, "kiosk-presence.ts"),
+    // Every line names what a machine on the network said about itself in an
+    // unauthenticated update check: its host name, versions and why an update
+    // failed, all off the query string.
+    path.join(HERE, "machine-updates.ts"),
     // Its sent line names the groups, the sender and the TEXT of a message, all
     // typed into POST /api/messages; its refusal line carries the reason, which
     // can name an id off the wire.

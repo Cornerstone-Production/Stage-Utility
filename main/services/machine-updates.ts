@@ -218,12 +218,14 @@ function closing(until: number | undefined): string {
   return clockOf(until ?? 0).slice(0, 5);
 }
 
-/** The noun for a machine in a log line: its name and enough of its id to tell
- *  two machines with the same name apart. */
-function who(m: Pick<MachineUpdate, "host" | "machine" | "platform">): string {
-  const kind = m.platform === "macos" ? "Mac" : "Windows kiosk";
-  return `${kind} ${scrub(m.host || "with no name")} (${scrub(m.machine.slice(0, 8))})`;
+/** How a log line names a machine: its kind, its name, and enough of its id to
+ *  tell two machines with the same name apart. Each piece is scrubbed where the
+ *  line is written (log-injection.test.ts reads the call, not this). */
+function kind(m: Pick<MachineUpdate, "platform">): string {
+  return m.platform === "macos" ? "Mac" : "Windows kiosk";
 }
+const hostOf = (m: Pick<MachineUpdate, "host">): string => m.host || "with no name";
+const idOf = (m: Pick<MachineUpdate, "machine">): string => m.machine.slice(0, 8);
 
 export class MachineUpdates {
   private readonly machines = new Map<string, MachineUpdate>();
@@ -272,7 +274,7 @@ export class MachineUpdates {
     const m = this.machines.get(machine);
     if (!m) return false;
     this.requested.add(machine);
-    console.log(`[helper-update] ${who(m)}: an update to ${scrub(m.platform === "macos" ? m.want : "the current launcher")} was asked for from Screens; it starts at the machine's next check, within five minutes`);
+    console.log(`[helper-update] ${scrub(kind(m))} ${scrub(hostOf(m))} (${scrub(idOf(m))}): an update to ${scrub(m.platform === "macos" ? m.want : "the current launcher")} was asked for from Screens; it starts at the machine's next check, within five minutes`);
     // Answer the button in the listing straight away, rather than leaving
     // "automatic updates are off" on screen until the machine next asks. A live
     // service still holds a Mac back (see decide), so that sentence stands.
@@ -300,34 +302,54 @@ export class MachineUpdates {
       if (m.checkedAt >= now - REPORT_TTL_MS) continue;
       this.machines.delete(id);
       this.requested.delete(id);
-      console.log(`[helper-update] ${who(m)} stopped checking for updates`);
+      console.log(`[helper-update] ${scrub(kind(m))} ${scrub(hostOf(m))} (${scrub(idOf(m))}) stopped checking for updates`);
       dropped = true;
     }
     if (dropped) this.onChange();
   }
 
-  /** Decisions and outcomes, written when they change, never on every check. */
-  private logChange(prev: MachineUpdate | undefined, next: MachineUpdate): void {
-    const name = who(next);
-    const outcomeChanged = !prev || prev.state !== next.state || prev.target !== next.target || prev.detail !== next.detail;
-    if (outcomeChanged && next.state !== "idle") {
-      const t = scrub(next.platform === "macos" ? next.target ?? next.have : "the launcher");
-      const why = next.detail ? `: ${scrub(next.detail)}` : "";
-      const line = {
-        updated: `updated ${next.platform === "macos" ? `to ${t}` : "its launcher; it takes effect at the next sign-in"}`,
-        failed: `the update${next.platform === "macos" ? ` to ${t}` : ""} failed${why}; it is not tried again until someone asks from Screens`,
-        "no-session": "an update is due, but nobody is logged in at the Mac to start and check the new helper; it waits for a login",
-        "not-running": "an update is due, but the helper was quit at the Mac; it updates once it runs again",
-        "local-network": `macOS refuses the helper Local Network access since the update to ${t}; answer the prompt at the Mac`,
-      }[next.state];
-      console.log(`[helper-update] ${name}: ${line}`);
+  /** Decisions and outcomes, written when they change, never on every check. Every
+   *  value is what a machine said off the wire, so each is scrubbed in the call. */
+  private logChange(prev: MachineUpdate | undefined, m: MachineUpdate): void {
+    const k = kind(m);
+    const host = hostOf(m);
+    const id = idOf(m);
+    const mac = m.platform === "macos";
+    const outcomeChanged = !prev || prev.state !== m.state || prev.target !== m.target || prev.detail !== m.detail;
+    if (outcomeChanged) {
+      const t = m.target ?? m.have;
+      const why = m.detail ? `: ${m.detail}` : "";
+      switch (m.state) {
+        case "updated":
+          if (mac) console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}): updated to ${scrub(t)}`);
+          else console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}): updated its launcher; it takes effect at the next sign-in`);
+          break;
+        case "failed":
+          console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}): the update${mac ? ` to ${scrub(t)}` : ""} failed${scrub(why)}; it is not tried again until someone asks from Screens`);
+          break;
+        case "no-session":
+          console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}): an update is due, but nobody is logged in at the Mac to start and check the new helper; it waits for a login`);
+          break;
+        case "not-running":
+          console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}): an update is due, but the helper was quit at the Mac; it updates once it runs again`);
+          break;
+        case "local-network":
+          console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}): macOS refuses the helper Local Network access since the update to ${scrub(t)}; answer the prompt at the Mac`);
+          break;
+        case "idle":
+          break;
+      }
     }
-    const decisionChanged = !prev || prev.update !== next.update || prev.waitingOn !== next.waitingOn || prev.have !== next.have || prev.want !== next.want;
+    const decisionChanged = !prev || prev.update !== m.update || prev.waitingOn !== m.waitingOn || prev.have !== m.have || prev.want !== m.want;
     if (!decisionChanged) return;
-    const on = next.platform === "macos" ? `is on ${scrub(next.have)}, this server is ${scrub(next.want)}` : "has an older launcher than this server";
-    if (next.update) console.log(`[helper-update] ${name} ${on}: going ahead`);
-    else if (next.waitingOn === "current") console.log(`[helper-update] ${name} ${next.platform === "macos" ? `is on ${scrub(next.have)}, the same as this server` : "has this server's launcher"}`);
-    else console.log(`[helper-update] ${name} ${on}: waiting, ${waitPhrase(next)}`);
+    if (m.waitingOn === "current") {
+      if (mac) console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}) is on ${scrub(m.have)}, the same as this server`);
+      else console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}) has this server's launcher`);
+      return;
+    }
+    const verdict = m.update ? "going ahead" : `waiting, ${waitPhrase(m)}`;
+    if (mac) console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}) is on ${scrub(m.have)}, this server is ${scrub(m.want)}: ${scrub(verdict)}`);
+    else console.log(`[helper-update] ${scrub(k)} ${scrub(host)} (${scrub(id)}) has an older launcher than this server: ${scrub(verdict)}`);
   }
 }
 
