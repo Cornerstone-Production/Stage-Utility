@@ -274,8 +274,8 @@ at the moment the log matters most.
 
 So every outside value is escaped on its way into a log line. A control character
 is shown rather than obeyed: a newline reads `\n`, a tab `\t`, anything else
-`\x1b`. Long values are cut at 200 characters with an ellipsis, and a stack trace
-at 2,000. Seeing `\n` in the middle of a plan title on this page means the title
+`\x1b`. Long values are cut at 200 characters with an ellipsis, a stack trace
+at 2,000, and a raw ProdCom frame under `PRODCOM_DEBUG=1` at 10,000. Seeing `\n` in the middle of a plan title on this page means the title
 really contains one — not that the page is broken.
 
 ### Timestamps that run backwards

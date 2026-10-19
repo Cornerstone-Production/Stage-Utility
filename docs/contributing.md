@@ -247,13 +247,19 @@ Actions tab once the workflow is on `main`.
 Not every check runs on every pull request. The secret scan, the commit
 convention check and the public-hygiene check (below) run on all of them,
 docs-only included. The script and workflow checks (below) run only when the files
-they read change. CodeQL is GitHub's default setup, configured in the
-repository's settings rather than by a workflow file: the extended query suite
-for JavaScript/TypeScript and the workflows themselves, on a weekly schedule and
-on pull requests (see [Code scanning](reference/code-scanning.md)). No check is a required status check on `beta` or
-`main`: the release workflow pushes its version bump to both directly, which a
-required check would refuse, so a merge is gated by review of a green PR. The
-build and tests skip a PR that touches only `docs/` and Markdown; dependency
+they read change. CodeQL (`codeql.yml`, the extended query suite) runs on pull
+requests to `beta` or `main`, on pushes to them, weekly, and by hand. JavaScript/TypeScript is analysed
+every time; the other languages only when a change touches what they analyse:
+Swift and C/C++ for `helper/macos/`, Ruby for a `.rb` file, and the workflows for
+`.github/`. A change to either CodeQL workflow runs all of them, and so does every
+push to `main`, the weekly run and a manual one. A language that does not run
+shows as skipped, and on a pull request uploads an empty result under its own
+category, so the `CodeQL` check still finds every configuration the base branch
+has instead of reporting "configurations not found". What the scanner flags, and
+what is dismissed, is in [Code scanning](reference/code-scanning.md). No check is
+a required status check on `beta` or `main`: the release workflow pushes its
+version bump to both directly, which a required check would refuse, so a merge is
+gated by review of a green PR. The build and tests skip a PR that touches only `docs/` and Markdown; dependency
 review runs only when `package.json` or the lockfile changes; the updater
 survival matrix runs only for the updater, the installers and its own scripts;
 and the Mac output helper's Swift build and tests (`helper-macos.yml`, on a

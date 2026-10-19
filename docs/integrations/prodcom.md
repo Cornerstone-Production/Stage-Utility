@@ -371,9 +371,10 @@ Smaller lines, each once per occurrence:
   keywords** is turned on, the counterpart of the `turned OFF` line
 
 Text is never logged, only its length, and neither is any keyword — only counts.
-`PRODCOM_DEBUG=1` logs every raw WebSocket and SSE frame verbatim, which is how
-to capture the shape of a live transcript event; it prints transcript text that
-would otherwise be redacted, so leave it off outside a debugging session.
+`PRODCOM_DEBUG=1` logs every raw WebSocket and SSE frame, escaped onto one line
+(a newline reads `\n`) and cut at 10,000 characters, which is how to capture the
+shape of a live transcript event; it prints transcript text that would otherwise
+be redacted, so leave it off outside a debugging session.
 
 ## Setup
 
