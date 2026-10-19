@@ -279,10 +279,29 @@ export function rememberScreen(id: string, size: { w: number; h: number; dpr?: n
 }
 
 /** Forget a device immediately — it was just claimed, so it stops being a
- *  candidate the moment the binding exists rather than a minute and a half later. */
+ *  candidate the moment the binding exists rather than a minute and a half later.
+ *  A later release is then announced again (noteReleased). */
 export function forgetSeen(id: string): void {
   secrets.delete(id);
+  toldReleased.delete(id);
   if (seen.delete(id)) announce();
+}
+
+/** Devices already told this server no longer claims them, so the line is logged
+ *  once per release and not once per probe from an agent that cannot act on it.
+ *  Cleared by forgetSeen, which a claim and a probe from a device bound here both
+ *  call. Bounded at the seen list's size, oldest dropped. */
+const toldReleased = new Set<string>();
+
+/**
+ * A device that still names this server, but is not set up here, is being told so.
+ * That answer is what makes it forget this server, so another can set it up.
+ */
+export function noteReleased(id: string): void {
+  if (toldReleased.has(id)) return;
+  if (toldReleased.size >= MAX_SEEN) toldReleased.delete(toldReleased.values().next().value!);
+  toldReleased.add(id);
+  console.log(`[kiosk-responder] ${scrub(id)} still names this server but is not set up here; told it so`);
 }
 
 /**
@@ -358,6 +377,7 @@ export function resetKioskPresence(): void {
   mismatched.clear();
   health.clear();
   seen.clear();
+  toldReleased.clear();
   scans.clear();
   fullWarned = false;
   lastSig = "";

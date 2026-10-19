@@ -183,6 +183,15 @@ public final class OutputStateStore {
     return token
   }
 
+  /// Save what an answer the filter believed does to `key`'s `boundTo`.
+  public func apply(_ change: OutputBinding, key: String) throws {
+    switch change {
+    case .keep: return
+    case .bind(let server): try setBoundTo(server, key: key)
+    case .forget: try setBoundTo(nil, key: key)
+    }
+  }
+
   /// Set one field of `key`'s record and save. Nothing is done for a key with no
   /// record, or a field that already holds `value`. Throws when it cannot be saved;
   /// the change is kept in memory regardless.

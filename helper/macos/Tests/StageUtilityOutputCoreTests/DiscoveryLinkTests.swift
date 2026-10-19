@@ -106,17 +106,49 @@ import Testing
 }
 
 @Suite struct ReplyFilterTests {
-  func reply(_ id: String) -> DiscoveryReply { DiscoveryReply(serverId: id, name: id, url: "http://192.0.2.10:8788") }
+  func reply(_ id: String, claimed: Bool? = nil) -> DiscoveryReply {
+    DiscoveryReply(serverId: id, name: id, url: "http://192.0.2.10:8788", claimed: claimed)
+  }
 
-  @Test func anUnboundOutputBelievesWhoeverAnswers() {
+  /// Two servers on their Screens page at once must not swap its page back and forth.
+  @Test func anUnboundOutputFollowsTheFirstServerToAnswer() {
     var f = ReplyFilter()
-    #expect(f.decide(reply("a"), boundTo: nil) == .accept)
-    #expect(f.decide(reply("b"), boundTo: nil) == .accept)
+    #expect(f.decide(reply("a", claimed: false), boundTo: nil) == .accept(.keep))
+    #expect(f.decide(reply("b", claimed: false), boundTo: nil) == .ignore(firstTime: true))
+    #expect(f.decide(reply("b"), boundTo: nil) == .ignore(firstTime: false))
+    #expect(f.decide(reply("a", claimed: false), boundTo: nil) == .accept(.keep))
+    #expect(f.following == "a")
+  }
+
+  @Test func anUnboundOutputMovesToTheServerThatSetsItUp() {
+    var f = ReplyFilter()
+    #expect(f.decide(reply("a", claimed: false), boundTo: nil) == .accept(.keep))
+    #expect(f.decide(reply("b", claimed: true), boundTo: nil) == .accept(.bind("b")))
+    #expect(f.following == "b")
+  }
+
+  /// Released by its own server, it follows whoever answers next.
+  @Test func aReleaseEndsTheFollowing() {
+    var f = ReplyFilter()
+    #expect(f.decide(reply("a", claimed: true), boundTo: "a") == .accept(.keep))
+    #expect(f.decide(reply("a", claimed: false), boundTo: "a") == .accept(.forget("a")))
+    #expect(f.following == nil)
+    #expect(f.decide(reply("b", claimed: false), boundTo: nil) == .accept(.keep))
+  }
+
+  /// A rogue host's answer to a bound output is an error worth its own line, even
+  /// after an unbound output's ordinary one was said.
+  @Test func eachKindOfIgnoredAnswerIsSaidOnce() {
+    var f = ReplyFilter()
+    #expect(f.decide(reply("a"), boundTo: nil) == .accept(.bind("a")))
+    #expect(f.decide(reply("b"), boundTo: nil) == .ignore(firstTime: true))
+    #expect(f.decide(reply("rogue"), boundTo: "a") == .ignore(firstTime: true))
+    #expect(f.decide(reply("rogue"), boundTo: "a") == .ignore(firstTime: false))
   }
 
   @Test func aBoundOutputBelievesItsServer() {
     var f = ReplyFilter()
-    #expect(f.decide(reply("a"), boundTo: "a") == .accept)
+    #expect(f.decide(reply("a"), boundTo: "a") == .accept(.keep))
   }
 
   /// Any host on the LAN can answer, and the answer names the address the output
@@ -126,7 +158,30 @@ import Testing
     #expect(f.decide(reply("rogue"), boundTo: "a") == .ignore(firstTime: true))
     #expect(f.decide(reply("rogue"), boundTo: "a") == .ignore(firstTime: false))
     #expect(f.decide(reply("other"), boundTo: "a") == .ignore(firstTime: false))
-    #expect(f.decide(reply("a"), boundTo: "a") == .accept)
+    #expect(f.decide(reply("a"), boundTo: "a") == .accept(.keep))
+  }
+}
+
+@Suite struct OutputBindingTests {
+  func reply(_ id: String, claimed: Bool?) -> DiscoveryReply {
+    DiscoveryReply(serverId: id, name: id, url: "http://192.0.2.10:8788", claimed: claimed)
+  }
+
+  @Test func rememberedOnlyWhenAServerSaysItIsSetUpThere() {
+    #expect(OutputBinding.change(after: reply("a", claimed: true), boundTo: nil) == .bind("a"))
+    #expect(OutputBinding.change(after: reply("a", claimed: false), boundTo: nil) == .keep)
+    #expect(OutputBinding.change(after: reply("a", claimed: true), boundTo: "a") == .keep)
+  }
+
+  @Test func forgottenOnlyWhenItsOwnServerSaysItIsNot() {
+    #expect(OutputBinding.change(after: reply("a", claimed: false), boundTo: "a") == .forget("a"))
+    #expect(OutputBinding.change(after: reply("b", claimed: false), boundTo: "a") == .keep)
+  }
+
+  /// A server older than the field: remembered on any answer.
+  @Test func anOlderServersAnswerIsRemembered() {
+    #expect(OutputBinding.change(after: reply("a", claimed: nil), boundTo: nil) == .bind("a"))
+    #expect(OutputBinding.change(after: reply("a", claimed: nil), boundTo: "a") == .keep)
   }
 }
 

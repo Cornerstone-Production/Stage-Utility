@@ -211,9 +211,10 @@ no `server` file it goes to the broadcast address of every interface:
 
 It probes every 2 s until the server answers, every 30 s after ten unanswered probes,
 and every 30 s after an answer so the server goes on listing the output until it is
-set up. The reply gives the server's id (kept as `boundTo`) and address. The output
-then loads `<server>/enroll?device=<id>&token=<token>`, which shows a holding screen
-until the output is set up on the server and redirects to its screen after.
+set up. The reply gives the server's id and address, and `claimed`: whether this
+output is set up on that server. The output then loads
+`<server>/enroll?device=<id>&token=<token>`, which shows a holding screen until the
+output is set up on the server and redirects to its screen after.
 
 **A `server` file** (`/Library/Application Support/StageUtility/server`, for a network
 where broadcast does not cross) names the server, and the page loads from it at once.
@@ -251,12 +252,18 @@ broadcast probe having been refused. A server switched off on the same subnet gi
 error and neither holds, so it gets the first line only. The retries go on underneath;
 the screen goes when the page loads.
 
-**Only the server it is bound to.** Once an output has heard a server it keeps that
-server's id as `boundTo` and ignores answers from any other: anything on the network
-can answer a broadcast, and the answer names the address the output sends its token
-to. The first such answer is logged once. After 30 unanswered probes to its server (the
-Linux agent's threshold) the probe also carries `unreachable: true`, so another server
-can list the output as *bound elsewhere*.
+**Only the server it is bound to.** Once a server says an output is set up there
+(`claimed: true`), the output keeps that server's id as `boundTo`, sends it in every
+probe, and ignores answers from any other: anything on the network can answer a
+broadcast, and the answer names the address the output sends its token to. The first
+such answer is logged once. When that server answers `claimed: false` (the output was
+released there) the output forgets it, logs `no longer has this output set up; forgot
+it`, and stops naming it, so any server can set it up. An output set up nowhere
+follows the first server to answer, in memory only, until a server says it is set up
+there. A server older than the `claimed` field is kept as `boundTo` on any answer.
+After 30 unanswered probes to its server (the Linux agent's threshold) the probe also
+carries `unreachable: true`, so another server can list the output as *bound
+elsewhere*.
 
 *If the server is gone for good and an output must move to another:* quit the helper,
 remove that output's `"boundTo"` line from `outputs.json` (and nothing else; its token

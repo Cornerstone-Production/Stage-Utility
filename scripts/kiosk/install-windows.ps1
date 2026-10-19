@@ -61,8 +61,67 @@ function Get-Macs {
     ForEach-Object { '"' + (`$_.MacAddress -replace '-', ':').ToLower() + '"' }
 }
 
-# One probe, and whatever answers within two seconds. The reply is unicast, so
-# nothing has to be open on this machine.
+# More than one server can answer in the two seconds. The answer kept is the one
+# from the server this screen remembers, else one from a server that says it is
+# set up there, else the first.
+function Select-Reply(`$replies, `$bound) {
+  if (`$bound) {
+    `$mine = `$replies | Where-Object { `$_ -match ('"serverId":"' + [regex]::Escape(`$bound) + '"') } | Select-Object -First 1
+    if (`$mine) { return `$mine }
+  }
+  `$claimed = `$replies | Where-Object { `$_ -match '"claimed":true' } | Select-Object -First 1
+  if (`$claimed) { return `$claimed }
+  return `$replies | Select-Object -First 1
+}
+
+# What this screen remembers, and puts in every probe as boundTo: a server that
+# says it is set up there, forgotten when that same server says it no longer is.
+# Every other server ignores a screen that names somebody else, so remembering one
+# that merely answered would keep a released screen away from them for good. An
+# answer that does not say either way, from a server older than the field, is
+# remembered. True when it has just forgotten its server.
+function Save-Binding(`$reply, `$bound) {
+  `$srv = if (`$reply -match '"serverId":"([^"]+)"') { `$matches[1] } else { '' }
+  `$claimed = if (`$reply -match '"claimed":(true|false)') { `$matches[1] } else { '' }
+  if (-not `$srv) { return `$false }
+  if (`$claimed -ne 'false') {
+    `$srv | Set-Content -NoNewline `$boundFile
+    return `$false
+  }
+  if (`$srv -ne `$bound) { return `$false }
+  Remove-Item `$boundFile
+  if (Test-Path `$boundFile) { return `$false }
+  Write-Host "[kiosk] server `$srv no longer has this screen set up; forgot it, so any server can set it up"
+  return `$true
+}
+
+# One probe, and every answer within two seconds, at most eight: a host that
+# keeps sending to the probe's port must not hold the screen off its display. The
+# replies are unicast, so nothing has to be open on this machine.
+function Send-Probe(`$probe) {
+  `$client = New-Object System.Net.Sockets.UdpClient
+  `$replies = @()
+  try {
+    `$client.EnableBroadcast = `$true
+    `$bytes = [Text.Encoding]::UTF8.GetBytes(`$probe)
+    `$null = `$client.Send(`$bytes, `$bytes.Length, '255.255.255.255', `$Port)
+    `$remote = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
+    `$deadline = [DateTime]::UtcNow.AddSeconds(2)
+    while (`$replies.Count -lt 8) {
+      `$left = [int](`$deadline - [DateTime]::UtcNow).TotalMilliseconds
+      # 0 would mean wait for ever.
+      if (`$left -le 0) { break }
+      `$client.Client.ReceiveTimeout = `$left
+      `$replies += [Text.Encoding]::UTF8.GetString(`$client.Receive([ref]`$remote))
+    }
+  } catch { } finally { `$client.Close() }
+  return `$replies
+}
+
+# One probe: the answer kept, remembered, and the address it gives. An answer that
+# makes this screen forget its server is followed straight away by one more probe
+# without it, so a server with its Screens page open can answer in this boot
+# rather than the next. If none does, the address the old server gave stands.
 function Find-Server {
   `$bound = if (Test-Path `$boundFile) { Get-Content `$boundFile } else { '' }
   `$macs = (Get-Macs) -join ','
@@ -71,18 +130,15 @@ function Find-Server {
   if (`$bound) { `$probe += ',"boundTo":"' + `$bound + '"' }
   `$probe += '}'
 
-  `$client = New-Object System.Net.Sockets.UdpClient
-  try {
-    `$client.EnableBroadcast = `$true
-    `$client.Client.ReceiveTimeout = 2000
-    `$bytes = [Text.Encoding]::UTF8.GetBytes(`$probe)
-    `$null = `$client.Send(`$bytes, `$bytes.Length, '255.255.255.255', `$Port)
-    `$remote = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
-    `$reply = [Text.Encoding]::UTF8.GetString(`$client.Receive([ref]`$remote))
-    if (`$reply -match '"serverId":"([^"]+)"') { `$matches[1] | Set-Content -NoNewline `$boundFile }
-    if (`$reply -match '"url":"([^"]+)"') { return `$matches[1] }
-  } catch { } finally { `$client.Close() }
-  return ''
+  `$replies = @(Send-Probe `$probe)
+  if (-not `$replies) { return '' }
+  `$reply = Select-Reply `$replies `$bound
+  `$url = if (`$reply -match '"url":"([^"]+)"') { `$matches[1] } else { '' }
+  if (Save-Binding `$reply `$bound) {
+    `$again = Find-Server
+    if (`$again) { `$url = `$again }
+  }
+  return `$url
 }
 
 if (Test-Path `$serverFile) {
