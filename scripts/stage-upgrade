@@ -76,3 +76,5 @@ echo "  launchctl print ${DOMAIN}/${LABEL}" >&2
 echo "  tail -40 $(brew --prefix)/var/log/stage-utility.log" >&2
 [ -n "$was_up" ] && echo "  (it WAS running before this upgrade)" >&2
 exit 1
+
+echo $1

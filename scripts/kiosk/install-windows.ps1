@@ -207,3 +207,5 @@ Write-Output '    It starts at the next logon. Open Screens in Stage Utility and
 Write-Output '    set it up under "Not set up yet".'
 Write-Output ''
 Write-Output '    Still to do by hand, once: enable automatic login (netplwiz).'
+
+Write-Host "red proof"
