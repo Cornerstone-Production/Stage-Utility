@@ -32,10 +32,14 @@ $AppDir   = Join-Path $ProgramFiles 'StageUtility'
 $Port     = if ($env:STAGE_KIOSK_PORT) { [int]$env:STAGE_KIOSK_PORT } else { 8789 }
 $Server   = $env:STAGE_SERVER
 
-# Where the launcher and the updater are downloaded from, best first: this download
-# only (STAGE_DOWNLOAD_FROM), the server this PC is pinned to as it is installed
-# (STAGE_SERVER), the server this installer came from, the server it is already
-# pinned to.
+# Where the launcher and the updater are downloaded from, best first, and so the
+# server the updater asks from then on: STAGE_DOWNLOAD_FROM (which does not pin the
+# PC), the server this PC is pinned to as it is installed (STAGE_SERVER), the server
+# this installer came from, the server it is already pinned to.
+# A server root and nothing else: the same pattern as kiosk-update-windows.ps1's
+# and is_origin in install-macos.sh (scripts/origin-shape.test.ts).
+$OriginPattern = '^https?://([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]{2,45}\])(:[0-9]{1,5})?$'
+
 function Get-DownloadOrigin {
   $pinned = Join-Path $StateDir 'server'
   $candidates = @($env:STAGE_DOWNLOAD_FROM, $env:STAGE_SERVER, $FetchedFrom)
@@ -45,7 +49,7 @@ function Get-DownloadOrigin {
     $origin = $candidate.Trim().TrimEnd('/')
     # A server root, the shape kiosk-update-windows.ps1 and the server's HOST_RE
     # admit: anything else is refused here rather than downloaded from.
-    if ($origin -notmatch '^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$') {
+    if ($origin -notmatch $OriginPattern) {
       throw "$origin is not a server address (http://<host>:<port>, nothing after it)"
     }
     return $origin

@@ -943,11 +943,12 @@ helper_pid() {
   launchctl print "gui/$CONSOLE_UID/$HELPER_LABEL" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }'
 }
 
-# A server root and nothing else: the shape HOST_RE in
-# main/services/kiosk-installer-origin.ts admits, and kiosk-update-windows.ps1's
-# Read-Origin too. Keep the three the same.
+# A server root and nothing else: http(s), then exactly the host and port HOST_RE
+# in main/services/kiosk-installer-origin.ts admits. The same pattern is
+# $OriginPattern in kiosk-update-windows.ps1 and install-windows.ps1;
+# scripts/origin-shape.test.ts runs all four against one list.
 is_origin() {
-  printf '%s\n' "$1" | grep -Eq '^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$'
+  printf '%s\n' "$1" | grep -Eq '^https?://([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]{2,45}\])(:[0-9]{1,5})?$'
 }
 
 # The server to ask: the one recorded at install, root's own copy. Never the state

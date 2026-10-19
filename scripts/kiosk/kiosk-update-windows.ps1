@@ -108,9 +108,10 @@ function Write-Status([string]$State, [string]$Target, [string]$Detail, [string]
   [IO.File]::WriteAllText($StatusFile, $json, $Utf8)
 }
 
-# A server root and nothing else: the same shape as HOST_RE in
-# main/services/kiosk-installer-origin.ts and is_origin in install-macos.sh.
-$OriginPattern = '^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$'
+# A server root and nothing else: the same pattern as is_origin in install-macos.sh
+# and $OriginPattern in install-windows.ps1, the shape HOST_RE in
+# main/services/kiosk-installer-origin.ts admits (scripts/origin-shape.test.ts).
+$OriginPattern = '^https?://([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]{2,45}\])(:[0-9]{1,5})?$'
 
 function Read-Origin([string]$File) {
   if (-not (Test-Path -LiteralPath $File)) { return '' }
