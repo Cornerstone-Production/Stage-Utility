@@ -14,9 +14,15 @@ import { cn } from "../../lib/cn";
 export interface ContextMenuItem {
   /** A separator; every other field is ignored. */
   separator?: boolean;
+  /** A small uppercase caption over the rows beneath it. Not interactive; every
+   *  field but `label` is ignored. */
+  heading?: boolean;
   label?: string;
   /** Right-aligned hint, e.g. "⌘C". Never a control — purely a reminder. */
   shortcut?: string;
+  /** Right-aligned, monospaced, muted: a live value that belongs to the row, like
+   *  a metric's current reading. Distinct from `shortcut`, which is a key hint. */
+  meta?: string;
   icon?: ReactNode;
   disabled?: boolean;
   danger?: boolean;
@@ -49,6 +55,14 @@ function MenuList({ items, onClose }: { items: ContextMenuItem[]; onClose: () =>
       {items.map((item, i) =>
         item.separator ? (
           <div key={`sep-${i}`} className="my-1 h-px bg-line" role="separator" />
+        ) : item.heading ? (
+          <div
+            key={`head-${i}`}
+            className="px-2 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-fg-subtle"
+            role="presentation"
+          >
+            {item.label}
+          </div>
         ) : item.items?.length ? (
           <SubmenuItem
             key={item.label ?? i}
@@ -91,8 +105,13 @@ function MenuList({ items, onClose }: { items: ContextMenuItem[]; onClose: () =>
                 {item.checked ? <CheckIcon className="size-3" strokeWidth={3} /> : null}
               </span>
             )}
-            <span className="flex-1 truncate">{item.label}</span>
+            {/* A row carrying a live value is never truncated: the menu widens to fit
+                it instead, since an ellipsis on "Automatic" next to its hint reads
+                as a broken row. Plain rows keep the cap for long caller-supplied
+                labels. */}
+            <span className={cn("flex-1", item.meta ? "whitespace-nowrap" : "truncate")}>{item.label}</span>
             {item.shortcut && <span className="ml-3 tabular-nums text-fg-subtle">{item.shortcut}</span>}
+            {item.meta && <span className="ml-3 whitespace-nowrap font-mono text-[11.5px] tabular-nums text-fg-subtle">{item.meta}</span>}
           </button>
         ),
       )}

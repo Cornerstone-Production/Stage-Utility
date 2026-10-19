@@ -105,6 +105,14 @@ mode needed, and ticking one leaves the menu open so several can be changed at
 once. On a touch device each tile also carries a small **⋯ button** in its
 corner, since there is no right-click to discover.
 
+**The Sound level tile's menu** leads with two choices, **Meter** and **Metric**,
+above Size and Show. **Metric** has **Automatic** first, with the metric it is
+reading beside it, then every metric the chosen meter reports, each with its
+live value. Pick one and the tile shows that metric, captioned
+`<metric> · <meter>`. With **Loudest meter**, the list is the loudest meter's, and
+once a metric is picked, "loudest" is judged on that metric. A picked metric the
+meter stops reporting reads `—` and names it, never another metric's number.
+
 ### Sizes
 
 Five shapes on a three-column grid:
