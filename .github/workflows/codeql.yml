@@ -23,9 +23,9 @@ name: CodeQL
 
 on:
   pull_request:
-    branches: [beta, main]
+    branches: [beta, main, tmp/codeql-verify-base]
   push:
-    branches: [beta, main]
+    branches: [beta, main, tmp/codeql-verify-base]
   schedule:
     - cron: "17 5 * * 1"
   # Lets a specific commit be scanned on demand.
