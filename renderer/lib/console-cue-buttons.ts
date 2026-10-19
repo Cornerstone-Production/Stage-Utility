@@ -50,8 +50,7 @@ export function consolesWithLayouts(views: readonly View[]): View[] {
  *
  * The default, 0.12, is the size the widget starts at: a word or two in a box
  * 0.3 of the canvas wide. A cue is named whatever somebody typed, and "Projectors
- * on" at 0.12 in that box is clipped at both edges, which is what a first try
- * showed. The cue button draws a state dot, the label in capitals at about 0.66em
+ * on" at 0.12 in that box is clipped at both edges. The cue button draws a state dot, the label in capitals at about 0.66em
  * a letter, and a line beneath, so the box has to hold roughly 2.4em of height
  * and the label's whole width. Nothing here reads the DOM: it is an estimate, and
  * errs small, because a label that is a little small is still a label.
@@ -66,9 +65,9 @@ export function fitFontSize(text: string, box: { w: number; h: number }, canvas:
   return Math.max(0.02, Math.min(ceiling, byWidth, byHeight));
 }
 
+const BACKDROP_SPAN = 0.9;
 /** Covers nearly the whole canvas, in both directions. */
 const isBackdrop = (o: LayoutObject): boolean => o.w >= BACKDROP_SPAN && o.h >= BACKDROP_SPAN;
-const BACKDROP_SPAN = 0.9;
 
 export interface PlacedButton {
   layout: LayoutDTO;

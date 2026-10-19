@@ -93,7 +93,7 @@ import {
 } from "../../components/ui";
 import { CompanionPressFields } from "./companion-cues";
 import { homeImpact, impactQuestion, makeAutomatic, makeManual } from "./rule-conversion";
-import { PickerField } from "./automation-picker";
+import { NOT_PICKED_TRIGGERS, PickerField } from "./automation-picker";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
 
@@ -187,9 +187,6 @@ export function Row({
 }
 
 const NO_NAMES: ReadonlySet<string> = new Set();
-
-/** The one trigger a picker never offers for a rule that is not already a cue. */
-const NOT_A_PICKED_TRIGGER: ReadonlySet<string> = new Set([CALL_TRIGGER_ID]);
 
 /** The saved JSON object as editable rows. Malformed config yields no rows rather
  *  than throwing — the operator can then just add them. */
@@ -1394,7 +1391,7 @@ export function RuleEditorBody({
           value={draft.trigger.id}
           placeholder="Pick a trigger…"
           ariaLabel="Trigger"
-          exclude={isCue ? undefined : NOT_A_PICKED_TRIGGER}
+          exclude={isCue ? undefined : NOT_PICKED_TRIGGERS}
           onChange={(id) =>
             setDraft({
               ...draft,

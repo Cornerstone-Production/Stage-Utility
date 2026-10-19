@@ -1,10 +1,8 @@
 // The New cue dialog: a stepped flow for making a cue or an automatic rule.
 //
-// REPLACES "Add rule", which saved a disabled "Rule N" holding the first trigger
-// in the registry and a log action, and only then opened it — so Cancel left a
-// rule behind that nobody had asked for. Here NOTHING IS SAVED UNTIL CREATE:
-// the draft lives in this component and goes with it, and Escape, the overlay,
-// the close button and Cancel are all the same discard.
+// NOTHING IS SAVED UNTIL CREATE: the draft lives in this component and goes with
+// it, and Escape, the overlay, the close button and Cancel are all the same
+// discard.
 //
 // The model — the steps, the defaults, what a step needs, the rule Create writes
 // — is new-cue-flow.ts. This file draws it and runs the two writes: the rule, and
@@ -25,8 +23,9 @@ import { useMemo, useRef, useState } from "react";
 import { HandIcon, ZapIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
+import { takenCueNames } from "@main/services/cue-aliases";
 import { errorMessage } from "@main/services/errors";
-import { CALL_TRIGGER_ID } from "@main/services/cue-aliases";
+import { plural } from "@main/services/plural";
 import { fieldsNeedAttention } from "@main/services/automation-param-validation";
 import type { Rule } from "@main/types/automation";
 import type { View } from "@main/types/views";
@@ -50,7 +49,7 @@ import {
   toast,
 } from "../../components/ui";
 import type { OptionSources } from "./automation-option-sources";
-import { AutomationPicker, PickerField } from "./automation-picker";
+import { AutomationPicker, NOT_PICKED_TRIGGERS, PickerField } from "./automation-picker";
 import {
   ActionParamsFields,
   ParamField,
@@ -72,15 +71,10 @@ import {
   stepIssues,
   stepsFor,
   suggestedName,
-  takenCueNames,
   type CueDraft,
   type CueKind,
   type StepId,
 } from "./new-cue-flow";
-
-/** The one trigger the When step does not offer: a manual cue is made by choosing
- *  the kind, which also gives it a name. */
-const NOT_PICKED: ReadonlySet<string> = new Set([CALL_TRIGGER_ID]);
 
 /** What the dialog says after Create when a console was refused. */
 interface Outcome {
@@ -208,7 +202,7 @@ export function NewCueDialog({
       case "if":
         return draft.conditions.length === 0
           ? "None"
-          : `${draft.conditions.length} condition${draft.conditions.length > 1 ? "s" : ""}`;
+          : plural(draft.conditions.length, "condition");
       case "act":
         return labelOf(registry.actions, draft.action.id);
       case "name":
@@ -216,7 +210,7 @@ export function NewCueDialog({
       case "console":
         return draft.consoleIds.length === 0
           ? "None"
-          : `${draft.consoleIds.length} console${draft.consoleIds.length > 1 ? "s" : ""}`;
+          : plural(draft.consoleIds.length, "console");
       default:
         return "";
     }
@@ -238,7 +232,7 @@ export function NewCueDialog({
               kind="trigger"
               defs={registry.triggers}
               value={draft.trigger.id}
-              exclude={NOT_PICKED}
+              exclude={NOT_PICKED_TRIGGERS}
               onChange={(id) =>
                 patch({
                   trigger: {
@@ -611,7 +605,7 @@ export function NewCueDialog({
   );
 }
 
-/** The line the Activity-adjacent log gets for the buttons: which consoles took
+/** The line the /log page gets for the buttons: which consoles took
  *  one and which refused, in one line so a Sunday morning reads it at a glance. */
 function logConsoleButtons(cue: string, results: ConsoleResult[]): void {
   const ok = results.filter((r) => r.ok).map((r) => `"${r.name}"`);

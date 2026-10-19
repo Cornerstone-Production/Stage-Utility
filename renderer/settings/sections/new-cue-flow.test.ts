@@ -31,7 +31,6 @@ const {
   stepIssues,
   stepsFor,
   suggestedName,
-  takenCueNames,
 } = await import("./new-cue-flow.js");
 type CueDraft = import("./new-cue-flow.js").CueDraft;
 
@@ -161,17 +160,6 @@ describe("names", () => {
   test("a typed name wins, and a blank one uses the suggestion", () => {
     assert.equal(displayName(manual({ name: "  Projectors on  " }), registry), "Projectors on");
     assert.equal(displayName(manual({ name: "   " }), registry), "Write a log message");
-  });
-
-  test("the taken names are every cue's name and former names, and the built-ins", () => {
-    const taken = takenCueNames(
-      [
-        { trigger: { id: "call.by-name", params: { name: "Stage_Reset", aliases: "old_reset, older_reset" } } },
-        { trigger: { id: "pco.service-started", params: { name: "not_a_cue" } } },
-      ],
-      ["obs_record_on"],
-    );
-    assert.deepEqual([...taken].sort(), ["obs_record_on", "old_reset", "older_reset", "stage_reset"]);
   });
 
   test("the cue name is derived from the display name and avoids what is taken", () => {

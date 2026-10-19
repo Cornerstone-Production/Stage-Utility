@@ -1,10 +1,9 @@
 // action-picker.tsx — the Action select on an action-button object.
 //
-// A flat, labelled list — the same list, in the same order, with the same
-// labels, the automation rule editor's own Action select shows
-// (rule-editor-dialog.tsx). AUTOMATION_ACTIONS carries no category field to
-// group by, and inventing one here would be a second, unshared answer to
-// "what this action is called" the rule editor does not have.
+// A flat, labelled list: every action in the registry's order, with the labels
+// the automation rule editor's grouped picker shows (automation-picker.tsx). It is
+// a plain Select because it sits in the layout editor's narrow side panel, where
+// the rule editor's two-column picker does not fit.
 //
 // Its own component, like cue-picker.tsx, so it can be rendered in a test
 // without mounting the whole inspector.

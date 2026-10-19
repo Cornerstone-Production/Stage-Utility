@@ -15,7 +15,7 @@
 //
 // NOTHING IS SAVED UNTIL CREATE. The draft lives in the dialog and goes with it.
 
-import { CALL_TRIGGER_ID, calledCueName, parseAliases } from "@main/services/cue-aliases";
+import { CALL_TRIGGER_ID } from "@main/services/cue-aliases";
 import { deriveCueName } from "@main/services/cue-name";
 import { homeVisibilityParams } from "@main/services/cue-pairs";
 import { ruleIssues, type RuleIssue } from "@main/services/automation-param-validation";
@@ -132,23 +132,6 @@ export function suggestedName(d: CueDraft, registry: Registry): string {
 export const displayName = (d: CueDraft, registry: Registry): string =>
   d.name.trim() || suggestedName(d, registry);
 
-/**
- * Every cue name in use, with its former names, and the built-ins — what a new
- * cue's name must not be. The engine treats them as ONE namespace.
- */
-export function takenCueNames(
-  rules: readonly Pick<Rule, "trigger">[],
-  reserved: readonly string[] = [],
-): Set<string> {
-  const taken = new Set(reserved.map((n) => n.toLowerCase()));
-  for (const r of rules) {
-    const name = calledCueName(r.trigger);
-    if (name) taken.add(name);
-    if (r.trigger.id === CALL_TRIGGER_ID) for (const alias of parseAliases(r.trigger.params)) taken.add(alias);
-  }
-  return taken;
-}
-
 /** The cue name a manual cue is made with: from its display name, not taken. */
 export function newCueName(d: CueDraft, registry: Registry, taken: ReadonlySet<string>): string {
   return deriveCueName(displayName(d, registry), taken);
@@ -160,7 +143,7 @@ export function newCueName(d: CueDraft, registry: Registry, taken: ReadonlySet<s
  * then mark. A step with no id yet has no issues of its own; whether it is
  * chosen is {@link stepComplete}'s question.
  */
-export function draftIssues(d: CueDraft, registry: Registry): RuleIssue[] {
+function draftIssues(d: CueDraft, registry: Registry): RuleIssue[] {
   return ruleIssues(
     {
       trigger: d.kind === "manual" ? { id: "", params: {} } : d.trigger,

@@ -1,5 +1,5 @@
 import { errorMessage } from "@main/services/errors";
-import { CALL_TRIGGER_ID, parseAliases } from "@main/services/cue-aliases";
+import { CALL_TRIGGER_ID, parseAliases, takenCueNames } from "@main/services/cue-aliases";
 import { APP_STATE_SOURCES, appStateRef } from "@main/services/app-state-sources";
 import {
   cuePairs,
@@ -36,7 +36,7 @@ import {
   type RuleEditorTarget,
 } from "./rule-editor-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "@tanstack/react-router";
+import { useSearchParam } from "../../lib/use-search-param";
 import { useConfiguredIntegrations } from "../../main/use-integration-states";
 import { usePvpState } from "../../main/use-pvp-state";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -48,7 +48,7 @@ import { Button, Collapsible, Input, Separator, Switch, toast } from "../../comp
 import { formatClock } from "../../lib/clock-format";
 import { CueAccessCard, CueButtonStatus, ImportPairsDialog } from "./companion-cues";
 import { NewCueDialog } from "./new-cue-dialog";
-import { takenCueNames, type CueKind } from "./new-cue-flow";
+import type { CueKind } from "./new-cue-flow";
 import { plural } from "@main/services/plural";
 
 /**
@@ -617,45 +617,24 @@ function ListSection({
 
 // ── The deep link ─────────────────────────────────────────────────────────────
 
-/** The part of the router this reads and writes. See useNewCueLink. */
-interface LinkRouter {
-  state: { location: { pathname: string; search: Record<string, unknown> } };
-  subscribe: (event: "onResolved", fn: () => void) => () => void;
-  navigate: (opts: { to: string; search: Record<string, unknown>; replace: boolean }) => Promise<void>;
-}
-
 /** The `new` search value that opens the New cue dialog on a manual cue. */
 export const NEW_CUE_PARAM = "new";
 export const NEW_MANUAL_CUE = "manual";
 
 /**
- * `/automation?new=manual` opens the New cue dialog at the manual kind.
- *
- * What the layout editor's "+ New manual cue…" links to. Read once on arrival and
- * again on every resolved navigation, because that button can be pressed while
- * this page is already the one showing. The parameter is DROPPED once it has
- * opened the dialog, so a reload (or Back) does not open it a second time — the
- * same reasoning the Integrations page's `?integration=` follows, the other way
- * round: that one is state worth keeping in the URL, this is a command.
- *
- * `useRouter({ warn: false })` is null with no router above it, which is every
- * test that renders this page bare; the page works exactly as it did there. See
- * service-history-section.tsx's useSelectedServiceKey for the same trick.
+ * `/automation?new=manual` opens the New cue dialog at the manual kind, for a link
+ * from another page. Read on arrival and on every resolved navigation, so a link
+ * pressed while this page is already showing works too. The parameter is DROPPED
+ * once it has opened the dialog, so a reload (or Back) does not open it a second
+ * time: it is a command, not state worth keeping in the URL.
  */
 function useNewCueLink(open: (kind: CueKind) => void) {
-  const router = useRouter({ warn: false }) as unknown as LinkRouter | null;
+  const [asked, setAsked] = useSearchParam(NEW_CUE_PARAM);
   useEffect(() => {
-    if (!router) return;
-    const check = () => {
-      const search = router.state.location.search;
-      if (search[NEW_CUE_PARAM] !== NEW_MANUAL_CUE) return;
-      open("manual");
-      const { [NEW_CUE_PARAM]: _consumed, ...rest } = search;
-      void router.navigate({ to: router.state.location.pathname, search: rest, replace: true });
-    };
-    check();
-    return router.subscribe("onResolved", check);
-  }, [router, open]);
+    if (asked !== NEW_MANUAL_CUE) return;
+    open("manual");
+    setAsked(null, { replace: true });
+  }, [asked, open, setAsked]);
 }
 
 // ── Section ───────────────────────────────────────────────────────────────────

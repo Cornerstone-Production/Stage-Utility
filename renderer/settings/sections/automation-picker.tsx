@@ -2,8 +2,8 @@
 //
 // ONE component for every place a rule's step is chosen: the New cue dialog's
 // When, If and Then steps, and the single-page editor's Trigger, Add condition and
-// Action rows. They replace the flat selects, which listed every definition in
-// the registry in one column — about a hundred of them, under no heading.
+// Action rows. The registry holds about a hundred definitions, so they are listed
+// under headings and can be searched.
 //
 // Two shapes of the same panel:
 //
@@ -38,8 +38,13 @@ import {
   conditionGroup,
   triggerGroup,
 } from "@main/services/automation-groups";
+import { CALL_TRIGGER_ID } from "@main/services/cue-aliases";
 import { cn } from "../../lib/cn";
 import { NOT_OFFERED } from "../../components/ui";
+
+/** The one trigger no picker offers: a cue is made by choosing the manual kind,
+ *  which also gives it a name. */
+export const NOT_PICKED_TRIGGERS: ReadonlySet<string> = new Set([CALL_TRIGGER_ID]);
 
 export type PickerKind = "trigger" | "action" | "condition";
 
@@ -222,8 +227,7 @@ export function AutomationPicker({
  *
  * `value` may name something the registry no longer lists (a trigger an older
  * release saved). The button then shows the id with "not found" after it, rather
- * than going blank or showing a neighbour, which is what the Select this
- * replaced did too.
+ * than going blank or showing a neighbour.
  */
 export function PickerField({
   kind,
@@ -243,9 +247,9 @@ export function PickerField({
   exclude?: ReadonlySet<string>;
 }) {
   const [open, setOpen] = useState(false);
-  // A stored id the registry no longer lists reads as the id and says so, the way
-  // a Select does for a value it has no option for (NOT_OFFERED). While the
-  // registry has not answered it is just the id: nothing is known to be missing.
+  // A stored id the registry no longer lists reads as the id and says so (NOT_OFFERED).
+  // While the registry has not answered it is just the id: nothing is known to be
+  // missing.
   const found = defs?.find((d) => d.id === value);
   const current = !value ? "" : found ? found.label : defs ? `${value} ${NOT_OFFERED}` : value;
   return (

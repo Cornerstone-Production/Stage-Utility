@@ -5,10 +5,10 @@
 // registry read and the write-back into config can be rendered in a test
 // without mounting the whole Inspector and every other object type's hooks.
 //
-// The action select and the per-parameter fields are the SAME components the
-// automation rule editor uses (ActionPicker, ActionParamsFields) — one
-// registry, one set of field widgets, so a param this repo already knows how
-// to edit does not grow a second, differently-behaved copy here.
+// The action list comes from the SAME registry the automation rule editor reads,
+// and the per-parameter fields are the same component (ActionParamsFields): a
+// param this repo already knows how to edit does not grow a second,
+// differently-behaved copy here.
 
 import { useQuery } from "@tanstack/react-query";
 

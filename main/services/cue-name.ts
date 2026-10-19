@@ -19,7 +19,7 @@ export const MAX_CUE_NAME = 60;
 const ROOM = 8;
 
 /** The suffix that takes a name out of the `_on`/`_off` shape. See below. */
-export const NOT_A_PAIR_HALF = "_cue";
+const NOT_A_PAIR_HALF = "_cue";
 
 /**
  * A usable cue name for `display`, not in `taken`.

@@ -48,7 +48,7 @@
 // same answer. See cue-states.ts.
 
 import { CALL_TRIGGER_ID } from "./automation-triggers.js";
-import { parseAliases } from "./cue-aliases.js";
+import { calledCueName, parseAliases } from "./cue-aliases.js";
 import {
   cuePairs,
   isHiddenFromHome,
@@ -249,7 +249,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
   const cues = new Map<string, Cue>();
   for (const rule of rules) {
     if (rule.trigger.id !== CALL_TRIGGER_ID) continue;
-    const name = String(rule.trigger.params.name ?? "").trim().toLowerCase();
+    const name = calledCueName(rule.trigger);
     if (!name || cues.has(name)) continue;
     cues.set(name, {
       name,

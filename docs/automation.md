@@ -512,15 +512,14 @@ address once the dialog is open, so a reload does not open it again.
 
 ### Editing a cue
 
-A rule's editor stays one page. A **manual cue** — a cue that is not half of an
+A rule's editor is one page. A **manual cue** — a cue that is not half of an
 ON/OFF pair — has no **When** or **If** in it: a box says **Runs only when called**
 and holds **Make it automatic**, and the action, Home Assistant, Allowed during a
 service and cooldown follow, with the cue's own fields (cue name, spoken as, room,
 former names, once per service, ask twice) below. A cue that carries conditions
 other than the service guard shows them under **Also only when**, so they can still
 be read and removed; the manual kind does not add one. An **automatic rule** has
-**Make it manual** beside **When**. A pair's halves have neither: a pair's editor
-is as it was.
+**Make it manual** beside **When**. A pair's halves have neither.
 
 Converting changes the draft, and nothing is written until **Save**. It keeps the
 action, name, enabled state and cooldown.
