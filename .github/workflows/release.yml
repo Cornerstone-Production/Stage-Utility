@@ -347,11 +347,20 @@ jobs:
           # release everything since the last tag, at the correct level for the
           # combined set. So stand down rather than erroring (or force-pushing:
           # deployments track beta and a rewrite breaks their in-app updater).
-          if git push "$REMOTE" "HEAD:${GITHUB_REF_NAME}"; then
+          #
+          # Only that rejection stands down. A push that fails for any other
+          # reason (a bad token, a protected branch, the network) is an error: it
+          # must not read as "someone else will release this".
+          if out=$(git push "$REMOTE" "HEAD:${GITHUB_REF_NAME}" 2>&1); then
             git push "$REMOTE" "v$V"
             echo "pushed=true" >> "$GITHUB_OUTPUT"
             echo "bump=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           else
+            echo "$out"
+            if ! grep -qE '! \[rejected\].*(fetch first|non-fast-forward)' <<<"$out"; then
+              echo "::error::pushing the v$V bump to ${GITHUB_REF_NAME} failed, and not because the branch moved"
+              exit 1
+            fi
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "::notice::${GITHUB_REF_NAME} advanced during this run — skipping v$V. The run for the newer commit will release it."
             # Overwrites the "Releasing v$NEXT" summary written a step ago, which
