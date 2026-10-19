@@ -929,7 +929,7 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
 // stand-in answers `print` with SHIM_PRINT_OUT (a pid, or nothing for a helper that
 // is not running) and, on the first `bootstrap` into a GUI session, writes what a
 // starting helper would write to its status file: that is the new helper starting.
-describe("--check-update", { skip: !(has("zip") && has("uuidgen") && has("xxd")) && "needs zip, uuidgen and xxd" }, () => {
+describe("--check-update", { skip: !(has("zip") && has("unzip") && has("uuidgen") && has("xxd")) && "needs zip, unzip, uuidgen and xxd" }, () => {
   let server: Fake;
   let shims: ReturnType<typeof makeShims>;
   let old: { file: string; bytes: Buffer };
@@ -966,7 +966,9 @@ describe("--check-update", { skip: !(has("zip") && has("uuidgen") && has("xxd"))
     // write, so the updater sends the id copied into its own folder at install.
     fs.writeFileSync(path.join(state, "device-id"), "planted-by-the-user\n");
     fs.mkdirSync(path.join(scratch, "Applications"), { recursive: true });
-    assert.equal(spawnSync("ditto", ["-x", "-k", old.file, path.join(scratch, "Applications")]).status, 0);
+    // unzip, not ditto: this suite runs on Linux in CI, which has no ditto.
+    const unpacked = spawnSync("unzip", ["-q", old.file, "-d", path.join(scratch, "Applications")], { encoding: "utf8" });
+    assert.equal(unpacked.status, 0, unpacked.stderr);
     const updater = path.join(scratch, "Library", "Application Support", "StageUtilityUpdater");
     fs.mkdirSync(updater, { recursive: true });
     fs.writeFileSync(path.join(updater, "server"), `${server.base}\n`);

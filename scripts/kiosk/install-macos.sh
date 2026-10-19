@@ -824,7 +824,7 @@ copy_updater_script() {
     fetch_to "${origin%/}/kiosk/install-macos.sh" "$UPDATER_SCRIPT.new" 60 0 || return 1
   fi
   # Only something this script would run: it parses, and it is this updater.
-  sh -n "$UPDATER_SCRIPT.new" && grep -q '^UPDATER_LABEL=' "$UPDATER_SCRIPT.new" || return 1
+  if ! sh -n "$UPDATER_SCRIPT.new" || ! grep -q '^UPDATER_LABEL=' "$UPDATER_SCRIPT.new"; then return 1; fi
   chown root:wheel "$UPDATER_SCRIPT.new" && chmod 755 "$UPDATER_SCRIPT.new" && mv -f "$UPDATER_SCRIPT.new" "$UPDATER_SCRIPT"
 }
 
@@ -838,12 +838,18 @@ updater_files() {
   origin="${origin%/}"
   [ -n "$origin" ] || { WHY="no server address to ask"; return 1; }
   is_origin "$origin" || { WHY="$origin is not a server address (http://<host>:<port>, nothing after it)"; return 1; }
-  [ -f "$STATE_DIR/device-id" ] && [ ! -L "$STATE_DIR/device-id" ] || { WHY="$STATE_DIR/device-id is missing or a link"; return 1; }
+  if [ ! -f "$STATE_DIR/device-id" ] || [ -L "$STATE_DIR/device-id" ]; then
+    WHY="$STATE_DIR/device-id is missing or a link"
+    return 1
+  fi
   machine="$(tr -d '\r\n' <"$STATE_DIR/device-id")"
   printf '%s\n' "$machine" | grep -Eq '^[A-Za-z0-9._-]{1,128}$' || { WHY="$STATE_DIR/device-id is not a device id"; return 1; }
   [ ! -L "$UPDATER_DIR" ] || { WHY="$UPDATER_DIR is a symbolic link"; return 1; }
   mkdir -p "$UPDATER_DIR" "$(dirname "$UPDATE_LOG")" "$(dirname "$UPDATER_PLIST")" || { WHY="could not create $UPDATER_DIR"; return 1; }
-  { chown root:wheel "$UPDATER_DIR" && chmod 755 "$UPDATER_DIR"; } || { WHY="could not make $UPDATER_DIR root's"; return 1; }
+  if ! chown root:wheel "$UPDATER_DIR" || ! chmod 755 "$UPDATER_DIR"; then
+    WHY="could not make $UPDATER_DIR root's"
+    return 1
+  fi
   copy_updater_script || { WHY="could not put a copy of this installer in $UPDATER_DIR${WHY:+ ($WHY)}"; return 1; }
   printf '%s\n' "$origin" | put_file "$UPDATER_ORIGIN" 644 || { WHY="could not write $UPDATER_ORIGIN"; return 1; }
   printf '%s\n' "$machine" | put_file "$UPDATER_DIR/device-id" 644 || { WHY="could not write $UPDATER_DIR/device-id"; return 1; }
@@ -921,7 +927,7 @@ helper_status_file() {
 # commas and all: the server's sentences have them. Anything else (a number, a
 # bool) comes back as written.
 json_field() { # file key
-  [ -r "$1" ] && [ ! -L "$1" ] || return 0
+  if [ ! -r "$1" ] || [ -L "$1" ]; then return 0; fi
   flat="$(tr -d '\n' <"$1")"
   value="$(printf '%s' "$flat" | sed -nE "s/.*\"$2\":\"(([^\"\\\\]|\\\\.)*)\".*/\1/p" | head -n 1)"
   if [ -z "$value" ]; then
@@ -936,7 +942,7 @@ json_field() { # file key
 helper_field() { # key
   file="$(helper_status_file || true)"
   # find looks at a link itself, not what it points at, so -type f refuses one.
-  [ -n "$file" ] && [ -n "$(find "$file" -prune -type f -user "$CONSOLE_UID" 2>/dev/null)" ] || return 0
+  if [ -z "$file" ] || [ -z "$(find "$file" -prune -type f -user "$CONSOLE_UID" 2>/dev/null)" ]; then return 0; fi
   json_field "$file" "$1"
 }
 
@@ -957,7 +963,7 @@ is_origin() {
 # folder's `server` file, nor the server the helper says it loads from: the
 # logged-in user can write both, and root installs what this server sends.
 update_server() {
-  [ -r "$UPDATER_ORIGIN" ] && [ ! -L "$UPDATER_ORIGIN" ] || return 0
+  if [ ! -r "$UPDATER_ORIGIN" ] || [ -L "$UPDATER_ORIGIN" ]; then return 0; fi
   origin="$(tr -d '\r\n' <"$UPDATER_ORIGIN")"
   if is_origin "${origin%/}"; then printf '%s' "${origin%/}"; fi
 }
