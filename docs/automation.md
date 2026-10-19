@@ -19,6 +19,20 @@ Built on the **Automation** page, in the sidebar.
 
 ![The Automation page: simulate mode, the Home Assistant cues and the other rules, each with a Run button](images/automation-rules.png)
 
+A rule is made with **New cue**, under the list, which opens a dialog of steps —
+see [Creating a cue](#creating-a-cue). A rule is one of two kinds. An **automatic
+rule** has all five parts above. A **manual cue** has no When and no If: it runs
+only when something calls it (see [Cues](#cues)), so it is the same rule with the
+**Called by name** trigger and no conditions but its service guard.
+
+Triggers, conditions and actions are chosen from a grouped, searchable list, in
+the dialog's steps and in the editor alike. Triggers are grouped by what they
+watch (Service and plan, Recording and streaming, People, Sound, Wireless,
+ProVideoPlayer, Screens, Baptism, Connections, This app), actions by the
+integration they drive, and conditions by what they ask about. Each choice shows
+the first sentence of its own description. Typing in the search field filters
+across every heading and names the heading beside each match.
+
 Triggers fire on **change**, not on state. Stage's channels carry snapshots — the
 live plan re-broadcasts constantly, the people counter reports the same number
 every poll — so a trigger compares the previous snapshot with the new one.
@@ -342,7 +356,7 @@ start, and when Planning Center cannot be read.
 A cue's editor has an **Allowed during a service** switch that is the same
 condition in one control: off (the imported default) refuses the cue while a
 service is live or about to start, on removes the condition and lets it fire
-whenever it is called. The rules list marks every cue that is on with a
+whenever it is called. A cue made with [New cue](#creating-a-cue) starts with it on. The rules list marks every cue that is on with a
 clearly visible **any time** badge, so the ones that can fire mid-service are
 easy to spot in a long list. A pair's row carries one badge over both halves,
 and reads **any time** if either half can fire — each half is evaluated against
@@ -395,7 +409,7 @@ the trigger and action's own names. A pair shows whenever either half matches.
 | **Former names** | names this cue still answers to, kept when its Companion button was relabelled and the cue renamed to match. Up to five, oldest dropped first. Remove one and that URL stops resolving |
 | **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
-| **Home Assistant** | on by default. Off keeps the cue out of Home Assistant and Apple Home entirely, leaving it callable by voice and by HTTP. A pair's two halves share one setting, stored on the `_on` half |
+| **Home Assistant** | on by default for a cue imported from Companion, and off for one made with [New cue](#creating-a-cue). Off keeps the cue out of Home Assistant and Apple Home entirely, leaving it callable by voice and by HTTP. A pair's two halves share one setting, stored on the `_on` half |
 | **State variable** | in **This pair**, for an ON/OFF pair only, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Saved on the `_on` rule. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `Booth-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
 | **Learning** | shown in **This pair** for a pair with no binding whose connections have no verified module row: the app probes them for candidate variables and binds one by watching what moves when you press the pair on and off. **Learn again** forgets what it found and probes again. See [Learning a state source](integrations/companion.md#learning-a-state-source) |
 | **Ask twice** | the first call is answered with a confirmation and does nothing; a second call within 30 seconds, carrying it, runs it. A confirmation is single use and lapses after 30 seconds — a replayed one is answered with a fresh confirmation, never a second press |
@@ -440,6 +454,91 @@ renamed to match and the old name keeps answering. See
 Set the whole thing up under [Companion](integrations/companion.md#calling-a-cue-by-name):
 the button picker, the ON/OFF and single-button import, the tokens and the Home
 Assistant paste.
+
+### Creating a cue
+
+**New cue** opens a dialog. **Nothing is saved until Create**: Cancel, Escape, the
+close button and the overlay all discard it. The first step is the kind.
+
+| | |
+|---|---|
+| **Manual cue** | fires only when something fires it — its Run button, a cue button on a console, Home Assistant or voice. It never fires by itself, so it starts **on**, with a cooldown of 2 seconds |
+| **Automatic rule** | fires on its own when something happens. It starts **off**, with a cooldown of 30 seconds, and **Review** says to watch it with a log message before giving it a real action |
+
+The steps that follow depend on the kind. An automatic rule: **When**, **If**
+(optional — **Skip** leaves it empty), **Then**, **Name and safety** (name,
+cooldown, once per service), **Review**. A manual cue: **What it does**, **Name and
+where it fires** (name, **Home Assistant**, **Allowed during a service**), **On a
+console** (optional), **Review**. The sidebar shows each finished step's choice and
+goes back to any step before the one you are on; **Review** has a **Change** link
+on each row. A step with a required field — a RossTalk target, a meter key — will
+not move on until it is filled, by the same check the editor's
+[Needs setup](#needs-setup) uses.
+
+A manual cue is made with **Home Assistant off** and **Allowed during a service
+on**: it is voice-only and console-only until you switch Home Assistant on, and it
+carries no [service guard](#cues) unless you switch that off. The cue name is
+derived from the name you type, `lower_snake_case`, and shown read-only on
+Review. It is never one that another cue, a former name or a
+[built-in](#built-in-cues) holds — a clash gets `_2`, `_3` — and a name that would
+end in `_on` or `_off` gets `_cue` after it: "Projectors on" is `projectors_on_cue`.
+The manifest reads `projectors_on` with no `projectors_off` as half of an ON/OFF
+pair and leaves it out of Home Assistant and out of the cue buttons on consoles,
+so the cue would read **Unbound** on the console it was put on.
+
+**On a console** lists the consoles that have a layout of their own — not a wall
+view, a calendar console or Home — and adds a **Cue button** bound to the new cue
+to each one ticked, after the cue is made. The button goes under the lowest object
+in the layout, in the column of the layout's last button and sized and styled like
+it; with no button to copy it is the widget's default size, centred, with its text
+sized to fit its name. The label is yours, or the cue's name when blank. When
+nothing fits below the other objects it sits against the bottom edge and says it
+overlaps. Drag it where you want it in the layout editor.
+
+The buttons are written through the views API with the layout's revision, so a
+console someone has open in the layout editor is refused rather than overwritten
+(one retry, from a fresh read). **A refusal does not undo the cue**: it stays made,
+the other consoles keep their buttons, and the dialog stays open on a panel naming
+which console did not get one and why, with the cue name to bind by hand. Each
+Create that touches consoles writes one line to `/log`:
+
+```
+[automation] cue button for projectors_on_cue added to "Booth console"; failed on "FOH iPad": This view was changed by someone else …
+```
+
+`/automation?new=manual` opens the dialog on a manual cue, already past the first
+step, for a link from another page to use. The parameter is dropped from the
+address once the dialog is open, so a reload does not open it again.
+
+### Editing a cue
+
+A rule's editor stays one page. A **manual cue** — a cue that is not half of an
+ON/OFF pair — has no **When** or **If** in it: a box says **Runs only when called**
+and holds **Make it automatic**, and the action, Home Assistant, Allowed during a
+service and cooldown follow, with the cue's own fields (cue name, spoken as, room,
+former names, once per service, ask twice) below. A cue that carries conditions
+other than the service guard shows them under **Also only when**, so they can still
+be read and removed; the manual kind does not add one. An **automatic rule** has
+**Make it manual** beside **When**. A pair's halves have neither: a pair's editor
+is as it was.
+
+Converting changes the draft, and nothing is written until **Save**. It keeps the
+action, name, enabled state and cooldown.
+
+- **Make it manual** gives the rule a cue name derived from its name, as above, with
+  Home Assistant off.
+- **Make it automatic** leaves the trigger empty for you to choose; **Save** waits
+  for one. The cue name, spoken name and former names go with the trigger.
+
+**Home Assistant is asked first.** Saving a conversion that would take away an
+entity it has — a cue shown in Home Assistant made automatic — asks before it
+writes, and so does one that would give it a new one (a rule made manual whose
+Home Assistant switch you then turned on). A cue switched off for Home Assistant
+loses nothing there and is not asked about.
+
+**A conversion never renames a cue.** Making a cue automatic and then manual again
+before saving puts back the trigger exactly as the editor opened it — name, former
+names, spoken name and room.
 
 ### Built-in cues
 
@@ -643,7 +742,7 @@ is for stopping.
 
 ### Run by hand
 
-**Run**, on every rule row, fires the rule's action once, now. It is explicit
+**Run**, on every rule row — a cue made with [New cue](#creating-a-cue) has one from the moment it exists — fires the rule's action once, now. It is explicit
 operator intent, so it bypasses what decides *when* a rule fires: the trigger, the
 conditions, the cooldown, once per service, and the rule's own enable switch — a
 disabled rule can be run. It does not bypass what decides *whether* anything may
