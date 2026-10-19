@@ -22,16 +22,33 @@ import { homeVisibilityParams, isHiddenFromHome, isPairHalfName } from "@main/se
 import type { Rule } from "@main/types/automation";
 
 /**
+ * The trigger a conversion LEFT, as the draft had it, so converting back puts it
+ * as it was a moment ago — edits included — and not as the editor opened. Kept by
+ * the editor for the length of one dialog session.
+ */
+export interface SetAside {
+  trigger: Rule["trigger"];
+  confirmRequired: boolean | undefined;
+}
+
+/** What a conversion takes out of the draft, for converting back. */
+export const setAside = (draft: Rule): SetAside => ({ trigger: draft.trigger, confirmRequired: draft.confirmRequired });
+
+/**
  * The automatic rule a manual cue becomes: the same rule with NO trigger yet.
  *
  * The trigger is the operator's to choose, and guessing one would save a rule that
  * fires on something they never picked. The editor will not Save until one is.
  */
-export function makeAutomatic(rule: Rule, seed: Rule): Rule {
-  // Back from manual in the same session: the trigger the editor OPENED with, when
-  // that was an automatic rule's, so Make it manual and then Make it automatic is
-  // a round trip and not a blank.
-  const trigger = seed.trigger.id !== CALL_TRIGGER_ID ? seed.trigger : { id: "", params: {} };
+export function makeAutomatic(rule: Rule, seed: Rule, aside: SetAside | null = null): Rule {
+  // Back from manual in the same session: the automatic trigger as it was left, or
+  // failing that the one the editor OPENED with, so Make it manual and then Make it
+  // automatic is a round trip and not a blank.
+  const trigger = aside
+    ? aside.trigger
+    : seed.trigger.id !== CALL_TRIGGER_ID
+      ? seed.trigger
+      : { id: "", params: {} };
   // Ask twice only means something on a called cue. Left on, Test and Run would
   // refuse with 428 on a rule whose editor no longer shows the switch to clear it.
   return { ...rule, trigger, ...(rule.confirmRequired ? { confirmRequired: false } : {}) };
@@ -40,13 +57,15 @@ export function makeAutomatic(rule: Rule, seed: Rule): Rule {
 /**
  * The manual cue a rule becomes.
  *
- * `seed` is the rule as the editor opened it. When that was already a cue (the
- * operator pressed Make it automatic and has changed their mind) its trigger is put
- * back exactly. Otherwise the cue name is derived from the rule's name, not a name
+ * `aside` is the cue's trigger as the draft had it when Make it automatic took it
+ * out, and `seed` is the rule as the editor opened it. Either, when there is a cue
+ * trigger to go back to (the operator has changed their mind), is put back exactly.
+ * Otherwise the cue name is derived from the rule's name, not a name
  * in `taken`, and Home Assistant is OFF: a conversion must not publish an entity
  * nobody asked for. The operator can switch it on, and Save says so when they do.
  */
-export function makeManual(rule: Rule, seed: Rule, taken: ReadonlySet<string>): Rule {
+export function makeManual(rule: Rule, seed: Rule, taken: ReadonlySet<string>, aside: SetAside | null = null): Rule {
+  if (aside) return { ...rule, trigger: aside.trigger, confirmRequired: aside.confirmRequired };
   if (seed.trigger.id === CALL_TRIGGER_ID) {
     return { ...rule, trigger: seed.trigger, confirmRequired: seed.confirmRequired };
   }

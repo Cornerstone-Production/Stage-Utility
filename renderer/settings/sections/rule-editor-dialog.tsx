@@ -92,7 +92,7 @@ import {
   toast,
 } from "../../components/ui";
 import { CompanionPressFields } from "./companion-cues";
-import { homeImpact, impactQuestion, makeAutomatic, makeManual } from "./rule-conversion";
+import { homeImpact, impactQuestion, makeAutomatic, makeManual, setAside, type SetAside } from "./rule-conversion";
 import { NOT_PICKED_TRIGGERS, PickerField } from "./automation-picker";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
@@ -1622,6 +1622,14 @@ export function RuleEditorDialog({
     on: isPair ? target.pair.on : target.rule,
     off: isPair ? target.pair.off : null,
   }));
+  // The trigger the last conversion took out of the draft, so converting back
+  // restores it as it was, edits and all. See rule-conversion.ts.
+  const leftBehind = useRef<SetAside | null>(null);
+  const convert = (to: (draft: Rule, seed: Rule, aside: SetAside | null) => Rule) => {
+    const aside = leftBehind.current;
+    leftBehind.current = setAside(onDraft);
+    setOnDraft(to(onDraft, seed.on, aside));
+  };
   const [half, setHalf] = useState<"on" | "off">("on");
   const [busy, setBusy] = useState(false);
   // Save has been pressed at least once this dialog session. Fields stay
@@ -2033,8 +2041,8 @@ export function RuleEditorDialog({
             issues={editingOff ? offIssues : onIssues}
             attempted={attempted}
             // A pair's halves are neither kind: its editor is unchanged.
-            onMakeAutomatic={isPair ? undefined : () => setOnDraft((d) => makeAutomatic(d, seed.on))}
-            onMakeManual={isPair ? undefined : () => setOnDraft((d) => makeManual(d, seed.on, cueNamesTaken))}
+            onMakeAutomatic={isPair ? undefined : () => convert(makeAutomatic)}
+            onMakeManual={isPair ? undefined : () => convert((d, s, aside) => makeManual(d, s, cueNamesTaken, aside))}
             leavingCue={
               !isPair && seed.on.trigger.id === CALL_TRIGGER_ID && onDraft.trigger.id !== CALL_TRIGGER_ID
                 ? String(seed.on.trigger.params.name ?? "")

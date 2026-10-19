@@ -373,6 +373,20 @@ describe("a conversion never renames a cue", () => {
     assert.deepEqual(r.trigger, { id: "call.by-name", params: { name: "stage_reset", says: "reset the stage", aliases: "old_reset", room: "Booth" } });
   });
 
+  test("what was changed on the cue before converting is still changed when converting back", async () => {
+    await automationEngine.addRule(cueRule());
+    await mount();
+    await openRow("Stage reset");
+    const name = labelled("Cue name");
+    assert.ok(name, "no Cue name field");
+    await act(async () => {
+      fireEvent.change(name, { target: { value: "stage_reset_two" } });
+    });
+    await press(button("Make it automatic"), "Make it automatic");
+    await press(button("Make it manual"), "Make it manual");
+    assert.equal(labelled("Cue name")?.value, "stage_reset_two", "converting back restored the opened cue, not the edited one");
+  });
+
   test("a rule made manual is never given a name another cue or former name holds", async () => {
     await automationEngine.addRule(cueRule({ aliases: "stage_reset_2" }, { name: "Existing" }));
     await automationEngine.addRule(base({ name: "Stage reset" }));
