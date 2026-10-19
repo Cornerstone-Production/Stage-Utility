@@ -141,7 +141,7 @@ Environment=STAGE_UTILITY_FRIENDLY_PORT=${FRIENDLY_PORT}
 # needs no port. Least-privilege: grants ONLY the bind-low-port capability.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 ExecStart=${NODE_BIN} --import tsx ${REPO_ROOT}/server.ts
-# `always` (not on-failure) so the in-app updater can restart the service by
+# Restart=always (not on-failure) so the in-app updater can restart the service by
 # exiting the process after it pulls + rebuilds.
 Restart=always
 RestartSec=3
