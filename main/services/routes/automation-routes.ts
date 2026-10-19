@@ -193,9 +193,10 @@ export async function automationRoutes(c: RouteCtx): Promise<void> {
     }
     const issues = issuesFor(body as unknown as RuleStepsLike);
     // An explicit ask to CREATE it enabled while it still has issues is refused
-    // outright — nothing this app creates today does that (Add rule always
-    // starts disabled, and the Companion imports always fill every field), so
-    // this is a stale-tab or hand-built-request backstop.
+    // outright — nothing this app creates today does that (New cue does not let
+    // a step be passed with a required field empty, and the Companion imports
+    // always fill every field), so this is a stale-tab or hand-built-request
+    // backstop.
     if (issues.length > 0 && body.enabled === true) {
       json(res, { error: "This rule needs setup before it can be turned on", code: "invalid-params", issues }, 409);
       return;

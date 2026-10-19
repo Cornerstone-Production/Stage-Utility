@@ -1663,7 +1663,7 @@ export function RuleEditorDialog({
       // one outcome docs/automation.md rules out. Gated on `onDraft.enabled`
       // because the operator may have turned the switch off themselves in the
       // same session (their explicit off must win), or never turned it on in
-      // the first place (every Add rule starts off) — either way this must
+      // the first place (every automatic rule is created off) — either way this must
       // never override what the switch in front of them says.
       if (forcedOff && onIssues.length === 0 && onDraft.enabled) onPatch.enabled = true;
       // The SAME shape GET's list items carry — Rule & { issues } — not a

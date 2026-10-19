@@ -17,9 +17,8 @@
 //  - A DELETE THAT LEAVES HALF A PAIR. `projectors_off` alone is a cue that
 //    turns something off and nothing that turns it on, and it is still a live
 //    URL.
-//  - ADD RULE THAT LANDS NOWHERE. "Rule 7" with a log action is the start of a
-//    rule; an operator left looking at a list of two hundred has to find it
-//    again to say what it does.
+//  (Add rule, which saved "Rule 7" before the operator saw anything, is gone:
+//  New cue saves nothing until Create. See new-cue-dialog.test.tsx.)
 //
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND. node:assert builds its
 // failure message by inspecting `actual`, and inspecting a live jsdom element
@@ -133,8 +132,6 @@ const cue = (name: string, params: Record<string, string | number> = {}): StubRu
 
 let RULES: StubRule[] = [];
 let requests: { method: string; url: string; body: string | null }[] = [];
-/** What POST /api/automation/rules answers with, so Add rule has an id. */
-let CREATED: StubRule | null = null;
 /** A rule id the server refuses to update, as it refuses a duplicate cue name. */
 let REFUSE: { id: string; error: string } | null = null;
 /** Answer POST .../run the way the server does for a confirm rule: 428 until the
@@ -185,11 +182,6 @@ let RUN_NEEDS_CONFIRM = false;
       return { ok: true, status: 200, json: async () => done, text: async () => JSON.stringify(done) };
     }
     if (method === "DELETE") RULES = RULES.filter((r) => r.id !== id);
-    if (method === "POST" && url.endsWith("/api/automation/rules") && CREATED) {
-      RULES = [...RULES, CREATED];
-      const created = { ...CREATED, issues: [] };
-      return { ok: true, status: 201, json: async () => created, text: async () => JSON.stringify(created) };
-    }
   }
   let body: unknown = {};
   if (url.includes("/api/automation/registry")) body = REGISTRY;
@@ -327,7 +319,6 @@ const writes = () => requests.filter((r) => r.url.includes("/api/automation/rule
 
 beforeEach(() => {
   RULES = [];
-  CREATED = null;
   REFUSE = null;
   RUN_NEEDS_CONFIRM = false;
   requests = [];
@@ -779,26 +770,6 @@ describe("a pair", () => {
       requests.filter((r) => r.url.endsWith("/run")).map((r) => r.url.split("/").at(-2)),
       ["rule-projectors_off"],
     );
-  });
-});
-
-describe("Add rule", () => {
-  test("opens the new rule's editor", async () => {
-    RULES = [cue("take_screens")];
-    CREATED = {
-      id: "rule-new",
-      name: "Rule 2",
-      enabled: false,
-      trigger: { id: CALL_TRIGGER_ID, params: {} },
-      conditions: [],
-      action: { id: "log.message", params: { message: "rule matched" } },
-      cooldownSec: 30,
-      oncePerService: false,
-    };
-    await mount();
-    await press(button("Add rule"), "Add rule");
-    assert.equal(editor(), "rule-new", "the new rule was added with nowhere to say what it does");
-    assert.equal(field("Name")?.value, "Rule 2");
   });
 });
 

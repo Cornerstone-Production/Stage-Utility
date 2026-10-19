@@ -171,12 +171,12 @@ describe("the field", () => {
     );
     const field = () => document.querySelector("[data-picker-field]");
     assert.equal(field()?.textContent?.trim(), "Write a log message");
-    assert.equal(document.querySelector("[data-picker]"), null, "the panel was open before it was pressed");
+    assert.equal(document.querySelector("[data-picker]") === null, true, "the panel was open before it was pressed");
     await press(field(), "the field");
     assert.ok(document.querySelector("[data-picker]"), "pressing the field did not open the panel");
     await press(document.querySelector('[data-picker-option="display.refresh"]'), "Refresh all displays");
     assert.deepEqual(picked, ["display.refresh"]);
-    assert.equal(document.querySelector("[data-picker]"), null, "the panel stayed open after a choice");
+    assert.equal(document.querySelector("[data-picker]") === null, true, "the panel stayed open after a choice");
   });
 
   test("an empty value shows the placeholder, and a stored id nobody lists is shown, with a note", () => {
