@@ -122,17 +122,27 @@ export function AutomationPicker({
   defs,
   value,
   onChange,
+  onPick,
   exclude,
 }: {
   kind: PickerKind;
   defs: readonly PickerDef[];
   /** The chosen id, or "" for none. */
   value: string;
+  /** Called only when the choice CHANGES. Choosing the one already chosen is not a
+   *  change: every consumer answers a change by seeding the new definition's
+   *  params, which would wipe the ones already filled in. */
   onChange: (id: string) => void;
+  /** Called after any choice, the unchanged one included. */
+  onPick?: () => void;
   /** Ids this picker does not offer. Called by name is the one a trigger picker
    *  leaves out: a manual cue is made by choosing the kind. */
   exclude?: ReadonlySet<string>;
 }) {
+  const choose = (id: string) => {
+    if (id !== value) onChange(id);
+    onPick?.();
+  };
   const entries = useMemo(
     () => pickerEntries(kind, exclude ? defs.filter((d) => !exclude.has(d.id)) : defs),
     [kind, defs, exclude],
@@ -158,7 +168,7 @@ export function AutomationPicker({
             // Enter takes the first match, so a search is a keyboard-only path.
             if (e.key === "Enter" && searching && options[0]) {
               e.preventDefault();
-              onChange(options[0].id);
+              choose(options[0].id);
             }
           }}
           placeholder={`Search ${NOUN[kind]}`}
@@ -201,7 +211,7 @@ export function AutomationPicker({
                 data-picker-option={e.id}
                 aria-pressed={e.id === value}
                 title={e.help}
-                onClick={() => onChange(e.id)}
+                onClick={() => choose(e.id)}
                 className={cn(
                   "flex flex-col gap-px rounded-lg border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
                   e.id === value ? "border-accent bg-accent/12" : "border-line bg-surface hover:bg-fill",
@@ -276,10 +286,8 @@ export function PickerField({
             defs={defs}
             value={value}
             exclude={exclude}
-            onChange={(id) => {
-              onChange(id);
-              setOpen(false);
-            }}
+            onChange={onChange}
+            onPick={() => setOpen(false)}
           />
         </div>
       )}

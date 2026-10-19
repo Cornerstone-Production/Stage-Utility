@@ -124,6 +124,25 @@ describe("the panel", () => {
     assert.deepEqual(picked, ["obs.record"]);
   });
 
+  test("choosing the one already chosen calls back with nothing: params already filled in are not reseeded", async () => {
+    const picked: string[] = [];
+    // A search whose first match is the chosen action, found by asking once with none chosen.
+    render(React.createElement(AutomationPicker, { kind: "action", defs: actions, value: "", onChange: () => {} }));
+    await search("record");
+    const first = document.querySelector("[data-picker-option]")?.getAttribute("data-picker-option") ?? "";
+    assert.ok(first, "the search found nothing to choose");
+    cleanup();
+
+    render(React.createElement(AutomationPicker, { kind: "action", defs: actions, value: first, onChange: (id: string) => picked.push(id) }));
+    await search("record");
+    await act(async () => {
+      fireEvent.keyDown(document.querySelector("[data-picker] input") as HTMLInputElement, { key: "Enter" });
+    });
+    await settle();
+    await press(document.querySelector(`[data-picker-option="${first}"]`), "the chosen row");
+    assert.deepEqual(picked, [], "choosing the chosen one, by Enter or by press, reported a change");
+  });
+
   test("an excluded id is not offered", async () => {
     render(
       React.createElement(AutomationPicker, {
@@ -201,6 +220,20 @@ describe("the field", () => {
     await press(document.querySelector('[data-picker-option="display.refresh"]'), "Refresh all displays");
     assert.deepEqual(picked, ["display.refresh"]);
     assert.equal(document.querySelector("[data-picker]") === null, true, "the panel stayed open after a choice");
+  });
+
+  test("pressing the chosen row closes the field and reports no change", async () => {
+    const picked: string[] = [];
+    render(
+      React.createElement(PickerField, {
+        kind: "action", defs: actions, value: "log.message", placeholder: "Pick an action…", ariaLabel: "Action",
+        onChange: (id: string) => picked.push(id),
+      }),
+    );
+    await press(document.querySelector("[data-picker-field]"), "the field");
+    await press(document.querySelector('[data-picker-option="log.message"]'), "the chosen action");
+    assert.deepEqual(picked, []);
+    assert.equal(document.querySelector("[data-picker]") === null, true, "the panel stayed open");
   });
 
   test("an empty value shows the placeholder, and a stored id nobody lists is shown, with a note", () => {
