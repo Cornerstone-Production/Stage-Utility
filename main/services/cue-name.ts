@@ -15,6 +15,9 @@ import { isPairHalfName } from "./cue-pairs.js";
 /** Long enough for any sentence somebody types, short enough for a URL. */
 export const MAX_CUE_NAME = 60;
 
+/** Room kept under the cap for what is added after the cut: `_cue`, then `_NN`. */
+const ROOM = 8;
+
 /** The suffix that takes a name out of the `_on`/`_off` shape. See below. */
 export const NOT_A_PAIR_HALF = "_cue";
 
@@ -38,7 +41,7 @@ export const NOT_A_PAIR_HALF = "_cue";
  */
 export function deriveCueName(display: string, taken: Iterable<string>): string {
   const used = new Set(taken);
-  let base = slugForCue(display).slice(0, MAX_CUE_NAME).replace(/_+$/, "");
+  let base = slugForCue(display).slice(0, MAX_CUE_NAME - ROOM).replace(/_+$/, "");
   if (base === "") base = "cue";
   if (isPairHalfName(base)) base += NOT_A_PAIR_HALF;
   if (!used.has(base)) return base;

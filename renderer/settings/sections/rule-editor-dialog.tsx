@@ -1407,7 +1407,7 @@ export function RuleEditorBody({
         <p role="status" data-picking-trigger="" className="rounded-lg bg-amber-3 px-3 py-2 text-caption1 text-amber-11">
           Pick a trigger to finish making this automatic.
           {leavingCue
-            ? ` Saving removes the cue ${leavingCue}: anything that calls it, Home Assistant included, stops finding it.`
+            ? ` Saving removes the cue ${leavingCue}: anything that calls it, a console cue button and Home Assistant included, stops finding it.`
             : ""}
           {onMakeManual ? " Make it manual puts it back." : ""}
         </p>
@@ -1772,9 +1772,10 @@ export function RuleEditorDialog({
 
   async function save() {
     setAttempted(true);
-    // What this save does to Home Assistant, asked BEFORE anything is written: a
-    // cue it had an entity for that stops being one takes its automations with it,
-    // and a rule that becomes a shown cue gives it an entity nobody has pasted.
+    // What this save does to a cue's callers, asked BEFORE anything is written: a
+    // cue that stops being one takes its URL, its console buttons and any Home
+    // Assistant entity with it, and a rule that becomes a shown cue gives Home
+    // Assistant an entity nobody has pasted.
     // Not asked for anything else — the editor has always saved a rename without
     // a word, and this is only the conversions' question.
     if (!isPair) {
@@ -2041,7 +2042,7 @@ export function RuleEditorDialog({
             issues={editingOff ? offIssues : onIssues}
             attempted={attempted}
             // A pair's halves are neither kind: its editor is unchanged.
-            onMakeAutomatic={isPair ? undefined : () => setOnDraft((d) => makeAutomatic(d))}
+            onMakeAutomatic={isPair ? undefined : () => setOnDraft((d) => makeAutomatic(d, openedAs))}
             onMakeManual={isPair ? undefined : () => setOnDraft((d) => makeManual(d, openedAs, cueNamesTaken))}
             leavingCue={
               !isPair && openedAs.trigger.id === CALL_TRIGGER_ID && onDraft.trigger.id !== CALL_TRIGGER_ID

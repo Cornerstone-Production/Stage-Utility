@@ -66,6 +66,7 @@ const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterP
   "@tanstack/react-router"
 );
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
+const { Toaster } = await import("../../components/ui/index.js");
 const { AutomationSection } = await import("./automation-section.js");
 const { consoleButtonDeps } = await import("../../lib/console-cue-buttons.js");
 
@@ -122,7 +123,7 @@ function page() {
   return React.createElement(
     QueryClientProvider,
     { client },
-    React.createElement(TooltipProvider, null, React.createElement(AutomationSection, {})),
+    React.createElement(TooltipProvider, null, React.createElement(AutomationSection, {}), React.createElement(Toaster, {})),
   );
 }
 
@@ -518,6 +519,41 @@ describe("On a console", () => {
     assert.ok(dialog(), "the dialog closed while its buttons were still being written");
     release();
     await eventually(() => assert.equal(dialog() === null, true));
+  });
+
+  test("a button that has no room below its layout's content is said to sit on the edge, not dropped quietly", async () => {
+    const booth = ctl.state.views.find((v) => v.id === "booth")!;
+    booth.layout!.objects = [{ id: "strip", x: 0, y: 0, w: 0.2, h: 0.97, z: 1, config: { type: "clock" } }] as never;
+    await toConsoleStep("Stage reset", ["booth"]);
+    await press(button("Next"), "Next to Review");
+    await create();
+    const said = await eventually(() => {
+      const t = document.body.textContent ?? "";
+      assert.ok(t.includes("Created Stage reset"), "no success toast");
+      return t;
+    });
+    assert.ok(said.includes("no room below") && said.includes("Booth"), `the overlap was not said: ${said.slice(0, 300)}`);
+  });
+
+  test("pressing Create twice at once makes one rule (an automatic rule has no duplicate check to refuse the second)", async () => {
+    await mount();
+    await press(button("New cue"), "New cue");
+    await press(document.querySelector('[data-kind="auto"]'), "Automatic rule");
+    await press(button("Next"), "Next");
+    await pickOption("pco.service-ended");
+    await press(button("Next"), "Next");
+    await press(button("Skip"), "Skip");
+    await pickOption("log.message");
+    await typeInto(labelledInput("Message"), "x", "Message");
+    await press(button("Next"), "Next");
+    await press(button("Next"), "Next");
+    await act(async () => {
+      const create = button("Create")!;
+      fireEvent.click(create);
+      fireEvent.click(create);
+    });
+    await eventually(() => assert.equal(dialog() === null, true));
+    assert.equal(rules().length, 1, "a double press made two rules");
   });
 
   test("Skip adds nothing", async () => {

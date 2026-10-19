@@ -27,8 +27,14 @@ import type { Rule } from "@main/types/automation";
  * The trigger is the operator's to choose, and guessing one would save a rule that
  * fires on something they never picked. The editor will not Save until one is.
  */
-export function makeAutomatic(rule: Rule): Rule {
-  return { ...rule, trigger: { id: "", params: {} } };
+export function makeAutomatic(rule: Rule, seed: Rule): Rule {
+  // Back from manual in the same session: the trigger the editor OPENED with, when
+  // that was an automatic rule's, so Make it manual and then Make it automatic is
+  // a round trip and not a blank.
+  const trigger = seed.trigger.id !== CALL_TRIGGER_ID ? seed.trigger : { id: "", params: {} };
+  // Ask twice only means something on a called cue. Left on, Test and Run would
+  // refuse with 428 on a rule whose editor no longer shows the switch to clear it.
+  return { ...rule, trigger, ...(rule.confirmRequired ? { confirmRequired: false } : {}) };
 }
 
 /**
@@ -41,7 +47,9 @@ export function makeAutomatic(rule: Rule): Rule {
  * nobody asked for. The operator can switch it on, and Save says so when they do.
  */
 export function makeManual(rule: Rule, seed: Rule, taken: ReadonlySet<string>): Rule {
-  if (seed.trigger.id === CALL_TRIGGER_ID) return { ...rule, trigger: seed.trigger };
+  if (seed.trigger.id === CALL_TRIGGER_ID) {
+    return { ...rule, trigger: seed.trigger, confirmRequired: seed.confirmRequired };
+  }
   return {
     ...rule,
     trigger: {
@@ -64,14 +72,24 @@ export function homeEntity(rule: Pick<Rule, "trigger">): string | null {
   return name;
 }
 
-export type HomeImpact = { kind: "lose" | "gain"; cue: string };
+/**
+ * What a conversion does to the cue's callers.
+ *
+ * `inHome` says whether Home Assistant is one of them: it had an entity for the cue
+ * (lose) or will have one (gain). A cue kept out of Home Assistant still has
+ * callers — `POST /api/cues/<name>` and any cue button on a console, which reads
+ * Unbound once the name is gone.
+ */
+export type HomeImpact = { kind: "lose" | "gain"; cue: string; inHome: boolean };
 
 /**
- * What a CONVERSION saved over `seed` does to Home Assistant, or null when nothing.
+ * What a CONVERSION saved over `seed` does to the cue, or null when nothing.
  *
- * LOSE: a cue it had an entity for is no longer one. Its automations, and the
- * HomeKit switch made from it, stop working. GAIN: a rule it had nothing for is a
- * shown cue now, which a pasted YAML fragment will not have.
+ * LOSE: a cue is no longer one. Its name stops resolving for voice, scripts and
+ * console buttons; if Home Assistant had an entity for it, that goes too, with its
+ * automations and the HomeKit switch made from it. GAIN: a rule that was no cue is
+ * a cue Home Assistant shows, which a pasted YAML fragment will not have. A cue
+ * that is new and kept out of Home Assistant gains nothing anybody was using.
  *
  * ONLY WHEN THE TRIGGER KIND CHANGED. The editor's own Home Assistant switch
  * already says, beside itself, that turning it off removes the entity, and has
@@ -81,24 +99,35 @@ export type HomeImpact = { kind: "lose" | "gain"; cue: string };
  */
 export function homeImpact(seed: Rule, draft: Rule): HomeImpact | null {
   if (seed.trigger.id === draft.trigger.id) return null;
-  const before = homeEntity(seed);
-  const after = homeEntity(draft);
-  if (before && !after) return { kind: "lose", cue: before };
-  if (!before && after) return { kind: "gain", cue: after };
+  const seedName = cueNameOf(seed);
+  if (seedName && draft.trigger.id !== CALL_TRIGGER_ID) {
+    return { kind: "lose", cue: seedName, inHome: homeEntity(seed) !== null };
+  }
+  const gained = homeEntity(draft);
+  if (!seedName && gained) return { kind: "gain", cue: gained, inHome: true };
   return null;
+}
+
+/** The cue name a rule answers to, or "" for a rule that is not a cue. */
+function cueNameOf(rule: Pick<Rule, "trigger">): string {
+  return rule.trigger.id === CALL_TRIGGER_ID ? String(rule.trigger.params.name ?? "").trim().toLowerCase() : "";
 }
 
 /** The question Save asks before it does either. */
 export function impactQuestion(impact: HomeImpact): { title: string; message: string; confirmLabel: string } {
-  return impact.kind === "lose"
-    ? {
-        title: "Home Assistant will lose this cue",
-        message: `${impact.cue} stops existing: Home Assistant removes its entity within a few seconds, automations there that refer to it stop working, and anything calling /api/cues/${impact.cue} stops finding it.`,
-        confirmLabel: "Save anyway",
-      }
-    : {
-        title: "Home Assistant will get a new cue",
-        message: `${impact.cue} becomes a button in Home Assistant and Apple Home. The Home Assistant integration picks it up by itself; a pasted YAML fragment needs to be generated and pasted again.`,
-        confirmLabel: "Save",
-      };
+  if (impact.kind === "lose") {
+    const home = impact.inHome
+      ? " Home Assistant removes its entity within a few seconds, and automations there that refer to it stop working."
+      : "";
+    return {
+      title: "This cue will stop existing",
+      message: `${impact.cue} goes away.${home} Anything calling /api/cues/${impact.cue} stops finding it, and a cue button on a console bound to it reads Unbound.`,
+      confirmLabel: "Save anyway",
+    };
+  }
+  return {
+    title: "Home Assistant will get a new cue",
+    message: `${impact.cue} becomes a button in Home Assistant and Apple Home. The Home Assistant integration picks it up by itself; a pasted YAML fragment needs to be generated and pasted again.`,
+    confirmLabel: "Save",
+  };
 }

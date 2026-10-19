@@ -30,9 +30,25 @@ const none = new Set<string>();
 describe("makeAutomatic", () => {
   test("keeps everything but the trigger, which is empty until the operator picks one", () => {
     const r = cue({ says: "the projectors", aliases: "old" }, { enabled: false });
-    const a = makeAutomatic(r);
+    const a = makeAutomatic(r, r);
     assert.deepEqual(a.trigger, { id: "", params: {} });
     assert.deepEqual({ ...a, trigger: r.trigger }, r);
+  });
+});
+
+describe("round trips", () => {
+  test("an automatic rule made manual and automatic again has its own trigger back, not a blank", () => {
+    const seed = rule();
+    const back = makeAutomatic(makeManual(seed, seed, none), seed);
+    assert.deepEqual(back.trigger, seed.trigger);
+  });
+
+  test("Ask twice is cleared going automatic, where nothing can clear it, and restored coming back", () => {
+    const seed = cue({}, { confirmRequired: true });
+    const auto = makeAutomatic(seed, seed);
+    assert.equal(auto.confirmRequired, false);
+    assert.equal(makeManual(auto, seed, none).confirmRequired, true);
+    assert.equal(makeAutomatic(cue(), cue()).confirmRequired, undefined, "a rule that never had it is not given it");
   });
 });
 
@@ -51,12 +67,12 @@ describe("makeManual", () => {
 
   test("back from automatic in the same session: the trigger as the editor OPENED it, name, former names and all", () => {
     const seed = cue({ says: "the projectors", aliases: "old_projectors", room: "Booth" });
-    const gone = makeAutomatic(seed);
+    const gone = makeAutomatic(seed, seed);
     const back = makeManual(gone, seed, none);
     assert.deepEqual(back.trigger, seed.trigger, "a round trip renamed or lost something");
     // A name the rule would derive differs from the cue's own: it must not win.
     const odd = cue({ name: "projector_power" }, { name: "Projectors" });
-    assert.equal(makeManual(makeAutomatic(odd), odd, none).trigger.params.name, "projector_power");
+    assert.equal(makeManual(makeAutomatic(odd, odd), odd, none).trigger.params.name, "projector_power");
   });
 });
 
@@ -75,16 +91,22 @@ describe("homeEntity", () => {
 describe("homeImpact", () => {
   test("a shown cue made automatic LOSES its entity", () => {
     const seed = cue();
-    assert.deepEqual(homeImpact(seed, makeAutomatic(seed)), { kind: "lose", cue: "projectors" });
-    assert.deepEqual(homeImpact(seed, { ...makeAutomatic(seed), trigger: { id: "pco.service-ended", params: {} } }), {
+    assert.deepEqual(homeImpact(seed, makeAutomatic(seed, seed)), { kind: "lose", cue: "projectors", inHome: true });
+    assert.deepEqual(homeImpact(seed, { ...makeAutomatic(seed, seed), trigger: { id: "pco.service-ended", params: {} } }), {
       kind: "lose",
       cue: "projectors",
+      inHome: true,
     });
   });
 
-  test("a hidden cue made automatic loses nothing Home Assistant had", () => {
+  test("a cue kept out of Home Assistant still loses its name, and the question says Home Assistant is not in it", () => {
     const seed = cue({ homeAssistant: "hidden" });
-    assert.equal(homeImpact(seed, makeAutomatic(seed)), null);
+    const impact = homeImpact(seed, makeAutomatic(seed, seed));
+    assert.deepEqual(impact, { kind: "lose", cue: "projectors", inHome: false });
+    const q = impactQuestion(impact!);
+    assert.match(q.message, /\/api\/cues\/projectors/);
+    assert.match(q.message, /console/);
+    assert.doesNotMatch(q.message, /Home Assistant removes/);
   });
 
   test("an automatic rule made manual GAINS nothing while Home Assistant is off, and an entity once it is on", () => {
@@ -92,7 +114,7 @@ describe("homeImpact", () => {
     const m = makeManual(seed, seed, none);
     assert.equal(homeImpact(seed, m), null);
     const shown = { ...m, trigger: { ...m.trigger, params: { ...m.trigger.params, homeAssistant: "" } } };
-    assert.deepEqual(homeImpact(seed, shown), { kind: "gain", cue: "projectors" });
+    assert.deepEqual(homeImpact(seed, shown), { kind: "gain", cue: "projectors", inHome: true });
   });
 
   test("nothing is asked when the trigger kind did not change: the Home Assistant switch has its own warning", () => {
@@ -103,12 +125,13 @@ describe("homeImpact", () => {
 
   test("a round trip is no impact at all", () => {
     const seed = cue();
-    assert.equal(homeImpact(seed, makeManual(makeAutomatic(seed), seed, none)), null);
+    assert.equal(homeImpact(seed, makeManual(makeAutomatic(seed, seed), seed, none)), null);
   });
 
   test("the question names the cue and says what is lost", () => {
-    const q = impactQuestion({ kind: "lose", cue: "projectors" });
+    const q = impactQuestion({ kind: "lose", cue: "projectors", inHome: true });
     assert.match(q.message, /projectors/);
+    assert.match(q.message, /Home Assistant removes/);
     assert.match(q.message, /\/api\/cues\/projectors/);
   });
 });

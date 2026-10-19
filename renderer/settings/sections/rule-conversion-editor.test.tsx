@@ -332,15 +332,25 @@ describe("Make it automatic", () => {
     assert.deepEqual(manifest.buttons.filter((b) => !b.builtin).map((b) => b.id), []);
   });
 
-  test("a cue kept out of Home Assistant loses nothing there, so Save does not ask", async () => {
+  test("a cue kept out of Home Assistant still has callers, so Save asks, naming the URL and console buttons", async () => {
     await automationEngine.addRule(cueRule({ homeAssistant: "hidden" }, { enabled: false }));
     await mount();
     await openRow("Stage reset");
     await press(button("Make it automatic"), "Make it automatic");
     await press(pickerField("Trigger"), "Trigger");
     await pickOption("pco.service-ended");
-    await save();
-    assert.equal(editorOpen(), false);
+    await press(button("Save"), "Save");
+    const ask = await eventually(() => {
+      const el = [...document.querySelectorAll("[role=alertdialog], [role=dialog]")].find((d) => !d.hasAttribute("data-rule-editor"));
+      assert.ok(el, "Save did not ask");
+      return el;
+    });
+    const said = ask.textContent ?? "";
+    assert.ok(said.includes("/api/cues/stage_reset"), `the URL is not named: ${said}`);
+    assert.ok(said.includes("console"), `console buttons are not named: ${said}`);
+    assert.equal(said.includes("Home Assistant removes"), false, "it claimed Home Assistant loses an entity it never had");
+    assert.deepEqual(patches(), [], "it saved before the answer");
+    await press([...ask.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Save anyway"), "Save anyway");
     assert.equal(rules()[0].trigger.id, "pco.service-ended");
     assert.equal(rules()[0].enabled, false);
   });

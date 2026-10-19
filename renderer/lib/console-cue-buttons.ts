@@ -66,6 +66,10 @@ export function fitFontSize(text: string, box: { w: number; h: number }, canvas:
   return Math.max(0.02, Math.min(ceiling, byWidth, byHeight));
 }
 
+/** Covers nearly the whole canvas, in both directions. */
+const isBackdrop = (o: LayoutObject): boolean => o.w >= BACKDROP_SPAN && o.h >= BACKDROP_SPAN;
+const BACKDROP_SPAN = 0.9;
+
 export interface PlacedButton {
   layout: LayoutDTO;
   /** There was no room below the existing content, so the button was put against
@@ -81,7 +85,7 @@ export interface PlacedButton {
  * that last button, with its style, so the new one looks like the others; the
  * editor's default size and style when there is no button to copy.
  *
- * Only top-level objects are looked at. A nested object's box is a fraction of
+ * Only top-level objects are looked at, and not a backdrop. A nested object's box is a fraction of
  * its container's, which is not the canvas's, so reading its bottom as one would
  * place the button somewhere meaningless.
  *
@@ -100,8 +104,12 @@ export function withCueButton(
   const reference = buttons.at(-1);
   const w = reference?.w ?? DEFAULT_BUTTON_SIZE.w;
   const h = reference?.h ?? DEFAULT_BUTTON_SIZE.h;
-  const bottom = layout.objects.reduce((low, o) => Math.max(low, o.y + o.h), 0);
-  const below = layout.objects.length === 0 ? 1 - h - BUTTON_GAP : bottom + BUTTON_GAP;
+  // A BACKDROP is not content: a panel or frame that fills the canvas has its
+  // bottom at the canvas's, so counting it puts every button on the bottom edge,
+  // over the last one, whatever else is there.
+  const content = layout.objects.filter((o) => !isBackdrop(o));
+  const bottom = content.reduce((low, o) => Math.max(low, o.y + o.h), 0);
+  const below = content.length === 0 ? 1 - h - BUTTON_GAP : bottom + BUTTON_GAP;
   const overEdge = below + h > 1;
   const y = overEdge ? Math.max(0, 1 - h) : below;
   const z = layout.objects.reduce((top, o) => Math.max(top, o.z), 0) + 1;
@@ -154,7 +162,9 @@ async function addToOne(viewId: string, cue: string, label: string, shownAs: str
     }
     const placed = withCueButton(view.layout, cue, label, shownAs);
     try {
-      await consoleButtonDeps.writeLayout(viewId, placed.layout, view.layoutRev);
+      // `?? 0`, as the server reads it: a console that has never saved a layout is at
+      // revision 0, and omitting the revision would be an unconditional overwrite.
+      await consoleButtonDeps.writeLayout(viewId, placed.layout, view.layoutRev ?? 0);
       return { viewId, name: view.name, ok: true, ...(placed.overEdge ? { overEdge: true } : {}) };
     } catch (err) {
       if ((err as { status?: number }).status === 409 && attempt === 0) continue;

@@ -21,7 +21,7 @@
 // kind cards' selected tint. jsdom loads no stylesheet and reports every
 // offsetHeight as 0.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { HandIcon, ZapIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -147,7 +147,13 @@ export function NewCueDialog({
   /** One line under a step's fields naming what still blocks Next. */
   const missing = stepIssues(step.id, draft, registry);
 
+  // Set at once, not through state: a second press before the first re-render would
+  // otherwise create a second automatic rule, which nothing refuses as a duplicate.
+  const started = useRef(false);
+
   async function create() {
+    if (started.current) return;
+    started.current = true;
     setBusy(true);
     setError(null);
     setFrozenTaken(taken);
@@ -161,6 +167,7 @@ export function NewCueDialog({
       setError(errorMessage(e));
       setFrozenTaken(null);
       setBusy(false);
+      started.current = false;
       return;
     }
     onCreated();
@@ -178,9 +185,15 @@ export function NewCueDialog({
       setOutcome({ ruleName, cueName: name, results });
       return;
     }
+    // Said, not dropped: the button is there but on top of something, and the only
+    // other evidence is a console somebody has to open.
+    const crowded = results.filter((r) => r.overEdge).map((r) => r.name);
     toast.success(
       results.length > 0
-        ? `Created ${ruleName}, with a button on ${joinWithAnd(results.map((r) => r.name))}`
+        ? `Created ${ruleName}, with a button on ${joinWithAnd(results.map((r) => r.name))}.` +
+            (crowded.length > 0
+              ? ` ${joinWithAnd(crowded)} had no room below its other objects, so the button sits against the bottom edge.`
+              : "")
         : `Created ${ruleName}`,
     );
     onClose();

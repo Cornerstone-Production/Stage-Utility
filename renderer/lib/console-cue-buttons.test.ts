@@ -124,6 +124,20 @@ describe("withCueButton", () => {
     assert.ok(Math.abs(b.y + b.h - 1) < 1e-9, `bottom at ${b.y + b.h}`);
   });
 
+  test("a backdrop that fills the canvas is not content, so it does not push the button onto the edge", () => {
+    const l = layoutOf(
+      obj({ id: "bg", x: 0, y: 0, w: 1, h: 1, z: 0 }),
+      obj({ id: "clock", y: 0.05, h: 0.2 }),
+    );
+    const { layout, overEdge } = withCueButton(l, "x", "");
+    const b = added(layout);
+    assert.equal(overEdge, false, "a full-canvas backdrop was counted as content");
+    assert.ok(Math.abs(b.y - (0.25 + BUTTON_GAP)) < 1e-9, `at ${b.y}`);
+    // A tall object that is not a backdrop (narrow) still counts.
+    const tall = layoutOf(obj({ id: "strip", x: 0, y: 0, w: 0.2, h: 1, z: 1 }));
+    assert.equal(withCueButton(tall, "x", "").overEdge, true);
+  });
+
   test("a nested object does not move the bottom: its box is a fraction of its container's", () => {
     const l = layoutOf(
       obj({ id: "box", y: 0.1, h: 0.2, config: { type: "container" } as LayoutObject["config"], children: [obj({ id: "inner", y: 0.9, h: 0.5 })] }),
@@ -176,6 +190,16 @@ describe("addCueButtonToConsoles", () => {
       [["a", true, ""], ["b", false, "the disk is full"], ["c", true, ""]],
     );
     assert.equal(results[1].name, "Console b", "the failure names the console");
+  });
+
+  test("a console that has never saved a layout is written at revision 0, not unconditionally", async () => {
+    const revs: (number | undefined)[] = [];
+    consoleButtonDeps.readViews = async () => [{ ...console1("a"), layoutRev: undefined }];
+    consoleButtonDeps.writeLayout = async (_id, _layout, rev) => {
+      revs.push(rev);
+    };
+    await addCueButtonToConsoles(["a"], "x", "");
+    assert.deepEqual(revs, [0]);
   });
 
   test("a stale revision is retried once from a fresh read, and then reported", async () => {

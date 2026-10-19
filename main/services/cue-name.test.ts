@@ -53,6 +53,16 @@ describe("deriveCueName", () => {
     assert.equal(isValidCueName(name), true, `"${name}" is not a usable cue name`);
   });
 
+  test("the cap is hard: an _on that lands on the cut, and a clash after it, stay under it", () => {
+    // 57 letters then "_on" is exactly 60 characters: the cut a 60 cap would make.
+    const text = "a".repeat(57) + " on tail";
+    for (const taken of [[], [deriveCueName(text, [])], [deriveCueName(text, []), deriveCueName(text, [deriveCueName(text, [])])]]) {
+      const name = deriveCueName(text, taken);
+      assert.ok(name.length <= MAX_CUE_NAME, `${name.length} characters: ${name}`);
+      assert.equal(isPairHalfName(name), false, name);
+    }
+  });
+
   test("everything it makes is a name the server accepts", () => {
     for (const text of ["Projectors on", "Foyer TVs off!", "!!!", "x".repeat(200), "Café / Lobby", "A_B  C", "___", "2 pm"]) {
       const name = deriveCueName(text, none);
