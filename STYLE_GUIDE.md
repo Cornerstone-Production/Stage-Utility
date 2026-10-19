@@ -113,6 +113,17 @@ The two-tier structure:
 | `--su-warn-9` / `-11` | **caution** (amber) — over-time, warnings. NOT unsaved: see below |
 | `--su-ok-*`, `--su-info-*` | success / informational |
 
+**Only declared steps exist.** The status families (`live`, `danger`, `warn`, `ok`,
+`info`) declare steps 9 and 11 and nothing else, `accent` declares no numbered step
+(`text-accent`, `hover:text-accent-hover`), and the Radix scales declare 1–12 as
+utilities. Only gray and amber also declare the alpha steps `a1`–`a12` as utilities;
+`--blue-a1`… exist as variables, with no utility. Tailwind's own palette
+(`bg-red-500`) also compiles, and nothing in the app uses it. A tint is the status
+fill at an opacity: `border-danger-9/30 bg-danger-9/12`, not `border-red-a6 bg-red-a3`.
+A class or `var(--…)` naming a step that is not declared is dropped silently, so the
+element renders with no tint or border; `renderer/color-steps.test.ts` compiles the
+theme and fails on any such name.
+
 **Theming per world:**
 - `:root` — the settings light defaults (slate + Radix scales).
 - `.dark` on `<html>` — flips the Radix slate scale; accent hover/active *lighten*

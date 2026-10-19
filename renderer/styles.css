@@ -388,7 +388,7 @@
      duration instead of pulsing. */
   @keyframes su-flash-pulse {
     0%, 100% { box-shadow: 0 0 0 0 transparent; }
-    15%, 60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent-9, #2e6691) 55%, transparent); }
+    15%, 60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent) 55%, transparent); }
   }
   .su-flash {
     animation: su-flash-pulse 2s ease-in-out;
@@ -490,7 +490,7 @@
        a static ring rather than keeping one. */
     .su-flash {
       animation: none;
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent-9, #2e6691) 55%, transparent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--su-accent) 55%, transparent);
     }
   }
 

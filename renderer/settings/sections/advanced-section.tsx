@@ -452,7 +452,7 @@ export function UpdatesPanel({
 
             {/* Success banner after an auto-reload completes (set pre-restart). */}
             {justUpdated ? (
-              <div className="mt-2 flex items-start gap-2 rounded-md border border-green-a5 bg-green-a2 p-2.5 text-caption1 text-green-11">
+              <div className="mt-2 flex items-start gap-2 rounded-md border border-ok-9/30 bg-ok-9/6 p-2.5 text-caption1 text-green-11">
                 <CheckCircle2Icon className="size-4 shrink-0 mt-0.5 text-green-10" />
                 <div className="flex-1">
                   <p className="font-medium">Update installed successfully.</p>

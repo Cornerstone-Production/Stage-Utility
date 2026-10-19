@@ -163,7 +163,7 @@ export function YouTubeConnectRow({
 
       <button
         type="button"
-        className="self-start text-caption1 text-accent-11 underline underline-offset-2 hover:text-accent-12"
+        className="self-start text-caption1 text-accent underline underline-offset-2 hover:text-accent-hover"
         onClick={() => setShowPaste((v) => !v)}
       >
         Paste a token instead
