@@ -131,11 +131,16 @@ describe("the per-language workflow", () => {
         for (const s of j.steps ?? []) if (s.uses) assert.match(s.uses, /@[0-9a-f]{40}( #.*)?$/, s.uses);
   });
 
+  it("names its jobs without an expression, because a skipped job shows its name unevaluated", () => {
+    assert.equal(analyze.name, "Analyze");
+    assert.equal(emptyResult.name, "Empty result");
+    for (const j of Object.values(language.jobs)) assert.doesNotMatch(String(j.name), /\$\{\{/);
+  });
+
   it("analyses only when asked to, on the runner it is given, with a bounded run", () => {
     assert.equal(analyze.if, "${{ inputs.run }}");
     assert.equal(analyze["runs-on"], "${{ inputs.runner }}");
     assert.ok(typeof analyze["timeout-minutes"] === "number" && analyze["timeout-minutes"] <= 60);
-    assert.equal(analyze.name, "Analyze (${{ inputs.language }})");
   });
 
   it("initialises CodeQL for the language and build mode it is given, with the extended queries", () => {

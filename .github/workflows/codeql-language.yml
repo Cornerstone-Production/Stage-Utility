@@ -33,9 +33,12 @@ on:
 permissions:
   contents: read
 
+# Job names are static: a job skipped by its `if` is shown with its name unevaluated,
+# so an expression in one renders as literal text. The caller's job id, which the
+# check name is prefixed with ("swift / Analyze"), is what names the language.
 jobs:
   analyze:
-    name: Analyze (${{ inputs.language }})
+    name: Analyze
     if: ${{ inputs.run }}
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 60
@@ -55,7 +58,7 @@ jobs:
 
   # No checkout and no CodeQL: it needs nothing but a runner that is not scarce.
   empty-result:
-    name: No ${{ inputs.language }} changes
+    name: Empty result
     if: ${{ !inputs.run && github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
