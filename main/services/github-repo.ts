@@ -2,10 +2,11 @@
 //
 // The updater, the installer fetch and the Mac output helper's download all talk
 // to the same repository's releases; each used to spell the name and the hosts
-// itself. (The shell installers cannot import this and carry their own copies,
-// each marked as such.)
+// itself. The shell installers cannot import this; install.sh, install.ps1 and
+// scripts/kiosk/install-macos.sh keep their own spellings, each with a comment
+// pointing here.
 
-export const REPO = "Cornerstone-Production/Stage-Utility";
+const REPO = "Cornerstone-Production/Stage-Utility";
 
 /** The releases API root for this repository: `<api>/releases/...`. */
 export const GITHUB_API_REPO = `https://api.github.com/repos/${REPO}`;

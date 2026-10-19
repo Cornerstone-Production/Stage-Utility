@@ -466,7 +466,7 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
     publishRelease("9.9.9", zipA, sha("also wrong"));
     const r = await install(FLOW);
     assert.equal(r.status, 1, r.out + r.err);
-    assert.match(r.err, /did not match its published SHA-256/);
+    assert.match(r.err, /did not match the release's SHA-256/);
     assert.ok(!fs.existsSync(app()), "a refused download must not become the app");
     assert.deepEqual(fs.existsSync(path.join(scratch, "Applications")) ? leftovers() : [], []);
   });
@@ -554,7 +554,7 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
       publishRelease("9.9.9", zipB, sha("not this zip"));
       const r = await install(FLOW);
       assert.equal(r.status, 1, r.out + r.err);
-      assert.match(r.err, /the GitHub release v9\.9\.9: the download did not match its published SHA-256/);
+      assert.match(r.err, /the GitHub release v9\.9\.9: the download did not match the release's SHA-256/);
       assert.ok(!fs.existsSync(app()));
     });
 

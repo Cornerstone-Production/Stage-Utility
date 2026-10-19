@@ -125,7 +125,7 @@ up on after a minute below 1 KB/s, with the same overall limit.
 | Request | |
 |---|---|
 | `GET /kiosk/StageUtilityOutput-<arch>.zip` | The app. The first request fetches it from the GitHub release matching the server's version and checks it against the SHA-256 the releases API lists for that asset; later requests come from the cache |
-| `GET /kiosk/StageUtilityOutput-<arch>.zip.sha256` | That zip's SHA-256, one `shasum` line the server builds from the release's digest, which the installer compares its download with. It is read once per version and cached beside the zip |
+| `GET /kiosk/StageUtilityOutput-<arch>.zip.sha256` | That zip's SHA-256, one `shasum` line the server builds from the release's digest, which the installer compares its download with. It is read once per version and cached beside the zip. A refusal is not cached, so each retry asks the releases API again, from the same 60-an-hour allowance the update check uses |
 
 The cache is `cache/output-helper/<version>/` in the data directory. It holds the
 running version only, is not part of a config backup, and costs one download to

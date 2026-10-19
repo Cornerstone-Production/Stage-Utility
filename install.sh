@@ -18,6 +18,7 @@
 #
 set -euo pipefail
 
+# Also spelled in main/services/github-repo.ts and the other installers.
 REPO="${STAGE_REPO:-Cornerstone-Production/Stage-Utility}"
 TRACK="${STAGE_TRACK:-main}"
 PORT="${STAGE_PORT:-8788}"

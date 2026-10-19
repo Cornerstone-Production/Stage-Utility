@@ -170,7 +170,7 @@ describe("fetching the helper from the release", () => {
     const r = await dl.resolve(ZIP);
     assert.ok(!r.ok);
     assert.equal(r.status, 502);
-    assert.match(r.message, /did not match its published SHA-256/);
+    assert.match(r.message, /did not match the release's SHA-256/);
     assert.deepEqual(await listCache(), [], "neither the zip, its checksum nor a partial file may be left");
     assert.ok(lines.some((l) => l.startsWith("[output-helper] StageUtilityOutput-arm64.zip failed:")), lines.join("\n"));
 

@@ -6,7 +6,7 @@
 # By default this installs the Stage Utility Output helper (macOS 14 or later): a
 # menu bar app that makes each of the Mac's displays, and each DeckLink port, a
 # screen device of its own. It downloads the app from this server, falls back to
-# the GitHub release for the server's version, checks a published SHA-256, puts it
+# the GitHub release for the server's version, checks the release's SHA-256, puts it
 # in /Applications and starts it at login, for whichever account logs in.
 #
 #   --browser    the earlier Chrome kiosk instead: one full-screen browser. For a
@@ -67,6 +67,7 @@ HELPER_LABEL=com.stageutility.output
 # System-wide, like the Chrome kiosk's agent: root-owned, loaded at any GUI login,
 # so it needs no account to exist when this runs.
 HELPER_PLIST="$AGENT_DIR/$HELPER_LABEL.plist"
+# The repository is also spelled in main/services/github-repo.ts and the other installers.
 GITHUB_BASE="${STAGE_INSTALL_GITHUB_BASE:-https://github.com/Cornerstone-Production/Stage-Utility/releases/download}"
 # A release's JSON, which carries each asset's SHA-256. The release publishes no
 # .sha256 file of its own; only the server serves one, built from this digest.
@@ -467,7 +468,7 @@ try_source() {
   actual="$(sha256_of "$WORK/$ZIP_NAME")"
   if [ "$actual" != "$expected" ]; then
     rm -f "$WORK/$ZIP_NAME"
-    WHY="$label: the download did not match its published SHA-256 (expected $expected, got $actual)"
+    WHY="$label: the download did not match the release's SHA-256 (expected $expected, got $actual)"
     return 1
   fi
   say "    verified SHA-256 $expected"
@@ -770,7 +771,7 @@ install_helper() {
     [ -n "$origin" ] || no_server_address
     would "download $origin/kiosk/StageUtilityOutput-$ARCH.zip and its .sha256"
     would "failing that, ask $origin/api/update/status for its version and download the GitHub release's StageUtilityOutput-$ARCH.zip"
-    would "refuse a zip whose SHA-256 differs from the published one"
+    would "refuse a zip whose SHA-256 differs from the release's"
     would "unpack beside $APPS_DIR/$APP_NAME, check it is $HELPER_LABEL, then swap it in, keeping the old copy until that worked"
     would "write $HELPER_PLIST, root-owned, which starts the helper at every login"
     if [ -n "$CONSOLE_USER" ]; then

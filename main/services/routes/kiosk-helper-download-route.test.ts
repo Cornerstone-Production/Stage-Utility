@@ -143,7 +143,7 @@ describe("GET /kiosk/StageUtilityOutput-<arch>.zip", () => {
     publish(crypto.randomBytes(10_000), sha(Buffer.from("not this")));
     const res = await fetch(`${appBase}/kiosk/${ZIP}`);
     assert.equal(res.status, 502);
-    assert.match(((await res.json()) as { error: string }).error, /did not match its published SHA-256/);
+    assert.match(((await res.json()) as { error: string }).error, /did not match the release's SHA-256/);
     const left = await fs.readdir(path.join(dataDir, "cache", "output-helper", VERSION)).catch(() => []);
     assert.deepEqual(left, []);
   });

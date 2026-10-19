@@ -59,7 +59,6 @@ export interface HelperAsset {
   name: string;
 }
 
-
 /** Every file this route serves, by name. The request path is only ever compared
  *  with these: the name that goes into the cache path and the outgoing URL is the
  *  table's own string, never text taken from the request. */
@@ -294,7 +293,7 @@ export class OutputHelperDownloads {
       this.verified.set(file, stamp);
       return true;
     }
-    const why = expected ? `its SHA-256 is ${got}, not the published ${expected}` : "its checksum is missing or unreadable";
+    const why = expected ? `its SHA-256 is ${got}, not the release's ${expected}` : "its checksum is missing or unreadable";
     console.warn(`[output-helper] the cached ${scrub(asset.name)} is not trusted (${scrub(why)}); fetching it again`);
     this.verified.delete(file);
     await fs.rm(file, { force: true });
@@ -431,7 +430,7 @@ export class OutputHelperDownloads {
         // Neither file stays: the zip is wrong, and the checksum that said so may
         // be the wrong half, so the next request starts both again.
         await fs.rm(sumFile, { force: true });
-        throw new Refusal(502, `${asset.name} did not match its published SHA-256 (expected ${expected}, got ${got}); not stored`);
+        throw new Refusal(502, `${asset.name} did not match the release's SHA-256 (expected ${expected}, got ${got}); not stored`);
       }
       await commitPart(part, file);
     } catch (err) {
