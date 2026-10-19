@@ -65,6 +65,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Red proof
+        run: echo "${{ github.event.pull_request.title }}"
+
       - name: Lint
         run: npm run lint
 
