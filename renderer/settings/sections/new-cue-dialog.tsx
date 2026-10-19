@@ -19,7 +19,7 @@
 // kind cards' selected tint. jsdom loads no stylesheet and reports every
 // offsetHeight as 0.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { HandIcon, ZapIcon } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -31,7 +31,7 @@ import type { Rule } from "@main/types/automation";
 import type { View } from "@main/types/views";
 
 import { invoke } from "../../lib/api";
-import { logToServer } from "../../lib/client-log";
+import { logReadFailure, logToServer } from "../../lib/client-log";
 import { cn } from "../../lib/cn";
 import { joinWithAnd } from "../../lib/join-with-and";
 import { QUERY_KEYS } from "../../app/queries";
@@ -116,11 +116,15 @@ export function NewCueDialog({
 
   // Consoles come from the same state read the rest of the app shares, so this
   // is not a request of its own while the page already holds it.
-  const { data: stage } = useQuery({
+  const { data: stage, error: stageError } = useQuery({
     queryKey: QUERY_KEYS.stageState,
     queryFn: () => invoke<{ views?: View[] }>("stage:getState"),
   });
   const consoles = useMemo(() => consolesWithLayouts(stage?.views ?? []), [stage]);
+  // A failed read is not "there are no consoles": the step says so, and /log has it.
+  useEffect(() => {
+    if (stageError) logReadFailure("automation", "the consoles for a cue button", stageError);
+  }, [stageError]);
 
   const takenNow = useMemo(() => takenCueNames(rules, registry.reservedCueNames), [rules, registry]);
   // FROZEN from Create until the dialog is done. The moment the rule exists the
@@ -405,6 +409,7 @@ export function NewCueDialog({
         return (
           <ConsoleStep
             consoles={consoles}
+            readError={!stage && stageError ? errorMessage(stageError) : null}
             chosen={draft.consoleIds}
             onToggle={(id) =>
               patch({
@@ -688,6 +693,7 @@ function KindStep({ kind, onChoose }: { kind: CueKind | null; onChoose: (k: CueK
 
 function ConsoleStep({
   consoles,
+  readError,
   chosen,
   onToggle,
   label,
@@ -695,12 +701,21 @@ function ConsoleStep({
   placeholder,
 }: {
   consoles: readonly View[];
+  /** Why the consoles could not be read, when they could not. */
+  readError: string | null;
   chosen: readonly string[];
   onToggle: (id: string) => void;
   label: string;
   onLabel: (v: string) => void;
   placeholder: string;
 }) {
+  if (readError) {
+    return (
+      <ErrorNote>
+        Could not read the consoles: {readError}. Skip this step and add the button in the layout editor.
+      </ErrorNote>
+    );
+  }
   if (consoles.length === 0) {
     return (
       <p className="rounded-lg border border-line bg-surface px-3 py-2 text-caption1 text-fg-muted">

@@ -14,7 +14,7 @@
 //    Assistant reads, and POST /api/cues/<name> are each asked of a cue made here.
 //  - A CONSOLE THAT SILENTLY GOT NO BUTTON. The cue is created and the failing
 //    console is NAMED, on a panel that stays.
-//  - THE DEEP LINK that the layout editor's "+ New manual cue…" follows.
+//  - THE DEEP LINK, /automation?new=manual, which opens the dialog on a manual cue.
 //
 // NOTHING BELOW PASSES A DOM NODE AS AN ASSERT OPERAND (see test-dom.ts).
 //
@@ -442,6 +442,30 @@ describe("On a console", () => {
     await toConsoleStep("x", []);
     const offered = [...document.querySelectorAll("[data-console]")].map((el) => el.getAttribute("data-console"));
     assert.deepEqual(offered, ["foh", "booth"]);
+  });
+
+  test("a console list that could not be read says so, and does not claim there are none", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input instanceof Request ? input.url : input).includes("/api/state")) {
+        return new Response(JSON.stringify({ error: "the stage is not answering" }), { status: 500, headers: { "content-type": "application/json" } });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+    try {
+      await mount();
+      await manualToName();
+      await typeInto(labelledInput("Name"), "x", "Name");
+      await press(button("Next"), "Next past Name");
+      const said = await eventually(() => {
+        const t = dialog()?.textContent ?? "";
+        assert.match(t, /Could not read the consoles/);
+        return t;
+      });
+      assert.equal(said.includes("There are no consoles"), false, "a failed read was reported as no consoles");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   test("a ticked console gets a button bound to the cue, under its content, sized like its other buttons", async () => {
