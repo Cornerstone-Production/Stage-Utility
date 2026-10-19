@@ -275,7 +275,7 @@ class AutomationEngine {
    */
   private assertCueValid(rule: Pick<Rule, "trigger">, exceptId: string | null): void {
     if (rule.trigger?.id !== CALL_TRIGGER_ID) return;
-    const name = String(rule.trigger.params?.name ?? "").trim().toLowerCase();
+    const name = calledCueName(rule.trigger);
     if (!name) throw new Error("A called cue needs a name");
     if (!isValidCueName(name)) {
       throw new Error(`"${name}" is not a usable cue name — use lower_snake_case`);
@@ -382,7 +382,8 @@ class AutomationEngine {
     const next: Rule = { ...rule, id: randomUUID() };
     this.rules.push(next);
     await automationStore.saveRules(this.rules);
-    console.log(`[automation] rule added "${scrub(next.name)}" (${scrub(next.id)})`);
+    const cue = calledCueName(next.trigger);
+    console.log(`[automation] rule added "${scrub(next.name)}" (${scrub(next.id)})${cue ? ` as cue "${scrub(cue)}"` : ""}`);
     this.rulesChanged();
     return next;
   }
@@ -391,9 +392,18 @@ class AutomationEngine {
     const r = this.rules.find((x) => x.id === id);
     if (!r) throw new Error(`Automation: unknown rule ${id}`);
     this.assertCueValid({ ...r, ...patch }, id);
+    const cueBefore = calledCueName(r.trigger);
     Object.assign(r, patch);
     await automationStore.saveRules(this.rules);
     console.log(`[automation] rule updated "${scrub(r.name)}" (${scrub(id)})`);
+    // A cue's name is a URL somebody else holds. When it changes or goes, "a console
+    // button reads Unbound" needs a line to be traced back to.
+    const cueAfter = calledCueName(r.trigger);
+    if (cueBefore && cueBefore !== cueAfter) {
+      console.log(
+        `[automation] cue "${scrub(cueBefore)}" ${cueAfter ? `is now "${scrub(cueAfter)}"` : "is no longer a cue"} (rule "${scrub(r.name)}")`,
+      );
+    }
     this.rulesChanged();
     return this.listRules();
   }

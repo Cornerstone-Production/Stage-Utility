@@ -304,7 +304,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
   ];
 
   if (cues.size === 0) {
-    lines.push("# No cues yet. Add a rule triggered by \"Called by name\" and reload this.");
+    lines.push("# No cues yet. Make one with New cue on the Automation page and reload this.");
     return lines.join("\n") + "\n";
   }
   // Returned rather than emitted empty: `rest_command:` with nothing under it

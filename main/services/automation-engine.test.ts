@@ -381,4 +381,30 @@ describe("rule edits are logged", () => {
       "removing a rule logged nothing — the name must be captured before the filter",
     );
   });
+
+  test("a cue's name is logged when it is made, and when it changes or goes", async () => {
+    const made = await automationEngine.addRule({
+      name: "Reset",
+      enabled: true,
+      trigger: { id: "call.by-name", params: { name: "Stage_Reset" } },
+      conditions: [],
+      action: { id: "log.message", params: { message: "x" } },
+      cooldownSec: 2,
+      oncePerService: false,
+    });
+    assert.deepEqual(matching(/as cue /), [`[automation] rule added "Reset" (${made.id}) as cue "stage_reset"`]);
+
+    lines = [];
+    await automationEngine.updateRule(made.id, { trigger: { id: "call.by-name", params: { name: "stage_reset_two" } } });
+    assert.deepEqual(matching(/^\[automation\] cue /), [`[automation] cue "stage_reset" is now "stage_reset_two" (rule "Reset")`]);
+
+    lines = [];
+    await automationEngine.updateRule(made.id, { trigger: { id: "pco.service-started", params: {} } });
+    assert.deepEqual(matching(/^\[automation\] cue /), [`[automation] cue "stage_reset_two" is no longer a cue (rule "Reset")`]);
+
+    lines = [];
+    await automationEngine.updateRule(made.id, { name: "Reset 2" });
+    assert.deepEqual(matching(/^\[automation\] cue /), [], "a rule that is not a cue logged a cue line");
+    await automationEngine.removeRule(made.id);
+  });
 });

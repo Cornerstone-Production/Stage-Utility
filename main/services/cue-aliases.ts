@@ -48,7 +48,7 @@ export const MAX_ALIASES = 5;
  * when the rule is not a cue.
  */
 export function calledCueName(trigger: { id: string; params: Record<string, string | number> }): string {
-  return trigger.id === CALL_TRIGGER_ID ? String(trigger.params.name ?? "").trim().toLowerCase() : "";
+  return trigger.id === CALL_TRIGGER_ID ? String(trigger.params?.name ?? "").trim().toLowerCase() : "";
 }
 
 /**
