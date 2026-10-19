@@ -16,7 +16,7 @@
 // restores the trigger exactly as the editor opened it, name, former names and all,
 // rather than deriving a new one that might differ.
 
-import { CALL_TRIGGER_ID } from "@main/services/cue-aliases";
+import { CALL_TRIGGER_ID, calledCueName } from "@main/services/cue-aliases";
 import { deriveCueName } from "@main/services/cue-name";
 import { homeVisibilityParams, isHiddenFromHome, isPairHalfName } from "@main/services/cue-pairs";
 import type { Rule } from "@main/types/automation";
@@ -66,8 +66,7 @@ export function makeManual(rule: Rule, seed: Rule, taken: ReadonlySet<string>): 
  * ON/OFF pair with no partner (which the manifest leaves out) all have none.
  */
 export function homeEntity(rule: Pick<Rule, "trigger">): string | null {
-  if (rule.trigger.id !== CALL_TRIGGER_ID) return null;
-  const name = String(rule.trigger.params.name ?? "").trim().toLowerCase();
+  const name = calledCueName(rule.trigger);
   if (!name || isPairHalfName(name) || isHiddenFromHome(rule.trigger.params)) return null;
   return name;
 }
@@ -99,18 +98,13 @@ export type HomeImpact = { kind: "lose" | "gain"; cue: string; inHome: boolean }
  */
 export function homeImpact(seed: Rule, draft: Rule): HomeImpact | null {
   if (seed.trigger.id === draft.trigger.id) return null;
-  const seedName = cueNameOf(seed);
+  const seedName = calledCueName(seed.trigger);
   if (seedName && draft.trigger.id !== CALL_TRIGGER_ID) {
     return { kind: "lose", cue: seedName, inHome: homeEntity(seed) !== null };
   }
   const gained = homeEntity(draft);
   if (!seedName && gained) return { kind: "gain", cue: gained, inHome: true };
   return null;
-}
-
-/** The cue name a rule answers to, or "" for a rule that is not a cue. */
-function cueNameOf(rule: Pick<Rule, "trigger">): string {
-  return rule.trigger.id === CALL_TRIGGER_ID ? String(rule.trigger.params.name ?? "").trim().toLowerCase() : "";
 }
 
 /** The question Save asks before it does either. */

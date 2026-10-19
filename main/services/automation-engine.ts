@@ -47,7 +47,7 @@ import {
 import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
 import { notePressForLearning } from "./companion-state-probe.js";
 import { cueLive } from "./cue-live.js";
-import { parseAliases } from "./cue-aliases.js";
+import { calledCueName, parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
 import { plural } from "./plural.js";
@@ -460,8 +460,7 @@ class AutomationEngine {
 
   /** The cue name a rule answers to, or "" when it is not a cue at all. */
   cueNameOf(rule: Rule): string {
-    if (rule.trigger.id !== CALL_TRIGGER_ID) return "";
-    return String(rule.trigger.params.name ?? "").trim().toLowerCase();
+    return calledCueName(rule.trigger);
   }
 
   /** The former names a rule also answers to, oldest first. See cue-aliases.ts. */

@@ -22,7 +22,7 @@ const {
   MANUAL_STEPS,
   buildRule,
   cooldownOf,
-  cueNameOf,
+  newCueName,
   displayName,
   emptyDraft,
   enabledOf,
@@ -176,9 +176,9 @@ describe("names", () => {
 
   test("the cue name is derived from the display name and avoids what is taken", () => {
     const d = manual({ name: "Stage reset" });
-    assert.equal(cueNameOf(d, registry, none), "stage_reset");
-    assert.equal(cueNameOf(d, registry, new Set(["stage_reset"])), "stage_reset_2");
-    assert.equal(cueNameOf(manual({ name: "Projectors on" }), registry, none), "projectors_on_cue");
+    assert.equal(newCueName(d, registry, none), "stage_reset");
+    assert.equal(newCueName(d, registry, new Set(["stage_reset"])), "stage_reset_2");
+    assert.equal(newCueName(manual({ name: "Projectors on" }), registry, none), "projectors_on_cue");
   });
 });
 

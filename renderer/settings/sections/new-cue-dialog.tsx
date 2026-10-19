@@ -62,10 +62,11 @@ import { OutlineButton, SettingRow } from "./screen-panel-parts";
 import {
   buildRule,
   cooldownOf,
-  cueNameOf,
   displayName,
   emptyDraft,
   enabledOf,
+  labelOf,
+  newCueName,
   reachable,
   stepComplete,
   stepIssues,
@@ -80,9 +81,6 @@ import {
 /** The one trigger the When step does not offer: a manual cue is made by choosing
  *  the kind, which also gives it a name. */
 const NOT_PICKED: ReadonlySet<string> = new Set([CALL_TRIGGER_ID]);
-
-const labelOf = (list: readonly { id: string; label: string }[], id: string): string =>
-  list.find((x) => x.id === id)?.label ?? "";
 
 /** What the dialog says after Create when a console was refused. */
 interface Outcome {
@@ -136,7 +134,7 @@ export function NewCueDialog({
   // still on screen would derive `stage_reset_2` for a cue that is `stage_reset`.
   const [frozenTaken, setFrozenTaken] = useState<ReadonlySet<string> | null>(null);
   const taken = frozenTaken ?? takenNow;
-  const cueName = cueNameOf(draft, registry, taken);
+  const cueName = newCueName(draft, registry, taken);
   const suggestion = suggestedName(draft, registry);
 
   const go = (id: StepId) => {

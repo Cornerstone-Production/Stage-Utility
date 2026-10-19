@@ -1613,24 +1613,18 @@ export function RuleEditorDialog({
    * when the server writes; this does not. The difference between the two is
    * what somebody else changed while this dialog was open, and the difference
    * between a draft and this is what the operator changed — see `changesOnly`.
+   * Read while drawing too (which cue a conversion is leaving), which is why it is
+   * state and not a ref.
    *
-   * A ref, and initialised once: the dialog is keyed `${kind}:${id}` upstream,
-   * which does NOT change when the rule's contents change, so a `useState`
-   * seeded from `target` would be reseeded by nothing and a dependency on
+   * Initialised once and never set: the dialog is keyed `${kind}:${id}` upstream,
+   * which does NOT change when the rule's contents change, and a dependency on
    * `target` would reseed it on every server write, throwing away the edit in
    * progress. That is what the editor this replaced did.
    */
-  const seed = useRef<{ on: Rule; off: Rule | null }>({
+  const [seed] = useState<{ on: Rule; off: Rule | null }>(() => ({
     on: isPair ? target.pair.on : target.rule,
     off: isPair ? target.pair.off : null,
-  });
-  /**
-   * The rule as it OPENED, for what the render has to read of it (which cue a
-   * conversion is leaving). `seed` above is a ref for the handlers that diff
-   * against it; a ref may not be read while drawing, and a value that never
-   * changes is state's job as much as a ref's.
-   */
-  const [openedAs] = useState<Rule>(() => (isPair ? target.pair.on : target.rule));
+  }));
   const [half, setHalf] = useState<"on" | "off">("on");
   const [busy, setBusy] = useState(false);
   // Save has been pressed at least once this dialog session. Fields stay
@@ -1779,7 +1773,7 @@ export function RuleEditorDialog({
     // Not asked for anything else — the editor has always saved a rename without
     // a word, and this is only the conversions' question.
     if (!isPair) {
-      const impact = homeImpact(openedAs, onHalfPatch());
+      const impact = homeImpact(seed.on, onHalfPatch());
       if (impact && !(await confirm(impactQuestion(impact)))) return;
     }
     setBusy(true);
@@ -1796,7 +1790,7 @@ export function RuleEditorDialog({
       // nothing in it: the ordering is the guarantee, and an empty patch is a
       // no-op the server already handles.
       const liveOn = isPair ? target.pair.on : target.rule;
-      const onPatch = changesOnly(seed.current.on, onHalfPatch(), liveOn);
+      const onPatch = changesOnly(seed.on, onHalfPatch(), liveOn);
       // A PREVIOUS save turned this off over issues that are now fixed, AND
       // the switch in front of the operator still reads on: ask for it back
       // on explicitly. Without this, the patch may carry no `enabled` key at
@@ -1816,10 +1810,10 @@ export function RuleEditorDialog({
         patch: onPatch,
       });
       let anyIssues = onResult.issues.length > 0;
-      if (offDraft && seed.current.off) {
+      if (offDraft && seed.off) {
         writing = "Turn off";
-        const liveOff = isPair ? target.pair.off : seed.current.off;
-        const offPatch = changesOnly(seed.current.off, offHalfPatch(offDraft), liveOff);
+        const liveOff = isPair ? target.pair.off : seed.off;
+        const offPatch = changesOnly(seed.off, offHalfPatch(offDraft), liveOff);
         if (forcedOff && offIssues.length === 0 && offDraft.enabled) offPatch.enabled = true;
         const offResult = await invoke<Rule & { issues: RuleIssue[] }>("automation:updateRule", {
           id: offDraft.id,
@@ -2042,11 +2036,11 @@ export function RuleEditorDialog({
             issues={editingOff ? offIssues : onIssues}
             attempted={attempted}
             // A pair's halves are neither kind: its editor is unchanged.
-            onMakeAutomatic={isPair ? undefined : () => setOnDraft((d) => makeAutomatic(d, openedAs))}
-            onMakeManual={isPair ? undefined : () => setOnDraft((d) => makeManual(d, openedAs, cueNamesTaken))}
+            onMakeAutomatic={isPair ? undefined : () => setOnDraft((d) => makeAutomatic(d, seed.on))}
+            onMakeManual={isPair ? undefined : () => setOnDraft((d) => makeManual(d, seed.on, cueNamesTaken))}
             leavingCue={
-              !isPair && openedAs.trigger.id === CALL_TRIGGER_ID && onDraft.trigger.id !== CALL_TRIGGER_ID
-                ? String(openedAs.trigger.params.name ?? "")
+              !isPair && seed.on.trigger.id === CALL_TRIGGER_ID && onDraft.trigger.id !== CALL_TRIGGER_ID
+                ? String(seed.on.trigger.params.name ?? "")
                 : null
             }
           />

@@ -13,10 +13,9 @@
 //  - AUTOMATIC. Fires when something happens in the building. It starts OFF: the
 //    advice the Review step gives is to watch it with a log message first.
 //
-// NOTHING IS SAVED UNTIL CREATE. The draft lives in the dialog and goes with it;
-// the old Add rule saved "Rule N" before the operator saw a thing.
+// NOTHING IS SAVED UNTIL CREATE. The draft lives in the dialog and goes with it.
 
-import { CALL_TRIGGER_ID, parseAliases } from "@main/services/cue-aliases";
+import { CALL_TRIGGER_ID, calledCueName, parseAliases } from "@main/services/cue-aliases";
 import { deriveCueName } from "@main/services/cue-name";
 import { homeVisibilityParams } from "@main/services/cue-pairs";
 import { ruleIssues, type RuleIssue } from "@main/services/automation-param-validation";
@@ -117,7 +116,7 @@ export const enabledOf = (d: CueDraft): boolean => d.enabled ?? d.kind === "manu
 export const cooldownOf = (d: CueDraft): number =>
   d.cooldownSec ?? (d.kind === "manual" ? MANUAL_COOLDOWN_SEC : AUTO_COOLDOWN_SEC);
 
-const labelOf = (list: readonly { id: string; label: string }[], id: string): string =>
+export const labelOf = (list: readonly { id: string; label: string }[], id: string): string =>
   list.find((x) => x.id === id)?.label ?? "";
 
 /** What the Name field offers when it is blank: the action for a manual cue,
@@ -143,16 +142,15 @@ export function takenCueNames(
 ): Set<string> {
   const taken = new Set(reserved.map((n) => n.toLowerCase()));
   for (const r of rules) {
-    if (r.trigger.id !== CALL_TRIGGER_ID) continue;
-    const name = String(r.trigger.params.name ?? "").trim().toLowerCase();
+    const name = calledCueName(r.trigger);
     if (name) taken.add(name);
-    for (const alias of parseAliases(r.trigger.params)) taken.add(alias);
+    if (r.trigger.id === CALL_TRIGGER_ID) for (const alias of parseAliases(r.trigger.params)) taken.add(alias);
   }
   return taken;
 }
 
 /** The cue name a manual cue is made with: from its display name, not taken. */
-export function cueNameOf(d: CueDraft, registry: Registry, taken: ReadonlySet<string>): string {
+export function newCueName(d: CueDraft, registry: Registry, taken: ReadonlySet<string>): string {
   return deriveCueName(displayName(d, registry), taken);
 }
 
@@ -220,7 +218,7 @@ export function buildRule(d: CueDraft, registry: Registry, taken: ReadonlySet<st
       enabled: enabledOf(d),
       trigger: {
         id: CALL_TRIGGER_ID,
-        params: { name: cueNameOf(d, registry, taken), ...homeVisibilityParams(!d.homeAssistant) },
+        params: { name: newCueName(d, registry, taken), ...homeVisibilityParams(!d.homeAssistant) },
       },
       conditions: withServiceGuard([], !d.allowedDuringService),
       action: d.action,

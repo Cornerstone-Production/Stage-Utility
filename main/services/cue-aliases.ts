@@ -43,6 +43,14 @@ export const CALL_TRIGGER_ID = "call.by-name";
  */
 export const MAX_ALIASES = 5;
 
+/**
+ * The cue name a rule answers to, normalised the way the engine compares it, or ""
+ * when the rule is not a cue.
+ */
+export function calledCueName(trigger: { id: string; params: Record<string, string | number> }): string {
+  return trigger.id === CALL_TRIGGER_ID ? String(trigger.params.name ?? "").trim().toLowerCase() : "";
+}
+
 /** The former names in a cue's trigger params, in order, oldest first. */
 export function parseAliases(params: Record<string, string | number>): string[] {
   const seen = new Set<string>();
