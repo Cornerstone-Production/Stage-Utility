@@ -3,7 +3,8 @@
 //
 // The route harness hands a handler a string-collecting response, which cannot
 // carry a binary body of this size, so this one listens. A second local server
-// stands in for GitHub, reached through the test-only release base.
+// stands in for GitHub, reached through the test-only release base: it serves the
+// zip and the releases API's record of the release, which is where the digest is.
 
 import assert from "node:assert/strict";
 import * as crypto from "node:crypto";
@@ -91,7 +92,7 @@ beforeEach(async () => {
 
 function publish(zip: Buffer, digest = sha(zip)): void {
   published.set(`/v${VERSION}/${ZIP}`, zip);
-  published.set(`/v${VERSION}/${ZIP}.sha256`, Buffer.from(`${digest}  ${ZIP}\n`));
+  published.set(`/api/releases/tags/v${VERSION}`, Buffer.from(JSON.stringify({ assets: [{ name: ZIP, digest: `sha256:${digest}` }] })));
 }
 
 describe("GET /kiosk/StageUtilityOutput-<arch>.zip", () => {
@@ -106,7 +107,7 @@ describe("GET /kiosk/StageUtilityOutput-<arch>.zip", () => {
     assert.equal(first.headers.get("content-length"), String(zip.length));
     assert.deepEqual(Buffer.from(await first.arrayBuffer()), zip);
     const hits = githubHits.length;
-    assert.equal(hits, 2, "the checksum and the zip, and nothing else, are fetched");
+    assert.deepEqual(githubHits.sort(), [`/api/releases/tags/v${VERSION}`, `/v${VERSION}/${ZIP}`], "the release record and the zip, and nothing else, are fetched");
 
     const second = await fetch(`${appBase}/kiosk/${ZIP}`);
     assert.deepEqual(Buffer.from(await second.arrayBuffer()), zip);
@@ -115,6 +116,26 @@ describe("GET /kiosk/StageUtilityOutput-<arch>.zip", () => {
     const sum = await fetch(`${appBase}/kiosk/${ZIP}.sha256`);
     assert.equal(sum.status, 200);
     assert.equal(await sum.text(), `${sha(zip)}  ${ZIP}\n`);
+  });
+
+  it("answers the .sha256 on its own from the release record, as one shasum line, without fetching the zip", async (t) => {
+    captureConsole(t, "log", "warn");
+    const zip = crypto.randomBytes(10_000);
+    publish(zip);
+    const res = await fetch(`${appBase}/kiosk/${ZIP}.sha256`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.equal(await res.text(), `${sha(zip)}  ${ZIP}\n`);
+    assert.deepEqual(githubHits, [`/api/releases/tags/v${VERSION}`], "only the release record is read");
+  });
+
+  it("answers the .sha256 with 502 and the reason when the release lists no digest for the zip", async (t) => {
+    captureConsole(t, "log", "warn");
+    published.set(`/api/releases/tags/v${VERSION}`, Buffer.from(JSON.stringify({ assets: [{ name: ZIP }] })));
+    const res = await fetch(`${appBase}/kiosk/${ZIP}.sha256`);
+    assert.equal(res.status, 502);
+    assert.match(((await res.json()) as { error: string }).error, /lists StageUtilityOutput-arm64\.zip with no digest/);
+    assert.deepEqual(await fs.readdir(path.join(dataDir, "cache", "output-helper", VERSION)).catch(() => []), []);
   });
 
   it("refuses a zip that does not match the published checksum, with 502 and nothing cached", async (t) => {

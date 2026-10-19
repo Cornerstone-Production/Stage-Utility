@@ -68,6 +68,9 @@ HELPER_LABEL=com.stageutility.output
 # so it needs no account to exist when this runs.
 HELPER_PLIST="$AGENT_DIR/$HELPER_LABEL.plist"
 GITHUB_BASE="${STAGE_INSTALL_GITHUB_BASE:-https://github.com/Cornerstone-Production/Stage-Utility/releases/download}"
+# A release's JSON, which carries each asset's SHA-256. The release publishes no
+# .sha256 file of its own; only the server serves one, built from this digest.
+GITHUB_API="${STAGE_INSTALL_GITHUB_API:-https://api.github.com/repos/Cornerstone-Production/Stage-Utility/releases/tags}"
 
 # The ceiling on one zip download, seconds. The server's own fetch of the zip from
 # GitHub may take up to two hours (its watchdog's ceiling, in
@@ -390,25 +393,71 @@ fetch_to() {
   fi
 }
 
-# One download source: the checksum, then the zip, then the comparison. Returns
-# non-zero with the reason in WHY, and leaves no zip it would trust behind.
-try_source() {
+# The digest a release's JSON lists for the zip, or nothing. The same extraction as
+# release_digest in install.sh, which says why it is written this way (and why there
+# is no {64}); scripts/kiosk-install-macos.test.ts runs both over the same fixtures.
+digest_from_release() {
+  awk -v want="\"name\": \"$ZIP_NAME\"" '
+    /"name": "/ { found = (index($0, want) > 0); next }
+    found && /"digest": "sha256:/ {
+      line = $0
+      sub(/.*sha256:/, "", line)
+      sub(/[^0-9a-f].*$/, "", line)
+      if (length(line) == 64) { print line; exit }
+    }
+  ' "$1"
+}
+
+# The two ways to learn what the zip must hash to. Each sets `expected`, or returns
+# non-zero with the reason in WHY, which starts with the source's LABEL.
+#
+# The server serves a checksum line (the first field of the first line):
+expected_from_server() {
   label="$1"
-  zip_url="$2"
-  sum_url="$3"
-  zip_idle="$4"
   WHY=""
-  rm -f "$WORK/$ZIP_NAME" "$WORK/$ZIP_NAME.sha256"
-  if ! fetch_to "$sum_url" "$WORK/$ZIP_NAME.sha256" 60 0; then
+  rm -f "$WORK/checksum"
+  if ! fetch_to "$2" "$WORK/checksum" 60 0; then
     WHY="$label: the checksum $WHY"
     return 1
   fi
-  expected="$(awk 'NR == 1 { print tolower($1) }' "$WORK/$ZIP_NAME.sha256")"
-  # One shape check: exactly 64 lowercase hex digits, and nothing else on the line.
-  if ! printf '%s\n' "$expected" | grep -Eq '^[0-9a-f]{64}$'; then
-    WHY="$label: the checksum is not a SHA-256 digest"
+  expected="$(awk 'NR == 1 { print tolower($1) }' "$WORK/checksum")"
+  expected_is_a_digest "$label"
+}
+
+# The release publishes no checksum file; its API lists a digest per asset.
+expected_from_release() {
+  label="$1"
+  WHY=""
+  rm -f "$WORK/release.json"
+  if ! fetch_to "$2" "$WORK/release.json" 60 0; then
+    case "$HTTP_CODE" in
+      403 | 429) WHY="$WHY (GitHub may have rate-limited this network: 60 requests an hour without a token)" ;;
+    esac
+    WHY="$label: the release record $WHY"
     return 1
   fi
+  expected="$(digest_from_release "$WORK/release.json")"
+  if [ -z "$expected" ]; then
+    WHY="$label: the release record lists no SHA-256 for $ZIP_NAME (the release may predate GitHub's asset digests, which began in 2025, or the record is not in the form this installer reads)"
+    return 1
+  fi
+  expected_is_a_digest "$label"
+}
+
+# One shape check for both: exactly 64 lowercase hex digits, and nothing else.
+expected_is_a_digest() {
+  if printf '%s\n' "$expected" | grep -Eq '^[0-9a-f]{64}$'; then return 0; fi
+  WHY="$1: the checksum is not a SHA-256 digest"
+  return 1
+}
+
+# One download source, after `expected` is known: the zip, then the comparison.
+# Returns non-zero with the reason in WHY, and leaves no zip it would trust behind.
+try_source() {
+  label="$1"
+  zip_url="$2"
+  zip_idle="$3"
+  rm -f "$WORK/$ZIP_NAME"
   say "    downloading $ZIP_NAME from $label"
   say "    (a server that has not fetched it yet downloads it from GitHub first; that can take a few minutes)"
   if ! fetch_to "$zip_url" "$WORK/$ZIP_NAME" "$ZIP_CEILING" 1 "$zip_idle"; then
@@ -439,7 +488,8 @@ fetch_helper() {
   ZIP_NAME="StageUtilityOutput-$ARCH.zip"
   # No idle limit on the server: a server that has not fetched the zip yet sends
   # nothing until it has all of it from GitHub, which curl would count as idle.
-  if try_source "this server ($origin)" "$origin/kiosk/$ZIP_NAME" "$origin/kiosk/$ZIP_NAME.sha256" 0; then
+  label="this server ($origin)"
+  if expected_from_server "$label" "$origin/kiosk/$ZIP_NAME.sha256" && try_source "$label" "$origin/kiosk/$ZIP_NAME" 0; then
     return 0
   fi
   say "    $WHY"
@@ -448,7 +498,8 @@ fetch_helper() {
   if [ -z "$version" ]; then
     die "could not get the helper. $first. This server's version could not be read from $origin/api/update/status either, so the GitHub release was not tried."
   fi
-  if try_source "the GitHub release v$version" "$GITHUB_BASE/v$version/$ZIP_NAME" "$GITHUB_BASE/v$version/$ZIP_NAME.sha256" 60; then
+  label="the GitHub release v$version"
+  if expected_from_release "$label" "$GITHUB_API/v$version" && try_source "$label" "$GITHUB_BASE/v$version/$ZIP_NAME" 60; then
     return 0
   fi
   die "could not get the helper. $first. $WHY."

@@ -122,13 +122,12 @@ describe("the helper job is gated on the build script being in the tree", () => 
     }
   });
 
-  it("builds both architectures through build-app.sh --arch and writes a checksum for each", () => {
+  it("builds both architectures through build-app.sh --arch and zips each", () => {
     const build = helper.steps?.find((s) => s.run?.includes("build-app.sh"));
     assert.ok(build?.run);
     assert.match(build.run, /for arch in arm64 x86_64/);
     assert.match(build.run, /helper\/macos\/build-app\.sh --arch "\$arch"/);
     assert.match(build.run, /StageUtilityOutput-\$arch\.zip"/);
-    assert.match(build.run, /shasum -a 256 "StageUtilityOutput-\$arch\.zip" > "StageUtilityOutput-\$arch\.zip\.sha256"/);
   });
 });
 
@@ -177,7 +176,7 @@ describe("the release itself is unchanged by the helper", () => {
   it("attaches the helper's files to the one release-create call", () => {
     const create = artifacts.steps?.find((s) => s.run?.includes("gh release create"));
     assert.ok(create?.run);
-    assert.match(create.run, /if \[ -d helper-dist \]; then assets\+=\(helper-dist\/\*\); fi/);
+    assert.match(create.run, /if \[ -d helper-dist \]; then assets\+=\(helper-dist\/StageUtilityOutput-\*\.zip\); fi/);
     assert.match(create.run, /gh release create "v\$V"[\s\S]*"\$\{assets\[@\]\}"/);
     assert.equal(create.run.match(/gh release create/g)?.length, 1);
     assert.equal(create.run.includes("gh release upload"), false, "a published release cannot be added to");
@@ -216,15 +215,18 @@ describe("the helper's download reaches the release", () => {
     }
   }
 
-  const HELPER_FILES = ["StageUtilityOutput-arm64.zip", "StageUtilityOutput-arm64.zip.sha256", "StageUtilityOutput-x86_64.zip", "StageUtilityOutput-x86_64.zip.sha256"];
+  const HELPER_FILES = ["StageUtilityOutput-arm64.zip", "StageUtilityOutput-x86_64.zip"];
+  const STRAY_FILES = ["StageUtilityOutput-arm64.zip.sha256", "StageUtilityOutput-x86_64.zip.sha256", "Other.zip"];
   const TARBALLS = ["dist/stage-utility-1.2.3-darwin-arm64.tar.gz", "dist/stage-utility-1.2.3-linux-x64.tar.gz"];
 
-  it("attaches the zips and checksums the download step puts down, wherever that step is told to put them", () => {
+  it("attaches the zips the download step puts down, wherever that step is told to put them", () => {
     const dir = String(download?.with?.["path"]);
     assert.ok(dir && dir !== "undefined", "the download step has no path");
     const r = runCreate((tree) => {
       fs.mkdirSync(path.join(tree, dir), { recursive: true });
       for (const n of HELPER_FILES) fs.writeFileSync(path.join(tree, dir, n), "x");
+      // Whatever else lands beside them is not published: the old checksum files, or a stray zip.
+      for (const n of STRAY_FILES) fs.writeFileSync(path.join(tree, dir, n), "x");
     });
     assert.equal(r.status, 0, r.err);
     assert.deepEqual(r.attached, [...TARBALLS, ...HELPER_FILES.map((n) => `${dir}/${n}`)].sort());
