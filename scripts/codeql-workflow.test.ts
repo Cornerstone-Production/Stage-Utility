@@ -54,7 +54,7 @@ const caller = load("codeql.yml");
 const language = load("codeql-language.yml");
 
 const LANGUAGES = ["swift", "c-cpp", "ruby", "actions"] as const;
-const REUSABLE = "./.github/workflows/codeql-language.yml";
+const REUSABLE = "$/.github/workflows/codeql-language.yml";
 const gate = caller.jobs["changes"].steps?.find((s) => s.id === "gate");
 const analyze = language.jobs["analyze"];
 const emptyResult = language.jobs["empty-result"];

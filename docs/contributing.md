@@ -246,7 +246,8 @@ Actions tab once the workflow is on `main`.
 
 Not every check runs on every pull request. The secret scan, the commit
 convention check and the public-hygiene check (below) run on all of them,
-docs-only included. CodeQL (`codeql.yml`, the extended query suite) runs on pull
+docs-only included. The script and workflow checks (below) run only when the files
+they read change. CodeQL (`codeql.yml`, the extended query suite) runs on pull
 requests to `beta` or `main`, on pushes to them, weekly, and by hand. JavaScript/TypeScript is analysed
 every time; the other languages only when a change touches what they analyse:
 Swift and C/C++ for `helper/macos/`, Ruby for a `.rb` file, and the workflows for
@@ -283,6 +284,55 @@ Green is not finished. Two more questions, answered in the PR body:
 
 "No docs needed" and "nothing worth logging" are fine answers — say which, so
 it reads as a decision rather than an omission.
+
+### Script and workflow checks
+
+Four checks cover the code that is not TypeScript. The installers run as root or
+elevated on display machines, and the release workflow holds write access to the
+repository.
+
+| Check | Looks at | Runs when | Locally |
+|---|---|---|---|
+| ShellCheck | every tracked `*.sh`, and extensionless scripts with a shell shebang (`scripts/stage-upgrade`) | a shell script changes | `brew install shellcheck`, then `scripts/lint-shell.sh` |
+| PSScriptAnalyzer | `scripts/kiosk/install-windows.ps1` | any `.ps1` changes | `brew install powershell`, `pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'`, then `pwsh scripts/lint-powershell.ps1` |
+| zizmor | `.github/**`: workflows, composite actions, Dependabot config | anything under `.github` changes | `brew install zizmor` (or `pip install zizmor`), then `GH_TOKEN=$(gh auth token) zizmor .github` |
+| Secret scan | the PR's commits and the working tree | every pull request | `gitleaks git . --log-opts="origin/beta..HEAD" --redact` |
+
+The first three also run on every push to `main` and weekly, because a new
+release of the tool can flag a file nobody touched. All four fail the job on any
+finding.
+
+`scripts/lint-shell.sh` and `scripts/lint-powershell.ps1` hold the file lists and
+CI calls them, so a local run is the CI run. PSScriptAnalyzer covers the Windows
+kiosk installer only. `install.ps1`, `scripts/update.ps1` and
+`scripts/survival/run-windows.ps1` are listed as deferred in
+`scripts/lint-powershell.ps1` and fail the analyzer today; a `.ps1` in neither
+list fails the check, so a new script is linted or deferred on purpose. The
+installer stays ASCII (see the header of that script for why).
+
+A script piped to `sh` carries a `#!/bin/sh` shebang, because ShellCheck picks the
+dialect from it and a bash shebang would check one shell and run another.
+
+Findings are fixed. Where one is kept on purpose, suppress it where it stands,
+naming the check and giving the reason on the same line:
+
+```sh
+# shellcheck disable=SC2086 # $_logs is a space-separated list of paths, meant to split
+```
+
+```powershell
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'why')]
+```
+
+`scripts/lint-shell.sh` rejects a `disable=` that names no `SCxxxx` check, and a
+`.shellcheckrc`. For zizmor, fix the workflow rather than adding a
+`# zizmor: ignore`.
+
+zizmor and the secret scan upload SARIF to code scanning, so their findings show
+in the Security tab as well as the job log. ShellCheck and PSScriptAnalyzer have
+no SARIF output; theirs are annotations on the PR diff. A fork or Dependabot pull
+request cannot write to code scanning and skips the upload; the job still gates on
+the scan.
 
 ### Merge-friendly guards
 

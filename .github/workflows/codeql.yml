@@ -110,7 +110,7 @@ jobs:
   swift:
     needs: changes
     if: ${{ !cancelled() }}
-    uses: ./.github/workflows/codeql-language.yml
+    uses: $/.github/workflows/codeql-language.yml
     permissions:
       contents: read
       security-events: write
@@ -123,7 +123,7 @@ jobs:
   c-cpp:
     needs: changes
     if: ${{ !cancelled() }}
-    uses: ./.github/workflows/codeql-language.yml
+    uses: $/.github/workflows/codeql-language.yml
     permissions:
       contents: read
       security-events: write
@@ -134,7 +134,7 @@ jobs:
   ruby:
     needs: changes
     if: ${{ !cancelled() }}
-    uses: ./.github/workflows/codeql-language.yml
+    uses: $/.github/workflows/codeql-language.yml
     permissions:
       contents: read
       security-events: write
@@ -145,7 +145,7 @@ jobs:
   actions:
     needs: changes
     if: ${{ !cancelled() }}
-    uses: ./.github/workflows/codeql-language.yml
+    uses: $/.github/workflows/codeql-language.yml
     permissions:
       contents: read
       security-events: write
@@ -155,7 +155,7 @@ jobs:
 
   # Nearly every change touches it, and Linux runners are not scarce.
   javascript-typescript:
-    uses: ./.github/workflows/codeql-language.yml
+    uses: $/.github/workflows/codeql-language.yml
     permissions:
       contents: read
       security-events: write

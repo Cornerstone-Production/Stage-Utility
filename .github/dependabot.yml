@@ -12,6 +12,10 @@ updates:
     target-branch: "beta"
     schedule:
       interval: "weekly"
+    # A release is not taken up for a week, so a compromised or yanked publish
+    # is usually pulled before a PR for it opens. Security updates ignore this.
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
@@ -48,6 +52,10 @@ updates:
     target-branch: "beta"
     schedule:
       interval: "weekly"
+    # A release is not taken up for a week, so a compromised or yanked publish
+    # is usually pulled before a PR for it opens. Security updates ignore this.
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     labels:
       - "dependencies"

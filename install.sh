@@ -92,7 +92,7 @@ _logs=""
 [ -n "${STAGE_UPDATE_LIVE_LOG:-}" ] && _logs="$_logs $STAGE_UPDATE_LIVE_LOG"
 [ -n "${STAGE_UPDATE_LOG:-}" ] && _logs="$_logs $STAGE_UPDATE_LOG"
 if [ -n "$_logs" ]; then
-  # shellcheck disable=SC2086
+  # shellcheck disable=SC2086 # $_logs is a space-separated list of paths, meant to split
   exec > >(tee -a $_logs) 2>&1
 fi
 
@@ -248,7 +248,7 @@ rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR"
 log "unpacking into ${RELEASE_DIR}"
 tar -xzf "$WORK/$ARCHIVE" -C "$RELEASE_DIR" || die "Could not unpack ${ARCHIVE} into ${RELEASE_DIR}."
-log "unpacked $(ls -1 "$RELEASE_DIR" | wc -l | tr -d " ") entries"
+log "unpacked $(find "$RELEASE_DIR" -mindepth 1 -maxdepth 1 | wc -l | tr -d " ") entries"
 [ -x "${RELEASE_DIR}/node" ] || die "Archive is missing its runtime — refusing to switch to it."
 
 mkdir -p "$DATA"
@@ -305,9 +305,11 @@ if [ "${STAGE_UPDATE_MODE:-}" = "swap" ]; then
   if [ "$OS" = linux ] && [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ] \
      && ! grep -q "AmbientCapabilities" "/etc/systemd/system/${SERVICE_NAME}.service"; then
     if [ "$(id -u)" -eq 0 ] && command -v setcap >/dev/null 2>&1; then
-      setcap 'cap_net_bind_service=+ep' "${RELEASE_DIR}/node" 2>/dev/null \
-        && log "granted port-80 binding to the new release" \
-        || warn "Could not grant port-80 binding to the new release; the app still serves on ${PORT}."
+      if setcap 'cap_net_bind_service=+ep' "${RELEASE_DIR}/node" 2>/dev/null; then
+        log "granted port-80 binding to the new release"
+      else
+        warn "Could not grant port-80 binding to the new release; the app still serves on ${PORT}."
+      fi
     else
       warn "This install predates the port-80 service capability, so :80 will stop answering after this update. Re-run the installer once with sudo to restore it; ${PORT} is unaffected."
       log "port-80 capability not carried across the swap (old unit, unprivileged swap)"

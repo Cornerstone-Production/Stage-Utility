@@ -7,8 +7,8 @@
 # purpose-built Pi is the right tool. This is for a PC already sitting at FOH.
 #
 # What it needs from you, once:
-#   • automatic login for this account (netplwiz)
-#   • Power & sleep -> Screen and Sleep both set to Never
+#   * automatic login for this account (netplwiz)
+#   * Power & sleep -> Screen and Sleep both set to Never
 #
 # Run in an ELEVATED PowerShell: the device id lives in ProgramData so that
 # clearing a browser profile, or the user profile, cannot cost you a claim.
@@ -22,11 +22,11 @@ $Server   = $env:STAGE_SERVER
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
            ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
-  Write-Error 'Run this in an elevated PowerShell — the device id lives in ProgramData.'
+  Write-Error 'Run this in an elevated PowerShell - the device id lives in ProgramData.'
   exit 1
 }
 
-Write-Host '==> Installing the Stage Utility kiosk agent'
+Write-Output '==> Installing the Stage Utility kiosk agent'
 New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
 
 # Generated ONCE. Re-running must never mint a new id, or this screen's binding
@@ -34,7 +34,7 @@ New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
 $IdFile = Join-Path $StateDir 'device-id'
 if (-not (Test-Path $IdFile)) { [guid]::NewGuid().ToString() | Set-Content -NoNewline $IdFile }
 
-# The device's own secret — pinned by the server the first time it is claimed.
+# The device's own secret - pinned by the server the first time it is claimed.
 $TokenFile = Join-Path $StateDir 'token'
 if (-not (Test-Path $TokenFile)) {
   $bytes = New-Object byte[] 24
@@ -42,9 +42,9 @@ if (-not (Test-Path $TokenFile)) {
   ($bytes | ForEach-Object { $_.ToString('x2') }) -join '' | Set-Content -NoNewline $TokenFile
 }
 if ($Server) { $Server | Set-Content -NoNewline (Join-Path $StateDir 'server') }
-Write-Host "    device id: $(Get-Content $IdFile)"
+Write-Output "    device id: $(Get-Content $IdFile)"
 
-# ── The launcher ────────────────────────────────────────────────────────────
+# -- The launcher ------------------------------------------------------------
 $Launcher = Join-Path $StateDir 'kiosk.ps1'
 @"
 `$ErrorActionPreference = 'SilentlyContinue'
@@ -174,7 +174,7 @@ if (`$chrome) {
 }
 "@ | Set-Content -Encoding UTF8 $Launcher
 
-# ── Survive a reboot, and a browser that dies ──────────────────────────────
+# -- Survive a reboot, and a browser that dies ------------------------------
 # At logon, not at boot: this needs a desktop session to put a window on a
 # screen, which is why automatic login is a prerequisite.
 $action  = New-ScheduledTaskAction -Execute 'powershell.exe' `
@@ -201,9 +201,9 @@ Register-ScheduledTask -TaskName 'StageUtilityKiosk' -Action $action `
 powercfg /change monitor-timeout-ac 0  2>$null
 powercfg /change standby-timeout-ac 0  2>$null
 
-Write-Host ''
-Write-Host "==> Done. This screen is device $(Get-Content $IdFile)"
-Write-Host '    It starts at the next logon. Open Screens in Stage Utility and'
-Write-Host '    set it up under "Not set up yet".'
-Write-Host ''
-Write-Host '    Still to do by hand, once: enable automatic login (netplwiz).'
+Write-Output ''
+Write-Output "==> Done. This screen is device $(Get-Content $IdFile)"
+Write-Output '    It starts at the next logon. Open Screens in Stage Utility and'
+Write-Output '    set it up under "Not set up yet".'
+Write-Output ''
+Write-Output '    Still to do by hand, once: enable automatic login (netplwiz).'

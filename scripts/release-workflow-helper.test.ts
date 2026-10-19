@@ -101,8 +101,9 @@ describe("the helper job is gated on the build script being in the tree", () => 
     const probe = gate.steps?.find((s) => s.id === "probe");
     assert.ok(probe?.run, "the gate has no probe step");
     // The probe's own shell, run on a tree with and without the script. The
-    // workflow expression in its notice line is filled in the way Actions would.
-    const script = probe.run.replace(/\$\{\{\s*needs\.release\.outputs\.version\s*\}\}/g, "1.2.3");
+    // version reaches it through the step's env, as it does on a runner.
+    assert.equal(probe.env?.["V"], "${{ needs.release.outputs.version }}");
+    const script = probe.run;
     for (const [withScript, expected] of [[true, "true"], [false, "false"]] as const) {
       const tree = fs.mkdtempSync(path.join(os.tmpdir(), "su-gate-"));
       try {
@@ -112,7 +113,7 @@ describe("the helper job is gated on the build script being in the tree", () => 
         }
         const out = path.join(tree, "output");
         fs.writeFileSync(out, "");
-        const r = spawnSync("bash", ["-c", script], { cwd: tree, env: { PATH: process.env.PATH ?? "", GITHUB_OUTPUT: out }, encoding: "utf8" });
+        const r = spawnSync("bash", ["-c", script], { cwd: tree, env: { PATH: process.env.PATH ?? "", GITHUB_OUTPUT: out, V: "1.2.3" }, encoding: "utf8" });
         assert.equal(r.status, 0, r.stderr);
         assert.equal(fs.readFileSync(out, "utf8").trim(), `present=${expected}`, `with${withScript ? "" : "out"} the script`);
       } finally {
@@ -150,8 +151,19 @@ describe("the release itself is unchanged by the helper", () => {
     const release = jobs["release"];
     assert.deepEqual(needsOf(release).sort(), ["verify-checks", "verify-tests"]);
     const push = release.steps?.find((s) => s.id === "push");
-    assert.ok(push?.run?.includes('git push origin "HEAD:${GITHUB_REF_NAME}"'), "the bump is still pushed fast-forward only");
+    assert.ok(push?.run?.includes('git push "$REMOTE" "HEAD:${GITHUB_REF_NAME}"'), "the bump is still pushed fast-forward only");
     assert.ok(!push?.run?.includes("--force"));
+  });
+
+  it("keeps no credential after checkout, and hands the token to the push step alone", () => {
+    const steps = jobs["release"].steps ?? [];
+    const checkout = steps.find((s) => s.uses?.startsWith("actions/checkout@"));
+    assert.equal(checkout?.with?.["persist-credentials"], false, "the checkout keeps the token in git config");
+    // The only step in the job that pushes is the one given the token.
+    const pushers = steps.filter((s) => /\bgit push\b/.test(s.run ?? ""));
+    assert.deepEqual(pushers.map((s) => s.id), ["push"]);
+    assert.equal(pushers[0]?.env?.["GH_TOKEN"], "${{ github.token }}");
+    assert.match(pushers[0]?.run ?? "", /REMOTE="https:\/\/x-access-token:\$\{GH_TOKEN\}@github\.com\/\$\{GITHUB_REPOSITORY\}\.git"/);
   });
 
   it("downloads the helper's artifact only from a helper that succeeded, under the name it was uploaded as", () => {
