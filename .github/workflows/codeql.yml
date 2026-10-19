@@ -4,14 +4,15 @@
 # files it analyses, and always on a push to main (the release), on the weekly
 # schedule, and by hand:
 #
-#   swift                 helper/macos/**   (needs a macOS runner, which are scarce)
-#   c-cpp                 helper/macos/**   (the helper's DeckLink shim)
+#   swift                 helper/macos/**   (built by hand on macOS, which runners are scarce)
+#   c-cpp                 helper/macos/**   (the helper's DeckLink shim, built on macOS too)
 #   ruby                  **/*.rb
 #   actions               .github/**
 #   javascript-typescript always
 #
-# A change to this workflow or codeql-language.yml runs every language. A language
-# that does not run shows as skipped, not pending. On a pull request it also uploads
+# A change to this workflow, to codeql-language.yml or to the shared configuration
+# (.github/codeql/codeql-config.yml) runs every language. The model tests run when
+# .github/codeql changes. A language that does not run shows as skipped, not pending. On a pull request it also uploads
 # an empty result under its own category (see codeql-language.yml), so code scanning
 # still finds every configuration it has on the base branch.
 #
@@ -58,6 +59,7 @@ jobs:
       c-cpp: ${{ steps.gate.outputs.c-cpp }}
       ruby: ${{ steps.gate.outputs.ruby }}
       actions: ${{ steps.gate.outputs.actions }}
+      models: ${{ steps.gate.outputs.models }}
     steps:
       - name: Which languages does this change touch?
         id: gate
@@ -72,7 +74,7 @@ jobs:
         run: |
           set -uo pipefail
           emit() {
-            for lang in swift c-cpp ruby actions; do echo "$lang=$1" >>"$GITHUB_OUTPUT"; done
+            for lang in swift c-cpp ruby actions models; do echo "$lang=$1" >>"$GITHUB_OUTPUT"; done
             echo "every language: $1 ($2)"
           }
           # flag <language> <pattern>: true when a changed file matches.
@@ -99,14 +101,19 @@ jobs:
           [ -z "$files" ] && { emit true "no files listed"; exit 0; }
           [ "$(grep -c . <<<"$files")" -ge "$limit" ] && { emit true "file list may be truncated"; exit 0; }
 
-          # A change to the CodeQL workflows themselves runs every language.
-          if grep -qE '^\.github/workflows/codeql(-language)?\.yml$' <<<"$files"; then emit true "CodeQL workflow changed"; exit 0; fi
+          # A change to the CodeQL workflows, or to the configuration every language reads,
+          # runs every language.
+          if grep -qE '^\.github/(workflows/codeql(-language)?\.yml|codeql/codeql-config\.yml)$' <<<"$files"; then emit true "CodeQL workflow or configuration changed"; exit 0; fi
 
-          flag swift '^helper/macos/'
-          flag c-cpp '^helper/macos/'
+          # The Xcode selection is part of how the helper is built for analysis.
+          flag swift '^helper/macos/|^\.github/actions/select-xcode/'
+          flag c-cpp '^helper/macos/|^\.github/actions/select-xcode/'
           flag ruby '\.rb$'
           flag actions '^\.github/'
+          flag models '^\.github/codeql/'
 
+  # swift and c-cpp run on the runner the helper's own CI builds on (helper-macos.yml),
+  # with the same Xcode choice, so the build the tracer watches is one CI already proves.
   swift:
     needs: changes
     if: ${{ !cancelled() }}
@@ -116,8 +123,8 @@ jobs:
       security-events: write
     with:
       language: swift
-      runner: macos-latest
-      build-mode: autobuild
+      runner: macos-14
+      build-mode: manual
       run: ${{ needs.changes.result != 'success' || needs.changes.outputs.swift == 'true' }}
 
   c-cpp:
@@ -129,6 +136,8 @@ jobs:
       security-events: write
     with:
       language: c-cpp
+      runner: macos-14
+      build-mode: manual
       run: ${{ needs.changes.result != 'success' || needs.changes.outputs.c-cpp == 'true' }}
 
   ruby:
@@ -152,6 +161,33 @@ jobs:
     with:
       language: actions
       run: ${{ needs.changes.result != 'success' || needs.changes.outputs.actions == 'true' }}
+
+  # The model pack and its tests, which only the JavaScript/TypeScript analysis uses.
+  # Runs the pack's own CodeQL tests against the CLI the analysis installs, so a model
+  # that stops resolving (a renamed function, a CodeQL release that reads the path
+  # differently) goes red here instead of silently analysing less.
+  models:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.models == 'true') }}
+    name: CodeQL model tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: codeql
+        uses: github/codeql-action/setup-codeql@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: javascript-typescript
+      - name: Run the model tests
+        env:
+          CODEQL: ${{ steps.codeql.outputs.codeql-path }}
+        run: |
+          "$CODEQL" version
+          "$CODEQL" test run .github/codeql/tests --additional-packs="$GITHUB_WORKSPACE/.github/codeql/extensions"
 
   # Nearly every change touches it, and Linux runners are not scarce.
   javascript-typescript:

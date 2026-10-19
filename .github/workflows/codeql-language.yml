@@ -9,6 +9,11 @@
 #
 # That upload is never made on a push. There it would tell code scanning the
 # language has no alerts on the branch, and close the ones it has.
+#
+# Every language reads .github/codeql/codeql-config.yml: the extended suite, and the
+# paths it ignores. JavaScript/TypeScript also loads the model pack beside it
+# (.github/codeql/extensions), which the action has no input for: it is passed to
+# the CLI through CODEQL_ACTION_EXTRA_OPTIONS.
 
 name: CodeQL language
 
@@ -27,6 +32,9 @@ on:
         type: string
         default: ubuntu-latest
       build-mode:
+        description: >-
+          none, or manual for a language the CodeQL tracer must watch being built (the
+          steps for it are below, keyed on the language).
         type: string
         default: none
 
@@ -49,12 +57,34 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Before init, so the tracer watches the Swift the helper is released with. The
+      # image's default Xcode may be older than the Swift 6 the package needs.
+      - name: Select Xcode
+        if: ${{ inputs.build-mode == 'manual' }}
+        uses: $/.github/actions/select-xcode
       - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           languages: ${{ inputs.language }}
           build-mode: ${{ inputs.build-mode }}
-          queries: security-extended
+          config-file: ./.github/codeql/codeql-config.yml
+      # What the tracer watches. The Swift leg builds the whole package, which also
+      # compiles the DeckLink shim; the C/C++ leg builds only the shim and the vendored
+      # SDK dispatch it links, so it does not repeat the Swift build on a second macOS
+      # runner.
+      - name: Build the Swift helper
+        if: ${{ inputs.build-mode == 'manual' && inputs.language == 'swift' }}
+        working-directory: helper/macos
+        run: swift build
+      - name: Build the DeckLink shim
+        if: ${{ inputs.build-mode == 'manual' && inputs.language == 'c-cpp' }}
+        working-directory: helper/macos
+        run: swift build --target DeckLinkShim
       - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        env:
+          # The model pack targets codeql/javascript-all, so only the JavaScript run
+          # loads it. A second --additional-packs is added to whatever the action
+          # passes itself, not substituted for it.
+          CODEQL_ACTION_EXTRA_OPTIONS: ${{ inputs.language == 'javascript-typescript' && format('{{"database":{{"run-queries":["--additional-packs={0}/.github/codeql/extensions","--model-packs=stage-utility/javascript-models"]}}}}', github.workspace) || '' }}
         with:
           category: "/language:${{ inputs.language }}"
 
