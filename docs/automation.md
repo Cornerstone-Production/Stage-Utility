@@ -491,9 +491,9 @@ view, a calendar console or Home — and adds a **Cue button** bound to the new 
 to each one ticked, after the cue is made. The button goes under the lowest object
 in the layout, in the column of the layout's last button and sized and styled like
 it; with no button to copy it is the widget's default size, centred, with its text
-sized to fit its name. The label is yours, or the cue's name when blank. When
-nothing fits below the other objects it sits against the bottom edge and says it
-overlaps. Drag it where you want it in the layout editor.
+sized to fit its name. The label is yours, or the cue's name when blank. A
+full-canvas background is not counted as content. When nothing fits below the other
+objects the button sits against the bottom edge and the confirmation says so. Drag it where you want it in the layout editor.
 
 The buttons are written through the views API with the layout's revision, so a
 console someone has open in the layout editor is refused rather than overwritten
@@ -530,11 +530,13 @@ action, name, enabled state and cooldown.
 - **Make it automatic** leaves the trigger empty for you to choose; **Save** waits
   for one. The cue name, spoken name and former names go with the trigger.
 
-**Home Assistant is asked first.** Saving a conversion that would take away an
-entity it has — a cue shown in Home Assistant made automatic — asks before it
-writes, and so does one that would give it a new one (a rule made manual whose
-Home Assistant switch you then turned on). A cue switched off for Home Assistant
-loses nothing there and is not asked about.
+**A cue that stops being one is asked about first.** Saving **Make it automatic**
+asks before it writes: the cue name goes, so `POST /api/cues/<name>` stops
+finding it and a cue button on a console bound to it reads **Unbound**, and when
+Home Assistant had an entity for it that goes too, with the automations there that
+refer to it. Saving a rule made manual whose Home Assistant switch you then turned
+on asks as well, because Home Assistant gets a new entity a pasted YAML fragment
+will not have.
 
 **A conversion never renames a cue.** Making a cue automatic and then manual again
 before saving puts back the trigger exactly as the editor opened it — name, former
