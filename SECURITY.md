@@ -50,20 +50,30 @@ When reporting, please include:
   (default `8788`). Run it on a trusted network and restrict the port with your firewall;
   do not expose it directly to the public internet.
 
-- **Cross-origin writes are blocked.** A firewall does not help against the browser case: any
-  web page an operator visits can issue requests to the appliance *from inside the LAN*, and
-  DNS rebinding makes that reachable from the public internet. State-changing requests
-  (`POST`/`PUT`/`PATCH`/`DELETE`) are therefore rejected with `403` unless they are
-  same-origin, which closes off a drive-by page triggering an update, a track switch, or a
-  restart mid-service.
+- **Other origins can neither read nor write.** A firewall does not help against the browser
+  case: any web page an operator visits can send requests to the appliance *from inside the
+  LAN*. No response carries an `Access-Control-*` header, so a page on another origin cannot
+  read what the app answers, and the browser refuses a cross-site preflight before the request
+  it asked about is sent. A state-changing request (`POST`/`PUT`/`PATCH`/`DELETE`) that skips
+  the preflight is rejected with `403` unless it is same-origin, which closes off a drive-by
+  page triggering an update, a track switch, or a restart mid-service.
 
   Requests carrying **no** `Origin` header are allowed — that is every non-browser client
   (the Companion module, `curl`, scripts), none of which a hostile web page can impersonate.
   Origins are matched on hostname only, so the friendly port `80`, port `8788`, and the Vite
-  dev proxy on `3000` all interoperate. `GET` is unchanged and remains open to the LAN.
+  dev proxy on `3000` all interoperate. Reads stay open to anything that reaches the port
+  directly.
 
   This is defence against the *browser*, not against a peer on the network: anyone who can
   reach the port directly can still call the API. Firewall the port regardless.
+
+- **DNS rebinding is not closed.** A page whose own hostname is made to resolve to this
+  server's address is, to the browser, on the same origin as the app: its requests name that
+  hostname in both `Origin` and `Host`, so the checks above pass, and so does the cue routes'
+  same-origin exemption below. The page can read and write as the app's own pages do, press
+  cues and mint a cue token. Nothing in the app refuses a request by the host name it was sent
+  to yet. Until it does, treat a browser on the app's network that visits untrusted sites as
+  able to reach the app.
 
 - **Cue tokens, and what they are not.** Calling a cue (`POST /api/cues/<name>`) presses a
   real button on real gear, usually on behalf of a caller that is not a browser — a voice
@@ -109,12 +119,13 @@ When reporting, please include:
   (mint, revoke), by `import-pairs` and by `buttons/refresh`, **unless the request is a
   same-origin browser write** — which means an `Origin` naming this server, which a page on
   this app's own origin sends on every `POST` and `DELETE` and a page on any other origin
-  cannot forge. `Sec-Fetch-Site` is not required: browsers send it only to HTTPS or localhost,
-  and this app is plain HTTP on a LAN address. When it is present it must say `same-origin`.
+  cannot forge, short of the DNS rebinding above. `Sec-Fetch-Site` is not required: browsers
+  send it only to HTTPS or localhost, and this app is plain HTTP on a LAN address. When it is
+  present it must say `same-origin`.
 
   That exemption is a **browser convenience, not a boundary**: `curl` can type an `Origin` as
   easily as a browser sends one. What it closes is the confused-deputy case — a page on another
-  origin cannot forge it.
+  origin cannot forge it — except under DNS rebinding, which it does not close.
 
   Reads are unchanged and remain open to the LAN: the token *list* (labels, ids and last-use
   times — never a hash), the generated Home Assistant fragment (which refers to the token as

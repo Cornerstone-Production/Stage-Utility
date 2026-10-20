@@ -1,6 +1,7 @@
 // LAN HTTP server on port 8788.
 // Serves public/control.html at GET / and the /api/* endpoints.
-// Permissive CORS on /api/*. Tracks sockets for clean shutdown.
+// No CORS: only pages on this server's own origin read it. Tracks sockets for
+// clean shutdown.
 
 
 import { errorMessage } from "./errors.js";
@@ -176,15 +177,6 @@ const FRIENDLY_PORT = process.env.STAGE_UTILITY_FRIENDLY_PORT !== undefined
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-function cors(res: http.ServerResponse): void {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
-  // Authorization is here for the cue routes: a caller that presents a bearer
-  // token is not a browser and never sends a preflight, but a page on this app's
-  // own origin fetching the Home Assistant config is, and it does.
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-}
 
 // hostnameOf / isCrossOrigin live in http-origin.ts, because the cue routes'
 // browser exemption has to be the SAME check — a second, looser copy of it in
@@ -802,55 +794,13 @@ export class RemoteServer {
     }, SSE_HEARTBEAT_MS);
     this.heartbeatTimer.unref?.();
 
-    // One request handler, shared by both listeners (PORT + the friendly port).
-    const handler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
-      const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
-      const pathname = url.pathname;
-
-      if (DEBUG_HTTP) console.log(`[remote-server] ${req.method} ${pathname}`);
-
-      // CORS preflight. A cross-site caller is only offered the safe methods, so
-      // the browser blocks a state-changing request before it is ever sent.
-      if (req.method === "OPTIONS") {
-        cors(res);
-        if (isCrossOrigin(req.headers.origin, req.headers.host)) {
-          res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-        }
-        res.writeHead(204);
-        res.end();
-        return;
-      }
-
-      cors(res);
-
-      // Enforcement, independent of whatever the preflight advertised: reads stay
-      // open (LAN appliance), writes must be same-origin.
-      if (MUTATING_METHODS.has(req.method ?? "") && isCrossOrigin(req.headers.origin, req.headers.host)) {
-        console.warn(`[remote-server] rejected cross-origin ${scrub(req.method)} ${scrub(pathname)} from ${scrub(req.headers.origin)}`);
-        error(res, "cross-origin request rejected", 403);
-        return;
-      }
-
-      try {
-        await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
-      } catch (err) {
-        const msg = errorMessage(err);
-        const status = handlerErrorStatus(err);
-        const code = handlerErrorCode(err, status);
-        console.error(`[remote-server] handler error ${scrub(pathname)}: ${scrub(msg)}`);
-        // The reader paused an over-limit body rather than destroying the socket,
-        // so the response reaches the client; closing after it releases the rest.
-        if (status === 413) res.setHeader("Connection", "close");
-        error(res, msg, status, code);
-      }
-    };
-
     const trackConn = (socket: net.Socket) => {
       this.sockets.add(socket);
       socket.on("close", () => this.sockets.delete(socket));
     };
 
-    this.server = http.createServer(handler);
+    // One request handler, shared by both listeners (PORT + the friendly port).
+    this.server = http.createServer(this.handle);
     this.server.on("connection", trackConn);
 
     await this.listenWithRetry();
@@ -862,16 +812,15 @@ export class RemoteServer {
     // of it becoming free. With the privilege granted (CAP_NET_BIND_SERVICE on prod)
     // the only failure mode is that transient restart race, which the retry closes.
     if (FRIENDLY_PORT && FRIENDLY_PORT !== PORT) {
-      this.bindFriendlyPort(handler, trackConn);
+      this.bindFriendlyPort(trackConn);
     }
   }
 
   private bindFriendlyPort(
-    handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
     trackConn: (socket: net.Socket) => void,
     attempt = 0,
   ): void {
-    const friendly = http.createServer(handler);
+    const friendly = http.createServer(this.handle);
     friendly.on("connection", trackConn);
     friendly.once("error", (err: NodeJS.ErrnoException) => {
       friendly.close();
@@ -888,7 +837,7 @@ export class RemoteServer {
       // never give up, so 80 is reclaimed the moment it frees up.
       const next = attempt + 1;
       const delay = next <= 5 ? 1000 : next <= 15 ? 5000 : 30000;
-      this.friendlyRetryTimer = setTimeout(() => this.bindFriendlyPort(handler, trackConn, next), delay);
+      this.friendlyRetryTimer = setTimeout(() => this.bindFriendlyPort(trackConn, next), delay);
       this.friendlyRetryTimer.unref?.();
     });
     friendly.listen(FRIENDLY_PORT, "0.0.0.0", () => {
@@ -931,6 +880,58 @@ export class RemoteServer {
     });
     console.log("[remote-server] stopped");
   }
+
+  /**
+   * Every request on both listeners, from the first header to the error mapping.
+   *
+   * A property rather than a closure inside start(), so a test can serve exactly
+   * this on a real socket: what the browser is told about other origins, the
+   * write gate and the thrown-error statuses all happen here, and a route test
+   * calls handleRequest, after every one of them.
+   */
+  readonly handle = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+    const pathname = url.pathname;
+
+    if (DEBUG_HTTP) console.log(`[remote-server] ${req.method} ${pathname}`);
+
+    // No Access-Control-* header, on any response. Every page this server
+    // serves calls it from its own origin, where CORS never applies, so the only
+    // thing such a header can do is let a page on ANOTHER origin read the
+    // answer. `Access-Control-Allow-Origin: *` did exactly that for every route,
+    // the log included: any website a staff member opened on the LAN could read
+    // the app's state.
+    //
+    // A cross-site preflight is therefore answered without permission, and the
+    // browser refuses to send the request it was asking about.
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // Enforcement, independent of the preflight: writes must be same-origin. A
+    // request with no Origin is not a browser's cross-site request (Companion,
+    // curl, a script), so it passes — see isCrossOrigin.
+    if (MUTATING_METHODS.has(req.method ?? "") && isCrossOrigin(req.headers.origin, req.headers.host)) {
+      console.warn(`[remote-server] rejected cross-origin ${scrub(req.method)} ${scrub(pathname)} from ${scrub(req.headers.origin)}`);
+      error(res, "cross-origin request rejected", 403);
+      return;
+    }
+
+    try {
+      await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
+    } catch (err) {
+      const msg = errorMessage(err);
+      const status = handlerErrorStatus(err);
+      const code = handlerErrorCode(err, status);
+      console.error(`[remote-server] handler error ${scrub(pathname)}: ${scrub(msg)}`);
+      // The reader paused an over-limit body rather than destroying the socket,
+      // so the response reaches the client; closing after it releases the rest.
+      if (status === 413) res.setHeader("Connection", "close");
+      error(res, msg, status, code);
+    }
+  };
 
   private async handleRequest(
     req: http.IncomingMessage,
