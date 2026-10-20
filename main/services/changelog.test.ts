@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import { summarizeChangelog } from "./changelog.js";
+import COMMIT_TYPE_FILE from "./commit-types.json" with { type: "json" };
+
+// The types are commit-types.json's, so the loops below cover a type the day it is added.
+const SHOWN = [...COMMIT_TYPE_FILE.minor, ...COMMIT_TYPE_FILE.patch];
 
 describe("summarizeChangelog", () => {
   test("the release workflow's own version bump is not news", () => {
@@ -34,8 +38,16 @@ describe("summarizeChangelog", () => {
     );
   });
 
+  test("every type a user can tell apart shows with its type dropped and its scope leading", () => {
+    for (const t of SHOWN) {
+      assert.deepEqual(summarizeChangelog([`${t}(patch): a change`]), ["patch — a change"], t);
+      assert.deepEqual(summarizeChangelog([`${t}: a change`]), ["a change"], `${t} with no scope`);
+    }
+  });
+
   test("developer-only work is filtered out", () => {
-    for (const t of ["chore", "ci", "build", "docs", "test", "refactor", "style"]) {
+    // A legacy type is one the lint refuses but old history may still carry.
+    for (const t of [...COMMIT_TYPE_FILE.invisible, ...COMMIT_TYPE_FILE.legacy]) {
       assert.deepEqual(summarizeChangelog([`${t}: something`]), [], t);
       assert.deepEqual(summarizeChangelog([`${t}(scope): something`]), [], `${t} with scope`);
     }
@@ -47,7 +59,7 @@ describe("summarizeChangelog", () => {
     // them. The scope names the machinery, and the list of such scopes is
     // shared with the notes generator and the workflow's version decision.
     for (const scope of ["release", "ci", "dx", "test"]) {
-      for (const t of ["feat", "fix", "perf"]) {
+      for (const t of SHOWN) {
         assert.deepEqual(summarizeChangelog([`${t}(${scope}): something`]), [], `${t}(${scope})`);
       }
     }

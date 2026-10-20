@@ -4,11 +4,8 @@
 # main  -> the release   X.Y.Z          (tag + GitHub release)
 #
 # The level comes from every commit since the last STABLE release, per
-# docs/contributing.md:
-#   feat            -> minor
-#   fix | perf      -> patch
-#   `!` or BREAKING -> major
-#   everything else -> no release
+# docs/contributing.md: a `!` or BREAKING CHANGE is major, and every type's own
+# level is in main/services/commit-types.json, which scripts/release-level.sh reads.
 #
 # Since the last stable, not since the last tag — so the base version moves only
 # when the pending release changes class. A feature opens X.Y+1.0-beta.1, and the
@@ -231,14 +228,17 @@ jobs:
             # sat unreleased for a day before anyone thought to look. Say it on
             # the run page instead, and list what was actually considered — the
             # answer is nearly always "all of these were refactor/chore".
+            #
+            # The type lists below are main/services/commit-types.json spelled out.
+            # scripts/commit-types.test.ts runs this step and fails when they differ.
             {
               echo "## No release — nothing user-visible"
               echo
               echo "No version was minted and no artifacts were built."
               echo
-              echo "Only \`feat\`, \`fix\`, \`perf\` or a breaking change trigger a release."
-              echo "\`refactor\`, \`docs\`, \`test\`, \`build\`, \`ci\` and \`chore\` do not, and"
-              echo "neither does a \`feat\`/\`fix\`/\`perf\` scoped to the release tooling itself"
+              echo "Only \`feat\`, \`fix\`, \`perf\`, \`polish\` or a breaking change trigger a release."
+              echo "\`build\`, \`chore\`, \`ci\`, \`docs\`, \`refactor\`, \`test\` and \`revert\` do not, and"
+              echo "neither does a \`feat\`/\`fix\`/\`perf\`/\`polish\` scoped to the release tooling itself"
               echo "(\`release\`, \`ci\`, \`dx\`, \`test\`) — they ride along with the next one"
               echo "that does. See docs/contributing.md."
               echo
@@ -255,7 +255,7 @@ jobs:
               if [ "$TOTAL" -gt 40 ]; then echo "… and $((TOTAL - 40)) more"; fi
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::notice title=No release::Nothing user-visible since ${LAST:-the beginning} — $TOTAL commit(s), none of them feat/fix/perf. They will ship with the next release."
+            echo "::notice title=No release::Nothing user-visible since ${LAST:-the beginning} — $TOTAL commit(s), none of them feat/fix/perf/polish. They will ship with the next release."
             exit 0
           fi
 

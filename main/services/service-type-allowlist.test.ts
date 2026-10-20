@@ -171,6 +171,9 @@ describe("no organisation's ids are baked into the source", () => {
     assert.deepEqual(
       found.filter((f) => f.endsWith(".json")).sort(),
       [
+        // Checked when it was added to this list: commit-type names and a comment.
+        // No digits at all.
+        "main/services/commit-types.json",
         "main/services/fixtures/espn-football-in-play.json",
         // Both arrived with the midnight-carry and poll-tier fixes. Checked when
         // they were added to this list: every id in them is invented (700001,

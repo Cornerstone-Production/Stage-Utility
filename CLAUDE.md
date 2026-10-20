@@ -130,18 +130,19 @@ carry decision notes, mockup links and local paths, and this repo is public.
 cannot be committed by accident. Protocol research that code comments cite is
 public reference and lives in `docs/research/`.
 
-## A fix to something that never shipped says so
+## A fix, perf or polish to something that never shipped says so
 
-Before committing a `fix:` or `perf:`, ask: does the thing I am fixing exist on
-`main`? If the bug could not have been hit by someone upgrading from the last
-stable tag, carry the trailer `Beta-only: true` in the commit body, per
+Before committing a `fix:`, `perf:` or `polish:`, ask: does the thing I am
+changing exist on `main`? If the bug (or the unrefined state) could not have been
+hit by someone upgrading from the last stable tag, carry the trailer
+`Beta-only: true` in the commit body, per
 [docs/contributing.md](docs/contributing.md#beta-only-true). CI warns when a
-fix touches a file also touched by a `feat:` commit from this release cycle,
-but that check cannot tell a shared file from a shared bug, and misses a fix to
-a new feature in a file no `feat:` commit touched — the trailer is the
-author's job, not the check's. In the 1.14.0 cycle, twelve fixes to a feature
-built in the same cycle shipped without it and were the entire generated Fixed
-list.
+fix, perf or polish touches a file also touched by a `feat:` commit from this
+release cycle, but that check cannot tell a shared file from a shared bug, and
+misses a change to a new feature in a file no `feat:` commit touched — the
+trailer is the author's job, not the check's. In the 1.14.0 cycle, twelve fixes
+to a feature built in the same cycle shipped without it and were the entire
+generated Fixed list.
 
 ## Do not swallow a failure
 

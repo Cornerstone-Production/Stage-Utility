@@ -24,9 +24,9 @@ commit that is already on `beta` and can therefore no longer be edited:
 
 `commit` is a SHA of seven characters or more — never a branch or a tag, which
 can move. `betaOnly` is the decision the commit should have carried — `true` holds the fix
-out of the stable release's **Fixed** list and into the held-back count, `false`
-puts it in. `reason` is required, and is printed to the release log when the
-override is applied.
+out of the stable release's **Fixed** list (**Improved**, for a `perf` or `polish`) and
+into the held-back count, `false` puts it in. `reason` is required, and is printed to
+the release log when the override is applied.
 
 Anything wrong here fails the release rather than generating notes without it.
 See [Correcting a trailer after the commit is on `beta`](../../contributing.md#correcting-a-trailer-after-the-commit-is-on-beta).
