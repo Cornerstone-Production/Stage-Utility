@@ -42,6 +42,19 @@ When reporting, please include:
     systemd unit's `Environment=`, a secrets manager, or a Docker secret); no key file is
     written. Generate one with `openssl rand -base64 32`.
 
+- **A credential goes only where it was entered for.** ProdCom's API key, the OBS, Smaart
+  and ProVideoPlayer passwords, a Spectera base station's API password and a pulled camera's
+  password are sent to an address the operator typed. A save, an import or a config restore
+  that changes that address clears the stored credential unless the same change supplies it
+  again, and logs that it did. Without that, any settings write, which anyone on the LAN can
+  make, could point an integration at another machine and collect the credential on the next
+  connect.
+
+  Camera passwords can still be read back, by design: the video feeds export with passwords
+  (`GET /api/video/export?passwords=1`), which is how feeds move between servers, answers any
+  client that is not a browser on another origin. Against a peer on the LAN this protects the
+  integration and wireless credentials, which nothing reads back.
+
 - **OS-level hardening (recommended for appliances).** For a headless install, the defenses
   that actually matter are at the OS layer, not the app: run the service as a dedicated
   unprivileged user; enable full-disk / SD-card encryption (the real protection against a

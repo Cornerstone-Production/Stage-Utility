@@ -142,6 +142,9 @@ const REQUEST_FACING = [
   // PRODCOM_DEBUG frame and the error text ProdCom sends back, all off its socket
   // or REST replies.
   "prodcom-service.ts",
+  // Names a wireless connection or a feed out of a restored bundle, which
+  // POST /api/config/import takes from anyone on the LAN.
+  "restore-credentials.ts",
   // The path is one of four fixed keys and the reference is read from settings,
   // but both are scrubbed: settings.json is a file an operator can edit by hand.
   "routes/app-icon-routes.ts",
@@ -483,6 +486,9 @@ function requestFacingFiles(): string[] {
     // title-fallback warning names a Planning Center plan item TITLE, read back
     // out of the raw archive, and POST /api/history/rebuild is what runs it.
     path.join(HERE, "archive/rebuild.ts"),
+    // Its lines name a wireless connection or a feed out of a bundle that
+    // POST /api/config/import takes from anyone on the LAN.
+    path.join(HERE, "restore-credentials.ts"),
     // Its one warning names the screen whose embedded views run past the cap; the id is
     // scrubbed, and a reply request is what asks the question.
     path.join(HERE, "screen-reach.ts"),

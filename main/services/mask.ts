@@ -89,3 +89,11 @@ export function isBlankSecret(value: unknown): value is string {
 export function hasSecretValue(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
 }
+
+/** A credential somebody typed into this value: real, and not the mask a form
+ *  sends back to mean "unchanged". What a save stores, and what lets a save
+ *  that moves an address keep the credential, since it was typed for the new
+ *  one. */
+export function isTypedSecret(value: unknown): value is string {
+  return hasSecretValue(value) && !isMask(value);
+}

@@ -33,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
   StackedField,
+  toast,
 } from "../../components/ui";
 import { Segmented } from "../../editor/inspector-rows";
 import { invoke } from "../../lib/api";
@@ -41,6 +42,7 @@ import { VideoObject } from "../../main/video/video-object";
 import { bFramesSentence, isObsWhipFeed } from "./b-frames-copy";
 import { SIDE_PANE } from "./side-pane";
 import { plural } from "@main/services/plural";
+import { droppedCredentialMessage } from "../../lib/dropped-credentials";
 
 const KIND_LABEL: Record<VideoSourceKind, string> = {
   pull: "Pull from a device (RTSP, SRT, HLS)",
@@ -282,6 +284,12 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
           ? await invoke<{ feed: VideoFeedView }>("video:addFeed", body)
           : await invoke<{ feed: VideoFeedView }>("video:updateFeed", { id: feed.id, patch: body });
       onSaved(result.feed);
+      // A password left alone that is gone after the save was cleared by the
+      // server: the address moved to another camera, or off an encrypted
+      // scheme, and a password is never sent where it was not entered for.
+      if (!isNew && feed?.hasPassword && !pullPasswordTouched && result.feed.source.kind === "pull" && !result.feed.hasPassword) {
+        toast.info(droppedCredentialMessage(result.feed.name, ["password"]));
+      }
       setDraft((d) => ({ ...d, pullPassword: "" }));
       setPullPasswordTouched(false);
     } catch (err) {

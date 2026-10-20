@@ -190,7 +190,14 @@ The relay only dials the address while something is actually showing the feed
 it connected. Once a password is stored, the field says "A password is
 saved. Type to replace it, or clear it." with a **Clear** button that
 removes it at once; typing a new one and saving replaces it, and leaving
-the field untouched on an edit leaves whatever is already stored.
+the field untouched on an edit leaves whatever is already stored, unless the
+edit points the feed at another camera. A password is only sent to the
+camera it was entered for, so a new host clears it, and so does moving from
+`rtsps` or `https` to a scheme that is not encrypted; a new path, port or
+protocol on the same camera does not. The editor says so, and `/log` records
+`[video] <feed>: cleared the stored password`. An SRT address on another
+camera is then not checked against the old password, since it is no longer
+kept.
 
 A Magewell Ultra Stream can serve one feed to Stage Utility this way while
 its first output keeps streaming to Resi: turn on the Ultra Stream's RTSP
@@ -370,15 +377,18 @@ on this server, each tagged:
   only reads "password differs", never the values), with a choice per feed:
   **Use the file's** (the default) or **Keep this server's**.
 - **Can't import**: this build cannot take the feed (a source kind it does not
-  offer, an address with a login inside it, an SRT address whose kept password
-  is not a valid passphrase); the reason is shown and the feed is skipped.
+  offer, an address with a login inside it, an SRT address on the same camera
+  whose kept password is not a valid passphrase); the reason is shown and the
+  feed is skipped.
 
 An import never removes a feed: the ones the file does not have are named and
 left alone. It never touches the **Video feeds** on/off switch, and it works
 with the switch off. A file that carries ports shows a **Use the file's relay
 ports** box, off by default; ticking it saves them, which restarts a running
 relay. A file with no passwords leaves this server's passwords alone on a feed
-it replaces, unless the feed's kind changes. A new push feed from a file
+it replaces, unless the feed's kind changes or its address is on another
+camera (or no longer encrypted); the result names each feed whose password was
+cleared that way. A new push feed from a file
 without a password gets a new publish password made here, and the result names
 it: its device needs the new password pasted in.
 
@@ -557,7 +567,8 @@ the server's own log; see Logging below.
 Exporting and importing feeds writes one line each, tagged `[video-export]`
 and `[video-import]`: the count of feeds, and whether passwords or relay ports
 were included or applied. The import line also names each skipped feed and
-why. An import that fails writes `import failed, nothing was changed:` and the
+why, and says `cleared N passwords whose address changed` when it moved pull
+feeds to another camera. An import that fails writes `import failed, nothing was changed:` and the
 reason, or `import failed and could not restore:` when putting things back
 failed too. A password is never in any of them.
 
@@ -628,6 +639,11 @@ from the server:
 - A push feed's password rotating, and whether it dropped the device that
   was connected; `made a new publish password (none was stored)` for a push
   feed that had lost its password, which its device then needs.
+- `<feed>: cleared the stored password: its address changed from <old> to
+  <new>`, when an edit or an import moves a pull feed to another camera, or
+  off an encrypted scheme; `<feed>: cleared a password left behind by an
+  earlier feed with the same id` when a new feed lands on the slot of one
+  removed before it. Neither line carries the password.
 - A screen struggling with a feed — dropped frames and stalls, in the last
   minute — the moment its window crosses the threshold above, and playing it
   smoothly again the moment it clears; each once, not repeated while it stays

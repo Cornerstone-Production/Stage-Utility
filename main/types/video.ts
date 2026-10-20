@@ -402,6 +402,10 @@ export interface ImportReport {
   skipped: { name: string; reason: string }[];
   /** Push feeds that got a freshly made publish password: their devices need it. */
   newPushPasswords: string[];
+  /** Pull feeds replaced with an address on another camera (or a plain scheme
+   *  where it was encrypted) and no password in the file: the one stored here
+   *  was entered for the old address and is gone. */
+  passwordsCleared: string[];
   passwordsWritten: number;
   portsApplied: boolean;
   /** Set when the ports were asked for and could not be saved; the feeds are already in. */

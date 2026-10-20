@@ -22,7 +22,8 @@ import {
   type VideoSourceKind,
 } from "../../types/video.js";
 import { FEED_ID_PATTERN } from "./feed-id.js";
-import { keptPassphraseError, parseFeedInput, passphraseProblem } from "./feed-input.js";
+import { keptPassphraseError, parseFeedInput, passphraseProblem, pullCredentialTarget } from "./feed-input.js";
+import { credentialTargetMoved } from "../credential-target.js";
 import { PORT_KEYS, parsePorts } from "./ports.js";
 
 export const VIDEO_FEEDS_BUNDLE_KIND = "stage-utility-video-feeds";
@@ -234,8 +235,17 @@ export async function planImport(
     if (pw.password !== undefined && pw.password !== (await readPassword(id))) differences.push({ field: "password" });
     // A replaced pull feed whose file carries no password keeps the one stored
     // here, so an SRT address takes it as its passphrase: held to the same rule
-    // parseFeedInput applies to a feed edited that way.
-    if (differences.length && pw.password === undefined && existing.source.kind === "pull" && parsed.source.kind === "pull" && new URL(parsed.source.url).protocol === "srt:") {
+    // parseFeedInput applies to a feed edited that way. Not when the address is
+    // on another camera, where the stored one is cleared rather than kept (see
+    // video-service.ts's updateFeed).
+    if (
+      differences.length &&
+      pw.password === undefined &&
+      existing.source.kind === "pull" &&
+      parsed.source.kind === "pull" &&
+      new URL(parsed.source.url).protocol === "srt:" &&
+      !credentialTargetMoved(pullCredentialTarget(existing.source), pullCredentialTarget(parsed.source))
+    ) {
       const kept = await readPassword(id);
       const problem = kept ? passphraseProblem(kept) : null;
       if (problem) {

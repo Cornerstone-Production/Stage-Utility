@@ -299,11 +299,20 @@ test("apply writes passwords to the secrets store and never to the feed file", a
   assert.equal(disk.includes("a".repeat(16)), false);
 });
 
-test("a replaced feed with no password in the file keeps this server's, unless its kind changes", async () => {
+test("a replaced feed with no password in the file keeps this server's, unless its kind changes or it moves to another camera", async () => {
   const box = await add(PULL);
-  const sameKind = bundleOf([{ id: box, name: "BOX renamed", source: { ...PULL.source, url: "rtsp://192.0.2.99:554/box" } }]);
+  const sameKind = bundleOf([{ id: box, name: "BOX renamed", source: { ...PULL.source, url: "rtsp://192.0.2.31:8554/box-main" } }]);
   assert.equal(((await apply({ bundle: sameKind })).json as Json).replaced.length, 1);
   assert.equal(await pwOf(box), "cam-pass-1", "the local password was lost");
+
+  // The file names another camera: the password entered for this one must not
+  // go there. This assertion was the reverse until credentials were bound to
+  // their address.
+  const otherCamera = bundleOf([{ id: box, name: "BOX", source: { ...PULL.source, url: "rtsp://192.0.2.99:554/box" } }]);
+  const moved = (await apply({ bundle: otherCamera })).json as Json;
+  assert.deepEqual(moved.passwordsCleared, ["BOX"]);
+  assert.equal(await pwOf(box), undefined, "the password followed the feed to another camera");
+  await callRoute(videoRoutes, `/api/video/feeds/${box}`, { method: "PATCH", body: { password: "cam-pass-1" } });
 
   const toEmbed = bundleOf([{ id: box, name: "BOX", source: EMBED.source }]);
   await apply({ bundle: toEmbed });

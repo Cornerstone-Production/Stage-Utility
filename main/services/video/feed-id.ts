@@ -3,6 +3,11 @@
 export const FEED_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
 const MAX_ID_LENGTH = 40;
 
+/** The secrets-store slot holding a feed's one password: a pull feed's camera
+ *  password or a push feed's publish password. Here rather than in
+ *  video-service.ts so a config restore can name it without loading the service. */
+export const feedSecretSlot = (feedId: string) => `video:${feedId}`;
+
 export function feedIdFor(name: string, taken: ReadonlySet<string>): string {
   const base =
     name

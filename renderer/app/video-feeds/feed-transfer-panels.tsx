@@ -532,6 +532,12 @@ function ImportDone({ report, preview, onAgain }: { report: ImportReport; previe
           server: paste the new publish password into each device.
         </Note>
       )}
+      {report.passwordsCleared.length > 0 && (
+        <Note tone="warn">
+          {joinWithAnd(report.passwordsCleared)} now {report.passwordsCleared.length === 1 ? "pulls" : "pull"} from a different address, so
+          the password saved here for the old one was cleared: enter it again if the new address needs it.
+        </Note>
+      )}
       {newPull.length > 0 && (
         <Note tone="info">
           {joinWithAnd(newPull)} {newPull.length === 1 ? "is" : "are"} pulled from {newPull.length === 1 ? "a device" : "devices"} on the

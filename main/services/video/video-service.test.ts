@@ -12,8 +12,9 @@ import { within } from "../fixtures/within.js";
 // against this directory, never the default data folder.
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-service-"));
 process.env.STAGE_UTILITY_DATA = TMP;
-const { videoService, SECRET_SLOT, STATUS_POLL_MS, PENDING_MARK_TTL_MS, RELAY_BOOT_GRACE_MS, RECENT_REQUEST_MS, videoPollDeps } =
+const { videoService, STATUS_POLL_MS, PENDING_MARK_TTL_MS, RELAY_BOOT_GRACE_MS, RECENT_REQUEST_MS, videoPollDeps } =
   await import("./video-service.js");
+const { feedSecretSlot } = await import("./feed-id.js");
 const { PULL_START_TIMEOUT_MS } = await import("./reconcile-plan.js");
 const { secretsStore } = await import("../secrets.js");
 const { configSnapshot } = await import("../config-snapshot.js");
@@ -69,7 +70,7 @@ test("a config snapshot never carries a feed's password", async () => {
   const made = await videoService.addFeed({ name: "Lobby cam", source: { kind: "pull", url: "rtsp://192.0.2.10:8554/s", username: "admin" }, password });
   assert.ok(made.ok, "expected the pull feed to be added");
   const id = (made as { feed: { id: string } }).feed.id;
-  assert.equal((await secretsStore.getSecrets(SECRET_SLOT(id))).password, password, "the seed never reached the secrets store");
+  assert.equal((await secretsStore.getSecrets(feedSecretSlot(id))).password, password, "the seed never reached the secrets store");
 
   const snapshot = await configSnapshot.build();
   const serialized = JSON.stringify(snapshot);
@@ -2419,7 +2420,7 @@ test("a push feed's plan entry carries its password, read fresh from secretsStor
     const first = reconciled[0]!.find((f) => f.id === id) as Extract<RelayFeed, { kind: "push" }> | undefined;
     assert.ok(first, "expected the just-added feed in the reconciled plan");
     assert.equal(first.kind, "push");
-    assert.equal(first.password, (await secretsStore.getSecrets(SECRET_SLOT(id))).password);
+    assert.equal(first.password, (await secretsStore.getSecrets(feedSecretSlot(id))).password);
 
     await videoService.newPushPassword(id);
     const rotated = reconciled[reconciled.length - 1]!.find((f) => f.id === id) as Extract<RelayFeed, { kind: "push" }> | undefined;
@@ -2562,7 +2563,7 @@ test("newPushPassword writes a fresh secret, reconciles, then kicks the current 
     const made = await videoService.addFeed({ name: "ProPresenter output", source: { kind: "push", protocol: "srt" } });
     assert.ok(made.ok);
     const id = (made as { feed: { id: string } }).feed.id;
-    const before = (await secretsStore.getSecrets(SECRET_SLOT(id))).password;
+    const before = (await secretsStore.getSecrets(feedSecretSlot(id))).password;
 
     const result = await videoService.newPushPassword(id);
     assert.ok(result, "expected newPushPassword to still answer even though the kick failed");
@@ -2601,7 +2602,7 @@ test("pushAddress's SRT and RTMP forms embed the password in the address; WHIP's
     assert.ok(made.ok);
     const id = (made as { feed: { id: string } }).feed.id;
     try {
-      const stored = (await secretsStore.getSecrets(SECRET_SLOT(id))).password;
+      const stored = (await secretsStore.getSecrets(feedSecretSlot(id))).password;
       assert.ok(stored, "expected addFeed to have minted a password already");
       const address = await videoService.pushAddress(id);
       assert.ok(address);
@@ -2791,8 +2792,8 @@ test("a push feed with no stored secret (a restored snapshot, a wiped secrets fi
   try {
     // Simulate a restored snapshot / wiped secrets file: the secret is gone,
     // but the feed itself is still there.
-    await secretsStore.clearSecrets(SECRET_SLOT(id));
-    assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(id)), {});
+    await secretsStore.clearSecrets(feedSecretSlot(id));
+    assert.deepEqual(await secretsStore.getSecrets(feedSecretSlot(id)), {});
 
     const lines = captureConsole(t, "warn");
     const address = await videoService.pushAddress(id);
@@ -2800,7 +2801,7 @@ test("a push feed with no stored secret (a restored snapshot, a wiped secrets fi
     assert.ok(address);
     assert.ok(address!.password.length > 0, "expected pushAddress to mint a fresh password rather than publish with none");
     assert.equal(
-      (await secretsStore.getSecrets(SECRET_SLOT(id))).password,
+      (await secretsStore.getSecrets(feedSecretSlot(id))).password,
       address!.password,
       "expected the minted password to actually be stored, not just handed out once",
     );
@@ -2823,7 +2824,7 @@ test("relayFeeds() mints a password for a push feed with no stored secret too, s
     const made = await videoService.addFeed({ name: "No-secret push", source: { kind: "push", protocol: "rtmp" } });
     assert.ok(made.ok);
     const id = (made as { feed: { id: string } }).feed.id;
-    await secretsStore.clearSecrets(SECRET_SLOT(id));
+    await secretsStore.clearSecrets(feedSecretSlot(id));
 
     // A no-op update just to trigger another reconcile without touching the secret directly.
     await videoService.updateFeed(id, { name: "No-secret push 2" });
@@ -2841,7 +2842,7 @@ test("a kind change's store write failing leaves the OLD secret in place — the
   const made = await videoService.addFeed({ name: "Reorder push", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
-  const before = (await secretsStore.getSecrets(SECRET_SLOT(id))).password;
+  const before = (await secretsStore.getSecrets(feedSecretSlot(id))).password;
   assert.ok(before);
 
   const { videoFeedsStore } = await import("./feed-store.js");
@@ -2860,7 +2861,7 @@ test("a kind change's store write failing leaves the OLD secret in place — the
   }
 
   assert.equal(
-    (await secretsStore.getSecrets(SECRET_SLOT(id))).password,
+    (await secretsStore.getSecrets(feedSecretSlot(id))).password,
     before,
     "a failed store write must leave the OLD (push) secret exactly as it was — the kind on disk is still push",
   );
@@ -2871,8 +2872,8 @@ test("pushPassword mints single-flight — two concurrent callers on a wiped sec
   const made = await videoService.addFeed({ name: "Racing mint push", source: { kind: "push", protocol: "srt" } });
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
-  await secretsStore.clearSecrets(SECRET_SLOT(id));
-  assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(id)), {});
+  await secretsStore.clearSecrets(feedSecretSlot(id));
+  assert.deepEqual(await secretsStore.getSecrets(feedSecretSlot(id)), {});
 
   // Every read of THIS feed's slot waits on one shared gate, released only
   // once BOTH callers' reads are pending on it — so both resolve together,
@@ -2889,7 +2890,7 @@ test("pushPassword mints single-flight — two concurrent callers on a wiped sec
   let readsPending = 0;
   (secretsStore as unknown as { getSecrets: typeof secretsStore.getSecrets }).getSecrets = async (slot: string) => {
     const result = await realGetSecrets(slot);
-    if (slot === SECRET_SLOT(id)) {
+    if (slot === feedSecretSlot(id)) {
       readsPending++;
       await gatePromise;
     }
@@ -2908,7 +2909,7 @@ test("pushPassword mints single-flight — two concurrent callers on a wiped sec
     assert.ok(a && b);
     assert.equal(a!.password, b!.password, "expected one password everywhere, not two callers racing two mints");
     assert.equal(
-      (await secretsStore.getSecrets(SECRET_SLOT(id))).password,
+      (await secretsStore.getSecrets(feedSecretSlot(id))).password,
       a!.password,
       "expected the shared mint to actually be the one stored, not overwritten by a second write",
     );
@@ -3124,7 +3125,7 @@ test("newPushPassword logs one summary line per rotation, without the password, 
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
   try {
-    const before = (await secretsStore.getSecrets(SECRET_SLOT(id))).password;
+    const before = (await secretsStore.getSecrets(feedSecretSlot(id))).password;
     lines.length = 0;
     await videoService.newPushPassword(id);
     const summary = lines.find((l) => l.startsWith("[video] Summary line push: new publish password"));
@@ -3144,10 +3145,10 @@ test("pull -> external/embed clears the slot; pull -> push overwrites the pull p
   });
   assert.ok(madePull.ok);
   const pullId = (madePull as { feed: { id: string } }).feed.id;
-  assert.equal((await secretsStore.getSecrets(SECRET_SLOT(pullId))).password, "pull-secret");
+  assert.equal((await secretsStore.getSecrets(feedSecretSlot(pullId))).password, "pull-secret");
 
   await videoService.updateFeed(pullId, { source: { kind: "external", url: "http://192.0.2.100/x/whep" } });
-  assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(pullId)), {}, "pull -> external must clear the slot");
+  assert.deepEqual(await secretsStore.getSecrets(feedSecretSlot(pullId)), {}, "pull -> external must clear the slot");
   await videoService.removeFeed(pullId);
 
   const madePull2 = await videoService.addFeed({
@@ -3158,7 +3159,7 @@ test("pull -> external/embed clears the slot; pull -> push overwrites the pull p
   assert.ok(madePull2.ok);
   const pullId2 = (madePull2 as { feed: { id: string } }).feed.id;
   await videoService.updateFeed(pullId2, { source: { kind: "embed", player: "youtube-channel", ref: "UC1234567890123456789012" } });
-  assert.deepEqual(await secretsStore.getSecrets(SECRET_SLOT(pullId2)), {}, "pull -> embed must clear the slot");
+  assert.deepEqual(await secretsStore.getSecrets(feedSecretSlot(pullId2)), {}, "pull -> embed must clear the slot");
   await videoService.removeFeed(pullId2);
 
   const madePull3 = await videoService.addFeed({
@@ -3169,7 +3170,7 @@ test("pull -> external/embed clears the slot; pull -> push overwrites the pull p
   assert.ok(madePull3.ok);
   const pullId3 = (madePull3 as { feed: { id: string } }).feed.id;
   await videoService.updateFeed(pullId3, { source: { kind: "push", protocol: "srt" } });
-  const afterPushSecret = (await secretsStore.getSecrets(SECRET_SLOT(pullId3))).password;
+  const afterPushSecret = (await secretsStore.getSecrets(feedSecretSlot(pullId3))).password;
   assert.ok(afterPushSecret, "expected pull -> push to mint a push password");
   assert.notEqual(afterPushSecret, "pull-secret-3", "expected the OLD pull password overwritten, not reused as the push password");
   await videoService.removeFeed(pullId3);

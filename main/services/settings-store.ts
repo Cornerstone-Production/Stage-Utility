@@ -313,12 +313,41 @@ export const settingsStore = {
     id: string,
     config: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
+    return (await settingsStore.swapIntegrationConfig(id, config)).merged;
+  },
+
+  /**
+   * {@link patchIntegrationConfig}, also answering what the config was just
+   * before this write. Both halves are read inside the same write, so a caller
+   * comparing them compares one moment, not two reads a concurrent save could
+   * land between. The integration manager compares where a credential is sent
+   * before and after a save; see integration-targets.ts.
+   */
+  async swapIntegrationConfig(
+    id: string,
+    config: Record<string, unknown>,
+  ): Promise<{ before: Record<string, unknown>; merged: Record<string, unknown> }> {
+    let before: Record<string, unknown> = {};
     let merged: Record<string, unknown> = {};
     syncTimeZone(await store.update((current) => {
-      merged = { ...(current.integrationConfigs?.[id] ?? {}), ...config };
+      before = { ...(current.integrationConfigs?.[id] ?? {}) };
+      merged = { ...before, ...config };
       return { ...current, integrationConfigs: { ...current.integrationConfigs, [id]: merged } };
     }));
-    return merged;
+    return { before, merged };
+  },
+
+  /**
+   * Put one integration's config back exactly as `config`, inside the write
+   * queue. What a save does when the half after its config write fails: the
+   * integration manager puts the old address back when it could not clear a
+   * credential that the new one must not receive.
+   */
+  async putIntegrationConfig(id: string, config: Record<string, unknown>): Promise<void> {
+    syncTimeZone(await store.update((current) => ({
+      ...current,
+      integrationConfigs: { ...current.integrationConfigs, [id]: { ...config } },
+    })));
   },
 
   /**

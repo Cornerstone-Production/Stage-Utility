@@ -22,9 +22,10 @@ import { cleared } from "../timers.js";
 import { walkLayoutObjects } from "../view-refs.js";
 import { viewsStore } from "../views-store.js";
 import { embedSrc } from "./embed.js";
-import { FEED_ID_PATTERN, feedIdFor } from "./feed-id.js";
+import { FEED_ID_PATTERN, feedIdFor, feedSecretSlot } from "./feed-id.js";
 import { feedState, type BFramesMark } from "./feed-state.js";
-import { externalProtocol, parseFeedInput } from "./feed-input.js";
+import { externalProtocol, parseFeedInput, pullCredentialTarget } from "./feed-input.js";
+import { credentialTargetMoved, describeTarget, type CredentialTarget } from "../credential-target.js";
 import {
   assertVideoBundle,
   buildPreview,
@@ -125,7 +126,6 @@ function sourceMoved(a: VideoSource, b: VideoSource): boolean {
   return false;
 }
 
-export const SECRET_SLOT = (feedId: string) => `video:${feedId}`;
 
 /** A push feed's publish password: 16 base62 characters from
  *  crypto.randomInt, never anything predictable — it is what stands
@@ -1474,7 +1474,7 @@ class VideoService {
   private readonly mintingPassword = new Map<string, Promise<string>>();
 
   private async pushPassword(feed: VideoFeed): Promise<string> {
-    const secrets = await secretsStore.getSecrets(SECRET_SLOT(feed.id));
+    const secrets = await secretsStore.getSecrets(feedSecretSlot(feed.id));
     if (secrets.password) return secrets.password;
     const inFlight = this.mintingPassword.get(feed.id);
     if (inFlight) return inFlight;
@@ -1778,14 +1778,22 @@ class VideoService {
     // no password behind it is worse than one that never appears, so a
     // failed write takes the feed back out and the failure goes to the
     // caller.
+    //
+    // With no password to store, the slot is emptied instead. An id comes from
+    // the name, so a new feed can land on the slot of one removed before it,
+    // and that feed's password (another camera's) is still there whenever its
+    // own clear never ran: a restore that dropped it, a delete that failed part
+    // way. A new feed must not inherit it.
     const password = added.source.kind === "push" ? generatePushPassword() : parsed.password;
-    if (password) {
-      try {
-        await this.setFeedPassword(added.id, password);
-      } catch (err) {
-        await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== added.id) }));
-        throw err;
+    try {
+      if (password) await this.setFeedPassword(added.id, password);
+      else if ((await this.storedPassword(added.id)) !== undefined) {
+        await this.clearFeedSecret(added.id);
+        console.warn(`[video] ${scrub(added.name)}: cleared a password left behind by an earlier feed with the same id`);
       }
+    } catch (err) {
+      await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== added.id) }));
+      throw err;
     }
     await this.publish();
     await this.notifyFeedsChanged(added.id);
@@ -1805,15 +1813,36 @@ class VideoService {
     // existing source (and, now, the body's own password) handed back through.
     // A pull feed's stored password stays when the body carries none (see
     // updateFeedSecret); any other kind's is cleared, so there is none to keep.
-    const kept = existing.source.kind === "pull" ? await this.storedPassword(id) : undefined;
-    const parsed = parseFeedInput(mergedFeedPatch(existing, body), this.allowedKinds(), kept);
+    //
+    // Except when the address moved to another camera, or from an encrypted
+    // scheme to a plain one. The password was entered for the old address, and
+    // the editor sends it back as "unchanged", so keeping it would hand it to
+    // whatever answers at the new one on the next dial.
+    // Decided before the parse, so an SRT address is not checked against a
+    // passphrase it will never use.
+    const patched = mergedFeedPatch(existing, body);
+    const stored = existing.source.kind === "pull" ? await this.storedPassword(id) : undefined;
+    const targetBefore = pullCredentialTarget(existing.source);
+    const targetAfter = pullCredentialTarget(patched.source);
+    const movedAway = stored !== undefined && credentialTargetMoved(targetBefore, targetAfter);
+    const parsed = parseFeedInput(patched, this.allowedKinds(), movedAway ? undefined : stored);
     if (!parsed.ok) return { ok: false, error: parsed.error };
 
     // The id never changes on update — it is the layout binding's permanent
     // key (see main/types/video.ts). Only feedIdFor(), at creation, mints one.
     const feed: VideoFeed = { id, name: parsed.name, source: parsed.source };
 
-    // The feed store write happens FIRST, updateFeedSecret() second.
+    // A pull feed moving to another camera loses the old camera's password
+    // BEFORE the new address is written, the order a restore uses
+    // (restore-credentials.ts). The other way round, the new address and the
+    // old password sat on disk together between the two writes: anything
+    // reading the feeds then (a reconcile already under way, or the next boot
+    // after a crash) dialled the new address with it. A store write that fails
+    // puts the password back, since the feed is still at its old address.
+    const clearedForMove = movedAway && existing.source.kind === "pull" && feed.source.kind === "pull";
+    if (clearedForMove) await this.clearFeedSecret(id);
+
+    // The feed store write happens BEFORE updateFeedSecret().
     // The reverse order (this used to run the secret change BEFORE the
     // store write) meant a store write that failed left a feed whose file
     // still named the OLD kind sitting behind a secret already changed to
@@ -1821,11 +1850,17 @@ class VideoService {
     // already cleared the push password, though the feed on disk was still
     // push. A failure here (the store write itself) is thrown, unhandled —
     // exactly as it was before this reordering.
-    await videoFeedsStore.update((current) => ({
-      ...current,
-      feeds: feedsOf(current).map((f) => (f.id === id ? feed : f)),
-    }));
+    try {
+      await videoFeedsStore.update((current) => ({
+        ...current,
+        feeds: feedsOf(current).map((f) => (f.id === id ? feed : f)),
+      }));
+    } catch (err) {
+      if (clearedForMove) await this.setFeedPassword(id, stored!);
+      throw err;
+    }
     await this.updateFeedSecret(id, existing.source.kind, feed.source.kind, parsed.password);
+    if (clearedForMove && parsed.password === undefined) this.logMovedPassword(feed.name, targetBefore, targetAfter);
     // What was remembered describes the old source: a feed changed to another
     // kind and back must not log "went offline" against a state of the first.
     if (sourceMoved(existing.source, feed.source)) await this.forgetFeedRuntime(id);
@@ -1961,24 +1996,35 @@ class VideoService {
   }
 
   private async setFeedPassword(id: string, password: string): Promise<void> {
-    await secretsStore.setSecret(SECRET_SLOT(id), "password", password);
+    await secretsStore.setSecret(feedSecretSlot(id), "password", password);
     this.bumpSecretRevision(id);
   }
 
   private async clearFeedSecret(id: string): Promise<void> {
-    await secretsStore.clearSecrets(SECRET_SLOT(id));
+    await secretsStore.clearSecrets(feedSecretSlot(id));
     this.bumpSecretRevision(id);
   }
 
+  /** The line for a pull feed whose stored password was cleared because its
+   *  address moved off the camera, or the encryption, it was entered for.
+   *  updateFeed and the import both say it here, so they say it the same way. */
+  private logMovedPassword(name: string, before: CredentialTarget | null, after: CredentialTarget | null): void {
+    console.warn(
+      `[video] ${scrub(name)}: cleared the stored password: its address changed from ` +
+        `${scrub(describeTarget(before))} to ${scrub(describeTarget(after))}, and it is never sent to an ` +
+        "address it was not entered for. Enter it again if the new address needs one.",
+    );
+  }
+
   private async restoreFeedSecrets(id: string, previous: Record<string, string>): Promise<void> {
-    if (Object.keys(previous).length) await secretsStore.setSecrets(SECRET_SLOT(id), previous);
-    else await secretsStore.clearSecrets(SECRET_SLOT(id));
+    if (Object.keys(previous).length) await secretsStore.setSecrets(feedSecretSlot(id), previous);
+    else await secretsStore.clearSecrets(feedSecretSlot(id));
     this.bumpSecretRevision(id);
   }
 
   /** A feed's stored password, or undefined — the secret slot's one field. */
   private async storedPassword(id: string): Promise<string | undefined> {
-    return (await secretsStore.getSecrets(SECRET_SLOT(id))).password || undefined;
+    return (await secretsStore.getSecrets(feedSecretSlot(id))).password || undefined;
   }
 
   /**
@@ -2066,65 +2112,105 @@ class VideoService {
       if (reviewFingerprint(seen.get(id), this.secretRevision.get(id) ?? 0) !== reviewed) movedOn.add(id);
     }
 
+    // A pull feed the file moves to another camera loses the old camera's
+    // password before the new address is written, for the reason updateFeed
+    // gives. Worked out from `seen`, which the plans were built from; a feed
+    // the write below then leaves alone, or a write that fails, gets its
+    // password back.
+    const clearedForMove = new Map<string, { password: string; before: CredentialTarget | null; after: CredentialTarget | null }>();
+    for (const plan of plans) {
+      const id = plan.preview.id;
+      const prior = seen.get(id);
+      if (!plan.parsed || plan.preview.status !== "differs" || (choices.get(id) ?? "replace") === "keep" || movedOn.has(id)) continue;
+      if (prior?.source.kind !== "pull" || plan.parsed.source.kind !== "pull") continue;
+      const before = pullCredentialTarget(prior.source);
+      const after = pullCredentialTarget(plan.parsed.source);
+      const password = await this.storedPassword(id);
+      if (password === undefined || !credentialTargetMoved(before, after)) continue;
+      clearedForMove.set(id, { password, before, after });
+      await this.clearFeedSecret(id);
+    }
+    const restoreCleared = async (keep: (id: string) => boolean) => {
+      for (const [id, { password }] of clearedForMove) if (!keep(id)) await this.setFeedPassword(id, password);
+    };
+
     interface Landed { plan: FeedPlan; outcome: "added" | "replaced" | "kept" | "same"; prior?: VideoFeed }
     const landed: Landed[] = [];
     const changed: { name: string; reason: string }[] = [];
-    await videoFeedsStore.update((current) => {
-      landed.length = 0;
-      changed.length = 0;
-      const feeds = feedsOf(current);
-      const byId = new Map(feeds.map((f) => [f.id, f]));
-      const next = [...feeds];
-      for (const plan of plans) {
-        if (!plan.parsed) continue;
-        const { id } = plan.preview;
-        const prior = byId.get(id);
-        // The plan was built from `seen`. A feed that is not what the plan saw
-        // (edited, added or deleted since) is left alone: the operator reviewed
-        // something else, and a delete must never turn into an add.
-        if (!sameFeed(seen.get(id), prior) || movedOn.has(id)) {
-          changed.push({ name: plan.preview.name, reason: CHANGED_SINCE_REVIEW });
-          continue;
+    try {
+      await videoFeedsStore.update((current) => {
+        landed.length = 0;
+        changed.length = 0;
+        const feeds = feedsOf(current);
+        const byId = new Map(feeds.map((f) => [f.id, f]));
+        const next = [...feeds];
+        for (const plan of plans) {
+          if (!plan.parsed) continue;
+          const { id } = plan.preview;
+          const prior = byId.get(id);
+          // The plan was built from `seen`. A feed that is not what the plan saw
+          // (edited, added or deleted since) is left alone: the operator reviewed
+          // something else, and a delete must never turn into an add.
+          if (!sameFeed(seen.get(id), prior) || movedOn.has(id)) {
+            changed.push({ name: plan.preview.name, reason: CHANGED_SINCE_REVIEW });
+            continue;
+          }
+          const feed: VideoFeed = { id, name: plan.parsed.name, source: plan.parsed.source };
+          if (!prior) {
+            next.push(feed);
+            landed.push({ plan, outcome: "added" });
+          } else if (plan.preview.status === "same") {
+            landed.push({ plan, outcome: "same", prior });
+          } else if ((choices.get(id) ?? "replace") === "keep") {
+            landed.push({ plan, outcome: "kept", prior });
+          } else {
+            next[next.findIndex((f) => f.id === id)] = feed;
+            landed.push({ plan, outcome: "replaced", prior });
+          }
         }
-        const feed: VideoFeed = { id, name: plan.parsed.name, source: plan.parsed.source };
-        if (!prior) {
-          next.push(feed);
-          landed.push({ plan, outcome: "added" });
-        } else if (plan.preview.status === "same") {
-          landed.push({ plan, outcome: "same", prior });
-        } else if ((choices.get(id) ?? "replace") === "keep") {
-          landed.push({ plan, outcome: "kept", prior });
-        } else {
-          next[next.findIndex((f) => f.id === id)] = feed;
-          landed.push({ plan, outcome: "replaced", prior });
-        }
-      }
-      // Nothing to write: hand back the object it was given, which the store reads as "no change".
-      if (!landed.some((l) => l.outcome === "added" || l.outcome === "replaced")) return current;
-      return { ...current, feeds: next };
-    });
+        // Nothing to write: hand back the object it was given, which the store reads as "no change".
+        if (!landed.some((l) => l.outcome === "added" || l.outcome === "replaced")) return current;
+        return { ...current, feeds: next };
+      });
+    } catch (err) {
+      await restoreCleared(() => false);
+      throw err;
+    }
+    // A feed the write left alone (changed on this server since the review)
+    // keeps the password it had.
+    await restoreCleared((id) => landed.some((l) => l.outcome === "replaced" && l.plan.preview.id === id));
 
     // Secrets. Each one's previous slot is remembered first, so a failure can put it back.
     const undo: Array<() => Promise<void>> = [];
     const newPushPasswords: string[] = [];
+    const passwordsCleared: string[] = [];
     let passwordsWritten = 0;
     try {
       for (const { plan, outcome, prior } of landed) {
         if (outcome !== "added" && outcome !== "replaced") continue;
         const { id } = plan.preview;
         const parsed = plan.parsed!;
-        const slot = SECRET_SLOT(id);
-        const previous = await secretsStore.getSecrets(slot);
+        const slot = feedSecretSlot(id);
+        const moved = clearedForMove.get(id);
+        const stored = await secretsStore.getSecrets(slot);
+        // What a failure puts back is what the feed had before this import,
+        // the password cleared above for a move included.
+        const previous = moved ? { ...stored, password: moved.password } : stored;
         undo.push(() => this.restoreFeedSecrets(id, previous));
         const newKind = parsed.source.kind;
         const oldKind = prior?.source.kind;
         if (parsed.password !== undefined) {
-          if (parsed.password !== previous.password) {
+          if (parsed.password !== stored.password) {
             await this.setFeedPassword(id, parsed.password);
             passwordsWritten++;
           }
         } else if (oldKind === newKind) {
-          // A replaced feed of the same kind keeps this server's password.
+          // A replaced feed of the same kind keeps this server's password,
+          // unless it now pulls from another camera, whose was cleared above.
+          if (moved) {
+            this.logMovedPassword(parsed.name, moved.before, moved.after);
+            passwordsCleared.push(parsed.name);
+          }
         } else if (oldKind === undefined) {
           if (newKind === "push") {
             await this.setFeedPassword(id, generatePushPassword());
@@ -2174,6 +2260,7 @@ class VideoService {
         ...changed,
       ],
       newPushPasswords,
+      passwordsCleared,
       passwordsWritten,
       portsApplied: false,
     };
@@ -2210,6 +2297,7 @@ class VideoService {
       `same ${report.same.length}, skipped ${report.skipped.length}` +
       (report.passwordsWritten ? `, wrote ${plural(report.passwordsWritten, "password")}` : "") +
       (report.newPushPasswords.length ? `, made ${plural(report.newPushPasswords.length, "new publish password")}` : "") +
+      (report.passwordsCleared.length ? `, cleared ${plural(report.passwordsCleared.length, "password")} whose address changed` : "") +
       (report.portsApplied ? ", applied relay ports" : "") +
       (report.portsError ? `, could not apply relay ports: ${report.portsError}` : "") +
       skippedText;

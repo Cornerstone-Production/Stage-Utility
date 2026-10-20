@@ -1,6 +1,7 @@
 // main/services/video/feed-input.ts — validate operator input for a feed source.
 
 import { PUSH_PROTOCOLS, EMBED_PLAYERS, type VideoSourceKind, type VideoSource } from "../../types/video.js";
+import type { CredentialTarget } from "../credential-target.js";
 import { normalizeEmbedRef } from "./embed.js";
 
 /** Longest name a feed may have, after trimming. */
@@ -22,6 +23,35 @@ function hasUserinfo(u: URL): boolean {
  *  takes for an SRT passphrase, and what makes the length rule's
  *  "characters" the same count as MediaMTX's bytes. */
 const PLAIN_ASCII = /^[\x20-\x7E]*$/;
+
+/** The pull schemes that carry the password inside an encrypted connection. */
+const ENCRYPTED_PULL_SCHEMES = new Set(["https:", "rtsps:"]);
+
+/**
+ * Where a pull feed's stored password is sent: the camera's host, and whether
+ * the connection to it is encrypted. Null for a source that is not a pull with
+ * an address that parses, which takes no password. Takes `unknown` because the
+ * update and import paths ask before the source is validated (see
+ * video-service.ts's updateFeed).
+ *
+ * The host and not the port, unlike an integration's target: one camera serves
+ * RTSP, SRT and HLS on ports of its own, and moving a feed between them is an
+ * ordinary edit, where the kept password is already held to the SRT passphrase
+ * rule (passphraseProblem). Encrypted or not, so an edit cannot take the
+ * password from rtsps or https down to a scheme that sends it in the clear.
+ */
+export function pullCredentialTarget(source: unknown): CredentialTarget | null {
+  if (typeof source !== "object" || source === null) return null;
+  const s = source as Record<string, unknown>;
+  if (s.kind !== "pull" || typeof s.url !== "string") return null;
+  let url: URL;
+  try {
+    url = new URL(s.url);
+  } catch {
+    return null;
+  }
+  return { host: url.hostname || null, encrypted: ENCRYPTED_PULL_SCHEMES.has(url.protocol) };
+}
 
 /** `problem` (from passphraseProblem), said for a stored password that an SRT
  *  address would take over — the one place the operator did not just type it. */

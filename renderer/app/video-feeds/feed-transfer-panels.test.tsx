@@ -86,7 +86,7 @@ const EXPECT = { box: "a".repeat(32), gym: "", resi: "b".repeat(32), odd: "" };
 interface Call { method: string; url: string; body?: unknown }
 
 function stub(
-  report: unknown = { added: ["GYM"], addedIds: ["gym"], replaced: ["BOX"], kept: [], same: ["Resi"], skipped: [{ name: "Odd", reason: "This build does not offer teleport." }], newPushPasswords: ["OBS"], passwordsWritten: 0, portsApplied: false },
+  report: unknown = { added: ["GYM"], addedIds: ["gym"], replaced: ["BOX"], kept: [], same: ["Resi"], skipped: [{ name: "Odd", reason: "This build does not offer teleport." }], newPushPasswords: ["OBS"], passwordsCleared: ["BOX"], passwordsWritten: 0, portsApplied: false },
   /** Holds the review's answer until it settles, for a test that needs it in flight. */
   previewGate?: Promise<void>,
   /** What the review answers; the server's own order, whatever the file's is. */
@@ -262,6 +262,7 @@ test("Import: pick a file, review it, choose, and the request carries exactly th
     assert.ok(screen.getByText(/Resi was already the same/));
     assert.ok(screen.getByText(/Skipped Odd: This build does not offer teleport\./));
     assert.ok(screen.getByText(/OBS has a new publish password on this server: paste the new publish password into each device/));
+    assert.ok(screen.getByText(/BOX now pulls from a different address, so the password saved here for the old one was cleared/));
     assert.ok(screen.getByText(/GYM is pulled from a device/));
     assert.ok(screen.getByRole("button", { name: "Import another" }));
   } finally {
