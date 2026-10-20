@@ -53,8 +53,8 @@ with a switch ACL. See [SECURITY.md](../../SECURITY.md).
 Put it behind your own network. Do not expose it to the internet.
 
 Request bodies are capped and a body over the limit is refused with `413` rather
-than being read into memory. The cap depends on what the route carries: 8 MB for
-ordinary JSON, 24 MB where the body is an image (`/api/branding`,
+than being read into memory. The cap depends on what the route carries: 16 KB for
+`/api/events/subscribe`, 8 MB for ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 `/api/layout-images`), 64 MB for a bundle (`/api/config/import`,
 `/api/views/import`, `/api/video/import`, `/api/video/import/preview`), and 128 MB for an archive upload (`/api/archive/inspect`,
 `/api/archive/import`).
@@ -576,14 +576,15 @@ starts, before it has been given the feed.
 | GET | `/api/branding/source?target=app\|empty\|avatar\|icon` | Original (un-cropped) upload and saved crop for the logo, empty-slot image, default avatar or tab and home-screen icon: `{original, crop}`, plus `art` (the square the sizes are drawn from) for the icon. Images come back as `/branding-images/…` references |
 | POST | `/api/branding` | Update branding; any of `{name, monochrome, accentColor, logo, logoOriginal, emptyLogo, emptyLogoOriginal, avatar, avatarOriginal, logoCrop, emptyLogoCrop, avatarCrop, icon}`. `accentColor` is `#rrggbb` or `null`; each image is an `image/` data URL (under about 1.5 MB) or `null` to clear, and an `…Original` may instead be the `/branding-images/…` reference `/api/branding/source` returned, if that file is stored; each crop is `{scale, x, y}` or `null`. `icon` is `null` to remove the custom tab and home-screen icon, or a complete set `{art, original, crop, background, apple, any192, any512, maskable}`: `background` is `#rrggbb`, `original` (a data URL or a stored reference) and `crop` may be `null`, and every other image is a PNG data URL, `apple` exactly 180 x 180, `any192` 192 x 192, `any512` and `maskable` 512 x 512, `art` any square size. An incomplete set or a wrong size is refused whole. Anything else is `400` naming the field. Up to 24 MB of body. Answers the state |
 | GET | `/api/events` | Multiplexed Server-Sent Events stream — see [Channels](#channels) |
-| POST | `/api/events/subscribe` | Set the channels a connection wants (`{cid, channels: string[]}`). Answers `{ok}`, false when either is missing, in which case nothing changes |
+| POST | `/api/events/subscribe` | Set the channels a connection wants (`{cid, channels: string[]}`). Answers `{ok}`, false when either is missing, in which case nothing changes. `400` for a `cid` that is empty or over 128 characters, more than 128 channels, or a channel name over 64 characters. A report waits for the stream or poll client with its `cid`. One still unclaimed after a minute is dropped by the next report to arrive, and at most 256 wait at once; a client whose report was dropped is sent every channel |
 | GET | `/api/events/poll?cid=&since=` | The same channels, collected by polling — see [Polling](#polling) |
 
 ## Channels
 
 `GET /api/events` is one stream carrying everything, filtered per connection.
 Pass `?cid=<your id>` and then `POST /api/events/subscribe` with the same `cid`
-and the channels you render; until you do, you are sent all of them. A stream
+and the channels you render; until you do, you are sent all of them. A `cid` over
+128 characters is ignored, so that stream is sent everything. A stream
 marked `?client=companion` (or with an `X-Companion-Module` header) is counted
 toward the Companion integration's connected-client total.
 
@@ -592,7 +593,9 @@ past 2 MB is dropped rather than buffered.
 
 Both transports are named on [`/log`](../ops/updates-and-logs.md):
 `[events] stream client connected (3 streams)` and its `closed` counterpart, and
-`[events] poll client <cid> started` / `expired (no poll for 30s)`.
+`[events] poll client <cid> started` / `expired (no poll for 30s)`. Reports nothing
+claimed are counted on `[events] dropped N channel reports …` when the report
+that drops them arrives: the first such line at once, then at most one a minute.
 
 ### Polling
 
@@ -603,7 +606,7 @@ underneath it.
 
 | Parameter | |
 |---|---|
-| `cid` | **Required.** The same client id `/api/events/subscribe` is keyed by, so one channel filter serves both transports. A request without it is a 400. |
+| `cid` | **Required.** The same client id `/api/events/subscribe` is keyed by, so one channel filter serves both transports. A request without it, or with one over 128 characters, is a 400. |
 | `since` | The `seq` from the previous response. Omit it to ask for a snapshot. |
 
 ```json

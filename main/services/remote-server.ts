@@ -23,6 +23,7 @@ import {
   subscriptionsChanged,
 } from "./broadcaster.js";
 import { EventPollHub, serializePollResponse, type PollFrame } from "./event-poll.js";
+import { ChannelReports, MAX_CID_LENGTH, MAX_SUBSCRIBE_BODY_BYTES, usableCid } from "./channel-reports.js";
 
 import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
@@ -285,8 +286,13 @@ const SSE_MAX_BUFFER_BYTES = 2_000_000;
 // client didn't ask for — so a mic display never receives the 4 Hz spl:metrics
 // firehose it discards anyway. Absent entry = no report yet → send everything (safe
 // fallback; filtering is a pure optimization, never a correctness dependency).
+// A report waits a bounded time for the stream or poll client that claims it: see
+// channel-reports.ts. Exported for the tests that hold it to those bounds.
 const resCid = new WeakMap<http.ServerResponse, string>();
-const clientChannels = new Map<string, Set<string>>();
+export const channelReports = new ChannelReports();
+/** What holds a cid on the poll transport: one live poll client per cid, so
+ *  one token does. A stream holds its cid with its own response. */
+const POLL_CLAIM = "poll";
 
 // Clients on the polling transport (`GET /api/events/poll`), which read the same
 // broadcasts out of a short replay buffer instead of holding a stream open. They
@@ -297,7 +303,7 @@ const eventPoll = new EventPollHub({
   // A cid's reported channel filter outlives its stream, so drop it with the
   // client the way the stream's close handler does — otherwise every panel that
   // ever polled leaves an entry behind for the life of the process.
-  onExpire: (cid) => clientChannels.delete(cid),
+  onExpire: (cid) => channelReports.release(cid, POLL_CLAIM),
 });
 
 // Currently-connected Companion-module clients (SSE streams opened with the
@@ -332,11 +338,11 @@ function countSubscribers(channel: string): number {
   let n = 0;
   for (const client of sseClients) {
     const cid = resCid.get(client);
-    const chans = cid ? clientChannels.get(cid) : undefined;
+    const chans = cid ? channelReports.get(cid) : undefined;
     if (!chans || chans.has(channel)) n++;
   }
   for (const cid of eventPoll.clientIds()) {
-    const chans = clientChannels.get(cid);
+    const chans = channelReports.get(cid);
     if (!chans || chans.has(channel)) n++;
   }
   return n;
@@ -348,10 +354,10 @@ function countSubscribers(channel: string): number {
 export function hasNamedSubscriber(channel: string): boolean {
   for (const client of sseClients) {
     const cid = resCid.get(client);
-    if (cid && clientChannels.get(cid)?.has(channel)) return true;
+    if (cid && channelReports.get(cid)?.has(channel)) return true;
   }
   for (const cid of eventPoll.clientIds()) {
-    if (clientChannels.get(cid)?.has(channel)) return true;
+    if (channelReports.get(cid)?.has(channel)) return true;
   }
   return false;
 }
@@ -761,12 +767,12 @@ export class RemoteServer {
       let frame: string | null = null; // serialize at most once, only if a client wants it
       for (const client of sseClients) {
         const cid = resCid.get(client);
-        const chans = cid ? clientChannels.get(cid) : undefined;
+        const chans = cid ? channelReports.get(cid) : undefined;
         if (chans && !chans.has(channel)) continue; // client filtered this channel out
         if (frame === null) frame = `event: ${channel}\ndata: ${serialized ?? JSON.stringify(payload)}\n\n`;
         if (!sseWriteFrame(client, frame)) {
           sseClients.delete(client);
-          if (cid) clientChannels.delete(cid);
+          if (cid) channelReports.release(cid, client);
           client.destroy();
         }
       }
@@ -855,6 +861,7 @@ export class RemoteServer {
       this.heartbeatTimer = null;
     }
     eventPoll.reset();
+    channelReports.reset();
     // Force-close all tracked sockets so the server shuts down promptly.
     for (const socket of this.sockets) {
       socket.destroy();
@@ -1066,8 +1073,15 @@ export class RemoteServer {
       console.log(`[events] stream client connected (${sseClients.size} streams)`);
       // Correlate this stream to its client id so POST /api/events/subscribe can set
       // its channel filter. No cid (or no report yet) → the fan-out sends everything.
-      const cid = _url.searchParams.get("cid");
-      if (cid) resCid.set(res, cid);
+      // A cid no client mints (an empty or oversized one) is treated as none: the
+      // stream still works, and its reports are refused the same way.
+      const rawCid = _url.searchParams.get("cid");
+      const cid = usableCid(rawCid) ? rawCid : null;
+      if (cid) {
+        resCid.set(res, cid);
+        // Claimed now, so a report that arrived before the stream keeps applying.
+        channelReports.claim(cid, res);
+      }
       // A Companion module marks its event stream so we can show a live
       // connected-client count in the integration panel. Re-broadcast the
       // integration states so the count updates everywhere immediately.
@@ -1081,7 +1095,7 @@ export class RemoteServer {
       req.on("close", () => {
         sseClients.delete(res);
         console.log(`[events] stream client closed (${sseClients.size} streams)`);
-        if (cid) clientChannels.delete(cid);
+        if (cid) channelReports.release(cid, res);
         if (isCompanion) {
           companionClients.delete(res);
           integrationManager.setCompanionClients(companionClients.size);
@@ -1099,14 +1113,16 @@ export class RemoteServer {
     // For a browser that cannot hold the stream above. See event-poll.ts.
     if (method === "GET" && pathname === "/api/events/poll") {
       const cid = _url.searchParams.get("cid");
-      if (!cid) {
-        error(res, "cid is required", 400);
+      if (!usableCid(cid)) {
+        error(res, `cid is required, at most ${MAX_CID_LENGTH} characters`, 400);
         return;
       }
       const sinceRaw = _url.searchParams.get("since");
       const sinceNum = sinceRaw === null ? null : Number(sinceRaw);
       const since = sinceNum !== null && Number.isFinite(sinceNum) ? sinceNum : null;
-      const chans = clientChannels.get(cid);
+      // Held while this client keeps polling; the hub's expiry releases it.
+      channelReports.claim(cid, POLL_CLAIM);
+      const chans = channelReports.get(cid);
       const result = eventPoll.buildPollResponse(cid, since, (c) => !chans || chans.has(c), helloSnapshot);
       const frames = result.frames.map((f) => `{"channel":${JSON.stringify(f.channel)},"data":${f.serialized}}`);
       // Serialized by event-poll.ts, beside the shape it serializes — see
@@ -1117,16 +1133,16 @@ export class RemoteServer {
       return;
     }
     if (method === "POST" && pathname === "/api/events/subscribe") {
-      const body = await readBodyOrEmpty(req);
-      const cid = typeof body.cid === "string" ? body.cid : null;
-      const channels = Array.isArray(body.channels)
-        ? body.channels.filter((c): c is string => typeof c === "string")
-        : null;
-      if (cid && channels) {
-        clientChannels.set(cid, new Set(channels));
-        subscriptionsChanged();
+      const body = await readBodyOrEmpty(req, MAX_SUBSCRIBE_BODY_BYTES);
+      const outcome = channelReports.report(body.cid, body.channels);
+      if (!outcome.stored && outcome.error) {
+        error(res, outcome.error, 400);
+        return;
       }
-      json(res, { ok: cid != null && channels != null });
+      // Only a claimed report changes what anything is sent. An unclaimed one
+      // waits for its stream or poll client, whose arrival announces itself.
+      if (outcome.stored && outcome.claimed) subscriptionsChanged();
+      json(res, { ok: outcome.stored });
       return;
     }
     // The connected set, on demand. The SSE hello burst carries this too, but a

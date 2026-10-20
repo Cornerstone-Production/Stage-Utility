@@ -197,7 +197,7 @@ a path or a credential. If you see one, report it.
 | `[device-manager]` | Wireless provider connections starting, stopping, or failing to disconnect: [Wireless](../integrations/wireless.md) |
 | `[displays]` | A display's reported screen size failing to record: [Size](../kiosk-devices.md#size) |
 | `[encryption]` | The encryption key generated on first run, or rejected as the wrong length: [When credentials all read as "not configured"](reliability.md#when-credentials-all-read-as-not-configured) |
-| `[events]` | SSE and poll-transport clients connecting, closing, or expiring: [Polling transport](../display-urls.md#polling-transport) |
+| `[events]` | SSE and poll-transport clients connecting, closing, or expiring; channel reports no stream or poll client claimed, dropped and counted when a later report arrives (the first line at once, then at most one a minute): [Polling transport](../display-urls.md#polling-transport), [Channels](../reference/api.md#channels) |
 | `[history]` | A time correction refused, a rebuild's outcome; on the browser, History or Home cards failing to load: [Attendance and service history](../features/attendance-and-history.md) |
 | `[history-edit]` | Merging one recorded service into another: [The service page](../features/attendance-and-history.md#the-service-page) |
 | `[integration-manager]` | Config-key validation, and credentials migrating (or failing to migrate) out of `settings.json`: [When a credential could not be moved out of settings.json](reliability.md#when-a-credential-could-not-be-moved-out-of-settingsjson) |

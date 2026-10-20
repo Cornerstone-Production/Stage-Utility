@@ -81,6 +81,8 @@ const REQUEST_FACING = [
   // Its suppression line names the STORED rule that owns a built-in's cue name
   // — both the rule's name and the cue name are typed into an HTTP body.
   "builtin-cues.ts",
+  // Fed by POST /api/events/subscribe with any cid; its one line is a count.
+  "channel-reports.ts",
   "checklist-ticks-store.ts",
   "companion-reconcile.ts",
   // Its lines name a cue pair's base — a rule param typed into an HTTP body —
@@ -388,6 +390,9 @@ function requestFacingFiles(): string[] {
     // beside the stored rule that owns the name, and a rule name and a cue name
     // both arrive in an HTTP body.
     path.join(HERE, "builtin-cues.ts"),
+    // Fed by POST /api/events/subscribe, which anyone on the LAN can call with
+    // any cid. Its one line carries only a count, scrubbed like everything else.
+    path.join(HERE, "channel-reports.ts"),
     // The plan id and the checklist row label both arrive in an HTTP body. It
     // reached beta AFTER this scan's coverage half was written, and the coverage
     // half caught it on its first run against a tree that had it — which is the
