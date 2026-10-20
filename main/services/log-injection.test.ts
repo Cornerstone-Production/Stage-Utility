@@ -211,6 +211,10 @@ const REQUEST_FACING = [
   // file's own "is live"/"went offline"/B-frames log lines on a transition.
   "video/video-service.ts",
   "view-import.ts",
+  // A connection's name and an update's patch keys arrive in the body of
+  // POST/PATCH /api/wireless/connections. It also logs what the drivers report,
+  // which is why it was filed under DEVICE until a body reached its lines.
+  "wireless-manager.ts",
   // The channel title on a successful Connect comes back from Google, not the
   // operator, but it is still external data reaching a log line.
   "youtube-connect.ts",
@@ -361,7 +365,6 @@ const NOT_SCANNED = new Map<string, string>([
       "route). The same shape as a device or provider talking back, since a LAN publisher's " +
       "stream key could in principle reach MediaMTX's own log — not audited line by line.",
   ],
-  ["wireless-manager.ts", DEVICE],
   ["youtube-service.ts", DEVICE],
 ]);
 
@@ -506,6 +509,8 @@ function requestFacingFiles(): string[] {
     // logged nothing at all before the plan import, which is when it acquired
     // the exposure.
     path.join(HERE, "view-import.ts"),
+    // A connection's name and an update's patch keys arrive in an HTTP body.
+    path.join(HERE, "wireless-manager.ts"),
     // The channel title on a successful Connect is read back from Google over
     // HTTP, not typed by the operator, but it is still external data reaching
     // a log line the same way a device's reply would.

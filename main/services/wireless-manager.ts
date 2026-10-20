@@ -72,7 +72,7 @@ class WirelessManager {
     // permanently, with the API masking them so nothing ever revealed it.
     const legacy = configs.filter((cfg) => allCredentialKeys().some((k) => cfg.config[k]));
     if (legacy.length > 0) {
-      console.log(`[wireless] migrating ${legacy.length} stored credential(s) out of wireless-connections.json`);
+      console.log(`[wireless] migrating ${scrub(legacy.length)} stored credential(s) out of wireless-connections.json`);
       await this.persist();
     }
 
@@ -85,7 +85,7 @@ class WirelessManager {
       this.broadcast();
     });
 
-    console.log(`[wireless] init complete — ${this.connections.length} connection(s), meterRate=${this.meterRateMs}ms`);
+    console.log(`[wireless] init complete — ${scrub(this.connections.length)} connection(s), meterRate=${scrub(this.meterRateMs)}ms`);
   }
 
   // ── Metering interval ───────────────────────────────────────────────────
@@ -99,7 +99,7 @@ class WirelessManager {
     // and 0 has no meaning here — it becomes setInterval(poll, 0), a busy loop
     // that pegs a core on a Pi and floods the LAN with device polls.
     const next = Math.max(MIN_METER_RATE_MS, Math.floor(ms));
-    console.log(`[wireless] setMeterRate → ${next}ms`);
+    console.log(`[wireless] setMeterRate → ${scrub(next)}ms`);
     this.meterRateMs = next;
     await settingsStore.patch({ wirelessMeterRateMs: next });
     deviceManager.setMeterRate(next);
@@ -208,7 +208,9 @@ class WirelessManager {
       }
     }
 
-    console.log(`[wireless] updateConnection — ${conn.id} patch keys: ${Object.keys(patch).join(", ")}`);
+    // The keys come off the request body, so a key holding a newline would
+    // otherwise write a second, forged line to /log.
+    console.log(`[wireless] updateConnection — ${scrub(conn.id)} patch keys: ${scrub(Object.keys(patch).join(", "))}`);
     await this.persist();
     await deviceManager.applyConnections(this.connections);
     this.broadcast();
@@ -219,7 +221,7 @@ class WirelessManager {
     const idx = this.connections.findIndex((c) => c.id === params.id);
     if (idx === -1) throw new Error(`wireless:removeConnection — unknown id: ${params.id}`);
 
-    console.log(`[wireless] removeConnection — ${params.id}`);
+    console.log(`[wireless] removeConnection — ${scrub(params.id)}`);
     this.connections.splice(idx, 1);
     // persist() only walks surviving connections, so without this the encrypted
     // credential outlives the connection the operator just deleted — a password
