@@ -42,7 +42,7 @@ import { brandHtml } from "./install-metadata.js";
 
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
-import { readImage } from "./image-files.js";
+import { readImage, storedImageHeaders } from "./image-files.js";
 import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
@@ -895,6 +895,10 @@ export class RemoteServer {
 
     if (DEBUG_HTTP) console.log(`[remote-server] ${req.method} ${pathname}`);
 
+    // The type each response names is the type the browser uses. Without it a
+    // browser may sniff an upload or an error body into something it will run.
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
     // No Access-Control-* header, on any response. Every page this server
     // serves calls it from its own origin, where CORS never applies, so the only
     // thing such a header can do is let a page on ANOTHER origin read the
@@ -952,7 +956,7 @@ export class RemoteServer {
           return;
         }
         // Content-hashed name → immutable, cache forever.
-        res.writeHead(200, { "Content-Type": img.mime, "Cache-Control": "public, max-age=31536000, immutable" });
+        res.writeHead(200, storedImageHeaders(img.mime, "public, max-age=31536000, immutable"));
         res.end(img.data);
         return;
       }
@@ -969,7 +973,7 @@ export class RemoteServer {
           res.end("Not found");
           return;
         }
-        res.writeHead(200, { "Content-Type": img.mime, "Cache-Control": "public, max-age=31536000, immutable" });
+        res.writeHead(200, storedImageHeaders(img.mime, "public, max-age=31536000, immutable"));
         res.end(img.data);
         return;
       }

@@ -67,6 +67,14 @@ When reporting, please include:
   This is defence against the *browser*, not against a peer on the network: anyone who can
   reach the port directly can still call the API. Firewall the port regardless.
 
+- **Uploaded images run nothing.** Layout and branding images may be SVG, and an SVG opened
+  directly is a document that can run script as the app. Every stored image is served with a
+  `Content-Security-Policy` that sandboxes it and allows no script, and every response carries
+  `X-Content-Type-Options: nosniff`. The app's own pages send no `Content-Security-Policy` and
+  no `frame-ancestors`: the Home Assistant integration frames the app in its sidebar from Home
+  Assistant's own origin, so refusing to be framed would break it. A page on another origin can
+  therefore still frame the app and try to trick a click.
+
 - **DNS rebinding is not closed.** A page whose own hostname is made to resolve to this
   server's address is, to the browser, on the same origin as the app: its requests name that
   hostname in both `Origin` and `Host`, so the checks above pass, and so does the cue routes'
