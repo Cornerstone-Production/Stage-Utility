@@ -46,6 +46,7 @@ import { errorMessage, fetchFailureMessage } from "./errors.js";
 import { GITHUB_API_REPO, GITHUB_RELEASE_DOWNLOAD, rateLimitMessage } from "./github-repo.js";
 import { scrub } from "./scrub.js";
 import { atomicWrite } from "./write-queue.js";
+import { isRecord } from "./is-record.js";
 
 export const HELPER_ARCHES = ["arm64", "x86_64"] as const;
 export type HelperArch = (typeof HELPER_ARCHES)[number];
@@ -157,7 +158,6 @@ class Refusal extends Error {
   }
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
  * The hex SHA-256 in the `digest` of the asset named exactly `assetName` in a

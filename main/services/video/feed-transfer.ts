@@ -25,6 +25,7 @@ import { FEED_ID_PATTERN } from "./feed-id.js";
 import { keptPassphraseError, parseFeedInput, passphraseProblem, pullCredentialTarget } from "./feed-input.js";
 import { credentialTargetMoved } from "../credential-target.js";
 import { PORT_KEYS, parsePorts } from "./ports.js";
+import { isRecord } from "../is-record.js";
 
 export const VIDEO_FEEDS_BUNDLE_KIND = "stage-utility-video-feeds";
 
@@ -33,7 +34,6 @@ export const VIDEO_FEEDS_BUNDLE_KIND = "stage-utility-video-feeds";
  *  stream id, an RTMP query and the relay's config. */
 const PUSH_PASSWORD_FORMAT = /^[A-Za-z0-9]{16,64}$/;
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 // ── The file ────────────────────────────────────────────────────────────────
 
