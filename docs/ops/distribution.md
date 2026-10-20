@@ -64,16 +64,19 @@ Targets: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, `win-x64`.
 
 When the release's tree has the [Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper)
 (`helper/macos/build-app.sh`), a macOS job also builds it, once per architecture, and
-the same release carries four more assets:
+the same release carries two more assets:
 
 ```
-StageUtilityOutput-arm64.zip     StageUtilityOutput-arm64.zip.sha256
-StageUtilityOutput-x86_64.zip    StageUtilityOutput-x86_64.zip.sha256
+StageUtilityOutput-arm64.zip
+StageUtilityOutput-x86_64.zip
 ```
 
-Each zip holds `StageUtilityOutput.app` (about 145 MB zipped and 330 MB unpacked, nearly all of it Chromium) and
-each `.sha256` is one `shasum -a 256` line. They are for the Mac installer, which a
-server serves from its own cache; the updater never reads them. A tree without the
+Each zip holds `StageUtilityOutput.app` (about 145 MB zipped and 330 MB unpacked, nearly all of it Chromium).
+They are for the Mac installer, which a server serves from its own cache; the updater
+never reads them. Like the archives, they are verified against the SHA-256 `digest`
+the releases API lists for the asset; no checksum file is published beside them. A
+release made before GitHub began serving asset digests (2025) has none, and its zips
+cannot be verified, so a server running one refuses them. A tree without the
 build script skips the job and releases as before, and a macOS build that fails or is
 cancelled releases without the zips rather than stopping the release (the archives do
 wait for that job, up to its 60-minute timeout); the run then carries an

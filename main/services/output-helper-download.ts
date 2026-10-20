@@ -4,14 +4,17 @@
 // The app is a few hundred MB because it bundles Chromium, so a Mac on a network
 // with no internet has to be able to get it from the server. The server is not
 // the source: GitHub's release for the version the server is running is. This
-// fetches that asset ONCE, checks it against the checksum the release publishes,
-// keeps it under the data directory, and serves it from there from then on.
+// fetches that asset ONCE, checks it against the digest GitHub's releases API
+// serves for it (the same per-asset digest the app's own installers verify their
+// tarballs against), keeps it under the data directory, and serves it from there
+// from then on.
 //
 // What is bounded, and why each bound is here:
 //   - one fetch at a time per file: two Macs installing together must not start
 //     two 300 MB downloads of the same thing;
 //   - a size cap: a release host (or whatever answers in its place) that sends
-//     more than the helper can possibly weigh is refused, not stored;
+//     more than the helper can possibly weigh is refused, not stored; the
+//     release's JSON, which carries the digest, has its own much smaller cap;
 //   - a stall watchdog and a ceiling: a transfer that goes quiet for a minute ends,
 //     so the next request tries again instead of waiting behind it for ever; one
 //     that keeps moving, however slowly, is let finish, up to two hours in all;
@@ -22,6 +25,12 @@
 //
 // A file reaches the cache only after its digest matched. It is written to a
 // temporary name and renamed into place, so a request never sees half a file.
+//
+// The digest is cached per version beside the zip, as the one `shasum` line the
+// installer reads from /kiosk/<zip>.sha256, so a restart does not ask the API
+// again. There is no .sha256 file on the release; the server builds that line.
+// A release with no digest for the asset is refused with that reason, never
+// verified some other way.
 //
 // This is a cache, not a store: nothing here is the operator's work, and losing
 // it costs one download. It lives under cache/ in the data directory, beside the
@@ -34,22 +43,21 @@ import * as path from "node:path";
 import { withoutDataDir } from "./app-paths.js";
 import { commitPart, downloadWatchdog, readCapped, sha256OfFile, streamToPart } from "./capped-download.js";
 import { errorMessage, fetchFailureMessage } from "./errors.js";
+import { GITHUB_API_REPO, GITHUB_RELEASE_DOWNLOAD, rateLimitMessage } from "./github-repo.js";
 import { scrub } from "./scrub.js";
 import { atomicWrite } from "./write-queue.js";
 
 export const HELPER_ARCHES = ["arm64", "x86_64"] as const;
 export type HelperArch = (typeof HELPER_ARCHES)[number];
 
-/** A file this module will serve: the zip for one architecture, or its checksum. */
+/** A file this module will serve: the zip for one architecture, or its checksum line. */
 export interface HelperAsset {
   arch: HelperArch;
   kind: "zip" | "sha256";
-  /** The file's name, which is also its name on the release and in the cache. */
+  /** The file's name, which is also its name in the cache. The zip is also its name
+   *  on the release; the checksum line is built here and is not a release asset. */
   name: string;
 }
-
-const REPO = "Cornerstone-Production/Stage-Utility";
-const DEFAULT_RELEASE_BASE = `https://github.com/${REPO}/releases/download`;
 
 /** Every file this route serves, by name. The request path is only ever compared
  *  with these: the name that goes into the cache path and the outgoing URL is the
@@ -68,15 +76,16 @@ export function parseHelperPath(pathname: string): HelperAsset | null {
  *  zip is a good deal under the bundle's 320 MB; this is the ceiling, not the
  *  expectation. */
 const DEFAULT_MAX_ZIP_BYTES = 1024 * 1024 * 1024;
-/** A checksum file is one line. */
-const MAX_SUM_BYTES = 4 * 1024;
+/** A release's JSON: its notes and one object per asset, some tens of KB; this is
+ *  headroom, not the expectation. */
+const MAX_RELEASE_JSON_BYTES = 1024 * 1024;
 /** No bytes for this long (the connect and the response headers count) and the zip
  *  transfer is given up on. A slow link that keeps moving never trips it. */
 const DEFAULT_ZIP_IDLE_MS = 60 * 1000;
 /** The outright ceiling, for a host that trickles just fast enough never to go
  *  idle. About 145 MB per architecture, so this is ~20 kB/s. */
 const DEFAULT_ZIP_TOTAL_MS = 2 * 60 * 60 * 1000;
-const SUM_TIMEOUT_MS = 15 * 1000;
+const DIGEST_TIMEOUT_MS = 15 * 1000;
 /** A leftover temporary file older than this belongs to a fetch that died. */
 const STALE_PART_MS = 60 * 60 * 1000;
 
@@ -90,34 +99,48 @@ export interface DownloadDeps {
   /** The running release's version, as in package.json: "1.26.0-beta.4". */
   version: () => string;
   fetch?: typeof fetch;
-  /** Where release assets are fetched from. Tests only; see releaseBase(). */
-  releaseBase?: () => string;
+  /** Where the release's zips and its API record are fetched from. Tests only;
+   *  see releaseHosts(). */
+  releaseHosts?: () => ReleaseHosts;
   maxZipBytes?: number;
   zipIdleMs?: number;
   zipTotalMs?: number;
-  sumTimeoutMs?: number;
+  /** The most the releases API call may take. */
+  digestTimeoutMs?: number;
+}
+
+export interface ReleaseHosts {
+  /** Where a release's assets download from: `<download>/v<version>/<name>`. */
+  download: string;
+  /** Where a release's JSON is read from: `<api>/v<version>`. */
+  api: string;
 }
 
 /**
- * Where release assets come from: GitHub, unless the test hook says otherwise.
+ * Where release assets and their digests come from: GitHub, unless the test hook
+ * says otherwise.
  *
  * STAGE_UTILITY_TEST_RELEASE_BASE exists so a test can stand a local HTTP server
- * in for GitHub. It is not an operator setting and is not documented as one; an
- * unset variable, which is every real install, means GitHub.
+ * in for GitHub. Assets are served from its root and the releases API from
+ * `<base>/api/releases/tags`, so one variable can never leave one half of the
+ * fetch pointed at the real GitHub. It is not an operator setting and is not
+ * documented as one; an unset variable, which is every real install, means GitHub.
  */
-export function releaseBase(): string {
+export function releaseHosts(): ReleaseHosts {
   const base = process.env.STAGE_UTILITY_TEST_RELEASE_BASE?.trim();
-  if (!base) return DEFAULT_RELEASE_BASE;
+  if (!base) return { download: GITHUB_RELEASE_DOWNLOAD, api: `${GITHUB_API_REPO}/releases/tags` };
   if (!testHookAnnounced) {
     testHookAnnounced = true;
     console.warn("[output-helper] fetching releases from STAGE_UTILITY_TEST_RELEASE_BASE, a test hook");
   }
-  return base.replace(/\/+$/, "");
+  const root = base.replace(/\/+$/, "");
+  return { download: root, api: `${root}/api/releases/tags` };
 }
 let testHookAnnounced = false;
 
-/** The digest on a checksum file's first line: `shasum -a 256` prints
- *  "<hex>  <file>", and a bare hex digest is accepted too. */
+/** The digest at the start of a checksum line: `shasum -a 256` prints
+ *  "<hex>  <file>", and a bare hex digest is accepted too. Reads the line this
+ *  server caches. */
 export function parseChecksum(text: string): string | null {
   const m = /^([0-9a-fA-F]{64})(?:\s|$)/.exec(text.trimStart());
   return m ? m[1].toLowerCase() : null;
@@ -134,6 +157,37 @@ class Refusal extends Error {
   }
 }
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * The hex SHA-256 in the `digest` of the asset named exactly `assetName` in a
+ * release's JSON (GitHub writes it "sha256:<64 hex>"). Throws a Refusal that says
+ * which part is missing: 404 when the release does not list the asset, 502 when it
+ * answered with something that cannot be verified against.
+ */
+export function assetDigest(body: string, version: string, assetName: string): string {
+  let release: unknown;
+  try {
+    release = JSON.parse(body);
+  } catch {
+    throw new Refusal(502, `the release record for v${version} is not JSON`);
+  }
+  const assets = isRecord(release) ? release.assets : undefined;
+  if (!Array.isArray(assets)) throw new Refusal(502, `the release record for v${version} lists no assets array`);
+  const asset: unknown = assets.find((a) => isRecord(a) && a.name === assetName);
+  if (!isRecord(asset)) throw new Refusal(404, `the release for v${version} has no ${assetName}`);
+  const digest = asset.digest;
+  if (digest === undefined || digest === null || digest === "") {
+    throw new Refusal(
+      502,
+      `the release for v${version} lists ${assetName} with no digest (GitHub only began serving asset digests in 2025, so an older release has none); it cannot be verified`,
+    );
+  }
+  const m = typeof digest === "string" ? /^sha256:([0-9a-fA-F]{64})$/.exec(digest) : null;
+  if (!m) throw new Refusal(502, `the digest GitHub lists for ${assetName} in v${version} is not a SHA-256 ("sha256:" and 64 hex digits)`);
+  return m[1].toLowerCase();
+}
+
 /** Where the helper's cached releases live: one directory per version. */
 function cacheRoot(dataDir: string): string {
   return path.join(dataDir, "cache", "output-helper");
@@ -146,8 +200,8 @@ export class OutputHelperDownloads {
   private readonly maxZipBytes: number;
   private readonly zipIdleMs: number;
   private readonly zipTotalMs: number;
-  private readonly sumTimeoutMs: number;
-  private readonly base: () => string;
+  private readonly digestTimeoutMs: number;
+  private readonly hosts: () => ReleaseHosts;
   /** The version whose older siblings were last removed. */
   private prunedFor: string | null = null;
   /** Cached zips this process has hashed since they last changed: path to the
@@ -160,8 +214,8 @@ export class OutputHelperDownloads {
     this.maxZipBytes = deps.maxZipBytes ?? DEFAULT_MAX_ZIP_BYTES;
     this.zipIdleMs = deps.zipIdleMs ?? DEFAULT_ZIP_IDLE_MS;
     this.zipTotalMs = deps.zipTotalMs ?? DEFAULT_ZIP_TOTAL_MS;
-    this.sumTimeoutMs = deps.sumTimeoutMs ?? SUM_TIMEOUT_MS;
-    this.base = deps.releaseBase ?? releaseBase;
+    this.digestTimeoutMs = deps.digestTimeoutMs ?? DIGEST_TIMEOUT_MS;
+    this.hosts = deps.releaseHosts ?? releaseHosts;
   }
 
   /** The file to send for this request, fetching it first when there is none.
@@ -239,7 +293,7 @@ export class OutputHelperDownloads {
       this.verified.set(file, stamp);
       return true;
     }
-    const why = expected ? `its SHA-256 is ${got}, not the published ${expected}` : "its checksum is missing or unreadable";
+    const why = expected ? `its SHA-256 is ${got}, not the release's ${expected}` : "its checksum is missing or unreadable";
     console.warn(`[output-helper] the cached ${scrub(asset.name)} is not trusted (${scrub(why)}); fetching it again`);
     this.verified.delete(file);
     await fs.rm(file, { force: true });
@@ -252,51 +306,67 @@ export class OutputHelperDownloads {
     return withoutDataDir(message, this.deps.dataDir());
   }
 
-  private url(name: string, version: string): string {
-    return `${this.base()}/v${version}/${name}`;
-  }
-
-  private async get(name: string, version: string, signal: AbortSignal): Promise<Response> {
-    const url = this.url(name, version);
+  /**
+   * One GET of the release host, for the zip or for the release's record, with the
+   * same answer to each outcome: unreachable is a 404 (the Mac may try GitHub
+   * itself), a missing release or asset is a 404, anything else that is not a 200 a
+   * 502 that says when it is GitHub's rate limit. `zipName` is the asset this
+   * request is for, `subject` what is being fetched, `missing` what a 404 means.
+   */
+  private async get(url: string, o: { zipName: string; version: string; subject: string; missing: string; signal: AbortSignal; headers?: Record<string, string> }): Promise<Response> {
     let res: Response;
     try {
-      res = await this.doFetch(url, { signal, headers: { "user-agent": "stage-utility-output-helper" } });
+      res = await this.doFetch(url, { signal: o.signal, headers: { "User-Agent": "stage-utility-output-helper", ...o.headers } });
     } catch (err) {
-      throw new Refusal(
-        404,
-        `v${version} of ${name} is not in the cache and could not be fetched: ${fetchFailureMessage(err, "the release host")}`,
-      );
+      throw new Refusal(404, `v${o.version} of ${o.zipName} is not in the cache and could not be fetched: ${fetchFailureMessage(err, "the release host")}`);
     }
-    if (res.status === 404) {
-      throw new Refusal(404, `the release for v${version} has no ${name}`);
-    }
-    if (res.status !== 200) {
-      await res.body?.cancel().catch(() => undefined);
-      throw new Refusal(502, `the release host answered ${res.status} for ${name}`);
-    }
-    return res;
+    if (res.status === 200) return res;
+    await res.body?.cancel().catch(() => undefined);
+    if (res.status === 404) throw new Refusal(404, o.missing);
+    const limit = rateLimitMessage(res);
+    throw new Refusal(502, `the release host answered ${res.status} for ${o.subject}${limit ? ` (${limit})` : ""}`);
   }
 
+  private getZip(name: string, version: string, signal: AbortSignal): Promise<Response> {
+    return this.get(`${this.hosts().download}/v${version}/${name}`, {
+      zipName: name,
+      version,
+      subject: name,
+      missing: `the release for v${version} has no ${name}`,
+      signal,
+    });
+  }
+
+  private getRelease(zipName: string, version: string, signal: AbortSignal): Promise<Response> {
+    return this.get(`${this.hosts().api}/v${version}`, {
+      zipName,
+      version,
+      subject: `the release record of v${version}`,
+      missing: `there is no release v${version} on GitHub`,
+      signal,
+      headers: { Accept: "application/vnd.github+json" },
+    });
+  }
+
+  /** The zip's digest from the releases API, written as the one `shasum` line the
+   *  installer reads. This is the only place the release is asked for a digest. */
   private async fetchChecksum(asset: HelperAsset, file: string, version: string): Promise<Resolution> {
     const zipName = asset.name.replace(/\.sha256$/, "");
-    const res = await this.get(asset.name, version, AbortSignal.timeout(this.sumTimeoutMs));
-    const body = await readCapped(res, MAX_SUM_BYTES);
-    if (!body) throw new Refusal(502, `${asset.name} is larger than ${MAX_SUM_BYTES} bytes; refusing it`);
-    const text = body.toString("utf8");
-    const digest = parseChecksum(text);
-    if (!digest) throw new Refusal(502, `${asset.name} does not start with a SHA-256 digest`);
-    // Normalised to `shasum` form, which is what the installer's check reads.
-    const line = `${digest}  ${zipName}\n`;
+    const res = await this.getRelease(zipName, version, AbortSignal.timeout(this.digestTimeoutMs));
+    const body = await readCapped(res, MAX_RELEASE_JSON_BYTES);
+    if (!body) throw new Refusal(502, `the release record for v${version} is larger than ${MAX_RELEASE_JSON_BYTES} bytes; refusing it`);
+    // In `shasum` form, which is what the installer's check reads.
+    const line = `${assetDigest(body.toString("utf8"), version, zipName)}  ${zipName}\n`;
     await fs.mkdir(path.dirname(file), { recursive: true });
     await atomicWrite(file, line, { mode: 0o644 });
-    console.log(`[output-helper] fetched ${scrub(asset.name)} from the release`);
+    console.log(`[output-helper] read the SHA-256 of ${scrub(zipName)} from the release record for v${scrub(version)}`);
     return { ok: true, file, size: Buffer.byteLength(line), source: "release" };
   }
 
   private async fetchZip(asset: HelperAsset, file: string, version: string): Promise<Resolution> {
     const sumName = `${asset.name}.sha256`;
     const sumFile = path.join(this.versionDir(version), sumName);
-    // The checksum first, and through the same one-flight path, so a Mac that
+    // The digest first, and through the same one-flight path, so a Mac that
     // asks for it while the zip is downloading does not start a second fetch.
     const sum = await this.ensure({ arch: asset.arch, kind: "sha256", name: sumName }, version);
     // Its own reason, unprefixed: the zip is not fetched without it, and the
@@ -327,7 +397,7 @@ export class OutputHelperDownloads {
     sumFile: string,
     watchdog: { signal: AbortSignal; touch: () => void },
   ): Promise<number> {
-    const res = await this.get(asset.name, version, watchdog.signal);
+    const res = await this.getZip(asset.name, version, watchdog.signal);
     watchdog.touch(); // the headers are data too
     const declared = Number(res.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > this.maxZipBytes) {
@@ -360,7 +430,7 @@ export class OutputHelperDownloads {
         // Neither file stays: the zip is wrong, and the checksum that said so may
         // be the wrong half, so the next request starts both again.
         await fs.rm(sumFile, { force: true });
-        throw new Refusal(502, `${asset.name} did not match its published SHA-256 (expected ${expected}, got ${got}); not stored`);
+        throw new Refusal(502, `${asset.name} did not match the release's SHA-256 (expected ${expected}, got ${got}); not stored`);
       }
       await commitPart(part, file);
     } catch (err) {

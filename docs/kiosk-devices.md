@@ -114,7 +114,9 @@ this run and saves nothing. `STAGE_SERVER` is a different choice: it also writes
 Mac does not follow the server if it moves. Use it only where discovery's broadcast
 does not cross. If that server cannot supply a zip
 that matches its checksum, it falls back to the GitHub release for the version in the
-server's `/api/update/status`. If neither works, it installs nothing and says what each
+server's `/api/update/status`, taking the digest from the releases API and the zip from
+the release's downloads. The API call carries no token, so GitHub allows 60 an hour per
+network; a refusal for that says so. If neither works, it installs nothing and says what each
 answered.
 A server that has not cached the zip yet sends nothing until it has all of it, so the
 installer waits on a server for up to 2 hours 10 minutes. A download from GitHub is given
@@ -122,8 +124,8 @@ up on after a minute below 1 KB/s, with the same overall limit.
 
 | Request | |
 |---|---|
-| `GET /kiosk/StageUtilityOutput-<arch>.zip` | The app. The first request fetches it from the GitHub release matching the server's version and checks it against the checksum the release publishes; later requests come from the cache |
-| `GET /kiosk/StageUtilityOutput-<arch>.zip.sha256` | That zip's SHA-256, one line, which the installer compares its download with |
+| `GET /kiosk/StageUtilityOutput-<arch>.zip` | The app. The first request fetches it from the GitHub release matching the server's version and checks it against the SHA-256 the releases API lists for that asset; later requests come from the cache |
+| `GET /kiosk/StageUtilityOutput-<arch>.zip.sha256` | That zip's SHA-256, one `shasum` line the server builds from the release's digest, which the installer compares its download with. It is read once per version and cached beside the zip. A refusal is not cached, so each retry asks the releases API again, from the same 60-an-hour allowance the update check uses |
 
 The cache is `cache/output-helper/<version>/` in the data directory. It holds the
 running version only, is not part of a config backup, and costs one download to
@@ -146,8 +148,10 @@ with the reason. The installer then goes to GitHub from the Mac itself, so a Mac
 with internet still installs; a Mac with none cannot until the server has the file,
 which any request for the zip made while the server is online puts in its cache. A
 release made before the helper existed has no zip, and answers `404` the same way.
-Each release attaches the two zips and their `.sha256` files when the build ran for it;
-see [distribution](ops/distribution.md#what-a-release-contains).
+Each release attaches the two zips when the build ran for it, and GitHub lists a digest
+for each; see [distribution](ops/distribution.md#what-a-release-contains). A release
+whose zip has no digest cannot be verified: the server answers `502` and says so, and
+the installer's GitHub fallback refuses it the same way.
 
 A release whose helper build failed has no zips either, and the installer does not get
 around that: a Mac whose server runs that version cannot install the helper, from the
