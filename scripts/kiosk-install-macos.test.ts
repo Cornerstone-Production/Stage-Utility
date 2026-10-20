@@ -149,6 +149,59 @@ describe("install-macos.sh is valid shell", () => {
   });
 });
 
+// The digest extraction exists twice, once per installer: install.sh is bash and reads
+// the JSON from a here-string, this one is POSIX sh and reads a file. Each is run from
+// its own source over the same fixtures, so a fix made to one and not the other fails here.
+describe("the digest extraction in install.sh and in install-macos.sh", () => {
+  const INSTALL_SH = path.join(HERE, "..", "install.sh");
+  /** A top-level shell function's text, found by name. */
+  const functionText = (file: string, name: string): string => {
+    const m = new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, "m").exec(fs.readFileSync(file, "utf8"));
+    assert.ok(m, `${name} is not defined at the top level of ${file}`);
+    return m[0];
+  };
+  const NAME = "StageUtilityOutput-arm64.zip";
+  const good = sha("the arm64 zip");
+  const other = sha("another asset");
+  /** `[label, release JSON, the digest both must print, or "" for none]`. */
+  const record = (assets: object[]) =>
+    JSON.stringify({ tag_name: "v9.9.9", name: "v9.9.9", uploader: { login: "bot" }, assets }, null, 2);
+  const fixtures: [string, string, string][] = [
+    ["the zip's own digest", record([{ name: NAME, digest: `sha256:${good}` }]), good],
+    ["the zip after other assets", record([{ name: "stage-utility-9.9.9-linux-x64.tar.gz", digest: `sha256:${other}` }, { name: NAME, digest: `sha256:${good}` }]), good],
+    ["a name that only begins with the zip's, first", record([{ name: `${NAME}.sha256`, digest: `sha256:${other}` }, { name: NAME, digest: `sha256:${good}` }]), good],
+    ["only another architecture's asset", record([{ name: "StageUtilityOutput-x86_64.zip", digest: `sha256:${other}` }]), ""],
+    ["the zip with no digest key, another's after it", record([{ name: NAME }, { name: "StageUtilityOutput-x86_64.zip", digest: `sha256:${other}` }]), ""],
+    ["the zip with a null digest, another's after it", record([{ name: NAME, digest: null }, { name: "StageUtilityOutput-x86_64.zip", digest: `sha256:${other}` }]), ""],
+    ["a digest of 63 digits", record([{ name: NAME, digest: `sha256:${good.slice(1)}` }]), ""],
+    ["a digest of 65 digits", record([{ name: NAME, digest: `sha256:${good}0` }]), ""],
+    ["a record on one line, not pretty-printed", JSON.stringify({ assets: [{ name: NAME, digest: `sha256:${good}` }] }), ""],
+  ];
+
+  const viaInstallSh = (json: string) =>
+    spawnSync("bash", ["-c", `${functionText(INSTALL_SH, "release_digest")}\nrelease_digest "$NAME" "$JSON"`], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", NAME, JSON: json } });
+  const viaInstallMacos = (json: string) => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "su-digest-")), "release.json");
+    try {
+      fs.writeFileSync(file, json);
+      return spawnSync("sh", ["-c", `${functionText(SCRIPT, "digest_from_release")}\nZIP_NAME="$NAME"; digest_from_release "$FILE"`], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", NAME, FILE: file } });
+    } finally {
+      fs.rmSync(path.dirname(file), { recursive: true, force: true });
+    }
+  };
+
+  for (const [label, json, want] of fixtures) {
+    it(`both read ${want ? "the digest" : "no digest"} from ${label}`, () => {
+      const a = viaInstallSh(json);
+      const b = viaInstallMacos(json);
+      assert.equal(a.status, 0, a.stderr);
+      assert.equal(b.status, 0, b.stderr);
+      assert.equal(a.stdout.trim(), want, "install.sh");
+      assert.equal(b.stdout.trim(), want, "install-macos.sh");
+    });
+  }
+});
+
 describe("--dry-run", () => {
   const server = { STAGE_SERVER: "http://192.0.2.10:8788", STAGE_INSTALL_TEST_UNAME_S: "Darwin", STAGE_INSTALL_TEST_OS_VERSION: "14.5", STAGE_INSTALL_TEST_CONSOLE_USER: ME };
 
@@ -390,11 +443,28 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
     host.routes.set(`${prefix}/StageUtilityOutput-arm64.zip.sha256`, { body: `${digest}  StageUtilityOutput-arm64.zip\n` });
   };
 
+  /** The GitHub release for `version`: the zip on the download host, and the release's JSON
+   *  on the API host with each asset's digest. There is no .sha256 asset on a release.
+   *  `assets` replaces the JSON's asset list, to publish a release with no digest or none. */
+  const publishRelease = (version: string, zip: { bytes: Buffer }, digest = sha(zip.bytes), assets?: object[]) => {
+    github.routes.set(`/releases/v${version}/StageUtilityOutput-arm64.zip`, { body: zip.bytes });
+    github.routes.set(`/api/releases/tags/v${version}`, {
+      body: JSON.stringify({
+        tag_name: `v${version}`,
+        assets: assets ?? [
+          { name: "StageUtilityOutput-arm64.zip", digest: `sha256:${digest}` },
+          { name: "StageUtilityOutput-x86_64.zip", digest: `sha256:${sha("the other architecture")}` },
+        ],
+      }, null, 2),
+    });
+  };
+
   const baseEnv = (extra: Record<string, string> = {}): Record<string, string> => ({
     STAGE_INSTALL_SOURCED: "1",
     STAGE_INSTALL_TEST_ROOT: scratch,
     STAGE_INSTALL_TEST_UNAME_M: "arm64",
     STAGE_INSTALL_GITHUB_BASE: `${github.base}/releases`,
+    STAGE_INSTALL_GITHUB_API: `${github.base}/api/releases/tags`,
     STAGE_SERVER: stageServer.base,
     ...extra,
   });
@@ -422,10 +492,10 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
   it("refuses a download that does not match its checksum, and installs nothing", async () => {
     publish(stageServer, "/kiosk", zipA, sha("a different file"));
     stageServer.routes.set("/api/update/status", { body: '{"tracks":["main","beta"],"version":"9.9.9"}' });
-    publish(github, "/releases/v9.9.9", zipA, sha("also wrong"));
+    publishRelease("9.9.9", zipA, sha("also wrong"));
     const r = await install(FLOW);
     assert.equal(r.status, 1, r.out + r.err);
-    assert.match(r.err, /did not match its published SHA-256/);
+    assert.match(r.err, /did not match the release's SHA-256/);
     assert.ok(!fs.existsSync(app()), "a refused download must not become the app");
     assert.deepEqual(fs.existsSync(path.join(scratch, "Applications")) ? leftovers() : [], []);
   });
@@ -456,13 +526,85 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
       body: JSON.stringify({ error: "v9.9.9 of StageUtilityOutput-arm64.zip.sha256 is not in the cache and could not be fetched: no route" }),
     });
     stageServer.routes.set("/api/update/status", { body: '{"tracks":["main","beta"],"version":"9.9.9"}' });
-    publish(github, "/releases/v9.9.9", zipB);
+    publishRelease("9.9.9", zipB);
     const r = await install(`${FLOW}; FINISHED=1`);
     assert.equal(r.status, 0, r.out + r.err);
     assert.match(r.out, /the checksum answered 404: v9\.9\.9 of .* is not in the cache and could not be fetched: no route/, "the server's own reason is shown");
     assert.match(r.out, /downloading StageUtilityOutput-arm64\.zip from the GitHub release v9\.9\.9/);
+    assert.match(r.out, new RegExp(`verified SHA-256 ${sha(zipB.bytes)}`), "the digest is the one the release's JSON lists for this architecture");
     assert.equal(marker(), "build-b");
     assert.ok(github.hits.some((h) => h.endsWith("/v9.9.9/StageUtilityOutput-arm64.zip")));
+    assert.ok(github.hits.includes("/api/releases/tags/v9.9.9"), "the digest is read from the releases API");
+    assert.ok(!github.hits.some((h) => h.endsWith(".sha256")), "a release has no .sha256 asset to ask for");
+  });
+
+  describe("the GitHub release's digest", () => {
+    /** The server cannot help, so the GitHub release is what the install rests on. */
+    const viaGithub = () => stageServer.routes.set("/api/update/status", { body: '{"version":"9.9.9"}' });
+    const ARM = "StageUtilityOutput-arm64.zip";
+    const X86 = "StageUtilityOutput-x86_64.zip";
+    const noSha = /the GitHub release v9\.9\.9: the release record lists no SHA-256 for StageUtilityOutput-arm64\.zip \(the release may predate GitHub's asset digests, which began in 2025, or the record is not in the form this installer reads\)/;
+
+    // Each of these leaves the installer with no digest it may trust for the arm64 zip.
+    // The first two are the ones a loose extraction gets wrong: it takes the NEXT asset's.
+    const cases: [string, (good: string) => object[]][] = [
+      ["lists the zip with no digest key, and another asset's digest after it", (good) => [{ name: ARM }, { name: X86, digest: `sha256:${good}` }]],
+      ["lists the zip with a null digest, and another asset's digest after it", (good) => [{ name: ARM, digest: null }, { name: X86, digest: `sha256:${good}` }]],
+      ["lists only another architecture's asset", (good) => [{ name: X86, digest: `sha256:${good}` }]],
+      ["lists the zip with a digest of 63 hex digits", (good) => [{ name: ARM, digest: `sha256:${good.slice(1)}` }]],
+      ["lists the zip with another algorithm's digest", (good) => [{ name: ARM, digest: `sha1:${good}` }]],
+    ];
+    for (const [label, assets] of cases) {
+      it(`is refused, with the reason, when the release ${label}`, async () => {
+        viaGithub();
+        publishRelease("9.9.9", zipB, undefined, assets(sha(zipB.bytes)));
+        const r = await install(FLOW);
+        assert.equal(r.status, 1, r.out + r.err);
+        assert.match(r.err, noSha);
+        assert.ok(!github.hits.some((h) => h.endsWith(".zip")), "an unverifiable zip must not even be downloaded");
+        assert.ok(!fs.existsSync(app()));
+      });
+    }
+
+    it("is the zip's own, though an asset whose name only begins with the zip's comes first", async () => {
+      viaGithub();
+      publishRelease("9.9.9", zipB, undefined, [
+        { name: `${ARM}.sha256`, digest: `sha256:${sha("a checksum file's hash")}` },
+        { name: ARM, digest: `sha256:${sha(zipB.bytes)}` },
+      ]);
+      const r = await install(`${FLOW}; FINISHED=1`);
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.match(r.out, new RegExp(`verified SHA-256 ${sha(zipB.bytes)}`));
+      assert.equal(marker(), "build-b");
+    });
+
+    it("is refused when the zip does not match it, and installs nothing", async () => {
+      viaGithub();
+      publishRelease("9.9.9", zipB, sha("not this zip"));
+      const r = await install(FLOW);
+      assert.equal(r.status, 1, r.out + r.err);
+      assert.match(r.err, /the GitHub release v9\.9\.9: the download did not match the release's SHA-256/);
+      assert.ok(!fs.existsSync(app()));
+    });
+
+    for (const status of [403, 429]) {
+      it(`says GitHub may have rate-limited this network when the release record answers ${status}`, async () => {
+        viaGithub();
+        github.routes.set("/api/releases/tags/v9.9.9", { status, body: '{"message":"API rate limit exceeded"}' });
+        const r = await install(FLOW);
+        assert.equal(r.status, 1, r.out + r.err);
+        assert.match(r.err, new RegExp(`the GitHub release v9\\.9\\.9: the release record answered ${status}.* \\(GitHub may have rate-limited this network: 60 requests an hour without a token\\)`));
+        assert.ok(!fs.existsSync(app()));
+      });
+    }
+
+    it("says nothing about a rate limit for a 404", async () => {
+      viaGithub();
+      const r = await install(FLOW);
+      assert.equal(r.status, 1, r.out + r.err);
+      assert.match(r.err, /the release record answered 404/);
+      assert.doesNotMatch(r.err, /rate-limited/);
+    });
   });
 
   describe("how long a zip download may take", () => {
@@ -490,7 +632,7 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
 
     it("the GitHub zip gives up after a minute under 1 KB/s, with the same ceiling", async () => {
       stageServer.routes.set("/api/update/status", { body: '{"version":"9.9.9"}' });
-      publish(github, "/releases/v9.9.9", zipB);
+      publishRelease("9.9.9", zipB);
       const spy = spyOnCurl();
       const r = await install(`${FLOW}; FINISHED=1`, spy.env);
       assert.equal(r.status, 0, r.out + r.err);
@@ -505,7 +647,7 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
     const r = await install(FLOW);
     assert.equal(r.status, 1);
     assert.match(r.err, /could not get the helper\. this server \(.*\): the checksum answered 404/);
-    assert.match(r.err, /the GitHub release v9\.9\.9: the checksum answered 404/);
+    assert.match(r.err, /the GitHub release v9\.9\.9: the release record answered 404/);
     assert.ok(!fs.existsSync(app()));
   });
 
@@ -988,6 +1130,9 @@ describe("--check-update", { skip: !(has("zip") && has("unzip") && has("uuidgen"
       STAGE_INSTALL_TEST_CONSOLE_USER: ME,
       STAGE_INSTALL_TEST_HOME: home(),
       STAGE_INSTALL_TEST_START_TIMEOUT: "4",
+      // No test reaches GitHub: a fallback to the release goes nowhere.
+      STAGE_INSTALL_GITHUB_BASE: "http://127.0.0.1:9",
+      STAGE_INSTALL_GITHUB_API: "http://127.0.0.1:9",
       SHIM_PRINT_RC: "0",
       SHIM_PRINT_OUT: "\tpid = 4242",
       SHIM_STARTS_WRITE: statusFile(),

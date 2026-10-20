@@ -508,11 +508,12 @@ jobs:
             mkdir -p "$check"
             ditto -x -k "$zip" "$check"
             codesign --verify --strict "$check/StageUtilityOutput.app"
-
-            ( cd helper-dist && shasum -a 256 "StageUtilityOutput-$arch.zip" > "StageUtilityOutput-$arch.zip.sha256" )
           done
           ls -l helper-dist
-          cat helper-dist/*.sha256
+          # For people reading the log. Not uploaded: GitHub serves each release
+          # asset's SHA-256 as its `digest`, and that is what the server and the
+          # installer verify the zips against.
+          ( cd helper-dist && shasum -a 256 StageUtilityOutput-*.zip )
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -640,8 +641,9 @@ jobs:
           if [ "$PRE" = true ]; then FROM="$LAST"; else FROM="$STABLE"; fi
           node scripts/release-notes.mjs "$V" "$FROM" > /tmp/notes.md
           assets=(dist/*.tar.gz)
-          # The Mac output helper's zips and checksums, when the helper job made them.
-          if [ -d helper-dist ]; then assets+=(helper-dist/*); fi
+          # The Mac output helper's two zips, when the helper job made them. Named by
+          # pattern, so nothing else that lands in helper-dist is published.
+          if [ -d helper-dist ]; then assets+=(helper-dist/StageUtilityOutput-*.zip); fi
           gh release create "v$V" \
             --title "v$V" \
             --notes-file /tmp/notes.md \

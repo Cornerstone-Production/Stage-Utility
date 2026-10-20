@@ -436,8 +436,8 @@ own variables, set on the command line of the machine being set up:
 | `STAGE_DOWNLOAD_FROM` | macOS and Windows: the server to download the output helper, or the Windows launcher, from, without pinning the device to it. The device's updater asks that server from then on. See [Installing the Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper) and [The Windows kiosk's launcher](../kiosk-devices.md#the-windows-kiosks-launcher) |
 
 **Tooling and tests.** `STAGE_UTILITY_TEST_RELEASE_BASE` points the Mac output
-helper download at a test server instead of GitHub's releases, and the server
-logs a notice when it is set. `STAGE_UTILITY_RELEASE_NOTES_DIR` redirects where
+helper download, and the releases API call that gives its digest, at a test server
+instead of GitHub, and the server logs a notice when it is set. `STAGE_UTILITY_RELEASE_NOTES_DIR` redirects where
 the release-notes script looks for notes. `PRIVATE_TERMS` and `REQUIRE_TERMS` are
 read by the public-hygiene check in CI, described in
 [Contributing](../contributing.md#public-hygiene). None of these has a use in

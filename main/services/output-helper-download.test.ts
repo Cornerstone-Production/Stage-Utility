@@ -1,5 +1,6 @@
 // The Mac output helper's download: fetched from the release once, checked
-// against the checksum the release publishes, cached, and served from the cache.
+// against the digest GitHub's releases API lists for the zip, cached, and served
+// from the cache.
 //
 // A fake fetch stands in for GitHub, so every case here runs the real module end
 // to end — real files in a real temporary data directory, real hashing, real
@@ -13,32 +14,59 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { captureConsole } from "./fixtures/capture-console.js";
-import { OutputHelperDownloads, parseChecksum, parseHelperPath, pruneOutputHelperCache, type HelperAsset } from "./output-helper-download.js";
+import { assetDigest, OutputHelperDownloads, parseChecksum, parseHelperPath, pruneOutputHelperCache, releaseHosts, type HelperAsset } from "./output-helper-download.js";
 
 const VERSION = "1.2.3-beta.4";
 const ZIP = parseHelperPath("/kiosk/StageUtilityOutput-arm64.zip") as HelperAsset;
 const SUM = parseHelperPath("/kiosk/StageUtilityOutput-arm64.zip.sha256") as HelperAsset;
 const sha = (b: Buffer | string) => crypto.createHash("sha256").update(b).digest("hex");
 
-/** A stand-in for the release host: what it serves, and what was asked of it. */
+const API_PATH = `/api/releases/tags/v${VERSION}`;
+
+/** A stand-in for the release host and the releases API: what they serve, and what was asked of them. */
 class FakeRelease {
   files = new Map<string, { status?: number; body: Buffer; headers?: Record<string, string> }>();
+  /** The assets the release's JSON lists. A release publishes no .sha256 file; the digest is a field here. */
+  assets: { name: string; digest?: unknown }[] = [];
+  /** The API's whole answer, when a test wants something other than the assets above. */
+  record: { status?: number; body: Buffer | string; headers?: Record<string, string> } | null = null;
   requests: string[] = [];
+  /** The headers of each API call, newest last. */
+  apiHeaders: Headers[] = [];
   offline = false;
   /** Held until released, so a test can start requests while a fetch is in flight. */
   gate: Promise<void> | null = null;
+  /** When set, only requests for this version wait at the gate. */
+  gateOnly: string | null = null;
+  /** The assets another version's JSON lists, by version. */
+  otherAssets = new Map<string, { name: string; digest?: unknown }[]>();
 
   publish(name: string, body: Buffer, digest = sha(body)): void {
     this.files.set(`/v${VERSION}/${name}`, { body });
-    this.files.set(`/v${VERSION}/${name}.sha256`, { body: Buffer.from(`${digest}  ${name}\n`) });
+    this.assets = [...this.assets.filter((a) => a.name !== name), { name, digest: `sha256:${digest}` }];
+  }
+
+  /** The same, for a version other than the running one. */
+  publishVersion(version: string, name: string, body: Buffer): void {
+    this.files.set(`/v${version}/${name}`, { body });
+    this.otherAssets.set(version, [{ name, digest: `sha256:${sha(body)}` }]);
   }
 
   fetch: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     this.requests.push(url.pathname);
     if (this.offline) throw Object.assign(new TypeError("fetch failed"), { cause: new Error("getaddrinfo ENOTFOUND github.com") });
-    if (this.gate) await this.gate;
+    if (this.gate && (this.gateOnly === null || url.pathname.includes(`v${this.gateOnly}`))) await this.gate;
     init?.signal?.throwIfAborted();
+    const other = /^\/api\/releases\/tags\/v(.+)$/.exec(url.pathname)?.[1];
+    if (other !== undefined && other !== VERSION) {
+      return new Response(JSON.stringify({ assets: this.otherAssets.get(other) ?? [] }), { status: 200 });
+    }
+    if (url.pathname === API_PATH) {
+      this.apiHeaders.push(new Headers(init?.headers));
+      const r = this.record ?? { body: JSON.stringify({ tag_name: `v${VERSION}`, assets: this.assets }, null, 2) };
+      return new Response(typeof r.body === "string" ? r.body : new Uint8Array(r.body), { status: r.status ?? 200, headers: r.headers });
+    }
     const file = this.files.get(url.pathname);
     if (!file) return new Response("not found", { status: 404 });
     return new Response(new Uint8Array(file.body), { status: file.status ?? 200, headers: file.headers });
@@ -47,13 +75,18 @@ class FakeRelease {
   count(suffix: string): number {
     return this.requests.filter((r) => r.endsWith(suffix)).length;
   }
+
+  /** How many times the releases API was asked for the release's record. */
+  apiCalls(): number {
+    return this.requests.filter((r) => r === API_PATH).length;
+  }
 }
 
 let dataDir: string;
 let release: FakeRelease;
 
 const make = (extra: Partial<ConstructorParameters<typeof OutputHelperDownloads>[0]> = {}) =>
-  new OutputHelperDownloads({ dataDir: () => dataDir, version: () => VERSION, fetch: release.fetch, releaseBase: () => "https://release.test", ...extra });
+  new OutputHelperDownloads({ dataDir: () => dataDir, version: () => VERSION, fetch: release.fetch, releaseHosts: () => ({ download: "https://release.test", api: "https://release.test/api/releases/tags" }), ...extra });
 
 const cacheDir = () => path.join(dataDir, "cache", "output-helper", VERSION);
 const listCache = async () => (await fs.readdir(cacheDir()).catch(() => [])).sort();
@@ -109,7 +142,8 @@ describe("fetching the helper from the release", () => {
     assert.equal(first.source, "release");
     assert.deepEqual(await fs.readFile(first.file), bytes);
     assert.equal(release.count(".zip"), 1);
-    assert.equal(release.count(".zip.sha256"), 1);
+    assert.equal(release.apiCalls(), 1);
+    assert.ok(!release.requests.some((r) => r.endsWith(".sha256")), "the release has no .sha256 file to ask for");
 
     const asked = release.requests.length;
     const second = await dl.resolve(ZIP);
@@ -122,6 +156,7 @@ describe("fetching the helper from the release", () => {
     assert.ok(sum.ok && sum.source === "cache");
     assert.equal(await fs.readFile(sum.file, "utf8"), `${sha(bytes)}  ${ZIP.name}\n`);
     assert.equal(release.requests.length, asked);
+    assert.ok(lines.some((l) => l === `[output-helper] read the SHA-256 of ${ZIP.name} from the release record for v${VERSION}`), lines.join("\n"));
 
     assert.ok(lines.some((l) => l.startsWith("[output-helper] fetched StageUtilityOutput-arm64.zip") && l.includes("verified its SHA-256")), lines.join("\n"));
     assert.ok(lines.some((l) => l.startsWith("[output-helper] serving StageUtilityOutput-arm64.zip from the cache")), lines.join("\n"));
@@ -135,14 +170,17 @@ describe("fetching the helper from the release", () => {
     const r = await dl.resolve(ZIP);
     assert.ok(!r.ok);
     assert.equal(r.status, 502);
-    assert.match(r.message, /did not match its published SHA-256/);
+    assert.match(r.message, /did not match the release's SHA-256/);
     assert.deepEqual(await listCache(), [], "neither the zip, its checksum nor a partial file may be left");
     assert.ok(lines.some((l) => l.startsWith("[output-helper] StageUtilityOutput-arm64.zip failed:")), lines.join("\n"));
 
-    // And it is not remembered as bad or good: the next request tries again.
+    // And it is not remembered as bad or good: the next request tries again, and
+    // asks the API for the digest again, since the one it read is not kept.
     const before = release.count(".zip");
+    const asked = release.apiCalls();
     await dl.resolve(ZIP);
     assert.equal(release.count(".zip"), before + 1);
+    assert.equal(release.apiCalls(), asked + 1, "a digest that did not match the zip is not cached");
   });
 
   it("answers 404 with a plain reason when there is no internet and no cache", async (t) => {
@@ -165,20 +203,158 @@ describe("fetching the helper from the release", () => {
     assert.ok(again.ok && again.source === "cache");
   });
 
-  it("answers 404 when the release has no such asset", async (t) => {
-    captureConsole(t, "warn");
-    const r = await make().resolve(ZIP);
-    assert.ok(!r.ok);
-    assert.equal(r.status, 404);
-    assert.match(r.message, new RegExp(`no ${ZIP.name}.sha256`));
+  describe("a release that cannot give a digest for the zip", () => {
+    /** The refusal for `resolve(ZIP)`, with the warning line it logged. */
+    const refused = async (t: Parameters<typeof captureConsole>[0], dl = make()) => {
+      const lines = captureConsole(t, "warn");
+      const r = await dl.resolve(ZIP);
+      assert.ok(!r.ok, "expected a refusal");
+      assert.equal(release.count(".zip"), 0, "an unverifiable download must not even start");
+      assert.deepEqual(await listCache(), [], "nothing is stored");
+      assert.ok(lines.some((l) => l.startsWith("[output-helper] StageUtilityOutput-arm64.zip failed: ") && l.includes(r.message)), lines.join("\n"));
+      return r;
+    };
+
+    it("answers 404 when there is no such release", async (t) => {
+      release.record = { status: 404, body: JSON.stringify({ message: "Not Found" }) };
+      const r = await refused(t);
+      assert.equal(r.status, 404);
+      assert.equal(r.message, `there is no release v${VERSION} on GitHub`);
+    });
+
+    it("answers 502 and says why when the release lists the zip with no digest", async (t) => {
+      release.assets = [{ name: ZIP.name }];
+      const r = await refused(t);
+      assert.equal(r.status, 502);
+      assert.match(r.message, new RegExp(`lists ${ZIP.name} with no digest \\(GitHub only began serving asset digests in 2025`));
+    });
+
+    it("answers 502 for any other status, and says how long a rate limit lasts", async (t) => {
+      const resetsIn10 = String(Math.floor(Date.now() / 1000) + 600);
+      release.record = { status: 403, body: "{}", headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": resetsIn10 } };
+      const limited = await refused(t);
+      assert.equal(limited.status, 502);
+      assert.match(limited.message, /answered 403 for the release record of v.* \(GitHub's hourly limit for this network is used up — it resets in (9|10) min\.\)/);
+      release.record = { status: 500, body: "oops" };
+      const broken = await make().resolve(ZIP);
+      assert.ok(!broken.ok);
+      assert.equal(broken.status, 502);
+      assert.match(broken.message, /answered 500 for the release record of v[^(]*$/);
+    });
+
+    // An explicit timeout: with no signal on the request, the fake would never be
+    // told to stop and this would await it for ever instead of failing.
+    it("gives up on a releases API that never answers, as the same 404 as no internet", { timeout: 3000 }, async (t) => {
+      const real = release.fetch;
+      release.fetch = (input, init) =>
+        new URL(String(input)).pathname === API_PATH
+          ? new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason)))
+          : real(input, init);
+      const r = await refused(t, make({ digestTimeoutMs: 50 }));
+      assert.equal(r.status, 404);
+      assert.match(r.message, /not in the cache and could not be fetched/);
+    });
   });
 
-  it("does not fetch the zip when its checksum is unavailable", async (t) => {
+  it("asks the releases API the way the updater does: the GitHub media type and a User-Agent", async (t) => {
+    captureConsole(t, "log", "warn");
+    release.publish(ZIP.name, Buffer.from("zip"));
+    assert.ok((await make().resolve(SUM)).ok);
+    assert.equal(release.apiHeaders.length, 1);
+    assert.equal(release.apiHeaders[0].get("accept"), "application/vnd.github+json");
+    assert.equal(release.apiHeaders[0].get("user-agent"), "stage-utility-output-helper");
+  });
+
+  it("serves the digest as one shasum line it builds itself, lowercased, whatever case the API used", async (t) => {
+    captureConsole(t, "log", "warn");
+    const digest = sha("zip bytes");
+    release.assets = [{ name: ZIP.name, digest: `sha256:${digest.toUpperCase()}` }];
+    const r = await make().resolve(SUM);
+    assert.ok(r.ok, JSON.stringify(r));
+    const text = await fs.readFile(r.file, "utf8");
+    assert.equal(text, `${digest}  ${ZIP.name}\n`);
+    assert.match(text, /^[0-9a-f]{64} {2}StageUtilityOutput-arm64\.zip\n$/);
+    assert.equal(r.size, Buffer.byteLength(text));
+  });
+
+  it("keeps the digest per version, so a restart serves the cached zip without asking the API again", async (t) => {
+    captureConsole(t, "log", "warn");
+    release.publish(ZIP.name, crypto.randomBytes(20_000));
+    assert.ok((await make().resolve(ZIP)).ok);
+    const asked = release.requests.length;
+    release.offline = true;
+    const restarted = make(); // a new process
+    const r = await restarted.resolve(ZIP);
+    assert.ok(r.ok && r.source === "cache", JSON.stringify(r));
+    assert.equal((await restarted.resolve(SUM)).ok, true);
+    assert.equal(release.requests.length, asked, "neither the zip nor the digest went back to the network");
+  });
+
+  describe("the digest assetDigest reads from a release record", () => {
+    const good = "b".repeat(64);
+    const record = (assets: unknown) => JSON.stringify({ assets });
+    const refusal = (status: number, message: RegExp) => (e: unknown) =>
+      e instanceof Error && (e as Error & { status?: number }).status === status && message.test(e.message);
+    const notSha = /is not a SHA-256/;
+
+    it("is the digest of the asset whose name is exactly the zip's, wherever it is listed, in lowercase", () => {
+      const body = record([
+        { name: `${ZIP.name}.sha256`, digest: `sha256:${"c".repeat(64)}` },
+        { name: "StageUtilityOutput-x86_64.zip", digest: `sha256:${"d".repeat(64)}` },
+        { name: ZIP.name, digest: `sha256:${good.toUpperCase()}` },
+      ]);
+      assert.equal(assetDigest(body, VERSION, ZIP.name), good);
+    });
+
+    const cases: [string, unknown, number, RegExp][] = [
+      ["no asset of that name", [{ name: "stage-utility-1.2.3-linux-x64.tar.gz", digest: `sha256:${good}` }], 404, /has no StageUtilityOutput-arm64\.zip$/],
+      ["only another architecture's", [{ name: "StageUtilityOutput-x86_64.zip", digest: `sha256:${good}` }], 404, /has no /],
+      ["only a prefixed name", [{ name: `${ZIP.name}.sha256`, digest: `sha256:${good}` }], 404, /has no /],
+      ["an asset named __proto__", [{ name: "__proto__", digest: `sha256:${good}` }], 404, /has no /],
+      ["no list entries that are objects", [null, 7, "x"], 404, /has no /],
+      ["no digest key", [{ name: ZIP.name }], 502, /with no digest \(GitHub only began serving asset digests in 2025/],
+      ["a null digest", [{ name: ZIP.name, digest: null }], 502, /with no digest/],
+      ["an empty digest", [{ name: ZIP.name, digest: "" }], 502, /with no digest/],
+      ["another algorithm", [{ name: ZIP.name, digest: `sha512:${"a".repeat(64)}` }], 502, notSha],
+      ["63 digits", [{ name: ZIP.name, digest: `sha256:${"a".repeat(63)}` }], 502, notSha],
+      ["65 digits", [{ name: ZIP.name, digest: `sha256:${"a".repeat(65)}` }], 502, notSha],
+      ["not hex", [{ name: ZIP.name, digest: `sha256:${"g".repeat(64)}` }], 502, notSha],
+      ["bare hex, no prefix", [{ name: ZIP.name, digest: "a".repeat(64) }], 502, notSha],
+      ["trailing text", [{ name: ZIP.name, digest: `sha256:${"a".repeat(64)} extra` }], 502, notSha],
+      ["a digest that is not a string", [{ name: ZIP.name, digest: 12345 }], 502, notSha],
+    ];
+    for (const [label, assets, status, message] of cases) {
+      it(`refuses ${label}: ${status}`, () => {
+        assert.throws(() => assetDigest(record(assets), VERSION, ZIP.name), refusal(status, message));
+      });
+    }
+
+    for (const [label, body, message] of [
+      ["a body that is not JSON", "<html>Bad gateway</html>", /is not JSON/],
+      ["JSON null", "null", /lists no assets array/],
+      ["assets that are not a list", JSON.stringify({ assets: "none" }), /lists no assets array/],
+    ] as const) {
+      it(`refuses ${label}: 502`, () => {
+        assert.throws(() => assetDigest(body, VERSION, ZIP.name), refusal(502, message));
+      });
+    }
+  });
+
+  it("points the API, with the downloads, at one test base, and at GitHub when it is unset", (t) => {
     captureConsole(t, "warn");
-    release.files.set(`/v${VERSION}/${ZIP.name}`, { body: Buffer.from("zip") });
-    const r = await make().resolve(ZIP);
-    assert.ok(!r.ok);
-    assert.equal(release.count(".zip"), 0, "an unverifiable download must not even start");
+    const was = process.env.STAGE_UTILITY_TEST_RELEASE_BASE;
+    try {
+      delete process.env.STAGE_UTILITY_TEST_RELEASE_BASE;
+      assert.deepEqual(releaseHosts(), {
+        download: "https://github.com/Cornerstone-Production/Stage-Utility/releases/download",
+        api: "https://api.github.com/repos/Cornerstone-Production/Stage-Utility/releases/tags",
+      });
+      process.env.STAGE_UTILITY_TEST_RELEASE_BASE = "http://127.0.0.1:9/";
+      assert.deepEqual(releaseHosts(), { download: "http://127.0.0.1:9", api: "http://127.0.0.1:9/api/releases/tags" });
+    } finally {
+      if (was === undefined) delete process.env.STAGE_UTILITY_TEST_RELEASE_BASE;
+      else process.env.STAGE_UTILITY_TEST_RELEASE_BASE = was;
+    }
   });
 
   it("shares one fetch between concurrent requests for the same file", async () => {
@@ -195,8 +371,30 @@ describe("fetching the helper from the release", () => {
 
     assert.ok(results.every((r) => r.ok), JSON.stringify(results));
     assert.equal(release.count(".zip"), 1, "one download of the zip for five requests");
-    assert.equal(release.count(".zip.sha256"), 1, "one fetch of the checksum, shared with the zip's own");
+    assert.equal(release.apiCalls(), 1, "one read of the release record, shared with the zip's own");
     assert.deepEqual(await listCache(), [ZIP.name, SUM.name]);
+  });
+
+  it("does not let a request for a newer version join the flight fetching the older one", { timeout: 5000 }, async (t) => {
+    captureConsole(t, "log", "warn");
+    const OLD = "1.0.0";
+    release.publishVersion(OLD, ZIP.name, Buffer.from("old zip"));
+    release.publish(ZIP.name, Buffer.from("new zip"));
+    let open!: () => void;
+    release.gate = new Promise((r) => (open = r));
+    release.gateOnly = OLD; // only the old version's fetches are held
+    let running = OLD;
+    const dl = make({ version: () => running });
+
+    const oldFlight = dl.resolve(ZIP);
+    await new Promise((r) => setTimeout(r, 20));
+    running = VERSION; // the server updated while the old fetch was in flight
+    const newer = await Promise.race([dl.resolve(ZIP), new Promise<"joined the old flight">((r) => setTimeout(() => r("joined the old flight"), 1000))]);
+    open();
+    await oldFlight;
+    assert.ok(typeof newer !== "string" && newer.ok, JSON.stringify(newer));
+    assert.equal(await fs.readFile(newer.file, "utf8"), "new zip");
+    assert.ok(newer.file.includes(`${path.sep}${VERSION}${path.sep}`), newer.file);
   });
 
   it("refuses a file that declares itself over the size cap, without reading it", async (t) => {
@@ -300,35 +498,28 @@ describe("fetching the helper from the release", () => {
     assert.deepEqual(await listCache(), [SUM.name]);
   });
 
-  describe("the checksum file's size cap", () => {
-    const sumBody = (extra: number) => {
-      const digest = sha(Buffer.from("zip bytes"));
-      const line = `${digest}  ${ZIP.name}\n`;
-      return Buffer.concat([Buffer.from(line), Buffer.alloc(extra, 0x20)]);
+  describe("the release record's size cap", () => {
+    const CAP = 1024 * 1024;
+    /** A valid record, padded with trailing whitespace to exactly `length` bytes. */
+    const recordOf = (length: number) => {
+      const json = Buffer.from(JSON.stringify({ assets: [{ name: ZIP.name, digest: `sha256:${sha(Buffer.from("zip bytes"))}` }] }));
+      return Buffer.concat([json, Buffer.alloc(length - json.length, 0x20)]);
     };
 
-    it("refuses a checksum body over 4 KiB, even when its first line is a good digest", async (t) => {
+    it("refuses a record over 1 MiB, even when it parses and lists a good digest", async (t) => {
       captureConsole(t, "warn");
-      release.publish(ZIP.name, Buffer.from("zip bytes"));
-      release.files.set(`/v${VERSION}/${ZIP.name}.sha256`, { body: sumBody(8 * 1024) });
+      release.record = { body: recordOf(CAP + 1) };
       const r = await make().resolve(SUM);
       assert.ok(!r.ok);
       assert.equal(r.status, 502);
-      assert.match(r.message, /StageUtilityOutput-arm64\.zip\.sha256 is larger than 4096 bytes; refusing it/);
+      assert.match(r.message, /the release record for v1\.2\.3-beta\.4 is larger than 1048576 bytes; refusing it/);
       assert.deepEqual(await listCache(), [], "nothing is stored");
     });
 
-    it("accepts one of exactly 4 KiB, and refuses one a byte over", async (t) => {
+    it("accepts one of exactly 1 MiB", async (t) => {
       captureConsole(t, "log", "warn");
-      const exact = sumBody(0);
-      const padded = Buffer.concat([exact, Buffer.alloc(4096 - exact.length, 0x20)]);
-      assert.equal(padded.length, 4096);
-      release.publish(ZIP.name, Buffer.from("zip bytes"));
-      release.files.set(`/v${VERSION}/${ZIP.name}.sha256`, { body: padded });
+      release.record = { body: recordOf(CAP) };
       assert.ok((await make().resolve(SUM)).ok);
-      await fs.rm(cacheDir(), { recursive: true, force: true });
-      release.files.set(`/v${VERSION}/${ZIP.name}.sha256`, { body: Buffer.concat([padded, Buffer.from(" ")]) });
-      assert.ok(!(await make().resolve(SUM)).ok);
     });
   });
 
