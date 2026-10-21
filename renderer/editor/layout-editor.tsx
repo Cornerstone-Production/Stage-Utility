@@ -83,6 +83,7 @@ import {
   objectIntegration,
   typeLabel,
 } from "../main/layout-objects";
+import { displayType, readTimerObject } from "../main/timer-config";
 import { invoke } from "../lib/api";
 import { fitFor } from "../main/console-fit";
 import { HOME_VIEW_ID } from "@main/services/home-view";
@@ -435,7 +436,7 @@ function OverlayNode({
           }}
         >
           {locked && <LockIcon style={{ width: 9, height: 9 }} />}
-          {typeLabel(o.config.type)}
+          {typeLabel(displayType(o.config))}
         </span>
       )}
       {/* On a coarse pointer, the menu's only other way in is a 500ms hold —
@@ -451,7 +452,7 @@ function OverlayNode({
       {isCoarse && inSel && onContextMenu && (
         <button
           type="button"
-          aria-label={`${typeLabel(o.config.type)} options`}
+          aria-label={`${typeLabel(displayType(o.config))} options`}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
@@ -1677,7 +1678,8 @@ export function LayoutEditor({
     setObjects((prev) => mapById(prev, id, (o) => ({ ...o, style: defaultStyleFor(o.config.type, { hostDrawsFrame: view.id === HOME_VIEW_ID }) })));
   }
   function updateConfig(id: string, config: LayoutObjectConfig) {
-    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, config })));
+    // A retired timer is written as a Timer, with the Home slot it held pinned.
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...readTimerObject(o), config })));
   }
   // Geometry updates during a drag don't each push history (startDrag already did).
   const onGeom = useCallback((id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => {
@@ -2394,7 +2396,7 @@ export function LayoutEditor({
               // must preview what that surface will draw.
               // The editor's own canvas is never the real screen a switched-off
               // display would refuse HLS on, so a Video widget here always may.
-              ctx={{ ...data, ...statusCtx(data), state: data.state, propresenter: data.propresenterStatus.value, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, allowHls: true, screen: null }}
+              ctx={{ ...data, ...statusCtx(data), state: data.state, propresenter: data.propresenterStatus.value, propresenterKnown: data.propresenterStatus.known, home: view.id === HOME_VIEW_ID, embedChain: [view.id], insideEmbedTile: false, servicePeak: data.servicePeaks.occupancy, servicePeakAttendance: data.servicePeaks.attendance, allowHls: true, screen: null }}
               ndiSource={view.ndiSource ?? null}
               onSelect={selectObject}
               onMarqueeSelect={selectMany}
@@ -2539,7 +2541,7 @@ export function LayoutEditor({
                   />
                 )}
                 <span className="text-caption1 text-fg flex-1 min-w-0 truncate">
-                  {o.config.type === "container" ? `${typeLabel(o.config.type)} (${o.children?.length ?? 0})` : typeLabel(o.config.type)}
+                  {o.config.type === "container" ? `${typeLabel(displayType(o.config))} (${o.children?.length ?? 0})` : typeLabel(displayType(o.config))}
                 </span>
                 {depth > 0 && (
                   <Tooltip label="Move out of container">

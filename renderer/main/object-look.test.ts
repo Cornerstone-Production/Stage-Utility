@@ -75,6 +75,7 @@ const CARDED = [
   "slide-progress",
   "spl-meter",
   "stream-status",
+  "timer",
   "view-embed",
   "wireless-channel",
   "wireless-summary",

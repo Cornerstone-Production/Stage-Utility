@@ -94,9 +94,10 @@ describe("the wall palette is unchanged", () => {
   });
 
   it("a Home card with no wall equivalent is NOT hidden", () => {
-    // Readiness, Next service, Service timer, Recent services, Screens online.
-    // Hiding these removes the reading rather than relocating it.
-    for (const t of ["home-readiness", "home-next-service", "home-live-status", "home-recent-services", "home-screens"]) {
+    // Readiness, Next service, Recent services, Screens online. Hiding these
+    // removes the reading rather than relocating it. (The Service timer is not
+    // here: it is the Timer now, which is offered on both surfaces.)
+    for (const t of ["home-readiness", "home-next-service", "home-recent-services", "home-screens"]) {
       assert.ok(!SUPERSEDED_ON_WALL.has(t as never), `${t} has no wall twin, so hiding it removes the reading`);
     }
   });
@@ -123,8 +124,11 @@ describe("the wall palette is unchanged", () => {
     // SUPERSEDED_ON_WALL and counted here — retiring them takes them out of the
     // palette entirely. The other two retirements were already excluded, having
     // twins in `obs-status` and `reaper-status`.
+    //
+    // SIX once the Service timer became the Timer: `home-live-status` is retired,
+    // so it left the palette like the per-source cards before it.
     const offered = onWall.filter((t) => t.startsWith("home-") && !SUPERSEDED_ON_WALL.has(t as never));
-    assert.equal(offered.length, 7, `expected 7 Home cards still offered on a wall, found ${offered.length}`);
+    assert.equal(offered.length, 6, `expected 6 Home cards still offered on a wall, found ${offered.length}`);
   });
 });
 

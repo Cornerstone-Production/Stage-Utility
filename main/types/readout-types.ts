@@ -36,6 +36,7 @@ export const IDIOM_TYPES = new Set<LayoutObjectType>([
   "wireless-channel",
   "spl-meter",
   "baptism-timer",
+  "timer",
 ]);
 
 /**

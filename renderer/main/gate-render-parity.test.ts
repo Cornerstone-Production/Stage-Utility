@@ -38,6 +38,7 @@ import { fileURLToPath } from "node:url";
 import { describe, test } from "node:test";
 
 import { LAYOUT_OBJECTS } from "./layout-objects.js";
+import { LEGACY_TIMER_TYPES } from "./timer-config.js";
 
 const here = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const RENDERER = here("./layout-renderer.tsx").split("\n");
@@ -303,14 +304,36 @@ const { gated: GATED, ungated: UNGATED } = scanGates();
 const READS = readsByType();
 
 describe("every channel a widget draws is one its layout subscribes to", () => {
-  test("the scan covers exactly the object registry, both ways", () => {
+  test("the scan covers exactly the object registry, both ways, less the types read as a Timer", () => {
     // The anchor. Nothing below means anything if the scan quietly found
     // nothing, and a floor ("at least forty arms") is how that goes unnoticed.
+    //
+    // Three types have no arm: ObjectBody reads `countdown-timer`, `pp-timer` and
+    // `baptism-timer` as a Timer before its switch, so the Timer's arm draws them
+    // (and its type is what the gates name). The compiler holds that: the switch's
+    // `never` default only compiles while no arm is left for a type readConfig
+    // maps. `home-live-status` keeps a Home-card arm, which the same mapping
+    // precedes. Listed exactly, and held to the mapping's own list.
+    const arms = [...READS.keys()].sort();
+    const registry = Object.keys(LAYOUT_OBJECTS).sort();
     assert.deepEqual(
-      [...READS.keys()].sort(),
-      Object.keys(LAYOUT_OBJECTS).sort(),
+      arms.filter((t) => !registry.includes(t)),
+      [],
+      "an arm was found for a type the registry does not have",
+    );
+    const armless = registry.filter((t) => !arms.includes(t));
+    assert.deepEqual(
+      armless,
+      [
+        "baptism-timer",
+        "countdown-timer",
+        "pp-timer",
+      ],
       "the render arms found do not match the object registry — a type has no arm, or the scan missed one",
     );
+    for (const t of armless) {
+      assert.ok((LEGACY_TIMER_TYPES as readonly string[]).includes(t), `${t} has no arm and is not read as a Timer`);
+    }
   });
 
   test("the gates were actually parsed", () => {
@@ -335,6 +358,7 @@ describe("every channel a widget draws is one its layout subscribes to", () => {
     assert.deepEqual(UNGATED, [
       "now",
       "pcoLive",
+      "pcoLiveKnown",
       "state",
     ]);
   });

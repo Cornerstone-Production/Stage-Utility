@@ -55,7 +55,7 @@ describe("the type-size rows a widget is offered", () => {
     // EVERY member, not the two that were reported. `people-counter` (attendance)
     // and `spl-meter` are the ones the operator named; the other thirteen were
     // just as dead.
-    assert.equal(IDIOM_TYPES.size, 15, "IDIOM_TYPES changed size — re-check this list");
+    assert.equal(IDIOM_TYPES.size, 16, "IDIOM_TYPES changed size — re-check this list");
     for (const t of IDIOM_TYPES) {
       const rows = rowsFor(t);
       assert.deepEqual(rows, [], `${t} still offers ${rows.join(" + ")}, which it does not read`);
@@ -78,7 +78,7 @@ describe("the type-size rows a widget is offered", () => {
 
   test("the predicate and the registry agree on who sizes itself", () => {
     const selfSizing = (Object.keys(LAYOUT_OBJECTS) as LayoutObjectType[]).filter(sizesTypeFromItsBox);
-    assert.equal(selfSizing.length, 15);
+    assert.equal(selfSizing.length, 16);
     assert.deepEqual(new Set(selfSizing), IDIOM_TYPES);
     // And the control still exists for the objects that honour it, so this is a
     // narrowing rather than a removal.

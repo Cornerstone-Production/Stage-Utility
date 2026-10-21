@@ -70,6 +70,7 @@ export const LAYOUT_OBJECT_TYPES = [
   "spl-meter",
   "stream-status",
   "text",
+  "timer",
   "transcript-strip",
   "video",
   "view-embed",

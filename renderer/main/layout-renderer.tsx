@@ -1,9 +1,10 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
-import { HomeCard, isHomeCard } from "../app/home/cards";
+import { HomeCard, Stat, isHomeCard } from "../app/home/cards";
+import { readConfig } from "./timer-config";
+import { readTimer, type TimerTone } from "./timer-reading";
 import { fitFor } from "./console-fit";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
-import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import { Tooltip } from "../components/ui/tooltip";
 import { advancePeakHold, type PeakHold } from "./peak-hold.js";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
@@ -33,7 +34,7 @@ import { useScoresStatus } from "./use-scores-state";
 import { ScoresObject } from "./scores-object";
 import { useOscState, resolveOscActive } from "./use-osc-state";
 import { usePeopleCountState, resolvePeopleValue, useServiceAvgOccupancy, useLiveServiceLow, useLiveServiceAttendance, useLiveServicePeaks } from "./use-people-count-state";
-import { useBaptismStatus, summarizeBaptism, fmtClock } from "./use-baptism-state";
+import { useBaptismStatus } from "./use-baptism-state";
 import { useIntegrations } from "./use-integration-states";
 import { useWirelessTelemetry } from "./use-wireless-telemetry";
 import { OscButton } from "./osc-button";
@@ -65,7 +66,13 @@ import { VideoObject } from "./video/video-object";
 export interface LayoutRenderCtx {
   state: StageState;
   propresenter: ProPresenterStatusDTO | null;
+  /** Whether ProPresenter's status has answered — a Timer reads a dash, not a
+   *  claim, until it has. */
+  propresenterKnown: boolean;
   pcoLive: PcoLiveDTO | null;
+  /** Whether PCO Live has answered. `pcoLive` is null both before it has and
+   *  when there is nothing live; only this tells them apart. */
+  pcoLiveKnown: boolean;
   /** All configured ProPresenter instances + their status — for per-object
    *  instance selection (two-auditorium setups). null until loaded. */
   propInstances: PropInstancesDTO | null;
@@ -349,7 +356,7 @@ export function boxStyle(o: LayoutObject, H: number): CSSProperties {
  * prose worse.
  */
 const TABULAR_TYPES = new Set<string>([
-  "clock", "countdown-timer", "pp-timer", "baptism-timer",
+  "clock", "countdown-timer", "pp-timer", "baptism-timer", "timer",
   "spl-meter", "people-counter", "service-pacing", "slide-progress", "charger-battery",
 ]);
 
@@ -759,8 +766,16 @@ const WALL_TWIN = externKeyed({
   "home-streaming-youtube": "YouTube",
 } as const);
 
+/** The wall's colour for a time that has earned one: the display palette's red
+ *  and amber, not Home's semantic tokens. */
+function timerWallColor(tone: TimerTone | null): string | null {
+  return tone === "over" ? "var(--red-10)" : tone === "warn" ? "var(--yellow-10)" : null;
+}
+
 function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
-  const c = o.config;
+  // An object saved as one of the four widgets the Timer replaced reads as the
+  // Timer from here on, so no arm below draws them and none can drift.
+  const c = readConfig(o.config);
   const ts = textStyle(o, ctx.H);
   // Every readout fits its box. This helper backs the plain-text objects
   // (text, slide text, slide notes), and routing it through FitText is what
@@ -1020,16 +1035,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // clock deliberately put on a wall in 24h must not flip because someone
       // changed a preference for the operator app.
       return readout(clockText(ctx.now, c.showSeconds ?? true, c.format ?? displayHourCycle(), c.showMeridiem ?? true));
-    case "countdown-timer": {
-      const t = computePcoTimer(ctx.pcoLive, ctx.now);
-      if (!t) return (c.hideWhenIdle ?? false) ? null : readout("—");
-      // Red once the timer goes negative (item or service ran over), like the
-      // dashboard; amber once it drops to/below the configured warning; else keep
-      // the idiom's own value colour.
-      const warning = c.warnSeconds != null && !t.over && t.seconds <= c.warnSeconds;
-      const color = t.over ? "var(--red-10)" : warning ? "var(--yellow-10)" : null;
-      return readout(fmtDuration(t.seconds), { valueColor: color });
-    }
     case "service-pacing": {
       // Live cumulative drift: how far ahead/behind the whole schedule we are
       // right NOW. See servicePacing() in service-pacing.ts for the math (also
@@ -1130,23 +1135,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // painted on a solid ground — a filled widget is the same widget wearing a
       // state, not a second design language.
       return readout(sec.name, { fill: sec.colorHex });
-    }
-    case "pp-timer": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
-      const timers = pro?.timers ?? [];
-      const timer = c.timerName ? timers.find((t) => t.name === c.timerName) : timers[0];
-      if (!timer) return (c.hideWhenIdle ?? false) ? null : readout("—");
-      // Color only on clearly-expired states; unknown/other states stay neutral.
-      const state = (timer.state ?? "").toLowerCase();
-      const danger = state.includes("over") || state.includes("expire");
-      const color = (c.warnStates ?? true) && danger ? "var(--red-10)" : null;
-      // The timer's NAME goes on the sub-line. It was an inline 0.6em span in
-      // front of the time — so a timer called "Sermon" pushed the number off
-      // centre and shrank with it. Under the value it stays a label.
-      return readout(timer.time, {
-        valueColor: color,
-        sub: (c.showLabel ?? true) ? timer.name : null,
-      });
     }
     case "slide-progress": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
@@ -1345,8 +1333,28 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       return <PeopleGraphObject ctx={ctx} config={c} ts={ts} />;
     case "people-panel":
       return <PeoplePanel config={c} people={ctx.peopleCount} serviceLow={ctx.serviceLow} serviceAttendance={ctx.serviceAttendance} servicePeak={ctx.servicePeak} servicePeakAttendance={ctx.servicePeakAttendance} ts={ts} H={ctx.H} />;
-    case "baptism-timer":
-      return <BaptismTimer state={ctx.baptism} known={ctx.baptismKnown} config={c} now={ctx.now} align={o.style?.textAlign} />;
+    case "timer": {
+      // The instance a ProPresenter timer reads: the default, or the one it
+      // names. A named instance that has not loaded is "not answering", not
+      // "no timers".
+      const named = c.propresenterInstanceId;
+      const r = readTimer(c, {
+        now: ctx.now,
+        pcoLive: ctx.pcoLive,
+        pcoLiveKnown: ctx.pcoLiveKnown,
+        propresenter: named ? ctx.propInstances?.status[named] : ctx.propresenter,
+        propresenterKnown: named ? ctx.propInstances != null : ctx.propresenterKnown,
+        baptism: ctx.baptism,
+        baptismKnown: ctx.baptismKnown,
+      });
+      if (r.hidden) return null;
+      // On Home the Timer is a stat like the cards beside it, in Home's own
+      // semantic colours; anywhere else it is the wall readout.
+      if (ctx.home) {
+        return <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone === "over" ? "danger" : r.tone === "warn" ? "warn" : undefined} />;
+      }
+      return readout(r.value, { caption: r.caption, sub: r.sub, valueColor: timerWallColor(r.tone) });
+    }
     case "record-status": {
       // "Is anything recording?" — one indicator regardless of which recorder the
       // campus uses, so a layout survives a switch from OBS to REAPER unchanged.
@@ -2195,140 +2203,6 @@ function PeoplePanel({
       })}
     </div>
     </div>
-  );
-}
-
-// A baptism-timer readout. `live` shows the running segment clock (ticking off the
-// shared 1s `now`); the rest are session stats. Optional sub-label.
-function BaptismTimer({
-  state,
-  known,
-  config,
-  now,
-  align,
-}: {
-  state: BaptismState | null;
-  /** Whether the baptism channel has answered yet. See the note at the end. */
-  known: boolean;
-  config: Extract<LayoutObjectConfig, { type: "baptism-timer" }>;
-  now: number;
-  align: LayoutHAlign | undefined;
-}) {
-  const field = config.field ?? "live";
-  const sum = summarizeBaptism(state);
-  let value = "—";
-  let fallback = "";
-  if (field === "live") {
-    if (state && state.phase !== "idle") {
-      // Same calculation as the operator page, so a paused timer on a display shows
-      // the held value rather than freezing at whatever it last happened to render.
-      value = fmtClock(segmentElapsedMs(state, now));
-      if (state.phase === "testimony") fallback = state.mode === "grouped" ? `Testimony ${state.personNumber}` : `Person ${state.personNumber} · testimony`;
-      // Armed reads identically to a just-started baptism otherwise — 0:00 over
-      // "Baptism 1" — which is exactly the ambiguity the operator panel's own
-      // "armed" readout exists to rule out. Same word, kept short for a wall
-      // rather than the panel's full sentence.
-      else if (state.armed) fallback = "armed";
-      else fallback = state.mode === "grouped" ? `Baptism ${state.baptismIndex + 1}` : `Person ${state.personNumber} · baptism`;
-    } else {
-      value = "0:00";
-      fallback = "ready";
-    }
-  } else if (field === "count") {
-    value = String(sum.count);
-    fallback = "baptized";
-  } else if (field === "total") {
-    value = fmtClock(sum.totalMs);
-    fallback = "total time";
-  } else if (field === "average") {
-    value = sum.count ? fmtClock(sum.avgPersonMs) : "—";
-    fallback = "avg per person";
-  } else if (field === "last") {
-    // NOT the last entry in `people` — in grouped mode every testimony is
-    // pushed up front with `baptizeMs: 0`, so the last entry is the last person
-    // who TESTIFIED, not the last one baptized (they agree only on the final
-    // baptism of the session). "Last person" on a stage display has to mean
-    // the last one actually baptized, same rule as `count`'s source.
-    const baptized = state?.people.filter((p) => p.baptizeMs > 0) ?? [];
-    const last = baptized[baptized.length - 1];
-    value = last ? fmtClock(last.testimonyMs + last.baptizeMs) : "—";
-    fallback = "last person";
-  } else if (field === "testimony") {
-    // This person's own testimony, once banked — NOT the live segment clock,
-    // which is `live`'s job. While their testimony is still running there is
-    // nothing banked yet, so this ticks the same running value `live` shows;
-    // once the phase moves on to baptizing them it holds at what was banked,
-    // independent of however long the baptism itself then runs.
-    if (!state || state.phase === "idle") {
-      value = "—";
-    } else if (state.phase === "testimony") {
-      value = fmtClock(segmentElapsedMs(state, now));
-    } else {
-      const bankedMs =
-        state.mode === "per-person" ? (state.pendingTestimonyMs ?? 0) : (state.people[state.baptismIndex]?.testimonyMs ?? 0);
-      value = fmtClock(bankedMs);
-    }
-    fallback = "testimony";
-  } else if (field === "session") {
-    // Wall clock since the session started — never paused, unlike the segment:
-    // a session that pauses through a long prayer still reads that time as part
-    // of the session. Freezes at the finished length once the session ends,
-    // rather than continuing to climb while idle before the next one starts.
-    if (!state?.sessionStartedAt) {
-      value = "—";
-    } else {
-      const started = Date.parse(state.sessionStartedAt);
-      const endedMs = state.finishedAt ? Date.parse(state.finishedAt) : now;
-      value = Number.isFinite(started) ? fmtClock(Math.max(0, endedMs - started)) : "—";
-    }
-    fallback = "session";
-  } else if (field === "phase") {
-    // The word, for a stage readout — armed reads as its own word rather than
-    // "baptism", the same distinction `live`'s fallback already draws: armed
-    // has no clock running, and saying "baptism" here would claim one does.
-    value = !state ? "—" : state.armed ? "armed" : state.phase;
-    fallback = "phase";
-  } else if (field === "person") {
-    // In grouped mode `personNumber` is the TESTIMONY counter and freezes once
-    // the baptism section arms — it is not who is being baptized. The person
-    // being baptized is `baptismIndex` (0-based) of `people.length`, which is
-    // only known once the testimony pass has filled `people`. Per-person mode
-    // never has a total, so it is always "Person N". Armed says so rather than
-    // "1 of 7" — indistinguishable from person 1 already being baptized, the
-    // same ambiguity `live`'s armed case already guards against.
-    if (!state || state.phase === "idle") {
-      value = "—";
-    } else if (state.armed) {
-      value = "armed";
-    } else if (state.phase === "testimony" || state.mode === "per-person") {
-      value = `Person ${state.personNumber}`;
-    } else {
-      value = `${state.baptismIndex + 1} of ${state.people.length}`;
-    }
-    fallback = "person";
-  }
-  // Not answered yet. Every field above reads a `null` state as a session with
-  // nothing in it — "0:00 ready", "0 baptized" — which on a wall that has just
-  // reloaded mid-baptism is a claim about a session that is running. The dash;
-  // the other fields' labels only name the box, but `live`'s "ready" is itself
-  // the claim, so it goes too.
-  if (!known) {
-    value = "—";
-    if (field === "live") fallback = "";
-  }
-  // "0:00 avg per person" on a narrow tile was 49px wider than the tile in the
-  // measured sweep, because the label rode on the end of the value and the pair
-  // was fitted as one string. Under the value it is a line of its own, and the
-  // value is sized from the box rather than from how long the label happens
-  // to be.
-  return (
-    <Readout
-      caption={config.caption}
-      value={value}
-      sub={config.showLabel ? config.label ?? fallback : null}
-      mono
-            align={align}
-    />
   );
 }
 
@@ -3261,7 +3135,14 @@ function collectLayoutTypes(
 
   for (const o of objects ?? []) {
     const config = o.config;
-    if (config?.type) into.add(config.type);
+    // A Timer reads ProPresenter or the baptism timer only for those sources, so
+    // a service Timer, the common one, names neither and opens neither channel.
+    // (Both gates name `timer`, so a ProPresenter Timer also opens the baptism
+    // read: one read and one channel, not the poll the ProPresenter gate holds at
+    // full rate.)
+    if (config?.type !== "timer" || (config.source ?? "service") !== "service") {
+      if (config?.type) into.add(config.type);
+    }
     if (o.children?.length) collectLayoutTypes(o.children, into, views, outputs, chain);
     if (config?.type === "view-embed") descend(config.viewId);
     // Resolved through the OUTPUT, exactly as the tile does, so a routing change
@@ -3312,7 +3193,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // The state comes FIRST, before the gates that used to be computed above it:
   // an embedded view's objects live in `state.views`, and a gate that cannot see
   // them leaves every widget inside a tile without a channel.
-  const { state, isLoading, error, pcoLive } = useDashboardState();
+  const { state, isLoading, error, pcoLive, pcoLiveKnown } = useDashboardState();
   const views = state?.views;
   const outputs = state?.outputs;
   // `views`/`outputs` are fresh array identities on every state broadcast, so
@@ -3404,10 +3285,11 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
     "section-chip",
     "slide-progress",
     "slide-thumbnail",
+    "timer",
   ]);
   const propresenterStatus = useProPresenterStatus(proWanted);
   const propInstances = usePropInstances(proWanted);
-  const baptismStatus = useBaptismStatus(want(["baptism-timer"]));
+  const baptismStatus = useBaptismStatus(want(["baptism-timer", "timer"]));
   // service-pacing reads the rundown only for its projected-end mode, and is
   // named whatever its config says: a gate that followed config would open the
   // read one render after the operator flipped the switch, and the projection
@@ -3420,7 +3302,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // as wrong as the last time anyone set it.
   const now = useServerClock(pcoLive?.serverNow);
 
-  return { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
+  return { state, isLoading, error, pcoLive, pcoLiveKnown, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now };
 }
 
 type LayoutData = ReturnType<typeof useLayoutData>;
@@ -3508,7 +3390,7 @@ export function LayoutRenderer({
    */
   viewId: string | null;
 }) {
-  const { state, isLoading, error, pcoLive, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
+  const { state, isLoading, error, pcoLive, pcoLiveKnown, propresenterStatus, propInstances, planItemsStatus, transcript, spl, obsStatus, reaperStatus, pvp, resiStatus, youtubeStatus, osc, cuesStatus, scoresStatus, messagesStatus, peopleCount, serviceLow, serviceAttendance, servicePeaks, baptismStatus, serviceTimeline, integrationsSnap, wireless, onlinePresence, now } = useLayoutData(layout, viewId);
 
   // Scale the design canvas to fit the container (letterboxed). Callback ref so
   // the observer attaches when the canvas mounts (after the loading guard).
@@ -3590,7 +3472,7 @@ export function LayoutRenderer({
   // NOT Home: Home draws its own grid with ObjectContent directly (see
   // home-grid), and /consoles/home redirects to it. Anything reaching this
   // renderer is a console, a display, or a preview of one.
-  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propInstances, pcoLive, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, messages: messagesStatus.value, messagesKnown: messagesStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, screen, H, interactive, placed };
+  const ctx: LayoutRenderCtx = { home: false, insideEmbedTile: false, embedChain: viewId ? [viewId] : [], state, propresenter: propresenterStatus.value, propresenterKnown: propresenterStatus.known, propInstances, pcoLive, pcoLiveKnown, planItems: planItemsStatus.value, planItemsKnown: planItemsStatus.known, planItemsFailed: planItemsStatus.failed, transcript, spl, obs: obsStatus.value, obsKnown: obsStatus.known, reaper: reaperStatus.value, reaperKnown: reaperStatus.known, pvp, resi: resiStatus.value, resiKnown: resiStatus.known, youtube: youtubeStatus.value, youtubeKnown: youtubeStatus.known, osc, cues: cuesStatus.value, cuesKnown: cuesStatus.known, scores: scoresStatus.value, scoresKnown: scoresStatus.known, messages: messagesStatus.value, messagesKnown: messagesStatus.known, peopleCount, serviceLow, serviceAttendance, servicePeak: servicePeaks.occupancy, servicePeakAttendance: servicePeaks.attendance, baptism: baptismStatus.value, baptismKnown: baptismStatus.known, serviceTimeline, integrations: integrationsSnap.states, integrationLabels: integrationsSnap.labels, integrationsKnown: integrationsSnap.known, wireless, onlineOutputIds: onlinePresence.onlineOutputIds, onlineKnown: onlinePresence.known, now, ndiSource, allowHls, screen, H, interactive, placed };
   const objects = [...layout.objects].filter((o) => !o.hidden).sort((a, b) => a.z - b.z);
 
   return (
