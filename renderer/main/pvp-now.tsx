@@ -311,14 +311,17 @@ export function PvpNowObject({
 
   // Countdown only draws the time and nothing else, so it answers before the
   // empty branch: nothing counting (an empty layer, a pinned name that is not
-  // there, a still with Count down stills off, an ended clip) is a dim dash,
-  // and the sentence the other layouts give it has no place to go.
+  // there, a still with Count down stills off) is a dim dash, and the sentence
+  // the other layouts give it has no place to go. An ended clip is not "nothing
+  // counting": its time ran out, so it holds 0:00 in the colour 0:00 takes and
+  // a full bar, the way a counted still holds once its hold runs out.
   if (layout === "countdown") {
+    const ended = !progress && badge === "ended";
     return (
       <PvpCountdownOnly
-        time={progress ? fmtDuration(progress.remainingSec) : null}
-        color={warnColor}
-        meter={meter}
+        time={progress ? fmtDuration(progress.remainingSec) : ended ? fmtDuration(0) : null}
+        color={ended ? pvpWarnColor(pvpWarnTone(0, config)) : warnColor}
+        meter={ended && (config.showProgress ?? true) ? 1 : meter}
         meterKey={pvpMeterKey(layer)}
         align={align}
       />

@@ -184,6 +184,30 @@ describe("Countdown only, nothing counting: a dim dash", () => {
   });
 });
 
+describe("Countdown only, an ended clip: holds 0:00", () => {
+  const cfg: PvpNowConfig = { layout: "countdown" };
+  // As PVP reports one: state "ended", the duration gone, the last frame held.
+  const ENDED = { state: "ended" as const, playbackRate: 1, anchorElapsedSec: 7.97, durationSec: null };
+  const ended = (config: PvpNowConfig = cfg) => draw(status([clip(0, ENDED)]), config);
+
+  test("0:00, undimmed, and no dash", () => {
+    const html = ended();
+    assert.ok(html.includes(">0:00<"), `no 0:00:\n${html}`);
+    assert.ok(!html.includes(">—<"), `an ended clip drew the dash:\n${html}`);
+    assert.ok(!/opacity:0\.45/.test(html), `the 0:00 is dimmed:\n${html}`);
+  });
+
+  test("with Warn near the end on it is red, as 0:00 is on a running clip", () => {
+    assert.ok(inkOfTime(ended({ ...cfg, warnNearEnd: true }), "0:00").includes(OVER));
+    assert.ok(!inkOfTime(ended(), "0:00").includes(OVER), "red with the warning off");
+  });
+
+  test("the hairline is full, and follows the Progress bar switch", () => {
+    assert.ok(/scaleX\(1\)|width:100%/.test(ended()), `the hairline is not full:\n${ended()}`);
+    assert.ok(!/scaleX\(1\)|width:100%/.test(ended({ ...cfg, showProgress: false })), "a hairline with Progress bar off");
+  });
+});
+
 describe("Warn near the end: the thresholds and their edges", () => {
   const on = { warnNearEnd: true };
 
