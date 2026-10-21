@@ -265,6 +265,19 @@ describe("when Planning Center is read", () => {
     for (const r of h.page.requests) assert.equal(r.body.includes("internal detail"), false);
   });
 
+  it("says on the card why Planning Center can't be read, and says nothing once it is not connected at all", async () => {
+    const h = await harness();
+    h.source.data.unavailable = "PCO API error 500: internal detail";
+    await h.pub.start();
+    await h.pub.runCycle();
+    assert.equal(h.pub.status().state, "publishing");
+    assert.deepEqual(h.pub.status().sourceProblem, { message: "PCO API error 500: internal detail" });
+    // Disconnected is a choice, not a failure: nothing is read, so nothing failed.
+    h.source.data.state = fixtureState({ pcoConfigured: false });
+    await h.pub.runCycle();
+    assert.equal(h.pub.status().sourceProblem, null);
+  });
+
   it("brings an edit to the layouts or the landing page to the page before the next minute", async () => {
     // The cycle is a minute apart; the nudge an edit sends is what makes it a moment.
     const h = await harness({ firstCycleMs: 5, cycleMs: 60_000, nudgeMs: 20 });

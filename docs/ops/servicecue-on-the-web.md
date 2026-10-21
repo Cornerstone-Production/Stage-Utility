@@ -138,6 +138,12 @@ page, and keeps the address it was on
   says why the Worker is not being reached: the token was refused, a Cloudflare rule
   blocked the server, the address is not the page, or the Worker has no secret set or one
   under 32 characters.
+- **The page has layouts but no services.** The server reaches the Worker but cannot read
+  Planning Center, so it sends no service types or rundowns. The **Public link** card
+  says **Can't read Planning Center** with the reason, and the log has
+  `[publish] could not read the service types: …` lines; it logs
+  `[publish] Planning Center can be read again` once the reads work. Fix the credentials
+  under **Integrations**.
 - **A page that shows no rundown** at an address that works for others: the rundown
   for that plan was never published. It says so, in place of the rundown.
 - **Open pages did not reload after a deploy.**

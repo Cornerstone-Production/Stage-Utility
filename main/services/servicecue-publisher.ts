@@ -66,7 +66,7 @@ import type {
   UpcomingPlansDTO,
 } from "../types/stage.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
-import type { PublishProblem, PublisherStatus } from "../types/servicecue-publish-status.js";
+import type { PublishProblem, PublisherStatus, SourceProblem } from "../types/servicecue-publish-status.js";
 import { FIXED_DOC_KEYS, FRAME_DOCS, PUBLISH_UPCOMING_DAYS, assetContentType, isFrameChannel, rundownKey, type FrameChannel, type PublicState } from "../types/servicecue-publish.js";
 
 // ── Cadence ──────────────────────────────────────────────────────────────────
@@ -226,6 +226,8 @@ class Run {
   havePlans = false;
   /** The landing types the last plan list could not read in full. */
   incompleteTypes: string[] = [];
+  /** Each Planning Center read that failed the last time it ran, by the document it is for, with why. */
+  readonly sourceFailures = new Map<string, string>();
   lastPcoAt = 0;
   forcePco = false;
   heldForPco = false;
@@ -406,9 +408,17 @@ export class ServiceCuePublisher {
       state: !enabled ? "off" : problem ? "problem" : "publishing",
       lastSentAt: run?.lastSentAt ?? null,
       lastError: problem,
+      sourceProblem: enabled && run ? this.sourceProblem(run) : null,
       counts: { types: run?.counts.types ?? 0, plans: run ? countUpcoming(this.plansOf(run), today) : 0, layouts: run?.counts.layouts ?? 0 },
       now: Date.now(),
     };
+  }
+
+  /** Why Planning Center could not be read, from the first failed read of a document the page still wants: none while it is not connected. */
+  private sourceProblem(run: Run): SourceProblem | null {
+    const wanted = new Set(this.wantedDocs(run));
+    const key = [...run.sourceFailures.keys()].filter((k) => wanted.has(k)).sort()[0];
+    return key === undefined ? null : { message: scrub(run.sourceFailures.get(key)!) };
   }
 
   /** The layouts, roles or landing page were edited: bring the page up to date soon. */
@@ -629,7 +639,12 @@ export class ServiceCuePublisher {
    * What one read said: its value, or why there is none. Said once per outage; the page keeps the last copy of what could not be
    * read. `failure` is for an answer that is a failure in disguise: the app serves its last list with the reason it could not refresh it.
    */
-  private async read<T>(run: Run, what: string, fn: () => Promise<T>, failure?: (value: T) => string | undefined): Promise<{ ok: true; value: T } | { ok: false }> {
+  private async read<T>(
+    run: Run,
+    what: string,
+    fn: () => Promise<T>,
+    failure?: (value: T) => string | undefined,
+  ): Promise<{ ok: true; value: T } | { ok: false; reason: string }> {
     let reason: string | undefined;
     let value: T | undefined;
     try {
@@ -644,7 +659,32 @@ export class ServiceCuePublisher {
     }
     const note = this.news(run, `read:${what}`, reason);
     if (note !== null) console.warn(`[publish] could not read ${scrub(what)}: ${scrub(reason)}; the page keeps its last copy${scrub(note)}`);
-    return { ok: false };
+    return { ok: false, reason };
+  }
+
+  /** A read from Planning Center, for the document `key`: as `read`, and remembered for the card's source problem. */
+  private async pcoRead<T>(
+    run: Run,
+    key: string,
+    what: string,
+    fn: () => Promise<T>,
+    failure?: (value: T) => string | undefined,
+  ): Promise<{ ok: true; value: T } | { ok: false; reason: string }> {
+    const r = await this.read(run, what, fn, failure);
+    if (r.ok) this.sourceRead(run, key);
+    else run.sourceFailures.set(key, r.reason);
+    return r;
+  }
+
+  /** The document `key` was read from Planning Center. */
+  private sourceRead(run: Run, key: string): void {
+    if (!run.sourceFailures.delete(key)) return;
+    if (run.sourceFailures.size === 0) {
+      console.log("[publish] Planning Center can be read again");
+      return;
+    }
+    // It answers again, so what else failed is due at the next trickle, not after its retry wait: until then the card says it can't be read.
+    for (const other of run.sourceFailures.keys()) run.nextDue.delete(other);
   }
 
   /** `key` has failed with `kind`: the text to append if that is news (the first time, a new kind, a reminder), null while it is the same failure again. */
@@ -706,14 +746,14 @@ export class ServiceCuePublisher {
     run.forcePco = false;
 
     const ids = run.known.landingIds;
-    const types = await this.read(run, "the service types", () => source.serviceTypes());
+    const types = await this.pcoRead(run, "service-types", "the service types", () => source.serviceTypes());
     if (types.ok) {
       const shown = landingTypes(types.value, ids);
       run.counts.types = shown.length;
       await this.put(run, "service-types", JSON.stringify(shown));
     }
     // The app serving its last list with the reason it could not refresh it is a failed read: its complaint is not for the page, and the last good list stays.
-    const upcoming = await this.read(run, "the plan list", () => source.upcoming(PUBLISH_UPCOMING_DAYS), (list) => list.unavailable);
+    const upcoming = await this.pcoRead(run, "plans-upcoming", "the plan list", () => source.upcoming(PUBLISH_UPCOMING_DAYS), (list) => list.unavailable);
     if (upcoming.ok) {
       run.known.plans = mergePlans(run.known.plans, upcoming.value, ids, startOfToday(source.timeZone()));
       run.havePlans = true;
@@ -728,13 +768,14 @@ export class ServiceCuePublisher {
       if (!this.alive(run) || !this.pcoClear(run)) return;
       const typeKey = rundownKey(id);
       if (typeKey === null) continue;
-      const r = await this.read(run, `the rundown for service type ${id}`, () => source.rundown(id, null));
+      const r = await this.pcoRead(run, typeKey, `the rundown for service type ${id}`, () => source.rundown(id, null));
       if (!r.ok) continue;
       await this.put(run, typeKey, JSON.stringify(r.value));
       const planId = r.value.planId;
       const planKey = planId ? rundownKey(id, planId) : null;
       if (planKey !== null && this.plansOf(run).some((p) => p.serviceTypeId === id && p.planId === planId)) {
         run.currentKeys.add(planKey);
+        this.sourceRead(run, planKey);
         run.nextDue.set(planKey, Date.now() + this.slowEveryMs());
         await this.put(run, planKey, JSON.stringify(r.value));
       }
@@ -794,7 +835,7 @@ export class ServiceCuePublisher {
       const key = rundownKey(plan.serviceTypeId, plan.planId);
       if (key === null || run.currentKeys.has(key) || (run.nextDue.get(key) ?? 0) > Date.now()) continue;
       if (!this.pcoClear(run)) return;
-      const r = await this.read(run, `the rundown for plan ${plan.planId}`, () => this.deps.source.rundown(plan.serviceTypeId, plan.planId));
+      const r = await this.pcoRead(run, key, `the rundown for plan ${plan.planId}`, () => this.deps.source.rundown(plan.serviceTypeId, plan.planId));
       run.nextDue.set(key, Date.now() + (r.ok ? this.slowEveryMs() : this.timings.failRetryMs));
       if (r.ok) await this.put(run, key, JSON.stringify(r.value));
       await this.pause(run, this.timings.staggerMs);

@@ -41,6 +41,15 @@ export interface PublishProblem {
   message: string;
 }
 
+/**
+ * Why what is published cannot be brought up to date from Planning Center: a read of the service
+ * types, the plan list or a rundown failed. The page is still reached; it keeps what it last received.
+ */
+export interface SourceProblem {
+  /** Why the read failed, as the server logs it. */
+  message: string;
+}
+
 export interface PublisherStatus {
   enabled: boolean;
   state: PublishState;
@@ -48,6 +57,9 @@ export interface PublisherStatus {
   lastSentAt: number | null;
   /** The problem, while `state` is "problem"; null otherwise. */
   lastError: PublishProblem | null;
+  /** Planning Center could not be read, while publishing is on and Planning Center is set up; null otherwise.
+   *  Apart from `state`: it never makes the page unreachable, and a page problem does not clear it. */
+  sourceProblem: SourceProblem | null;
   /** What the page was last sent: landing page service types, the plans in their
    *  switchers that have not gone by, and layouts. */
   counts: { types: number; plans: number; layouts: number };
