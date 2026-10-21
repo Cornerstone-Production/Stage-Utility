@@ -11,6 +11,7 @@ import { resolveServiceCueSpec, computeClocks, buildServiceCueColumns, totalLeng
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { plural } from "@main/services/plural";
+import { PublicLinkCard } from "./servicecue-public-link";
 
 // crypto.randomUUID is undefined in an insecure (plain-HTTP) context, which prod
 // is served over — fall back so layout creation never throws there.
@@ -267,6 +268,14 @@ export function ServiceCueSection() {
         />
         <span className="text-caption2 text-gray-9 basis-full sm:basis-auto">Only these appear on the ServiceCue landing page.</span>
       </div>
+
+      {/* The same landing page and layouts, handed to anyone with a link. It lists
+          what it publishes from the two lists above and below it, so it cannot say
+          one thing while the page does another. */}
+      <PublicLinkCard
+        typeNames={shownIds.map((id) => types.find((t) => t.id === id)?.name).filter((n): n is string => !!n)}
+        layoutNames={sortedLayouts.map((l) => l.name)}
+      />
 
       <div className="flex items-center gap-2 mb-4">
         <span className="text-caption1 text-gray-11">Preview with</span>

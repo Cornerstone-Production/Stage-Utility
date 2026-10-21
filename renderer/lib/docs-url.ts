@@ -28,6 +28,15 @@ const SAFE_REF = /^[A-Za-z0-9._/-]+$/;
  * what such a build can show.
  */
 export function docsUrl(descriptor: Pick<IntegrationDescriptor, "docs">, branch?: string | null): string {
+  return docsPageUrl(`integrations/${descriptor.docs}`, branch);
+}
+
+/**
+ * Any page under `docs/`, on the same ref rule as {@link docsUrl}: `page` is its path
+ * without the extension ("ops/servicecue-on-the-web"). A page that exists only on
+ * beta is linked on beta for the same reason an integration's is.
+ */
+export function docsPageUrl(page: string, branch?: string | null): string {
   const ref = branch && SAFE_REF.test(branch) ? branch : "main";
-  return `https://github.com/Cornerstone-Production/Stage-Utility/blob/${ref}/docs/integrations/${descriptor.docs}.md`;
+  return `https://github.com/Cornerstone-Production/Stage-Utility/blob/${ref}/docs/${page}.md`;
 }

@@ -524,6 +524,7 @@ export type IpcChannel =
   | "security:hostNames"
   | "security:setHostNames"
   | "servicecue:getConfig"
+  | "servicecue:getPublish"
   | "servicecue:listLayouts"
   | "servicecue:listRoles"
   | "servicecue:noteCategories"
@@ -531,6 +532,8 @@ export type IpcChannel =
   | "servicecue:saveLayouts"
   | "servicecue:saveRoles"
   | "servicecue:setConfig"
+  | "servicecue:setPublish"
+  | "servicecue:testPublish"
   | "sensource:listLocations"
   | "sensource:listZones"
   | "serviceTimeline:delete"
@@ -677,6 +680,17 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "servicecue:setConfig":
       return post<T>("/api/servicecue/config", { serviceTypeIds: p.serviceTypeIds });
+
+    // The public link: the settings and how publishing is going, the write, and a
+    // connection test. The test sends only what the form holds — see the route.
+    case "servicecue:getPublish":
+      return apiFetch<T>("/api/servicecue/publish");
+
+    case "servicecue:setPublish":
+      return post<T>("/api/servicecue/publish", p);
+
+    case "servicecue:testPublish":
+      return post<T>("/api/servicecue/publish/test", p);
 
     case "servicecue:listRoles":
       return apiFetch<T>("/api/servicecue/roles");
