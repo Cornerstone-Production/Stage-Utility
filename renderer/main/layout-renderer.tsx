@@ -1345,6 +1345,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         pcoLiveKnown: ctx.pcoLiveKnown,
         propresenter: named ? ctx.propInstances?.status[named] : ctx.propresenter,
         propresenterKnown: named ? ctx.propInstances != null : ctx.propresenterKnown,
+        // Set up: the integration for the default machine, a listed instance for a
+        // named one. Only a ProPresenter that is set up can be "not answering".
+        propresenterConfigured: named
+          ? (ctx.propInstances?.list.some((i) => i.id === named) ?? false)
+          : ctx.integrations.some((i) => i.id === "propresenter" && i.configured),
         baptism: ctx.baptism,
         baptismKnown: ctx.baptismKnown,
       });
@@ -3302,7 +3307,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   // would sit on a dash until it landed.
   const planItemsStatus = usePlanItemsStatus(want(["service-order", "service-pacing"]));
   const serviceTimeline = useServiceTimeline(want(["service-pacing", "people-graph"]));
-  const integrationsSnap = useIntegrations(want(["integration-status"]));
+  const integrationsSnap = useIntegrations(want(["integration-status", "timer:propresenter"]));
 
   // One clock for the whole canvas, and it is the SERVER's — a wall Pi's own is
   // as wrong as the last time anyone set it.

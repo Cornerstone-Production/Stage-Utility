@@ -99,6 +99,8 @@ function draw(config: Record<string, unknown>, ctx: Partial<LayoutRenderCtx> = {
 }
 
 const NEUTRAL = /readout-value-color/;
+/** ProPresenter set up on this machine, as the integrations list reports it. */
+const PRO_SET_UP = { integrations: [{ id: "propresenter", configured: true }] as unknown as IntegrationState[] };
 const RED_WALL = "var(--red-10)";
 const AMBER_WALL = "var(--yellow-10)";
 
@@ -307,13 +309,15 @@ describe("a source that has not answered", () => {
 
   test("ProPresenter says it is not answering only after it has answered that it is down", () => {
     const cfg = { type: "timer", source: "propresenter" };
-    assert.equal(draw(cfg, { propresenter: PRO([], false), propresenterKnown: true }).sub, "ProPresenter isn\u2019t answering");
-    assert.equal(draw(cfg, { propresenter: PRO([], true), propresenterKnown: true }).sub, null, "connected with no timer running is idle");
+    const down = { propresenter: PRO([], false), propresenterKnown: true, ...PRO_SET_UP };
+    assert.equal(draw(cfg, down).sub, "ProPresenter isn\u2019t answering");
+    assert.equal(draw(cfg, { ...down, propresenter: PRO([], true) }).sub, null, "connected with no timer running is idle");
   });
 
   test("Hide when idle stays hidden through the first read", () => {
     assert.equal(draw({ type: "timer", source: "service", hideWhenIdle: true }, { pcoLiveKnown: false }).text, "");
     assert.equal(draw({ type: "timer", source: "propresenter", hideWhenIdle: true }, { propresenter: null, propresenterKnown: false }).text, "");
+    assert.equal(draw({ type: "timer", source: "baptism", hideWhenIdle: true }, { baptism: null, baptismKnown: false }).text, "");
   });
 
 });
@@ -374,9 +378,39 @@ describe("on Home, a converted widget keeps the look it had", () => {
   });
 });
 
+describe("a machine with no ProPresenter", () => {
+  // An empty box has nothing to be "not answering": the disconnected status it
+  // reports is the plain dash, as it was before the sentence existed.
+  const none = { propresenter: PRO([], false), propresenterKnown: true, integrations: [] as IntegrationState[] };
+
+  test("a ProPresenter Timer reads a dash and no sentence", () => {
+    const d = draw({ type: "timer", source: "propresenter" }, none);
+    assert.equal(d.value, "\u2014");
+    assert.equal(d.sub, null);
+  });
+
+  test("a saved pp-timer reads the same", () => {
+    assert.equal(draw({ type: "pp-timer", caption: "Stage timer" }, none).sub, null);
+  });
+
+  test("an integration present but not set up is not set up", () => {
+    const off = { ...none, integrations: [{ id: "propresenter", configured: false }] as unknown as IntegrationState[] };
+    assert.equal(draw({ type: "timer", source: "propresenter" }, off).sub, null);
+  });
+
+  test("a named instance counts as set up only when it is listed", () => {
+    const cfg = { type: "timer", source: "propresenter", propresenterInstanceId: "room-2" };
+    const instances = (listed: boolean) => ({
+      propInstances: { list: listed ? [{ id: "room-2", name: "Room 2" }] : [], conn: {}, status: { "room-2": PRO([], false) } } as unknown as PropInstancesDTO,
+    });
+    assert.equal(draw(cfg, instances(true)).sub, "ProPresenter isn\u2019t answering");
+    assert.equal(draw(cfg, instances(false)).sub, null);
+  });
+});
+
 describe("Hide when idle wins over a source that is down", () => {
   test("draws nothing, as the ProPresenter timer did; without it the sentence stays", () => {
-    const down = { propresenter: PRO([], false), propresenterKnown: true };
+    const down = { propresenter: PRO([], false), propresenterKnown: true, ...PRO_SET_UP };
     assert.equal(draw({ type: "timer", source: "propresenter", hideWhenIdle: true }, down).text, "");
     assert.equal(draw({ type: "timer", source: "propresenter" }, down).sub, "ProPresenter isn\u2019t answering");
   });

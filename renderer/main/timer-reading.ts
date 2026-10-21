@@ -41,6 +41,9 @@ export interface TimerInputs {
    *  `propresenterInstanceId`: undefined when that instance has not loaded. */
   propresenter: ProPresenterStatusDTO | null | undefined;
   propresenterKnown: boolean;
+  /** Whether ProPresenter is set up at all. A machine without it has nothing to be
+   *  "not answering". */
+  propresenterConfigured: boolean;
   baptism: BaptismState | null;
   baptismKnown: boolean;
 }
@@ -132,7 +135,11 @@ function propresenter(config: TimerConfig, i: TimerInputs, { hide, showSub }: Co
   // Known to be down. Hide when idle wins, as it did for the ProPresenter timer
   // before: a widget set to draw nothing when there is nothing to show does not
   // start announcing an outage.
-  if (pro?.connected === false) return hide ? HIDE : dash(caption, true, showSub ? PROPRESENTER_UNANSWERED : null);
+  if (pro?.connected === false) {
+    if (hide) return HIDE;
+    // Not set up is not down: a machine with no ProPresenter reads the plain dash.
+    return dash(caption, i.propresenterConfigured, i.propresenterConfigured && showSub ? PROPRESENTER_UNANSWERED : null);
+  }
   const timers = pro?.timers ?? [];
   const timer = config.timerName ? timers.find((t) => t.name === config.timerName) : timers[0];
   if (!timer) return hide ? HIDE : dash(caption, false);
@@ -254,7 +261,8 @@ function baptismReadout(
 
 function baptism(config: TimerConfig, i: TimerInputs, { hide, showSub }: Common): TimerReading {
   const idle = i.baptismKnown && (!i.baptism || i.baptism.phase === "idle");
-  if (hide && idle) return HIDE;
+  // Quiet through the first read, as the other sources are.
+  if (hide && (!i.baptismKnown || idle)) return HIDE;
   const { value, word } = baptismReadout(config.field ?? "live", i.baptism, i.baptismKnown, i.now);
   return {
     hidden: false,

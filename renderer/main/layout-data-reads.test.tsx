@@ -298,7 +298,7 @@ describe("a Timer pays only for the source it reads", () => {
     await mount(useViewData, timerLayout("propresenter"));
     assert.equal(count("/api/propresenter/status"), 1, "the ProPresenter Timer never read its status");
     assert.ok((await subscribed()).has("propresenter:status"), "the ProPresenter Timer never subscribed its channel");
-    assert.deepEqual((await unwanted()).filter((x) => !x.startsWith("prop")), [], "a ProPresenter Timer paid for another source");
+    assert.deepEqual((await unwanted()).filter((x) => !x.startsWith("prop") && !x.startsWith("integrations")), [], "a ProPresenter Timer paid for another source");
   });
 
   test("a baptism Timer reads and subscribes the baptism timer", async () => {

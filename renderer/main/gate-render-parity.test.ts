@@ -305,6 +305,7 @@ function readsByType(): Map<string, Set<string>> {
 const TIMER_FIELD_SOURCE: Record<string, string> = {
   baptism: "baptism",
   baptismKnown: "baptism",
+  integrations: "propresenter",
   propInstances: "propresenter",
   propresenter: "propresenter",
   propresenterKnown: "propresenter",
