@@ -15,6 +15,7 @@ import { useNavigateTo, useSearchParam } from "../lib/use-search-param";
 import { useBackHref } from "../lib/back-target";
 import { refreshWhileMounted } from "../lib/live-refresh";
 import { rundownKey } from "@main/types/servicecue-publish";
+import { RUNDOWN_NOT_SENT, SERVICES_NOT_SENT, notPublishedYet } from "../lib/public-mode";
 
 /** The pages that open a rundown, which its back arrow may return to. */
 const SERVICECUE_LAUNCHERS = ["/servicecue", "/servicecue/manage"] as const;
@@ -41,6 +42,9 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const [layouts, setLayouts] = useState<ServiceCueLayout[]>([]);
   const [roles, setRoles] = useState<CategoryRole[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // On the public page, what the church has not sent yet (see notPublishedYet): said to a visitor, not as a failure.
+  const [typesNotSent, setTypesNotSent] = useState(false);
+  const [rundownNotSent, setRundownNotSent] = useState(false);
   // Which of the lists FAILED, as opposed to came back empty. Each failure used
   // to draw a plausible page that was wrong; see where they render.
   const { failed, fail, clear } = useFailedReads<"types" | "layouts" | "roles" | "rundown" | "plans" | "plan">("servicecue");
@@ -78,9 +82,19 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         .then((t) => {
           if (cancelled) return;
           setTypes(t);
+          setTypesNotSent(false);
           clear("types");
         })
-        .catch((err: unknown) => { if (!cancelled) fail("types", "the service types", err); });
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          if (notPublishedYet(err)) {
+            setTypesNotSent(true);
+            clear("types");
+          } else {
+            setTypesNotSent(false);
+            fail("types", "the service types", err);
+          }
+        });
     load();
     const stop = refreshWhileMounted(load, ["service-types"], 60_000);
     return () => { cancelled = true; stop(); };
@@ -122,7 +136,14 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   // Without the plan the body would spin for ever, so it says why instead:
   // quietly when Planning Center is simply not connected, as an error when a
   // read failed. A slug also needs the type list to resolve.
-  const notice = pcoConfigured === false ? "Planning Center isn't connected, so this page can't find its plan." : null;
+  const notice =
+    pcoConfigured === false
+      ? "Planning Center isn't connected, so this page can't find its plan."
+      : rundownNotSent
+        ? RUNDOWN_NOT_SENT
+        : !resolvedTypeId && typesNotSent
+          ? SERVICES_NOT_SENT
+          : null;
   const bodyError =
     error ?? (!resolvedTypeId && failed.has("types") ? "Couldn't load the service types, so this page can't find its plan." : null);
 
@@ -140,6 +161,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   useResyncOn([resolvedTypeId, planParam], () => {
     setRundown(null);
     setError(null);
+    setRundownNotSent(false);
     clear("rundown", "plan");
   });
 
@@ -167,9 +189,16 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
           clear("plan");
           setRundown(r);
           setError(null);
+          setRundownNotSent(false);
         })
         .catch((e: unknown) => {
           if (cancelled) return;
+          if (notPublishedYet(e)) {
+            setError(null);
+            setRundownNotSent(true);
+            clear("rundown");
+            return;
+          }
           setError(errorMessage(e));
           fail("rundown", `the rundown for service type ${resolvedTypeId}`, e);
         });
@@ -183,7 +212,8 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const upcoming = useUpcomingPlans({ enabled: !!pcoConfigured });
   // The read failed (an Error), or answered that Planning Center could not be
   // reached (a string). Neither is an empty list, and each is said and logged.
-  const planListProblem = upcoming.error ?? upcoming.unavailable;
+  // A plan list the church has not sent yet offers no plans, and the body says why.
+  const planListProblem = (notPublishedYet(upcoming.error) ? null : upcoming.error) ?? upcoming.unavailable;
   useEffect(() => {
     if (planListProblem) fail("plans", "the plan list", planListProblem);
     else clear("plans");

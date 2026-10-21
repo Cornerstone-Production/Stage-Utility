@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
-import { ok, reply } from "../test-fixtures/fetch-log.js";
+import { alerts, ok, reply } from "../test-fixtures/fetch-log.js";
 import { FakeSocket } from "../test-fixtures/fake-socket.js";
 
 const teardown = installRenderDom();
@@ -95,6 +95,10 @@ let heartbeatAnswer: () => unknown = () => ok({ at: EDGE - 5_000, now: EDGE });
 /** The rundown the Worker holds; a case changes it. */
 let rundown: unknown = RUNDOWN;
 const countOf = (path: string) => requests.filter((r) => r.path === path).length;
+/** The docs the Worker holds no copy of, which it answers 404 as it does a doc never sent. */
+let unpublished = new Set<string>();
+/** The paths the Worker fails on: a 500, which is a failure and not a doc not sent. */
+let broken = new Set<string>();
 
 const liveFrame = (itemId: string, startedAgoMs: number, serverNow = EDGE) => ({
   mode: "item",
@@ -114,6 +118,10 @@ const liveFrame = (itemId: string, startedAgoMs: number, serverNow = EDGE) => ({
 g.fetch = async (input: unknown, init?: RequestInit) => {
   const u = new URL(String(input), "https://servicecue.example.workers.dev");
   requests.push({ method: init?.method ?? "GET", path: u.pathname, search: u.search });
+  if (broken.has(u.pathname)) return reply(500, { error: "Something went wrong" });
+  if (unpublished.has(u.pathname)) {
+    return reply(404, { error: u.pathname === "/api/servicecue/rundown" ? "That plan is not published" : "That is not published" });
+  }
   switch (u.pathname) {
     case "/api/state":
       return ok(STATE);
@@ -215,6 +223,8 @@ beforeEach(() => {
   perfNow = 50_000;
   heartbeatAnswer = () => ok({ at: EDGE - 5_000, now: EDGE });
   rundown = RUNDOWN;
+  unpublished = new Set();
+  broken = new Set();
 });
 afterEach(() => {
   cleanup();
@@ -284,6 +294,49 @@ describe("a rundown", () => {
     await eventually(() => assert.ok(screen.getByText("Hold Fast")));
     await say({ channel: "pco:live", data: liveFrame("s1", 10_000), replay: true });
     await eventually(() => assert.match(liveRows()[0]?.textContent ?? "", /Hold Fast/));
+  });
+});
+
+describe("what the church has not sent yet", () => {
+  const SERVICES = "The church hasn't sent its services yet. Check back soon.";
+  const RUNDOWN_TEXT = "This service hasn't been sent yet. Check back soon.";
+
+  test("the landing page says so to a visitor, in place of an error, while the service types have not been sent", async () => {
+    unpublished = new Set(["/api/service-types"]);
+    await load("/servicecue");
+    await eventually(() => assert.ok(screen.getByText(SERVICES)));
+    assert.equal(alerts(), "");
+  });
+
+  test("a rundown link says so too, when the service types it is named by have not been sent", async () => {
+    unpublished = new Set(["/api/service-types", "/api/plans/upcoming"]);
+    await load("/servicecue/weekend/audio");
+    await eventually(() => assert.ok(screen.getByText(SERVICES)));
+    assert.equal(alerts(), "");
+  });
+
+  test("a rundown the church has not sent says so, and so does no plan list", async () => {
+    unpublished = new Set(["/api/servicecue/rundown", "/api/plans/upcoming"]);
+    await load("/servicecue/weekend/audio");
+    await eventually(() => assert.ok(screen.getByText(RUNDOWN_TEXT)));
+    assert.equal(alerts(), "");
+    assert.equal(screen.queryByText("That plan is not published"), null);
+  });
+
+  test("a read that fails is still said as a failure", async () => {
+    broken = new Set(["/api/service-types"]);
+    await load("/servicecue");
+    await eventually(() => assert.match(alerts(), /Couldn't load ServiceCue's service types and layouts/));
+    assert.equal(screen.queryByText(SERVICES), null);
+  });
+
+  test("in the building a 404 is a failure, as it always was", async () => {
+    unpublished = new Set(["/api/service-types"]);
+    await onTheChurchsOwnPage(async () => {
+      await load("/servicecue", { socket: false });
+      await eventually(() => assert.match(alerts(), /Couldn't load ServiceCue's service types and layouts/));
+      assert.equal(screen.queryByText(SERVICES), null);
+    });
   });
 });
 

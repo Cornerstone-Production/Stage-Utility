@@ -8,7 +8,7 @@ import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import { useOriginHref } from "../lib/back-target";
-import { isPublicMode } from "../lib/public-mode";
+import { SERVICES_NOT_SENT, isPublicMode, notPublishedYet } from "../lib/public-mode";
 
 // Implicit layout that shows every note-category column — always available so the
 // landing page works before any custom layout is configured (Phase 3 adds those).
@@ -41,6 +41,8 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
   const [layouts, setLayouts] = useState<ServiceCueLayout[]>([]);
   const [shownIds, setShownIds] = useState<string[]>([]);
   const { failed, fail, clear } = useFailedReads<"load">("servicecue");
+  // On the public page: the church has not sent one of the three yet (see notPublishedYet).
+  const [notSent, setNotSent] = useState(false);
   // Lets a rundown's back arrow lead back to this page.
   const withThisPage = useOriginHref();
   const [sel, setSel] = useState<Record<string, string>>({});
@@ -68,9 +70,19 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
         setTypes(t);
         setLayouts(l);
         setShownIds(c.serviceTypeIds ?? []);
+        setNotSent(false);
         clear("load");
       })
-      .catch((err: unknown) => { if (!cancelled) fail("load", "the ServiceCue service types and layouts", err); });
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (notPublishedYet(err)) {
+          setNotSent(true);
+          clear("load");
+        } else {
+          setNotSent(false);
+          fail("load", "the ServiceCue service types and layouts", err);
+        }
+      });
     return () => { cancelled = true; };
   }, [pcoConfigured, fail, clear]);
 
@@ -122,6 +134,8 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
 
           {pcoConfigured === false ? (
             <p className="text-body text-fg-subtle text-center max-w-xs">Connect Planning Center to use ServiceCue.</p>
+          ) : notSent ? (
+            <p className="text-body text-fg-subtle text-center max-w-xs">{SERVICES_NOT_SENT}</p>
           ) : failed.has("load") ? (
             <ErrorNote>Couldn't load ServiceCue's service types and layouts.</ErrorNote>
           ) : !types || stateLoading ? (
