@@ -65,6 +65,13 @@ export interface LayoutObjectSpec {
    * dimming them would just be noise.
    */
   integration?: { id: string; label: string };
+  /**
+   * The style this widget starts with when it is added on HOME, where it has no
+   * card of its own and the theme decides the text colour. Absent: the ordinary
+   * `style()`. A wall widget's readout style names a white ink, which on Home's
+   * light card is white on white.
+   */
+  homeStyle?: () => LayoutStyle;
   /** No per-object options; the inspector shows a "styling only" hint. */
   stylingOnly?: boolean;
   /**
@@ -362,6 +369,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     // is the Service card again. Converted objects keep their own settings.
     config: () => ({ type: "timer", source: "service", nextItem: true }),
     style: () => READOUT(0.1),
+    // As the bare Service card it replaces: no ink of its own on Home.
+    homeStyle: BARE,
   },
   "countdown-timer": {
     label: "PCO countdown",
@@ -1234,6 +1243,8 @@ export function defaultStyleFor(
   // function -- a readout added in the editor stored textAlign:"center"
   // permanently, and Reset look on an object from a newer build white-screened
   // the page.
+  const home = findLayoutObjectSpec(type)?.homeStyle;
+  if (opts.hostDrawsFrame && home) return home();
   const base = defaultStyle(type);
   if (opts.hostDrawsFrame || !HOST_FRAMED_TYPES.has(type)) return base;
   return { ...CARD_PRESETS.neutral, ...base };
