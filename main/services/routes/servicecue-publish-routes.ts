@@ -17,7 +17,7 @@ import { plural } from "../plural.js";
 import { isMask, MASK, hasSecretValue } from "../mask.js";
 import { scrub } from "../scrub.js";
 import { secretsStore } from "../secrets.js";
-import { createPushClient, problemOf } from "../servicecue-publish-client.js";
+import { createPushClient, failureForLog, problemOf } from "../servicecue-publish-client.js";
 import { checkPublishToken, parsePublishUrl, type PublishOrigin } from "../servicecue-publish-rules.js";
 import {
   PUBLISH_SECRET_SLOT,
@@ -50,7 +50,11 @@ async function settingsDto(dropped?: PublishSettingsDTO["dropped"]): Promise<Pub
 /** The page's own answer to a status request, as the card reads it. */
 async function testPage(origin: PublishOrigin, token: string): Promise<PublishTestResult> {
   const r = await createPushClient({ origin, token }).status();
-  if (!r.ok) return { ok: false, ...problemOf(r) };
+  if (!r.ok) {
+    // The operator asked: said once each time, and with what Node said, which the card does not show.
+    console.warn(`[publish] the connection test did not reach the page — ${failureForLog(r)}`);
+    return { ok: false, ...problemOf(r) };
+  }
   return { ok: true, message: `Reached the page: it holds ${plural(r.page.docs.length, "document")} and ${plural(r.page.assets.length, "image")}.` };
 }
 

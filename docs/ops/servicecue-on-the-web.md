@@ -138,6 +138,11 @@ page, and keeps the address it was on
   says why the Worker is not being reached: the token was refused, a Cloudflare rule
   blocked the server, the address is not the page, or the Worker has no secret set or one
   under 32 characters.
+- **The card says something on this network is intercepting the connection.** A firewall
+  or web filter on the church's network is answering for the Worker with a certificate of
+  its own, usually because its filter blocks the address. Ask whoever runs it to allow the
+  Worker's host. The `[publish]` log line carries what Node said and its code
+  (`SELF_SIGNED_CERT_IN_CHAIN`, `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` and the like).
 - **The page says "The church hasn't sent its services yet."** The Worker holds no
   service types: the server reaches it but cannot read Planning Center, so it sends
   layouts and no service types or rundowns. The **Public link** card

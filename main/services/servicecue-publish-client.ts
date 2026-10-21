@@ -15,8 +15,9 @@
 //     field. Any other body is cancelled unread so the socket is released.
 
 import { readCapped } from "./capped-download.js";
-import { fetchFailureMessage } from "./errors.js";
+import { fetchFailureMessage, untrustedCertificateCode } from "./errors.js";
 import { pinToOrigin } from "./pinned-origin.js";
+import { scrub } from "./scrub.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 import type { PublishProblem } from "../types/servicecue-publish-status.js";
 import { PUBLISH_BASE_PATH, PUBLISH_MAX_BODY_BYTES, PUBLISH_MAX_VERSION_LENGTH, PUBLISH_PROTOCOL_VERSION, type PublishStatus } from "../types/servicecue-publish.js";
@@ -66,6 +67,7 @@ export type PushFailureKind =
   | "rejected"
   | "redirect"
   | "unreachable"
+  | "intercepted"
   | "protocol"
   | "refused"
   | "aborted";
@@ -77,6 +79,8 @@ export interface PushFailure {
   status?: number;
   /** A plain sentence. Never contains the token. */
   message: string;
+  /** What Node said, for the log when `message` is the operator's words for it. */
+  detail?: string;
 }
 
 /** A failure as the problem the card shows. `refused` and `aborted` are never one; they read as the address not being the page. */
@@ -132,7 +136,23 @@ function failureOf(err: unknown, origin: string, ceilingMs: number): PushFailure
       message: "The address answered with a redirect, which is never followed. Use the address the page was deployed at.",
     };
   }
+  // Node's own words for this ("self-signed certificate; … try running Node.js with --use-system-ca") are advice to a developer, not to the operator.
+  const code = untrustedCertificateCode(err);
+  if (code !== null) {
+    const host = new URL(origin).host;
+    return {
+      ok: false,
+      kind: "intercepted",
+      message: `Something on this network is intercepting the connection to ${host}, usually a firewall or web filter blocking the address. Ask whoever runs the firewall to allow ${host}.`,
+      detail: `${code}: ${fetchFailureMessage(err, origin)}`,
+    };
+  }
   return { ok: false, kind: "unreachable", message: fetchFailureMessage(err, origin) };
+}
+
+/** A failure as the log says it, scrubbed: the plain sentence, and what Node said when that is not it. Each is capped on its own, so the sentence cannot crowd out the code. */
+export function failureForLog(f: { message: string; detail?: string }): string {
+  return f.detail ? `${scrub(f.message)} (${scrub(f.detail)})` : scrub(f.message);
 }
 
 /**

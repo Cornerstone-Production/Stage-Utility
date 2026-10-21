@@ -52,7 +52,7 @@ import {
   type PublicLive,
   type PublicSpl,
 } from "./servicecue-publish-docs.js";
-import { createPushClient, problemOf, type PageHolds, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
+import { createPushClient, failureForLog, problemOf, type PageHolds, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
 import { checkPublishToken, parsePublishUrl, type PublishOrigin } from "./servicecue-publish-rules.js";
 import type { ServiceCuePublishSettings } from "./servicecue-publish-store.js";
 import type {
@@ -488,10 +488,10 @@ export class ServiceCuePublisher {
       case "rejected":
       case "protocol":
         // Waiting does not fix a token, a firewall rule, an address that is not the page, or another protocol.
-        this.hold(run, problemOf(r));
+        this.hold(run, problemOf(r), r.detail);
         return;
       default:
-        this.failed(run, item, problemOf(r));
+        this.failed(run, item, problemOf(r), r.detail);
     }
   }
 
@@ -521,7 +521,7 @@ export class ServiceCuePublisher {
   }
 
   /** A failure waiting can fix: back off, say so once, and probe with a heartbeat when the wait is over. */
-  private failed(run: Run, item: string, problem: PublishProblem): void {
+  private failed(run: Run, item: string, problem: PublishProblem, detail?: string): void {
     run.failures.set(item, (run.failures.get(item) ?? 0) + 1);
     run.cycleFailed = true;
     run.problem = problem;
@@ -530,7 +530,7 @@ export class ServiceCuePublisher {
     run.retryAt = Date.now() + wait;
     const decision = run.outage.fail("page", `${problem.kind}:${problem.status ?? ""}`, Date.now());
     if (decision.log) {
-      console.warn(`[publish] the page is not accepting what is sent — ${scrub(problem.message)} Trying again in ${scrub(Math.round(wait / 1000))} s${scrub(decision.note)}`);
+      console.warn(`[publish] the page is not accepting what is sent — ${failureForLog({ message: problem.message, detail })} Trying again in ${scrub(Math.round(wait / 1000))} s${scrub(decision.note)}`);
     }
     if (run.retryTimer) clearTimeout(run.retryTimer);
     run.retryTimer = setTimeout(() => void this.probe(run), wait);
@@ -538,12 +538,12 @@ export class ServiceCuePublisher {
   }
 
   /** A failure waiting cannot fix: stop until the settings change. The card keeps reading the problem off the run. */
-  private hold(run: Run, problem: PublishProblem): void {
+  private hold(run: Run, problem: PublishProblem, detail?: string): void {
     this.teardown(run);
     run.held = problem;
     const decision = run.outage.fail("page", `${problem.kind}:${problem.status ?? ""}`, Date.now());
     if (decision.log) {
-      console.warn(`[publish] publishing is held — ${scrub(problem.message)} Change the address or the token to try again.${scrub(decision.note)}`);
+      console.warn(`[publish] publishing is held — ${failureForLog({ message: problem.message, detail })} Change the address or the token to try again.${scrub(decision.note)}`);
     }
   }
 
@@ -700,7 +700,7 @@ export class ServiceCuePublisher {
     if (r.kind === "refused") {
       // Remembered by its text, so it is not tried again until it changes.
       run.refused.set(key, hash);
-      console.warn(`[publish] not sent: ${scrub(key)}, and not tried again until it changes — ${scrub(r.message)}`);
+      console.warn(`[publish] not sent: ${scrub(key)}, and not tried again until it changes — ${failureForLog(r)}`);
     }
     return false;
   }
@@ -885,7 +885,7 @@ export class ServiceCuePublisher {
         run.assets.sent.add(name);
       } else if (r.kind === "refused") {
         run.assets.refused.add(name);
-        console.warn(`[publish] not sent: the logo ${scrub(name)}, and it is left off the page — ${scrub(r.message)}`);
+        console.warn(`[publish] not sent: the logo ${scrub(name)}, and it is left off the page — ${failureForLog(r)}`);
       }
     }
   }
@@ -943,7 +943,7 @@ export class ServiceCuePublisher {
     if (!r.ok) {
       // A manifest the page will not take is not something a retry changes, and it would be said every cycle.
       const note = r.kind === "refused" ? this.news(run, "manifest", `${r.status ?? ""}`) : null;
-      if (note !== null) console.warn(`[publish] the page refused the list of what to keep — ${scrub(r.message)} Nothing is removed from the page until it takes one${scrub(note)}`);
+      if (note !== null) console.warn(`[publish] the page refused the list of what to keep — ${failureForLog(r)} Nothing is removed from the page until it takes one${scrub(note)}`);
       return;
     }
     run.outage.forget("manifest");
@@ -1059,7 +1059,7 @@ export class ServiceCuePublisher {
     } else if (r.kind === "refused") {
       run.refused.set(doc, hash);
       const note = this.news(run, `frame:${channel}`, `${r.status ?? ""}`);
-      if (note !== null) console.warn(`[publish] the page refused a ${scrub(channel)} frame — ${scrub(r.message)}${scrub(note)}`);
+      if (note !== null) console.warn(`[publish] the page refused a ${scrub(channel)} frame — ${failureForLog(r)}${scrub(note)}`);
     }
   }
 
@@ -1082,7 +1082,7 @@ export class ServiceCuePublisher {
       console.log("[publish] asked the page to drop its copy");
       return { ok: true };
     }
-    console.warn(`[publish] the page could not be asked to drop its copy — ${scrub(r.message)}`);
+    console.warn(`[publish] the page could not be asked to drop its copy — ${failureForLog(r)}`);
     return { ok: false, message: r.message };
   }
 }
