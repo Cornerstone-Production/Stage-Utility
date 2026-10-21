@@ -70,7 +70,7 @@ const nothingStored = (hub: MemoryHub) => {
 };
 
 describe("every response", () => {
-  test("carries the three base headers, whichever route made it", async () => {
+  test("carries the base headers, whichever route made it", async () => {
     const s = setup();
     s.hub.docs.set("state", "{}");
     const requests: [string, string, { headers?: Record<string, string>; body?: BodyInit }?][] = [
@@ -101,6 +101,40 @@ describe("every response", () => {
     const res = await s.run("PUT", "/_publish/v1/doc/state", { headers: AUTH, body: "{}" });
     assert.equal(res.status, 503);
     for (const [name, value] of BASE_HEADERS) assert.equal(res.headers.get(name), value, name);
+  });
+});
+
+describe("plain http", () => {
+  const over = (origin: string, method: string, path: string, headers: Record<string, string> = {}) => {
+    const s = setup();
+    return { s, res: handle(new Request(`${origin}${path}`, { method, headers }), { hub: s.hub, upgrade: async () => new Response(null), assets: async () => new Response("page"), token: TOKEN, now: () => 0 }) };
+  };
+
+  test("a visitor is sent to the same address over https, path and query kept", async () => {
+    for (const path of ["/", "/servicecue", "/servicecue/weekend/audio?plan=123&text=lg", "/api/state", "/nothing-here"]) {
+      const res = await over("http://servicecue.example.workers.dev", "GET", path).res;
+      assert.equal(res.status, 301, path);
+      assert.equal(res.headers.get("Location"), `https://servicecue.example.workers.dev${path}`, path);
+      for (const [name, value] of BASE_HEADERS) assert.equal(res.headers.get(name), value, `${path} ${name}`);
+    }
+  });
+
+  test("a publish is refused, even with the right token, and stores nothing", async () => {
+    for (const [method, path] of [["GET", "/_publish/v1/status"], ["PUT", "/_publish/v1/doc/state"]] as const) {
+      const { s, res } = over("http://servicecue.example.workers.dev", method, path, AUTH);
+      const answer = await res;
+      assert.equal(answer.status, 403, `${method} ${path}`);
+      assert.deepEqual(await answer.json(), { error: "Publishing needs https" });
+      nothingStored(s.hub);
+    }
+  });
+
+  test("the loopback is served as it is, for wrangler dev", async () => {
+    for (const origin of ["http://127.0.0.1:8787", "http://localhost:8787", "http://[::1]:8787"]) {
+      const res = await over(origin, "GET", "/_publish/v1/status", AUTH).res;
+      assert.notEqual(res.status, 301, origin);
+      assert.notEqual(res.status, 403, origin);
+    }
   });
 });
 

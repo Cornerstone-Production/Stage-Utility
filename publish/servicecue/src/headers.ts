@@ -5,11 +5,14 @@ import { PUBLIC_STATIC_FILES, STATIC_ASSET_PREFIX } from "../../../main/types/se
 
 /**
  * On EVERY response the Worker sends, whatever route made it: the page is not for
- * search engines, a browser takes a response for what it says it is, and a link out
- * of the page does not tell the next site where it came from. Sorted by name.
+ * search engines, a browser takes a response for what it says it is, a link out of
+ * the page does not tell the next site where it came from, and a browser that has
+ * been here once comes back over https only, whatever the zone's own settings say.
+ * Sorted by name.
  */
 export const BASE_HEADERS: readonly (readonly [name: string, value: string])[] = [
   ["Referrer-Policy", "no-referrer"],
+  ["Strict-Transport-Security", "max-age=15552000; includeSubDomains"],
   ["X-Content-Type-Options", "nosniff"],
   ["X-Robots-Tag", "noindex"],
 ];

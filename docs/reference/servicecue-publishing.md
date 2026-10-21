@@ -209,7 +209,14 @@ with `1000` where not.
 ### Response headers
 
 On every response the Worker sends, the `101` handshake aside: `X-Robots-Tag: noindex`,
-`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+`Strict-Transport-Security: max-age=15552000; includeSubDomains`.
+
+A request over plain `http` gets a `301` to the same path and query over `https`,
+except under `/_publish/`, which is a `403 {"error": "Publishing needs https"}` without
+the token being checked. `localhost`, `127.0.0.1` and `[::1]` are served over `http` as
+they are, for `wrangler dev`. A zone with **Always Use HTTPS** on redirects before the
+Worker sees the request; this is the same rule kept by the Worker itself.
 
 On the page, a policy that allows no inline script:
 

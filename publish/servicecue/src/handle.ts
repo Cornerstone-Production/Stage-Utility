@@ -32,9 +32,28 @@ export interface HandlerDeps {
   now: () => number;
 }
 
+/** `wrangler dev` and the tests serve plain http on the loopback; nothing else may. */
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * A plain-http request, which reaches the Worker only if the zone's Always Use HTTPS
+ * is off. A visitor is sent to the same address over https. A publish is refused
+ * without its token being looked at: the token has already crossed the wire in the
+ * clear, and a publisher that sent it so is told loudly rather than kept working.
+ */
+function plainHttp(url: URL): Response | null {
+  if (url.protocol !== "http:" || LOOPBACK.has(url.hostname)) return null;
+  if (isPublishArea(url.pathname)) return json({ error: "Publishing needs https" }, 403);
+  const to = new URL(url);
+  to.protocol = "https:";
+  return new Response(null, { status: 301, headers: { Location: to.href } });
+}
+
 /** Answer a request. Every response carries the base headers. */
 export async function handle(request: Request, deps: HandlerDeps): Promise<Response> {
   const url = new URL(request.url);
+  const insecure = plainHttp(url);
+  if (insecure) return secured(insecure);
   try {
     return secured(isPublishArea(url.pathname) ? await publish(request, url, deps) : await serve(request, url, deps));
   } catch (err) {
