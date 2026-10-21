@@ -402,7 +402,7 @@ export function PublicLinkCard({
       )}
 
       {/* After the page problem, which keeps the pill: fixing that alone would still leave the rundowns missing. */}
-      {dto && view !== "off" && status?.sourceProblem && (
+      {dto && status?.sourceProblem && (
         <Note>
           Publishing, but Planning Center can't be read: {sentence(status.sourceProblem.message)} The public page keeps what it
           last received.{" "}

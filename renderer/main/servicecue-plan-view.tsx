@@ -87,13 +87,10 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         })
         .catch((err: unknown) => {
           if (cancelled) return;
-          if (notPublishedYet(err)) {
-            setTypesNotSent(true);
-            clear("types");
-          } else {
-            setTypesNotSent(false);
-            fail("types", "the service types", err);
-          }
+          const missing = notPublishedYet(err);
+          setTypesNotSent(missing);
+          if (missing) clear("types");
+          else fail("types", "the service types", err);
         });
     load();
     const stop = refreshWhileMounted(load, ["service-types"], 60_000);
@@ -136,14 +133,10 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   // Without the plan the body would spin for ever, so it says why instead:
   // quietly when Planning Center is simply not connected, as an error when a
   // read failed. A slug also needs the type list to resolve.
-  const notice =
-    pcoConfigured === false
-      ? "Planning Center isn't connected, so this page can't find its plan."
-      : rundownNotSent
-        ? RUNDOWN_NOT_SENT
-        : !resolvedTypeId && typesNotSent
-          ? SERVICES_NOT_SENT
-          : null;
+  let notice: string | null = null;
+  if (pcoConfigured === false) notice = "Planning Center isn't connected, so this page can't find its plan.";
+  else if (rundownNotSent) notice = RUNDOWN_NOT_SENT;
+  else if (!resolvedTypeId && typesNotSent) notice = SERVICES_NOT_SENT;
   const bodyError =
     error ?? (!resolvedTypeId && failed.has("types") ? "Couldn't load the service types, so this page can't find its plan." : null);
 
@@ -193,14 +186,11 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         })
         .catch((e: unknown) => {
           if (cancelled) return;
-          if (notPublishedYet(e)) {
-            setError(null);
-            setRundownNotSent(true);
-            clear("rundown");
-            return;
-          }
-          setError(errorMessage(e));
-          fail("rundown", `the rundown for service type ${resolvedTypeId}`, e);
+          const missing = notPublishedYet(e);
+          setRundownNotSent(missing);
+          setError(missing ? null : errorMessage(e));
+          if (missing) clear("rundown");
+          else fail("rundown", `the rundown for service type ${resolvedTypeId}`, e);
         });
     load();
     const stop = refreshWhileMounted(load, [rundownKey(resolvedTypeId, planParam) ?? ""], 60_000);

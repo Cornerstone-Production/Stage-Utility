@@ -75,13 +75,10 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        if (notPublishedYet(err)) {
-          setNotSent(true);
-          clear("load");
-        } else {
-          setNotSent(false);
-          fail("load", "the ServiceCue service types and layouts", err);
-        }
+        const missing = notPublishedYet(err);
+        setNotSent(missing);
+        if (missing) clear("load");
+        else fail("load", "the ServiceCue service types and layouts", err);
       });
     return () => { cancelled = true; };
   }, [pcoConfigured, fail, clear]);
