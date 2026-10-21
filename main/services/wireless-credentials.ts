@@ -16,13 +16,19 @@
 // is what lets the UI round-trip a form it never received the real value for.
 
 import { providerRegistry } from "../providers/registry.js";
+import { specteraTarget } from "../providers/wireless/sennheiser-spectera.js";
+import type { CredentialTarget } from "./credential-target.js";
 
 // The mask and the test for it live in mask.ts, which the RENDERER can import —
 // this module cannot be imported there, because providerRegistry above pulls in
 // the whole server-side provider graph. Re-exported rather than moved out of
 // sight: this file's callers and its own test read `MASK` from here.
 export { MASK, isMask } from "./mask.js";
-import { MASK, hasSecretValue, isBlankSecret, isMask } from "./mask.js";
+import { MASK, hasSecretValue, isBlankSecret, isMask, isTypedSecret } from "./mask.js";
+
+/** The secrets-store slot for one connection's credentials. Per connection:
+ *  two Spectera base stations are two different passwords. */
+export const wirelessSecretSlot = (connId: string) => `wireless:${connId}`;
 
 /** Which config keys for this provider hold a credential. */
 export function credentialKeys(providerId: string): string[] {
@@ -52,6 +58,25 @@ export function allCredentialKeys(): string[] {
   return [...keys];
 }
 
+
+/**
+ * Where a connection's credential is sent: its provider, and the host and port
+ * that provider's driver dials. A provider change counts as a move, since the
+ * credential was entered for a different device.
+ *
+ * Exported for the update path and for a config restore, which both drop a
+ * credential whose target moved (see credential-target.ts).
+ */
+export function wirelessCredentialTarget(providerId: string, config: Record<string, unknown>): CredentialTarget {
+  // A provider whose driver dials an address of its own reads it with the
+  // driver's function, so the two cannot disagree. Compared by name, never
+  // looked up by it: providerId arrives in a request body.
+  if (providerId === "sennheiser-spectera") return { ...specteraTarget(config), provider: providerId };
+  const host = typeof config.host === "string" && config.host.trim() ? config.host.trim() : null;
+  const port = typeof config.port === "number" && config.port > 0 ? config.port : null;
+  return { host, port, provider: providerId };
+}
+
 /** Split a full config into the part safe to persist and the part that is not. */
 export function splitConfig(config: Record<string, unknown>): {
   safe: Record<string, unknown>;
@@ -66,7 +91,7 @@ export function splitConfig(config: Record<string, unknown>): {
     const value = safe[key];
     delete safe[key];
     // The mask is not a value — it is the UI saying "unchanged". Never store it.
-    if (hasSecretValue(value) && !isMask(value)) secret[key] = value;
+    if (isTypedSecret(value)) secret[key] = value;
   }
   return { safe, secret };
 }

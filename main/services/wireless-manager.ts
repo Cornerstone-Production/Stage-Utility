@@ -13,7 +13,17 @@ import { broadcast } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
 import { secretsStore } from "./secrets.js";
 import { settingsStore } from "./settings-store.js";
-import { allCredentialKeys, mergeSecrets, publicConfig, splitConfig, withSecrets } from "./wireless-credentials.js";
+import {
+  allCredentialKeys,
+  mergeSecrets,
+  publicConfig,
+  splitConfig,
+  wirelessCredentialTarget,
+  wirelessSecretSlot,
+  withSecrets,
+} from "./wireless-credentials.js";
+import { credentialTargetMoved, describeTarget } from "./credential-target.js";
+import { hasSecretValue, isTypedSecret } from "./mask.js";
 import { wirelessStore } from "./wireless-store.js";
 
 /** The fastest metering interval worth allowing. Below this the polling costs
@@ -42,7 +52,7 @@ class WirelessManager {
     this.connections = await Promise.all(
       configs.map(async (cfg) => ({
         ...cfg,
-        config: withSecrets(cfg.config, await secretsStore.getSecrets(WirelessManager.secretId(cfg.id))),
+        config: withSecrets(cfg.config, await secretsStore.getSecrets(wirelessSecretSlot(cfg.id))),
         connection: "disconnected" as const,
         message: null,
       })),
@@ -62,7 +72,7 @@ class WirelessManager {
     // permanently, with the API masking them so nothing ever revealed it.
     const legacy = configs.filter((cfg) => allCredentialKeys().some((k) => cfg.config[k]));
     if (legacy.length > 0) {
-      console.log(`[wireless] migrating ${legacy.length} stored credential(s) out of wireless-connections.json`);
+      console.log(`[wireless] migrating ${scrub(legacy.length)} stored credential(s) out of wireless-connections.json`);
       await this.persist();
     }
 
@@ -75,7 +85,7 @@ class WirelessManager {
       this.broadcast();
     });
 
-    console.log(`[wireless] init complete — ${this.connections.length} connection(s), meterRate=${this.meterRateMs}ms`);
+    console.log(`[wireless] init complete — ${scrub(this.connections.length)} connection(s), meterRate=${scrub(this.meterRateMs)}ms`);
   }
 
   // ── Metering interval ───────────────────────────────────────────────────
@@ -89,7 +99,7 @@ class WirelessManager {
     // and 0 has no meaning here — it becomes setInterval(poll, 0), a busy loop
     // that pegs a core on a Pi and floods the LAN with device polls.
     const next = Math.max(MIN_METER_RATE_MS, Math.floor(ms));
-    console.log(`[wireless] setMeterRate → ${next}ms`);
+    console.log(`[wireless] setMeterRate → ${scrub(next)}ms`);
     this.meterRateMs = next;
     await settingsStore.patch({ wirelessMeterRateMs: next });
     deviceManager.setMeterRate(next);
@@ -153,6 +163,8 @@ class WirelessManager {
 
     const conn = this.connections[idx];
     const patch = params.patch;
+    // Where its credential goes now, before the patch moves anything.
+    const targetBefore = wirelessCredentialTarget(conn.providerId, conn.config);
 
     if (patch.name !== undefined) conn.name = patch.name.trim() || conn.name;
     if (patch.providerId !== undefined) conn.providerId = patch.providerId;
@@ -162,7 +174,7 @@ class WirelessManager {
       // the IP still carries "••••" in the password field. Merging that verbatim
       // would hand the driver the mask as its password. mergeSecrets resolves it
       // against what is stored: mask keeps, "" clears, anything else replaces.
-      const stored = await secretsStore.getSecrets(WirelessManager.secretId(conn.id));
+      const stored = await secretsStore.getSecrets(wirelessSecretSlot(conn.id));
       const merged = mergeSecrets(conn.providerId, patch.config, stored);
       // Rebuild from the credential-free parts of BOTH, then add back only what
       // mergeSecrets kept. Spreading the patch over conn.config cannot clear a
@@ -178,7 +190,27 @@ class WirelessManager {
       );
     }
 
-    console.log(`[wireless] updateConnection — ${conn.id} patch keys: ${Object.keys(patch).join(", ")}`);
+    // A credential goes only where it was entered for. The panel posts an
+    // unchanged password back as the mask, which keeps it, so a patch that
+    // moved the base station's address (or the provider) would otherwise hand
+    // the stored password to whatever answers at the new one. A password this
+    // patch supplies is the operator's, for the new address, and stays.
+    const targetAfter = wirelessCredentialTarget(conn.providerId, conn.config);
+    if (credentialTargetMoved(targetBefore, targetAfter)) {
+      const dropped = allCredentialKeys().filter((k) => hasSecretValue(conn.config[k]) && !isTypedSecret(patch.config?.[k]));
+      for (const key of dropped) delete conn.config[key];
+      if (dropped.length > 0) {
+        console.warn(
+          `[wireless] cleared the stored ${scrub(dropped.join(", "))} on ${scrub(conn.name)}: its address changed ` +
+            `from ${scrub(describeTarget(targetBefore))} to ${scrub(describeTarget(targetAfter))}, and it is never sent ` +
+            "to an address it was not entered for. Enter it again if the new one needs it.",
+        );
+      }
+    }
+
+    // The keys come off the request body, so a key holding a newline would
+    // otherwise write a second, forged line to /log.
+    console.log(`[wireless] updateConnection — ${scrub(conn.id)} patch keys: ${scrub(Object.keys(patch).join(", "))}`);
     await this.persist();
     await deviceManager.applyConnections(this.connections);
     this.broadcast();
@@ -189,12 +221,12 @@ class WirelessManager {
     const idx = this.connections.findIndex((c) => c.id === params.id);
     if (idx === -1) throw new Error(`wireless:removeConnection — unknown id: ${params.id}`);
 
-    console.log(`[wireless] removeConnection — ${params.id}`);
+    console.log(`[wireless] removeConnection — ${scrub(params.id)}`);
     this.connections.splice(idx, 1);
     // persist() only walks surviving connections, so without this the encrypted
     // credential outlives the connection the operator just deleted — a password
     // they believe is gone, accumulating in secrets.bin.
-    await secretsStore.clearSecrets(WirelessManager.secretId(params.id));
+    await secretsStore.clearSecrets(wirelessSecretSlot(params.id));
     await this.persist();
     // applyConnections reconciles — the removed entry will be disconnected.
     await deviceManager.applyConnections(this.connections);
@@ -236,11 +268,6 @@ class WirelessManager {
     if (state === "connected" || state === "disconnected") conn.message = null;
   }
 
-  /** The secrets slot for one connection. Per-connection: two Spectera base
-   *  stations are two different passwords. */
-  private static secretId(connId: string): string {
-    return `wireless:${connId}`;
-  }
 
   private async persist(): Promise<void> {
     // Credentials never reach wireless-connections.json — that file is in
@@ -258,7 +285,7 @@ class WirelessManager {
     const secrets: Record<string, Record<string, string>> = {};
     for (const { id, name, providerId, enabled, config } of this.connections) {
       const split = splitConfig(config);
-      secrets[WirelessManager.secretId(id)] = split.secret;
+      secrets[wirelessSecretSlot(id)] = split.secret;
       rows.push({ id, name, providerId, enabled, config: split.safe });
     }
     await secretsStore.setManySecrets(secrets);

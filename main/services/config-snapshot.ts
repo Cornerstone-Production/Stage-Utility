@@ -425,6 +425,9 @@ class ConfigSnapshotService {
     // below would otherwise drop it without a word and the restore would report
     // success having put none of that work back.
     const renamedTo = new Map(renamedStores().map((s) => [s.renamedFrom.filename, s.filename]));
+    // What is about to be written, by today's file names, worked out first so
+    // the credentials below can be checked against all of it at once.
+    const toRestore = new Map<string, NonNullable<unknown>>();
     for (const [listed, contents] of Object.entries(bundle.files)) {
       const name = renamedTo.get(listed) ?? listed;
       if (name !== listed && Object.hasOwn(bundle.files, name)) {
@@ -435,6 +438,16 @@ class ConfigSnapshotService {
       }
       if (!configFiles().includes(name)) continue; // allowlist only
       if (contents === undefined || contents === null) continue;
+      toRestore.set(name, contents);
+    }
+    // A bundle carries addresses and no secrets, so a stored credential would
+    // follow whatever address it names. Cleared before anything is written: a
+    // write that then fails costs the operator a password typed again, where
+    // the other order could send one to an address it was never entered for.
+    // Imported lazily for the reason pauseBackgroundWriters is.
+    const { clearCredentialsARestoreMoves } = await import("./restore-credentials.js");
+    await clearCredentialsARestoreMoves(toRestore);
+    for (const [name, contents] of toRestore) {
       const dest = path.join(getUserDataPath(), name);
       const toWrite =
         name === "settings.json" && typeof contents === "object" && !Array.isArray(contents)

@@ -36,6 +36,7 @@ import type { Slot, SlotLink } from "../types/stage.js";
 import { scrub } from "./scrub.js";
 import { DataStore } from "./data-store.js";
 import { assertSafeKey, isSafeKey } from "./safe-key.js";
+import { isRecord } from "./is-record.js";
 
 /** v2 -> v3: a single `teamPositionName` + `notesStartsWith` becomes a `positions`
  *  range. Exported for tests. Total by design — DataStore does not deep-merge on
@@ -111,10 +112,6 @@ const store = new DataStore<unknown>("slots.json", {}, "config");
 
 function emptyFile(): SlotsFile {
   return { version: 3, defaults: new Map(), overrides: new Map() };
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 /**

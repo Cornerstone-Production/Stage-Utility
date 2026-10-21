@@ -13,7 +13,7 @@
 import type { RouteCtx } from "./context.js";
 import { BRANDING_IMAGE_DIR } from "../branding-image-store.js";
 import { buildManifest, ICON_ROUTES, MANIFEST_PATH } from "../install-metadata.js";
-import { readImage } from "../image-files.js";
+import { readImage, storedImageHeaders } from "../image-files.js";
 import { scrub } from "../scrub.js";
 import { settingsStore } from "../settings-store.js";
 import { stageController } from "../stage-controller.js";
@@ -57,6 +57,6 @@ export async function appIconRoutes({ res, pathname, method }: RouteCtx): Promis
     }
     return;
   }
-  res.writeHead(200, { "Content-Type": img.mime, "Cache-Control": "no-cache" });
+  res.writeHead(200, storedImageHeaders(img.mime, "no-cache"));
   res.end(img.data);
 }

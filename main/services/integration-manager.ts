@@ -31,6 +31,17 @@ import {
 } from "./sensource-service.js";
 import { settingsStore } from "./settings-store.js";
 import type { ConnectionManagedId, IntegrationId } from "./integration-ids.js";
+import { credentialTargetMoved, describeTarget } from "./credential-target.js";
+import {
+  configNumber,
+  credentialTargetFor,
+  hostPortOf,
+  obsTarget,
+  positiveConfigNumber,
+  prodcomTarget,
+  pvpTarget,
+  smaartTarget,
+} from "./integration-targets.js";
 import type { ConnState } from "./integration-base.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
@@ -41,7 +52,7 @@ import { wirelessManager } from "./wireless-manager.js";
 // One definition of "this is the mask, not a value" and "is there anything in
 // this field", shared with the wireless half and the renderer rather than
 // written again here. A leaf module, so the panels can import it too.
-import { hasSecretValue, isBlankSecret, isMask, MASK } from "./mask.js";
+import { hasSecretValue, isBlankSecret, isMask, isTypedSecret, MASK } from "./mask.js";
 
 // PCO integration descriptor.
 const PCO_DESCRIPTOR: IntegrationDescriptor = {
@@ -201,37 +212,8 @@ const PROPRESENTER_DESCRIPTOR: IntegrationDescriptor = {
   ],
 };
 
-/**
- * A saved number, which the settings form may have stored as a number or as the
- * string it was typed as. NaN when unset, blank or not a number.
- */
-function configNumber(raw: unknown): number {
-  if (typeof raw === "number") return raw;
-  if (typeof raw === "string" && raw.trim()) return parseInt(raw, 10);
-  return NaN;
-}
-
-/** {@link configNumber}, kept only when it is a positive number. */
-function positiveConfigNumber(raw: unknown): number | null {
-  const n = configNumber(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-/**
- * A host/port target off an integration's config, defaulting the port.
- *
- * Only defaults the port when a host was given AND there is a default worth
- * giving: no host is "not configured", and an integration whose port has no
- * conventional value (PVP's is whatever its Preferences pane shows) must not be
- * reported as configured on the strength of a guess.
- */
-function hostPortOf(
-  cfg: Record<string, unknown>,
-  defaultPort: number | null,
-): { host: string | null; port: number | null } {
-  const host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-  return { host, port: positiveConfigNumber(cfg.port) ?? (host ? defaultPort : null) };
-}
+// configNumber, positiveConfigNumber and hostPortOf live in integration-targets.ts,
+// beside the targets that decide where each stored credential may be sent.
 
 /**
  * `config` with each of the integration's secret keys set to the mask when a
@@ -1155,7 +1137,7 @@ export function planSecretMigration(
       // A mask is not a value: an older build wrote "••••" into settings.json
       // for a slot whose real value was already in secrets.bin, and storing that
       // would replace the credential with a row of bullets.
-      return hasSecretValue(v) && !isMask(v);
+      return isTypedSecret(v);
     });
     if (keys.length === 0) continue;
     const values: Record<string, string> = {};
@@ -1744,36 +1726,77 @@ class IntegrationManager {
 
     // Persist non-secret config.
     //
-    // patchIntegrationConfig, not load-then-patch. `patch` is atomic for the
+    // swapIntegrationConfig, not load-then-patch. `patch` is atomic for the
     // values handed to it, and this hands it a whole `integrationConfigs` map
     // built from a load() taken OUTSIDE the write queue — so two integrations
     // saved at once both read the map before either write lands, and the second
     // writes one that never heard of the first. Merging inside store.update is
     // what makes the read and the write indivisible.
     //
-    // It returns the merged config because the mask below needs it. Reading it
-    // back off a second load() is the other half of the same race.
-    const merged = await settingsStore.patchIntegrationConfig(id, nonSecretConfig);
+    // It returns the merged config because the mask below needs it, and the
+    // config it replaced because the address check below does. Reading either
+    // off a second load() is the other half of the same race.
+    const { before, merged } = await settingsStore.swapIntegrationConfig(id, nonSecretConfig);
+
+    // A stored credential goes only where it was entered for. The form posts an
+    // unchanged password back as the mask, which keeps it, so a save that moved
+    // the host or port would otherwise send the old credential to the new
+    // address on the next connect or Test. One the body supplies again is the
+    // operator's, for the new address, and stays.
+    const targetBefore = credentialTargetFor(id, before);
+    const targetAfter = credentialTargetFor(id, merged);
+    const movedAway = credentialTargetMoved(targetBefore, targetAfter)
+      ? secretKeys.filter((k) => k in existingSecrets && !(k in newSecrets) && !clearedSecrets.includes(k))
+      : [];
 
     // Persist secrets: merge so unchanged ones survive, and DELETE the ones the
-    // operator emptied. Written as one blob rather than key by key, because
-    // secrets.ts re-encrypts the whole file on every save. `existingSecrets` and
-    // `removed` are read above, where the SafeSpace marker decision needs them.
+    // operator emptied or whose address moved. Written as one blob rather than
+    // key by key, because secrets.ts re-encrypts the whole file on every save.
+    // `existingSecrets` and `removed` are read above, where the SafeSpace marker
+    // decision needs them.
     const nextSecrets = { ...existingSecrets, ...newSecrets };
-    for (const key of clearedSecrets) delete nextSecrets[key];
+    for (const key of [...clearedSecrets, ...movedAway]) delete nextSecrets[key];
     // Only when something actually changed. A save that touches no secret used
     // to rewrite the encrypted blob anyway, and every such write is another
     // window for the concurrent-write race secrets.ts guards against.
     const secretsChanged =
-      removed.length > 0 || Object.entries(newSecrets).some(([k, v]) => existingSecrets[k] !== v);
+      removed.length > 0 ||
+      movedAway.length > 0 ||
+      Object.entries(newSecrets).some(([k, v]) => existingSecrets[k] !== v);
     if (secretsChanged) {
-      await secretsStore.setSecrets(id, nextSecrets);
+      try {
+        await secretsStore.setSecrets(id, nextSecrets);
+      } catch (err) {
+        // The new address is already on disk, and the credential entered for
+        // the old one is still in secrets.bin: left that way, the next boot
+        // would send it to the new address. Put the old address back first.
+        if (movedAway.length > 0) {
+          const undoFailure = await settingsStore.putIntegrationConfig(id, before).then(
+            () => null,
+            (undoErr: unknown) => undoErr,
+          );
+          if (undoFailure !== null) {
+            throw new Error(
+              `${errorMessage(err)} (and the previous address could not be put back: ${errorMessage(undoFailure)})`,
+              { cause: err },
+            );
+          }
+        }
+        throw err;
+      }
       // Field NAMES, never values. Clearing a credential is an operator decision
       // with no other trace — the field simply reads empty afterwards, which is
       // also what it read while the value was still stored.
       if (removed.length > 0) {
         console.log(
           `[integration-manager] cleared ${scrub(removed.length)} stored credential(s) on ${scrub(id)}: ${scrub(removed.join(", "))}`,
+        );
+      }
+      if (movedAway.length > 0) {
+        console.warn(
+          `[integration-manager] cleared the stored ${scrub(movedAway.join(", "))} on ${scrub(id)}: its address changed ` +
+            `from ${scrub(describeTarget(targetBefore))} to ${scrub(describeTarget(targetAfter))}, and it is never sent ` +
+            "to an address it was not entered for. Enter it again if the new one needs it.",
         );
       }
     }
@@ -2146,7 +2169,7 @@ class IntegrationManager {
   }
 
   private getProdcomTarget(): { host: string | null; port: number | null } {
-    return this.hostPort("prodcom", null);
+    return prodcomTarget(this.configOf("prodcom"));
   }
 
   /** Start/stop the ProdCom transcript stream to match enabled + configured state. */
@@ -2169,7 +2192,7 @@ class IntegrationManager {
 
   /** Smaart's standard API port is the default when only a host is given. */
   private getSmaartTarget(): { host: string | null; port: number | null } {
-    return this.hostPort("smaart", 26000);
+    return smaartTarget(this.configOf("smaart"));
   }
 
   /** Start/stop the Smaart SPL connection to match enabled + configured state. */
@@ -2190,12 +2213,17 @@ class IntegrationManager {
     id: ConnectionManagedId,
     defaultPort: number | null,
   ): { host: string | null; port: number | null } {
-    return hostPortOf(this.states.get(id)?.config ?? {}, defaultPort);
+    return hostPortOf(this.configOf(id), defaultPort);
   }
 
-  /** obs-websocket's standard port. */
+  /** One connection-managed integration's config as the state holds it. */
+  private configOf(id: ConnectionManagedId): Record<string, unknown> {
+    return this.states.get(id)?.config ?? {};
+  }
+
+  /** obs-websocket's standard port: see integration-targets.ts. */
   private getObsTarget() {
-    return this.hostPort("obs", 4455);
+    return obsTarget(this.configOf("obs"));
   }
 
   /** REAPER's suggested web-interface port. */
@@ -2203,14 +2231,9 @@ class IntegrationManager {
     return this.hostPort("reaper", 8080);
   }
 
-  /** PVP's Network API port is whatever its Preferences pane shows. The setup
-   *  form PREFILLS 50742 (the descriptor's `default`), which is what a real
-   *  install shows — but a prefill is a suggestion the operator saves, and this
-   *  is the dialling path. Assuming a port here would let "configured" point at
-   *  one nothing is listening on, so a stored value is still required. */
+  /** PVP's target, port required: see pvpTarget in integration-targets.ts. */
   private getPvpTarget() {
-    const { host, port } = this.hostPort("pvp", null);
-    return { host, port, https: this.states.get("pvp")?.config.https === "on" };
+    return pvpTarget(this.configOf("pvp"));
   }
 
   /**
