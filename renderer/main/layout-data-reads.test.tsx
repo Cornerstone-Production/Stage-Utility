@@ -278,3 +278,42 @@ describe("a placed widget still gets its source", () => {
     }
   });
 });
+
+describe("a Timer pays only for the source it reads", () => {
+  // `timer` is named by the ProPresenter and baptism gates, because its render
+  // arm can read either. Naming it there must not make a SERVICE timer — the
+  // common one, and the one that replaced the PCO countdown — open both: the
+  // ProPresenter channel is the one whose subscriber holds the server's fallback
+  // poll at full rate. collectLayoutTypes names `timer` only for a source that
+  // needs it.
+  const timerLayout = (source: string): LayoutDTO => ({
+    ...PLAIN(),
+    objects: [{ ...object("timer"), config: { type: "timer", source } as LayoutObjectConfig }],
+  });
+
+  test("a service Timer reads neither ProPresenter nor the baptism timer", async () => {
+    await mount(useViewData, timerLayout("service"));
+    assert.deepEqual(await unwanted(), []);
+  });
+
+  test("a ProPresenter Timer reads and subscribes ProPresenter", async () => {
+    await mount(useViewData, timerLayout("propresenter"));
+    assert.equal(count("/api/propresenter/status"), 1, "the ProPresenter Timer never read its status");
+    assert.ok((await subscribed()).has("propresenter:status"), "the ProPresenter Timer never subscribed its channel");
+  });
+
+  test("a baptism Timer reads and subscribes the baptism timer", async () => {
+    await mount(useViewData, timerLayout("baptism"));
+    assert.equal(count("/api/baptism"), 1, "the baptism Timer never read the session");
+    assert.ok((await subscribed()).has("baptism:state"), "the baptism Timer never subscribed its channel");
+  });
+
+  test("switching a Timer's source in an open layout opens the new source and closes the old", async () => {
+    const { rerender } = await mount(useViewData, timerLayout("service"));
+    const before = count("/api/baptism");
+    await rerender(timerLayout("baptism"));
+    assert.equal(count("/api/baptism") - before, 1, "switching to the baptism source never read it");
+    await rerender(timerLayout("service"));
+    assert.ok(!(await subscribed()).has("baptism:state"), "switching back left the baptism channel subscribed");
+  });
+});
