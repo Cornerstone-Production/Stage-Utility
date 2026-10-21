@@ -28,14 +28,14 @@ after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
 
 /** Mounts the Inspector on one object and returns what it is asked to write. */
-async function mount(config: Record<string, unknown>) {
+async function mount(config: Record<string, unknown>, timers = [{ name: "Stage timer", time: "00:03:00", state: "running" }, { name: "Sermon", time: "00:20:00", state: "running" }]) {
   const f = stubFetchWithLog((url) =>
     url.endsWith("/api/state") ? ok(DEFAULT_STAGE_STATE)
     : url.includes("/api/propresenter/instances")
       ? ok({
           list: [{ id: "default", name: "Main" }],
           conn: {},
-          status: { default: { connected: true, timers: [{ name: "Stage timer", time: "00:03:00", state: "running" }, { name: "Sermon", time: "00:20:00", state: "running" }] } },
+          status: { default: { connected: true, timers } },
         })
       : ok({}),
   );
@@ -211,6 +211,49 @@ describe("a retired timer opens as a Timer", () => {
     try {
       assert.ok(m.container.querySelector('[aria-label="Shows"]'), "the baptism readout picker is missing");
       assert.match(m.container.textContent ?? "", /Baptism clocks count up/);
+    } finally {
+      m.restore();
+    }
+  });
+});
+
+describe("the ProPresenter timer name", () => {
+  // Always a text field, so a name can be typed before the service when nothing is
+  // running. The reported timers are suggestions in a datalist.
+  test("is a text field that suggests the running timers and writes what is typed", async () => {
+    const m = await mount({ type: "timer", source: "propresenter" });
+    try {
+      const field = m.container.querySelector('[aria-label="Timer"]') as HTMLInputElement;
+      assert.equal(field.tagName, "INPUT");
+      assert.match(field.placeholder, /first running timer/);
+      const list = m.container.querySelector(`datalist#${field.getAttribute("list")}`);
+      await new Promise((r) => setTimeout(r, 50));
+      const offered = [...(list?.querySelectorAll("option") ?? [])].map((o) => o.getAttribute("value"));
+      assert.deepEqual(offered, ["Stage timer", "Sermon"]);
+      fireEvent.change(field, { target: { value: "Countdown" } });
+      assert.equal((m.writes.at(-1) as { timerName?: string | null }).timerName, "Countdown");
+    } finally {
+      m.restore();
+    }
+  });
+
+  test("an empty field follows the first running timer: clearing writes null", async () => {
+    const m = await mount({ type: "timer", source: "propresenter", timerName: "Sermon" });
+    try {
+      fireEvent.change(m.container.querySelector('[aria-label="Timer"]') as HTMLInputElement, { target: { value: "" } });
+      assert.equal((m.writes.at(-1) as { timerName?: string | null }).timerName, null);
+    } finally {
+      m.restore();
+    }
+  });
+
+  test("is still a text field when nothing is running", async () => {
+    const m = await mount({ type: "timer", source: "propresenter" }, []);
+    try {
+      const field = m.container.querySelector('[aria-label="Timer"]') as HTMLInputElement;
+      assert.equal(field.tagName, "INPUT");
+      fireEvent.change(field, { target: { value: "Sermon" } });
+      assert.equal((m.writes.at(-1) as { timerName?: string | null }).timerName, "Sermon");
     } finally {
       m.restore();
     }

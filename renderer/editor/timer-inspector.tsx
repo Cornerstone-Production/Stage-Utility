@@ -18,10 +18,6 @@ import {
 } from "../main/timer-config";
 import { Segmented } from "./inspector-rows";
 
-/** The sentinel for "the first timer ProPresenter reports", which is `null` in
- *  the config — a Select value cannot be null. */
-const FIRST = "__first__";
-
 /** A label on the left, a switch on the right: the row every setting here but
  *  the numbers and pickers uses. */
 function SwitchRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
@@ -37,8 +33,7 @@ export function TimerInspector({ c, onConfig }: { c: TimerConfig; onConfig: (c: 
   const source = c.source ?? "service";
   const set = (patch: Partial<TimerConfig>) => onConfig({ ...c, ...patch });
   // The timers ProPresenter is running right now, from the instance this one
-  // reads. ProPresenter reports only running timers, so a stopped one cannot be
-  // listed: with none running the name is typed instead.
+  // reads, offered as suggestions: ProPresenter reports only running timers.
   const instances = usePropInstances();
   const running = instances?.status[c.propresenterInstanceId ?? "default"]?.timers ?? [];
   const names = running.map((t) => t.name);
@@ -67,27 +62,21 @@ export function TimerInspector({ c, onConfig }: { c: TimerConfig; onConfig: (c: 
           label="Timer"
           description="A second ProPresenter picker appears only when more than one is connected."
         >
-          {names.length > 0 ? (
-            <Select
-              value={c.timerName || FIRST}
-              onValueChange={(v) => set({ timerName: v === FIRST ? null : v })}
-            >
-              <SelectTrigger aria-label="Timer" className="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={FIRST}>The first running timer</SelectItem>
-                {names.map((n) => (
-                  <SelectItem key={n} value={n}>{n}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Input
-              aria-label="Timer"
-              value={c.timerName ?? ""}
-              placeholder="The first running timer"
-              onChange={(e) => set({ timerName: e.target.value.trim() || null })}
-            />
-          )}
+          {/* Always a text field: typing a name before the service has to work, and
+              ProPresenter only reports RUNNING timers, so the reported ones are
+              suggestions, never the whole list. */}
+          <Input
+            aria-label="Timer"
+            list="timer-names"
+            value={c.timerName ?? ""}
+            placeholder="Empty follows the first running timer"
+            onChange={(e) => set({ timerName: e.target.value.trim() || null })}
+          />
+          <datalist id="timer-names">
+            {names.map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
         </StackedField>
       )}
 
