@@ -234,7 +234,7 @@ export function PublicLinkCard({
 
   if (failed.has("publish") && !dto) {
     return (
-      <section aria-labelledby="pub-title" className="mb-5 max-w-[760px]">
+      <section aria-labelledby="pub-title" className="mb-5">
         <h2 id="pub-title" className="sr-only">Public link</h2>
         <ErrorNote>Couldn't load the public link settings.</ErrorNote>
       </section>
@@ -330,7 +330,7 @@ export function PublicLinkCard({
     <section
       aria-labelledby="pub-title"
       data-state={dto ? view : "loading"}
-      className="mb-5 flex max-w-[760px] flex-col gap-3 rounded-xl border border-line-strong bg-surface px-[18px] py-4"
+      className="mb-5 flex flex-col gap-3 rounded-xl border border-line-strong bg-surface px-[18px] py-4"
     >
       <div className="flex items-center gap-2.5">
         <h2 id="pub-title" className="text-subheadline font-semibold text-fg">Public link</h2>
