@@ -46,7 +46,25 @@ updates:
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
 
-  # 2. GitHub Actions Dependencies
+  # 2. The public ServiceCue Worker's own packages (wrangler, its types). A package
+  # of its own, so the root entry above never sees it. Wrangler also decides how
+  # new a compatibility_date its local runtime will start on: a bump takes both.
+  - package-ecosystem: "npm"
+    directory: "/publish/servicecue"
+    target-branch: "beta"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "javascript/typescript"
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # 3. GitHub Actions Dependencies
   - package-ecosystem: "github-actions"
     directory: "/"
     target-branch: "beta"
