@@ -49,7 +49,7 @@ by default, and only offered in 12-hour format) are separate switches.
 
 **Timer** reads one of three sources, chosen at the top of its settings. A layout
 saved with a PCO countdown, Service timer, ProPresenter timer or Baptism timer
-opens as a Timer, drawn as it always was.
+opens as a Timer and draws the same.
 
 - **Service** — before the service, the time until it starts; while an item is
   live, that item's time left, counting up when the item has no length. The
@@ -81,9 +81,9 @@ Until a source has answered, a Timer reads a plain dash and says nothing. A
 ProPresenter that has answered and reports not connected reads as a dash with
 **ProPresenter isn't answering** on the sub-line, unless **Hide when idle** is on:
 then the Timer draws nothing, down or idle, and stays hidden through the first
-read. On Home a Timer is the wall readout, as its widget was, except a Service
-Timer with **Show the next item** on, which is a stat card like the cards beside
-it.
+read. A ProPresenter that is not set up reads the plain dash, not the sentence.
+On Home a Timer is the wall readout, except a Service Timer with **Show the next
+item** on (how a new Timer starts), which is a stat card like the cards beside it.
 
 ## PCO / service
 
@@ -244,7 +244,9 @@ the screen presentation, which is the only one that fills or hides.
 
 Right-click a Home tile — or tap and hold it — to choose what it answers for:
 **Platform** on **Streaming** (any, Resi, YouTube) and **Recorder** on
-**Recording** (every recorder, OBS, REAPER). Both also offer **Elapsed time**.
+**Recording** (every recorder, OBS, REAPER). Both also offer **Elapsed time**. A
+**Timer** offers **Red on overrun**, **Show the next item** (Service source) and
+**Hide when idle**; a Baptism Timer offers only the last.
 
 > Four Home cards are marked *replaced* below — **OBS recording**, **REAPER
 > recording**, **Resi status** and **YouTube status**. Each was the general card
@@ -756,7 +758,7 @@ chooses which; with one, it is not shown.
 |---|---|
 | **Text** | **Text** |
 | **Clock** | **Format** 12h or 24h (follows the app setting until chosen), **Seconds**, **AM/PM** |
-| **Timer** | **Source** (Service, ProPresenter or Baptism). Service: **Show the next item** (off). ProPresenter: **Timer** (a name typed in, with the running timers suggested; empty follows the first running one). Baptism: **Shows** one of nine readouts and its **Label** (auto by default). All: **Caption**, one sub-line switch (**Show the sub-line**, **Show the timer's name** or **Show the label**, on), **Hide when idle** (off). Service and ProPresenter: **Amber near the end** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5) and **Red on overrun** (on) |
+| **Timer** | **Source** (Service, ProPresenter or Baptism). Service: **Show the next item** (on for a new Timer). ProPresenter: **Timer** (a name typed in, with the running timers suggested; empty follows the first running one). Baptism: **Shows** one of nine readouts and its **Label** (auto by default). All: **Caption**, one sub-line switch (**Show the sub-line**, **Show the timer's name** or **Show the label**, on), **Hide when idle** (off). Service and ProPresenter: **Amber near the end** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5) and **Red on overrun** (on) |
 | **Service pacing** | **Ahead color** and **Behind color** (green and red until changed, each with a Reset), **Projected end time** (off), **Show ahead/behind label** (off), **Show dash when idle** (on) |
 | **Section chip** | **Which**: Current, Next, or Next section (skips arrangement breaks) |
 | **Slide progress** | **Display**: fraction (`3 / 12`, the default), left, percent or bar; **Show 'slides' label** (off, not offered for the bar) |

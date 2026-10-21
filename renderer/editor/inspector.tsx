@@ -33,13 +33,11 @@ import {
   SelectItem,
   SelectValue,
   ButtonGroup,
-  Switch,
   Separator,
   InfoHint,
   ChipToggle,
   ChipToggleRow,
   ErrorNote,
-  FieldLabel,
   StackedField,
 } from "../components/ui";
 import { loadProcessedAttachment, FILL_WHEN_ACTIVE, STATUS_TEXT, obsModeText } from "../main/layout-renderer";
@@ -87,7 +85,7 @@ import { numberParamDefault } from "@main/services/automation-param-validation";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import {
-  Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls, Segmented,
+  Row, RowSwitch, StackedSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls, Segmented,
   ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, sizesTypeFromItsBox,
 } from "./inspector-rows";
 import { TimerInspector } from "./timer-inspector";
@@ -394,10 +392,7 @@ export function VideoConfig({
           onChange={(v) => onConfig({ ...c, fit: v })}
         />
       </StackedField>
-      <div className="flex items-center justify-between gap-2.5">
-        <FieldLabel>Show feed name</FieldLabel>
-        <Switch aria-label="Show feed name" checked={c.showLabel ?? true} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} />
-      </div>
+      <StackedSwitch label="Show feed name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
       <StackedField label="When the feed is offline">
         <Select
           value={c.whenOffline ?? "message"}
@@ -1545,7 +1540,7 @@ export function Inspector({
           </>
         );
       })()}
-      {c.type === "timer" && <TimerInspector c={c} onConfig={onConfig} />}
+      {c.type === "timer" && <TimerInspector c={c} onConfig={onConfig} propInstances={propInstances} />}
       {c.type === "rosstalk-button" && <RossTalkButtonConfig c={c} onConfig={onConfig} />}
 
       {c.type === "osc-button" && (() => {

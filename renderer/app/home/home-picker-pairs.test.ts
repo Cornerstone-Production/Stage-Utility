@@ -119,16 +119,26 @@ describe("the wall palette is unchanged", () => {
     // already has is the mirror of this question and has not been asked.
     const onWall = PALETTE_GROUPS.flatMap((g) => g.types as readonly string[]);
     //
-    // NINE until the per-source cards were retired. `home-streaming-resi` and
+    // The list was nine long until the per-source cards were retired. `home-streaming-resi` and
     // `home-streaming-youtube` have no wall twin, so they were never in
     // SUPERSEDED_ON_WALL and counted here — retiring them takes them out of the
     // palette entirely. The other two retirements were already excluded, having
     // twins in `obs-status` and `reaper-status`.
     //
-    // SIX once the Service timer became the Timer: `home-live-status` is retired,
-    // so it left the palette like the per-source cards before it.
+    // `home-live-status` is retired into the Timer, so it is not here.
     const offered = onWall.filter((t) => t.startsWith("home-") && !SUPERSEDED_ON_WALL.has(t as never));
-    assert.equal(offered.length, 6, `expected 6 Home cards still offered on a wall, found ${offered.length}`);
+    assert.deepEqual(
+      offered.sort(),
+      [
+        "home-next-service",
+        "home-readiness",
+        "home-recent-services",
+        "home-scores",
+        "home-screens",
+        "home-streaming",
+      ],
+      "the Home cards a wall still offers changed — update this list deliberately",
+    );
   });
 });
 

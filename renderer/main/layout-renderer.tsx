@@ -1354,10 +1354,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         baptismKnown: ctx.baptismKnown,
       });
       if (r.hidden) return null;
-      // On Home the Timer is the old Service card — a Stat in Home's own colours —
-      // only when it shows the next item. Every other Timer is what its widget was
-      // on Home before: the wall readout, at Home's uniform size and the object's
-      // own alignment.
+      // On Home a Timer that shows the next item is a Stat in Home's own colours.
+      // Every other Timer is the wall readout at Home's uniform size, aligned as
+      // the object says.
       if (ctx.home && timerSource(c) === "service" && (c.nextItem ?? false)) {
         return <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone === "over" ? "danger" : r.tone === "warn" ? "warn" : undefined} />;
       }

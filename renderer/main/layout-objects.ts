@@ -358,7 +358,9 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     label: "Timer",
     blurb: "A countdown or clock from the service, ProPresenter or a baptism",
     group: "Text & time",
-    config: () => ({ type: "timer", source: "service" }),
+    // The next item on, as the approved design defaults it: a Timer added on Home
+    // is the Service card again. Converted objects keep their own settings.
+    config: () => ({ type: "timer", source: "service", nextItem: true }),
     style: () => READOUT(0.1),
   },
   "countdown-timer": {

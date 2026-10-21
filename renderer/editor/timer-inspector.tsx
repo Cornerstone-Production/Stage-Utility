@@ -9,7 +9,6 @@
 
 import type { LayoutObjectConfig } from "@main/types/views";
 import { FieldLabel, Input, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StackedField } from "../components/ui";
-import { usePropInstances } from "../main/use-dashboard-state";
 import {
   BAPTISM_FIELD_OPTIONS,
   TIMER_SOURCES,
@@ -20,13 +19,23 @@ import {
 } from "../main/timer-config";
 import { Segmented, StackedSwitch } from "./inspector-rows";
 
-export function TimerInspector({ c, onConfig }: { c: TimerConfig; onConfig: (c: LayoutObjectConfig) => void }) {
+export function TimerInspector({
+  c,
+  onConfig,
+  propInstances,
+}: {
+  c: TimerConfig;
+  onConfig: (c: LayoutObjectConfig) => void;
+  /** The parent Inspector's read of the ProPresenter instances, so this does not
+   *  open a second one. */
+  propInstances: PropInstancesDTO | null;
+}) {
   const source = timerSource(c);
   const info = TIMER_SOURCE_INFO[source];
   const set = (patch: Partial<TimerConfig>) => onConfig({ ...c, ...patch });
   // The timers ProPresenter is running right now, from the instance this one
   // reads, offered as suggestions: ProPresenter reports only running timers.
-  const instances = usePropInstances();
+  const instances = propInstances;
   const running = instances?.status?.[c.propresenterInstanceId ?? "default"]?.timers ?? [];
   const names = running.map((t) => t.name);
   if (c.timerName && !names.includes(c.timerName)) names.push(c.timerName);

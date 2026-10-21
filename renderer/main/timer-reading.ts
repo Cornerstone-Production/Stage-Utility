@@ -132,9 +132,8 @@ function propresenter(config: TimerConfig, i: TimerInputs, { hide, showSub }: Co
     // earns the sentence below.
     return hide ? HIDE : dash(caption, true);
   }
-  // Known to be down. Hide when idle wins, as it did for the ProPresenter timer
-  // before: a widget set to draw nothing when there is nothing to show does not
-  // start announcing an outage.
+  // Known to be down. Hide when idle wins: a widget set to draw nothing when
+  // there is nothing to show does not announce an outage.
   if (pro?.connected === false) {
     if (hide) return HIDE;
     // Not set up is not down: a machine with no ProPresenter reads the plain dash.

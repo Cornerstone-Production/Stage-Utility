@@ -34,6 +34,7 @@ const { render, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx } = await import("./test-render-ctx.js");
+const { LAYOUT_OBJECTS } = await import("./layout-objects.js");
 
 after(() => {
   cleanup();
@@ -424,5 +425,19 @@ describe("a baptism label", () => {
   });
   test("empty is the readout's own word", () => {
     assert.equal(draw({ type: "timer", source: "baptism", field: "live", showLabel: true, label: "" }, idle).sub, "ready");
+  });
+});
+
+describe("a Timer from the picker", () => {
+  test("is the service clock with the next item on, so on Home it is the Service card again", () => {
+    const config = LAYOUT_OBJECTS.timer.config() as Record<string, unknown>;
+    assert.equal(config.nextItem, true);
+    const d = draw(config, { home: true, interactive: true, pcoLive: item(-5) });
+    assert.equal(d.color, "var(--color-danger-11)", "a new Timer on Home is not the Stat card");
+    assert.equal(d.sub, "Next \u00b7 Announcements");
+  });
+
+  test("a converted PCO countdown keeps the next item off", () => {
+    assert.equal(draw({ type: "countdown-timer", caption: "x" }, { pcoLive: item(48) }).sub, null);
   });
 });
