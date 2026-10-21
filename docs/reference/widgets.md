@@ -355,8 +355,9 @@ word, no cue name, no sub-line, no next cue. The number fills the widget — as
 tall as 62% of its height allows, and never wider than its width allows for the
 digits it is showing — and follows a resize. It reads `m:ss`, or `h:mm:ss` past
 an hour. With nothing counting — nothing on the layer, a layer PVP does not
-report, a still with **Count down stills** off, an ended clip — it shows a dim
-dash, so a blank widget never looks like a frozen one. A paused clip is the
+report, a still with **Count down stills** off — it shows a dim dash, so a blank
+widget never looks like a frozen one. An ended clip holds **0:00**, with a full
+bar and in red when **Warn near the end** is on, until the layer moves on. A paused clip is the
 reverse: it draws its frozen time with no state word, since there is no room for
 one here — switch to Full or Compact to see **paused**. **Progress bar**,
 **Layer**, **Count down stills** and the **Align** pad still apply (the bar is a
