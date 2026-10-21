@@ -58,11 +58,6 @@ export function allCredentialKeys(): string[] {
   return [...keys];
 }
 
-/** Each provider whose driver dials an address with a credential, and how it
- *  reads that address: its own function, so the two cannot disagree. */
-const DIAL_TARGETS = new Map<string, (config: Record<string, unknown>) => { host: string | null; port: number }>([
-  ["sennheiser-spectera", specteraTarget],
-]);
 
 /**
  * Where a connection's credential is sent: its provider, and the host and port
@@ -73,8 +68,10 @@ const DIAL_TARGETS = new Map<string, (config: Record<string, unknown>) => { host
  * credential whose target moved (see credential-target.ts).
  */
 export function wirelessCredentialTarget(providerId: string, config: Record<string, unknown>): CredentialTarget {
-  const dial = DIAL_TARGETS.get(providerId);
-  if (dial) return { ...dial(config), provider: providerId };
+  // A provider whose driver dials an address of its own reads it with the
+  // driver's function, so the two cannot disagree. Compared by name, never
+  // looked up by it: providerId arrives in a request body.
+  if (providerId === "sennheiser-spectera") return { ...specteraTarget(config), provider: providerId };
   const host = typeof config.host === "string" && config.host.trim() ? config.host.trim() : null;
   const port = typeof config.port === "number" && config.port > 0 ? config.port : null;
   return { host, port, provider: providerId };
