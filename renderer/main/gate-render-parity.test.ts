@@ -300,6 +300,16 @@ function readsByType(): Map<string, Set<string>> {
 
 // ---------------------------------------------------------------- the guard
 
+/** Which Timer source reads each gated `ctx` field. The service source reads only
+ *  the ungated PCO fields. */
+const TIMER_FIELD_SOURCE: Record<string, string> = {
+  baptism: "baptism",
+  baptismKnown: "baptism",
+  propInstances: "propresenter",
+  propresenter: "propresenter",
+  propresenterKnown: "propresenter",
+};
+
 const { gated: GATED, ungated: UNGATED } = scanGates();
 const READS = readsByType();
 
@@ -368,7 +378,20 @@ describe("every channel a widget draws is one its layout subscribes to", () => {
     for (const [type, fields] of READS) {
       for (const field of fields) {
         const gate = GATED.get(field);
-        if (gate && !gate.has(type)) {
+        // A Timer is named by SOURCE (`timer:propresenter`, `timer:baptism`), so
+        // each channel it can read must be gated by the source that reads it —
+        // and by no other: naming `timer:baptism` on the ProPresenter gate would
+        // pass a looser test while opening the wrong channel.
+        const named = type === "timer" ? `timer:${TIMER_FIELD_SOURCE[field] ?? "?"}` : type;
+        if (type === "timer" && gate && !(field in TIMER_FIELD_SOURCE)) {
+          holes.push(`timer draws ctx.${field}, a gated channel with no source declared for it in TIMER_FIELD_SOURCE`);
+          continue;
+        }
+        if (type === "timer" && gate) {
+          const wrong = [...gate].filter((g) => g.startsWith("timer") && g !== named);
+          if (wrong.length) holes.push(`ctx.${field} is also opened for ${wrong.join(", ")}, which is not the source that reads it`);
+        }
+        if (gate && !gate.has(named)) {
           holes.push(
             `${type} draws ctx.${field}, but that channel is opened only for [${[...gate].sort().join(", ")}] — ` +
               `a layout whose only such widget is a ${type} subscribes to nothing and shows the offline state for ever`,

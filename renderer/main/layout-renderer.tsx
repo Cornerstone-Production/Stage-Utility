@@ -1,7 +1,7 @@
 import { clamp } from "@main/services/clamp";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
 import { HomeCard, Stat, isHomeCard } from "../app/home/cards";
-import { readConfig } from "./timer-config";
+import { readConfig, timerSource } from "./timer-config";
 import { readTimer, type TimerTone } from "./timer-reading";
 import { fitFor } from "./console-fit";
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
@@ -3136,13 +3136,14 @@ function collectLayoutTypes(
   for (const o of objects ?? []) {
     const config = o.config;
     // A Timer reads ProPresenter or the baptism timer only for those sources, so
-    // a service Timer, the common one, names neither and opens neither channel.
-    // (Both gates name `timer`, so a ProPresenter Timer also opens the baptism
-    // read: one read and one channel, not the poll the ProPresenter gate holds at
-    // full rate.)
-    if (config?.type !== "timer" || (config.source ?? "service") !== "service") {
-      if (config?.type) into.add(config.type);
-    }
+    // it is named by SOURCE: `timer:propresenter` opens the ProPresenter channels,
+    // `timer:baptism` the baptism one, and a service Timer opens neither. A bare
+    // `timer` would open both for any of them, and the ProPresenter channel is
+    // the one whose subscriber holds the server's fallback poll at full rate.
+    if (config?.type === "timer") {
+      const source = timerSource(config);
+      if (source !== "service") into.add(`timer:${source}`);
+    } else if (config?.type) into.add(config.type);
     if (o.children?.length) collectLayoutTypes(o.children, into, views, outputs, chain);
     if (config?.type === "view-embed") descend(config.viewId);
     // Resolved through the OUTPUT, exactly as the tile does, so a routing change
@@ -3285,11 +3286,11 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
     "section-chip",
     "slide-progress",
     "slide-thumbnail",
-    "timer",
+    "timer:propresenter",
   ]);
   const propresenterStatus = useProPresenterStatus(proWanted);
   const propInstances = usePropInstances(proWanted);
-  const baptismStatus = useBaptismStatus(want(["baptism-timer", "timer"]));
+  const baptismStatus = useBaptismStatus(want(["baptism-timer", "timer:baptism"]));
   // service-pacing reads the rundown only for its projected-end mode, and is
   // named whatever its config says: a gate that followed config would open the
   // read one render after the operator flipped the switch, and the projection

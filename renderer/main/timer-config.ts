@@ -137,6 +137,11 @@ export function readTimerConfig(config: LayoutObjectConfig): TimerConfig | null 
   }
 }
 
+/** Where a Timer reads from: its `source`, which absent reads as the service. */
+export function timerSource(config: Pick<TimerConfig, "source">): TimerSource {
+  return config.source ?? "service";
+}
+
 /** The config the renderer's switch reads: the Timer for the four, else itself. */
 export function readConfig(config: LayoutObjectConfig): ReadConfig {
   return (readTimerConfig(config) ?? config) as ReadConfig;

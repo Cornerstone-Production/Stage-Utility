@@ -280,12 +280,10 @@ describe("a placed widget still gets its source", () => {
 });
 
 describe("a Timer pays only for the source it reads", () => {
-  // `timer` is named by the ProPresenter and baptism gates, because its render
-  // arm can read either. Naming it there must not make a SERVICE timer — the
-  // common one, and the one that replaced the PCO countdown — open both: the
-  // ProPresenter channel is the one whose subscriber holds the server's fallback
-  // poll at full rate. collectLayoutTypes names `timer` only for a source that
-  // needs it.
+  // A Timer is named by SOURCE (`timer:propresenter`, `timer:baptism`), so each
+  // source opens its own channels and no other: the ProPresenter channel is the
+  // one whose subscriber holds the server's fallback poll at full rate, and a
+  // service Timer, the one that replaced the PCO countdown, opens neither.
   const timerLayout = (source: string): LayoutDTO => ({
     ...PLAIN(),
     objects: [{ ...object("timer"), config: { type: "timer", source } as LayoutObjectConfig }],
@@ -300,12 +298,14 @@ describe("a Timer pays only for the source it reads", () => {
     await mount(useViewData, timerLayout("propresenter"));
     assert.equal(count("/api/propresenter/status"), 1, "the ProPresenter Timer never read its status");
     assert.ok((await subscribed()).has("propresenter:status"), "the ProPresenter Timer never subscribed its channel");
+    assert.deepEqual((await unwanted()).filter((x) => !x.startsWith("prop")), [], "a ProPresenter Timer paid for another source");
   });
 
   test("a baptism Timer reads and subscribes the baptism timer", async () => {
     await mount(useViewData, timerLayout("baptism"));
     assert.equal(count("/api/baptism"), 1, "the baptism Timer never read the session");
     assert.ok((await subscribed()).has("baptism:state"), "the baptism Timer never subscribed its channel");
+    assert.deepEqual((await unwanted()).filter((x) => !x.startsWith("baptism")), [], "a baptism Timer paid for another source");
   });
 
   test("switching a Timer's source in an open layout opens the new source and closes the old", async () => {
