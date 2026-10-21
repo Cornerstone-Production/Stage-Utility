@@ -19,3 +19,18 @@ export const PUBLIC_VIEWER_ATTRIBUTE = "data-servicecue-public";
 export function isPublicMode(): boolean {
   return typeof document !== "undefined" && document.documentElement?.hasAttribute(PUBLIC_VIEWER_ATTRIBUTE) === true;
 }
+
+/**
+ * Was this read answered "not published"? On the public page a 404 is the Worker
+ * holding no copy of that document: the church has not sent it yet, which a visitor
+ * is told plainly rather than shown as a failure. Never true in the building, where a
+ * 404 is a real one.
+ */
+export function notPublishedYet(err: unknown): boolean {
+  return isPublicMode() && typeof err === "object" && err !== null && (err as { status?: unknown }).status === 404;
+}
+
+/** What a visitor reads while the church has sent no service types. */
+export const SERVICES_NOT_SENT = "The church hasn't sent its services yet. Check back soon.";
+/** What a visitor reads for a rundown the church has not sent. */
+export const RUNDOWN_NOT_SENT = "This service hasn't been sent yet. Check back soon.";

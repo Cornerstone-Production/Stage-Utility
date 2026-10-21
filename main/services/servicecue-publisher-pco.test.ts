@@ -36,12 +36,15 @@ const realFetch = globalThis.fetch;
 let asked: string[] = [];
 /** What the stub says PCO has used of its limit, in the three headers. */
 let used = 5;
+/** What the stub answers every Planning Center request with: 401 is credentials it refuses. */
+let pcoStatus = 200;
 
 function stubPco(): void {
   globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
     const url = String(input);
     if (!url.startsWith("https://api.planningcenteronline.com")) return realFetch(input as string, init);
     asked.push(url);
+    if (pcoStatus !== 200) return new Response(JSON.stringify({ errors: [{ title: "Unauthorized" }] }), { status: pcoStatus, headers: { "Content-Type": "application/json" } });
     const u = new URL(url);
     const p = u.pathname.replace("/services/v2", "") || "/";
     const json = (data: unknown, included: unknown[] = []) => ({ data, included });
@@ -86,6 +89,7 @@ beforeEach(async () => {
   pcoService.clearCache();
   pcoService.resetRateLimit();
   used = 5;
+  pcoStatus = 200;
   asked = [];
   page.requests.length = 0;
   stubPco();
@@ -173,5 +177,27 @@ describe("the publisher and the Planning Center gate", () => {
     await pub.runCycle();
     assert.ok(asked.length > 0, "the refresh did not resume");
     assert.equal(lines.filter((l) => /^\[publish\].*headroom has recovered/.test(l)).length, 1);
+  });
+
+  it("says Planning Center can't be read, apart from the page, while its credentials are refused, and stops once they work", async (t) => {
+    const lines = captureConsole(t, "log", "warn", "error");
+    pcoStatus = 401;
+    await pub.start();
+    await pub.runCycle();
+    await pub.trickle();
+    const failing = pub.status();
+    assert.equal(failing.state, "publishing", "the page is reached: Planning Center failing is not a page problem");
+    assert.equal(failing.lastError, null);
+    assert.deepEqual(failing.sourceProblem, { message: "PCO auth failed — check App ID/Secret in Integrations settings" });
+    assert.equal(failing.counts.types, 0);
+    assert.ok(page.docs.has("servicecue-layouts"), "the layouts still go out");
+
+    pcoStatus = 200;
+    pcoService.clearCache();
+    pub.nudge();
+    await pub.runCycle();
+    await pub.trickle();
+    assert.equal(pub.status().sourceProblem, null);
+    assert.equal(lines.filter((l) => /^\[publish\] Planning Center can be read again$/.test(l)).length, 1);
   });
 });

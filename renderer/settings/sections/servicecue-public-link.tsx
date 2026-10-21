@@ -4,10 +4,11 @@
 // operator deployed, and volunteers open that page instead of the app. This card is
 // the switch, the address it publishes to, the link to hand out, and how it is going.
 //
-// Three states, drawn from the approved mockup: OFF (setup fields; the switch waits
-// for both), PUBLISHING (the link, QR code and what was last sent) and PROBLEM (the
-// same, and why the page is not being reached). Every word of the card is the
-// mockup's, and the problem text says what really went wrong.
+// Four states, drawn from the approved mockups: OFF (setup fields; the switch waits
+// for both), PUBLISHING (the link, QR code and what was last sent), PROBLEM (the
+// same, and why the page is not being reached) and SOURCE (the page is reached, but
+// Planning Center can't be read, so it gets no new rundowns). Every word of the card
+// is the mockups', and the problem text says what really went wrong.
 //
 // One react-query read, polled while the page is open (the Automation page's own pattern
 // for a live status). The answer to every write goes into the same cache entry: it is
@@ -20,6 +21,7 @@ import { parsePublishUrl } from "@main/services/servicecue-publish-rules";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { AppLink } from "../../app/app-link";
 import { useUpdateStatus } from "../../app/queries";
 import { QrHint } from "../../components/qr-hint";
 import { Button, ErrorNote, Input, Switch } from "../../components/ui";
@@ -41,6 +43,9 @@ const POLL_MS = 5_000;
 const COPIED_MS = 1_500;
 
 const QUERY_KEY = ["servicecue:getPublish"] as const;
+
+/** Where Planning Center's credentials are set. */
+const INTEGRATIONS_ROUTE = "/settings/integrations";
 
 const ADDRESS_PLACEHOLDER = "https://servicecue.your-account.workers.dev";
 
@@ -156,13 +161,15 @@ const pill = {
   off: { word: "Off", tone: "bg-fill text-fg-muted" },
   publishing: { word: "Publishing", tone: "bg-ok-9/12 text-ok-11" },
   problem: { word: "Not reaching the page", tone: "bg-warn-9/12 text-warn-11" },
+  source: { word: "Can't read Planning Center", tone: "bg-warn-9/12 text-warn-11" },
 } as const;
 
 type View = keyof typeof pill;
 
 function viewOf(dto: PublishSettingsDTO | undefined): View {
   if (!dto?.enabled) return "off";
-  return dto.status.state === "problem" && dto.status.lastError ? "problem" : "publishing";
+  if (dto.status.state === "problem" && dto.status.lastError) return "problem";
+  return dto.status.sourceProblem ? "source" : "publishing";
 }
 
 export function PublicLinkCard({
@@ -391,6 +398,17 @@ export function PublicLinkCard({
       {dto && view === "problem" && status?.lastError && (
         <Note>
           <ProblemText problem={status.lastError} />
+        </Note>
+      )}
+
+      {/* After the page problem, which keeps the pill: fixing that alone would still leave the rundowns missing. */}
+      {dto && status?.sourceProblem && (
+        <Note>
+          Publishing, but Planning Center can't be read: {sentence(status.sourceProblem.message)} The public page keeps what it
+          last received.{" "}
+          <AppLink to={INTEGRATIONS_ROUTE} className="font-semibold underline underline-offset-2">
+            Open Integrations
+          </AppLink>
         </Note>
       )}
 
