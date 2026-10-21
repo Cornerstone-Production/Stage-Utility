@@ -12,7 +12,8 @@ How it works is in [ServiceCue publishing protocol](../reference/servicecue-publ
 **Anyone with the link, and the link is not a secret.** There is no login.
 
 - Everything ServiceCue shows is public: the service types, the layouts, the plans in
-  the plan switcher, the live item, the countdown and the clock, and the whole rundown
+  the plan switcher (from the last 7 days through the next 60 days, so last week's
+  rundowns stay public for up to 7 days), the live item, the countdown and the clock, and the whole rundown
   of every plan that is published. **Every note on a published plan is public**, in
   every column: audio and band notes, lighting and video cues, and whatever else is
   written in a plan's item notes. Do not publish a plan whose notes you would not put
@@ -91,6 +92,14 @@ To stop sharing, delete the Worker (see [Taking it down](#rotating-the-token-and
    `"protocol":1` with your token, and a 401 without it, mean the Worker is running
    and the secret is set.
 
+6. **Turn it on in Stage Utility.** Open the ServiceCue presets page
+   (`/servicecue/presets`), find **Public link**, and enter the Worker's address and the
+   token from step 4. Switch it on: Stage Utility asks the Worker first, so a wrong
+   address or token is said on the card and nothing is switched on. The card then shows
+   the link to give out (with **Copy** and a **QR code**) and how long ago the Worker last
+   accepted something. The token is kept encrypted on the server, belongs to the address
+   it was entered with, and is never shown again or included in a backup.
+
 ## What the address is
 
 | | |
@@ -124,8 +133,11 @@ page, and keeps the address it was on
   `[servicecue-hub]` when a manifest removes something, when a socket is refused for
   the page being full or one address holding its share, when idle sockets are closed to
   make room, and when a viewer's socket fails; and `[servicecue-worker]` when a request
-  fails, or when the page carries no build id (below). A server's own side of this has
-  its own lines in the app's [log](updates-and-logs.md) once it sends.
+  fails, or when the page carries no build id (below). The server's side is in the
+  app's [log](updates-and-logs.md) as `[publish]` lines, and the **Public link** card
+  says why the Worker is not being reached: the token was refused, a Cloudflare rule
+  blocked the server, the address is not the page, or the Worker has no secret set or one
+  under 32 characters.
 - **A page that shows no rundown** at an address that works for others: the rundown
   for that plan was never published. It says so, in place of the rundown.
 - **Open pages did not reload after a deploy.**
@@ -155,7 +167,7 @@ A leaked token lets someone, from anywhere:
 It reaches no part of your network, your Planning Center account or your settings.
 
 To rotate it, set a new one with the two commands in step 4 and update Stage Utility;
-the old one stops working at once. Do it when someone who had it leaves, and whenever it
+the old one stops working at once, and the **Public link** card shows it as the problem until the new one is entered under **Cloudflare connection**. Do it when someone who had it leaves, and whenever it
 may have been seen.
 
 To take the Worker down, Wrangler asks before it deletes:
@@ -173,7 +185,11 @@ npm run servicecue:dev
 ```
 
 This builds the page and runs the Worker locally (`http://localhost:8787/servicecue`),
-with its own empty storage. `.dev.vars` is ignored by git.
+with its own empty storage. `.dev.vars` is ignored by git. To publish to it, start Stage
+Utility with `STAGE_UTILITY_PUBLISH_ALLOW_LOCAL=1` in its environment, and give the
+**Public link** card `http://localhost:8787` and that token. Without the variable the card
+refuses every address that is not `https://`, so a production server can never be pointed
+at a port on its own machine.
 
 ## What it costs, and what it limits
 

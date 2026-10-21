@@ -68,6 +68,12 @@ export interface UpcomingPlansDTO {
    * the plan the machine is on, and a 5xx would make it look broken.
    */
   unavailable?: string;
+  /**
+   * The service types whose plans are missing from this list because they could not
+   * be read in full: the type itself, or only its recent plans. Absent when every
+   * type was. A plan missing from the list is only deleted if its type is not here.
+   */
+  incompleteTypeIds?: string[];
 }
 
 /** How the editor's plan switcher steps. See docs/slots.md. */

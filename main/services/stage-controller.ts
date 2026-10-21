@@ -30,6 +30,7 @@ import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
 import { OutageLog } from "./repeat-log.js";
 import {
+  incompleteOf,
   isDefaultRundownPlan,
   planWindow,
   sameIds,
@@ -508,9 +509,13 @@ export class StageController {
     days: number;
     allowed: string[];
     plans: UpcomingPlan[];
-    /** Some service type could not be read: reused for a shorter time. */
-    partial: boolean;
+    /** Service types whose plans could not be read in full (the type itself, or its
+     *  recent plans): reused for a shorter time, and named to the caller. */
+    incomplete: string[];
   } | null = null;
+  /** What the last `[plans] upcoming list refreshed` line said, so an unchanged list is not
+   *  said again every time its cache expires. */
+  private lastRefreshLine = "";
   /** Plan-list reads that keep failing, said once per outage. Keys:
    *  `followed:<serviceTypeId>` and `upcoming:<serviceTypeId>`. */
   private readonly plansOutage = new OutageLog();
@@ -1122,20 +1127,34 @@ export class StageController {
    * that has already happened.
    */
   async listPlans(serviceTypeId: string): Promise<PlanDTO[]> {
+    return (await this.readPlans(serviceTypeId)).plans;
+  }
+
+  /**
+   * `listPlans`, and whether its recent half came back. A failed recent read still leaves
+   * the upcoming plans, which is what the picker wants; a caller that must not mistake the
+   * shorter list for the whole one reads `recentFailed`.
+   */
+  private async readPlans(serviceTypeId: string): Promise<{ plans: PlanDTO[]; recentFailed: boolean }> {
     this.assertPco();
+    let recentFailed = false;
     const [past, future] = await Promise.all([
-      pcoService
-        .listRecentPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId)
-        .catch(() => [] as PlanDTO[]),
+      pcoService.listRecentPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId).catch(() => {
+        recentFailed = true;
+        return [] as PlanDTO[];
+      }),
       pcoService.listUpcomingPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId),
     ]);
     // Oldest → newest, and de-duplicated: a plan happening today can come back
     // from both filters depending on where PCO draws the line.
     const seen = new Set(future.map((p) => p.id));
-    return [
-      ...past.filter((p) => !seen.has(p.id)).reverse().map((p) => ({ ...p, past: true })),
-      ...future,
-    ];
+    return {
+      plans: [
+        ...past.filter((p) => !seen.has(p.id)).reverse().map((p) => ({ ...p, past: true })),
+        ...future,
+      ],
+      recentFailed,
+    };
   }
 
   /**
@@ -1153,7 +1172,9 @@ export class StageController {
    *
    * A type that fails on its own does NOT fail the list: its plans are missing
    * and the failure is logged, because one unreachable service type is not
-   * evidence about the other five.
+   * evidence about the other five. The types that could not be read in full, whether
+   * the type or only its recent plans, are named in `incompleteTypeIds`: a reader that
+   * keeps its own copy must not take their absent plans for deleted ones.
    */
   async getUpcomingPlanList(days: number): Promise<UpcomingPlansDTO> {
     const now = Date.now();
@@ -1167,9 +1188,9 @@ export class StageController {
       cached &&
       cached.days === days &&
       sameIds(cached.allowed, this.state.allowedServiceTypeIds) &&
-      now - cached.at < (cached.partial ? UPCOMING_PARTIAL_CACHE_MS : UPCOMING_CACHE_MS)
+      now - cached.at < (cached.incomplete.length > 0 ? UPCOMING_PARTIAL_CACHE_MS : UPCOMING_CACHE_MS)
     ) {
-      return { plans: cached.plans, cacheAgeMs: now - cached.at };
+      return { plans: cached.plans, cacheAgeMs: now - cached.at, ...incompleteOf(cached.incomplete) };
     }
 
     let types: ServiceTypeDTO[];
@@ -1182,11 +1203,14 @@ export class StageController {
     const w = planWindow(now, days);
     const currentPlanId = this.state.planId;
     const failures: string[] = [];
+    const incomplete: string[] = [];
     const perType = await Promise.all(
       types.map(async (t) => {
         const key = `upcoming:${t.id}`;
         try {
-          const rows = toUpcoming(t, await this.listPlans(t.id), w, currentPlanId);
+          const read = await this.readPlans(t.id);
+          if (read.recentFailed) incomplete.push(t.id);
+          const rows = toUpcoming(t, read.plans, w, currentPlanId);
           const recovered = this.plansOutage.ok(key, now);
           if (recovered.log) {
             console.log(`[plans] upcoming list: ${scrub(t.name)} can be read again${scrub(recovered.note)}`);
@@ -1198,6 +1222,7 @@ export class StageController {
           // logged so an operator with a missing type has something to read.
           const reason = errorMessage(err);
           failures.push(`${t.name}: ${reason}`);
+          incomplete.push(t.id);
           // Once per outage per type, not once per refresh: a partial list is
           // reused for only thirty seconds, so a type that stays down would
           // otherwise repeat this line every thirty seconds until it came back.
@@ -1224,12 +1249,16 @@ export class StageController {
       days,
       allowed: [...this.state.allowedServiceTypeIds],
       plans,
-      partial: failures.length > 0,
+      incomplete,
     };
-    console.log(
-      `[plans] upcoming list refreshed: ${scrub(plans.length)} plans across ${scrub(types.length)} types`,
-    );
-    return { plans, cacheAgeMs: 0 };
+    // Said when it changes, not every time the cache expires: a list nobody edited is the
+    // same line every five minutes, all week.
+    const shape = `${plans.length} plans across ${types.length} types`;
+    if (shape !== this.lastRefreshLine) {
+      this.lastRefreshLine = shape;
+      console.log(`[plans] upcoming list refreshed: ${scrub(plans.length)} plans across ${scrub(types.length)} types`);
+    }
+    return { plans, cacheAgeMs: 0, ...incompleteOf(incomplete) };
   }
 
   /** The unavailable answer: the last good list when there is one, else nothing.

@@ -19,6 +19,7 @@
 import { errorMessage } from "@main/services/errors";
 import {
   DOCS_CHANNEL,
+  FRAME_DOCS,
   HEARTBEAT_CHANNEL,
   HEARTBEAT_PATH,
   LIVE_CHANNELS,
@@ -299,6 +300,21 @@ function onMessage(raw: unknown): void {
     hear(received);
   }
   deps.deliver(frame.channel, frame.data);
+  if (frame.channel === DOCS_CHANNEL) clearRemovedLive(frame.data);
+}
+
+/**
+ * A doc that is also a frame (FRAME_DOCS) is told to viewers as that frame while it is written, and named on
+ * `publish:docs` only when it is REMOVED: the page was told to forget it. The live position and the SPL recording are
+ * nothing then, which is the `null` the publisher sends for nothing live; left alone they would keep showing the
+ * last one. The state is not cleared here (a null is not a state): its reader reads it again, and finds nothing.
+ */
+function clearRemovedLive(data: unknown): void {
+  const named = (data as Partial<DocsFrameData> | null)?.keys;
+  if (!Array.isArray(named)) return;
+  for (const [channel, key] of FRAME_DOCS) {
+    if (channel !== "stage:state-changed" && named.includes(key)) deps?.deliver(channel, null);
+  }
 }
 
 // ── The edge ──────────────────────────────────────────────────────────────────

@@ -240,6 +240,11 @@ reads a doc when `publish:docs` names it, and every doc after each connect and
 reconnect (a change made while it was away is not replayed). While it has no socket it
 reads again every 10 minutes. The building's own page still reads every minute.
 
+A doc that is also a frame is named on `publish:docs` only when it is removed, so a viewer
+treats that as the live position or the SPL recording becoming `null` (nothing live,
+nothing recording) and reads the state again. A page that was told to forget a rundown does
+not go on showing the last live item.
+
 **The clock.** It sets its clock once per connection from `/api/publish/heartbeat`, over
 a request whose round trip is measured, and renders every countdown against it.
 
@@ -305,5 +310,6 @@ connected and a church that is quiet costs nothing while it waits.
 address with more than 25 devices raises the second.
 
 A publisher should send a frame when something changed and a heartbeat every 30
-seconds. What each costs against the free plan is in
+seconds. Stage Utility's own does, and how it paces the rest, retries and what it logs
+is in [On the web](../features/servicecue-and-baptisms.md#on-the-web). What each costs against the free plan is in
 [ServiceCue on the web](../ops/servicecue-on-the-web.md#what-it-costs-and-what-it-limits).

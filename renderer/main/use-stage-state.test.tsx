@@ -208,6 +208,23 @@ describe("the state is fetched once for everyone", () => {
     }
   });
 
+  test("reads the state again when the public page's Worker names it as removed, and not for any other doc", async () => {
+    // `publish:docs` names a doc that is also a frame only when it was removed. A state frame cannot say "nothing",
+    // so the state is read again, and the page does not go on showing the last one.
+    render(React.createElement(OneConsumer));
+    await settle();
+    assert.equal(requests.filter((u) => u.includes("/api/state")).length, 1);
+    const say = (keys: string[]) => {
+      for (const handler of [...(listeners.get("publish:docs") ?? [])]) handler({ data: JSON.stringify({ keys }) });
+    };
+    act(() => say(["servicecue-layouts", "rundown-100"]));
+    await settle();
+    assert.equal(requests.filter((u) => u.includes("/api/state")).length, 1, "a doc that is not the state read the state again");
+    act(() => say(["state"]));
+    await settle();
+    assert.equal(requests.filter((u) => u.includes("/api/state")).length, 2, "the removed state was not read again");
+  });
+
   test("unmounting one consumer does not blind the others", async () => {
     const a = render(React.createElement(OneConsumer));
     const b = render(React.createElement(OneConsumer));

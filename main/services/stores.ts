@@ -37,6 +37,7 @@ import "./stream-start-store.js";
 import "./notes-store.js";
 import "./servicecue-config-store.js";
 import "./servicecue-layouts-store.js";
+import "./servicecue-publish-store.js";
 import "./servicecue-roles-store.js";
 import "./service-timeline-store.js";
 import "./kiosk-devices-store.js";

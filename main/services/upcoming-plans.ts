@@ -93,6 +93,11 @@ export function sortUpcoming(plans: UpcomingPlan[]): UpcomingPlan[] {
   });
 }
 
+/** `incompleteTypeIds` for a list, or nothing when every type was read in full. */
+export function incompleteOf(ids: readonly string[]): { incompleteTypeIds?: string[] } {
+  return ids.length > 0 ? { incompleteTypeIds: [...ids] } : {};
+}
+
 /** One service type's plans, flattened into switcher rows. */
 export function toUpcoming(
   type: ServiceTypeDTO,

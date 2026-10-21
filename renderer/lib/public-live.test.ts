@@ -148,6 +148,24 @@ describe("frames", () => {
     ]);
   });
 
+  test("a frame-backed doc named on publish:docs was removed: the live position and the recording are cleared, and nothing else is", async () => {
+    const x = await connected();
+    x.delivered.length = 0;
+    FakeSocket.last.say({ channel: "publish:docs", data: { keys: ["rundown-100", "servicecue-layouts"] } });
+    assert.deepEqual(x.delivered, [{ channel: "publish:docs", data: { keys: ["rundown-100", "servicecue-layouts"] } }], "a doc that is not a frame cleared something");
+    x.delivered.length = 0;
+    FakeSocket.last.say({ channel: "publish:docs", data: { keys: ["pco-live", "spl-current", "state"] } });
+    assert.deepEqual(x.delivered, [
+      { channel: "publish:docs", data: { keys: ["pco-live", "spl-current", "state"] } },
+      { channel: "pco:live", data: null },
+      { channel: "spl:history", data: null },
+    ], "the state is read again by its own reader, never delivered as null");
+    // `all` (after a reconnect) is not a removal.
+    x.delivered.length = 0;
+    FakeSocket.last.say({ channel: "publish:docs", data: { keys: [], all: true } });
+    assert.deepEqual(x.delivered.map((d) => d.channel), ["publish:docs"]);
+  });
+
   test("a replayed frame is delivered like any other", async () => {
     const x = await connected();
     x.delivered.length = 0;

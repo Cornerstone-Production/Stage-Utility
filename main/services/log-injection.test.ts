@@ -190,6 +190,9 @@ const REQUEST_FACING = [
   "routes/route-harness.ts",
   // Logs nothing: it reads a creation body and answers a failure.
   "routes/screen-write.ts",
+  // Logs nothing: it reads the page address and token off POST /api/servicecue/publish and
+  // hands them to servicecue-publisher.ts, whose lines are below.
+  "routes/servicecue-publish-routes.ts",
   "routes/servicecue-routes.ts",
   "routes/state-routes.ts",
   "routes/status-routes.ts",
@@ -206,11 +209,16 @@ const REQUEST_FACING = [
   // Its one warning names the screen whose embedded views run past the cap; the id is
   // scrubbed, and a reply request is what asks the question.
   "screen-reach.ts",
-  // Both recorders name a Planning Center PLAN ITEM TITLE on their re-run and
-  // carry-over lines. A title is typed into Planning Center and arrives here in
-  // an HTTP response body — outside data by every measure this file uses, and
-  // the same exposure pco-service.ts is scanned for.
+  // Both recorders (this one, and spl-recorder.ts after the next entry) name a
+  // Planning Center PLAN ITEM TITLE on their re-run and carry-over lines. A title
+  // is typed into Planning Center and arrives here in an HTTP response body —
+  // outside data by every measure this file uses, and the same exposure
+  // pco-service.ts is scanned for.
   "service-timeline-recorder.ts",
+  // Its lines name the host of the page address typed into POST /api/servicecue/publish,
+  // a document key built from Planning Center ids, and whatever the page or the network
+  // said back. It never names the token.
+  "servicecue-publisher.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
   // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
@@ -512,6 +520,9 @@ function requestFacingFiles(): string[] {
     // and, for the timeline, on the carried-over-item line. A title is typed
     // into Planning Center and reaches this process in an HTTP response body.
     path.join(HERE, "service-timeline-recorder.ts"),
+    // Its lines name the host of the page address typed into POST /api/servicecue/publish
+    // and whatever the page or the network said back; see REQUEST_FACING.
+    path.join(HERE, "servicecue-publisher.ts"),
     path.join(HERE, "spl-recorder.ts"),
     path.join(HERE, "stage-controller.ts"),
     // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
