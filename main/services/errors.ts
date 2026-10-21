@@ -67,6 +67,27 @@ export function toError(err: unknown): Error {
  * read — it goes in only when the message does not already name the address,
  * because the cause usually does and two copies read as two failures.
  */
+/** Node's codes for a certificate it would not trust: what a firewall that intercepts TLS, swapping in its own, causes. */
+const UNTRUSTED_CERTIFICATE_CODES: ReadonlySet<string> = new Set([
+  "CERT_HAS_EXPIRED",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+]);
+
+/** The code, when a request failed over a certificate it would not trust. A failed fetch carries it on `cause`. */
+export function untrustedCertificateCode(err: unknown): string | null {
+  let e: unknown = err;
+  for (let depth = 0; depth < 4 && typeof e === "object" && e !== null; depth++) {
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === "string" && UNTRUSTED_CERTIFICATE_CODES.has(code)) return code;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return null;
+}
+
 export function fetchFailureMessage(err: unknown, target: string): string {
   const top = errorMessage(err);
   const cause = err instanceof Error && err.cause !== undefined ? errorMessage(err.cause) : "";
