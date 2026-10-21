@@ -109,6 +109,8 @@ const REQUEST_FACING = [
   // Its one warning names a cue pair's base, which comes from a cue name typed
   // into an HTTP body.
   "home-assistant-yaml.ts",
+  // Every line names a Host header: whatever name the sender chose, verbatim.
+  "host-names.ts",
   "integration-manager.ts",
   // Its lines name a device id and the figures of a health report, both taken from
   // POST /api/devices/:id/health (the path and the body), and an output name and
@@ -161,6 +163,7 @@ const REQUEST_FACING = [
   "routes/dev-clean-urls.ts",
   "routes/display-settings-routes.ts",
   "routes/history-routes.ts",
+  "routes/host-name-routes.ts",
   "routes/integration-routes.ts",
   "routes/kiosk-device-routes.ts",
   // Logs nothing: it redirects an API path and echoes the path and query into a
@@ -445,6 +448,9 @@ function requestFacingFiles(): string[] {
     // a `/log` entry. It is scrubbed at the logger.
     path.join(HERE, "history-milestones-store.ts"),
     path.join(HERE, "home-assistant-yaml.ts"),
+    // Its lines name a request's Host header, which the sender writes freely: a
+    // newline in one would forge a `/log` entry. Scrubbed at each line.
+    path.join(HERE, "host-names.ts"),
     // POST /api/integrations/:id/config checks only that `config` is an object,
     // then foldConfigEntries warns with the rejected KEY. That key is an
     // attacker's string, verbatim, and this file was missing from the list.

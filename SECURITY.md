@@ -88,13 +88,29 @@ When reporting, please include:
   Assistant's own origin, so refusing to be framed would break it. A page on another origin can
   therefore still frame the app and try to trick a click.
 
-- **DNS rebinding is not closed.** A page whose own hostname is made to resolve to this
-  server's address is, to the browser, on the same origin as the app: its requests name that
-  hostname in both `Origin` and `Host`, so the checks above pass, and so does the cue routes'
-  same-origin exemption below. The page can read and write as the app's own pages do, press
-  cues and mint a cue token. Nothing in the app refuses a request by the host name it was sent
-  to yet. Until it does, treat a browser on the app's network that visits untrusted sites as
-  able to reach the app.
+- **DNS rebinding is closed only once refusal is on.** A page whose own hostname is made to
+  resolve to this server's address is, to the browser, on the same origin as the app: its
+  requests name that hostname in both `Origin` and `Host`, so the checks above pass, and so
+  does the cue routes' same-origin exemption below. The one thing that differs is the name in
+  `Host`, so the server checks it on every request, before anything else runs.
+
+  Always answered: no `Host` at all, any IP address, `localhost` and names under `.localhost`,
+  a name with no dot, names under `.local`, `.internal` and `.home.arpa`, this machine's own
+  name and the **Public address**. No website can get a browser to reach the server under any
+  of those. Any other name is answered only if it is on the list in **Settings → Advanced →
+  Host names**.
+
+  **Refusal is off by default.** While it is off, a name not on the list is still answered,
+  logged once on a `[security]` line and listed on that card to accept or dismiss, and the
+  sidebar's Advanced entry counts the names waiting. With **Refuse names not on the list** on,
+  such a request gets a `403`, reads and writes alike, and an event stream opened by such a
+  name is closed. The first time it is turned on it accepts the names plainly in use: seen in
+  the last 30 days, over at least a day, and not dismissed. A page can make a browser send any
+  name once, so a name seen in one burst is left waiting, and so is every name refused later:
+  turning refusal off and on again accepts nothing. The list itself changes only by a request
+  whose name is already answered, so a page cannot list its own name for later. Until refusal
+  is on, treat a browser on the app's network that visits untrusted sites as able to reach the
+  app.
 
 - **Cue tokens, and what they are not.** Calling a cue (`POST /api/cues/<name>`) presses a
   real button on real gear, usually on behalf of a caller that is not a browser — a voice
@@ -140,13 +156,14 @@ When reporting, please include:
   (mint, revoke), by `import-pairs` and by `buttons/refresh`, **unless the request is a
   same-origin browser write** — which means an `Origin` naming this server, which a page on
   this app's own origin sends on every `POST` and `DELETE` and a page on any other origin
-  cannot forge, short of the DNS rebinding above. `Sec-Fetch-Site` is not required: browsers
+  cannot forge, short of the DNS rebinding above while refusal is off. `Sec-Fetch-Site` is not required: browsers
   send it only to HTTPS or localhost, and this app is plain HTTP on a LAN address. When it is
   present it must say `same-origin`.
 
   That exemption is a **browser convenience, not a boundary**: `curl` can type an `Origin` as
   easily as a browser sends one. What it closes is the confused-deputy case — a page on another
-  origin cannot forge it — except under DNS rebinding, which it does not close.
+  origin cannot forge it. Under DNS rebinding it is the host-name check above, not this
+  exemption, that refuses the page.
 
   Reads are unchanged and remain open to the LAN: the token *list* (labels, ids and last-use
   times — never a hash), the generated Home Assistant fragment (which refers to the token as

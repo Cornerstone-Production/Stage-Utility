@@ -33,14 +33,15 @@ A `500` means this app broke, and only that.
 ## What is protected, and what is not
 
 The app is a LAN appliance with no user accounts, and **every route below is
-reachable unauthenticated** unless it says otherwise. Four things do gate:
+reachable unauthenticated** unless it says otherwise. Five things do gate:
 
 | | |
 |---|---|
-| **Other origins** | No response carries an `Access-Control-*` header, so a page on another origin cannot read an answer, and its preflight gets no permission. Any `POST`/`PUT`/`PATCH`/`DELETE` carrying an `Origin` whose hostname is not the request's `Host` is refused `403`. A request with no `Origin` is allowed, and reads are not gated at the server, except the two that answer a live secret (a push feed's address and the feeds export with passwords), which refuse a cross-origin browser. Ports are ignored so the dev proxy works. DNS rebinding is not covered: see [SECURITY.md](../../SECURITY.md) |
+| **Other origins** | No response carries an `Access-Control-*` header, so a page on another origin cannot read an answer, and its preflight gets no permission. Any `POST`/`PUT`/`PATCH`/`DELETE` carrying an `Origin` whose hostname is not the request's `Host` is refused `403`. A request with no `Origin` is allowed, and reads are not gated at the server, except the two that answer a live secret (a push feed's address and the feeds export with passwords), which refuse a cross-origin browser. Ports are ignored so the dev proxy works. DNS rebinding is covered by the host-name check below |
+| **Host names** | Every request is checked by the name in its `Host` header before anything else runs. No `Host`, an IP address, `localhost`, a name with no dot, names under `.local`, `.internal`, `.home.arpa` or `.localhost`, this machine's name and the Public address are always answered; any other name only when it is on the list (`/api/security/host-names`). While refusal is off, the default, an unlisted name is answered and recorded; while it is on, it is `403`: a short HTML page for a browser asking for one, otherwise `{error}`. See [SECURITY.md](../../SECURITY.md) |
 | **The log** | `/log` and `/api/log` require `?token=…` when `STAGE_UTILITY_LOG_TOKEN` is set, and answer `401` without it. Unset means open. `/api/prodcom/transcript/raw` — the unredacted transcript — uses the same token and the same failure |
 | **Device secrets** | `/enroll` authorises a `device` id against the secret that device was issued; an unrecognised device gets a holding screen rather than somebody else's screen. `POST /api/devices/:id/health` takes the same secret in an `x-device-token` header and answers one `401` for an unknown id, an unconfirmed binding and a wrong secret alike |
-| **Cue calls** | `POST /api/cues/:name` requires `Authorization: Bearer su_…` and answers `401` without one, **unless the request is a same-origin browser write** — a cue button on a console — which is logged as `console`. `POST /api/action/invoke`, the cue token **writes** (mint, revoke), `import-pairs` and `buttons/refresh` require the same token **unless the request is a same-origin browser write** — an `Origin` naming this server, which a browser sends on every `POST`/`DELETE` and a page on any other origin cannot forge, short of DNS rebinding. `Sec-Fetch-Site` is not required (browsers send it only to HTTPS or localhost, and this app is plain HTTP on a LAN address), but when present it must say `same-origin`. Reads are open, including the token list and the Home Assistant fragment: a same-origin `GET` sends no `Origin`, and neither carries a secret |
+| **Cue calls** | `POST /api/cues/:name` requires `Authorization: Bearer su_…` and answers `401` without one, **unless the request is a same-origin browser write** — a cue button on a console — which is logged as `console`. `POST /api/action/invoke`, the cue token **writes** (mint, revoke), `import-pairs` and `buttons/refresh` require the same token **unless the request is a same-origin browser write** — an `Origin` naming this server, which a browser sends on every `POST`/`DELETE` and a page on any other origin cannot forge. Under DNS rebinding it is the host-name check above, once refusal is on, that refuses the page. `Sec-Fetch-Site` is not required (browsers send it only to HTTPS or localhost, and this app is plain HTTP on a LAN address), but when present it must say `same-origin`. Reads are open, including the token list and the Home Assistant fragment: a same-origin `GET` sends no `Origin`, and neither carries a secret |
 
 The cue token identifies the caller in the activity log and keeps the call route
 closed to anything that has not been handed one. **It is not a perimeter.** Anyone
@@ -533,6 +534,13 @@ the wrong shape is `400` with the reason unless noted.
 | `/api/checklist-sources` | `{categories?, teams?}`, below |
 | `/api/bar-items` | `{items?, mobileItems?}`, above |
 
+**Host names** — the names this server answers to; see [Host names](#what-is-protected-and-what-is-not).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/security/host-names` | `{enforce, seeded, automatic, accepted, waiting, dismissed}`; `seeded` is whether refusal has already turned on once. `automatic` is this machine's name and the Public address (`{name, source}`); `accepted` is the list (`{name, source: "added" \| "accepted" \| "seen", at}`); `waiting` (up to 50, newest first) and `dismissed` are names that reached the server and are not on it (`{name, firstSeen, lastSeen, count, lastFrom, client}`); a dismissed name the seen list has since forgotten has empty times and address and a `count` of 0 |
+| POST | `/api/security/host-names` | One change, answering the view above: `{enforce: boolean}`; `{add}` or `{accept}` a name (a pasted address keeps its host; an IP, a name that is always answered, one that is not a host name, or a list already holding 200 is `400` with the reason); `{remove}`; `{dismiss}` a waiting name (anything else, or a full dismissed list of 200, is `400`); `{undismiss}`. Any other body is `400`. `403` unless the request's own `Host` is answered without the list. The first time `enforce` turns on it accepts every waiting name seen in the last 30 days over at least a day |
+
 `/api/checklist-sources` takes `{categories}` and `{teams}` — plan-note category
 and team names, not ids. Either may be omitted and is then left as it stands; a
 present one must be a `string[]`, and `[]` clears that list. A body naming
@@ -677,7 +685,12 @@ something to change:
 `rosstalk:simulated` · `automation:rules` · `cues` · `cues:all` ·
 `automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` (`{scanning, seen, health}`; the Screens page and the sidebar's count of screens not set up refetch `/api/devices` on each, and a steady output's health does not push one) ·
 `display:refresh` · `settings:allowedServiceTypeIds-changed` · `baptism:rebuilt` ·
-`update:notice` · `propresenter:status:<id>`
+`update:notice` · `propresenter:status:<id>` · `security:host-names`
+
+`security:host-names` is `{waiting, enforce}`, sent when a new name reaches the
+server or the list or the switch changes; the Host names card and the sidebar's
+count refetch `/api/security/host-names` on it. A name already waiting does not
+push one per request.
 
 `update:notice` is `{tag, count}`: a new release has appeared, sent once per
 release and only while a browser is subscribed to it, so a release found

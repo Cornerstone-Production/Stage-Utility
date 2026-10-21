@@ -103,6 +103,7 @@ const EXPECTED_CONFIG = [
   "bar-config.json",
   // The operator's own dates worth marking on the Trends chart.
   "history-milestones.json",
+  "host-names.json",
   "kiosk-devices.json",
   "layout-groups.json",
   "layout-templates.json",
@@ -134,6 +135,7 @@ const EXPECTED_RUNTIME = [
   "automation-log.json",
   "baptism.json",
   "checklist-ticks.json",
+  "host-names-seen.json",
   // The day's stage messages: an observation, cleared nightly.
   "messages.json",
   "service-timeline.json",

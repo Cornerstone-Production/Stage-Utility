@@ -360,9 +360,19 @@ screens, each with its own URL.
 rules, recorded services, the baptism timer and the stage patch sheet.
 
 **Advanced** — updates and the update track, the server log, the context bar,
-kiosk devices, time zone and clock format, the public address, how integrations
-back off between services, backup and restore, automatic backups, and the data
-archive.
+kiosk devices, time zone and clock format, the public address, host names, how
+integrations back off between services, backup and restore, automatic backups, and
+the data archive.
+
+**Host names** lists the DNS names this server answers to, its defence against DNS
+rebinding ([SECURITY.md](../../SECURITY.md)). IP addresses, names with no dot and
+names under `.local` always work. A screen, panel or Home Assistant that opens the
+app by any other name, such as `stage.example.org`, needs that name on the list
+before **Refuse names not on the list** is turned on: names that reach the server
+wait on the card to be accepted or dismissed, and the sidebar counts them. The
+first time refusal is turned on it accepts each waiting name seen over at least a
+day in the last 30. Change the list from the server's IP address or a name
+already on it.
 
 ### Time zone
 

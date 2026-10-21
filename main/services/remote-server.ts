@@ -34,6 +34,9 @@ import { buildVersionPayload, describePortHolder, rawPortHolder } from "./port-h
 import { getUserDataPath } from "./app-paths.js";
 import { getLanIp } from "./lan-ip.js";
 import { isCrossOrigin } from "./http-origin.js";
+import { hostNames } from "./host-names.js";
+import { escapeHtml } from "./html-escape.js";
+import { hostNameRoutes } from "./routes/host-name-routes.js";
 import { isOperatorPath } from "./routes/operator-paths.js";
 import { legacyApiRoutes } from "./routes/legacy-api-routes.js";
 import { legacyPageRoutes } from "./routes/legacy-page-routes.js";
@@ -133,6 +136,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   calendarRoutes,
   videoRoutes,
   messagesRoutes,
+  hostNameRoutes,
 ] as const;
 
 /**
@@ -178,6 +182,21 @@ const FRIENDLY_PORT = process.env.STAGE_UTILITY_FRIENDLY_PORT !== undefined
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+/** The answer to a request by a name not on the list: what is wrong and how to
+ *  fix it, as a page for a browser and as JSON for anything else. */
+function refuseHostName(req: http.IncomingMessage, res: http.ServerResponse, name: string): void {
+  const sentence =
+    `This server does not answer to the name ${name}. If that name is yours, open the server by its ` +
+    "IP address, go to Settings, Advanced, Host names, and add it.";
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  if (String(req.headers.accept ?? "").includes("text/html")) {
+    res.writeHead(403, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(`<!doctype html><meta charset="utf-8"><title>Not this server's name</title><body style="font-family:system-ui;background:#0a0a0a;color:#eee;padding:2rem"><p>${escapeHtml(sentence)}</p>`);
+    return;
+  }
+  error(res, sentence, 403);
+}
 
 // hostnameOf / isCrossOrigin live in http-origin.ts, because the cue routes'
 // browser exemption has to be the SAME check — a second, looser copy of it in
@@ -272,6 +291,19 @@ export function handlePresenceHeartbeat(
 
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();
+/** The Host each stream was opened by, so turning host-name refusal on can close
+ *  one a page opened by a name that is now refused. */
+const sseHost = new WeakMap<http.ServerResponse, string | undefined>();
+hostNames.onRefusalOn(() => {
+  let closed = 0;
+  for (const client of sseClients) {
+    if (hostNames.answersTo(sseHost.get(client))) continue;
+    // Destroyed, as a stalled stream is: its close handler releases the rest.
+    client.destroy();
+    closed += 1;
+  }
+  if (closed > 0) console.warn(`[security] closed ${scrub(closed)} event stream(s) opened by a name now refused`);
+});
 // Keep the SSE pipe warm and surface dead clients: EventSource ignores comment
 // lines, but the write itself fails (or backs up) on a half-open socket so we can
 // reap it. Without this, a slept/dropped kiosk lingers forever holding memory and
@@ -750,6 +782,9 @@ export class RemoteServer {
   async start(): Promise<void> {
     if (this.server) return;
 
+    // Before the first request: until it has loaded, every name is answered.
+    hostNames.setPublicUrlSource(() => stageController.getState().publicUrl ?? null);
+    await hostNames.init();
     // Push state to SSE clients on every broadcast so the phone page can use
     // EventSource instead of polling.
     // Let producers idle when nothing is watching their channel: true if any client
@@ -862,6 +897,7 @@ export class RemoteServer {
     }
     eventPoll.reset();
     channelReports.reset();
+    await hostNames.stop();
     // Force-close all tracked sockets so the server shuts down promptly.
     for (const socket of this.sockets) {
       socket.destroy();
@@ -901,6 +937,22 @@ export class RemoteServer {
     const pathname = url.pathname;
 
     if (DEBUG_HTTP) console.log(`[remote-server] ${req.method} ${pathname}`);
+
+    // A request by a name this server does not answer to is the shape of DNS
+    // rebinding: a page whose own hostname was made to resolve here. Checked
+    // before anything else, every method, because a rebinding page's reads send
+    // no Origin and would otherwise read everything. Recorded, and refused only
+    // while refusal is on: see host-names.ts.
+    const host = hostNames.check(req.headers.host, {
+      method: req.method,
+      path: pathname,
+      from: req.socket?.remoteAddress,
+      userAgent: req.headers["user-agent"],
+    });
+    if (!host.answer) {
+      refuseHostName(req, res, host.name ?? "");
+      return;
+    }
 
     // The type each response names is the type the browser uses. Without it a
     // browser may sniff an upload or an error body into something it will run.
@@ -1068,6 +1120,7 @@ export class RemoteServer {
       });
       writeHelloBurst(res);
       sseClients.add(res);
+      sseHost.set(res, req.headers.host);
       // Who is actually attached, on a tagged line. The only prior evidence that
       // a display had dropped its stream was the display itself going stale.
       console.log(`[events] stream client connected (${sseClients.size} streams)`);

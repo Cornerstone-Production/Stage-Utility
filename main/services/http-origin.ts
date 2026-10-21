@@ -5,11 +5,17 @@
 // a looser copy in cue-tokens.ts, and the copy accepted a bare `Sec-Fetch-Site`
 // header — curl with one header minted itself a cue token. One definition now.
 
-/** Hostname of an Origin header ("http://host:port") or a Host header ("host:port"). */
-export function hostnameOf(value: string | undefined): string | null {
+/**
+ * Hostname of an Origin header ("http://host:port") or a Host header
+ * ("host:port"): lower-cased, without a trailing dot, or null when the value is
+ * absent or does not parse. IPv6 literals keep their brackets. Pure, so the
+ * Host names card validates with it too.
+ */
+export function hostnameOf(value: string | undefined | null): string | null {
   if (!value) return null;
   try {
-    return new URL(value.includes("://") ? value : `http://${value}`).hostname.toLowerCase();
+    const name = new URL(value.includes("://") ? value : `http://${value}`).hostname.toLowerCase();
+    return name.replace(/\.$/, "") || null;
   } catch {
     return null;
   }
@@ -36,8 +42,8 @@ export function hostnameOf(value: string | undefined): string | null {
  *
  * What this does NOT stop is DNS rebinding: a page whose own hostname has been
  * made to resolve to this server sends that hostname as both Origin and Host,
- * so the two match. Only checking Host against the names this server answers to
- * closes that, and nothing does yet (SECURITY.md says so).
+ * so the two match. Checking Host against the names this server answers to
+ * closes that, in host-names.ts, once refusal is on.
  */
 export function isCrossOrigin(origin: string | undefined, host: string | undefined): boolean {
   if (!origin) return false;
