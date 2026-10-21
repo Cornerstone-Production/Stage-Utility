@@ -18,6 +18,7 @@ import type { HomeCardSize, HomeVisibility } from "@main/types/views";
 import { CARD_HAIRLINE, IDIOM_TYPES } from "@main/types/readout-types";
 import { externKeyed } from "@main/types/extern-keyed";
 import { DEFAULT_WARN_AMBER_SEC, DEFAULT_WARN_RED_SEC } from "./pvp-now-config";
+import { readTimerConfig } from "./timer-config";
 
 /** Palette sections, in the order the add-object dropdown shows them. */
 export const PALETTE_GROUP_ORDER = [
@@ -29,7 +30,6 @@ export const PALETTE_GROUP_ORDER = [
   "Audio (SPL)",
   "Transcription",
   "People",
-  "Baptisms",
   "OBS",
   "REAPER",
   "ProVideoPlayer",
@@ -65,6 +65,13 @@ export interface LayoutObjectSpec {
    * dimming them would just be noise.
    */
   integration?: { id: string; label: string };
+  /**
+   * The style this widget starts with when it is added on HOME, where it has no
+   * card of its own and the theme decides the text colour. Absent: the ordinary
+   * `style()`. A wall widget's readout style names a white ink, which on Home's
+   * light card is white on white.
+   */
+  homeStyle?: () => LayoutStyle;
   /** No per-object options; the inspector shows a "styling only" hint. */
   stylingOnly?: boolean;
   /**
@@ -283,6 +290,19 @@ export const EMBED_FONT_FRACTION = 0.016;
 
 // ── The registry ──────────────────────────────────────────────────────────────
 
+/**
+ * The retirement shared by the four widgets the Timer replaced.
+ *
+ * Unlike the others it offers no Convert button: the mapping runs wherever an
+ * object is read (timer-config.ts), so nothing ever shows an old one to convert.
+ * `convert` is the same mapping, there because the `retired` type requires one.
+ */
+const RETIRED_TIMER: NonNullable<LayoutObjectSpec["retired"]> = {
+  replacedBy: "timer",
+  why: "Timer reads the service clock, a ProPresenter timer or a baptism readout, and a saved one opens as a Timer on its own.",
+  convert: (old) => readTimerConfig(old) ?? old,
+};
+
 export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = externKeyed({
   // Layout
   container: {
@@ -341,10 +361,22 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     style: () => CARD({ fontWeight: 600 }),
     homeSize: "s",
   },
+  timer: {
+    label: "Timer",
+    blurb: "A countdown or clock from the service, ProPresenter or a baptism",
+    group: "Text & time",
+    // The next item on, as the approved design defaults it: a Timer added on Home
+    // is the Service card again. Converted objects keep their own settings.
+    config: () => ({ type: "timer", source: "service", nextItem: true }),
+    style: () => READOUT(0.1),
+    // As the bare Service card it replaces: no ink of its own on Home.
+    homeStyle: BARE,
+  },
   "countdown-timer": {
     label: "PCO countdown",
     blurb: "Time until the service starts, from Planning Center",
-    group: "Text & time",
+    group: null,
+    retired: RETIRED_TIMER,
     config: () => ({ type: "countdown-timer", caption: "Service starts in" }) as LayoutObjectConfig,
     style: () => READOUT(0.085),
   },
@@ -453,7 +485,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "home-live-status": {
     label: "Service timer",
     blurb: "The running item's clock, and what comes next",
-    group: "PCO / service",
+    group: null,
+    retired: RETIRED_TIMER,
     config: () => ({ type: "home-live-status" }),
     style: BARE,
     homeSize: "xl",
@@ -541,7 +574,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "pp-timer": {
     label: "ProPresenter timer",
     blurb: "A timer from ProPresenter, by name",
-    group: "ProPresenter",
+    group: null,
+    retired: RETIRED_TIMER,
     config: () => ({ type: "pp-timer", timerName: null, propresenterInstanceId: null, warnStates: true, hideWhenIdle: false, showLabel: true, caption: "Stage timer" }),
     style: () => READOUT(0.1),
     homeSize: "s",
@@ -658,7 +692,8 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
   "baptism-timer": {
     label: "Baptism timer",
     blurb: "The running baptism clock, or the session's totals",
-    group: "Baptisms",
+    group: null,
+    retired: RETIRED_TIMER,
     config: () => ({ type: "baptism-timer", field: "live", showLabel: true, label: "", caption: "Baptisms" }),
     style: () => READOUT(0.14),
     homeSize: "s",
@@ -1208,6 +1243,8 @@ export function defaultStyleFor(
   // function -- a readout added in the editor stored textAlign:"center"
   // permanently, and Reset look on an object from a newer build white-screened
   // the page.
+  const home = findLayoutObjectSpec(type)?.homeStyle;
+  if (opts.hostDrawsFrame && home) return home();
   const base = defaultStyle(type);
   if (opts.hostDrawsFrame || !HOST_FRAMED_TYPES.has(type)) return base;
   return { ...CARD_PRESETS.neutral, ...base };

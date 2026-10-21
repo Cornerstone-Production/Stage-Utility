@@ -350,8 +350,10 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // one mechanism.
   // Renamed when it was split: it drew recording and SPL too, and does not any
   // more. The type id stays so no stored layout has to move.
+  // Retired into the Timer (see RETIRED): the label is still pinned, the
+  // placement is skipped, and the card after it now follows `home-next-service`.
   { type: "home-live-status", label: "Service timer", group: "PCO / service", after: "home-next-service" },
-  { type: "home-recent-services", label: "Recent services", group: "PCO / service", after: "home-live-status" },
+  { type: "home-recent-services", label: "Recent services", group: "PCO / service", after: "home-next-service" },
   // The live card's insides, split out so each can be placed on its own once
   // Home became a grid. The card kept the timer; these three kept their look.
   // Each sits beside the widgets it belongs with rather than with the other Home
@@ -397,6 +399,9 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // The Video feeds page's own widget: a live camera or program feed, named by
   // id. Sits after the logo, the last of the plain Layout media types.
   { type: "video", label: "Video", group: "Layout", after: "brand-logo" },
+  // One timer for the service clock, a ProPresenter timer and the baptism
+  // readouts: it replaces four widgets (see RETIRED) and leads the group's tail.
+  { type: "timer", label: "Timer", group: "Text & time", after: "clock" },
 ];
 
 /**
@@ -409,6 +414,13 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
  */
 const RETIRED: { type: string; label: string; replacedBy: string }[] = [
   { type: "service-order", label: "Service order (legacy)", replacedBy: "view-embed" },
+  // The four timers the Timer replaced. Unlike the rest they offer no Convert
+  // button: a saved one is read as a Timer wherever it is read (timer-config.ts),
+  // so nothing ever shows an old one to convert. Sorted, one per line.
+  { type: "baptism-timer", label: "Baptism timer", replacedBy: "timer" },
+  { type: "countdown-timer", label: "PCO countdown", replacedBy: "timer" },
+  { type: "home-live-status", label: "Service timer", replacedBy: "timer" },
+  { type: "pp-timer", label: "ProPresenter timer", replacedBy: "timer" },
   // The per-source Home cards. Each was one component with one prop fixed —
   // `<RecordingCard recorder="OBS" />`, `<StreamingCard platform="Resi" />` — so
   // the prop became a right-click choice on the general card and these four stop

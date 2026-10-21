@@ -243,6 +243,23 @@ const PRO_LIVE: ProPresenterStatusDTO = {
   slidePreviewKey: null,
 };
 
+/** A live item twelve seconds past its length with another after it, so the
+ *  Timer's two service switches have something to show: Red on overrun colours
+ *  the time, Show the next item adds the line. */
+const PCO_LIVE = {
+  mode: "item",
+  currentItemId: "item-1",
+  label: "Message",
+  lengthSec: 60,
+  liveStartAt: new Date(NOW - 72_000).toISOString(),
+  targetAt: null,
+  serverNow: new Date(NOW).toISOString(),
+  currentItemTitle: "Message",
+  nextItemTitle: "Announcements",
+  serviceTimeId: null,
+  serviceTimeStartsAt: null,
+} as unknown as PcoLiveDTO;
+
 /** A service running four minutes behind, so `service-pacing` has a drift to
  *  report and its two display modes cannot come out the same. */
 const TIMELINE: ServiceTimeline = {
@@ -341,6 +358,7 @@ function ctxFor(home: boolean, live: boolean) {
     // are fed, because the guard renders each pair on both surfaces.
     scores: live ? SCORES_LIVE : SCORES_IDLE,
     propresenter: live ? PRO_LIVE : null,
+    pcoLive: live ? PCO_LIVE : null,
     serviceTimeline: live ? TIMELINE : null,
   });
 }

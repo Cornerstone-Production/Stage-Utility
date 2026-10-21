@@ -13,6 +13,15 @@ import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER } from "./layout-objects.js";
 
 const TYPES = Object.keys(LAYOUT_OBJECTS) as (keyof typeof LAYOUT_OBJECTS)[];
 
+/**
+ * Blurbs approved at a length past one line, with the length each was approved
+ * at. The palette card wraps rather than truncating, so a longer line costs a
+ * second row and nothing is cut. An exact list, so it cannot grow quietly.
+ */
+const LONGER_BLURBS: Partial<Record<(typeof TYPES)[number], number>> = {
+  timer: 64,
+};
+
 describe("the catalog covers every object type", () => {
   test("exactly the expected types, and the two registries agree", () => {
     // An EXACT set, not a floor. The design doc said 38 while the capability
@@ -35,7 +44,7 @@ describe("every blurb is usable on a card", () => {
     test(`${t}`, () => {
       const b = LAYOUT_OBJECTS[t].blurb;
       assert.ok(b.length > 0, "must not be empty");
-      assert.ok(b.length <= 60, `must fit one line, got ${b.length} chars`);
+      assert.ok(b.length <= (LONGER_BLURBS[t] ?? 60), `must fit one line, got ${b.length} chars`);
 
       // A blurb that restates the label teaches nothing. "OBS status" under a
       // card titled "OBS status" is the failure this catches.

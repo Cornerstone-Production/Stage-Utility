@@ -380,8 +380,8 @@ in **grouped**; that fallback (`baptismDefaultMode`) has no setting screen of
 its own, so it changes only if someone edits the settings file directly.
 
 Sessions are named by service and cross-linked into Service History with
-per-person splits and averages. A **Baptism timer** layout object puts the live
-count and timer on a display.
+per-person splits and averages. A **Timer** layout object set to the Baptism
+source puts the live count and timer on a display ([Widgets](../reference/widgets.md#text--time)).
 
 ## Header and figures
 

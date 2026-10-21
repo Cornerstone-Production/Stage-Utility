@@ -46,7 +46,7 @@ function stageWall(micBoardViewId, rundownViewId) {
   const big = { fontSize: 0.075, fontWeight: 600, color: "#f1f3f4", vAlign: "middle" };
   return layout([
     obj({ type: "text", text: "Main Room · Stage" }, [0.02, 0.03, 0.3, 0.08], { style: title }),
-    obj({ type: "countdown-timer", hideWhenIdle: false, caption: "Time left" }, [0.34, 0.015, 0.3, 0.115], { style: { ...CARD, ...big, textAlign: "center", fontSize: 0.07 } }),
+    obj({ type: "timer", source: "service", hideWhenIdle: false, caption: "Time left" }, [0.34, 0.015, 0.3, 0.115], { style: { ...CARD, ...big, textAlign: "center", fontSize: 0.07 } }),
     obj({ type: "clock", showSeconds: false, format: "12h", showMeridiem: true }, [0.78, 0.015, 0.2, 0.115], { style: { ...CARD, ...big, textAlign: "center" } }),
     obj({ type: "slots-grid", source: "view", sourceViewId: micBoardViewId }, [0.02, 0.15, 0.62, 0.62], {}),
     obj({ type: "messages" }, [0.66, 0.15, 0.32, 0.3], { id: "wall-messages", style: { ...CARD, fontSize: 0.026 } }),
@@ -81,7 +81,7 @@ function lobbyWelcome() {
   return layout([
     obj({ type: "text", text: "Welcome" }, [0.05, 0.05, 0.4, 0.1], { style: title }),
     obj({ type: "clock", showSeconds: false, format: "12h", showMeridiem: true }, [0.05, 0.18, 0.42, 0.34], { style: { ...CARD, ...big } }),
-    obj({ type: "countdown-timer", hideWhenIdle: false, caption: "Time left" }, [0.53, 0.18, 0.42, 0.34], { style: { ...CARD, ...big, fontSize: 0.12 } }),
+    obj({ type: "timer", source: "service", hideWhenIdle: false, caption: "Time left" }, [0.53, 0.18, 0.42, 0.34], { style: { ...CARD, ...big, fontSize: 0.12 } }),
     obj({ type: "text", text: "Coffee is in the lobby. Kids check-in is down the hall." }, [0.05, 0.6, 0.9, 0.2], { style: { fontSize: 0.05, fontWeight: 500, color: "#e8eaed", textAlign: "center", vAlign: "middle" } }),
   ]);
 }
@@ -92,7 +92,7 @@ function stageConsole() {
   return layout(
     [
       obj({ type: "clock", showSeconds: false, format: "12h", showMeridiem: true }, [0.04, 0.04, 0.44, 0.16], { style: { ...CARD, ...big } }),
-      obj({ type: "countdown-timer", hideWhenIdle: false, caption: "Time left" }, [0.52, 0.04, 0.44, 0.16], { style: { ...CARD, ...big } }),
+      obj({ type: "timer", source: "service", hideWhenIdle: false, caption: "Time left" }, [0.52, 0.04, 0.44, 0.16], { style: { ...CARD, ...big } }),
       obj({ type: "messages" }, [0.04, 0.24, 0.92, 0.72], { id: "panel-messages", style: { ...CARD, fontSize: 0.03 } }),
     ],
     { background: "#101114", fit: "fill" },

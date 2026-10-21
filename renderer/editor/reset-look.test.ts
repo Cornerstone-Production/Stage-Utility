@@ -77,7 +77,7 @@ describe("it is wired the way it is tested", () => {
     // the style rather than spreading a patch over whatever was there.
     assert.match(
       EDITOR,
-      /style:\s*defaultStyleFor\(o\.config\.type,/,
+      /style:\s*defaultStyleFor\(displayType\(o\.config\),/,
       "reset must assign the default style, not spread a patch over the old one",
     );
   });

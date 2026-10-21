@@ -105,6 +105,7 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed(
   "slide-thumbnail": ["readout"],
   "slots-grid": ["readout"],
   text: ["readout"],
+  timer: ["readout"],
   "transcript-strip": ["readout"],
   video: ["readout"],
   "view-embed": ["readout"],

@@ -119,7 +119,8 @@ export function addCard(
       z: objects.length + 1,
       home: { size: defaultSize(type), when: defaultWhen(type) },
       config: spec.config() as LayoutObjectConfig,
-      style: spec.style(),
+      // What the widget starts with ON HOME, which is not always its wall style.
+      style: (spec.homeStyle ?? spec.style)(),
     } as LayoutObject,
   ];
 }

@@ -11,6 +11,7 @@ import * as React from "react";
 import { useRef, useState, type ChangeEvent } from "react";
 import {
   Switch,
+  FieldLabel,
   Input,
   Button,
   ButtonGroup,
@@ -196,6 +197,18 @@ export function AlignPad({
 
 export function RowSwitch({ label, hint, checked, onChange, disabled }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean | string }) {
   return <Row label={label} hint={hint} disabled={disabled}><Switch aria-label={label} checked={checked} onCheckedChange={onChange} disabled={!!disabled} /></Row>;
+}
+
+/** The stacked variant of RowSwitch: the label above-left and the switch at the
+ *  far end of one line, for the sections drawn with stacked fields (Video, Timer)
+ *  whose labels do not fit beside a 96px label column. */
+export function StackedSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-2.5">
+      <FieldLabel>{label}</FieldLabel>
+      <Switch aria-label={label} checked={checked} onCheckedChange={onChange} />
+    </div>
+  );
 }
 
 export function RowText({ label, hint, value, placeholder, onChange }: { label: string; hint?: string; value: string; placeholder?: string; onChange: (v: string) => void }) {

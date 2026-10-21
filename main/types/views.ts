@@ -361,6 +361,13 @@ export interface LayoutStyle {
 /** The four materials offered in the inspector's Look section. */
 export type LayoutSurface = "flat" | "glass" | "solid" | "outline";
 
+/** Where a Timer reads its time. */
+export type TimerSource = "service" | "propresenter" | "baptism";
+
+/** The nine readouts of a baptism session a Timer or Baptism timer can show. */
+export type BaptismTimerField =
+  | "live" | "count" | "total" | "average" | "last" | "testimony" | "session" | "phase" | "person";
+
 /** Per-type configuration. The discriminant is `type`. */
 export type LayoutObjectConfig =
   | { type: "text"; text: string }
@@ -991,9 +998,48 @@ export type LayoutObjectConfig =
   | {
       type: "baptism-timer";
       caption?: string | null;
-      field?: "live" | "count" | "total" | "average" | "last" | "testimony" | "session" | "phase" | "person";
+      field?: BaptismTimerField;
       label?: string;
       showLabel?: boolean;
+    }
+  // One timer for everything that counts: the Planning Center service clock, a
+  // ProPresenter timer, or a baptism readout. Replaces `countdown-timer`,
+  // `home-live-status`, `pp-timer` and `baptism-timer`, which still render
+  // forever — see `readTimerConfig` in renderer/main/timer-config.ts, which maps
+  // each of them onto this shape wherever a layout object is read.
+  //
+  // Every field is optional and a field left unset means that source's default,
+  // so a saved object never needs rewriting when a setting is added. Which fields
+  // a source reads is stated beside each; a field a source does not read is
+  // carried, not cleared, so flipping the source back and forth loses nothing.
+  | {
+      type: "timer";
+      /** Where the time comes from. Absent reads as "service". */
+      source?: TimerSource;
+      /**
+       * A caption above the value. Unset is the source's own default (the live
+       * item's name, "Stage timer", "Baptisms"); an EMPTY string is no caption,
+       * which is how an object converted from one that had none stays that way.
+       */
+      caption?: string | null;
+      /** The sub-line: the timer's name (propresenter), the readout's word
+       *  (baptism), or the next item and the like (service). Default on. */
+      showLabel?: boolean;
+      hideWhenIdle?: boolean;
+      /** service and propresenter. Amber once this many seconds remain; unset is
+       *  off. */
+      warnSeconds?: number;
+      /** service and propresenter. Red once the time is over. Default on. */
+      redOnOverrun?: boolean;
+      /** service. "Next · <title>" on the sub-line. Default off. */
+      nextItem?: boolean;
+      /** propresenter. A timer by name; null or unset is the first reported. */
+      timerName?: string | null;
+      propresenterInstanceId?: string | null;
+      /** baptism. Which readout; absent reads as "live". */
+      field?: BaptismTimerField;
+      /** baptism. Replaces the readout's own word on the sub-line. */
+      label?: string;
     }
   // A styled box that holds other objects. Children are positioned as fractions
   // of THIS container's box (not the canvas), so moving/resizing the container

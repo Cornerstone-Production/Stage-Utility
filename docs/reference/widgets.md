@@ -40,12 +40,50 @@ See also [Layout editor](layout-editor.md) for placement, sizing and styling, an
 |---|---|---|
 | **Text** | Words you type, unchanged | You |
 | **Clock** | The wall clock | The server's clock, in the app time zone |
-| **PCO countdown** | Time until the service starts | Planning Center plan time |
+| **Timer** | A countdown or clock from the service, ProPresenter or a baptism | Planning Center Live · ProPresenter · the baptism recorder |
 
 **Clock** follows the app-wide 12/24-hour setting unless you set one on the widget
 itself — a clock deliberately put on a wall in 24-hour does not flip when someone
 changes their preference in the app. **Seconds** (on by default) and **AM/PM** (on
 by default, and only offered in 12-hour format) are separate switches.
+
+**Timer** reads one of three sources, chosen at the top of its settings. A layout
+saved with a PCO countdown, Service timer, ProPresenter timer or Baptism timer
+opens as a Timer and draws the same.
+
+- **Service** — before the service, the time until it starts; while an item is
+  live, that item's time left, counting up when the item has no length. The
+  caption is the live item's name until you type one. The sub-line holds nothing
+  until **Show the next item** is on, which adds a `Next · <title>` line.
+- **ProPresenter** — one timer by name, or the first running one, with the time
+  as ProPresenter reports it. The timer's name sits on the sub-line. Amber near the
+  end reads that time, so it is meant for a timer counting down.
+- **Baptism** — one of nine readouts of the baptism session: **The running
+  clock** (the running testimony or baptism clock, `0:00 ready` when idle),
+  **Testimony time** (this person's, once banked — frozen while their baptism
+  itself is timed), **Session time** (wall clock since the session started, never
+  paused), **Average per person**, **Last person**, **Phase** (the word — idle,
+  armed, testimony or baptism), **Person** (`Person 3`, or `3 of 7` in grouped
+  mode once the testimony pass has run — per-person mode never has a total),
+  **Count** and **Total**. Armed reads as its own word rather than a running
+  clock or a person number, on every readout. A baptism clock counts up from
+  zero, so it has no amber or red. See
+  [ServiceCue and Baptisms](../features/servicecue-and-baptisms.md).
+
+A new Timer starts with its source's caption written in (`Stage timer`,
+`Baptisms`; the service has none, so it shows the item's name). Changing the
+source swaps the caption while it is still the old source's own, and clearing the
+field means no caption. A Service or ProPresenter Timer turns **red** once its
+time is over (**Red on overrun**, on) and **amber** from a number of seconds left
+(**Amber near the end**, off; 60 when switched on).
+
+Until a source has answered, a Timer reads a plain dash and says nothing. A
+ProPresenter that has answered and reports not connected reads as a dash with
+**ProPresenter isn't answering** on the sub-line, unless **Hide when idle** is on:
+then the Timer draws nothing, down or idle, and stays hidden through the first
+read. A ProPresenter that is not set up reads the plain dash, not the sentence.
+On Home a Timer is the wall readout, except a Service Timer with **Show the next
+item** on (how a new Timer starts), which is a stat card like the cards beside it.
 
 ## PCO / service
 
@@ -54,7 +92,6 @@ by default, and only offered in 12-hour format) are separate switches.
 | **Current item** | What the plan is on right now | Planning Center Live |
 | **Next item** | What comes after it | Planning Center Live |
 | **PCO Prev/Next** | Buttons that move the service on | Planning Center Live (writes) |
-| **Service timer** | The running item's clock, and what is next | Planning Center Live |
 | **Service pacing** | How far ahead or behind the whole plan the service is, or when it is projected to end | Recorded service timeline · Planning Center Live |
 | **Next service** | The next plan, its series and when it starts | Planning Center |
 | **Readiness** | What still needs doing before the next service, including the plan's own checklist ([plan notes](../integrations/planning-center.md#plan-notes-as-a-checklist)) | Planning Center + integration states |
@@ -207,7 +244,9 @@ the screen presentation, which is the only one that fills or hides.
 
 Right-click a Home tile — or tap and hold it — to choose what it answers for:
 **Platform** on **Streaming** (any, Resi, YouTube) and **Recorder** on
-**Recording** (every recorder, OBS, REAPER). Both also offer **Elapsed time**.
+**Recording** (every recorder, OBS, REAPER). Both also offer **Elapsed time**. A
+**Timer** offers **Red on overrun**, **Show the next item** (Service source) and
+**Hide when idle**; a Baptism Timer offers only the last.
 
 > Four Home cards are marked *replaced* below — **OBS recording**, **REAPER
 > recording**, **Resi status** and **YouTube status**. Each was the general card
@@ -413,12 +452,11 @@ up even on a layer that is playing. See
 | **Slide image** | A picture of the slide showing now | ProPresenter thumbnails |
 | **Slide progress** | How far through the presentation | ProPresenter |
 | **Section chip** | The part of the service running now, as a label | ProPresenter |
-| **ProPresenter timer** | One ProPresenter timer, by name | ProPresenter |
 
 **Slide progress** reads as a fraction, a count remaining, a percentage or a bar.
-**ProPresenter timer** finds its timer by name, so renaming it in ProPresenter
-breaks the link — and it can colour itself as the timer runs down. With more than
-one ProPresenter connected, both pick which instance they follow. See
+A **Timer** on the ProPresenter source finds its timer by name, so renaming it in
+ProPresenter breaks the link. With more than one ProPresenter connected, these
+widgets and the Timer pick which instance they follow. See
 [ProPresenter](../integrations/propresenter.md).
 
 ## Mics & RF
@@ -493,24 +531,6 @@ and average are building-only — the zone endpoint does not report them. See
 **Lines** caps how many show, 1 to 10; left blank it reads **Fit** and shows as
 many as the widget holds. **Channels shown** hides any channel from this widget, and lists
 the channels once captions have arrived.
-
-## Baptisms
-
-| Widget | What it shows | Source |
-|---|---|---|
-| **Baptism timer** | The running baptism clock, or the session's totals | The baptism recorder |
-
-**Baptism timer** picks one of nine fields: **Live** (the running testimony or
-baptism clock), **Testimony** (this person's testimony, once banked — frozen
-while their baptism itself is timed), **Session** (wall clock since the session
-started, never paused), **Phase** (the word — idle, armed, testimony or
-baptism), **Person** (`Person 3`, or `3 of 7` in grouped mode once the
-testimony pass has run — per-person mode never has a total), **Count**,
-**Total time**, **Average per person** and **Last person**. Armed reads as its
-own word rather than a running clock or a person number, on every field — the
-baptisms have begun but nobody has stepped up yet.
-
-See [ServiceCue and Baptisms](../features/servicecue-and-baptisms.md).
 
 ## Control
 
@@ -739,10 +759,9 @@ chooses which; with one, it is not shown.
 |---|---|
 | **Text** | **Text** |
 | **Clock** | **Format** 12h or 24h (follows the app setting until chosen), **Seconds**, **AM/PM** |
-| **PCO countdown** | **Amber warning** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5, and it still goes red on overrun), **Hide when idle** (off: draws a dash) |
+| **Timer** | **Source** (Service, ProPresenter or Baptism). Service: **Show the next item** (on for a new Timer). ProPresenter: **Timer** (a name typed in, with the running timers suggested; empty follows the first running one). Baptism: **Shows** one of nine readouts and its **Label** (auto by default). All: **Caption**, one sub-line switch (**Show the sub-line**, **Show the timer's name** or **Show the label**, on), **Hide when idle** (off). Service and ProPresenter: **Amber near the end** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5) and **Red on overrun** (on) |
 | **Service pacing** | **Ahead color** and **Behind color** (green and red until changed, each with a Reset), **Projected end time** (off), **Show ahead/behind label** (off), **Show dash when idle** (on) |
 | **Section chip** | **Which**: Current, Next, or Next section (skips arrangement breaks) |
-| **ProPresenter timer** | **Timer name** (blank follows the first timer ProPresenter reports), **Color on overrun** (on), **Show timer name** (on), **Hide when idle** (off) |
 | **Slide progress** | **Display**: fraction (`3 / 12`, the default), left, percent or bar; **Show 'slides' label** (off, not offered for the bar) |
 | **Service order (legacy)** | **Scroll**: Follow live (the default) or Static, **Fit to height** (on), **Highlight live** (on), **Show length** (off), **Notes shown** (every note category, once a plan with notes is loaded) |
 | **Embedded view** | **View** (any other view; a view cannot contain itself and nesting stops after three levels), **Show the view's header** (off), **Follow the live item** (on) |
@@ -757,7 +776,6 @@ chooses which; with one, it is not shown.
 | **People summary** | One switch per figure (in room, peak attendance, peak in room this service, peak attendance this service, entries this service, entries today, capacity, average, average service, versus average, lowest); In room, Peak att. and Entries (day) are on to start. **Layout**: Row or Stacked. **Show labels** (on) |
 | **People graph** | **Count** (Attendance or In room), **Show value** (on) and **Label**, **Source** Live or Recorded (with **Service**, *Most recent* by default), **Plan-item markers** (on), **Hover tooltip** (on), **Kiosk live/recorded toggle** (off) |
 | **Transcription** | **Mode**, **Lines**, **Channels shown**: see [Transcription](#transcription) |
-| **Baptism timer** | **Show** one of nine fields (see [Baptisms](#baptisms)), **Show label** (on) and **Label** |
 | **Record status** | **Recorder** (any, OBS only or REAPER only), **Recording text**, **Idle text**, **Offline text** (blank uses `RECORDING`, `STANDBY` and `NO RECORDER`), **Fill red while recording** (on), **Hide when idle** (off) |
 | **OBS status** | **Show** (Recording, Streaming or Virtual camera), **Active text**, **Idle text**, **Offline text**, **Fill red when active** (on), **Show timecode** (off; recording only), **Hide when idle** (off) |
 | **REAPER status** | **Recording text**, **Idle text**, **Offline text**, **Fill red when recording** (on), **Show position** (off), **Hide when idle** (off) |

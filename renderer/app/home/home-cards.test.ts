@@ -15,7 +15,7 @@ import {
   visibleCards,
   whenOf,
 } from "./home-cards.js";
-import { LAYOUT_OBJECTS } from "../../main/layout-objects.js";
+import { LAYOUT_OBJECTS, defaultStyleFor } from "../../main/layout-objects.js";
 import type { HomeCardSize, LayoutObject } from "@main/types/views";
 
 /** A card, with the geometry Home ignores. */
@@ -159,6 +159,25 @@ describe("editing", () => {
     assert.equal(o.config.type, "countdown-timer");
     assert.deepEqual(o.config, LAYOUT_OBJECTS["countdown-timer"].config());
     assert.deepEqual(o.style, LAYOUT_OBJECTS["countdown-timer"].style());
+  });
+
+  test("a Timer added on Home carries no explicit text colour, so the theme's ink shows on Home's card", () => {
+    // The wall readout style names a white ink, which on Home's light card is
+    // white on white. The Service card this Timer replaces was bare.
+    const o = addCard(base, "timer", "new")[2];
+    assert.deepEqual(o.style, {});
+    assert.equal((o.style as { color?: string }).color, undefined);
+    // On a wall it keeps the readout style, white ink and card included.
+    assert.equal((LAYOUT_OBJECTS.timer.style() as { color?: string }).color, "#ffffff");
+    assert.equal((defaultStyleFor("timer", { hostDrawsFrame: false }) as { color?: string }).color, "#ffffff");
+    assert.deepEqual(defaultStyleFor("timer", { hostDrawsFrame: true }), {});
+  });
+
+  test("only the Timer starts differently on Home, so every other widget's Home add is its registry style", () => {
+    const differing = Object.entries(LAYOUT_OBJECTS)
+      .filter(([, spec]) => spec.homeStyle)
+      .map(([type]) => type);
+    assert.deepEqual(differing, ["timer"]);
   });
 
   test("removing takes exactly one card", () => {

@@ -73,8 +73,10 @@ export function makeRenderCtx(overrides: Partial<LayoutRenderCtx> = {}): LayoutR
   return {
     state: DEFAULT_STAGE_STATE,
     propresenter: null,
+    propresenterKnown: true,
     propInstances: null,
     pcoLive: null,
+    pcoLiveKnown: true,
     planItems: null,
     planItemsKnown: true,
     planItemsFailed: false,

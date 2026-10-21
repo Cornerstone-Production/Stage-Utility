@@ -33,13 +33,11 @@ import {
   SelectItem,
   SelectValue,
   ButtonGroup,
-  Switch,
   Separator,
   InfoHint,
   ChipToggle,
   ChipToggleRow,
   ErrorNote,
-  FieldLabel,
   StackedField,
 } from "../components/ui";
 import { loadProcessedAttachment, FILL_WHEN_ACTIVE, STATUS_TEXT, obsModeText } from "../main/layout-renderer";
@@ -87,9 +85,11 @@ import { numberParamDefault } from "@main/services/automation-param-validation";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import {
-  Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls, Segmented,
+  Row, RowSwitch, StackedSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls, Segmented,
   ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, sizesTypeFromItsBox,
 } from "./inspector-rows";
+import { TimerInspector } from "./timer-inspector";
+import { readConfig, timerSource } from "../main/timer-config";
 import { ResponsiveControls } from "./responsive-controls";
 import { MessagesGroupsPicker } from "./messages-groups-picker";
 import { ButtonInspector } from "./button-inspector";
@@ -392,10 +392,7 @@ export function VideoConfig({
           onChange={(v) => onConfig({ ...c, fit: v })}
         />
       </StackedField>
-      <div className="flex items-center justify-between gap-2.5">
-        <FieldLabel>Show feed name</FieldLabel>
-        <Switch aria-label="Show feed name" checked={c.showLabel ?? true} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} />
-      </div>
+      <StackedSwitch label="Show feed name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
       <StackedField label="When the feed is offline">
         <Select
           value={c.whenOffline ?? "message"}
@@ -864,7 +861,9 @@ export function Inspector({
   onSnapToGrid: () => void;
 }) {
   const s = o.style ?? {};
-  const c = o.config;
+  // An object saved as one of the four widgets the Timer replaced is edited as the
+  // Timer, and the first edit writes it as one.
+  const c = readConfig(o.config);
   const chargerBays = useStageState().state?.chargerBays ?? [];
   const spl = useSplState();
   const { data: wirelessChannels = [] } = useWirelessChannels();
@@ -947,7 +946,7 @@ export function Inspector({
 
       {/* ProPresenter instance picker — only when >1 instance is configured
           (two-auditorium setups); otherwise everything reads the primary. */}
-      {usesPropInstance(c.type) && propInstances && propInstances.list.length > 1 && (
+      {(usesPropInstance(c.type) || (c.type === "timer" && timerSource(c) === "propresenter")) && propInstances && propInstances.list.length > 1 && (
         <RowSelect
           label="ProPresenter"
           hint="Which ProPresenter machine this object reads from — for multi-auditorium setups. Defaults to the primary instance; pick another to point this object at a second room's ProPresenter."
@@ -973,7 +972,7 @@ export function Inspector({
           does not say what it is counting to — and this is how it is changed or
           cleared. Emptying it removes the caption entirely; a default nobody can
           switch off would be worse than no default. */}
-      {"caption" in c && (
+      {"caption" in c && c.type !== "timer" && (
         <RowText
           label="Caption"
           value={(c as { caption?: string | null }).caption ?? ""}
@@ -1012,20 +1011,6 @@ export function Inspector({
           ]}
           onChange={(v) => onConfig({ type: "section-chip", which: v as "current" | "next" | "nextArrangement" })}
         />
-      )}
-      {c.type === "pp-timer" && (
-        <>
-          <RowText
-            label="Timer name"
-            hint="Exact name of a timer running INSIDE ProPresenter — distinct from the PCO countdown. Leave blank to show the first timer ProPresenter reports."
-            value={c.timerName ?? ""}
-            placeholder="First timer"
-            onChange={(v) => onConfig({ ...c, timerName: v.trim() || null })}
-          />
-          <RowSwitch label="Color on overrun" checked={c.warnStates ?? true} onChange={(v) => onConfig({ ...c, warnStates: v })} />
-          <RowSwitch label="Show timer name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-          <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
-        </>
       )}
       {c.type === "slide-progress" && (
         <>
@@ -1555,15 +1540,7 @@ export function Inspector({
           </>
         );
       })()}
-      {c.type === "countdown-timer" && (
-        <>
-          <RowSwitch label="Amber warning" checked={c.warnSeconds != null} onChange={(v) => onConfig({ ...c, warnSeconds: v ? 60 : undefined })} />
-          {c.warnSeconds != null && (
-            <RowNumber label="Warn at (s)" value={c.warnSeconds} step={5} min={0} max={3600} onChange={(v) => onConfig({ ...c, warnSeconds: Math.round(v) })} />
-          )}
-          <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
-        </>
-      )}
+      {c.type === "timer" && <TimerInspector c={c} onConfig={onConfig} propInstances={propInstances} />}
       {c.type === "rosstalk-button" && <RossTalkButtonConfig c={c} onConfig={onConfig} />}
 
       {c.type === "osc-button" && (() => {
@@ -1710,31 +1687,6 @@ export function Inspector({
           </>
         );
       })()}
-      {c.type === "baptism-timer" && (
-        <>
-          <RowSelect
-            label="Show"
-            value={c.field ?? "live"}
-            options={[
-              { value: "live", label: "Live (running clock)" },
-              { value: "testimony", label: "Testimony (this person's, once banked)" },
-              { value: "session", label: "Session (wall clock)" },
-              { value: "phase", label: "Phase (the word)" },
-              { value: "person", label: "Person (number, or N of M)" },
-              { value: "count", label: "Count baptized" },
-              { value: "total", label: "Total time" },
-              { value: "average", label: "Average per person" },
-              { value: "last", label: "Last person" },
-            ]}
-            onChange={(v) => onConfig({ ...c, field: v as NonNullable<typeof c.field> })}
-          />
-          <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-          {(c.showLabel ?? true) && (
-            <RowText label="Label" value={c.label ?? ""} placeholder="(auto)" onChange={(v) => onConfig({ ...c, label: v })} />
-          )}
-          <p className="text-caption2 text-fg-muted leading-snug">Driven by the Baptisms tab. &ldquo;Live&rdquo; ticks the current testimony/baptism; others summarize the session.</p>
-        </>
-      )}
       {c.type === "messages" && (
         <MessagesGroupsPicker groups={c.groups} onChange={(groups) => onConfig({ ...c, groups })} />
       )}

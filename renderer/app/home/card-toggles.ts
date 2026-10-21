@@ -23,6 +23,8 @@ import type { LayoutObject, LayoutObjectConfig, PvpNowLayout } from "@main/types
 
 import { LOUDEST_METER, RECORDER_FOR, STREAMER_FOR } from "../recording-status";
 import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS, type PvpNowConfig } from "../../main/pvp-now";
+import { TIMER_SOURCE_INFO, readTimerObject, timerSource } from "../../main/timer-config";
+import type { TimerSource } from "@main/types/views";
 import { PVP_NOW_LAYOUT_OPTIONS, pvpNowLayout, pvpNowRowStates, withPvpNowLayout } from "../../main/pvp-now-config";
 
 /** The members of the config union that declare `K`, by their `type`. */
@@ -52,8 +54,14 @@ const APPLIES = {
     "home-recording": true,
   },
   showProjectedEnd: { "service-pacing": true },
+  // `pp-timer` and `countdown-timer` are listed because the type checker wants
+  // every member that declares a key; the menu reads them as a Timer first.
   warnStates: { "pp-timer": true },
+  // The Timer's red on overrun, and the next item under a service clock.
+  redOnOverrun: { timer: true },
+  nextItem: { timer: true },
   hideWhenIdle: {
+    timer: true,
     "countdown-timer": true,
     "service-pacing": true,
     "pp-timer": true,
@@ -248,6 +256,8 @@ type ToggleKey =
   | "showElapsed"
   | "showProjectedEnd"
   | "warnStates"
+  | "redOnOverrun"
+  | "nextItem"
   | "hideWhenIdle"
   | "fillWhenLive"
   | "fillWhenRecording"
@@ -289,6 +299,8 @@ const SPECS: {
   // the drift, which is what every card already on a Home page does.
   { key: "showProjectedEnd", label: "Projected end time", fallback: false },
   { key: "warnStates", label: "Colour on warning", fallback: true },
+  { key: "redOnOverrun", label: "Red on overrun", fallback: true },
+  { key: "nextItem", label: "Show the next item", fallback: false },
   { key: "hideWhenIdle", label: "Hide when idle", fallback: false },
   // `true` to agree with the renderer. Home draws these cards as Stats and
   // ignores the setting, but the SAME object on a wall is filled unless this is
@@ -335,7 +347,8 @@ type Config = Record<string, unknown>;
  * the Full layout, where the inspector greys it.
  */
 export function togglesFor(card: LayoutObject): CardToggle[] {
-  const config = card.config as Config;
+  // A retired timer is read as the Timer it is.
+  const config = readTimerObject(card, true).config as Config;
   const type = config.type as string;
   // hasOwn for the same reason as pickedValue above: `type` is off a saved card.
   const supports = (key: ToggleKey) => Object.hasOwn(APPLIES[key] as Record<string, true>, type);
@@ -358,6 +371,10 @@ export function togglesFor(card: LayoutObject): CardToggle[] {
   for (const spec of SPECS) {
     if (!supports(spec.key)) continue;
     if (spec.key === "showMeridiem" && is24h) continue;
+    // A switch for what a source cannot show would tick and change nothing.
+    const source = TIMER_SOURCE_INFO[timerSource(config as { source?: TimerSource })];
+    if (type === "timer" && spec.key === "redOnOverrun" && !source.warns) continue;
+    if (type === "timer" && spec.key === "nextItem" && !source.nextItem) continue;
     // Only Full draws the next cue; Compact and Countdown only never do, so a
     // switch for it would tick and change nothing — the inspector greys the same
     // row for the same reason (pvpNowRowStates).
@@ -385,6 +402,8 @@ export function withToggle(
   key: SettingKey,
   next: boolean | string,
 ): LayoutObject {
+  // Written as a Timer, keeping a retired card's Home tile.
+  card = readTimerObject(card, true);
   const config = card.config as Config;
   // A layout pick also retires the legacy Compact switch — see withPvpNowLayout.
   const written =

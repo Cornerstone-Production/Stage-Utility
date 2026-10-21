@@ -41,7 +41,7 @@ describe("Ultritouch strip templates", () => {
       const objects = ultritouchTemplate(model);
       const cueButtons = objects.filter((o) => o.config.type === "cue-button");
       assert.equal(cueButtons.length, model === "ultritouch-4" ? 16 : 8);
-      assert.equal(objects.filter((o) => o.config.type === "countdown-timer").length, 1);
+      assert.equal(objects.filter((o) => o.config.type === "timer").length, 1);
       assert.equal(objects.length, cueButtons.length + 1);
       for (const o of objects) {
         assert.ok(o.x >= 0 && o.y >= 0 && o.x + o.w <= 1.0001 && o.y + o.h <= 1.0001, `${o.id} off the canvas`);
