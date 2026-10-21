@@ -72,10 +72,11 @@ opens as a Timer, drawn as it always was.
 
 A Service or ProPresenter Timer turns **red** once its time is over (**Red on
 overrun**, on) and **amber** from a number of seconds left (**Amber near the end**,
-off; 60 when switched on). Until the source has answered the value is a dash, and
-once it is reported down the sub-line says **Planning Center isn't answering** or
-**ProPresenter isn't answering**. **Hide when idle** draws nothing while there is
-nothing to show. On Home a Timer is a stat card like the cards beside it.
+off; 60 when switched on). A source that has not answered, or that ProPresenter
+reports not connected, reads as a dash with **Planning Center isn't answering** or
+**ProPresenter isn't answering** on the sub-line. **Hide when idle** draws nothing
+while there is nothing to show, and stays hidden through the first read. On Home a
+Timer is a stat card like the cards beside it.
 
 ## PCO / service
 
