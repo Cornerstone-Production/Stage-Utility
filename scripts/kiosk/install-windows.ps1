@@ -57,15 +57,17 @@ function Get-DownloadOrigin {
   return ''
 }
 
-# One script from the server, parsed before it replaces anything. It is staged in
-# Program Files, under a name nobody could have guessed, never beside $To: the state
-# folder in ProgramData lets any user create files, and one who pre-created the
-# staging file would still own it after it was moved into place.
-function Save-KioskScript([string]$From, [string]$Name, [string]$To) {
+# One script from the server, parsed before it replaces anything. With an $Accept
+# block, it is given the download's SHA-256 first and throws to refuse the file.
+# It is staged in Program Files, under a name nobody could have guessed, never
+# beside $To: the state folder in ProgramData lets any user create files, and one
+# who pre-created the staging file would still own it after it was moved into place.
+function Save-KioskScript([string]$From, [string]$Name, [string]$To, [scriptblock]$Accept = $null) {
   New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
   $temp = Join-Path $AppDir ('{0}.{1}.tmp' -f $Name, [guid]::NewGuid().ToString('N'))
   try {
     Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -Uri "$From/kiosk/$Name" -OutFile $temp
+    if ($Accept) { & $Accept (Get-FileHash -Algorithm SHA256 -LiteralPath $temp).Hash.ToLowerInvariant() }
     $tokens = $null
     $errors = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile($temp, [ref]$tokens, [ref]$errors)
@@ -74,6 +76,26 @@ function Save-KioskScript([string]$From, [string]$Name, [string]$To) {
   } finally {
     if (Test-Path -LiteralPath $temp) { Remove-Item -Force -LiteralPath $temp }
   }
+}
+
+# The launcher, held to the same standard as an update: the download must have the
+# SHA-256 the server names for it in GET /api/machine-updates/check, the check the
+# updater makes. The check is made about the file that was downloaded (that digest
+# is what this PC will have), so the server lists the PC with the launcher it is
+# about to run, and the digest is read whatever the answer says about updating: the
+# operator's switch holds updates, not a first install. Nothing is installed
+# without a digest, so a server that does not answer is a launcher not installed.
+# This check lists the PC in Screens, and the updater's first check replaces it.
+function Install-Launcher([string]$From, [string]$Machine, [string]$To) {
+  $accept = {
+    param([string]$Got)
+    $query = 'machine={0}&platform=windows&have={1}&host={2}' -f [uri]::EscapeDataString($Machine), $Got, [uri]::EscapeDataString([string]$env:COMPUTERNAME)
+    $answer = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Uri "$From/api/machine-updates/check?$query").Content | ConvertFrom-Json
+    $want = [string]$answer.version
+    if ($want -notmatch '^[0-9a-f]{64}$') { throw "$From did not name a SHA-256 for the launcher" }
+    if ($Got -ne $want) { throw "kiosk-windows.ps1 from $From has SHA-256 $Got, expected $want" }
+  }.GetNewClosure()
+  Save-KioskScript -From $From -Name 'kiosk-windows.ps1' -To $To -Accept $accept
 }
 
 # The updater: a SYSTEM task, so its script is in Program Files, where only an
@@ -134,10 +156,11 @@ Write-Output "    device id: $(Get-Content $IdFile)"
 # Downloaded from the server rather than written from this script, so the launcher
 # a PC runs is whatever the server has, and the updater below can replace it later.
 # The bytes are kept exactly as served: the server's digest of the file is what the
-# updater compares, and Set-Content would re-encode it.
+# download is checked against, here and in the updater, and Set-Content would
+# re-encode it.
 $Launcher = Join-Path $StateDir 'kiosk.ps1'
 try {
-  Save-KioskScript -From $Origin -Name 'kiosk-windows.ps1' -To $Launcher
+  Install-Launcher -From $Origin -Machine (Get-Content $IdFile -Raw).Trim() -To $Launcher
 } catch {
   Write-Error "could not get the kiosk launcher from ${Origin}: $($_.Exception.Message) Set STAGE_DOWNLOAD_FROM to the server's address (http://<server>:<port>) and run this again."
   exit 1

@@ -338,7 +338,17 @@ in the helper's window.
 
 The Windows installer writes the device's identity to `%PROGRAMDATA%\StageUtility\`
 as before, and downloads the launcher, `kiosk-windows.ps1`, from the server it was
-fetched from into that folder as `kiosk.ps1`. The scheduled task `StageUtilityKiosk`
+fetched from into that folder as `kiosk.ps1`. The download must be the one the server
+names: the installer asks `GET /api/machine-updates/check`, as the updater does, for
+the launcher's SHA-256 (updates held or not: the switch stops updates, not a first
+install), saying what it downloaded, and installs the file only when its SHA-256 is
+the one named and it parses. A server that does not answer, or names no SHA-256,
+leaves the launcher as it was (none, on a first install) and the installer stops. This
+shows the PC in Screens at once; the updater's first check takes over from there.
+That proves the file arrived whole from this server over the same plain-HTTP
+connection, not who sent it: anything that can answer as the server can name its own
+digest. The updater script the installer also downloads is only checked to parse,
+since the server names no SHA-256 for it. The scheduled task `StageUtilityKiosk`
 runs it at every sign-in and every minute; it finds the server and opens the
 browser on the device's `/enroll` address. The discovery port is in the `port` file
 beside it (`STAGE_KIOSK_PORT` at install, 8789 by default).
