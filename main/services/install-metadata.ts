@@ -8,6 +8,7 @@
 // custom icon, and app-icon-routes.ts decides which bytes each path answers with.
 
 import type { AppIconSettings } from "./app-icon.js";
+import { escapeHtml } from "./html-escape.js";
 
 export const MANIFEST_PATH = "/manifest.webmanifest";
 
@@ -48,10 +49,6 @@ export function buildManifest(appName: string): Record<string, unknown> {
   };
 }
 
-function escapeAttr(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
 const IOS_TITLE = /(<meta\s+name="apple-mobile-web-app-title"\s+content=")[^"]*(")/;
 const PAGE_TITLE = /(<title>)[^<]*(<\/title>)/;
 
@@ -65,7 +62,7 @@ const PAGE_TITLE = /(<title>)[^<]*(<\/title>)/;
  * be read as a replacement pattern.
  */
 export function brandHtml(html: string, appName: string): string {
-  const name = escapeAttr(appName);
+  const name = escapeHtml(appName);
   return html.replace(IOS_TITLE, (_m, open: string, close: string) => `${open}${name}${close}`).replace(
     PAGE_TITLE,
     (_m, open: string, close: string) => `${open}${name}${close}`,

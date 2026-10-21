@@ -9,6 +9,8 @@
 //
 // Always near-black. A wall display has no light mode.
 
+import { escapeHtml } from "./html-escape.js";
+
 export interface HoldingScreenInfo {
   id: string | null;
   ip?: string;
@@ -19,13 +21,8 @@ export interface HoldingScreenInfo {
   reason: "unclaimed" | "no-device";
 }
 
-const esc = (s: string): string =>
-  s.replace(/[&<>"']/g, (ch) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch] as string,
-  );
-
 const field = (label: string, value: string | undefined): string =>
-  value ? `<div class="f"><span>${esc(label)}</span><b>${esc(value)}</b></div>` : "";
+  value ? `<div class="f"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>` : "";
 
 export function holdingScreen(info: HoldingScreenInfo): string {
   const headline =
@@ -41,7 +38,7 @@ export function holdingScreen(info: HoldingScreenInfo): string {
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Stage Utility — ${esc(headline)}</title>
+<title>Stage Utility — ${escapeHtml(headline)}</title>
 <style>
   :root { color-scheme: dark }
   html,body { height:100%; margin:0 }
@@ -62,8 +59,8 @@ export function holdingScreen(info: HoldingScreenInfo): string {
 </head><body>
 <main>
   <div class="cap">Stage Utility</div>
-  <h1>${esc(headline)}</h1>
-  <p>${esc(sub)}</p>
+  <h1>${escapeHtml(headline)}</h1>
+  <p>${escapeHtml(sub)}</p>
   <div class="ids">
     ${field("Device", info.id ?? undefined)}
     ${field("Address", info.ip)}
