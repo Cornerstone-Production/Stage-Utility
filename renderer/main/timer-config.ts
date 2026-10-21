@@ -70,7 +70,7 @@ export const TIMER_CAPTION_DEFAULT: Record<TimerSource, string | null> = {
 
 /** The same, as an inspector placeholder. */
 export const TIMER_CAPTION_PLACEHOLDER: Record<TimerSource, string> = {
-  service: "The item's name",
+  service: "The item\u2019s name",
   propresenter: "Stage timer",
   baptism: "Baptisms",
 };
