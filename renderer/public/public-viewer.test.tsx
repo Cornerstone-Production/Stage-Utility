@@ -419,7 +419,9 @@ describe('the "Not updating" notice', () => {
     const at = EDGE - 3 * MINUTE;
     await beat(at);
     await pass(2 * MINUTE + 10_000);
-    const expected = formatClock(at, { timeZone: "America/Chicago" });
+    // Read as the page reads it: Intl puts a narrow no-break space before the day
+    // period on Linux Node, which the notice text collapses like any other space.
+    const expected = formatClock(at, { timeZone: "America/Chicago" }).replace(/\s+/g, " ");
     assert.match(expected, /^\d{1,2}:\d{2} [AP]M$/, "the fixture is supposed to be a 12-hour clock");
     await eventually(() => assert.equal(noticeText(), `Not updating. The last update from the church was at ${expected}. The live item may have moved on.`));
   });
@@ -473,7 +475,7 @@ describe('the "Not updating" notice', () => {
     assert.equal(FakeSocket.last.readyState, 0, "the socket was supposed never to open");
     // The page reads the edge a few seconds after loading, when no socket has opened.
     await eventually(() => assert.ok(countOf(HEARTBEAT_PATH) >= 1, "the page never asked the Worker"), live.FIRST_READ_AFTER_MS + 3000);
-    const expected = formatClock(EDGE - 7 * MINUTE, { timeZone: "America/Chicago" });
+    const expected = formatClock(EDGE - 7 * MINUTE, { timeZone: "America/Chicago" }).replace(/\s+/g, " ");
     await eventually(() => assert.equal(noticeText(), `Not updating. The last update from the church was at ${expected}. The live item may have moved on.`));
   });
 

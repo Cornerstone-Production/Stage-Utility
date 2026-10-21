@@ -384,7 +384,12 @@ export function viewerBuildTag(id: string): string {
  * comment is not the document's.
  */
 export function viewerBuildFromHtml(html: string): string | null {
-  const bare = html.replace(/<!--[\s\S]*?-->/g, "");
+  // Until nothing changes: one pass can leave a comment that removing another formed.
+  let bare = html;
+  for (let before = ""; before !== bare; ) {
+    before = bare;
+    bare = bare.replace(/<!--[\s\S]*?-->/g, "");
+  }
   const m = new RegExp(`<meta\\s+name="${VIEWER_BUILD_META}"\\s+content="([^"]*)"\\s*/?>`).exec(bare);
   return m !== null && isViewerBuildId(m[1]) ? m[1] : null;
 }
