@@ -159,6 +159,14 @@ describe("the publisher's token", () => {
     assert.equal((await s.run("GET", "/api/service-types")).status, 200);
     assert.equal((await s.run("GET", "/servicecue")).status, 200);
   });
+
+  test("the bare address is sent on to the landing page, with nothing else said", async () => {
+    const s = setup();
+    const res = await s.run("GET", "/");
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get("Location"), "/servicecue");
+    assert.equal(await res.text(), "");
+  });
 });
 
 describe("docs", () => {
@@ -604,7 +612,6 @@ describe("a failure in storage", () => {
 
 describe("everything else", () => {
   const NOT_ANSWERED = [
-    "/",
     "/servicecue.html",
     "/servicecue/presets",
     "/servicecue/a/b/c",
@@ -640,7 +647,8 @@ describe("everything else", () => {
     assert.equal((await s.run("GET", "/servicecue/%2e%2e/api/state")).status, 200);
     assert.equal((await s.run("GET", "/api\\state")).status, 200, "a backslash is a slash to the URL parser");
     // And these climb to somewhere that is not allowed.
-    for (const path of ["/servicecue/../", "/assets/../servicecue.html", "/servicecue/weekend/audio/../../../api/log"]) {
+    assert.equal((await s.run("GET", "/servicecue/../")).status, 302, "the bare address, which goes to the landing page");
+    for (const path of ["/assets/../servicecue.html", "/servicecue/weekend/audio/../../../api/log"]) {
       assert.equal((await s.run("GET", path)).status, 404, path);
     }
     assert.deepEqual(s.assetCalls, []);

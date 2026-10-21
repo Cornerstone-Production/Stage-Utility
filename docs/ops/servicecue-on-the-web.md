@@ -106,10 +106,30 @@ To stop sharing, delete the Worker (see [Taking it down](#rotating-the-token-and
 |---|---|
 | `/servicecue` | the landing page, as a stage tablet sees it, without the **Edit column presets** link |
 | `/servicecue/<service type>/<layout>` | a rundown. The same links as the app's: `weekend/audio`, a layout by id, `all-columns`, `?plan=`, `?text=` |
-| anything else | `404`. There is no `/`, no `/servicecue/presets` and no settings of any kind |
+| `/` | sends the visitor on to `/servicecue` |
+| anything else | `404`. There is no `/servicecue/presets` and no settings of any kind |
 
 Give people the `/servicecue` link; every rundown they open from it works like the
 app's own, and its back arrow returns to it.
+
+## Your own domain
+
+A domain whose DNS is on Cloudflare, in the same account, can stand in for the
+`workers.dev` address. A domain bought through Cloudflare already is.
+
+1. Attach it: **Workers & Pages → servicecue → Settings → Domains & Routes → Add →
+   Custom Domain**. Cloudflare makes the DNS record and the certificate.
+2. Tell later deploys about it, or the next one drops it. Create
+   `publish/servicecue/deploy.local.json` (gitignored, so the domain stays out of the
+   repository):
+
+   ```json
+   { "domain": "servicecue.example.org", "workersDev": false }
+   ```
+
+   `workersDev: false` turns the `workers.dev` address off; leave it out to keep both.
+3. In the Public link card, change the page address and enter the publishing token
+   again in the same save: a token is kept only for the address it was saved with.
 
 ## Updating it
 

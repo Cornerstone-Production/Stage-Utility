@@ -161,6 +161,11 @@ async function serve(request: Request, url: URL, deps: HandlerDeps): Promise<Res
     case "reject":
       return rejection(r);
 
+    case "home":
+      // A domain of its own opens on the landing page. Temporary, so a browser asks
+      // again if the page ever moves.
+      return new Response(null, { status: 302, headers: { Location: "/servicecue" } });
+
     case "doc": {
       const text = await deps.hub.getDoc(r.key);
       if (text === null) {

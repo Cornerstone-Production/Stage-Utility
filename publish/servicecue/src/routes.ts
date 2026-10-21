@@ -89,6 +89,8 @@ export function routePublish(method: string, url: URL): PublishRoute {
 // anyway is a path it does not name, so a 404.
 
 export type PublicRoute =
+  /** The bare address: sent on to the ServiceCue landing page. */
+  | { kind: "home" }
   /** The viewer's document, whichever ServiceCue address asked for it. */
   | { kind: "viewer" }
   | { kind: "doc"; key: string }
@@ -111,6 +113,7 @@ function isViewerPath(pathname: string): boolean {
 function matchPublic(url: URL): Exclude<PublicRoute, Rejection> | null {
   const { pathname, search } = url;
 
+  if (pathname === "/") return { kind: "home" };
   if (isViewerPath(pathname)) return { kind: "viewer" };
 
   if (pathname.startsWith(ASSET_PATH_PREFIX)) {

@@ -56,13 +56,18 @@ describe("the viewer's addresses", () => {
       "/ServiceCue",
       "/SERVICECUE/weekend/audio",
       "/scriptview/weekend/audio",
-      "/",
       "/index.html",
       "/servicecue.html",
       "/app.html",
     ]) {
       assert.equal(publicKind("GET", no), "reject:404", no);
     }
+  });
+
+  test("sends the bare address to the landing page, and takes only a read there", () => {
+    assert.equal(publicKind("GET", "/"), "home");
+    assert.equal(publicKind("HEAD", "/"), "home");
+    assert.equal(publicKind("POST", "/"), "reject:405");
   });
 
   test("a segment is a slug or an id: letters, digits, underscore, dash", () => {
@@ -139,9 +144,11 @@ describe("docs, images and the live pages", () => {
 
   test("an image is served by name", () => {
     assert.deepEqual(routePublic("GET", url("/branding-images/logo-1234abcd.png")), { kind: "asset", name: "logo-1234abcd.png" });
-    for (const no of ["/branding-images/", "/branding-images/a/b.png", "/branding-images/a%2fb.png", "/branding-images/..", "/branding-images/%2e%2e", "/branding-images/a b.png", `/branding-images/${"a".repeat(101)}.png`]) {
+    for (const no of ["/branding-images/", "/branding-images/a/b.png", "/branding-images/a%2fb.png", "/branding-images/a b.png", `/branding-images/${"a".repeat(101)}.png`]) {
       assert.equal(publicKind("GET", no), "reject:404", no);
     }
+    // A name of dots is no name: the URL parser climbs to the bare address.
+    for (const up of ["/branding-images/..", "/branding-images/%2e%2e"]) assert.equal(publicKind("GET", up), "home", up);
   });
 
   test("the heartbeat and the live socket take no query", () => {

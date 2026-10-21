@@ -160,7 +160,10 @@ they are not requests the Worker is charged for. `wrangler.jsonc` names each by 
 type, and the build writes the `_headers` file the asset service reads: the base
 headers below, and `immutable` caching for `/assets/*`.
 
-**Everything else is a `404`**: `/`, `/servicecue/presets`, `/servicecue/manage`, a
+`/` is a `302` to `/servicecue`, with no query carried, so a domain of its own opens
+on the landing page.
+
+**Everything else is a `404`**: `/servicecue/presets`, `/servicecue/manage`, a
 deeper path, any file name not in the build. The Worker answers only paths it names;
 nothing falls back to a near one. The page's own file is never served at its own name.
 A path is judged as the URL parser leaves it: `..` and `%2e%2e` segments and a backslash
