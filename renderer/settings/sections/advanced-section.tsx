@@ -31,6 +31,7 @@ import {
 } from "../../components/ui";
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { DataArchivePanel } from "./data-archive-panel";
+import { HostNamesCard } from "./host-names-card";
 import { HistoryMilestonesPanel } from "./history-milestones-panel";
 import { VideoRelayPortsPanel, VIDEO_PORTS_FLASH_ID } from "./video-relay-ports";
 import { BarConfigurator } from "../../app/bar-configurator";
@@ -1383,6 +1384,8 @@ export function AdvancedSection({
             </FieldGroup>
           </FieldSet>
         </div>
+
+        <HostNamesCard />
 
         <div className="su-card">
           <div className="border-b border-line px-4 py-3">

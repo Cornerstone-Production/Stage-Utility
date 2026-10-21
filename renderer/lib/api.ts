@@ -518,6 +518,8 @@ export type IpcChannel =
   | "scores:getStatus"
   | "scores:listTeams"
   | "scores:setFavourites"
+  | "security:hostNames"
+  | "security:setHostNames"
   | "servicecue:getConfig"
   | "servicecue:listLayouts"
   | "servicecue:listRoles"
@@ -954,6 +956,13 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "update:check":
       return post<T>("/api/update/check");
+
+    // ── Host names (Settings, Advanced) ──────────────────────────────────
+    case "security:hostNames":
+      return apiFetch<T>("/api/security/host-names");
+
+    case "security:setHostNames":
+      return post<T>("/api/security/host-names", params);
 
     case "update:apply":
       return post<T>("/api/update/apply", p);
