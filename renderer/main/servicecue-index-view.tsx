@@ -8,6 +8,7 @@ import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import { useOriginHref } from "../lib/back-target";
+import { isPublicMode } from "../lib/public-mode";
 
 // Implicit layout that shows every note-category column — always available so the
 // landing page works before any custom layout is configured (Phase 3 adds those).
@@ -157,12 +158,15 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
               );
             })
           )}
-          <a
-            href="/servicecue/presets"
-            className="mt-2 self-start text-caption1 text-accent hover:underline"
-          >
-            Edit column presets
-          </a>
+          {/* Editing stays in the building: the public page has no presets page to go to. */}
+          {!isPublicMode() && (
+            <a
+              href="/servicecue/presets"
+              className="mt-2 self-start text-caption1 text-accent hover:underline"
+            >
+              Edit column presets
+            </a>
+          )}
         </div>
         </div>
       </div>

@@ -7,6 +7,8 @@
 // (port 8788), so all paths here are relative.
 
 import { errorMessage } from "@main/services/errors";
+import { isPublicMode } from "./public-mode";
+import { startPublicLive, type PublicLiveDeps } from "./public-live";
 import { readStored } from "./safe-storage";
 import { monotonicNow, serverClock } from "./server-clock";
 import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
@@ -1669,7 +1671,8 @@ const sseListeners: SseListener[] = [];
  */
 const POLL_TRANSPORT = (() => {
   try {
-    return typeof location !== "undefined" && new URLSearchParams(location.search).get("transport") === "poll";
+    // Not on the public page, whose host has no /api/events/poll.
+    return !isPublicMode() && typeof location !== "undefined" && new URLSearchParams(location.search).get("transport") === "poll";
   } catch {
     return false; // no DOM (worker, test harness, SSR) — there is no URL to opt in on
   }
@@ -1764,6 +1767,15 @@ function fanOut(
  *  frame once per listener. */
 const directHandlers = new Map<string, Set<(payload: unknown, replayed: boolean) => void>>();
 
+/** What the public page's WebSocket needs from this module: the one dispatch
+ *  every transport ends in, and the one clock every surface renders from. */
+const PUBLIC_LIVE: PublicLiveDeps = {
+  deliver: (channel, data) => dispatch(channel, data, false),
+  observeClock: (edgeMs, rttMs) => {
+    serverClock.observe(edgeMs, rttMs);
+  },
+};
+
 /**
  * That one wire listener, by channel, so the LAST subscriber to leave can find
  * it.
@@ -1816,6 +1828,8 @@ const CLIENT_ID = genClientId();
 // server keeps sending everything — filtering is an optimization, never required.
 let reportTimer: ReturnType<typeof setTimeout> | null = null;
 function reportChannels(): void {
+  // The public page writes nothing to the Worker.
+  if (isPublicMode()) return;
   if (reportTimer) return;
   reportTimer = setTimeout(() => {
     reportTimer = null;
@@ -1854,8 +1868,9 @@ function reportChannels(): void {
 const SHARED_SSE_KEY = "stage:sharedSse";
 let sharedSse = (() => {
   // The worker exists to SHARE one EventSource across tabs. On the polling
-  // transport there is no stream to share, so it would open one nobody reads.
-  if (POLL_TRANSPORT) return false;
+  // transport there is no stream to share, so it would open one nobody reads, and
+  // the public page's transport is public-live.ts.
+  if (POLL_TRANSPORT || isPublicMode()) return false;
   return typeof SharedWorker !== "undefined" && readStored(SHARED_SSE_KEY, (raw) => raw !== "0", false);
 })();
 
@@ -2388,7 +2403,12 @@ export function onNotification(
   // to matter. On the polling transport there is no stream; the poller is
   // already running from module scope, which is what makes the hydrate snapshot
   // available to a subscriber that mounts later.
-  if (first && !POLL_TRANSPORT) {
+  //
+  // The public page's one WebSocket carries every channel, so there is no
+  // listener per channel to attach (see public-live.ts).
+  if (isPublicMode()) {
+    startPublicLive(PUBLIC_LIVE);
+  } else if (first && !POLL_TRANSPORT) {
     const handler = (e: MessageEvent) => {
       try {
         dispatch(channel, JSON.parse(e.data), false);

@@ -254,6 +254,17 @@ narrow screen: below 1100px the clock is dropped (the Remaining and Over timer
 stays), the plan title shortens, and below what still fits the bar wraps onto a
 second line.
 
+## On the web
+
+ServiceCue can be put on a public address for volunteers who are not on the building's
+network: the same pages and links, no login, on a free Cloudflare Workers address you
+[deploy yourself](../ops/servicecue-on-the-web.md). **Anyone with the link can read
+everything it shows, plan notes included.** It is this page with nothing to edit (no
+**Edit column presets** link), a bar saying **Not updating** when the church has sent
+nothing for two minutes, and a reload, once, of a page left open when the public page
+is updated. The address and what it accepts are in the
+[publishing protocol](../reference/servicecue-publishing.md).
+
 # Baptisms
 
 An operator page at `/baptism`. It opens in

@@ -13,6 +13,8 @@ import { useTextSize } from "./use-servicecue-text-size";
 import { useUpcomingPlans } from "../settings/sections/plan-switcher";
 import { useNavigateTo, useSearchParam } from "../lib/use-search-param";
 import { useBackHref } from "../lib/back-target";
+import { refreshWhileMounted } from "../lib/live-refresh";
+import { rundownKey } from "@main/types/servicecue-publish";
 
 /** The pages that open a rundown, which its back arrow may return to. */
 const SERVICECUE_LAUNCHERS = ["/servicecue", "/servicecue/manage"] as const;
@@ -80,8 +82,8 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         })
         .catch((err: unknown) => { if (!cancelled) fail("types", "the service types", err); });
     load();
-    const t = setInterval(load, 60_000);
-    return () => { cancelled = true; clearInterval(t); };
+    const stop = refreshWhileMounted(load, ["service-types"], 60_000);
+    return () => { cancelled = true; stop(); };
   }, [pcoConfigured, fail, clear]);
   // Same reasoning for the layouts and roles: a transient failure at boot left
   // them empty for the life of the page (see servicecue-view.tsx's comment on this
@@ -105,8 +107,8 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         .catch((err: unknown) => { if (!cancelled) fail("roles", "the category roles", err); });
     };
     load();
-    const t = setInterval(load, 60_000);
-    return () => { cancelled = true; clearInterval(t); };
+    const stop = refreshWhileMounted(load, ["servicecue-layouts", "servicecue-roles"], 60_000);
+    return () => { cancelled = true; stop(); };
   }, [fail, clear]);
 
   // Resolve the service-type slug (or raw id) to an id.
@@ -172,8 +174,8 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
           fail("rundown", `the rundown for service type ${resolvedTypeId}`, e);
         });
     load();
-    const t = setInterval(load, 60_000);
-    return () => { cancelled = true; clearInterval(t); };
+    const stop = refreshWhileMounted(load, [rundownKey(resolvedTypeId, planParam) ?? ""], 60_000);
+    return () => { cancelled = true; stop(); };
   }, [resolvedTypeId, planParam, pcoConfigured, fail, clear]);
 
   // The plans the switcher walks: the slots editor's own list, asked for only
