@@ -257,13 +257,14 @@ access, no settings, no network addresses. The card's **Setup guide** link opens
 [deploy guide](../ops/servicecue-on-the-web.md); what the server and the page say to each
 other is in the [publishing protocol](../reference/servicecue-publishing.md).
 
-The card has three states:
+The card has four states:
 
 | | |
 |---|---|
 | **Off** | The page address and the publishing token, and a switch that stays off until both are filled in. Switching it on asks the page first, so a wrong address or token is said on the card and nothing is switched on |
 | **Publishing** | The link, with **Copy** and a **QR code** to print (dark on white in either theme), how long ago the page last accepted something, how many service types, layouts and upcoming plans (those dated today or later; last week's are on the page but not counted) it holds, and what the public sees. **Cloudflare connection** opens the address and token to change them |
 | **Not reaching the page** | The same, and why. The card names the cause: the token was refused, a rule on the Cloudflare account blocked this server, the page is limiting requests, the page has no token of its own, another server error, an address that is not the ServiceCue page, a redirect (never followed), no answer, or a page that speaks another protocol version. The connection fields open themselves when the fix is in them |
+| **Can't read Planning Center** | The page is reached, but a read of the service types, the plan list or a rundown failed, so the page gets no new rundowns and keeps what it last received. The card gives the reason the server logged and links to **Integrations**, where the credentials are. While the page is not reached either, the pill says that, and both notes show |
 
 What the public sees is what ServiceCue shows here:
 

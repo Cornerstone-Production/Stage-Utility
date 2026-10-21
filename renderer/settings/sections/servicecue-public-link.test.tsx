@@ -25,6 +25,8 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 const React = await import("react");
 const { PublicLinkCard, ProblemText, sentAgo } = await import("./servicecue-public-link.js");
 const { TooltipProvider } = await import("../../components/ui/index.js");
+const { RouterContextProvider } = await import("@tanstack/react-router");
+const { routerAt } = await import("../../test-fixtures/router.js");
 const { FORM_MASK, MASK } = await import("../../../main/services/mask.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
@@ -46,6 +48,7 @@ type Dto = {
     state: "off" | "publishing" | "problem";
     lastSentAt: number | null;
     lastError: { kind: string; status?: number; message: string } | null;
+    sourceProblem: { message: string } | null;
     counts: { types: number; plans: number; layouts: number };
     now: number;
   };
@@ -56,7 +59,7 @@ const off = (): Dto => ({
   enabled: false,
   url: "",
   token: "",
-  status: { enabled: false, state: "off", lastSentAt: null, lastError: null, counts: { types: 0, plans: 0, layouts: 0 }, now: NOW },
+  status: { enabled: false, state: "off", lastSentAt: null, lastError: null, sourceProblem: null, counts: { types: 0, plans: 0, layouts: 0 }, now: NOW },
 });
 
 const publishing = (over: Partial<Dto["status"]> = {}): Dto => ({
@@ -68,6 +71,7 @@ const publishing = (over: Partial<Dto["status"]> = {}): Dto => ({
     state: "publishing",
     lastSentAt: NOW - 8_000,
     lastError: null,
+    sourceProblem: null,
     counts: { types: 4, plans: 11, layouts: 4 },
     now: NOW,
     ...over,
@@ -149,10 +153,17 @@ const NAMES = {
   layoutNames: ["Audio", "Video", "Lighting"],
 };
 
-/** The card inside what the app puts around it: a query client that does not retry, and the tooltips. */
+const INTEGRATIONS = "/settings/integrations";
+let router: ReturnType<typeof routerAt>;
+
+/** The card inside what the app puts around it: a query client that does not retry, the tooltips, and a router for its link. */
 function inApp(card: React.ReactElement): React.ReactElement {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  return React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, card));
+  router = routerAt("/servicecue/manage", "/servicecue/manage", INTEGRATIONS);
+  return React.createElement(
+    RouterContextProvider,
+    { router, children: React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, card)) } as never,
+  );
 }
 
 async function mount(over: Partial<React.ComponentProps<typeof PublicLinkCard>> = {}): Promise<void> {
@@ -585,6 +596,43 @@ describe("Problem", () => {
     await mount();
     fireEvent.click(sw());
     await eventually(() => assert.ok(text().startsWith("Public link Off"), text()));
+  });
+});
+
+describe("Planning Center can't be read", () => {
+  const PCO = "PCO auth failed — check App ID/Secret in Integrations settings";
+  const PCO_TEXT = `Publishing, but Planning Center can't be read: ${PCO}. The public page keeps what it last received. Open Integrations`;
+
+  test("is the mockup: Can't read Planning Center, why, and the way to Integrations", async () => {
+    server.dto = publishing({ sourceProblem: { message: PCO }, counts: { types: 0, plans: 0, layouts: 6 } });
+    await mount();
+    assert.ok(text().startsWith("Public link Can't read Planning Center"), text());
+    assert.equal(stateOf(), "source");
+    assert.equal(alerts(), PCO_TEXT);
+    // The page is reached: still switched on, still the link and what was sent.
+    assert.equal(sw().getAttribute("aria-checked"), "true");
+    assert.ok(text().includes("0 service types"), text());
+    assert.ok(text().includes("6 layouts"), text());
+
+    const link = screen.getByRole("link", { name: "Open Integrations" });
+    assert.equal(link.getAttribute("href"), INTEGRATIONS);
+    fireEvent.click(link);
+    await eventually(() => assert.equal(router.state.location.pathname, INTEGRATIONS));
+  });
+
+  test("with the page not reached too: that keeps the pill, and both notes show, the page's first", async () => {
+    server.dto = publishing({ state: "problem", lastSentAt: NOW - 6 * 60_000, lastError: AUTH_PROBLEM, sourceProblem: { message: PCO } });
+    await mount();
+    assert.ok(text().startsWith("Public link Not reaching the page"), text());
+    assert.equal(alerts(), `${AUTH_TEXT} | ${PCO_TEXT}`);
+  });
+
+  test("goes when Planning Center can be read again", async () => {
+    server.dto = publishing({ sourceProblem: { message: PCO } });
+    await mount({ pollMs: 50 });
+    server.dto = publishing();
+    await eventually(() => assert.ok(text().startsWith("Public link Publishing"), text()));
+    assert.equal(alerts(), "");
   });
 });
 
