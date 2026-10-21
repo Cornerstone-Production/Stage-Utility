@@ -15,7 +15,8 @@
 // modelled as a file this test plants, which says where the script reads and
 // writes, not who owns what), and install-windows.ps1 itself, which needs the
 // ScheduledTasks module and an elevated token. Those need a Windows PC. Of the
-// installer only Save-KioskScript is run, lifted out of the file by its parser.
+// installer only Save-KioskScript and Install-Launcher are run, lifted out of the
+// file by its parser.
 
 import assert from "node:assert/strict";
 import * as crypto from "node:crypto";
@@ -551,6 +552,102 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       assert.notEqual(fs.statSync(planted).ino, fs.statSync(path.join(state, "kiosk.ps1")).ino, "kiosk.ps1 is not the file that was planted");
       assert.deepEqual(fs.readdirSync(state).filter((n) => /\.(download|tmp)$/.test(n) && n !== "kiosk.ps1.download"), [], "nothing else was staged in the state folder");
       assert.deepEqual(fs.readdirSync(app), [], "the staging file is gone afterwards");
+    });
+  });
+
+  describe("install-windows.ps1's Install-Launcher", () => {
+    // The installer's first download of the launcher: the digest the server names in
+    // the update check is what it must be, as for an update. Lifted out by the parser
+    // like Save-KioskScript, with the folders it uses set and the installer's own
+    // $ErrorActionPreference, which is what makes a failed download stop it.
+    const FNS = ["Save-KioskScript", "Install-Launcher"];
+    const install = (base: string, extra = ""): Promise<{ status: number | null; out: string; err: string }> =>
+      pwsh(
+        [
+          "-Command",
+          `$t = $null; $e = $null; $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:INSTALLER, [ref]$t, [ref]$e);` +
+            `foreach ($name in '${FNS.join("','")}') {` +
+            `$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true);` +
+            `if (-not $fn) { throw "$name is gone" }; Invoke-Expression $fn.Extent.Text };` +
+            `$ErrorActionPreference = 'Stop'; $AppDir = $env:APP_DIR; ${extra}` +
+            `Install-Launcher -From $env:FROM -Machine 'machine-1' -To $env:TO`,
+        ],
+        { INSTALLER: path.join(KIOSK, "install-windows.ps1"), APP_DIR: app, FROM: base, TO: path.join(state, "kiosk.ps1") },
+      );
+    const noLauncher = () => fs.rmSync(path.join(state, "kiosk.ps1"));
+
+    it("installs a launcher whose bytes are the digest the server named, even with updates held", async () => {
+      const f = await serve();
+      f.answer = { version: sha(NEW), update: false, reason: "Updates are off." };
+      noLauncher();
+      const r = await install(f.base);
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.deepEqual(launcher(), NEW);
+      assert.equal(f.checks.length, 1);
+      assert.equal(f.checks[0].machine, "machine-1");
+      assert.equal(f.checks[0].platform, "windows");
+      assert.equal(f.checks[0].have, sha(NEW), "the check says what was downloaded, not a placeholder");
+    });
+
+    it("refuses a launcher whose bytes are not the digest the server named, and leaves nothing behind", async () => {
+      const f = await serve();
+      f.answer = { version: sha(NEW), update: false, reason: "x" };
+      f.launcher = Buffer.from("Write-Output 'somebody else'\r\n"); // parses, but is not what the server named
+      noLauncher();
+      const r = await install(f.base);
+      assert.notEqual(r.status, 0, r.out);
+      assert.match(r.out + r.err, /expected /);
+      assert.equal(f.downloads, 1);
+      assert.equal(f.checks[0].have, sha(f.launcher), "the server was told what this PC was given");
+      assert.ok(!fs.existsSync(path.join(state, "kiosk.ps1")), "the refused launcher was not installed");
+      assert.deepEqual(leftovers(), [], "the refused download was not left in Program Files");
+    });
+
+    it("leaves a launcher already there alone when the download is refused", async () => {
+      const f = await serve();
+      f.answer = { version: sha(NEW), update: false, reason: "x" };
+      f.launcher = Buffer.from("Write-Output 'somebody else'\r\n");
+      const r = await install(f.base);
+      assert.notEqual(r.status, 0, r.out);
+      assert.deepEqual(launcher(), OLD);
+    });
+
+    it("installs nothing when the server names no digest, or does not answer", async () => {
+      const f = await serve();
+      noLauncher();
+      for (const answer of [{}, { version: "not-a-digest" }, { version: sha(NEW).slice(1) }]) {
+        f.answer = answer;
+        const r = await install(f.base);
+        assert.notEqual(r.status, 0, JSON.stringify(answer));
+      }
+      assert.ok(!fs.existsSync(path.join(state, "kiosk.ps1")), "a download with no digest to check it against is not installed");
+      assert.deepEqual(leftovers(), []);
+      const gone = await install("http://127.0.0.1:9");
+      assert.notEqual(gone.status, 0);
+      assert.ok(!fs.existsSync(path.join(state, "kiosk.ps1")));
+    });
+
+    it("is what the installer runs for the launcher, with no other way to fetch a script", async () => {
+      // The installer as a whole needs an elevated Windows session, so its parse tree
+      // is read instead: Install-Launcher is called from the main flow, and the one
+      // other call that downloads a script is the updater's.
+      const r = await pwsh(
+        [
+          "-Command",
+          `$t = $null; $e = $null; $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:INSTALLER, [ref]$t, [ref]$e);` +
+            `$cmds = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true);` +
+            `$inFn = { param($c) $p = $c.Parent; while ($p) { if ($p -is [System.Management.Automation.Language.FunctionDefinitionAst]) { return $p.Name }; $p = $p.Parent }; '' };` +
+            `foreach ($c in $cmds) { $n = $c.GetCommandName(); if ($n -in 'Install-Launcher','Save-KioskScript') { "$n in [$(& $inFn $c)] $($c.Extent.Text)" } }`,
+        ],
+        { INSTALLER: path.join(KIOSK, "install-windows.ps1") },
+      );
+      assert.equal(r.status, 0, r.err);
+      const calls = r.out.split("\n").filter(Boolean);
+      assert.ok(calls.some((c) => c.startsWith("Install-Launcher in []")), `the main flow does not call Install-Launcher:\n${r.out}`);
+      // Whatever it is called with: only the launcher's path may fetch a script
+      // with a digest to hold it to, and the updater's is the other caller.
+      const savers = calls.filter((c) => c.startsWith("Save-KioskScript")).map((c) => /^Save-KioskScript in \[([^\]]*)\]/.exec(c)?.[1]);
+      assert.deepEqual(savers.sort(), ["Install-Launcher", "Install-Updater"], r.out);
     });
   });
 });
