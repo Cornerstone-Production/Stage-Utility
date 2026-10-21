@@ -193,7 +193,9 @@ describe("GET /kiosk/install-macos.sh", () => {
     const r = await get('x"; id; "');
     assert.equal(r.status, 200);
     assert.ok(r.body.split("\n").includes('FETCHED_FROM=""'));
-    assert.ok(!r.body.includes("id; "));
+    // The header itself, verbatim, appears nowhere: not a fragment of it, which the
+    // script's own prose can contain ("no usable device id; run ...").
+    assert.ok(!r.body.includes('x"; id; "'));
   });
 });
 

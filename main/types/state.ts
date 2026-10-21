@@ -58,6 +58,9 @@ export interface StageState {
   /** Answer kiosk devices looking for a server. Off until switched on, so a test
    *  instance on the same LAN cannot claim a screen meant for the real one. */
   kioskDiscovery: boolean;
+  /** Mac output helpers and Windows kiosks follow this server's version on their
+   *  own. See machine-updates.ts. */
+  autoUpdateMachines: boolean;
   /** Allowlisted service type IDs for auto mode. Empty array = all allowed. */
   allowedServiceTypeIds: string[];
   /** How the slot editor's plan switcher steps. Editor-only — it never changes

@@ -297,7 +297,7 @@ repository.
 | Check | Looks at | Runs when | Locally |
 |---|---|---|---|
 | ShellCheck | every tracked `*.sh`, and extensionless scripts with a shell shebang (`scripts/stage-upgrade`) | a shell script changes | `brew install shellcheck`, then `scripts/lint-shell.sh` |
-| PSScriptAnalyzer | `scripts/kiosk/install-windows.ps1` | any `.ps1` changes | `brew install powershell`, `pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'`, then `pwsh scripts/lint-powershell.ps1` |
+| PSScriptAnalyzer | `scripts/kiosk/install-windows.ps1`, `kiosk-windows.ps1`, `kiosk-update-windows.ps1` | any `.ps1` changes | `brew install powershell`, `pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'`, then `pwsh scripts/lint-powershell.ps1` |
 | zizmor | `.github/**`: workflows, composite actions, Dependabot config | anything under `.github` changes | `brew install zizmor` (or `pip install zizmor`), then `GH_TOKEN=$(gh auth token) zizmor .github` |
 | Secret scan | the PR's commits and the working tree | every pull request | `gitleaks git . --log-opts="origin/beta..HEAD" --redact` |
 
@@ -307,7 +307,7 @@ finding.
 
 `scripts/lint-shell.sh` and `scripts/lint-powershell.ps1` hold the file lists and
 CI calls them, so a local run is the CI run. PSScriptAnalyzer covers the Windows
-kiosk installer only. `install.ps1`, `scripts/update.ps1` and
+kiosk's installer, launcher and updater only. `install.ps1`, `scripts/update.ps1` and
 `scripts/survival/run-windows.ps1` are listed as deferred in
 `scripts/lint-powershell.ps1` and fail the analyzer today; a `.ps1` in neither
 list fails the check, so a new script is linted or deferred on purpose. The

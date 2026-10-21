@@ -422,6 +422,7 @@ export class StageController {
     lanUrl: null,
     showQr: true,
     kioskDiscovery: false,
+    autoUpdateMachines: true,
     allowedServiceTypeIds: [],
     planSwitcherMode: "upcoming",
     checklistNoteCategories: [],
@@ -620,6 +621,7 @@ export class StageController {
 
     const showQr = settings.showQr ?? true;
     const kioskDiscovery = settings.kioskDiscovery ?? false;
+    const autoUpdateMachines = settings.autoUpdateMachines ?? true;
 
     const { views, outputs } = await this.loadOrMigrateViewsAndOutputs(settings);
 
@@ -668,6 +670,7 @@ export class StageController {
       outputs,
       showQr,
       kioskDiscovery,
+      autoUpdateMachines,
       allowedServiceTypeIds,
       planSwitcherMode: settings.planSwitcherMode === "within-type" ? "within-type" : "upcoming",
       checklistNoteCategories: settings.checklistNoteCategories ?? [],
@@ -1340,6 +1343,18 @@ export class StageController {
   /** True when a PCO Services Live session is running (used to defer auto-updates). */
   isServiceLive(): boolean {
     return this.lastLive != null && this.lastLive.mode !== "none";
+  }
+
+  /**
+   * Whether the service times and the live state are known well enough to restart
+   * a Mac's outputs on: always without Planning Center; with it, once the windows
+   * have been computed and, when a plan is followed, its live state read. Just
+   * after a restart, and while Planning Center cannot be reached, they are not.
+   */
+  serviceTimesKnown(): boolean {
+    if (!this.pcoAppId || !this.pcoSecret) return true;
+    if (!serviceWindow.isKnown()) return false;
+    return !this.state.serviceTypeId || !this.state.planId || this.lastLive !== null;
   }
 
   /** Latest PCO live snapshot (null if none fetched yet) — for the update-lock guard. */
@@ -2626,6 +2641,16 @@ export class StageController {
     return this.state;
   }
 
+  /** Let Mac output helpers and Windows kiosks update themselves, or stop them.
+   *  Read on every machine's next check; nothing is pushed. */
+  async setAutoUpdateMachines(on: boolean): Promise<StageState> {
+    console.log(`[stage-controller] setAutoUpdateMachines → ${scrub(on)}`);
+    this.state = { ...this.state, autoUpdateMachines: on };
+    await settingsStore.patch({ autoUpdateMachines: on });
+    this.broadcast();
+    return this.state;
+  }
+
   /** Dismiss (or restore) the first-run "Getting started" checklist, machine-wide. */
   async setOnboardingDismissed(dismissed: boolean): Promise<StageState> {
     this.state = { ...this.state, onboardingDismissed: dismissed };
@@ -2751,10 +2776,20 @@ export class StageController {
       const allowed = this.state.allowedServiceTypeIds;
       const types = allowed.length ? allTypes.filter((t) => allowed.includes(t.id)) : allTypes;
       const windows: { open: number; close: number }[] = [];
+      // A type or a plan whose times could not be read leaves a gap, not "nothing
+      // planned": the windows are still set, for reconnects, but counted as unknown,
+      // so what must not act blind (a Mac helper's restart) waits.
+      let gaps = 0;
       for (const t of types) {
-        const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, t.id).catch(() => [] as PlanDTO[]);
+        const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, t.id).catch(() => {
+          gaps++;
+          return [] as PlanDTO[];
+        });
         for (const p of plans.slice(0, 2)) { // next couple plans per type is plenty
-          const times = await pcoService.listPlanTimes(this.pcoAppId, this.pcoSecret, t.id, p.id).catch(() => []);
+          const times = await pcoService.listPlanTimes(this.pcoAppId, this.pcoSecret, t.id, p.id).catch(() => {
+            gaps++;
+            return [];
+          });
           const starts = times.map((x) => Date.parse(x.startsAt)).filter(Number.isFinite);
           if (!starts.length) continue;
           const ends = times.map((x) => (x.endsAt ? Date.parse(x.endsAt) : NaN)).filter(Number.isFinite);
@@ -2762,8 +2797,14 @@ export class StageController {
         }
       }
       serviceWindow.setWindows(windows);
-      console.log(`[stage-controller] reconnect windows recomputed: ${scrub(windows.length)}`);
+      if (gaps > 0) {
+        serviceWindow.markUnknown();
+        console.warn(`[stage-controller] reconnect windows recomputed with ${scrub(gaps)} plan read(s) failing, so the schedule counts as unknown until the next refresh`);
+      } else {
+        console.log(`[stage-controller] reconnect windows recomputed: ${scrub(windows.length)}`);
+      }
     } catch (err) {
+      serviceWindow.markUnknown();
       console.warn("[stage-controller] refreshServiceWindows failed:", scrubError(err));
     }
   }

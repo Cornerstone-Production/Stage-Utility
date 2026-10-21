@@ -1294,6 +1294,26 @@ export function AdvancedSection({
 
               <Field orientation="horizontal">
                 <FieldContent>
+                  <FieldLabel>Update Mac output helpers and Windows kiosks with this server</FieldLabel>
+                  <FieldDescription>
+                    When this server updates, each Mac running the output helper installs the same
+                    version on its own. Never during a service, or within the window around one. The
+                    helper restarts to finish, which takes its outputs off air for about three seconds.
+                    A Windows kiosk takes the new launcher at its next sign-in.
+                  </FieldDescription>
+                </FieldContent>
+                <Switch
+                  checked={stageState.autoUpdateMachines ?? true}
+                  onCheckedChange={(on: boolean) =>
+                    void invoke("stage:setAutoUpdateMachines", { enabled: on })
+                      .catch((e: unknown) => toast.error(`Could not change this setting: ${errorMessage(e)}`))
+                  }
+                  aria-label="Update Mac output helpers and Windows kiosks with this server"
+                />
+              </Field>
+
+              <Field orientation="horizontal">
+                <FieldContent>
                   <FieldLabel>Answer devices looking for a server</FieldLabel>
                   <FieldDescription>
                     Off by default so a test instance on the same network cannot claim a screen

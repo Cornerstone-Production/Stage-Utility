@@ -40,6 +40,7 @@ export const DEFAULT_STAGE_STATE: StageState = {
   lanUrl: null,
   showQr: false,
   kioskDiscovery: false,
+  autoUpdateMachines: true,
   allowedServiceTypeIds: [],
   planSwitcherMode: "upcoming",
   checklistNoteCategories: [],
