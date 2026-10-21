@@ -130,6 +130,16 @@ A domain whose DNS is on Cloudflare, in the same account, can stand in for the
    `workersDev: false` turns the `workers.dev` address off; leave it out to keep both.
 3. In the Public link card, change the page address and enter the publishing token
    again in the same save: a token is kept only for the address it was saved with.
+4. Harden the zone, in the domain's own settings:
+   - **SSL/TLS → Edge Certificates**: **Always Use HTTPS** on, **HSTS** on (6 months,
+     subdomains included, preload off), **Minimum TLS Version** 1.2. The Worker
+     redirects plain `http` and sends HSTS on its own as well, so the page stays on
+     `https` if a setting is turned off.
+   - **DNS → Settings**: **DNSSEC** on.
+   - **Domain Registration**: **Auto-renew** on. A lapsed domain can be bought by
+     anyone, and the link and QR codes already handed out would open their page.
+   - Two-factor sign-in on every account with access: whoever can sign in can deploy
+     any page to this address.
 
 ## Updating it
 

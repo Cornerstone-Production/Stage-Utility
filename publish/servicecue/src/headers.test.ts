@@ -7,10 +7,15 @@ import { PUBLIC_STATIC_FILES } from "../../../main/types/servicecue-publish.js";
 import { BASE_HEADERS, STATIC_HEADERS_FILE, SVG_CSP, htmlCsp, json, jsonText, noContent, secured, staticHeaders } from "./headers.js";
 
 describe("the base headers", () => {
-  test("are exactly these three, sorted", () => {
+  test("are exactly these, sorted", () => {
     assert.deepEqual(
       BASE_HEADERS.map(([name, value]) => `${name}: ${value}`),
-      ["Referrer-Policy: no-referrer", "X-Content-Type-Options: nosniff", "X-Robots-Tag: noindex"],
+      [
+        "Referrer-Policy: no-referrer",
+        "Strict-Transport-Security: max-age=15552000; includeSubDomains",
+        "X-Content-Type-Options: nosniff",
+        "X-Robots-Tag: noindex",
+      ],
     );
   });
 
@@ -92,6 +97,7 @@ describe("the static files' headers", () => {
         "/assets/*",
         "  Cache-Control: public, max-age=31536000, immutable",
         "  Referrer-Policy: no-referrer",
+        "  Strict-Transport-Security: max-age=15552000; includeSubDomains",
         "  X-Content-Type-Options: nosniff",
         "  X-Robots-Tag: noindex",
       ].join("\n"),
