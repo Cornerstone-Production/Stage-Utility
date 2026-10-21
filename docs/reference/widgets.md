@@ -72,8 +72,8 @@ opens as a Timer, drawn as it always was.
 
 A Service or ProPresenter Timer turns **red** once its time is over (**Red on
 overrun**, on) and **amber** from a number of seconds left (**Amber near the end**,
-off; 60 when switched on). A source that has not answered, or that ProPresenter
-reports not connected, reads as a dash with **Planning Center isn't answering** or
+off; 60 when switched on). Until a source has answered, a Timer reads a plain dash and says nothing. A
+ProPresenter that has answered and reports not connected reads as a dash with
 **ProPresenter isn't answering** on the sub-line. **Hide when idle** draws nothing
 while there is nothing to show, and stays hidden through the first read. On Home a
 Timer is a stat card like the cards beside it.
@@ -749,7 +749,7 @@ chooses which; with one, it is not shown.
 |---|---|
 | **Text** | **Text** |
 | **Clock** | **Format** 12h or 24h (follows the app setting until chosen), **Seconds**, **AM/PM** |
-| **Timer** | **Source** (Service, ProPresenter or Baptism). Service: **Show the next item** (off). ProPresenter: **Timer** (the first running one, or a running timer by name; typed when none is running) and **Show the timer's name** (on). Baptism: **Shows** one of nine readouts, **Show the label** (on) and its **Label**. All: **Caption**, **Show the sub-line** (on), **Hide when idle** (off). Service and ProPresenter: **Amber near the end** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5) and **Red on overrun** (on) |
+| **Timer** | **Source** (Service, ProPresenter or Baptism). Service: **Show the next item** (off). ProPresenter: **Timer** (a name typed in, with the running timers suggested; empty follows the first running one) and **Show the timer's name** (on). Baptism: **Shows** one of nine readouts, **Show the label** (on) and its **Label**. All: **Caption**, **Show the sub-line** (on), **Hide when idle** (off). Service and ProPresenter: **Amber near the end** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5) and **Red on overrun** (on) |
 | **Service pacing** | **Ahead color** and **Behind color** (green and red until changed, each with a Reset), **Projected end time** (off), **Show ahead/behind label** (off), **Show dash when idle** (on) |
 | **Section chip** | **Which**: Current, Next, or Next section (skips arrangement breaks) |
 | **Slide progress** | **Display**: fraction (`3 / 12`, the default), left, percent or bar; **Show 'slides' label** (off, not offered for the bar) |

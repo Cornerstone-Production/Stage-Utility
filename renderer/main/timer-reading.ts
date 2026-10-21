@@ -45,7 +45,6 @@ export interface TimerInputs {
   baptismKnown: boolean;
 }
 
-export const SERVICE_UNANSWERED = "Planning Center isn’t answering";
 export const PROPRESENTER_UNANSWERED = "ProPresenter isn’t answering";
 
 /**
@@ -77,17 +76,12 @@ function service(config: TimerConfig, i: TimerInputs): TimerReading {
   const hide = config.hideWhenIdle ?? false;
   const showSub = config.showLabel ?? true;
   if (!i.pcoLiveKnown) {
-    // Not heard from yet. A Hide-when-idle widget stays hidden through the first
-    // read rather than flashing a claim at a room that has just reloaded.
+    // Not heard from yet: the plain dash and no sentence, the house rule for a
+    // wall that has just loaded (wall-status-unknown.test.tsx). Planning Center
+    // has no signal for "down" (a failed read and "nothing live" both arrive as
+    // null), so there is no service sentence to show once it has answered either.
     if (hide) return HIDE;
-    return {
-      hidden: false,
-      caption: captionOf(config, "Service"),
-      value: "—",
-      sub: showSub ? SERVICE_UNANSWERED : null,
-      tone: null,
-      unanswered: true,
-    };
+    return { hidden: false, caption: captionOf(config, "Service"), value: "—", sub: null, tone: null, unanswered: true };
   }
   if (!t && hide) return HIDE;
   const next = i.pcoLive?.nextItemTitle;
@@ -116,11 +110,14 @@ function propresenter(config: TimerConfig, i: TimerInputs): TimerReading {
   const down = i.propresenterKnown && pro?.connected === false;
   const timers = pro?.timers ?? [];
   const timer = config.timerName ? timers.find((t) => t.name === config.timerName) : timers[0];
-  if (!i.propresenterKnown || down) {
-    // Loading stays quiet under Hide when idle, as the service clock does. A
-    // ProPresenter that has answered and is not connected is the one thing worth
-    // showing even then.
-    if (hide && !down) return HIDE;
+  if (!i.propresenterKnown) {
+    // Not heard from yet: the plain dash, no sentence, and hidden under Hide when
+    // idle. Only a ProPresenter that has ANSWERED, and said it is not connected,
+    // earns the sentence below.
+    return hide ? HIDE : { hidden: false, caption, value: "—", sub: null, tone: null, unanswered: true };
+  }
+  if (down) {
+    // Known to be down, so worth saying even under Hide when idle.
     return {
       hidden: false,
       caption,

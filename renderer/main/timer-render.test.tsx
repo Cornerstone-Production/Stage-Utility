@@ -299,30 +299,38 @@ describe("the Timer itself", () => {
 });
 
 describe("a source that has not answered", () => {
-  test("service: a dash and a muted sentence, until Planning Center answers", () => {
-    const d = draw({ type: "timer", source: "service" }, { pcoLive: null, pcoLiveKnown: false });
-    assert.equal(d.value, "—");
-    assert.equal(d.sub, "Planning Center isn’t answering");
-    // Answered, with nothing live: idle, not "not answering".
+  // The wall-status-unknown rule: while a read is in flight the widget draws the
+  // plain dash and makes no claim. Only a source KNOWN to be down says so.
+  test("loading draws a dash and no sentence, for service and ProPresenter", () => {
+    const service = draw({ type: "timer", source: "service" }, { pcoLive: null, pcoLiveKnown: false });
+    assert.equal(service.value, "\u2014");
+    assert.equal(service.sub, null);
+    assert.doesNotMatch(service.text, /answering/);
+    const pro = draw({ type: "timer", source: "propresenter" }, { propresenter: null, propresenterKnown: false });
+    assert.equal(pro.value, "\u2014");
+    assert.equal(pro.sub, null);
+    assert.doesNotMatch(pro.text, /answering/);
+  });
+
+  test("Planning Center answered with nothing live is idle, with no sentence", () => {
     const idle = draw({ type: "timer", source: "service" }, { pcoLive: null, pcoLiveKnown: true });
-    assert.equal(idle.value, "—");
+    assert.equal(idle.value, "\u2014");
     assert.equal(idle.sub, null);
   });
 
-  test("propresenter: not answering while unread, and when it answers that it is down", () => {
+  test("ProPresenter says it is not answering only after it has answered that it is down", () => {
     const cfg = { type: "timer", source: "propresenter" };
-    assert.equal(draw(cfg, { propresenter: null, propresenterKnown: false }).sub, "ProPresenter isn’t answering");
-    assert.equal(draw(cfg, { propresenter: PRO([], false), propresenterKnown: true }).sub, "ProPresenter isn’t answering");
+    assert.equal(draw(cfg, { propresenter: PRO([], false), propresenterKnown: true }).sub, "ProPresenter isn\u2019t answering");
     assert.equal(draw(cfg, { propresenter: PRO([], true), propresenterKnown: true }).sub, null, "connected with no timer running is idle");
   });
 
-  test("Hide when idle stays hidden through the first read, rather than flashing a claim", () => {
+  test("Hide when idle stays hidden through the first read", () => {
     assert.equal(draw({ type: "timer", source: "service", hideWhenIdle: true }, { pcoLiveKnown: false }).text, "");
     assert.equal(draw({ type: "timer", source: "propresenter", hideWhenIdle: true }, { propresenter: null, propresenterKnown: false }).text, "");
   });
 
-  test("a ProPresenter that has answered it is down still says so under Hide when idle", () => {
+  test("a ProPresenter known to be down still says so under Hide when idle", () => {
     const d = draw({ type: "timer", source: "propresenter", hideWhenIdle: true }, { propresenter: PRO([], false), propresenterKnown: true });
-    assert.equal(d.sub, "ProPresenter isn’t answering");
+    assert.equal(d.sub, "ProPresenter isn\u2019t answering");
   });
 });
