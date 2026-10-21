@@ -119,38 +119,48 @@ function assertSavedDrawsAsTimer(stored: { config: unknown }[], where: string): 
   });
 }
 
-describe("a saved layout template", () => {
-  test("keeps the old types and draws them as Timers", async () => {
-    await saveLayoutTemplate("Old stage wall", layoutOf() as never);
-    const [tpl] = await listLayoutTemplates();
-    assertSavedDrawsAsTimer(tpl.layout.objects, "template");
-  });
-});
+/** Each way a layout reaches a screen besides views.json: the four old types go in
+ *  through the real store or importer, and the stored objects come back out. */
+const STORES: { name: string; roundTrip: () => Promise<{ config: unknown }[]> }[] = [
+  {
+    name: "a saved layout template",
+    roundTrip: async () => {
+      await saveLayoutTemplate("Old stage wall", layoutOf() as never);
+      return (await listLayoutTemplates())[0].layout.objects;
+    },
+  },
+  {
+    name: "a saved group",
+    roundTrip: async () => {
+      await saveLayoutGroup("Old timers", {
+        ...objectOf({ type: "container" }, "g"),
+        children: SAVED.map((s, i) => objectOf(s.old, `c${i}`)),
+      } as never);
+      return (await listLayoutGroups())[0].object.children ?? [];
+    },
+  },
+  {
+    name: "an imported view file",
+    roundTrip: async () => {
+      const report = await applyViewBundle({
+        kind: "stage-utility-view", version: 1, appVersion: "1.0.0",
+        createdAt: "2026-08-17T00:00:00.000Z", source: { server: "Elsewhere" },
+        views: [{ id: "view-1", name: "Old stage wall", kind: "custom", createdAt: 0, layout: layoutOf() }],
+        sideData: { slots: {}, notes: {}, serviceCueLayouts: [] },
+        targets: { osc: [], rosstalk: [] },
+        images: {},
+      });
+      return (await viewsStore.load()).find((v) => v.id === report.views[0].id)?.layout?.objects ?? [];
+    },
+  },
+];
 
-describe("a saved group", () => {
-  test("keeps the old types and draws them as Timers", async () => {
-    await saveLayoutGroup("Old timers", {
-      ...objectOf({ type: "container" }, "g"),
-      children: SAVED.map((s, i) => objectOf(s.old, `c${i}`)),
-    } as never);
-    const [group] = await listLayoutGroups();
-    assertSavedDrawsAsTimer(group.object.children ?? [], "group");
-  });
-});
-
-describe("an imported view file", () => {
-  test("keeps the old types and draws them as Timers", async () => {
-    const report = await applyViewBundle({
-      kind: "stage-utility-view", version: 1, appVersion: "1.0.0",
-      createdAt: "2026-08-17T00:00:00.000Z", source: { server: "Elsewhere" },
-      views: [{ id: "view-1", name: "Old stage wall", kind: "custom", createdAt: 0, layout: layoutOf() }],
-      sideData: { slots: {}, notes: {}, serviceCueLayouts: [] },
-      targets: { osc: [], rosstalk: [] },
-      images: {},
+describe("a layout saved with the old timers", () => {
+  for (const store of STORES) {
+    test(`${store.name} keeps the old types and draws them as Timers`, async () => {
+      assertSavedDrawsAsTimer(await store.roundTrip(), store.name);
     });
-    const view = (await viewsStore.load()).find((v) => v.id === report.views[0].id);
-    assertSavedDrawsAsTimer(view?.layout?.objects ?? [], "import");
-  });
+  }
 });
 
 describe("the harness itself", () => {

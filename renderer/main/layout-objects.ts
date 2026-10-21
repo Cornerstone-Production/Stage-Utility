@@ -288,7 +288,7 @@ export const EMBED_FONT_FRACTION = 0.016;
  *
  * Unlike the others it offers no Convert button: the mapping runs wherever an
  * object is read (timer-config.ts), so nothing ever shows an old one to convert.
- * `convert` is the same mapping, for the registry's own contract.
+ * `convert` is the same mapping, there because the `retired` type requires one.
  */
 const RETIRED_TIMER: NonNullable<LayoutObjectSpec["retired"]> = {
   replacedBy: "timer",

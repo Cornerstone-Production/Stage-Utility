@@ -33,7 +33,8 @@ import type { LayoutObjectConfig, PvpNowLayout } from "@main/types/views";
  * distance, Home reads a row of three-line cards, and a streaming card that
  * wore the wall's composition was the odd one out on the page.
  */
-export type HomeCardType = Extract<LayoutObjectConfig, { type: `home-${string}` }>["type"];
+// Less `home-live-status`, which readConfig turns into a Timer first.
+export type HomeCardType = Exclude<Extract<LayoutObjectConfig, { type: `home-${string}` }>["type"], "home-live-status">;
 
 import { flashTarget } from "../flash";
 import { cn } from "../../lib/cn";
@@ -42,7 +43,7 @@ import { useFailedReads } from "../../lib/use-failed-reads";
 import { joinWithAnd } from "../../lib/join-with-and";
 import { ErrorNote } from "../../components/ui/error-note";
 import { computeOverview, trendColor, type OverviewData, type Trend } from "../../settings/sections/overview-data";
-import { computePcoTimer, fmtDuration } from "../../main/pco-timer";
+import { fmtDuration } from "../../main/pco-timer";
 import { useObsStatus } from "../../main/use-obs-state";
 import { usePvpState } from "../../main/use-pvp-state";
 import { PvpLayerRow } from "../../main/pvp-layer-row";
@@ -72,7 +73,6 @@ const HOME_CARD_TYPES: Record<HomeCardType, true> = {
   "home-readiness": true,
   "home-next-service": true,
   "home-recent-services": true,
-  "home-live-status": true,
   "home-recording": true,
   "home-recording-obs": true,
   "home-recording-reaper": true,
@@ -597,38 +597,6 @@ export function RecentServicesCard({
   );
 }
 
-/**
- * The service timer — the running item's clock, what it is, and what is next.
- *
- * It used to carry recording, SPL, screens and history inside it, because Home
- * had no way to arrange four small things. The grid does, so those are their own
- * widgets now and this is one job again. The maths is NOT reimplemented:
- * computePcoTimer mirrors PCO's semantics and fmtDuration formats it, and the
- * dashboard, the stage display and the context bar all use that pair.
- */
-export function LiveStatusCard({
-  pcoLive,
-  now,
-}: {
-  pcoLive: PcoLiveDTO | null;
-  now: number;
-}) {
-  const timer = computePcoTimer(pcoLive, now);
-  // The idiom, like every other card. This was the last one drawing its own
-  // markup — a clamp()'d timer with its label sitting BESIDE it on the baseline
-  // and the next item below, which is the same three pieces of information the
-  // composition already has places for. The label is what the number is counting
-  // to, so it is the caption; the next item qualifies it, so it is the sub.
-  return (
-    <Stat
-      label={timer?.label ?? "Service"}
-      value={timer ? fmtDuration(timer.seconds) : "—"}
-      sub={pcoLive?.nextItemTitle ? `Next · ${pcoLive.nextItemTitle}` : undefined}
-      tone={timer?.over ? "danger" : undefined}
-    />
-  );
-}
-
 /** Whether every recorder this card speaks for has answered: "any" reads both. */
 function recordersKnown(recorder: string, obsKnown: boolean, reaperKnown: boolean): boolean {
   switch (recorder) {
@@ -1045,7 +1013,6 @@ export function ScreensCard({
 export function HomeCard({
   config,
   state,
-  pcoLive,
   now,
   onlineOutputIds,
   onlineKnown,
@@ -1062,7 +1029,6 @@ export function HomeCard({
    */
   config: Extract<LayoutObjectConfig, { type: HomeCardType }>;
   state: StageState;
-  pcoLive: PcoLiveDTO | null;
   now: number;
   /**
    * Output ids with a live heartbeat, from `useDisplayPresenceStatus` by way of
@@ -1084,8 +1050,6 @@ export function HomeCard({
 }) {
   const c = config;
   switch (c.type) {
-    case "home-live-status":
-      return <LiveStatusCard pcoLive={pcoLive} now={now} />;
     case "home-recording":
       return <RecordingCard recorder={RECORDER_FOR[c.recorder ?? "any"] ?? "any"} now={now} showElapsed={c.showElapsed ?? true} />;
     case "home-recording-obs":

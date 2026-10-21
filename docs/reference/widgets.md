@@ -53,8 +53,8 @@ opens as a Timer, drawn as it always was.
 
 - **Service** — before the service, the time until it starts; while an item is
   live, that item's time left, counting up when the item has no length. The
-  caption is the live item's name until you type one, and **Show the next item**
-  adds a `Next · <title>` line.
+  caption is the live item's name until you type one. The sub-line holds nothing
+  until **Show the next item** is on, which adds a `Next · <title>` line.
 - **ProPresenter** — one timer by name, or the first running one, with the time
   as ProPresenter reports it. The timer's name sits on the sub-line. Amber near the
   end reads that time, so it is meant for a timer counting down.
@@ -70,13 +70,20 @@ opens as a Timer, drawn as it always was.
   zero, so it has no amber or red. See
   [ServiceCue and Baptisms](../features/servicecue-and-baptisms.md).
 
-A Service or ProPresenter Timer turns **red** once its time is over (**Red on
-overrun**, on) and **amber** from a number of seconds left (**Amber near the end**,
-off; 60 when switched on). Until a source has answered, a Timer reads a plain dash and says nothing. A
+A new Timer starts with its source's caption written in (`Stage timer`,
+`Baptisms`; the service has none, so it shows the item's name). Changing the
+source swaps the caption while it is still the old source's own, and clearing the
+field means no caption. A Service or ProPresenter Timer turns **red** once its
+time is over (**Red on overrun**, on) and **amber** from a number of seconds left
+(**Amber near the end**, off; 60 when switched on).
+
+Until a source has answered, a Timer reads a plain dash and says nothing. A
 ProPresenter that has answered and reports not connected reads as a dash with
-**ProPresenter isn't answering** on the sub-line. **Hide when idle** draws nothing
-while there is nothing to show, and stays hidden through the first read. On Home a
-Timer is a stat card like the cards beside it.
+**ProPresenter isn't answering** on the sub-line, unless **Hide when idle** is on:
+then the Timer draws nothing, down or idle, and stays hidden through the first
+read. On Home a Timer is the wall readout, as its widget was, except a Service
+Timer with **Show the next item** on, which is a stat card like the cards beside
+it.
 
 ## PCO / service
 
@@ -749,7 +756,7 @@ chooses which; with one, it is not shown.
 |---|---|
 | **Text** | **Text** |
 | **Clock** | **Format** 12h or 24h (follows the app setting until chosen), **Seconds**, **AM/PM** |
-| **Timer** | **Source** (Service, ProPresenter or Baptism). Service: **Show the next item** (off). ProPresenter: **Timer** (a name typed in, with the running timers suggested; empty follows the first running one) and **Show the timer's name** (on). Baptism: **Shows** one of nine readouts, **Show the label** (on) and its **Label**. All: **Caption**, **Show the sub-line** (on), **Hide when idle** (off). Service and ProPresenter: **Amber near the end** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5) and **Red on overrun** (on) |
+| **Timer** | **Source** (Service, ProPresenter or Baptism). Service: **Show the next item** (off). ProPresenter: **Timer** (a name typed in, with the running timers suggested; empty follows the first running one). Baptism: **Shows** one of nine readouts and its **Label** (auto by default). All: **Caption**, one sub-line switch (**Show the sub-line**, **Show the timer's name** or **Show the label**, on), **Hide when idle** (off). Service and ProPresenter: **Amber near the end** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5) and **Red on overrun** (on) |
 | **Service pacing** | **Ahead color** and **Behind color** (green and red until changed, each with a Reset), **Projected end time** (off), **Show ahead/behind label** (off), **Show dash when idle** (on) |
 | **Section chip** | **Which**: Current, Next, or Next section (skips arrangement breaks) |
 | **Slide progress** | **Display**: fraction (`3 / 12`, the default), left, percent or bar; **Show 'slides' label** (off, not offered for the bar) |

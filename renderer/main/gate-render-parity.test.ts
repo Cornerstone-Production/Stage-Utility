@@ -318,12 +318,12 @@ describe("every channel a widget draws is one its layout subscribes to", () => {
     // The anchor. Nothing below means anything if the scan quietly found
     // nothing, and a floor ("at least forty arms") is how that goes unnoticed.
     //
-    // Three types have no arm: ObjectBody reads `countdown-timer`, `pp-timer` and
-    // `baptism-timer` as a Timer before its switch, so the Timer's arm draws them
-    // (and its type is what the gates name). The compiler holds that: the switch's
-    // `never` default only compiles while no arm is left for a type readConfig
-    // maps. `home-live-status` keeps a Home-card arm, which the same mapping
-    // precedes. Listed exactly, and held to the mapping's own list.
+    // Four types have no arm: ObjectBody reads `countdown-timer`, `pp-timer`,
+    // `baptism-timer` and `home-live-status` as a Timer before its switch, so the
+    // Timer's arm draws them (and its source is what the gates name). The compiler
+    // holds that: the switch's `never` default, and HomeCard's, only compile while
+    // no arm is left for a type readConfig maps. Listed exactly, and held to the
+    // mapping's own list.
     const arms = [...READS.keys()].sort();
     const registry = Object.keys(LAYOUT_OBJECTS).sort();
     assert.deepEqual(
@@ -337,6 +337,7 @@ describe("every channel a widget draws is one its layout subscribes to", () => {
       [
         "baptism-timer",
         "countdown-timer",
+        "home-live-status",
         "pp-timer",
       ],
       "the render arms found do not match the object registry — a type has no arm, or the scan missed one",

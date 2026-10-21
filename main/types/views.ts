@@ -361,7 +361,6 @@ export interface LayoutStyle {
 /** The four materials offered in the inspector's Look section. */
 export type LayoutSurface = "flat" | "glass" | "solid" | "outline";
 
-/** Per-type configuration. The discriminant is `type`. */
 /** Where a Timer reads its time. */
 export type TimerSource = "service" | "propresenter" | "baptism";
 
@@ -369,6 +368,7 @@ export type TimerSource = "service" | "propresenter" | "baptism";
 export type BaptismTimerField =
   | "live" | "count" | "total" | "average" | "last" | "testimony" | "session" | "phase" | "person";
 
+/** Per-type configuration. The discriminant is `type`. */
 export type LayoutObjectConfig =
   | { type: "text"; text: string }
   | { type: "clock"; showSeconds?: boolean; format?: "12h" | "24h"; showMeridiem?: boolean }

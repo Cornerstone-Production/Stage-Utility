@@ -11,7 +11,7 @@
 
 import { segmentElapsedMs } from "@main/services/baptism-elapsed";
 import type { TimerConfig } from "./timer-config";
-import { TIMER_CAPTION_DEFAULT } from "./timer-config";
+import { timerSource } from "./timer-config";
 import { computePcoTimer, fmtDuration } from "./pco-timer";
 import { fmtClock, summarizeBaptism } from "./use-baptism-state";
 
@@ -61,27 +61,44 @@ export function parseProTimerSeconds(text: string | null | undefined): number | 
   return m[1] ? -secs : secs;
 }
 
-/** The caption as the operator set it, else the source's default. An empty
- *  string is a deliberate "no caption". */
-function captionOf(config: TimerConfig, fallback: string | null): string | null {
-  const c = config.caption ?? fallback;
+/**
+ * The caption as the operator set it. Unset is the fallback, which only the
+ * service has (the live item's name, data rather than a default string); an
+ * empty or null caption is a deliberate "no caption". A new Timer is created with
+ * its source's caption written into its config, so the renderer defaults none.
+ */
+function captionOf(config: TimerConfig, fallback: string | null = null): string | null {
+  const c = config.caption === undefined ? fallback : config.caption;
   return c ? c : null;
 }
 
 /** Hide-when-idle and nothing to show. Quiet reads never claim anything. */
 const HIDE: TimerReading = { hidden: true, caption: null, value: "", sub: null, tone: null, unanswered: false };
 
-function service(config: TimerConfig, i: TimerInputs): TimerReading {
+/** The dash: a source with nothing to say, or not heard from yet. */
+const dash = (caption: string | null, unanswered: boolean, sub: string | null = null): TimerReading => ({
+  hidden: false,
+  caption,
+  value: "\u2014",
+  sub,
+  tone: null,
+  unanswered,
+});
+
+/** The settings every source reads the same way, normalised once. */
+interface Common {
+  hide: boolean;
+  showSub: boolean;
+}
+
+function service(config: TimerConfig, i: TimerInputs, { hide, showSub }: Common): TimerReading {
   const t = computePcoTimer(i.pcoLive, i.now);
-  const hide = config.hideWhenIdle ?? false;
-  const showSub = config.showLabel ?? true;
   if (!i.pcoLiveKnown) {
     // Not heard from yet: the plain dash and no sentence, the house rule for a
     // wall that has just loaded (wall-status-unknown.test.tsx). Planning Center
     // has no signal for "down" (a failed read and "nothing live" both arrive as
     // null), so there is no service sentence to show once it has answered either.
-    if (hide) return HIDE;
-    return { hidden: false, caption: captionOf(config, "Service"), value: "—", sub: null, tone: null, unanswered: true };
+    return hide ? HIDE : dash(captionOf(config, "Service"), true);
   }
   if (!t && hide) return HIDE;
   const next = i.pcoLive?.nextItemTitle;
@@ -96,38 +113,29 @@ function service(config: TimerConfig, i: TimerInputs): TimerReading {
   return {
     hidden: false,
     caption: captionOf(config, t?.label ?? "Service"),
-    value: t ? fmtDuration(t.seconds) : "—",
-    sub: showSub && (config.nextItem ?? false) && next ? `Next · ${next}` : null,
+    value: t ? fmtDuration(t.seconds) : "\u2014",
+    sub: showSub && (config.nextItem ?? false) && next ? `Next \u00b7 ${next}` : null,
     tone,
     unanswered: false,
   };
 }
 
-function propresenter(config: TimerConfig, i: TimerInputs): TimerReading {
+function propresenter(config: TimerConfig, i: TimerInputs, { hide, showSub }: Common): TimerReading {
   const pro = i.propresenter;
-  const hide = config.hideWhenIdle ?? false;
-  const caption = captionOf(config, TIMER_CAPTION_DEFAULT.propresenter);
-  const down = i.propresenterKnown && pro?.connected === false;
-  const timers = pro?.timers ?? [];
-  const timer = config.timerName ? timers.find((t) => t.name === config.timerName) : timers[0];
+  const caption = captionOf(config);
   if (!i.propresenterKnown) {
-    // Not heard from yet: the plain dash, no sentence, and hidden under Hide when
+    // Not heard from yet: the plain dash, no sentence, hidden under Hide when
     // idle. Only a ProPresenter that has ANSWERED, and said it is not connected,
     // earns the sentence below.
-    return hide ? HIDE : { hidden: false, caption, value: "—", sub: null, tone: null, unanswered: true };
+    return hide ? HIDE : dash(caption, true);
   }
-  if (down) {
-    // Known to be down, so worth saying even under Hide when idle.
-    return {
-      hidden: false,
-      caption,
-      value: "—",
-      sub: (config.showLabel ?? true) ? PROPRESENTER_UNANSWERED : null,
-      tone: null,
-      unanswered: true,
-    };
-  }
-  if (!timer) return hide ? HIDE : { hidden: false, caption, value: "—", sub: null, tone: null, unanswered: false };
+  // Known to be down. Hide when idle wins, as it did for the ProPresenter timer
+  // before: a widget set to draw nothing when there is nothing to show does not
+  // start announcing an outage.
+  if (pro?.connected === false) return hide ? HIDE : dash(caption, true, showSub ? PROPRESENTER_UNANSWERED : null);
+  const timers = pro?.timers ?? [];
+  const timer = config.timerName ? timers.find((t) => t.name === config.timerName) : timers[0];
+  if (!timer) return hide ? HIDE : dash(caption, false);
   // Red only on the states that say the time is up; anything else stays neutral.
   const state = (timer.state ?? "").toLowerCase();
   const over = state.includes("over") || state.includes("expire");
@@ -140,7 +148,7 @@ function propresenter(config: TimerConfig, i: TimerInputs): TimerReading {
     caption,
     value: timer.time,
     // The timer's NAME, under the value: inline it pushed the number off centre.
-    sub: (config.showLabel ?? true) ? timer.name : null,
+    sub: showSub ? timer.name : null,
     tone,
     unanswered: false,
   };
@@ -148,7 +156,7 @@ function propresenter(config: TimerConfig, i: TimerInputs): TimerReading {
 
 /** The value and the word under it for one baptism readout, before the caption
  *  and the label switch are applied. */
-export function baptismReadout(
+function baptismReadout(
   field: NonNullable<TimerConfig["field"]>,
   state: BaptismState | null,
   known: boolean,
@@ -244,16 +252,17 @@ export function baptismReadout(
   return { value, word };
 }
 
-function baptism(config: TimerConfig, i: TimerInputs): TimerReading {
+function baptism(config: TimerConfig, i: TimerInputs, { hide, showSub }: Common): TimerReading {
   const idle = i.baptismKnown && (!i.baptism || i.baptism.phase === "idle");
-  if ((config.hideWhenIdle ?? false) && idle) return HIDE;
+  if (hide && idle) return HIDE;
   const { value, word } = baptismReadout(config.field ?? "live", i.baptism, i.baptismKnown, i.now);
   return {
     hidden: false,
-    caption: captionOf(config, TIMER_CAPTION_DEFAULT.baptism),
+    caption: captionOf(config),
     value,
-    // An empty label means the readout's own word, as the inspector's "(auto)" says.
-    sub: (config.showLabel ?? true) ? (config.label?.trim() ? config.label : word) : null,
+    // An empty label is the readout's own word, as the inspector's "(auto)" says;
+    // a label of only spaces is a label, and draws a blank line as it always did.
+    sub: showSub ? (config.label ? config.label : word) : null,
     tone: null,
     unanswered: !i.baptismKnown,
   };
@@ -261,12 +270,13 @@ function baptism(config: TimerConfig, i: TimerInputs): TimerReading {
 
 /** What a Timer says right now. */
 export function readTimer(config: TimerConfig, inputs: TimerInputs): TimerReading {
-  switch (config.source ?? "service") {
+  const common: Common = { hide: config.hideWhenIdle ?? false, showSub: config.showLabel ?? true };
+  switch (timerSource(config)) {
     case "propresenter":
-      return propresenter(config, inputs);
+      return propresenter(config, inputs, common);
     case "baptism":
-      return baptism(config, inputs);
+      return baptism(config, inputs, common);
     default:
-      return service(config, inputs);
+      return service(config, inputs, common);
   }
 }

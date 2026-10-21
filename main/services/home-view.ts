@@ -35,7 +35,7 @@
 // widgets a stage display uses. A second store would have been a second thing to
 // back up, migrate and get wrong.
 
-import type { View, LayoutObjectConfig } from "@main/types/views";
+import type { View, LayoutObject, LayoutObjectConfig } from "@main/types/views";
 
 /** The id of the Home view. Stable, because Home routes to it by name. */
 export const HOME_VIEW_ID = "home";
@@ -63,7 +63,7 @@ export function defaultHomeLayout() {
   // ones), and identical coordinates would draw four cards exactly on top of
   // each other. Filler, but not nonsense.
   let row = 0;
-  const card = (config: HomeCardConfig, home?: { size: "xl"; when: "live" }) => ({
+  const card = (config: HomeCardConfig, home?: LayoutObject["home"]) => ({
     id: config.type,
     x: 0.04, y: 0.04 + row++ * 0.135, w: 0.92, h: 0.12, z: 1,
     ...(home ? { home } : {}),

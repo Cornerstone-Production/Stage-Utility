@@ -1675,11 +1675,11 @@ export function LayoutEditor({
    * operator's separate decisions and are not this button's business.
    */
   function resetLook(id: string) {
-    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, style: defaultStyleFor(o.config.type, { hostDrawsFrame: view.id === HOME_VIEW_ID }) })));
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...o, style: defaultStyleFor(displayType(o.config), { hostDrawsFrame: view.id === HOME_VIEW_ID }) })));
   }
   function updateConfig(id: string, config: LayoutObjectConfig) {
     // A retired timer is written as a Timer, with the Home slot it held pinned.
-    setObjects((prev) => mapById(prev, id, (o) => ({ ...readTimerObject(o), config })));
+    setObjects((prev) => mapById(prev, id, (o) => ({ ...readTimerObject(o, view.id === HOME_VIEW_ID), config })));
   }
   // Geometry updates during a drag don't each push history (startDrag already did).
   const onGeom = useCallback((id: string, geom: Pick<LayoutObject, "x" | "y" | "w" | "h">) => {

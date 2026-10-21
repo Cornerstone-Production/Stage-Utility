@@ -71,12 +71,17 @@ interface Drawn {
   value: string | null;
   color: string | null;
   sub: string | null;
+  /** The composition's own `align-items`, the value's font size and its text
+   *  alignment: what Home's uniform sizing and the object's alignment decide. */
+  align: string | null;
+  valueSize: string | null;
+  valueAlign: string | null;
 }
 
 /** One object, drawn through the real ObjectContent, read back as its rows. */
 function draw(config: Record<string, unknown>, ctx: Partial<LayoutRenderCtx> = {}): Drawn {
   cleanup();
-  const o = { id: "o1", x: 0, y: 0, w: 0.3, h: 0.2, z: 1, config, style: {} } as never;
+  const o = { id: "o1", x: 0, y: 0, w: 0.3, h: 0.2, z: 1, config, style: { textAlign: "center" } } as never;
   const { container } = render(React.createElement(ObjectContent as never, { o, ctx: makeRenderCtx({ now: NOW, ...ctx }) }));
   const valueBox = container.querySelector("[data-readout-value]");
   const valueEl = valueBox?.firstElementChild as HTMLElement | null;
@@ -87,6 +92,9 @@ function draw(config: Record<string, unknown>, ctx: Partial<LayoutRenderCtx> = {
     value: valueEl?.textContent ?? null,
     color: valueEl?.style.color ?? null,
     sub: subEl?.textContent ?? null,
+    align: (valueBox?.parentElement as HTMLElement | null)?.style.alignItems ?? null,
+    valueSize: (valueBox as HTMLElement | null)?.style.fontSize ?? null,
+    valueAlign: (valueBox as HTMLElement | null)?.style.textAlign ?? null,
   };
 }
 
@@ -109,14 +117,6 @@ describe("a saved PCO countdown draws what it always drew", () => {
     assert.match(draw({ ...warned, warnSeconds: 30 }, { pcoLive: item(48) }).color ?? "", NEUTRAL);
     // No Warn at saved: never amber.
     assert.match(draw({ type: "countdown-timer" }, { pcoLive: item(5) }).color ?? "", NEUTRAL);
-  });
-
-  test("an object saved with no caption draws none", () => {
-    // "No layout anybody built gains a caption it did not ask for."
-    const d = draw({ type: "countdown-timer" }, { pcoLive: item(48) });
-    assert.equal(d.caption, null);
-    assert.equal(d.value, "0:48");
-    assert.equal(d.sub, null, "a countdown never drew the next item");
   });
 
   test("nothing live: a dash, or nothing at all under Hide when idle", () => {
@@ -176,10 +176,6 @@ describe("a saved ProPresenter timer draws what it always drew", () => {
     assert.equal(draw({ ...saved, hideWhenIdle: true }, { propresenter: PRO([]) }).text, "");
   });
 
-  test("an object saved with no caption draws none", () => {
-    const { caption: _caption, ...bare } = saved;
-    assert.equal(draw(bare, { propresenter: PRO([stage]) }).caption, null);
-  });
 });
 
 describe("a saved Service timer card draws what it always drew, on Home", () => {
@@ -236,10 +232,6 @@ describe("a saved Baptism timer draws what it always drew", () => {
     assert.equal(draw({ type: "baptism-timer", field: "count" }, { baptism: idle }).sub, null);
   });
 
-  test("a caption saved as nothing draws none", () => {
-    assert.equal(draw({ type: "baptism-timer", field: "count", showLabel: true }, { baptism: idle }).caption, null);
-  });
-
   test("not answered yet: a dash, and live's ready is not claimed", () => {
     const d = draw({ type: "baptism-timer", field: "live", showLabel: true }, { baptism: null, baptismKnown: false });
     assert.equal(d.value, "—");
@@ -291,11 +283,6 @@ describe("the Timer itself", () => {
     assert.notEqual(draw(cfg, { baptism: baptismState({ phase: "testimony", personNumber: 1 }), baptismKnown: true }).text, "");
   });
 
-  test("on Home it is a stat card in Home's own colours", () => {
-    const d = draw({ type: "timer", source: "service", warnSeconds: 60 }, { home: true, interactive: true, pcoLive: item(48) });
-    assert.equal(d.color, "var(--color-warn-11)");
-    assert.equal(draw({ type: "timer", source: "service" }, { home: true, interactive: true, pcoLive: item(-5) }).color, "var(--color-danger-11)");
-  });
 });
 
 describe("a source that has not answered", () => {
@@ -329,8 +316,79 @@ describe("a source that has not answered", () => {
     assert.equal(draw({ type: "timer", source: "propresenter", hideWhenIdle: true }, { propresenter: null, propresenterKnown: false }).text, "");
   });
 
-  test("a ProPresenter known to be down still says so under Hide when idle", () => {
-    const d = draw({ type: "timer", source: "propresenter", hideWhenIdle: true }, { propresenter: PRO([], false), propresenterKnown: true });
-    assert.equal(d.sub, "ProPresenter isn\u2019t answering");
+});
+
+describe("an object saved with no caption draws none", () => {
+  // "No layout anybody built gains a caption it did not ask for": the three
+  // widgets that drew no caption when none was stored still draw none.
+  const live = { pcoLive: item(48), propresenter: PRO([{ name: "Stage", time: "00:03:00", state: "running" }]), baptism: baptismState({}) };
+  for (const config of [
+    { type: "countdown-timer" },
+    { type: "pp-timer" },
+    { type: "baptism-timer", field: "count" },
+  ]) {
+    test(String(config.type), () => assert.equal(draw(config, live).caption, null));
+  }
+});
+
+describe("a Timer's caption", () => {
+  const live = { pcoLive: item(48) };
+  test("unset on a service Timer is the live item's name; empty or null is none", () => {
+    assert.equal(draw({ type: "timer", source: "service" }, live).caption, "Message");
+    assert.equal(draw({ type: "timer", source: "service", caption: "" }, live).caption, null);
+    assert.equal(draw({ type: "timer", source: "service", caption: null }, live).caption, null);
+  });
+  test("the renderer defaults none for the other sources: what is written is what is drawn", () => {
+    assert.equal(draw({ type: "timer", source: "propresenter", caption: "Stage timer" }, { propresenter: PRO([]) , propresenterKnown: true }).caption, "Stage timer");
+    assert.equal(draw({ type: "timer", source: "propresenter" }, { propresenter: PRO([]), propresenterKnown: true }).caption, null);
+    assert.equal(draw({ type: "timer", source: "baptism", caption: null }, { baptism: baptismState({}) }).caption, null);
+  });
+});
+
+describe("on Home, a converted widget keeps the look it had", () => {
+  // Pinned from beta, which drew each of these on Home as the wall readout at
+  // Home's uniform size, aligned as the object says, with the wall's red. Only a
+  // service Timer that shows the next item is the Stat card.
+  const home = { home: true, interactive: true };
+  const over = PRO([{ name: "Sermon", time: "-00:00:05", state: "Overrun" }]);
+
+  test("PCO countdown", () => {
+    const d = draw({ type: "countdown-timer", caption: "Time left" }, { ...home, pcoLive: item(-12) });
+    assert.deepEqual([d.align, d.valueAlign, d.valueSize, d.color], ["center", "center", "72px", RED_WALL]);
+  });
+  test("ProPresenter timer", () => {
+    const d = draw({ type: "pp-timer", caption: "Stage timer" }, { ...home, propresenter: over, propresenterKnown: true });
+    assert.deepEqual([d.align, d.valueAlign, d.valueSize, d.color], ["center", "center", "72px", RED_WALL]);
+  });
+  test("Baptism timer", () => {
+    const d = draw({ type: "baptism-timer", field: "count" }, { ...home, baptism: null, baptismKnown: true });
+    assert.deepEqual([d.align, d.valueAlign, d.valueSize], ["center", "center", "137.85px"]);
+  });
+  test("a service Timer with the next item on is the Stat card, in Home's colours", () => {
+    const d = draw({ type: "timer", source: "service", nextItem: true, warnSeconds: 60 }, { ...home, pcoLive: item(48) });
+    assert.equal(d.color, "var(--color-warn-11)");
+    assert.equal(draw({ type: "timer", source: "service", nextItem: true }, { ...home, pcoLive: item(-5) }).color, "var(--color-danger-11)");
+  });
+  test("a service Timer without the next item is the readout, not the Stat", () => {
+    assert.equal(draw({ type: "timer", source: "service" }, { ...home, pcoLive: item(-5) }).color, RED_WALL);
+  });
+});
+
+describe("Hide when idle wins over a source that is down", () => {
+  test("draws nothing, as the ProPresenter timer did; without it the sentence stays", () => {
+    const down = { propresenter: PRO([], false), propresenterKnown: true };
+    assert.equal(draw({ type: "timer", source: "propresenter", hideWhenIdle: true }, down).text, "");
+    assert.equal(draw({ type: "timer", source: "propresenter" }, down).sub, "ProPresenter isn\u2019t answering");
+  });
+});
+
+describe("a baptism label", () => {
+  const idle = { baptism: baptismState({}) };
+  test("of only spaces is a label and draws a blank line, as it did", () => {
+    const d = draw({ type: "timer", source: "baptism", field: "live", showLabel: true, label: "   " }, idle);
+    assert.equal(d.sub, "   ");
+  });
+  test("empty is the readout's own word", () => {
+    assert.equal(draw({ type: "timer", source: "baptism", field: "live", showLabel: true, label: "" }, idle).sub, "ready");
   });
 });

@@ -40,11 +40,36 @@ export type LegacyTimerType = (typeof LEGACY_TIMER_TYPES)[number];
  *  the four, so the type checker proves nothing draws one outside the mapping. */
 export type ReadConfig = Exclude<LayoutObjectConfig, { type: LegacyTimerType }>;
 
-export const TIMER_SOURCES: { value: TimerSource; label: string }[] = [
-  { value: "service", label: "Service" },
-  { value: "propresenter", label: "ProPresenter" },
-  { value: "baptism", label: "Baptism" },
-];
+/**
+ * What differs between the three sources, declared once: the inspector, Home's
+ * card menu and the caption rules all read this instead of each testing
+ * `source === ...` themselves.
+ */
+export const TIMER_SOURCE_INFO: Record<
+  TimerSource,
+  {
+    label: string;
+    /** The caption a NEW Timer of this source is created with, and the one a
+     *  source switch swaps in while the old source's default is still there.
+     *  `undefined` is no key at all: the service draws the live item's name. */
+    caption: string | undefined;
+    /** The wording of the sub-line switch. */
+    subSwitch: string;
+    /** Ends, so it can go amber near the end and red once over. */
+    warns: boolean;
+    /** Has a next item to show under the time. */
+    nextItem: boolean;
+  }
+> = {
+  service: { label: "Service", caption: undefined, subSwitch: "Show the sub-line", warns: true, nextItem: true },
+  propresenter: { label: "ProPresenter", caption: "Stage timer", subSwitch: "Show the timer\u2019s name", warns: true, nextItem: false },
+  baptism: { label: "Baptism", caption: "Baptisms", subSwitch: "Show the label", warns: false, nextItem: false },
+};
+
+export const TIMER_SOURCES = (Object.keys(TIMER_SOURCE_INFO) as TimerSource[]).map((value) => ({
+  value,
+  label: TIMER_SOURCE_INFO[value].label,
+}));
 
 /** The baptism readouts in the order the inspector lists them, with the words
  *  it uses for them. One list so the picker and the tests cannot differ. */
@@ -60,20 +85,21 @@ export const BAPTISM_FIELD_OPTIONS: { value: BaptismTimerField; label: string }[
   { value: "total", label: "Total" },
 ];
 
-/** What a Timer's caption reads when it has none of its own, per source. The
- *  service default is the live item's name, which only the reading can know. */
-export const TIMER_CAPTION_DEFAULT: Record<TimerSource, string | null> = {
-  service: null,
-  propresenter: "Stage timer",
-  baptism: "Baptisms",
-};
-
-/** The same, as an inspector placeholder. */
-export const TIMER_CAPTION_PLACEHOLDER: Record<TimerSource, string> = {
-  service: "The item\u2019s name",
-  propresenter: "Stage timer",
-  baptism: "Baptisms",
-};
+/**
+ * The Timer with another source chosen. The caption follows the source while it
+ * is still the old source's own default; one the operator typed (or cleared)
+ * stays. Every other setting is carried, so flipping back loses nothing.
+ */
+export function withTimerSource(c: TimerConfig, source: TimerSource): TimerConfig {
+  const wasDefault = c.caption === TIMER_SOURCE_INFO[timerSource(c)].caption;
+  const next: TimerConfig = { ...c, source };
+  if (wasDefault) {
+    const caption = TIMER_SOURCE_INFO[source].caption;
+    if (caption === undefined) delete next.caption;
+    else next.caption = caption;
+  }
+  return next;
+}
 
 /** A config with the keys whose value is `undefined` left out, so a converted
  *  object compares and serialises the same as one built by hand. */
@@ -162,13 +188,16 @@ export const LEGACY_HOME: Partial<Record<LegacyTimerType, NonNullable<LayoutObje
 
 /**
  * The object with its config read as a Timer, for a caller about to WRITE it
- * (an inspector edit, a Home card toggle). Returns the object itself when it is
- * not one of the four, so a caller can compare by reference.
+ * (an inspector edit, a Home card toggle). `onHome` says it is a Home card, which
+ * is what pins the retired card's tile. Returns the object itself when it is not
+ * one of the four, so a caller can compare by reference.
  */
-export function readTimerObject(o: LayoutObject): LayoutObject {
+export function readTimerObject(o: LayoutObject, onHome = false): LayoutObject {
   const timer = o.config?.type === "timer" ? null : readTimerConfig(o.config);
   if (!timer) return o;
-  const pin = LEGACY_HOME[o.config.type as LegacyTimerType];
+  // Only on Home does a missing `home` mean "the type's default tile": a wall
+  // object has none, and gaining one would put a Home tile on a wall layout.
+  const pin = onHome ? LEGACY_HOME[o.config.type as LegacyTimerType] : undefined;
   const home = pin ? { ...pin, ...o.home } : o.home;
   return { ...o, config: timer, ...(home ? { home } : {}) };
 }

@@ -797,6 +797,8 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       captionEnd?: ReactNode;
       upper?: boolean;
       dim?: boolean;
+      /** Overrides Home's uniform value size, for a widget that never took it. */
+      uniform?: boolean;
     },
   ) => (
     <Readout
@@ -1010,7 +1012,6 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         <HomeCard
           config={c}
           state={ctx.state}
-          pcoLive={ctx.pcoLive}
           now={ctx.now}
           onlineOutputIds={ctx.onlineOutputIds}
           onlineKnown={ctx.onlineKnown}
@@ -1348,12 +1349,16 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         baptismKnown: ctx.baptismKnown,
       });
       if (r.hidden) return null;
-      // On Home the Timer is a stat like the cards beside it, in Home's own
-      // semantic colours; anywhere else it is the wall readout.
-      if (ctx.home) {
+      // On Home the Timer is the old Service card — a Stat in Home's own colours —
+      // only when it shows the next item. Every other Timer is what its widget was
+      // on Home before: the wall readout, at Home's uniform size and the object's
+      // own alignment.
+      if (ctx.home && timerSource(c) === "service" && (c.nextItem ?? false)) {
         return <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone === "over" ? "danger" : r.tone === "warn" ? "warn" : undefined} />;
       }
-      return readout(r.value, { caption: r.caption, sub: r.sub, valueColor: timerWallColor(r.tone) });
+      // The baptism readout never sized itself to Home's uniform tile, and still
+      // does not: its value fills the box as it did.
+      return readout(r.value, { caption: r.caption, sub: r.sub, valueColor: timerWallColor(r.tone), ...(timerSource(c) === "baptism" ? { uniform: false } : null) });
     }
     case "record-status": {
       // "Is anything recording?" — one indicator regardless of which recorder the

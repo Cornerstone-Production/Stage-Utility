@@ -77,26 +77,6 @@ describe("Home's cards on the kiosk surface", () => {
     }
   });
 
-  test("the live timer goes through the shared composition", () => {
-    // One of the two spans that were actually broken. It no longer names a
-    // colour because it no longer names anything: it drew its own markup — a
-    // clamp()'d value with the label beside it — and now renders through Stat,
-    // which is Readout. The colour guarantee moved with it, to the test below.
-    //
-    // Pinned so the card cannot quietly go back to hand-rolled markup, which is
-    // where the black-on-black came from in the first place.
-    // Bounded to the function's OWN body. A `[\s\S]*?<Stat` from the function
-    // name would happily cross into the next card and match its Stat — the first
-    // version of this test did exactly that and passed while the timer was back
-    // to a hand-rolled span.
-    const start = SRC.indexOf("export function LiveStatusCard(");
-    assert.notEqual(start, -1, "LiveStatusCard not found — was it renamed?");
-    const rest = SRC.slice(start + 1);
-    const end = rest.search(/\nexport (?:function|const) /);
-    const body = end === -1 ? rest : rest.slice(0, end);
-    assert.match(body, /<Stat\b/, "the live timer draws its own markup again instead of using Stat");
-  });
-
   test("the stat value takes its colour from a token, not from inheritance", () => {
     // Where BOTH originally-broken spans ended up. Neither is a Tailwind class
     // any more: Stat renders through the shared Readout, and the live timer

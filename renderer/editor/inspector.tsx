@@ -91,7 +91,7 @@ import {
   ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, sizesTypeFromItsBox,
 } from "./inspector-rows";
 import { TimerInspector } from "./timer-inspector";
-import { readConfig } from "../main/timer-config";
+import { readConfig, timerSource } from "../main/timer-config";
 import { ResponsiveControls } from "./responsive-controls";
 import { MessagesGroupsPicker } from "./messages-groups-picker";
 import { ButtonInspector } from "./button-inspector";
@@ -951,7 +951,7 @@ export function Inspector({
 
       {/* ProPresenter instance picker — only when >1 instance is configured
           (two-auditorium setups); otherwise everything reads the primary. */}
-      {(usesPropInstance(c.type) || (c.type === "timer" && (c.source ?? "service") === "propresenter")) && propInstances && propInstances.list.length > 1 && (
+      {(usesPropInstance(c.type) || (c.type === "timer" && timerSource(c) === "propresenter")) && propInstances && propInstances.list.length > 1 && (
         <RowSelect
           label="ProPresenter"
           hint="Which ProPresenter machine this object reads from — for multi-auditorium setups. Defaults to the primary instance; pick another to point this object at a second room's ProPresenter."

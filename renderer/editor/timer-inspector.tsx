@@ -8,38 +8,29 @@
 // not fit beside a 96px label.
 
 import type { LayoutObjectConfig } from "@main/types/views";
-import { FieldLabel, Input, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StackedField, Switch } from "../components/ui";
+import { FieldLabel, Input, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StackedField } from "../components/ui";
 import { usePropInstances } from "../main/use-dashboard-state";
 import {
   BAPTISM_FIELD_OPTIONS,
-  TIMER_CAPTION_PLACEHOLDER,
   TIMER_SOURCES,
+  TIMER_SOURCE_INFO,
+  timerSource,
+  withTimerSource,
   type TimerConfig,
 } from "../main/timer-config";
-import { Segmented } from "./inspector-rows";
-
-/** A label on the left, a switch on the right: the row every setting here but
- *  the numbers and pickers uses. */
-function SwitchRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <div className="flex items-center justify-between gap-2.5">
-      <FieldLabel>{label}</FieldLabel>
-      <Switch aria-label={label} checked={checked} onCheckedChange={onChange} />
-    </div>
-  );
-}
+import { Segmented, StackedSwitch } from "./inspector-rows";
 
 export function TimerInspector({ c, onConfig }: { c: TimerConfig; onConfig: (c: LayoutObjectConfig) => void }) {
-  const source = c.source ?? "service";
+  const source = timerSource(c);
+  const info = TIMER_SOURCE_INFO[source];
   const set = (patch: Partial<TimerConfig>) => onConfig({ ...c, ...patch });
   // The timers ProPresenter is running right now, from the instance this one
   // reads, offered as suggestions: ProPresenter reports only running timers.
   const instances = usePropInstances();
-  const running = instances?.status[c.propresenterInstanceId ?? "default"]?.timers ?? [];
+  const running = instances?.status?.[c.propresenterInstanceId ?? "default"]?.timers ?? [];
   const names = running.map((t) => t.name);
   if (c.timerName && !names.includes(c.timerName)) names.push(c.timerName);
 
-  const warnable = source !== "baptism";
   const warnOn = c.warnSeconds != null;
 
   return (
@@ -49,12 +40,12 @@ export function TimerInspector({ c, onConfig }: { c: TimerConfig; onConfig: (c: 
           label="Source"
           value={source}
           options={TIMER_SOURCES}
-          onChange={(v) => set({ source: v })}
+          onChange={(v) => onConfig(withTimerSource(c, v))}
         />
       </StackedField>
 
-      {source === "service" && (
-        <SwitchRow label="Show the next item" checked={c.nextItem ?? false} onChange={(v) => set({ nextItem: v })} />
+      {info.nextItem && (
+        <StackedSwitch label="Show the next item" checked={c.nextItem ?? false} onChange={(v) => set({ nextItem: v })} />
       )}
 
       {source === "propresenter" && (
@@ -70,7 +61,10 @@ export function TimerInspector({ c, onConfig }: { c: TimerConfig; onConfig: (c: 
             list="timer-names"
             value={c.timerName ?? ""}
             placeholder="Empty follows the first running timer"
-            onChange={(e) => set({ timerName: e.target.value.trim() || null })}
+            // Not trimmed as it is typed: a name of two words has a space in the
+            // middle of typing it. Trimmed when the field is left.
+            onChange={(e) => set({ timerName: e.target.value || null })}
+            onBlur={(e) => set({ timerName: e.target.value.trim() || null })}
           />
           <datalist id="timer-names">
             {names.map((n) => (
@@ -98,12 +92,14 @@ export function TimerInspector({ c, onConfig }: { c: TimerConfig; onConfig: (c: 
           <Input
             aria-label="Caption"
             value={c.caption ?? ""}
-            placeholder={TIMER_CAPTION_PLACEHOLDER[source]}
-            onChange={(e) => set({ caption: e.target.value.trim() ? e.target.value : undefined })}
+            // Empty is NO caption, except on a service Timer that has never had
+            // one set, which draws the live item's name.
+            placeholder={source === "service" && c.caption === undefined ? "The item\u2019s name" : "No caption"}
+            onChange={(e) => set({ caption: e.target.value })}
           />
         </StackedField>
-        <SwitchRow
-          label={source === "propresenter" ? "Show the timer’s name" : source === "baptism" ? "Show the label" : "Show the sub-line"}
+        <StackedSwitch
+          label={info.subSwitch}
           checked={c.showLabel ?? true}
           onChange={(v) => set({ showLabel: v })}
         />
@@ -117,13 +113,13 @@ export function TimerInspector({ c, onConfig }: { c: TimerConfig; onConfig: (c: 
             />
           </StackedField>
         )}
-        <SwitchRow label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => set({ hideWhenIdle: v })} />
+        <StackedSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => set({ hideWhenIdle: v })} />
       </div>
 
       <div className="flex flex-col gap-3 border-t border-line pt-3.5">
-        {warnable ? (
+        {info.warns ? (
           <>
-            <SwitchRow
+            <StackedSwitch
               label="Amber near the end"
               checked={warnOn}
               onChange={(v) => set({ warnSeconds: v ? 60 : undefined })}
@@ -142,7 +138,7 @@ export function TimerInspector({ c, onConfig }: { c: TimerConfig; onConfig: (c: 
                 />
               </div>
             )}
-            <SwitchRow label="Red on overrun" checked={c.redOnOverrun ?? true} onChange={(v) => set({ redOnOverrun: v })} />
+            <StackedSwitch label="Red on overrun" checked={c.redOnOverrun ?? true} onChange={(v) => set({ redOnOverrun: v })} />
           </>
         ) : (
           <p className="text-caption2 text-fg-subtle leading-snug">

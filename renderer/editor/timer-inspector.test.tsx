@@ -176,14 +176,39 @@ describe("each control writes the field it names", () => {
     }
   });
 
-  test("Caption writes what is typed, and clearing it returns the source's own", async () => {
+  test("Caption writes what is typed, and clearing it writes an empty caption: none", async () => {
     const m = await mount({ type: "timer", source: "service", caption: "Time left" });
     try {
       const caption = m.container.querySelector('[aria-label="Caption"]') as HTMLInputElement;
       assert.equal(caption.value, "Time left");
-      assert.equal(caption.placeholder, "The item’s name");
       fireEvent.change(caption, { target: { value: "" } });
-      assert.equal((m.writes.at(-1) as { caption?: string }).caption, undefined);
+      assert.equal((m.writes.at(-1) as { caption?: string }).caption, "");
+    } finally {
+      m.restore();
+    }
+  });
+
+  test("the placeholder says what an empty caption draws", async () => {
+    const unset = await mount({ type: "timer", source: "service" });
+    try {
+      assert.equal((unset.container.querySelector('[aria-label="Caption"]') as HTMLInputElement).placeholder, "The item\u2019s name");
+    } finally {
+      unset.restore();
+    }
+    cleanup();
+    const cleared = await mount({ type: "timer", source: "service", caption: "" });
+    try {
+      assert.equal((cleared.container.querySelector('[aria-label="Caption"]') as HTMLInputElement).placeholder, "No caption");
+    } finally {
+      cleared.restore();
+    }
+  });
+
+  test("switching source swaps the caption while it is still the old source's default", async () => {
+    const m = await mount({ type: "timer", source: "service" });
+    try {
+      fireEvent.click(m.getByRole("button", { name: "ProPresenter" }));
+      assert.deepEqual(m.writes.at(-1), { type: "timer", source: "propresenter", caption: "Stage timer" });
     } finally {
       m.restore();
     }
@@ -232,6 +257,19 @@ describe("the ProPresenter timer name", () => {
       assert.deepEqual(offered, ["Stage timer", "Sermon"]);
       fireEvent.change(field, { target: { value: "Countdown" } });
       assert.equal((m.writes.at(-1) as { timerName?: string | null }).timerName, "Countdown");
+    } finally {
+      m.restore();
+    }
+  });
+
+  test("a name of two words can be typed, and is trimmed when the field is left", async () => {
+    const m = await mount({ type: "timer", source: "propresenter" });
+    try {
+      const field = m.container.querySelector('[aria-label="Timer"]') as HTMLInputElement;
+      fireEvent.change(field, { target: { value: "Stage " } });
+      assert.equal((m.writes.at(-1) as { timerName?: string | null }).timerName, "Stage ", "the space typed after the first word was dropped");
+      fireEvent.blur(field, { target: { value: "  Stage timer  " } });
+      assert.equal((m.writes.at(-1) as { timerName?: string | null }).timerName, "Stage timer");
     } finally {
       m.restore();
     }
