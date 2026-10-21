@@ -6,6 +6,7 @@ import { applyFavicon } from "../lib/apply-favicon";
 import { setDisplayHourCycle } from "../lib/clock-format";
 import { isPreviewSlug } from "./preview-url";
 import { errorMessage } from "@main/services/errors";
+import { DOCS_CHANNEL, type DocsFrameData } from "@main/types/servicecue-publish";
 
 interface UseStageStateResult {
   state: StageState | null;
@@ -136,6 +137,15 @@ function start(): void {
     onNotification("stage:state-changed", (payload: unknown) => {
       broadcastSinceHydrateStarted = true;
       adoptState(payload as StageState);
+    }),
+  );
+
+  // On the public ServiceCue page the Worker names a doc on `publish:docs` when it is removed, and the
+  // state is one: read it again, so a page that was told to forget it does not go on showing the last one.
+  unsubscribers.push(
+    onNotification(DOCS_CHANNEL, (payload: unknown) => {
+      const keys = (payload as Partial<DocsFrameData> | null)?.keys;
+      if (Array.isArray(keys) && keys.includes("state")) hydrate();
     }),
   );
 

@@ -240,6 +240,11 @@ reads a doc when `publish:docs` names it, and every doc after each connect and
 reconnect (a change made while it was away is not replayed). While it has no socket it
 reads again every 10 minutes. The building's own page still reads every minute.
 
+A doc that is also a frame is named on `publish:docs` only when it is removed, so a viewer
+treats that as the live position or the SPL recording becoming `null` (nothing live,
+nothing recording) and reads the state again. A page that was told to forget a rundown does
+not go on showing the last live item.
+
 **The clock.** It sets its clock once per connection from `/api/publish/heartbeat`, over
 a request whose round trip is measured, and renders every countdown against it.
 
