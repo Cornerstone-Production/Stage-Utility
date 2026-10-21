@@ -100,10 +100,19 @@ gains a size picker, a visibility select, a remove button and a drag handle, and
 
 **Right-click a tile** — or tap and hold it — for its size, when it shows,
 remove, and the few settings that widget supports — seconds and the hour cycle
-on a clock, hide-when-idle and fill-when-recording on a status widget. No edit
+on a clock, hide-when-idle and fill-when-recording on a status widget, the
+layout of the ProVideoPlayer card. No edit
 mode needed, and ticking one leaves the menu open so several can be changed at
 once. On a touch device each tile also carries a small **⋯ button** in its
 corner, since there is no right-click to discover.
+
+**The Sound level tile's menu** leads with two choices, **Meter** and **Metric**,
+above Size and Show. **Metric** has **Automatic** first, with the metric it is
+reading beside it, then every metric the chosen meter reports, each with its
+live value. Pick one and the tile shows that metric, captioned
+`<metric> · <meter>`. With **Loudest meter**, the list is the loudest meter's, and
+once a metric is picked, "loudest" is judged on that metric. A picked metric the
+meter stops reporting reads `—` and names it, never another metric's number.
 
 ### Sizes
 
@@ -152,7 +161,7 @@ an edited Home alone.
 ## Screens
 
 **Screens** has a card for every physical screen, with a live preview of what it
-shows. The card keeps what an operator changes while working: its name, the view
+shows, running edge to edge across the card. The card keeps what an operator changes while working: its name, the view
 it shows, the colour and icon, the message groups it is in, and the way into its
 layout. Its menu (the vertical dots) is actions only:
 
@@ -315,7 +324,7 @@ control surface you operate** rather than *A wall view anyone can see*. A
 calendar can be a console too, and pages through months on it: the dialog does not
 offer that, so make the calendar view first and choose *Make it a control surface*
 in its card's menu (the card of a view no screen shows). Every other built-in kind
-has nothing to operate. A **cue button** on one fires a cue and shows what its
+has nothing to operate. A **Button** on one, set to Fire a cue, fires a cue and shows what its
 device is doing; see [Widgets](../reference/widgets.md#control). A console meant for a
 Ross Ultritouch panel has its own presets and a starter; see
 [Ultritouch](../integrations/ultritouch.md).
@@ -416,19 +425,44 @@ a wall, in a different page entirely.
 ## Branding
 
 **Settings → Branding** controls how the app introduces itself, on every screen
-and in its own chrome.
+and in its own chrome. The page opens on the app's identity: the logo large on a
+stage-black canvas with the name beneath it, as a display draws them. Beside it sit
+the settings that style them. Below are the images, each drawn where it is used;
+click the logo or any image to edit it in a dialog.
 
 | | |
 |---|---|
-| **App name** | shown in the sidebar and the kiosk's top bar. Set it to your organization's name |
-| **Logo** | PNG, JPG, SVG or WebP, up to 1.5 MB, shown next to the app name and used as the browser tab icon on every page. With **Recolor to match theme** on, the tab icon is the logo recolored to contrast with the browser's light or dark setting (a custom browser theme can differ from it); with it off, it is the logo as uploaded. Removing the logo restores the stock icon |
-| **Recolor to match theme** | for a single-color logo — recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
-| **Accent color** | the brand color for buttons, selection, links and focus, app-wide. Status colors (live / over / caution) are unaffected. Clear to use the built-in default |
-| **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray |
+| **App name** | shown in the sidebar, on every display's top bar and in the browser tab, and used as the home-screen label when the app is added to a phone or tablet. Set it to your organization's name |
+| **Accent color** | the brand color for buttons, selection, links and focus, app-wide: six presets, a custom color, or **Default**. Status colors (live / over / caution) are unaffected |
+| **Recolor to match theme** | shown once a logo is set. For a single-color logo: recolors it to light, dark and the kiosk's own gray. Off shows the logo's colors exactly as uploaded |
+| **Logo** | click it in the identity canvas. PNG, JPG, SVG or WebP, up to 1.5 MB, with **Upload** (**Replace** once set), **Adjust** (pan and zoom a square crop) and **Remove**. Shown next to the app name and, unless a tab icon is set, used as the browser tab icon on every page. With **Recolor to match theme** on, the tab icon is the logo recolored to contrast with the browser's light or dark setting (a custom browser theme can differ from it); with it off, it is the logo as uploaded |
+| **Tab and home-screen icon** | the image behind the browser tab, bookmarks, and the icon on a phone or tablet home screen. Until one is set the tab shows your logo and phones show the built-in Stage Utility icon |
+| **Empty slot image** | centered in an empty mic slot on a kiosk, recolored to the display's gray. Same **Upload**, **Adjust** and **Remove** |
 | **Default avatar** | shown for a scheduled person with no photo in Planning Center, in place of their initials, recolored to match the theme. A built-in silhouette is the fallback when unset |
 
-The connect QR toggle lives on this page too — see
+The connect QR toggle is the last card on this page — see
 [QR codes](../display-urls.md#qr-codes).
+
+### Tab and home-screen icon
+
+Click the icon card, then **Upload** a square PNG, JPG, SVG or WebP (512 x 512 or larger looks sharpest),
+or press **Use my logo** to build it from the logo already set. Smaller art is never refused: the editor, and the dialog for **Use my logo**, say when it is smaller than 512 x 512 and may look soft. Stage Utility draws
+every size from that one square in your browser: 180 px for the iPhone and iPad
+home screen, 192 and 512 px for Android and the tab, and a second 512 px version
+for Android's round and rounded-square masks with the art kept inside the centre
+80%. The dialog previews it at tab, iPhone and Android sizes.
+
+**Background** fills the transparent areas of your art (black, two blues or white);
+phones would otherwise fill them with black. Changing it redraws every size at once.
+Once set, the dialog offers **Replace**, **Adjust** and **Remove**. Removing it puts
+everything back: the tab follows the logo again, and phones get the built-in icon.
+
+A tab icon is shown exactly as drawn and never recolored, and it wins over the logo.
+The tab loads it from `/icon-192.png`, which answers with the built-in icon if the
+stored file is ever missing, so the tab is never blank. The home-screen label is the
+app name, read by iOS when the app is added, so renaming the app does not rename an
+icon already on a home screen; adding it again does. The manifest and icon files
+behind this are listed in the [API](../reference/api.md).
 
 ## Read-only links to hand out
 

@@ -35,7 +35,7 @@
 // widgets a stage display uses. A second store would have been a second thing to
 // back up, migrate and get wrong.
 
-import type { View, LayoutObjectConfig } from "@main/types/views";
+import type { View, LayoutObject, LayoutObjectConfig } from "@main/types/views";
 
 /** The id of the Home view. Stable, because Home routes to it by name. */
 export const HOME_VIEW_ID = "home";
@@ -49,8 +49,10 @@ export const HOME_VIEW_ID = "home";
  */
 export function defaultHomeLayout() {
   // Typed against the real config union, so a card whose type is retired stops
-  // compiling here rather than seeding an object nothing renders.
-  type HomeCardConfig = Extract<LayoutObjectConfig, { type: `home-${string}` }>;
+  // compiling here rather than seeding an object nothing renders. The Timer is
+  // the one card that is not a `home-*` type: it is the wall widget too, and
+  // takes its tile from the `home` it is seeded with.
+  type HomeCardConfig = Extract<LayoutObjectConfig, { type: `home-${string}` | "timer" }>;
   // The id IS the type. One card of each kind, so there is nothing else it could
   // usefully be, and the editor mints the same id when a card is switched back
   // on — two schemes for the same objects would only be confusing in the file.
@@ -61,9 +63,10 @@ export function defaultHomeLayout() {
   // ones), and identical coordinates would draw four cards exactly on top of
   // each other. Filler, but not nonsense.
   let row = 0;
-  const card = (config: HomeCardConfig) => ({
+  const card = (config: HomeCardConfig, home?: LayoutObject["home"]) => ({
     id: config.type,
     x: 0.04, y: 0.04 + row++ * 0.135, w: 0.92, h: 0.12, z: 1,
+    ...(home ? { home } : {}),
     config,
     style: {},
   });
@@ -74,7 +77,10 @@ export function defaultHomeLayout() {
       // Live first, so a service that starts while Home is open puts the timer
       // at the top. It is the only card of its mood, so its position among the
       // idle cards never shows.
-      card({ type: "home-live-status" }),
+      // The service timer: the item's clock and what is next, as wide as Home
+      // goes and only during a service. Seeded as the Timer, which is what the
+      // retired `home-live-status` card reads as.
+      card({ type: "timer", source: "service", nextItem: true }, { size: "xl", when: "live" }),
       card({ type: "home-recording" }),
       card({ type: "home-spl" }),
       card({ type: "home-screens" }),

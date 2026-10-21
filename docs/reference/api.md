@@ -18,20 +18,30 @@ body, and `502` for a read that only failed because Planning Center could not be
 reached — every `/api/pco/*` read, plus `/api/service-types`, `/api/plans`,
 `/api/team-positions` and the two `/api/servicecue` reads. A `serviceTypeId` or
 `planId` that is not a Planning Center id (digits only) is a `400` naming the
-parameter on any of them; Planning Center is not asked. A `500` means this app
-broke, and only that.
+parameter on any of them; Planning Center is not asked. A `503` is a data file
+the server cannot read, naming the file: every save to that store, the kiosk
+device routes and `/enroll`, the cue manifest, states and YAML, rule edits, and
+a config export or backup. See
+[When a store file cannot be read](../ops/reliability.md#when-a-store-file-cannot-be-read).
+A recorded file the server cannot read answers `503` the same way from the data
+archive's export, inspect and import, the History workbook, and a read of or
+edit to that service, its baptism lane included (its SPL series answers `500`,
+which the chart shows as samples unavailable): see
+[When a recorded file cannot be read](../ops/reliability.md#when-a-recorded-file-cannot-be-read).
+A `500` means this app broke, and only that.
 
 ## What is protected, and what is not
 
 The app is a LAN appliance with no user accounts, and **every route below is
-reachable unauthenticated** unless it says otherwise. Four things do gate:
+reachable unauthenticated** unless it says otherwise. Five things do gate:
 
 | | |
 |---|---|
-| **Cross-origin writes** | Any `POST`/`PUT`/`PATCH`/`DELETE` carrying an `Origin` whose hostname is not the request's `Host` is refused `403`. A request with no `Origin` is allowed, and reads are never gated. Ports are ignored so the dev proxy works |
+| **Other origins** | No response carries an `Access-Control-*` header, so a page on another origin cannot read an answer, and its preflight gets no permission. Any `POST`/`PUT`/`PATCH`/`DELETE` carrying an `Origin` whose hostname is not the request's `Host` is refused `403`. A request with no `Origin` is allowed, and reads are not gated at the server, except the two that answer a live secret (a push feed's address and the feeds export with passwords), which refuse a cross-origin browser. Ports are ignored so the dev proxy works. DNS rebinding is covered by the host-name check below |
+| **Host names** | Every request is checked by the name in its `Host` header before anything else runs. No `Host`, an IP address, `localhost`, a name with no dot, names under `.local`, `.internal`, `.home.arpa` or `.localhost`, this machine's name and the Public address are always answered; any other name only when it is on the list (`/api/security/host-names`). While refusal is off, the default, an unlisted name is answered and recorded; while it is on, it is `403`: a short HTML page for a browser asking for one, otherwise `{error}`. See [SECURITY.md](../../SECURITY.md) |
 | **The log** | `/log` and `/api/log` require `?token=…` when `STAGE_UTILITY_LOG_TOKEN` is set, and answer `401` without it. Unset means open. `/api/prodcom/transcript/raw` — the unredacted transcript — uses the same token and the same failure |
 | **Device secrets** | `/enroll` authorises a `device` id against the secret that device was issued; an unrecognised device gets a holding screen rather than somebody else's screen. `POST /api/devices/:id/health` takes the same secret in an `x-device-token` header and answers one `401` for an unknown id, an unconfirmed binding and a wrong secret alike |
-| **Cue calls** | `POST /api/cues/:name` requires `Authorization: Bearer su_…` and answers `401` without one, **unless the request is a same-origin browser write** — a cue button on a console — which is logged as `console`. `POST /api/action/invoke`, the cue token **writes** (mint, revoke), `import-pairs` and `buttons/refresh` require the same token **unless the request is a same-origin browser write** — an `Origin` naming this server, which a browser sends on every `POST`/`DELETE` and a page on any other origin cannot forge. `Sec-Fetch-Site` is not required (browsers send it only to HTTPS or localhost, and this app is plain HTTP on a LAN address), but when present it must say `same-origin`. Reads are open, including the token list and the Home Assistant fragment: a same-origin `GET` sends no `Origin`, and neither carries a secret |
+| **Cue calls** | `POST /api/cues/:name` requires `Authorization: Bearer su_…` and answers `401` without one, **unless the request is a same-origin browser write** — a cue button on a console — which is logged as `console`. `POST /api/action/invoke`, the cue token **writes** (mint, revoke), `import-pairs` and `buttons/refresh` require the same token **unless the request is a same-origin browser write** — an `Origin` naming this server, which a browser sends on every `POST`/`DELETE` and a page on any other origin cannot forge. Under DNS rebinding it is the host-name check above, once refusal is on, that refuses the page. `Sec-Fetch-Site` is not required (browsers send it only to HTTPS or localhost, and this app is plain HTTP on a LAN address), but when present it must say `same-origin`. Reads are open, including the token list and the Home Assistant fragment: a same-origin `GET` sends no `Origin`, and neither carries a secret |
 
 The cue token identifies the caller in the activity log and keeps the call route
 closed to anything that has not been handed one. **It is not a perimeter.** Anyone
@@ -44,8 +54,8 @@ with a switch ACL. See [SECURITY.md](../../SECURITY.md).
 Put it behind your own network. Do not expose it to the internet.
 
 Request bodies are capped and a body over the limit is refused with `413` rather
-than being read into memory. The cap depends on what the route carries: 8 MB for
-ordinary JSON, 24 MB where the body is an image (`/api/branding`,
+than being read into memory. The cap depends on what the route carries: 16 KB for
+`/api/events/subscribe`, 8 MB for ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 `/api/layout-images`), 64 MB for a bundle (`/api/config/import`,
 `/api/views/import`, `/api/video/import`, `/api/video/import/preview`), and 128 MB for an archive upload (`/api/archive/inspect`,
 `/api/archive/import`).
@@ -59,7 +69,7 @@ ordinary JSON, 24 MB where the body is an image (`/api/branding`,
 | GET  | `/api/service-types` | PCO service types |
 | GET  | `/api/team-positions` | Team positions, `{teamId, teamName, positionName}[]`, for the service type selected in the app. `?serviceTypeId=…` answers for that type instead (`400` unless the value is a Planning Center id: 1-20 digits). `?all=1` (or `all=true`) answers for every service type as `{positions, failed}`: each position also carries `serviceTypeId` and `serviceTypeName`, and `failed` names the types that could not be read, which are skipped rather than failing the call. `all=0` and `all=false` mean the default; any other `all` value is `400`. Types are read one at a time and each read is cached |
 | GET  | `/api/plans?serviceTypeId=…` | Plans for a service type |
-| GET  | `/api/plans/upcoming?days=…` | Every allowed service type's plans from the last 7 days to `days` ahead (whole days; default 60, capped at 365, and anything that is not a whole day above zero takes the default), sorted by date, each with `{serviceTypeId, serviceTypeName, planId, title, sortDate, dates, isCurrent}`. Cached for five minutes, or thirty seconds when a service type could not be read (it is left out and logged, and asked for again at the next refresh); `cacheAgeMs` and the `X-Plans-Cache-Age-Ms` header say how old the list is. Always `200` — when Planning Center cannot be reached the body carries `unavailable` with the reason, and the last good list if there is one |
+| GET  | `/api/plans/upcoming?days=…` | Every allowed service type's plans from the last 7 days to `days` ahead (whole days; default 60, capped at 365, and anything that is not a whole day above zero takes the default), sorted by date, each with `{serviceTypeId, serviceTypeName, planId, title, sortDate, dates, isCurrent}`. Cached for five minutes, or thirty seconds when a service type could not be read (it is left out and logged, and asked for again at the next refresh). `incompleteTypeIds` names the types that could not be read in full, whether the type or only its recent plans, so a reader keeping its own copy does not take their missing plans for deleted ones; it is absent when every type was read. `cacheAgeMs` and the `X-Plans-Cache-Age-Ms` header say how old the list is. Always `200` — when Planning Center cannot be reached the body carries `unavailable` with the reason, and the last good list if there is one |
 | GET  | `/api/pco/attachments` | Files on the active plan (plan + item level) |
 | GET  | `/api/pco/attachment?match=…` | Stream the active plan's file matching a filename substring (proxied + cached). The `200` carries an `ETag` naming the attachment id and its version (`updated_at`, else size), and `If-None-Match` with it is a `304` with no body and no download; `Cache-Control: private, max-age=300`. `404` when none matches, when Planning Center is not configured, or when no plan is selected; `502` when Planning Center will not give the file up; `500` when reading the plan's attachment list throws, or when the cached file is still missing after being looked up a second time (a newer version of the file was written while this one was being read) |
 | POST | `/api/service-type` | Set the active service type: `{id}` (`400` without one). Answers the state |
@@ -173,7 +183,7 @@ others. See [Health from the screens](../integrations/video-feeds.md#health-from
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/integrations` | `{descriptors, states}`: each integration's settings schema, and its connection state |
-| POST | `/api/integrations/:id/config` | Update config: `{config: {…}}` (`400` when `config` is not an object). Secrets are encrypted. Answers the integration's state |
+| POST | `/api/integrations/:id/config` | Update config: `{config: {…}}` (`400` when `config` is not an object). Secrets are encrypted. A body that changes where ProdCom, OBS, Smaart or ProVideoPlayer sends its credential (host, port, ProVideoPlayer's HTTPS) clears the stored one unless it carries it again; the state then shows the field empty. Answers the integration's state |
 | POST | `/api/integrations/:id/enabled` | Enable / disable: `{enabled: boolean}`. Answers the integration's state |
 | POST | `/api/integrations/:id/test` | Test a connection |
 | POST | `/api/integrations/youtube/connect` | Start a device-flow attempt using the SAVED client ID and secret. `409` with `{error: "Save the client ID and secret first"}` when either is blank or mode is not `oauth`. Otherwise the status below |
@@ -181,7 +191,7 @@ others. See [Health from the screens](../integrations/video-feeds.md#health-from
 | DELETE | `/api/integrations/youtube/connect` | Cancels a pending attempt, or clears a stale error back to idle. `{disconnect: true}` in the body instead clears the stored refresh token and channel title and stops the service. Answers the status above |
 | GET | `/api/wireless/providers` | Available device drivers |
 | GET / POST | `/api/wireless/connections` | List / add a device connection (`{name?, providerId?}`; adding answers `201` with the list) |
-| PATCH / DELETE | `/api/wireless/connections/:id` | Update (`{name?, providerId?, enabled?, config?}`) / remove a connection. Both answer the list |
+| PATCH / DELETE | `/api/wireless/connections/:id` | Update (`{name?, providerId?, enabled?, config?}`) / remove a connection. An update that changes the host, port or provider clears a stored password it does not carry again. Both answer the list |
 | POST | `/api/wireless/connections/:id/test` | Test a device connection |
 | GET | `/api/integrations/wireless/channels` | Bindable channels — `{id, label, deviceType}` per configured channel, whether or not it has ever reported. For pickers; `deviceType` is what lets one offer mics without charger bays |
 | GET | `/api/integrations/wireless/statuses` | Live telemetry — full `DeviceStatus` per RF channel (RF, battery, runtime, frequency, audio). Chargers excluded. For widgets |
@@ -217,7 +227,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/automation/registry` | Every trigger, condition and action this build offers: `{triggers, conditions, actions}`, each `{id, label, params, help}` (a trigger also carries its `channel`) |
+| GET | `/api/automation/registry` | Every trigger, condition and action this build offers: `{triggers, conditions, actions, reservedCueNames}`, each definition `{id, label, params, help}` (a trigger also carries its `channel`). `reservedCueNames` is the sorted list of cue names the app ships, which no rule may take |
 | GET | `/api/automation/plan-items` | The current plan's items, for the item pickers: `{items: [{value, label, dueAt, exact}]}`, `value` the item's title. Empty, never an error, with no plan loaded |
 | GET | `/api/automation/propresenter-instances` | Every ProPresenter a rule can address, as `{items: [{value, label}]}` |
 | GET | `/api/automation/propresenter-macros` | Macro names across every configured instance, unioned: `{items, unreachable}`. Empty, never an error, when one is unreachable, and `unreachable` names the instances that did not answer. A name only some instances have is labelled `DOORS (Main only)` — but only while every instance answered, since "only" is a claim about the machines that did |
@@ -257,7 +267,7 @@ untouched by GET, by init, and by any write that does not go through this route
 | GET / POST | `/api/cues/tokens` | List callers, `{tokens}` (never a hash) / mint one (`{label}`, `400` without one). Minting answers `201 {token, secret}`: the secret is returned once and never again |
 | DELETE | `/api/cues/tokens/:id` | Revoke one caller. Answers `{ok, tokens}`, or `404` for an id nobody holds |
 | GET | `/api/cues/home-assistant.yaml` | The Home Assistant fragment for every cue — `text/yaml; charset=utf-8`, not JSON, with `Content-Disposition: attachment; filename="stage_utility.yaml"` so it downloads as a fixed name |
-| GET | `/api/cues/manifest` | Every cue as JSON, for an integration rather than a pasted config: `{version, server: {name, lanUrl}, switches, buttons}`. `version` goes up on any rule change and is the only thing worth comparing about it. A `switch` is an ON/OFF pair — `{id, name, room, on, off, toggle, state, reason?, settling?, commanded?, stateSource?, available}`, `state` one of `on`, `off`, `unknown`; `stateSource` is the Companion variable the state is read from, or an `app:<source>` such as `app:reaper.recording` for a pair Stage Utility answers for itself — treat it as opaque; `settling: true` with `commanded` (`on`/`off`) means a press was dispatched for that pair in the last eight seconds and `state` may still be from before it — show `commanded`, not `state`; a `button` is a lone cue — `{id, name, room, cue, available}`; a cue named `<base>_on` or `<base>_off` whose partner does not exist is neither, and is omitted from both lists, exactly as it is from the generated YAML. A switch or button the app ships rather than the operator made carries `builtin: true` (an integration can ignore it), and a switch may carry `tone: "live"` (ON means on air or recording). A cue whose Companion button has gone missing is listed with `available: false`, never dropped; a cue whose **Home Assistant** switch is off is omitted entirely, and a hidden pair omits both halves rather than exposing them as buttons. `?all=1` lists hidden cues too, each carrying `hiddenFromHome: true`, for the app's own cue buttons; an integration must not pass it. Open read; state comes from the same five-second cached read as `/api/cues/states`. Pairs with the [`cues`](#channels) channel |
+| GET | `/api/cues/manifest` | Every cue as JSON, for an integration rather than a pasted config: `{version, server: {name, lanUrl}, switches, buttons}`. `version` goes up on any rule change and is the only thing worth comparing about it. A `switch` is an ON/OFF pair — `{id, name, room, on, off, toggle, state, reason?, settling?, commanded?, stateSource?, available}`, `state` one of `on`, `off`, `unknown`; `stateSource` is the Companion variable the state is read from, or an `app:<source>` such as `app:reaper.recording` for a pair Stage Utility answers for itself — treat it as opaque; `settling: true` with `commanded` (`on`/`off`) means a press was dispatched for that pair in the last eight seconds and `state` may still be from before it — show `commanded`, not `state`; a `button` is a lone cue — `{id, name, room, cue, available}`; a cue named `<base>_on` or `<base>_off` whose partner does not exist is neither, and is omitted from both lists, exactly as it is from the generated YAML. A switch or button the app ships rather than the operator made carries `builtin: true` (an integration can ignore it), and a switch may carry `tone: "live"` (ON means on air or recording). A cue whose Companion button has gone missing is listed with `available: false`, never dropped; a cue whose **Home Assistant** switch is off is omitted entirely, and a hidden pair omits both halves rather than exposing them as buttons. `?all=1` lists hidden cues too, each carrying `hiddenFromHome: true`, for the app's own cue buttons; an integration must not pass it. Open read; state comes from the same five-second cached read as `/api/cues/states`. Answers `503` rather than an empty list while `automation-rules.json` cannot be read, as do `/api/cues/states` and the YAML, and `?all=1` with them, so the app's own cue buttons go too; an integration must treat a failure as "unknown", never as "no cues" ([When a store file cannot be read](../ops/reliability.md#when-a-store-file-cannot-be-read)). Pairs with the [`cues`](#channels) channel |
 | GET | `/api/cues/states` | What each bound ON/OFF pair's device is actually doing: `{ok, checkedAt, states}`, `states` keyed by the pair's base — `{on, off, variable, value, state, reason?, settling?, commanded?}` with `state` one of `on`, `off`, `unknown`. `settling: true` with `commanded` (`on`/`off`) means a press was dispatched for that pair in the last eight seconds and `value` may still be from before it — Companion polls the device on its own interval (see [The settle window](../integrations/companion.md#the-settle-window)); that one variable is re-read every second until it agrees. `ok` is false when any pair is unknown. Open read. Reads the bound sources on demand, in parallel, and serves the whole answer for 5 seconds — a Companion variable (custom, or a module's own), or an `app:<source>` this app answers itself, such as `app:reaper.recording` off the REAPER transport poll; only pairs with a **State variable** are in it, and an install with none reads nothing at all. A pair whose **Home Assistant** switch is off is still here, carrying `hiddenFromHome: true` — the app's own rules page reads this route for every pair's state, and the generated Home Assistant sensor lifts only the bases the YAML listed, which are the shown ones. The [`cues`](#channels) channel drops those rows |
 
 **Companion** — reading the connected Companion's own configuration.
@@ -376,6 +386,9 @@ Two things to know:
   answer `409`. The recorder holds the same record and would write its own copy
   back over any change, and releasing it only makes the next live tick start a
   fresh empty record in its place. Correcting a recording is a post-hoc repair.
+  A service whose record a recorder could not save yet is refused the same way,
+  with `code: "unsaved"`, until the retried save lands: see
+  [When a recorded service cannot be saved](../ops/reliability.md#when-a-recorded-service-cannot-be-saved).
 - **An item time correction is an overlay.** The recorded stamps are never
   rewritten: the edit is stored on the record as `itemTimeEdits` and applied to
   `startedAt`, `endedAt` and `actualDurationSec` on every read, so a rebuild from
@@ -397,10 +410,18 @@ Two things to know:
 | GET | `/api/servicecue/note-categories?serviceTypeId=…` | Note categories for the column picker |
 | GET / POST | `/api/servicecue/roles` | List / save [category roles](../features/servicecue-and-baptisms.md#category-roles) |
 | POST | `/api/servicecue/roles/seed` | One role per note category on a service type. Adds only; never rewrites a role you have |
+| GET | `/api/servicecue/publish` | The [public link](../features/servicecue-and-baptisms.md#on-the-web): `{enabled, url, token, status}`. `url` is the page's origin. `token` is `"••••"` when one is stored for that address and `""` when none is; the token itself is never returned. `status` is `{enabled, state, lastSentAt, lastError, sourceProblem, counts: {types, plans, layouts}, now}`: `state` is `"off"`, `"publishing"` or `"problem"`, `lastSentAt` the last request the page accepted (epoch ms, `null` before the first), `counts.plans` the upcoming plans, `now` the server's clock when it was built, `lastError` is `{kind, status?, message}` while `state` is `"problem"` and `null` otherwise, and `sourceProblem` is `{message}` while a Planning Center read for the page failed the last time it ran (`null` while it works, while publishing is off, and while Planning Center is not connected). `sourceProblem` does not change `state`: the page is still reached. `kind` is one of `auth`, `blocked`, `limited`, `no-token`, `server`, `rejected`, `redirect`, `unreachable`, `intercepted` (a certificate this server would not trust, as a firewall or web filter that intercepts TLS presents), `protocol`, `config` |
+| POST | `/api/servicecue/publish` | `{enabled?, url?, token?}`; a field left out is left alone. `url` must be `https://` (`http://` for `localhost` and `127.0.0.1` only when the server runs with `STAGE_UTILITY_PUBLISH_ALLOW_LOCAL=1`), and is kept as its origin. The token is stored encrypted with that address, has to be 32 or more printable ASCII characters with no space, and is never read back for another address: a `url` that differs from the saved one, in a request with no `token`, clears it. A token with no address, a request that would leave publishing on without both, or a token or address the rules refuse is `400` naming the rule and changes nothing. Clearing the `url` switches publishing off. A `token` of `"••••"` means "leave it". Saves are applied one at a time. Switching off, or moving to another address, asks the old page to drop what it was sent, and the answer carries `dropped: {ok: true}` or `{ok: false, message}`. Answers the same shape as `GET` |
+| POST | `/api/servicecue/publish/test` | `{url?, token?}`. Asks the page for its status and answers `200` either way: `{ok: true, message}` naming how many documents and images it holds, or `{ok: false, kind, status?, message}` with the `kind`s of `lastError`. `config` is an address or token that was never sent. With neither field it tests the saved address with the saved token, which is only ever sent to the address it was saved with: testing another `url` needs a `token` in the request |
 
 Requests to `/api/scriptview/…` answer `308` with the same path and query under
 `/api/servicecue/…`, keeping the method and body, so a script written against the
 old paths still works once its client follows redirects.
+
+The routes above, the live state and the live position are also what the **public**
+ServiceCue page asks a Cloudflare Worker for, and what a server sends out to it:
+[ServiceCue publishing protocol](servicecue-publishing.md). Those are the Worker's
+routes, not this server's.
 
 **Patch sheet** — see [Patch sheet](../patch-sheet/README.md).
 
@@ -467,7 +488,7 @@ same dispatcher.
 | GET | `/api/update/lock` | `{active, reasons}` — why an update would be refused right now |
 | POST | `/api/update/notices/dismiss` \| `/api/update/restart` \| `/api/update/auto` | Dismiss the post-update dialog (`{ok: true}`) / restart (the reply is the update status, plus `relaunchFailure` when this server could not arrange its own relaunch on launchd) / set the automatic-update mode and window (see Settings above) |
 | GET | `/api/config/export` | The config snapshot as a download, `stage-utility-config-<date>.json`, the date in the app time zone. Credentials are excluded |
-| POST | `/api/config/import` | Apply a snapshot (the bundle itself, or `{bundle}`), then **restart**. The reply is `{ok, applied, restarting}`, plus `relaunchFailure` (a reason) when this server could not arrange its own relaunch on launchd |
+| POST | `/api/config/import` | Apply a snapshot (the bundle itself, or `{bundle}`), then **restart**. A snapshot carries no credentials, so before writing anything the restore clears each stored one it would send to a new address (an integration, a wireless connection or a pull feed moved, removed, or turned into another kind), logged on `[config-snapshot]`. The reply is `{ok, applied, restarting}`, plus `relaunchFailure` (a reason) when this server could not arrange its own relaunch on launchd |
 | GET / POST | `/api/config/snapshots` | List / save a named snapshot on this machine (`{name}`; saving answers `201`) |
 | POST / DELETE | `/api/config/snapshots/:id/recall` \| `/api/config/snapshots/:id` | Apply one (then restart, with the same reply as an import) / delete one |
 | GET / POST | `/api/backup/schedule` | The automatic-backup schedule. `POST` takes any of `{enabled, includeArchive, destination, intervalDays, keep}` |
@@ -490,7 +511,10 @@ recorder is running. Pass `{override: true}` to go anyway.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/devices` | `{scanning, bound, seen, matches, health}`. Device secrets are stripped. A device that is one output of a Mac output helper carries its `output` (`{kind, name, port, modes?}`) in `bound` and `seen`. `health` lists what each helper output last reported, `{deviceId, fps, repeated, dropped, latencyMs?, at, receivedAt, struggling}`, for the ones still reporting; it is never stored |
+| GET | `/api/devices` | `{scanning, bound, seen, matches, health, updates, updatesListeningSince}`. Device secrets are stripped. A device that is one output of a Mac output helper carries its `output` (`{kind, name, port, modes?}`) in `bound` and `seen`. `health` lists what each helper output last reported, `{deviceId, fps, repeated, dropped, latencyMs?, at, receivedAt, struggling}`, for the ones still reporting; it is never stored. `updates` lists each Mac helper and Windows kiosk that has checked for updates in the last 20 minutes, `{machine, platform, host?, have, want, state, target?, detail?, at?, checkedAt, update, reason, waitingOn?, waitUntil?}`, also never stored; `updatesListeningSince` is when the server began answering checks |
+| GET | `/api/machine-updates/check` | Asked every five minutes by a Mac's or a Windows kiosk's updater, and once by the Windows installer for its launcher's SHA-256: [Keeping the helper on the server's version](../kiosk-devices.md#keeping-the-helper-on-the-servers-version). Query: `machine` (its device id), `platform` (`macos` or `windows`), `have` (the helper's version, or the launcher's SHA-256), `host?`, `state?` (`idle`, `updated`, `failed`, `retrying`, `no-session`, `not-running` or `local-network`; what it last did), `target?` and `detail?` (what that was about, and why), `at?` (when, in unix seconds by the machine's clock, so a new failure is told from the same one reported again). Answers `{version, update, reason}`, where `version` is the server's version, or for Windows its launcher's SHA-256: `update` is true when the machine is behind and nothing holds it (for a Mac: a live service, the service window, or Planning Center's times not known yet; for both: the switch, and a version that failed there before). `400` naming the field for a check that is not one. Not authenticated: what a machine says is shown and logged, and drives nothing else |
+| POST | `/api/machine-updates/request` | Update now, or Try again: `{machine}`. Overrides the switch, the service window and a past failure at the machine's next check, never a live service. `404` for a machine that has not checked in the last 20 minutes. Answers `{ok}` |
+| POST | `/api/machine-updates/auto` | `{enabled}`: whether Mac helpers and Windows kiosks update with this server. Answers the state |
 | POST | `/api/devices/scan` | Open or close the scan window. `{holder?, stop?}`: a Screens page holds one while it is open. A scan is what makes the server answer a device that is not set up; devices are listed in `seen` whether or not one is open. Answers `{scanning}` |
 | POST | `/api/devices/claim` | Bind a device to an output. `{deviceId, outputId}` binds it to that screen. With no `outputId` it makes a new screen first, from the same fields as `POST /api/outputs` (`name`, or `newName`, else the device's hostname; `viewId` (with `expectSurface`, which refuses as above with a `409` that makes no screen and binds nothing) or `newView`, `slug`, `showInSidebar`; a `mode` is `400`), validated before anything is written. Binding the device is the last step of making the screen, so a binding that fails puts back everything before it (the screen, a view made for it, a sidebar listing written on an existing view) and answers the same `500` as `POST /api/outputs`. Those fields with an `outputId` are `400`. A device already bound is not made a new screen: with no `outputId` it is `409` naming the screen it shows (moving it is a claim with that screen's `outputId`). Answers `{ok, displaced, outputId}` |
 | POST | `/api/devices/release` | Unbind it. The screen keeps its view and slug |
@@ -521,6 +545,13 @@ the wrong shape is `400` with the reason unless noted.
 | `/api/checklist-sources` | `{categories?, teams?}`, below |
 | `/api/bar-items` | `{items?, mobileItems?}`, above |
 
+**Host names** — the names this server answers to; see [Host names](#what-is-protected-and-what-is-not).
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/security/host-names` | `{enforce, seeded, automatic, accepted, waiting, dismissed}`; `seeded` is whether refusal has already turned on once. `automatic` is this machine's name and the Public address (`{name, source}`); `accepted` is the list (`{name, source: "added" \| "accepted" \| "seen", at}`); `waiting` (up to 50, newest first) and `dismissed` are names that reached the server and are not on it (`{name, firstSeen, lastSeen, count, lastFrom, client}`); a dismissed name the seen list has since forgotten has empty times and address and a `count` of 0 |
+| POST | `/api/security/host-names` | One change, answering the view above: `{enforce: boolean}`; `{add}` or `{accept}` a name (a pasted address keeps its host; an IP, a name that is always answered, one that is not a host name, or a list already holding 200 is `400` with the reason); `{remove}`; `{dismiss}` a waiting name (anything else, or a full dismissed list of 200, is `400`); `{undismiss}`. Any other body is `400`. `403` unless the request's own `Host` is answered without the list. The first time `enforce` turns on it accepts every waiting name seen in the last 30 days over at least a day |
+
 `/api/checklist-sources` takes `{categories}` and `{teams}` — plan-note category
 and team names, not ids. Either may be omitted and is then left as it stands; a
 present one must be a `string[]`, and `[]` clears that list. A body naming
@@ -534,14 +565,14 @@ neither is a 400.
 | GET | `/api/video/feeds` | `{feeds}` |
 | PATCH | `/api/video/ports` | Saves the relay's six ports and restarts it if it is running. Body: `{rtmp, srt, webrtcUdp, webrtcHttp, hls, api}`, every value a whole number from 1024 to 65535 and all six different — `400` naming the rule otherwise. `200` with `{ports}` |
 | POST | `/api/video/feeds` | Add a feed. `{name, source}`; `201` with `{feed}`. `400` with the reason for a body that fails validation — a name that is not 1 to 60 characters of text, a kind this build does not offer, an address carrying a username or password |
-| PATCH | `/api/video/feeds/:id` | Update a feed; answers `{feed}`. Any field omitted from the body keeps its current value; a field present is validated as on POST. `404` for an unknown id |
+| PATCH | `/api/video/feeds/:id` | Update a feed; answers `{feed}`. Any field omitted from the body keeps its current value; a field present is validated as on POST. A pull feed moved to another host, or from `rtsps`/`https` to a plain scheme, loses its stored password unless the body carries one; the feed it answers then reads `hasPassword: false`. `404` for an unknown id |
 | DELETE | `/api/video/feeds/:id` | Remove a feed (`{ok: true}`, or `404` for an unknown id). A layout still pointed at it keeps the binding and renders it as offline |
 | GET | `/api/video/feeds/:id/usage` | `{layouts}` — every layout with a Video widget bound to this feed, for the editor's used-by line and the delete confirmation |
 | GET | `/api/video/feeds/:id/push?protocol=srt\|rtmp\|whip` | A push feed's paste-ready address: `{protocol, address, password}`. `?protocol` previews another protocol with the SAME stored password, without saving anything; omitted or invalid falls back to the feed's own saved protocol. `404` for an unknown id or a feed that is not `push`; `403` for a cross-origin browser request (unlike every other GET here, this one answers a live secret) |
 | POST | `/api/video/feeds/:id/push/new-password` | Replaces the feed's publish password (`404` for an unknown id or a feed that is not `push`), reconciles the relay, and kicks whoever is currently publishing so the old password stops working at once. `{protocol, address, password, applied, kicked}` — `applied` is false only if a running relay's reconcile itself failed; `kicked` is `"dropped"` once a connected publisher actually was, `"none"` if nobody was publishing or no relay was running to ask, and `"failed"` only if a publisher was there and dropping it did not work |
 | GET | `/api/video/export?feeds=a,b&ports=1&passwords=1` | The feeds as a download, `stage-utility-video-feeds-<date>.json`: `{kind: "stage-utility-video-feeds", version, appVersion, createdAt, source, feeds: [{id, name, source, password?}], ports?}`. Feeds keep their ids. `feeds` is a comma-separated list of ids (omitted: every feed); `ports=1` adds the relay ports; `passwords=1` adds each pull feed's camera password and push feed's publish password, as stored (none is made for the file). `400` naming the reason for an unknown id or a flag that is not `1`, `0`, `true` or `false`; `403` for a cross-origin browser request with `passwords=1`. See [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | POST | `/api/video/import/preview` | Body is the file. Compares each feed in it with this server's without writing anything: `{server, createdAt, hasPasswords, feeds: [{id, name, kind, status, differences, error?, filePassword?, here}], absent, ports?}`. `status` is `new`, `same`, `differs` or `invalid` (a feed this build cannot take; `error` says why). `differences` is `[{field, here, file}]` for `name`, `kind`, `url`, `username`, `protocol`, `player` or `ref`, and `{field: "password"}` with no values. `filePassword` is true when the file carries a password for that feed (the password itself is never returned). `absent` names this server's feeds the file lacks; `ports` is `{file, here, same}` and present only when the file carries ports. `400` for a file of the wrong kind or version, with `feeds` not a list, a bad or repeated id, or unusable ports. Accepts up to 64 MB |
-| POST | `/api/video/import` | `{bundle, choices?, expect?, ports?}`: lands the file's feeds under their own ids. `choices` maps a feed id to `replace` (the default) or `keep` for a feed that differs; `expect` maps a feed id to the `here` fingerprint the preview gave it (this server's feed under that id as the review saw it, `""` for none, keyed per server process and never a hash of a password); a feed edited, added, deleted or given a new password here since, is skipped with "Changed on this server since the review. Review the file again." rather than written, and a caller that sends no `expect` still gets that check against what was there when the import started. `ports: true` also saves the file's relay ports. Never removes a feed and never changes the Video feeds switch. Passwords go to the secrets store, never to the feed file. `200` with `{added, addedIds, replaced, kept, same, skipped: [{name, reason}], newPushPasswords, passwordsWritten, portsApplied, portsError?}` (feed names); `newPushPasswords` names push feeds that got a new publish password because the file had none. `400` as for the preview or for a malformed `choices`, `expect` or `ports`. A secret that cannot be written undoes the whole import and answers `500`. Accepts up to 64 MB |
+| POST | `/api/video/import` | `{bundle, choices?, expect?, ports?}`: lands the file's feeds under their own ids. `choices` maps a feed id to `replace` (the default) or `keep` for a feed that differs; `expect` maps a feed id to the `here` fingerprint the preview gave it (this server's feed under that id as the review saw it, `""` for none, keyed per server process and never a hash of a password); a feed edited, added, deleted or given a new password here since, is skipped with "Changed on this server since the review. Review the file again." rather than written, and a caller that sends no `expect` still gets that check against what was there when the import started. `ports: true` also saves the file's relay ports. Never removes a feed and never changes the Video feeds switch. Passwords go to the secrets store, never to the feed file. `200` with `{added, addedIds, replaced, kept, same, skipped: [{name, reason}], newPushPasswords, passwordsCleared, passwordsWritten, portsApplied, portsError?}` (feed names); `newPushPasswords` names push feeds that got a new publish password because the file had none, and `passwordsCleared` pull feeds whose address moved to another camera (or off an encrypted scheme), so the password stored for the old one was cleared. `400` as for the preview or for a malformed `choices`, `expect` or `ports`. A secret that cannot be written undoes the whole import and answers `500`. Accepts up to 64 MB |
 
 Playback is proxied on Stage Utility's own origin, not under `/api`, because
 the relay's own HTTP listeners are loopback-only: `POST /video/<feedId>/whep`,
@@ -561,17 +592,18 @@ starts, before it has been given the feed.
 **Branding & events**
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/api/branding/source?target=app\|empty\|avatar` | Original (un-cropped) logo, empty-slot image or default avatar |
-| POST | `/api/branding` | Update branding; any of `{name, monochrome, accentColor, logo, logoOriginal, emptyLogo, emptyLogoOriginal, avatar, avatarOriginal, logoCrop, emptyLogoCrop, avatarCrop}`. `accentColor` is `#rrggbb` or `null`; each image is an `image/` data URL (under about 1.5 MB) or `null` to clear; each crop is `{scale, x, y}` or `null`. Anything else is `400` naming the field. Up to 24 MB of body. Answers the state |
+| GET | `/api/branding/source?target=app\|empty\|avatar\|icon` | Original (un-cropped) upload and saved crop for the logo, empty-slot image, default avatar or tab and home-screen icon: `{original, crop}`, plus `art` (the square the sizes are drawn from) for the icon. Images come back as `/branding-images/…` references |
+| POST | `/api/branding` | Update branding; any of `{name, monochrome, accentColor, logo, logoOriginal, emptyLogo, emptyLogoOriginal, avatar, avatarOriginal, logoCrop, emptyLogoCrop, avatarCrop, icon}`. `accentColor` is `#rrggbb` or `null`; each image is an `image/` data URL (under about 1.5 MB) or `null` to clear, and an `…Original` may instead be the `/branding-images/…` reference `/api/branding/source` returned, if that file is stored; each crop is `{scale, x, y}` or `null`. `icon` is `null` to remove the custom tab and home-screen icon, or a complete set `{art, original, crop, background, apple, any192, any512, maskable}`: `background` is `#rrggbb`, `original` (a data URL or a stored reference) and `crop` may be `null`, and every other image is a PNG data URL, `apple` exactly 180 x 180, `any192` 192 x 192, `any512` and `maskable` 512 x 512, `art` any square size. An incomplete set or a wrong size is refused whole. Anything else is `400` naming the field. Up to 24 MB of body. Answers the state |
 | GET | `/api/events` | Multiplexed Server-Sent Events stream — see [Channels](#channels) |
-| POST | `/api/events/subscribe` | Set the channels a connection wants (`{cid, channels: string[]}`). Answers `{ok}`, false when either is missing, in which case nothing changes |
+| POST | `/api/events/subscribe` | Set the channels a connection wants (`{cid, channels: string[]}`). Answers `{ok}`, false when either is missing, in which case nothing changes. `400` for a `cid` that is empty or over 128 characters, more than 128 channels, or a channel name over 64 characters. A report waits for the stream or poll client with its `cid`. One still unclaimed after a minute is dropped by the next report to arrive, and at most 256 wait at once; a client whose report was dropped is sent every channel |
 | GET | `/api/events/poll?cid=&since=` | The same channels, collected by polling — see [Polling](#polling) |
 
 ## Channels
 
 `GET /api/events` is one stream carrying everything, filtered per connection.
 Pass `?cid=<your id>` and then `POST /api/events/subscribe` with the same `cid`
-and the channels you render; until you do, you are sent all of them. A stream
+and the channels you render; until you do, you are sent all of them. A `cid` over
+128 characters is ignored, so that stream is sent everything. A stream
 marked `?client=companion` (or with an `X-Companion-Module` header) is counted
 toward the Companion integration's connected-client total.
 
@@ -580,7 +612,9 @@ past 2 MB is dropped rather than buffered.
 
 Both transports are named on [`/log`](../ops/updates-and-logs.md):
 `[events] stream client connected (3 streams)` and its `closed` counterpart, and
-`[events] poll client <cid> started` / `expired (no poll for 30s)`.
+`[events] poll client <cid> started` / `expired (no poll for 30s)`. Reports nothing
+claimed are counted on `[events] dropped N channel reports …` when the report
+that drops them arrives: the first such line at once, then at most one a minute.
 
 ### Polling
 
@@ -591,7 +625,7 @@ underneath it.
 
 | Parameter | |
 |---|---|
-| `cid` | **Required.** The same client id `/api/events/subscribe` is keyed by, so one channel filter serves both transports. A request without it is a 400. |
+| `cid` | **Required.** The same client id `/api/events/subscribe` is keyed by, so one channel filter serves both transports. A request without it, or with one over 128 characters, is a 400. |
 | `since` | The `seq` from the previous response. Omit it to ask for a snapshot. |
 
 ```json
@@ -662,7 +696,12 @@ something to change:
 `rosstalk:simulated` · `automation:rules` · `cues` · `cues:all` ·
 `automation:settings` · `automation:log` · `patch:updated` · `kiosk:devices` (`{scanning, seen, health}`; the Screens page and the sidebar's count of screens not set up refetch `/api/devices` on each, and a steady output's health does not push one) ·
 `display:refresh` · `settings:allowedServiceTypeIds-changed` · `baptism:rebuilt` ·
-`update:notice` · `propresenter:status:<id>`
+`update:notice` · `propresenter:status:<id>` · `security:host-names`
+
+`security:host-names` is `{waiting, enforce}`, sent when a new name reaches the
+server or the list or the switch changes; the Host names card and the sidebar's
+count refetch `/api/security/host-names` on it. A name already waiting does not
+push one per request.
 
 `update:notice` is `{tag, count}`: a new release has appeared, sent once per
 release and only while a browser is subscribed to it, so a release found
@@ -710,9 +749,12 @@ Either channel having a subscriber starts the five-second read.
 | GET | `/api/log[?since=N]` | `{ lines, reset, latestSeq, checks }`. Same gate. Omit `since` for the whole buffer; pass the previous `latestSeq` to get only what is newer. `reset: true` means replace rather than append — you asked for everything, the buffer rolled past your cursor, or your cursor is above the newest line, which means it came from before a restart (`seq` is per-process and starts again at 1). `checks` is the health snapshot the page draws: version, uptime, app time zone, warning and error counts, and one entry per configured integration |
 | GET | `/enroll?device=…&token=…` | Where a kiosk device asks which screen it is. Redirects to that screen, or shows a holding page |
 | GET | `/kiosk/install-linux.sh` \| `install-macos.sh` \| `install-windows.ps1` | The kiosk agent installers, with this server's address already in them |
-| GET | `/kiosk/StageUtilityOutput-arm64.zip` \| `StageUtilityOutput-x86_64.zip` | The Mac [output helper](../kiosk-devices.md#installing-the-mac-output-helper) for that architecture. Fetched once from the GitHub release matching this server's version, checked against the release's published SHA-256, cached under the data directory and served from there. `404` with the reason when it is not cached and the release cannot be reached or has no such file; `502` when the release host answers any other status, or the download fails its checksum or the size limit or does not finish |
-| GET | `/kiosk/StageUtilityOutput-arm64.zip.sha256` \| `StageUtilityOutput-x86_64.zip.sha256` | That zip's SHA-256, one `shasum` line. The installer verifies the zip against it |
-| GET | `/layout-images/:name` \| `/branding-images/:name` | Uploaded images, content-addressed and served immutable |
+| GET | `/kiosk/kiosk-windows.ps1` \| `kiosk-update-windows.ps1` | The [Windows kiosk's launcher](../kiosk-devices.md#the-windows-kiosks-launcher) and its updater, which the Windows installer downloads. The launcher's SHA-256 over these bytes is what `GET /api/machine-updates/check` compares a PC's with |
+| GET | `/kiosk/StageUtilityOutput-arm64.zip` \| `StageUtilityOutput-x86_64.zip` | The Mac [output helper](../kiosk-devices.md#installing-the-mac-output-helper) for that architecture. Fetched once from the GitHub release matching this server's version, checked against the SHA-256 the releases API lists for that asset, cached under the data directory and served from there. `404` with the reason when it is not cached and the release cannot be reached, does not exist or does not list the zip; `502` when the release host answers any other status, the release lists the zip with no digest or a malformed one, or the download fails its checksum or the size limit or does not finish |
+| GET | `/kiosk/StageUtilityOutput-arm64.zip.sha256` \| `StageUtilityOutput-x86_64.zip.sha256` | That zip's SHA-256, one `shasum` line (`<hex>  <zip name>`) built from the release's digest and cached per version; the release has no such file. The installer verifies the zip against it. Same `404` and `502` as the zip's for a release that cannot give the digest |
+| GET | `/layout-images/:name` \| `/branding-images/:name` | Uploaded images, content-addressed and served immutable, with a `Content-Security-Policy` that sandboxes the file and allows no script: an SVG opened directly runs nothing |
+| GET | `/manifest.webmanifest` | The web app manifest, built per request: `name` and `short_name` are the app name, so renaming the app renames the home-screen label on Android. `no-cache` |
+| GET | `/apple-touch-icon.png` \| `/icon-192.png` \| `/icon-512.png` \| `/icon-maskable-512.png` | The home-screen icons the pages and the manifest name. The operator's own [tab and home-screen icon](../features/operator-app.md#branding) when one is set, else the built-in file, and the built-in file too when the stored one is missing. A query string is ignored: the tab loads `/icon-192.png?v=<hash>` so a changed icon is a new URL. `no-cache`, so a new icon reaches the next install. The operator's icon carries the uploaded images' `Content-Security-Policy` |
 | POST | `/api/layout-images` | Store an image and return its URL |
 | GET | `/api/history/export` | The service report as a spreadsheet (`?from=&to=&include=…`, `include` a comma-separated choice of `services`, `attendance`, `items`, `spl` and `baptisms`; names it does not know are ignored) |
 

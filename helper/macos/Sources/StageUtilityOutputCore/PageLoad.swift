@@ -18,12 +18,25 @@ public struct PageLoadTracker: Equatable {
   /// The navigation in flight failed and was counted. Its finishing, if the browser
   /// reports one, is the end of that failure, not a load.
   public private(set) var failedInFlight = false
+  /// The helper's own page for a failed load is up (`UnreachablePage`), until the
+  /// next load starts. What the browser reports about it is not the server's page:
+  /// it neither commits a screen nor ends the run of failures.
+  public private(set) var showingFailurePage = false
+  /// The reason last written to the log in this run of failures.
+  private var loggedReason: String?
+  /// When the current run of failures began; nil while the page is up.
+  public private(set) var failingSince: Date?
+  /// The failure page has said where to turn on Local Network access in this run.
+  private var localNetworkHintLogged = false
 
   public struct Failure: Equatable {
     public var failures: Int
     public var reason: String
     /// Seconds until the reload.
     public var delay: TimeInterval
+    /// Whether to log it: the first failure of a run, or one whose reason differs
+    /// from the last logged. A retry that fails the same way is not a new line.
+    public var log: Bool
   }
 
   public enum Outcome: Equatable {
@@ -39,14 +52,48 @@ public struct PageLoadTracker: Equatable {
   /// A new address was asked for: nothing from the old one carries over.
   public mutating func reset() {
     failures = 0
-    responseFailed = false
-    failedInFlight = false
+    endRun()
+    loadStarted()
+  }
+
+  private mutating func endRun() {
+    loggedReason = nil
+    failingSince = nil
+    localNetworkHintLogged = false
   }
 
   /// A load (or a reload) begins.
   public mutating func loadStarted() {
     responseFailed = false
     failedInFlight = false
+    showingFailurePage = false
+  }
+
+  /// Whether a page that committed at `url` is one to report: not a 5xx's, and not
+  /// the helper's own failure page, even when its commit arrives after a reload has
+  /// begun (a `data:` address is never the server's).
+  public func reportsCommit(of url: URL) -> Bool { !responseFailed && !showingFailurePage && url.scheme != "data" }
+
+  /// A navigation failed: what it counts as, and whether the helper's failure page
+  /// replaces it on the screen. Every Chromium net error is replaced, whether or not
+  /// it counts as a new failure (the one after a 5xx does not), because the browser
+  /// host has hidden Chromium's own error page and shows the browser again only when
+  /// a page commits. Not when the failure page itself failed: that would loop.
+  public mutating func failed(_ error: NSError) -> (outcome: Outcome, showFailurePage: Bool) {
+    let wasShowing = showingFailurePage
+    let outcome = navigationFailed(error)
+    let show = error.domain == Self.netErrorDomain && !wasShowing
+    if show { showingFailurePage = true }
+    return (outcome, show)
+  }
+
+  /// The failure page says where to turn on Local Network access: true the first
+  /// time in a run of failures, so it is logged once (the failure's own line may
+  /// already have been written without it).
+  public mutating func localNetworkHintShown() -> Bool {
+    if localNetworkHintLogged { return false }
+    localNetworkHintLogged = true
+    return true
   }
 
   /// The main frame's response arrived with this HTTP status.
@@ -58,6 +105,7 @@ public struct PageLoadTracker: Equatable {
 
   /// The browser finished the navigation.
   public mutating func finished() -> Outcome {
+    if showingFailurePage { return .none }
     if responseFailed || failedInFlight {
       // Already counted when the 5xx or the failure arrived.
       responseFailed = false
@@ -66,6 +114,7 @@ public struct PageLoadTracker: Equatable {
     }
     let ended = failures
     failures = 0
+    endRun()
     return .loaded(afterFailures: ended)
   }
 
@@ -73,6 +122,7 @@ public struct PageLoadTracker: Equatable {
   public mutating func navigationFailed(_ error: NSError) -> Outcome {
     // Our own load() interrupting one in flight.
     if error.domain == NSURLErrorDomain, error.code == NSURLErrorCancelled { return .none }
+    if showingFailurePage { return .none }
     if responseFailed {
       // The 5xx that began it was counted; its failing is the same failure.
       responseFailed = false
@@ -92,14 +142,21 @@ public struct PageLoadTracker: Equatable {
     // net::ERR_ABORTED: our own load replacing one in flight, not the server failing.
     if code == abortedCode { return NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled) }
     return NSError(
-      domain: "net", code: code, userInfo: [NSLocalizedDescriptionKey: "\(text) loading \(Redact.url(url))"])
+      domain: netErrorDomain, code: code, userInfo: [NSLocalizedDescriptionKey: "\(text) loading \(Redact.url(url))"])
   }
+
+  /// The domain of a Chromium net error from `navigationError`.
+  public static let netErrorDomain = "net"
 
   /// net::ERR_ABORTED, in Chromium's net_error_list.h.
   public static let abortedCode = -3
 
   private mutating func fail(_ reason: String) -> Outcome {
     failures += 1
-    return .failed(Failure(failures: failures, reason: reason, delay: Backoff.reloadDelay(failures: failures)))
+    if failures == 1 { failingSince = Date() }
+    let log = reason != loggedReason
+    if log { loggedReason = reason }
+    return .failed(
+      Failure(failures: failures, reason: reason, delay: Backoff.reloadDelay(failures: failures), log: log))
   }
 }

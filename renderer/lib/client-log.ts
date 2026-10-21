@@ -8,6 +8,7 @@
 // would want to find while wondering why a figure is missing.
 
 import { errorMessage } from "@main/services/errors";
+import { isPublicMode } from "./public-mode";
 
 /** One line, on the server's log, tagged the way the server's own lines are.
  *
@@ -16,9 +17,13 @@ import { errorMessage } from "@main/services/errors";
  *  a developer with devtools open sees it immediately and without a round trip.
  *
  *  Never throws, and never rejects — a caller in a `catch` must not acquire a
- *  second failure to handle. */
+ *  second failure to handle.
+ *
+ *  On the public ServiceCue page it stops at the console: the host there has no
+ *  log to write to, and a page open to anyone sends nothing to anyone. */
 export function logToServer(tag: string, message: string): void {
   console.warn(`[${tag}] ${message}`);
+  if (isPublicMode()) return;
   try {
     void fetch("/api/log/client", {
       method: "POST",

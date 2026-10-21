@@ -1,0 +1,12 @@
+edges
+| main/services/publish-forgery.ts:9:9:9:11 | raw | main/services/publish-forgery.ts:10:26:10:28 | raw | provenance |  |
+| main/services/publish-forgery.ts:9:15:9:21 | req.url | main/services/publish-forgery.ts:9:9:9:11 | raw | provenance |  |
+| main/services/publish-forgery.ts:10:26:10:28 | raw | main/services/publish-forgery.ts:10:15:10:49 | `https: ... status` | provenance |  |
+nodes
+| main/services/publish-forgery.ts:9:9:9:11 | raw | semmle.label | raw |
+| main/services/publish-forgery.ts:9:15:9:21 | req.url | semmle.label | req.url |
+| main/services/publish-forgery.ts:10:15:10:49 | `https: ... status` | semmle.label | `https: ... status` |
+| main/services/publish-forgery.ts:10:26:10:28 | raw | semmle.label | raw |
+subpaths
+#select
+| main/services/publish-forgery.ts:10:9:10:50 | fetch(` ... tatus`) | main/services/publish-forgery.ts:9:15:9:21 | req.url | main/services/publish-forgery.ts:10:15:10:49 | `https: ... status` | The $@ of this request depends on a $@. | main/services/publish-forgery.ts:10:15:10:49 | `https: ... status` | URL | main/services/publish-forgery.ts:9:15:9:21 | req.url | user-provided value |

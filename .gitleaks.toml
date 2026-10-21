@@ -23,4 +23,8 @@ id = "generic-api-key"
 [rules.allowlist]
 regexes = [
   '''(America|Europe|Asia|Africa|Australia|Pacific|Atlantic|Indian|Antarctica|Arctic|Etc)/[A-Za-z_+-]+''',
+  # The made-up device token in the helper's UnreachablePageTests.swift, whose
+  # whole subject is that a token in a failed page's address never reaches the
+  # screen. The exact string, so it cannot hide anything else.
+  '''9f2c1e0d4b7a68352f1e0d9c8b7a6f5e4d3c2b1a09f8e7d6''',
 ]

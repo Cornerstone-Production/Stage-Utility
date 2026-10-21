@@ -294,4 +294,86 @@ func withTempDir<T>(_ body: (URL) throws -> T) rethrows -> T {
       #expect(throws: (any Error).self) { try store.ensure(key: "k", defaultEnabled: true) }
     }
   }
+
+  /// `--new-token`: a new secret, saved, and nothing else about the output changes.
+  /// Not its id, so the server still knows which screen it was; not `boundTo`, so no
+  /// other server on the network is handed the new secret.
+  @Test func aNewTokenReplacesOnlyTheToken() throws {
+    try withTempDir { dir in
+      var n = 0
+      let store = OutputStateStore(directory: dir, makeToken: { n += 1; return "token-\(n)" })
+      try store.ensure(key: "sdi", defaultEnabled: true)
+      try store.setBoundTo("server-1", key: "sdi")
+      try store.setVideoMode("720p59.94", key: "sdi")
+      try store.ensure(key: "other", defaultEnabled: true)
+      let before = try #require(store.record(for: "sdi"))
+
+      #expect(try store.newToken(key: "sdi") == "token-3")
+      var expected = before
+      expected.token = "token-3"
+      #expect(store.record(for: "sdi") == expected)
+      #expect(store.record(for: "other")?.token == "token-2")
+      // Saved: a restart reads the new one.
+      #expect(OutputStateStore(directory: dir).record(for: "sdi") == expected)
+      #expect(try store.newToken(key: "missing") == nil)
+      #expect(store.record(for: "missing") == nil)
+    }
+  }
+
+  /// The output that took over the Mac's Chrome kiosk keeps going by the Mac's id,
+  /// with a secret of its own from now on.
+  @Test func aNewTokenForTheKioskOutputKeepsItsIdentity() throws {
+    try withTempDir { dir in
+      let store = OutputStateStore(directory: dir, makeToken: { "fresh" })
+      var mac = MacIdentity(deviceId: "mac", source: .installer, server: nil, installerToken: "installer-token")
+      mac.migratedFromKiosk = true
+      let main = OutputDescriptor(kind: .display, key: "main", name: "Built-in", port: "Built-in", isMain: true)
+      #expect(try store.ensure(main, mac: mac).token == "installer-token")
+      _ = try store.newToken(key: "main")
+      #expect(store.record(for: "main")?.kioskIdentity == true)
+      #expect(store.record(for: "main")?.token == "fresh")
+      #expect(store.record(for: "main")?.deviceId(mac: "mac", key: "main") == "mac")
+    }
+  }
+}
+
+@Suite struct TokenRotationTests {
+  @Test func saysWhatIsLeftToDoAndNeverPrintsTheSecret() throws {
+    try withTempDir { dir in
+      let store = OutputStateStore(directory: dir, makeToken: OutputStateStore.randomToken)
+      let old = try store.ensure(key: "decklink-ab-0", defaultEnabled: true).token
+      let result = TokenRotation.run(store: store, key: "decklink-ab-0", macDeviceId: "mac-1")
+      #expect(result.succeeded)
+      let new = try #require(store.record(for: "decklink-ab-0")?.token)
+      #expect(new != old)
+      #expect(OutputStateStore(directory: dir).record(for: "decklink-ab-0")?.token == new)
+      let text = result.lines.joined(separator: "\n")
+      #expect(!text.contains(new) && !text.contains(old))
+      #expect(text.contains("mac-1.decklink-ab-0"))
+      #expect(text.contains("Release"))
+      #expect(text.contains("Not set up yet"))
+    }
+  }
+
+  @Test func anUnknownOutputChangesNothing() throws {
+    try withTempDir { dir in
+      let store = OutputStateStore(directory: dir, makeToken: { "t" })
+      try store.ensure(key: "k", defaultEnabled: true)
+      let result = TokenRotation.run(store: store, key: "nope", macDeviceId: "mac")
+      #expect(!result.succeeded)
+      #expect(result.lines.first?.contains("--list-outputs") == true)
+      #expect(store.record(for: "k")?.token == "t")
+    }
+  }
+
+  /// A file the helper could not read holds pinned secrets; nothing is written over it.
+  @Test func anUnreadableFileIsLeftAlone() throws {
+    try withTempDir { dir in
+      let file = dir.appendingPathComponent("outputs.json")
+      try "{ not json".write(to: file, atomically: true, encoding: .utf8)
+      let result = TokenRotation.run(store: OutputStateStore(directory: dir), key: "k", macDeviceId: "mac")
+      #expect(!result.succeeded)
+      #expect(try String(contentsOf: file, encoding: .utf8) == "{ not json")
+    }
+  }
 }

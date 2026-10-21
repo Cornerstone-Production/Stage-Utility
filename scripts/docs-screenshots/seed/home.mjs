@@ -10,7 +10,7 @@ import { layout, obj } from "./layout-kit.mjs";
 export async function seedHome(api) {
   const tile = (config, home, id) => obj(config, [0, 0, 1, 0.1], { id, extra: { home }, style: {} });
   const objects = [
-    tile({ type: "home-live-status" }, { size: "xl", when: "live" }, "home-live-status"),
+    tile({ type: "timer", source: "service", nextItem: true }, { size: "xl", when: "live" }, "home-timer"),
     tile({ type: "home-next-service" }, { size: "m", when: "idle" }, "home-next-service"),
     tile({ type: "home-screens" }, { size: "s", when: "always" }, "home-screens"),
     tile({ type: "wireless-summary", showOnline: true, showBattery: true, showRuntime: false, showLabel: true, label: "Wireless" }, { size: "s", when: "always" }, "home-wireless"),

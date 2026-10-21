@@ -105,6 +105,7 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed(
   "slide-thumbnail": ["readout"],
   "slots-grid": ["readout"],
   text: ["readout"],
+  timer: ["readout"],
   "transcript-strip": ["readout"],
   video: ["readout"],
   "view-embed": ["readout"],
@@ -131,13 +132,17 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed(
 /**
  * Where a drill-down-capable object goes when pressed in the operator shell.
  *
+ * Operator pages, never the chromeless `/history` or `/servicecue`: a press here
+ * leaves the page the operator is on, and a target without the shell's sidebar
+ * has no way back. `/history/manage` is History in the rail.
+ *
  * Only the four the design doc names. Others can gain a target later without a
  * schema change — an object is only reachable here if it declares `drilldown`
  * above, so an entry that is not also a drill-down capability does nothing.
  */
 export const DRILLDOWN: Partial<Record<LayoutObjectType, string>> = {
-  "spl-meter": "/history",
-  "people-counter": "/history",
+  "spl-meter": "/history/manage",
+  "people-counter": "/history/manage",
   "wireless-channel": "/patch",
   "integration-status": "/settings/integrations",
 };

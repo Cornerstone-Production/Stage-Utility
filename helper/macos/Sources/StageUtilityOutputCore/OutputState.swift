@@ -172,6 +172,26 @@ public final class OutputStateStore {
     try update(key, \.boundTo, to: server)
   }
 
+  /// Give `key`'s output a new secret, saved, and return it; nil when there is no
+  /// such output. Nothing else changes: not `boundTo`, which stops another server on
+  /// the network being handed the new secret (`TokenRotation` for the rest). Throws
+  /// when it cannot be saved, or when the file was not read at launch.
+  public func newToken(key: String) throws -> String? {
+    guard records[key] != nil else { return nil }
+    let token = makeToken()
+    try update(key, \.token, to: token)
+    return token
+  }
+
+  /// Save what an answer the filter believed does to `key`'s `boundTo`.
+  public func apply(_ change: OutputBinding, key: String) throws {
+    switch change {
+    case .keep: return
+    case .bind(let server): try setBoundTo(server, key: key)
+    case .forget: try setBoundTo(nil, key: key)
+    }
+  }
+
   /// Set one field of `key`'s record and save. Nothing is done for a key with no
   /// record, or a field that already holds `value`. Throws when it cannot be saved;
   /// the change is kept in memory regardless.

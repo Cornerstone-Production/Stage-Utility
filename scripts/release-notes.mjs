@@ -19,6 +19,7 @@
 import { execFileSync } from "node:child_process";
 import SCOPE_LABEL_FILE from "../main/services/scope-labels.json" with { type: "json" };
 import INTERNAL_SCOPE_FILE from "../main/services/internal-scopes.json" with { type: "json" };
+import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
 
 const SCOPE_LABELS = Object.fromEntries(
   Object.entries(SCOPE_LABEL_FILE).filter(([k]) => !k.startsWith("_")),
@@ -75,8 +76,22 @@ function upgradeNotice(v) {
   }
 }
 
-/** Commit types that change nothing an operator could notice. */
-const INVISIBLE = new Set(["chore", "ci", "build", "docs", "test", "refactor", "style"]);
+/**
+ * Commit types that change nothing an operator could notice, and the legacy ones
+ * the lint refuses but old history may still carry.
+ */
+const INVISIBLE = new Set([...COMMIT_TYPE_FILE.invisible, ...COMMIT_TYPE_FILE.legacy]);
+
+/** A minor type announces a capability: New. */
+const MINOR_TYPES = new Set(COMMIT_TYPE_FILE.minor);
+
+/**
+ * A patch type is a bug fix, an improvement, or both, and any of them can be held
+ * back as beta-only. `fix` alone has the Fixed section; every other patch type is
+ * listed under Improved.
+ */
+const PATCH_TYPES = new Set(COMMIT_TYPE_FILE.patch);
+const FIX_TYPE = "fix";
 
 /**
  * Scopes that name this machinery rather than the app. `fix(release)` is a
@@ -100,7 +115,7 @@ const CONVENTIONAL = /^([a-z]+)(?:\(([^)]*)\))?(!)?:\s*(.+)$/i;
  *
  * A total budget, floors first and then the rest shared out in proportion to
  * what each section still has to show, follows the shape of the release
- * instead. Whatever is left over is counted and stated — see section() — and
+ * instead. Whatever is left over is counted and stated — see bulletList() — and
  * the full range is linked below the last one.
  *
  * 40 is under the update dialog's own NOTES_CAP of 60 (release-check.ts), so
@@ -298,17 +313,18 @@ function scopesBefore(ref) {
 const features = [];
 const fixes = [];
 /**
- * `perf`. A section of its own rather than a share of Fixed, which is where
- * these used to land: "anchor the record clock instead of polling a timecode"
- * reached an operator as a bug report about their install. The dialog has
- * rendered an Improved heading since it learned about sections; nothing was
- * ever routed to it.
+ * `perf` and `polish`: every patch-level type but `fix`. A section of its own
+ * rather than a share of Fixed, which is where `perf` used to land: "anchor the
+ * record clock instead of polling a timecode" reached an operator as a bug
+ * report about their install, and a refinement ("pages sit 8px from the
+ * sidebar") is not one either. The dialog has rendered an Improved heading since
+ * it learned about sections.
  */
 const improvements = [];
 const breaking = [];
 /** Held back as build-out churn, counted so each omission is stated. */
 let buildOutFixes = 0;
-let buildOutPerf = 0;
+let buildOutImprovements = 0;
 const seen = new Set();
 
 const parsed = [];
@@ -330,13 +346,13 @@ for (const { sha, subject, body } of entries) {
   // Skipped before featScopes: a feat(release) must not make `release` read as
   // a surface introduced this cycle.
   if (key && INTERNAL_SCOPES.has(key) && !bang) continue;
-  if (!bang && type === "feat" && key) featScopes.add(key);
+  if (!bang && MINOR_TYPES.has(type) && key) featScopes.add(key);
 
   const trailer = BETA_ONLY.test(body);
   const override = overrides.get(sha);
-  // Only a fix or a perf is ever held back, so an override on anything else
+  // Only a patch-level commit is ever held back, so an override on anything else
   // would read as applied and change nothing. Left unapplied, and caught below.
-  const correctable = !bang && (type === "fix" || type === "perf");
+  const correctable = !bang && PATCH_TYPES.has(type);
   if (override && correctable) {
     overridesApplied.add(sha);
     console.error(`[release-notes] ${sha.slice(0, 9)} ${say(override.betaOnly, trailer)} — ${override.reason}`);
@@ -359,7 +375,7 @@ function say(betaOnly, trailer) {
 for (const [sha, o] of overrides) {
   if (overridesApplied.has(sha)) continue;
   throw new Error(
-    `docs/release-notes/overrides/${version}.json names ${o.given}, which is not a non-breaking fix: or perf: ` +
+    `docs/release-notes/overrides/${version}.json names ${o.given}, which is not a non-breaking ${[...PATCH_TYPES].map((t) => `${t}:`).join("/")} ` +
       `commit in ${range}. An override that matches nothing is a correction that would never be applied.`,
   );
 }
@@ -368,7 +384,7 @@ for (const [sha, o] of overrides) {
  * A fix nobody outside the beta track could have hit.
  *
  * A stable release folds in thirty-odd betas, so "Fixed" filled up with the
- * polish commits that built the release's own new features — a reader who has
+ * small corrections that built the release's own new features — a reader who has
  * never had digital signage does not need eleven lines about signage bugs, and
  * they crowded out the fixes to things they DO have.
  *
@@ -407,13 +423,13 @@ for (const entry of parsed) {
   seen.add(line);
 
   if (bang) breaking.push(line);
-  else if (type === "feat") features.push(line);
-  else if (type === "perf") {
-    if (isBuildOutFix(entry, oldScopes)) buildOutPerf++;
-    else improvements.push(line);
-  } else if (type === "fix") {
+  else if (MINOR_TYPES.has(type)) features.push(line);
+  else if (type === FIX_TYPE) {
     if (isBuildOutFix(entry, oldScopes)) buildOutFixes++;
     else fixes.push(line);
+  } else if (PATCH_TYPES.has(type)) {
+    if (isBuildOutFix(entry, oldScopes)) buildOutImprovements++;
+    else improvements.push(line);
   }
 }
 
@@ -433,12 +449,67 @@ function scopeLabel(scope) {
 }
 
 /** A capped bullet list, saying plainly how much was left out. */
-function section(title, items, limit) {
-  if (items.length === 0) return "";
+function bulletList(items, limit) {
   const shown = items.slice(0, limit).map((s) => `- ${s}`);
   const rest = items.length - shown.length;
   if (rest > 0) shown.push(`- …and ${rest} more`);
-  return `## ${title}\n\n${shown.join("\n")}\n`;
+  return shown.join("\n");
+}
+
+/**
+ * Lift out of a hand-written notice every section the generator also writes.
+ *
+ * Prepended whole, a notice's `## Improved` and the generated one sat on the
+ * release page as two headings with the same name. The dialog merges repeats on
+ * read; the page does not. So those sections are taken out here and written once
+ * by `renderSection`. Everything else — the overview, `## Changed`, anything a
+ * notice invents — stays where it is.
+ *
+ * Only a `##` heading starts or ends a section, so a `###` under it stays inside.
+ * It does split the section: the dialog ends a section at ANY line starting with
+ * `#`, so what follows the first one is the `tail`, and the generated lines have
+ * to go above it, after the `head`. A `## comment` inside a code fence is not a
+ * heading at all.
+ *
+ * @returns {{ prose: string, lead: Map<string, {head: string, tail: string}> }}
+ *   `lead` by lower-case title
+ */
+function takeGeneratedSections(notice, titles) {
+  const wanted = new Set(titles.map((t) => t.toLowerCase()));
+  const prose = [];
+  const lead = new Map();
+  let into = null;
+  let underSubheading = false;
+  let fence = null; // the marker that opened the code fence we are inside, if any
+  for (const line of notice.split("\n")) {
+    const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+    if (marker) {
+      if (!fence) fence = marker;
+      else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+    }
+    const title = fence ? undefined : /^##\s+(.+?)\s*$/.exec(line)?.[1].toLowerCase();
+    if (title !== undefined) {
+      into = wanted.has(title) ? title : null;
+      if (into) {
+        if (!lead.has(into)) lead.set(into, { head: [], tail: [] });
+        underSubheading = false;
+        continue;
+      }
+    }
+    if (!into) {
+      prose.push(line);
+      continue;
+    }
+    if (!fence && line.trim().startsWith("#")) underSubheading = true;
+    lead.get(into)[underSubheading ? "tail" : "head"].push(line);
+  }
+  const text = prose.join("\n").trim();
+  return {
+    prose: text ? `${text}\n` : "",
+    lead: new Map(
+      [...lead].map(([k, { head, tail }]) => [k, { head: head.join("\n").trim(), tail: tail.join("\n").trim() }]),
+    ),
+  };
 }
 
 const install = `## Install
@@ -470,15 +541,29 @@ running it? Update from **Settings → Advanced → Updates**.
  * heading reads as a stray line of prose in the middle of a release.
  *
  * Fixes and improvements are counted apart so each section's arithmetic is its
- * own; calling a held-back `perf` a "fix" is the same mislabelling that put
- * them under Fixed to begin with.
+ * own; calling a held-back `perf` or `polish` a "fix" is the same mislabelling
+ * that put them under Fixed to begin with.
+ *
+ * `lead` is what the hand-written notice already said under this heading, kept
+ * verbatim: its `head` first, then everything generated, then its `tail`, which
+ * starts at the notice's first sub-heading. The dialog ends a section there, so
+ * nothing generated may sit below it. The lead is not counted against the bullet
+ * budget, which is there so the release page and the dialog's NOTES_CAP agree; the
+ * notice's other sections, `Changed` included, have never been counted either.
  */
-function renderSection({ title, items, held = 0, one, many }, limit) {
+function renderSection({ title, items, held = 0, one, many, lead = { head: "", tail: "" } }, limit) {
   const note = held
-    ? `${held} further ${held === 1 ? one : many} made while building the features above ${held === 1 ? "is" : "are"} not listed — ${held === 1 ? "it was" : "they were"} never in a released version.\n`
+    ? `${held} further ${held === 1 ? one : many} made while building the features above ${held === 1 ? "is" : "are"} not listed — ${held === 1 ? "it was" : "they were"} never in a released version.`
     : "";
-  if (items.length) return note ? `${section(title, items, limit)}\n${note}` : section(title, items, limit);
-  return note ? `## ${title}\n\n${note}` : "";
+  const bullets = items.length ? bulletList(items, limit) : "";
+  // A hand-written list and the generated bullets are one tight list. After
+  // hand-written prose they get a blank line, as any new paragraph does.
+  const endsInBullet = /^\s*[-*] /.test(lead.head.split(/\n\s*\n/).pop());
+  const list = [lead.head, bullets].filter(Boolean).join(endsInBullet ? "\n" : "\n\n");
+  // The note gets a blank line too: directly under a bullet it is a lazy
+  // continuation of it, and reads as part of that bullet on the release page.
+  const text = [list, note, lead.tail].filter(Boolean).join("\n\n");
+  return text ? `## ${title}\n\n${text}\n` : "";
 }
 
 /**
@@ -489,10 +574,12 @@ function renderSection({ title, items, held = 0, one, many }, limit) {
 const SECTIONS = [
   { title: "Breaking", items: breaking },
   { title: "New", items: features },
-  { title: "Improved", items: improvements, held: buildOutPerf, one: "improvement", many: "improvements" },
+  { title: "Improved", items: improvements, held: buildOutImprovements, one: "improvement", many: "improvements" },
   { title: "Fixed", items: fixes, held: buildOutFixes, one: "fix", many: "fixes" },
 ];
 const limits = allocate(SECTIONS.map((s) => s.items.length));
+
+const notice = takeGeneratedSections(upgradeNotice(version), SECTIONS.map((s) => s.title));
 
 /**
  * Where the rest of it is.
@@ -507,8 +594,8 @@ const fullChangelog = fromRef
   : "";
 
 const parts = [
-  upgradeNotice(version),
-  ...SECTIONS.map((s, i) => renderSection(s, limits[i])),
+  notice.prose,
+  ...SECTIONS.map((s, i) => renderSection({ ...s, lead: notice.lead.get(s.title.toLowerCase()) }, limits[i])),
   fullChangelog,
   install,
 ];

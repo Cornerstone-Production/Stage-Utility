@@ -370,6 +370,7 @@ class means for backups.
 | `scores-favourites.json` | config | Followed teams |
 | `servicecue-config.json` | config | Which service types the ServiceCue landing shows |
 | `servicecue-layouts.json` | config | ServiceCue column layouts |
+| `servicecue-publish.json` | config | Whether ServiceCue is [published to the web](../features/servicecue-and-baptisms.md#on-the-web), and the address of its page. The token is in `secrets.bin`, which a backup does not carry |
 | `servicecue-roles.json` | config | ServiceCue category roles |
 | `service-timeline.json` | runtime | Per-item timing recordings, one file per service in a folder of the same name |
 | `settings.json` | config | Service type and plan mode, screens, integration settings (not credentials), branding, schedules, time zone |
@@ -388,6 +389,17 @@ single-document file a pre-split install may still hold, and the live data is th
 folder beside it (`attendance-history/`, `service-timeline/`, `spl-history/`).
 Uploaded logos and layout images are files in `branding-images/` and
 `layout-images/`, named by content hash and carried by a config snapshot.
+
+The custom tab and home-screen icon is eight `settings.json` fields: `appIcon`
+(the square art the sizes are drawn from), `appIconOriginal` and `appIconCrop`
+(the upload and its crop, for Adjust), `appIconBackground` (`#rrggbb`, `#000000`
+by default) and the four sizes served to browsers and phones, `appIconApple`
+(180 px), `appIcon192`, `appIcon512` and `appIconMaskable` (512 px, art inside the
+safe zone). The image fields are references into `branding-images/`. The icon is
+set or removed as a whole, so the seven image and crop fields are null until one is set; only
+`appIconOriginal` and `appIconCrop` may stay null in a set icon (one made through
+the API has no upload to adjust). The state carries `appIcon192`,
+`appIconMaskable` and `appIconBackground`, and nothing else of it.
 
 ## How state reaches a screen
 

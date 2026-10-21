@@ -29,6 +29,8 @@ import ts from "typescript";
 
 import { pinToOrigin } from "./pinned-origin.js";
 import { pvpFetch, pvpOrigin, pvpService, pvpUrl, type PvpOrigin, type PvpTarget, type PvpUrl } from "./pvp-service.js";
+import { publishFetch, publishUrl, type PublishUrl } from "./servicecue-publish-client.js";
+import { parsePublishUrl, type PublishOrigin } from "./servicecue-publish-rules.js";
 import { safeSpaceFetch, safeSpaceUrl, type SafeSpaceUrl } from "./safespace-client.js";
 import {
   senSourceApiUrl, senSourceAuthFetch, senSourceAuthUrl, veaFetch,
@@ -76,6 +78,10 @@ const typeLevel = (): void => {
   void pvpFetch("http://192.0.2.10:8080" as PvpOrigin, "http://192.0.2.10:8080/api/0/x", {});
   // @ts-expect-error a plain string is not a PvpOrigin
   void pvpFetch("http://192.0.2.10:8080", "http://192.0.2.10:8080/api/0/x" as PvpUrl, {});
+  // @ts-expect-error a plain string is not a PublishUrl
+  void publishFetch("https://page.example" as PublishOrigin, "https://page.example/_publish/v1/status", {});
+  // @ts-expect-error a plain string is not a PublishOrigin
+  void publishFetch("https://page.example", "https://page.example/_publish/v1/status" as PublishUrl, {});
   // The two SenSource brands are not interchangeable: the token must not be able
   // to go to the auth host, nor the client secret to the API host.
   // @ts-expect-error an API URL is not an auth URL
@@ -231,6 +237,22 @@ describe("ProVideoPlayer", () => {
     assert.equal(new URL(sent[0].url).pathname, "//evil.example/api");
   });
 
+  it("pins a forged ServiceCue publishing URL to the page's origin, so the publishing token cannot leave for another host", async () => {
+    const parsed = parsePublishUrl("https://page.example");
+    assert.ok(parsed.ok);
+    const origin = parsed.origin;
+    await publishFetch(origin, publishUrl(origin, "/_publish/v1/status"), {});
+    assert.equal(sent[0].url, "https://page.example/_publish/v1/status");
+    assert.deepEqual(errors, []);
+    sent = [];
+    await publishFetch(origin, "https://evil.example/_publish/v1/status?x=1" as unknown as PublishUrl, {});
+    assert.equal(sent[0].url, "https://page.example/_publish/v1/status?x=1");
+    assert.match(errors[0], /^\[publish\] BUG/);
+    sent = [];
+    await publishFetch(origin, publishUrl(origin, "//evil.example/x"), {});
+    assert.equal(new URL(sent[0].url).origin, "https://page.example");
+  });
+
   it("sends nothing, with the token, when the configured host is not a bare host", async () => {
     // Through the real service entry the Test connection button uses.
     const out = await pvpService.test("evil.example/x#", 8080, false, "tok");
@@ -291,6 +313,7 @@ const CREDENTIALED = [
   "main/services/pvp-service.ts",
   "main/services/safespace-client.ts",
   "main/services/sensource-service.ts",
+  "main/services/servicecue-publish-client.ts",
 ];
 
 // One entry per line, sorted: two branches adding different entries merge without
@@ -301,6 +324,7 @@ main/services/pvp-service.ts:pvpFetch
 main/services/safespace-client.ts:safeSpaceFetch
 main/services/sensource-service.ts:senSourceAuthFetch
 main/services/sensource-service.ts:veaFetch
+main/services/servicecue-publish-client.ts:publishFetch
 `.trim().split("\n");
 
 describe("the credentialed fetches", () => {
@@ -310,7 +334,7 @@ describe("the credentialed fetches", () => {
   });
 
   it("the scan sees a call in every shape it claims to", () => {
-    // The scan over the four files proves nothing if it cannot see a call, so it
+    // The scan over the five files proves nothing if it cannot see a call, so it
     // is run on source that has each shape and one that only mentions fetch.
     const shapes = `
       export function a() { return fetch("x"); }

@@ -31,6 +31,7 @@ import {
 } from "../../components/ui";
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { DataArchivePanel } from "./data-archive-panel";
+import { HostNamesCard } from "./host-names-card";
 import { HistoryMilestonesPanel } from "./history-milestones-panel";
 import { VideoRelayPortsPanel, VIDEO_PORTS_FLASH_ID } from "./video-relay-ports";
 import { BarConfigurator } from "../../app/bar-configurator";
@@ -452,7 +453,7 @@ export function UpdatesPanel({
 
             {/* Success banner after an auto-reload completes (set pre-restart). */}
             {justUpdated ? (
-              <div className="mt-2 flex items-start gap-2 rounded-md border border-green-a5 bg-green-a2 p-2.5 text-caption1 text-green-11">
+              <div className="mt-2 flex items-start gap-2 rounded-md border border-ok-9/30 bg-ok-9/6 p-2.5 text-caption1 text-green-11">
                 <CheckCircle2Icon className="size-4 shrink-0 mt-0.5 text-green-10" />
                 <div className="flex-1">
                   <p className="font-medium">Update installed successfully.</p>
@@ -1294,6 +1295,26 @@ export function AdvancedSection({
 
               <Field orientation="horizontal">
                 <FieldContent>
+                  <FieldLabel>Update Mac output helpers and Windows kiosks with this server</FieldLabel>
+                  <FieldDescription>
+                    When this server updates, each Mac running the output helper installs the same
+                    version on its own. Never during a service, or within the window around one. The
+                    helper restarts to finish, which takes its outputs off air for about three seconds.
+                    A Windows kiosk takes the new launcher at its next sign-in.
+                  </FieldDescription>
+                </FieldContent>
+                <Switch
+                  checked={stageState.autoUpdateMachines ?? true}
+                  onCheckedChange={(on: boolean) =>
+                    void invoke("stage:setAutoUpdateMachines", { enabled: on })
+                      .catch((e: unknown) => toast.error(`Could not change this setting: ${errorMessage(e)}`))
+                  }
+                  aria-label="Update Mac output helpers and Windows kiosks with this server"
+                />
+              </Field>
+
+              <Field orientation="horizontal">
+                <FieldContent>
                   <FieldLabel>Answer devices looking for a server</FieldLabel>
                   <FieldDescription>
                     Off by default so a test instance on the same network cannot claim a screen
@@ -1383,6 +1404,8 @@ export function AdvancedSection({
             </FieldGroup>
           </FieldSet>
         </div>
+
+        <HostNamesCard />
 
         <div className="su-card">
           <div className="border-b border-line px-4 py-3">

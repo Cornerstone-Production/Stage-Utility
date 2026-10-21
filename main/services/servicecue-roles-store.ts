@@ -42,4 +42,8 @@ export const serviceCueRolesStore = {
   async save(roles: CategoryRole[]): Promise<void> {
     await store.save(roles);
   },
+  /** Why saves to the roles are refused: see DataStore.refusingSaves(). */
+  refusingSaves() {
+    return store.refusingSaves();
+  },
 };

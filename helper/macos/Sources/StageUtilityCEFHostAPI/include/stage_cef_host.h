@@ -24,7 +24,7 @@ extern "C" {
 
 /// Bumped whenever the table below changes shape. The app refuses a host built
 /// for another version rather than calling through a mismatched table.
-#define SU_CEF_API_VERSION 1
+#define SU_CEF_API_VERSION 2
 
 /// One browser: a page in a window (a display output) or in no window at all (a
 /// card output). Opaque.
@@ -42,6 +42,9 @@ typedef struct su_browser_events {
   void (*finished)(void* context, int http_status);
   /// A main-frame navigation failed or was cancelled. `error_code` is Chromium's
   /// net error (net_error_list.h): -3 is ERR_ABORTED, a load that was replaced.
+  /// Chromium's error page for any other is never shown: the host hides the browser
+  /// (a windowless one hands over no pictures) until a page commits without an
+  /// error, which the app makes happen by loading its own.
   void (*failed)(void* context, int error_code, const char* error_text, const char* url);
   /// The page's renderer process ended: crashed, killed, out of memory. The page
   /// is gone until it is loaded again.
@@ -57,6 +60,11 @@ typedef struct su_cef_settings {
   const char* cache_path;
   /// CEF's own log (warnings and worse).
   const char* log_file;
+  /// Switches for Chromium's browser process, each `name` or `name=value` without
+  /// the leading dashes: `ChromiumSwitches.browser` in the Swift core, where they
+  /// are tested. `switch_count` of them; the strings are copied.
+  const char* const* switches;
+  size_t switch_count;
   void* context;
   /// CEF is ready for browsers. Browsers must not be made before this.
   void (*context_initialized)(void* context);

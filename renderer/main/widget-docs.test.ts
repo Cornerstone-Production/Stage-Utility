@@ -17,6 +17,7 @@ import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { LAYOUT_OBJECTS } from "./layout-objects.js";
+import { LEGACY_TIMER_TYPES } from "./timer-config.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DOC = path.join(ROOT, "docs", "reference", "widgets.md");
@@ -36,7 +37,13 @@ describe("the widget reference covers the registry", () => {
   // with it and thereby turned "Service order (legacy)" into "Service order",
   // reporting the one widget it was documenting correctly as missing.
   const documented = documentedNames();
-  const registry = Object.values(LAYOUT_OBJECTS).map((e) => (e as { label: string }).label);
+  // Less the four timers a saved layout reads as a Timer: nothing shows their
+  // labels any more (the layer list, the inspector and Home name them "Timer"),
+  // so a row for each would describe a widget nobody can find. The reference says
+  // in one line that a saved one opens as a Timer.
+  const registry = Object.entries(LAYOUT_OBJECTS)
+    .filter(([type]) => !(LEGACY_TIMER_TYPES as readonly string[]).includes(type))
+    .map(([, e]) => (e as { label: string }).label);
 
   test("the scan finds rows at all", () => {
     // Guards the regex. A silently-empty scan would make this file vacuous —

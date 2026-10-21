@@ -262,3 +262,61 @@ describe("a hand-edited id floor cannot abort a restore half-written", () => {
     );
   });
 });
+
+// A backup left out what it could not read and reported success, and the
+// scheduler then pruned the older copies that still held it.
+describe("a backup of a config store that cannot be read", () => {
+  const file = path.join(TMP, TARGET);
+
+  afterEach(async () => {
+    await fs.rm(file, { recursive: true, force: true });
+  });
+
+  it("fails, rather than leaving the store out", async () => {
+    await fs.rm(file, { recursive: true, force: true });
+    // A directory where the file should be fails the read for root as well.
+    await fs.mkdir(file);
+    await assert.rejects(configSnapshot.build(), { name: "StoreReadError", code: "EISDIR" });
+  });
+
+  it("still leaves out a store that has no file yet", async () => {
+    await fs.rm(file, { recursive: true, force: true });
+    const bundle = await configSnapshot.build();
+    assert.equal(Object.hasOwn(bundle.files, TARGET), false);
+  });
+});
+
+describe("a backup of an uploaded image that cannot be read", () => {
+  const dir = path.join(TMP, "layout-images");
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("fails, rather than leaving the image out", async () => {
+    // A directory where the image should be fails the read for root as well.
+    await fs.mkdir(path.join(dir, "abc.png"), { recursive: true });
+    await assert.rejects(configSnapshot.build(), { name: "StoreReadError", code: "EISDIR" });
+  });
+
+  it(
+    "fails when the image directory cannot be listed",
+    { skip: process.getuid?.() === 0 && "running as root, which can list a mode-000 directory" },
+    async () => {
+      await fs.mkdir(dir, { recursive: true });
+      await fs.chmod(dir, 0o000);
+      try {
+        await assert.rejects(configSnapshot.build(), { name: "StoreReadError", code: "EACCES" });
+      } finally {
+        await fs.chmod(dir, 0o700);
+      }
+    },
+  );
+
+  it("still carries an image it can read", async () => {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "abc.png"), "png");
+    const bundle = await configSnapshot.build();
+    assert.deepEqual(Object.keys(bundle.images ?? {}), ["layout-images/abc.png"]);
+  });
+});

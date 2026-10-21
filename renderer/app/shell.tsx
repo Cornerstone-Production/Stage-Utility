@@ -121,7 +121,7 @@ export function Shell() {
       // would add and overshoot by a header's height.
       style={{ scrollPaddingTop: "calc(var(--su-history-header-inset, 0px) + 0.75rem)" }}
       className={cn(
-        "flex-1 min-h-0 overflow-y-auto px-5 max-sm:px-3",
+        "flex-1 min-h-0 overflow-y-auto px-2 max-sm:px-3",
         // `sm:pt-4` is the air between the band and the page. With no band
         // there is nothing for it to separate, and it would hand 16px of
         // the reclaimed height straight back as padding. The HORIZONTAL

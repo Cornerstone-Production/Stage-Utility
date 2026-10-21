@@ -49,6 +49,8 @@ final class AppModel: ObservableObject {
     var discovery: OutputDiscovery?
     var serverURL: String?
     var serverName: String?
+    /// When the server last answered this output's probe.
+    var answeredAt: Date?
     var loaded = false
     var unreachable = false
     /// What the committed page is. Not what is being loaded: see `ScreenPage`.
@@ -347,6 +349,10 @@ final class AppModel: ObservableObject {
       guard let self, let rt else { return }
       self.pageMoved(rt, to: url)
     }
+    sink.surface.localNetworkEvidence = { [weak self, weak rt] since in
+      guard let self, let rt else { return .none }
+      return self.localNetworkEvidence(rt, since: since)
+    }
 
     // With a `server` file the page loads from it at once and the probes go to that
     // server alone, so the output still shows up under "Not set up yet". The latency
@@ -361,9 +367,9 @@ final class AppModel: ObservableObject {
       label: d.port, port: options.discoveryPort, mode: mode,
       boundTo: { [weak self] in self?.store.record(for: key)?.boundTo },
       makeProbe: { [weak self, weak rt] unreachable in self?.probe(for: rt, unreachable: unreachable) ?? Data() })
-    discovery.onReply = { [weak self, weak rt] reply in
+    discovery.onReply = { [weak self, weak rt] reply, change in
       guard let self, let rt else { return }
-      self.heard(key, rt, reply)
+      self.heard(key, rt, reply, change)
     }
     discovery.onLocalNetworkSuspected = { [weak self] in self?.suspectLocalNetwork() }
     rt.discovery = discovery
@@ -378,6 +384,7 @@ final class AppModel: ObservableObject {
     rt.sink = nil
     rt.loaded = false
     rt.unreachable = false
+    rt.answeredAt = nil
     rt.page = .other
     rt.rotation = .none
     rt.videoMode = nil
@@ -407,8 +414,9 @@ final class AppModel: ObservableObject {
 
   // MARK: Server
 
-  private func heard(_ key: String, _ rt: Runtime, _ reply: DiscoveryReply) {
+  private func heard(_ key: String, _ rt: Runtime, _ reply: DiscoveryReply, _ change: OutputBinding) {
     rt.serverName = reply.name
+    rt.answeredAt = Date()
     clearLocalNetworkSuspicion()
     // A server file names the server; an answer from it only says it is there.
     if identity.server == nil, rt.serverURL != reply.url {
@@ -416,7 +424,10 @@ final class AppModel: ObservableObject {
       rt.serverURL = reply.url
       navigate(rt)
     }
-    save { try store.setBoundTo(reply.serverId, key: key) }
+    if case .forget(let server) = change {
+      Log.notice(.discovery, "\(rt.descriptor.port): \"\(reply.name)\" (\(server)) no longer has this output set up; forgot it, so any server can set it up")
+    }
+    save { try store.apply(change, key: key) }
     refresh()
   }
 
@@ -602,15 +613,27 @@ final class AppModel: ObservableObject {
 
   private func suspectLocalNetwork() {
     if noteTable["local-network"] == nil {
-      Log.error(.app, "Local Network access may be off for this app")
+      // The version, so a refusal that starts with an update can be told from one that
+      // did not (README, "After an update").
+      Log.error(.app, "Local Network access may be off for this app (version \(version))")
     }
     setNote("local-network", LocalNetworkAccess.windowMessage)
+    writeStatus()
+  }
+
+  /// What says a failed load is Local Network access rather than the server being
+  /// off: the server answered this output's probe after the loads began failing (an
+  /// answer from before could be a server switched off since), or every broadcast
+  /// was refused.
+  private func localNetworkEvidence(_ rt: Runtime, since: Date) -> UnreachablePage.Evidence {
+    .init(answeredAt: rt.answeredAt, failingSince: since, broadcastsBlocked: noteTable["local-network"] != nil)
   }
 
   private func clearLocalNetworkSuspicion() {
     if noteTable["local-network"] != nil {
       Log.notice(.app, "the network is reachable again; the Local Network warning is cleared")
       clearNote("local-network")
+      writeStatus()
     }
   }
 
@@ -649,6 +672,37 @@ final class AppModel: ObservableObject {
       order.compactMap { runtimes[$0] }.map {
         .init(active: $0.sink != nil, serverURL: $0.serverURL, serverName: $0.serverName, loaded: $0.loaded, unreachable: $0.unreachable)
       })
+    writeStatus()
+  }
+
+  // MARK: The updater's status file
+
+  /// The bytes last written, so a refresh that changed none of its facts writes
+  /// nothing: refresh runs on every probe answer.
+  private var lastStatus: Data?
+
+  /// `helper-status.json`, for the updater that installed this copy (`HelperStatus`).
+  private func writeStatus() {
+    let status = HelperStatus(
+      version: version, pid: getpid(), chromium: CEFEngine.failure == nil ? .started : .failed,
+      chromiumProblem: CEFEngine.failure, localNetworkRefused: noteTable["local-network"] != nil)
+    let data = status.encoded()
+    guard data != lastStatus else { return }
+    do {
+      try PrivateFiles.makeDirectory(paths.userDir)
+      try PrivateFiles.write(data, to: paths.userDir.appendingPathComponent(HelperStatus.fileName))
+      lastStatus = data
+      if noteTable["status-file"] != nil { clearNote("status-file") }
+    } catch {
+      // Said once per cause: the next refresh tries again and would say it again.
+      // In the window too: without the file an automatic update cannot tell this
+      // copy started, and puts the previous one back.
+      let text = "Could not write \(HelperStatus.fileName) for the updater: \(error.localizedDescription)"
+      if noteTable["status-file"] != text {
+        Log.error(.state, text)
+        setNote("status-file", text)
+      }
+    }
   }
 
   // MARK: Open at login

@@ -15,6 +15,7 @@ import { exportFilename, exportRows } from "../patch-export.js";
 import { toCsv } from "../patch-export-csv.js";
 import { toXlsx } from "../patch-export-xlsx.js";
 import { broadcast } from "../broadcaster.js";
+import { servicecuePublisher } from "../servicecue-publisher-instance.js";
 
 export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, url, method } = c;
@@ -31,6 +32,7 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       json(res, await stageController.saveServiceCueLayouts(body.layouts as ServiceCueLayout[]));
+      servicecuePublisher.nudge(); // the public page follows an edit within a second or so
       return;
     }
 
@@ -46,6 +48,7 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       json(res, await stageController.setServiceCueConfig(body.serviceTypeIds.map(String)));
+      servicecuePublisher.nudge();
       return;
     }
 
@@ -153,6 +156,7 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       json(res, await stageController.saveServiceCueRoles(body.roles as CategoryRole[]));
+      servicecuePublisher.nudge();
       return;
     }
 
@@ -166,6 +170,7 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       json(res, await stageController.seedServiceCueRoles(serviceTypeId));
+      servicecuePublisher.nudge();
       return;
     }
 

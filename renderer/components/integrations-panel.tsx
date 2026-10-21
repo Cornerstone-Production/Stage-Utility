@@ -24,6 +24,7 @@ import { integrationDialogClass } from "./integration-dialog-size";
 import { initialConfig, numberFieldValue } from "./integration-number-fields";
 import { useUpdateStatus } from "../app/queries";
 import { docsUrl } from "../lib/docs-url";
+import { droppedCredentialFields, droppedCredentialMessage } from "../lib/dropped-credentials";
 import { UnsavedChangesDialog } from "../editor/unsaved-changes-dialog";
 import { UnsavedWorkProvider, useUnsavedWork } from "./unsaved-work";
 import {
@@ -521,7 +522,11 @@ export function IntegrationDialog({
       // permanently unequal, so "Unsaved changes" stayed up after a successful
       // save — most visibly after changing a secret.
       setLocalConfig(initialConfig(descriptor, next));
-      toast.success(`${descriptor.label} settings saved.`);
+      // A password left unchanged that comes back empty was cleared by the
+      // server because the address moved: see dropped-credentials.ts.
+      const dropped = droppedCredentialFields(descriptor.configSchema, pristine, config, next.config);
+      if (dropped.length > 0) toast.info(droppedCredentialMessage(`${descriptor.label} settings saved`, dropped.map((f) => f.label)));
+      else toast.success(`${descriptor.label} settings saved.`);
       return true;
     } catch (err) {
       console.error("[IntegrationsPanel:save] error", err);
@@ -770,7 +775,7 @@ export function IntegrationDialog({
                     href={docsUrl(descriptor, updateStatus?.branch)}
                     target="_blank"
                     rel="noreferrer"
-                    className="whitespace-nowrap text-accent-11 underline underline-offset-2 hover:text-accent-12"
+                    className="whitespace-nowrap text-accent underline underline-offset-2 hover:text-accent-hover"
                   >
                     Setup guide
                   </a>

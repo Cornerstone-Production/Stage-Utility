@@ -12,6 +12,7 @@ import { logReadFailure } from "../../lib/client-log";
 import type { SeenDevice } from "@main/types/kiosk";
 import type { PublicDevice } from "@main/services/kiosk-devices-store";
 import type { OutputHealth } from "@main/types/output-health";
+import type { MachineUpdate } from "@main/services/machine-updates";
 import { notSetUp } from "./not-set-up";
 import { toError } from "@main/services/errors";
 // One phrasing of a screen size, shared with the holding screen the operator is
@@ -28,6 +29,12 @@ export interface DevicesPayload {
    *  reporting. Pushed with every `kiosk:devices`, so it is as fresh as the
    *  server last said. */
   health: OutputHealth[];
+  /** Each Mac helper and Windows kiosk that has checked for updates lately: what
+   *  it runs, what this server has, and what it was told. */
+  updates: MachineUpdate[];
+  /** When the server began answering update checks: until one check interval has
+   *  passed, a machine it has not heard from may just not have asked yet. */
+  updatesListeningSince: number | null;
   /** Ids of the devices that have reported health at any time since this page
    *  loaded. A reading that is no longer in `health` was dropped after the helper
    *  stopped, which is what tells "stopped reporting" from "never reported". */
@@ -37,7 +44,7 @@ export interface DevicesPayload {
   error: Error | null;
 }
 
-const EMPTY: DevicesPayload = { scanning: false, seen: [], matches: {}, bound: [], health: [], reported: [], error: null };
+const EMPTY: DevicesPayload = { scanning: false, seen: [], matches: {}, bound: [], health: [], updates: [], updatesListeningSince: null, reported: [], error: null };
 
 let current: DevicesPayload = EMPTY;
 /** The read on the wire now, if any. */
@@ -79,6 +86,8 @@ function read(): Promise<Error | null> {
         matches: d.matches ?? {},
         bound: d.bound ?? [],
         health,
+        updates: d.updates ?? [],
+        updatesListeningSince: d.updatesListeningSince ?? null,
         reported,
         error: null,
       });

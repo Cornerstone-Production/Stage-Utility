@@ -41,6 +41,15 @@ import Testing
     #expect(try assignment("MARKER", in: try installerLines()) == "\"$STATE_DIR/\(KioskMigration.markerFileName)\"")
   }
 
+  /// The updater the installer leaves behind reads the helper's status file from the
+  /// logged-in user's own folder, by these two names.
+  @Test func theUpdaterReadsTheStatusFileTheHelperWrites() throws {
+    let lines = try installerLines()
+    #expect(try assignment("HELPER_STATUS_NAME", in: lines) == HelperStatus.fileName)
+    let paths = HelperPaths.resolve(environment: [:], home: URL(fileURLWithPath: "/Users/someone"))
+    #expect(try assignment("HELPER_USER_DIR", in: lines) == "\"\(paths.userDir.path.dropFirst("/Users/someone/".count))\"")
+  }
+
   /// The files the helper reads from the installer's folder, each of which the
   /// installer writes or refuses a link at.
   @Test func theFilesTheHelperReadsAreTheOnesTheInstallerWrites() throws {

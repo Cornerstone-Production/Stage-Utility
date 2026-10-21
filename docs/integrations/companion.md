@@ -989,7 +989,7 @@ yet, and after the nightly clear; `message_alert_active` reads `false`.
 addressed to Everyone and editable after it is placed, and a **Clear alerts**
 button that wears the **Alert running** feedback.
 
-The same two things are available to rules and to any console's Action button as
+The same two things are available to rules and to any console's Button, set to Run an action, as
 the automation actions **Send a stage message** and **Clear stage message
 alerts**; see [Automation](../automation.md#actions). Those send from
 `Automation`.

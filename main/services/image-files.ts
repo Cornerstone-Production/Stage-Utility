@@ -16,6 +16,7 @@ import * as path from "path";
 import { getUserDataPath } from "./app-paths.js";
 import { externKeyed } from "../types/extern-keyed.js";
 import { atomicWrite } from "./write-queue.js";
+import { isNotFound } from "./errors.js";
 
 // NOT externKeyed(), unlike MIME_BY_EXT below: the only lookup into this table
 // is `EXT_BY_MIME[m[1].toLowerCase()]`, and `m[1]` is a capture of
@@ -42,6 +43,30 @@ const MIME_BY_EXT: Record<string, string> = externKeyed({
 /** The largest image the store will accept. Exported so the route body limits
  *  can be checked against it rather than against a copy of the number. */
 export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+
+/**
+ * The Content-Security-Policy a stored image is served with.
+ *
+ * An SVG is a document as well as a picture. Drawn by an `<img>` or a CSS
+ * background it is inert, but opened directly (a link, a new tab, an image URL
+ * pasted into the address bar) its `<script>` runs as this app: same origin,
+ * same-origin writes, the cue routes' browser exemption. Layout and branding
+ * images are uploaded by anyone on the LAN. This policy makes such a document a
+ * sandboxed one that runs nothing; a policy on an image that an `<img>` loads
+ * is ignored, so nothing that draws the image changes. Inline styles and
+ * embedded raster images stay, because exported logos lean on both.
+ */
+const STORED_IMAGE_POLICY = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; sandbox";
+
+/**
+ * The headers for serving a stored image. Every route that answers with one
+ * goes through here, so none can serve an upload without the policy above.
+ * Sent whatever the type: the rule should not rest on the extension a file was
+ * saved under, and on a PNG it costs nothing.
+ */
+export function storedImageHeaders(mime: string, cacheControl: string): Record<string, string> {
+  return { "Content-Type": mime, "Cache-Control": cacheControl, "Content-Security-Policy": STORED_IMAGE_POLICY };
+}
 
 /**
  * Do the bytes actually look like the format the data URL claimed?
@@ -112,18 +137,24 @@ export async function readImage(
   if (!mime) return null;
   try {
     return { data: await fs.readFile(path.join(imageDir(dirName), file)), mime };
-  } catch {
-    return null;
+  } catch (err) {
+    // Only a missing file is "no such image". One that is there and cannot be
+    // read throws: a backup that took it for absent left it out and said it
+    // had succeeded.
+    if (isNotFound(err)) return null;
+    throw err;
   }
 }
 
-/** Every stored file in a directory, for backup or pruning. */
+/** Every stored file in a directory, for backup or pruning. Throws when the
+ *  directory is there and cannot be read, for the reason readImage does. */
 export async function listImages(dirName: string): Promise<string[]> {
   try {
     // Not a write in flight: atomicWrite's scratch file is a dotfile beside the image.
     return (await fs.readdir(imageDir(dirName))).filter((f) => !f.startsWith("."));
-  } catch {
-    return []; // nothing stored yet
+  } catch (err) {
+    if (isNotFound(err)) return []; // nothing stored yet
+    throw err;
   }
 }
 

@@ -1,0 +1,25 @@
+# Request data that CodeQL's stock model does not see arrive.
+#
+# Every route handler is an element of ROUTE_MODULES or EARLY_ROUTE_MODULES in
+# main/services/remote-server.ts and is called through a loop over that array.
+# CodeQL resolves no call made through an array element, so it never
+# connects the request the server received to the `c: RouteCtx` a handler is
+# given, and `c.url` and `c.req` inside a handler start no flow. A data extension
+# can only name a function's parameter when the function is passed to a library
+# call, which a handler never is, so those two cannot be modelled here.
+#
+# A body can. Every handler reads it through one of these three functions, whose
+# result is the request's bytes or JSON, so the result is the source. The path is
+# `file:` plus the path of the module that defines them, as the importing files
+# see it.
+#
+# Tested by .github/codeql/tests/models (fixtures: main/services/route-sources.ts)
+# and, for the paths, by scripts/codeql-workflow.test.ts.
+extensions:
+  - addsTo:
+      pack: codeql/javascript-all
+      extensible: sourceModel
+    data:
+      - ["file:main/services/routes/context.ts", "Member[readBody].ReturnValue.Awaited", "remote"]
+      - ["file:main/services/routes/context.ts", "Member[readBodyOrEmpty].ReturnValue.Awaited", "remote"]
+      - ["file:main/services/routes/context.ts", "Member[readRawBody].ReturnValue.Awaited", "remote"]

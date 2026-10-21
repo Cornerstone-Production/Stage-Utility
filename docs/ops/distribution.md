@@ -12,15 +12,16 @@ Releases are cut automatically from Conventional Commits by
 | `beta` | a prerelease `X.Y.Z-beta.N`, tagged and published as a GitHub prerelease |
 | `main` | the release `X.Y.Z`, tagged and published as the latest GitHub release |
 
-A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build` produces **no
-release**, so documentation churn does not mint versions.
+A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build`/`revert` produces
+**no release**, so documentation churn does not mint versions.
 
 Otherwise the level is the highest severity among every commit since the last
-**stable** release — one `feat` among twenty `docs` makes it a minor. A `feat`,
-`fix` or `perf` scoped to the tooling itself (`release`, `ci`, `dx`, `test`) is
-left out of that reading, and out of the notes; see `scripts/release-level.sh`.
-Measuring from the last stable rather than the last tag is what lets a beta line
-accumulate:
+**stable** release — one `feat` among twenty `docs` makes it a minor. `fix`, `perf`
+and `polish` are patch level, so a release of only those is X.Y.Z+1. A `feat`,
+`fix`, `perf` or `polish` scoped to the tooling itself (`release`, `ci`, `dx`,
+`test`) is left out of that reading, and out of the notes; see
+`scripts/release-level.sh`. Measuring from the last stable rather than the last
+tag is what lets a beta line accumulate:
 
 ```
 v1.9.2            last stable release
@@ -34,6 +35,10 @@ v1.9.2            last stable release
 The base version moves only when the pending release changes class; refinements
 advance `-beta.N`. The version never decreases — if the beta line already sits above
 what the level implies, it stays.
+
+Prereleases ship continuously, one per push to `beta` that carries a releasable
+commit. Stable releases are promoted about every two weeks, or sooner for a fix that
+cannot wait; see [Release rhythm](../contributing.md#release-rhythm).
 
 Nothing is ever force-pushed. Deployments track these branches, and a rewrite breaks
 their updater.
@@ -64,16 +69,19 @@ Targets: `linux-x64`, `linux-arm64`, `darwin-arm64`, `darwin-x64`, `win-x64`.
 
 When the release's tree has the [Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper)
 (`helper/macos/build-app.sh`), a macOS job also builds it, once per architecture, and
-the same release carries four more assets:
+the same release carries two more assets:
 
 ```
-StageUtilityOutput-arm64.zip     StageUtilityOutput-arm64.zip.sha256
-StageUtilityOutput-x86_64.zip    StageUtilityOutput-x86_64.zip.sha256
+StageUtilityOutput-arm64.zip
+StageUtilityOutput-x86_64.zip
 ```
 
-Each zip holds `StageUtilityOutput.app` (about 145 MB zipped and 330 MB unpacked, nearly all of it Chromium) and
-each `.sha256` is one `shasum -a 256` line. They are for the Mac installer, which a
-server serves from its own cache; the updater never reads them. A tree without the
+Each zip holds `StageUtilityOutput.app` (about 145 MB zipped and 330 MB unpacked, nearly all of it Chromium).
+They are for the Mac installer, which a server serves from its own cache; the updater
+never reads them. Like the archives, they are verified against the SHA-256 `digest`
+the releases API lists for the asset; no checksum file is published beside them. A
+release made before GitHub began serving asset digests (2025) has none, and its zips
+cannot be verified, so a server running one refuses them. A tree without the
 build script skips the job and releases as before, and a macOS build that fails or is
 cancelled releases without the zips rather than stopping the release (the archives do
 wait for that job, up to its 60-minute timeout); the run then carries an

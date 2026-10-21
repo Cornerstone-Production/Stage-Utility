@@ -6,6 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
 import { NOTES_CAP } from "../main/services/update/release-check.js";
 import { parseReleaseSections } from "../main/services/update/release-notes.js";
 
@@ -79,8 +80,10 @@ function sectionText(out: string, title: string): string {
  * whatever happens to be in the log, so it would drift with every release and
  * say nothing precise about the rule. Here the history IS the fixture: two
  * scopes, one that existed before the anchor and one introduced after it.
+ *
+ * `git` and `commit` come back so a test can carry the history on past v1.1.0.
  */
-function buildRepo(): { dir: string; sha: Record<string, string> } {
+function buildRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "release-notes-"));
   const git = (...args: string[]) =>
     execFileSync("git", args, {
@@ -126,6 +129,10 @@ function buildRepo(): { dir: string; sha: Record<string, string> } {
   // reads, and one held back for never having been in a released version.
   commit("streamPerf", "perf(patch): one stream instead of a six-request poll");
   commit("askOncePerf", "perf(signage): ask once per pair, not every hour", "Beta-only: true");
+  // `polish` reads the same way: an operator-visible refinement under an old scope,
+  // and one the author marked Beta-only because it refines the diagram above.
+  commit("rackSpacing", "polish(patch): more room between rack rows");
+  commit("legendSpacing", "polish(patch): the diagram legend sits closer to its title", "Beta-only: true");
   // And a breaking change, so every heading the generator can emit is emitted.
   commit("slugBang", "feat(patch)!: a display without a slug now redirects");
   git("tag", "v1.1.0");
@@ -139,7 +146,7 @@ function buildRepo(): { dir: string; sha: Record<string, string> } {
   // could name this and apply to whatever the branch points at later.
   git("branch", "movable", sha.rackColour);
 
-  return { dir, sha };
+  return { dir, sha, git, commit };
 }
 
 describe("a scope that names a renamed feature", () => {
@@ -229,10 +236,10 @@ describe("release notes", () => {
   });
 });
 
-// A stable release folds in thirty-odd betas. "Fixed" filled up with the polish
-// commits that BUILT the release's own new features — a reader who has never had
-// digital signage does not need eleven lines about signage bugs, and those lines
-// crowded out fixes to the things they do have.
+// A stable release folds in thirty-odd betas. "Fixed" filled up with the small
+// corrections that BUILT the release's own new features — a reader who has never
+// had digital signage does not need eleven lines about signage bugs, and those
+// lines crowded out fixes to the things they do have.
 //
 // The rule is deliberately narrow: a fix is held back only when its scope both
 // shipped a feature in this range AND never appeared before the anchor. A
@@ -411,17 +418,19 @@ describe("an override for a Beta-only decision that can no longer be made in the
       { commit: repo.sha.oldFix, betaOnly: true, reason: "a commit from before the anchor" },
     ], () => runNotes(VERSION, "v1.0.0", repo.dir));
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /which is not a non-breaking fix: or perf: commit in/);
+    assert.match(r.stderr, /which is not a non-breaking .+ commit in/);
+    // And it says what an override CAN name: every patch type the shared list has.
+    for (const t of COMMIT_TYPE_FILE.patch) assert.match(r.stderr, new RegExp(`\\b${t}:`), `${t} is not named`);
   });
 
   it("an override naming something that is not a fix stops the release", () => {
-    // `betaOnly` only ever holds back a fix or a perf. On a feat it would read
-    // as applied and change nothing.
+    // `betaOnly` only ever holds back a patch-level commit. On a feat it would
+    // read as applied and change nothing.
     const r = withOverride(file, [
       { commit: repo.sha.signageFeat, betaOnly: true, reason: "wrong commit pasted" },
     ], () => runNotes(VERSION, "v1.0.0", repo.dir));
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /which is not a non-breaking fix: or perf: commit in/);
+    assert.match(r.stderr, /which is not a non-breaking .+ commit in/);
   });
 
   it("a file that will not parse stops the release rather than quietly generating notes", () => {
@@ -653,7 +662,7 @@ describe("perf is an improvement, not a bug fix", () => {
     // Each section's arithmetic is its own, or the Fixed note claims a count
     // that includes work no reasonable person would call a fix.
     const out = notesFor("1.1.0", "v1.0.0", repo.dir);
-    assert.match(sectionText(out, "Improved"), /1 further improvement made while building/);
+    assert.match(sectionText(out, "Improved"), /\b2 further improvements made while building/);
     assert.match(sectionText(out, "Fixed"), /3 further fixes made while building/);
   });
 
@@ -790,5 +799,230 @@ describe("an override names a commit, not a name for one", () => {
       () => notesFor("9.9.7", "v1.0.0", repo.dir),
     );
     assert.doesNotMatch(sectionText(out, "Fixed"), /rack colour bled/);
+  });
+});
+
+// The commit types are main/services/commit-types.json's, so these loop over what
+// it says: a type added there is covered here the day it is added, and a generator
+// carrying its own copy of the list goes red.
+describe("every commit type the shared list names is routed by its level", () => {
+  const repo = buildRepo();
+  after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));
+
+  // Under `patch`, a scope the anchor already has, so nothing here is held back.
+  for (const t of [...COMMIT_TYPE_FILE.minor, ...COMMIT_TYPE_FILE.patch]) {
+    repo.commit(`type_${t}`, `${t}(patch): the ${t} commit`);
+  }
+  // A hidden type's words repeat a feature's. The type is never listed, but a
+  // line it let through would claim the slot the feature needs. Hidden is the
+  // invisible types and the legacy ones, which only old history carries.
+  const HIDDEN = [...COMMIT_TYPE_FILE.invisible, ...COMMIT_TYPE_FILE.legacy];
+  for (const t of HIDDEN) {
+    repo.commit(`feat_${t}`, `feat(patch): the ${t} words`);
+    repo.commit(`hidden_${t}`, `${t}(patch): the ${t} words`);
+  }
+  repo.git("tag", "v1.2.0");
+  const out = notesFor("1.2.0", "v1.1.0", repo.dir);
+
+  /** The sections a line landed in. */
+  const where = (words: string) =>
+    ["Breaking", "New", "Improved", "Fixed"].filter((s) => sectionText(out, s).includes(`**patch** — ${words}`));
+
+  it("a minor type is New", () => {
+    for (const t of COMMIT_TYPE_FILE.minor) assert.deepEqual(where(`the ${t} commit`), ["New"], t);
+  });
+
+  it("fix is Fixed and every other patch type is Improved", () => {
+    for (const t of COMMIT_TYPE_FILE.patch) {
+      assert.deepEqual(where(`the ${t} commit`), [t === "fix" ? "Fixed" : "Improved"], t);
+    }
+  });
+
+  it("a hidden type is not listed, and does not take a feature's place", () => {
+    for (const t of HIDDEN) assert.deepEqual(where(`the ${t} words`), ["New"], t);
+  });
+});
+
+// A patch type has no section of its own beyond Fixed: `polish` reads as an
+// improvement, and is held back as beta-only exactly as a fix is.
+describe("a polish commit is held back as beta-only, like a fix", () => {
+  const repo = buildRepo();
+  after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));
+
+  it("a Beta-only polish is held back and counted with the improvements", () => {
+    // Nobody upgrading from stable saw the unpolished diagram, so a stable
+    // release does not announce polishing it.
+    const out = notesFor("1.1.0", "v1.0.0", repo.dir);
+    assert.doesNotMatch(sectionText(out, "Improved"), /legend sits closer/);
+    assert.match(sectionText(out, "Improved"), /\b2 further improvements made while building/);
+    assert.match(sectionText(out, "Fixed"), /\b3 further fixes made while building/, "polish was counted as a fix");
+  });
+
+  it("sets the held-back note off from the last bullet by a blank line", () => {
+    // Directly under a bullet it is a lazy continuation of it, and reads as part
+    // of that bullet on the release page.
+    const out = notesFor("1.1.0", "v1.0.0", repo.dir);
+    assert.match(sectionText(out, "Improved"), /\n\n2 further improvements made while building/);
+    assert.match(sectionText(out, "Fixed"), /\n\n3 further fixes made while building/);
+  });
+
+  it("a prerelease keeps it", () => {
+    const out = notesFor("1.1.0-beta.1", "v1.0.0", repo.dir);
+    assert.match(sectionText(out, "Improved"), /legend sits closer/);
+    assert.doesNotMatch(out, /further improvements? made while building/);
+  });
+
+  it("an override can hold one back or show one, like a fix", () => {
+    const file = path.join(FIXTURE_OVERRIDE_DIR, "9.9.7.json");
+    const held = withOverride(file, [
+      { commit: repo.sha.rackSpacing, betaOnly: true, reason: "Spacing on a table built in this release." },
+    ], () => notesFor("9.9.7", "v1.0.0", repo.dir));
+    assert.doesNotMatch(sectionText(held, "Improved"), /more room between rack rows/);
+    assert.match(sectionText(held, "Improved"), /\b3 further improvements made while building/);
+
+    const shown = withOverride(file, [
+      { commit: repo.sha.legendSpacing, betaOnly: false, reason: "The legend shipped in v1.0.0." },
+    ], () => notesFor("9.9.7", "v1.0.0", repo.dir));
+    assert.match(sectionText(shown, "Improved"), /legend sits closer/);
+  });
+});
+
+// A hand-written notice and the generated sections both want the same heading.
+// Prepended whole, the release page carried two `## Improved` headings, one of
+// them above New and the other below it.
+describe("a hand-written notice and the generated sections share one heading", () => {
+  const repo = buildRepo();
+  after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));
+  const version = "9.9.7";
+  const noticeFile = path.join(FIXTURE_NOTES_DIR, `${version}.md`);
+
+  function withNotice<T>(text: string, run: () => T): T {
+    fs.mkdirSync(FIXTURE_NOTES_DIR, { recursive: true });
+    fs.writeFileSync(noticeFile, text);
+    try {
+      return run();
+    } finally {
+      fs.rmSync(noticeFile, { force: true });
+    }
+  }
+
+  const notesWith = (notice: string, from = "v1.0.0") =>
+    withNotice(notice, () => notesFor(version, from, repo.dir));
+  /** How many lines are exactly `## title`, fenced or not. */
+  const headingCount = (out: string, title: string) =>
+    out.split("\n").filter((l) => l === `## ${title}`).length;
+
+  const NOTICE = [
+    "Overview prose for the release.",
+    "",
+    "## Changed",
+    "",
+    "- A behaviour changed.",
+    "",
+    "## Improved",
+    "",
+    "- A hand-written improvement.",
+    "",
+  ].join("\n");
+
+  it("writes Improved once, hand-written bullets first, then the generated ones", () => {
+    const out = notesWith(NOTICE);
+    assert.equal(headingCount(out, "Improved"), 1, `Improved appears twice:\n${out}`);
+
+    const improved = sectionText(out, "Improved");
+    const handWritten = improved.indexOf("A hand-written improvement.");
+    const generated = improved.indexOf("more room between rack rows");
+    assert.ok(handWritten !== -1, "the hand-written bullet was lost");
+    assert.ok(generated !== -1, "the generated polish bullet is missing");
+    assert.ok(handWritten < generated, "hand-written bullets come first");
+    assert.match(improved, /- A hand-written improvement\.\n- \*\*patch\*\*/, "one tight list, not two");
+  });
+
+  it("leaves the prose and the sections the generator does not write where they were", () => {
+    const out = notesWith(NOTICE);
+    assert.ok(out.startsWith("Overview prose for the release.\n\n## Changed"), out);
+    assert.match(sectionText(out, "Changed"), /A behaviour changed\./);
+    assert.doesNotMatch(sectionText(out, "Changed"), /hand-written improvement/, "Improved's bullets stayed under Changed");
+  });
+
+  it("the dialog reads the one section as both sets of bullets", () => {
+    // The real parser over the real output, not a count of headings.
+    const improved = parseReleaseSections(notesWith(NOTICE), 100).find((s) => s.section === "Improved");
+    assert.ok(improved);
+    assert.ok(improved.lines.some((l) => l.includes("A hand-written improvement.")));
+    assert.ok(improved.lines.some((l) => l.includes("more room between rack rows")));
+  });
+
+  it("keeps a hand-written Improved when nothing generated lands there", () => {
+    // From the last polish on: only the breaking change after it is in range.
+    const out = notesWith(NOTICE, repo.sha.legendSpacing);
+    assert.match(sectionText(out, "Breaking"), /a display without a slug/, "the range is not the one this test means");
+    assert.equal(headingCount(out, "Improved"), 1);
+    assert.match(sectionText(out, "Improved"), /A hand-written improvement\./);
+  });
+
+  for (const sub of ["###", "#"]) {
+    it(`keeps a ${sub} under the section it was written in, with the generated lines above it`, () => {
+      // Only a `##` ends a section. A sub-heading that did would send everything
+      // after it up to the overview, above the heading it belongs to.
+      const out = notesWith(
+        ["## Improved", "", "- A hand-written improvement.", "", `${sub} Details`, "", "Why the table moved.", ""].join("\n"),
+      );
+      assert.equal(headingCount(out, "Improved"), 1);
+      assert.match(sectionText(out, "Improved"), new RegExp(`${sub} Details\\n\\nWhy the table moved\\.`));
+      assert.ok(out.indexOf(`${sub} Details`) > out.indexOf("## Improved"), "the sub-heading was lifted out above its section");
+
+      // The dialog ends a section at ANY line starting with `#`, so everything
+      // generated has to sit above the sub-heading or the dialog never sees it.
+      const improved = parseReleaseSections(out, 100).find((s) => s.section === "Improved");
+      assert.ok(improved);
+      assert.ok(improved.lines.some((l) => l.includes("A hand-written improvement.")));
+      assert.ok(improved.lines.some((l) => l.includes("more room between rack rows")), "the generated bullets sit under the sub-heading");
+      assert.match(improved.note ?? "", /further improvements made while building/, "so does the held-back note");
+    });
+  }
+
+  it("merges two hand-written sections of the same name under the one heading", () => {
+    const out = notesWith(
+      ["## Improved", "", "- First hand-written.", "", "## Changed", "", "- A behaviour changed.", "", "## Improved", "", "- Second hand-written.", ""].join("\n"),
+    );
+    assert.equal(headingCount(out, "Improved"), 1);
+    const improved = sectionText(out, "Improved");
+    assert.ok(improved.includes("First hand-written."), "the first section was dropped when the second began");
+    assert.ok(improved.indexOf("First hand-written.") < improved.indexOf("Second hand-written."), "the written lines are out of order");
+    assert.match(sectionText(out, "Changed"), /A behaviour changed\./);
+  });
+
+  it("lifts every section the generator writes, not only Improved", () => {
+    const TITLES = ["Breaking", "New", "Improved", "Fixed"];
+    const out = notesWith(TITLES.flatMap((t) => [`## ${t}`, "", `- Hand-written ${t}.`, ""]).join("\n"));
+    for (const t of TITLES) {
+      assert.equal(headingCount(out, t), 1, `${t} appears twice`);
+      const firstBullet = sectionText(out, t).split("\n").find((l) => l.startsWith("- "));
+      assert.equal(firstBullet, `- Hand-written ${t}.`, `${t} does not lead with what was written`);
+    }
+  });
+
+  // Each block holds a `## Improved` that is a comment, not a heading.
+  const FENCED: Record<string, string[]> = {
+    "a backtick fence": ["```bash", "## Improved", "echo hi", "```"],
+    "a tilde fence": ["~~~bash", "## Improved", "echo hi", "~~~"],
+    "a tilde fence with backticks inside it": ["~~~bash", "```", "## Improved", "echo hi", "~~~"],
+    "a longer fence with a shorter marker inside it": ["````md", "```", "## Improved", "echo hi", "````"],
+  };
+  for (const [name, block] of Object.entries(FENCED)) {
+    it(`does not mistake a comment inside ${name} for a heading`, () => {
+      const out = notesWith(["Run this:", "", ...block, "", NOTICE].join("\n"));
+      assert.ok(out.includes(block.join("\n")), "the fenced line was lifted out of its code block");
+      assert.equal(headingCount(out, "Improved"), 2, "one in the fence, one real heading");
+      // The fence holds the first `## Improved`, so the real section is the last.
+      assert.match(out.slice(out.lastIndexOf("## Improved")), /A hand-written improvement\./);
+    });
+  }
+
+  it("joins the generated bullets to a hand-written list whose last bullet wraps", () => {
+    // The last LINE is a continuation, not a bullet; the last PARAGRAPH is the list.
+    const out = notesWith(["## Improved", "", "- A hand-written improvement that runs on", "  to a second line.", ""].join("\n"));
+    assert.match(sectionText(out, "Improved"), /to a second line\.\n- \*\*patch\*\*/, "a blank line split the list in two");
   });
 });

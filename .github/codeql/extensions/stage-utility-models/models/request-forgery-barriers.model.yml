@@ -1,0 +1,21 @@
+# The operator's page address, once it has been through the rules.
+#
+# js/request-forgery flags a request whose URL depends on a value a user supplied. The
+# address the ServiceCue publisher sends to is typed into the Public link card, by design,
+# and parsePublishUrl is what makes it safe to send to: it keeps only the origin of an
+# https address (plain http for localhost and 127.0.0.1 only while
+# STAGE_UTILITY_PUBLISH_ALLOW_LOCAL=1 is set on the server), refuses credentials, and
+# returns a branded PublishOrigin that publishFetch pins every URL onto
+# (docs/reference/code-scanning.md, "ServiceCue publishing").
+#
+# js/request-forgery honours barrierModel (kind "request-forgery"), so the result of the
+# parse is the barrier. Nothing else is modelled: an address that has not been parsed
+# stays tainted.
+#
+# Tested by .github/codeql/tests/models (fixture: main/services/publish-forgery.ts).
+extensions:
+  - addsTo:
+      pack: codeql/javascript-all
+      extensible: barrierModel
+    data:
+      - ["file:main/services/servicecue-publish-rules.ts", "Member[parsePublishUrl].ReturnValue", "request-forgery"]

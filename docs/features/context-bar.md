@@ -141,7 +141,7 @@ in a fixed order, and the order is the design:
 | *(before any of these)* | On a desktop, the **page's name** gives up width first — down to about 14 characters and no further. Every built-in page name is shorter than that and so is never shortened at all; only a console you have given a long name ever ends in an ellipsis here. |
 | **Full** | Nothing. Everything at its full length. |
 | **Qualifiers** | The clock's seconds. The score capsule's inning or period. The label beside a pre-service countdown. |
-| **Compact** | Every idle word becomes that item's own mark — `No item`, `Off air`, `Standby`, `All connected`. The word `LIVE` goes; its dot does not. Gaps and edge padding tighten. The score capsule tightens. |
+| **Compact** | Every idle word becomes that item's own mark — `No item`, `Off air`, `Standby`, `All connected`. The word `LIVE` goes; its dot does not. Gaps tighten, and on a phone so does the edge padding. The score capsule tightens. |
 | **The floor** | Names somebody wrote — the service type, the plan title, the current item — give way and end in an ellipsis. |
 
 Four things it may never do:

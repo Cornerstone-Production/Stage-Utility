@@ -360,9 +360,19 @@ screens, each with its own URL.
 rules, recorded services, the baptism timer and the stage patch sheet.
 
 **Advanced** — updates and the update track, the server log, the context bar,
-kiosk devices, time zone and clock format, the public address, how integrations
-back off between services, backup and restore, automatic backups, and the data
-archive.
+kiosk devices, time zone and clock format, the public address, host names, how
+integrations back off between services, backup and restore, automatic backups, and
+the data archive.
+
+**Host names** lists the DNS names this server answers to, its defence against DNS
+rebinding ([SECURITY.md](../../SECURITY.md)). IP addresses, names with no dot and
+names under `.local` always work. A screen, panel or Home Assistant that opens the
+app by any other name, such as `stage.example.org`, needs that name on the list
+before **Refuse names not on the list** is turned on: names that reach the server
+wait on the card to be accepted or dismissed, and the sidebar counts them. The
+first time refusal is turned on it accepts each waiting name seen over at least a
+day in the last 30. Change the list from the server's IP address or a name
+already on it.
 
 ### Time zone
 
@@ -433,11 +443,11 @@ own variables, set on the command line of the machine being set up:
 | `STAGE_SERVER` | Pin the device to one server's address, for a network where discovery does not reach it. All three installers |
 | `STAGE_KIOSK_PORT` | The UDP port the device broadcasts its discovery probe to. Default `8789` |
 | `STAGE_KIOSK_UID` | Linux only: the numeric id of the account the kiosk browser runs as. Default `1000` |
-| `STAGE_DOWNLOAD_FROM` | macOS only: the server to fetch the output helper from for this run only. See [Installing the Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper) |
+| `STAGE_DOWNLOAD_FROM` | macOS and Windows: the server to download the output helper, or the Windows launcher, from, without pinning the device to it. The device's updater asks that server from then on. See [Installing the Mac output helper](../kiosk-devices.md#installing-the-mac-output-helper) and [The Windows kiosk's launcher](../kiosk-devices.md#the-windows-kiosks-launcher) |
 
 **Tooling and tests.** `STAGE_UTILITY_TEST_RELEASE_BASE` points the Mac output
-helper download at a test server instead of GitHub's releases, and the server
-logs a notice when it is set. `STAGE_UTILITY_RELEASE_NOTES_DIR` redirects where
+helper download, and the releases API call that gives its digest, at a test server
+instead of GitHub, and the server logs a notice when it is set. `STAGE_UTILITY_RELEASE_NOTES_DIR` redirects where
 the release-notes script looks for notes. `PRIVATE_TERMS` and `REQUIRE_TERMS` are
 read by the public-hygiene check in CI, described in
 [Contributing](../contributing.md#public-hygiene). None of these has a use in

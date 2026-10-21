@@ -531,7 +531,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           mounts once the card is on screen — eight iframes booting at once each
           fetch state and open a stream, which timed out the server on a real
           install with eight displays. */}
-      <div className="px-3 pt-2">
+      <div className="pt-2">
         {output.viewId ? (
           // The preview IS the display, so clicking it opens the real thing in a
           // new tab - the same place the menu's "Open display" goes. An anchor
@@ -550,7 +550,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
             following={panelOpen ? { label: `Show settings for ${output.name}`, onOpenDisplay: () => window.open(outputUrl, `display-${output.id}`) } : undefined}
           />
         ) : (
-          <div className="grid aspect-video place-items-center rounded-lg border border-dashed border-line text-caption1 text-fg-subtle">
+          <div className="grid aspect-video place-items-center border-y border-dashed border-line text-caption1 text-fg-subtle">
             Nothing assigned
           </div>
         )}
@@ -607,7 +607,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           ariaLabel={`View on ${output.name}`}
           triggerClassName={cn(
             "h-7 w-auto min-w-0 max-w-[70%] truncate rounded-lg border-transparent px-2.5 text-footnote font-medium",
-            output.viewId ? "bg-fill text-fg" : "bg-warn-3 text-warn-11",
+            output.viewId ? "bg-fill text-fg" : "bg-warn-9/15 text-warn-11",
           )}
         />
         {/* Opening the real screen moved here, because the preview now opens the
@@ -743,7 +743,7 @@ function UnassignedViewCard({
         </DropdownMenu.Root>
       </div>
 
-      <div className="px-3 pt-2">
+      <div className="pt-2">
         <LazyPreview
           viewId={view.id}
           onExpand={onEditLayout}

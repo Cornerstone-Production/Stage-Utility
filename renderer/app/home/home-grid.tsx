@@ -21,6 +21,7 @@ import { useSlideOnMove } from "../../lib/use-slide-on-move";
 import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../../lib/use-media-query";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
+import { displayType } from "../../main/timer-config";
 
 /**
  * The widget's own styling MINUS everything Home supplies itself: the frame AND
@@ -173,6 +174,8 @@ function useHomeCtx(layout: LayoutDTO, menuCardId: string | null): LayoutRenderC
     propresenter: d.propresenterStatus.value,
     propInstances: d.propInstances,
     pcoLive: d.pcoLive,
+    pcoLiveKnown: d.pcoLiveKnown,
+    propresenterKnown: d.propresenterStatus.known,
     transcript: d.transcript,
     spl: d.spl,
     pvp: d.pvp,
@@ -281,7 +284,7 @@ export function HomeCardCell({
       {isCoarse && onCardContextMenu && (
         <button
           type="button"
-          aria-label={`${LAYOUT_OBJECTS[card.config.type as keyof typeof LAYOUT_OBJECTS]?.label ?? card.config.type} options`}
+          aria-label={`${LAYOUT_OBJECTS[displayType(card.config) as keyof typeof LAYOUT_OBJECTS]?.label ?? card.config.type} options`}
           className="absolute right-1 top-1 z-[1] grid size-11 shrink-0 place-items-center rounded-md text-fg-subtle opacity-80 hover:bg-fill-active hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           onClick={(e) => {
             e.stopPropagation();

@@ -103,6 +103,7 @@ const EXPECTED_CONFIG = [
   "bar-config.json",
   // The operator's own dates worth marking on the Trends chart.
   "history-milestones.json",
+  "host-names.json",
   "kiosk-devices.json",
   "layout-groups.json",
   "layout-templates.json",
@@ -121,6 +122,9 @@ const EXPECTED_CONFIG = [
   "scores-favourites.json",
   "servicecue-config.json",
   "servicecue-layouts.json",
+  // Whether web publishing is on, and the address it publishes to. The token is in
+  // secrets.bin, which a snapshot never carries.
+  "servicecue-publish.json",
   "servicecue-roles.json",
   "settings.json",
   "slots.json",
@@ -134,6 +138,7 @@ const EXPECTED_RUNTIME = [
   "automation-log.json",
   "baptism.json",
   "checklist-ticks.json",
+  "host-names-seen.json",
   // The day's stage messages: an observation, cleared nightly.
   "messages.json",
   "service-timeline.json",

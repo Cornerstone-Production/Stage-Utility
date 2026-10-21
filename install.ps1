@@ -15,6 +15,7 @@
 
 $ErrorActionPreference = "Stop"
 
+# Also spelled in main/services/github-repo.ts and the other installers.
 $repo    = if ($env:STAGE_REPO)   { $env:STAGE_REPO }   else { "Cornerstone-Production/Stage-Utility" }
 $track   = if ($env:STAGE_TRACK)  { $env:STAGE_TRACK }  else { "main" }
 $port    = if ($env:STAGE_PORT)   { $env:STAGE_PORT }   else { "8788" }

@@ -41,7 +41,10 @@ Nothing is written outside a service.
 Rows are only ever whole: each ends in a newline and the parser stops at the last
 one, so a file cut short by a power loss reads back as every complete row it had.
 If a meter starts reporting a new metric mid-service the writer moves to
-`spl.2.csv` rather than leaving earlier rows misaligned.
+`spl.2.csv` rather than leaving earlier rows misaligned. A file that is there and
+cannot be read, or stops taking rows, is passed over the same way and left as it
+was: see
+[When a recorded file cannot be read](ops/reliability.md#when-a-recorded-file-cannot-be-read).
 
 About 0.45 MB per service, roughly 47 MB a year at two services a week. There is
 no automatic pruning.
@@ -79,6 +82,8 @@ figures can be recomputed properly.
 
 Importing the same archive twice changes nothing. Every file is read and validated
 before anything is written, so a corrupt archive cannot leave a half-imported year.
+While a service record on this machine cannot be read, download, inspect and
+import all refuse, rather than leaving that service out or taking it for new.
 
 Baptism sessions (`baptism.json`) restore separately from the per-service choice
 above: every session in the archive merges into the local list by id, whatever is
@@ -98,7 +103,8 @@ an archive, and it treats the raw layer differently in each direction:
   into the target's directory, chronologically and widened to the union of both
   column sets, and the source directory is removed. Not optional: SPL rebuilds
   its record from these rows after a restart, so a merge that left them behind
-  reverted itself the next time the box came up.
+  reverted itself the next time the box came up. Every file on both sides is
+  read first, so one that cannot be read refuses the merge with nothing moved.
 - **Merging two recordings re-keys the source's baptism sessions onto the
   target.** `baptism.json` holds every service's sessions in one flat list, not
   a record per occurrence like the stores above, so there is nothing to
@@ -125,6 +131,13 @@ an archive, and it treats the raw layer differently in each direction:
 - **A service that is recording right now cannot be edited at all.** The
   recorder holds the same record, so any change races its next write. History
   refuses until the service ends.
+- **Nor can one whose record could not be read.** Every edit rewrites the
+  record from what it read, so History refuses until the file reads and the
+  server restarts.
+- **Nor one whose record could not be saved yet.** The recorder holds the only
+  current copy and retries the save; History and an import over that service
+  refuse until it lands. See
+  [When a recorded service cannot be saved](ops/reliability.md#when-a-recorded-service-cannot-be-saved).
 
 ### Rebuild from raw
 

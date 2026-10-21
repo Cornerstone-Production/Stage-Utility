@@ -15,7 +15,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { LAYOUT_OBJECTS } from "../../main/layout-objects.js";
+import { readConfig } from "../../main/timer-config.js";
 import { isHomeCard } from "./cards.js";
+
 
 const HOME_TYPES = Object.keys(LAYOUT_OBJECTS).filter((t) => t.startsWith("home-"));
 
@@ -48,14 +50,22 @@ describe("routing a home card", () => {
   });
 
   test("every home- type in the registry is claimed by the card renderer", () => {
+    // Less `home-live-status`, which is a Timer by the time it is routed (the
+    // next test holds that).
     const orphans = HOME_TYPES.filter(
-      (type) => !isHomeCard(LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS].config() as never),
+      (type) => type !== "home-live-status" && !isHomeCard(LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS].config() as never),
     );
     assert.deepEqual(
       orphans,
       [],
       "these fall through to LayoutRenderer's switch and are drawn as something else",
     );
+  });
+
+  test("the one home type that is a Timer is claimed by the Timer, not by a card", () => {
+    const config = readConfig(LAYOUT_OBJECTS["home-live-status"].config());
+    assert.equal(config.type, "timer");
+    assert.equal(isHomeCard(config as never), false);
   });
 
   test("the streaming trio in particular", () => {

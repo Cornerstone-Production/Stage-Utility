@@ -14,6 +14,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { XIcon, GripVerticalIcon } from "lucide-react";
 
 import { LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, SUPERSEDED_ON_HOME, widgetMatchesQuery } from "../../main/layout-objects";
+import { displayType } from "../../main/timer-config";
 import type { HomeCardSize, HomeVisibility, LayoutObject } from "@main/types/views";
 import { DialogOverlay } from "../../components/ui/dialog";
 import type { PointerEvent as ReactPointerEvent } from "react";
@@ -42,7 +43,7 @@ export function CardChrome({
   /** This card is the one being dragged. */
   dragging: boolean;
 }) {
-  const label = LAYOUT_OBJECTS[card.config.type as keyof typeof LAYOUT_OBJECTS]?.label ?? card.config.type;
+  const label = LAYOUT_OBJECTS[displayType(card.config) as keyof typeof LAYOUT_OBJECTS]?.label ?? card.config.type;
   const when = whenOf(card);
   const size = sizeOf(card);
   return (

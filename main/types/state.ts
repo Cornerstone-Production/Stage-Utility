@@ -58,6 +58,9 @@ export interface StageState {
   /** Answer kiosk devices looking for a server. Off until switched on, so a test
    *  instance on the same LAN cannot claim a screen meant for the real one. */
   kioskDiscovery: boolean;
+  /** Mac output helpers and Windows kiosks follow this server's version on their
+   *  own. See machine-updates.ts. */
+  autoUpdateMachines: boolean;
   /** Allowlisted service type IDs for auto mode. Empty array = all allowed. */
   allowedServiceTypeIds: string[];
   /** How the slot editor's plan switcher steps. Editor-only — it never changes
@@ -79,6 +82,15 @@ export interface StageState {
   /** Avatar shown for matched people with no PCO photo (recolored like a silhouette);
    *  null = use the built-in person icon. */
   defaultAvatar: string | null;
+  /** The custom tab and home-screen icon, as the stored 192 px image the tab uses and
+   *  the previews draw, or null when none is set (the tab then follows the logo and
+   *  phones keep the built-in icon). The other sizes are served by the server, never
+   *  sent here. */
+  appIcon192: string | null;
+  /** The same icon drawn for Android's adaptive masks, with its art inside the safe zone. */
+  appIconMaskable: string | null;
+  /** `#rrggbb` behind the icon's transparent areas. */
+  appIconBackground: string;
   /** Show NDI-related controls in settings (off by default; native client only). */
   ndiEnabled: boolean;
   /** Public base URL (DNS) for the connect QR + display links; null = LAN IP. */

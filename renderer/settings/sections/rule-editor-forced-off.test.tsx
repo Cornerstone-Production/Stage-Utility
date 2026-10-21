@@ -5,8 +5,8 @@
 // The bug this guards: the offer applied unconditionally — "if forcedOff and
 // no issues, send enabled:true" — with no regard for what the Enabled switch
 // on screen actually read. An operator who explicitly switched a broken rule
-// off, or a rule that was never on in the first place (every Add rule starts
-// off), got enabled behind their back the moment the field was fixed and Save
+// off, or a rule that was never on in the first place (every automatic rule is
+// created off), got enabled behind their back the moment the field was fixed and Save
 // was pressed again. Reverting either `onDraft.enabled`/`offDraft.enabled`
 // gate in save(), or the matching `onWillReenable`/`offWillReenable` gate on
 // the footer, turns the tests below red.
@@ -101,7 +101,7 @@ function patchesFor(id: string): Record<string, unknown>[] {
   return calls.filter((c) => c.id === id).map((c) => c.body);
 }
 
-const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
+const { render, cleanup, act, fireEvent, within } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
@@ -243,7 +243,7 @@ describe("a save that turned the rule off over an issue", () => {
     assert.equal(last?.enabled, false, `the second save's patch must ask for OFF, not re-add enabled:true, got ${JSON.stringify(last)}`);
   });
 
-  test("B: OFF as Add rule creates it, with an issue; operator never touches Enabled; saves twice — it must stay off", async () => {
+  test("B: OFF as New cue creates an automatic rule, with an issue; operator never touches Enabled; saves twice — it must stay off", async () => {
     RULES = { r1: base(false) };
     await mount();
     await save();
@@ -320,5 +320,15 @@ describe("a pair whose OFF half was forced off over its own issue", () => {
       false,
       `the off half's patch must ask for OFF, not re-add enabled:true, got ${JSON.stringify(last)}`,
     );
+  });
+});
+
+describe("the fields outside the rule's steps", () => {
+  // The Cooldown row is a <label> whose first control is its hint button, so
+  // the label names the hint and the number field beside it is left unnamed.
+  test("Cooldown is named, hint and all", async () => {
+    RULES = { r1: base(true) };
+    await mount();
+    assert.ok(within(document.body).getByRole("textbox", { name: "Cooldown" }));
   });
 });

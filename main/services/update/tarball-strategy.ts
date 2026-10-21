@@ -11,10 +11,9 @@
 // problem this ordering does not create: the cgroup only tears down because
 // something called `systemctl stop`, and swap mode never does.
 
+import { GITHUB_RAW } from "../github-repo.js";
 import type { InstallKind } from "./install-kind.js";
 import type { ApplyOptions, SpawnPlan, UpdateStrategy } from "./strategy.js";
-
-const REPO = "Cornerstone-Production/Stage-Utility";
 
 /**
  * The installer for a track comes from that track's branch.
@@ -37,7 +36,7 @@ const REPO = "Cornerstone-Production/Stage-Utility";
 export function installerUrl(track: string, platform: NodeJS.Platform): string {
   const branch = track === "beta" ? "beta" : "main";
   const file = platform === "win32" ? "install.ps1" : "install.sh";
-  return `https://raw.githubusercontent.com/${REPO}/${branch}/${file}`;
+  return `${GITHUB_RAW}/${branch}/${file}`;
 }
 
 export class TarballStrategy implements UpdateStrategy {

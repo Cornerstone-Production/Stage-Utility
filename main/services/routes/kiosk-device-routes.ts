@@ -6,7 +6,9 @@
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, updateDevices } from "../kiosk-devices-store.js";
-import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, healthList, forgetHealth } from "../kiosk-presence.js";
+import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret, announceDevices } from "../kiosk-presence.js";
+import { MachineUpdates, minutes, parseCheck, REPORT_TTL_MS } from "../machine-updates.js";
+import { serviceWindow } from "../service-window.js";
 import { parseHealthReport } from "../output-health.js";
 import { headerValue } from "../http-origin.js";
 import { screenFromQuery, describeScreen } from "../kiosk-screen-size.js";
@@ -17,6 +19,7 @@ import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, readCreateScreenBody, r
 import { errorMessage } from "../errors.js";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
+import * as crypto from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import * as path from "node:path";
 import { APP_ROOT } from "../app-root.js";
@@ -24,11 +27,38 @@ import { getUserDataPath } from "../app-paths.js";
 import { OutputHelperDownloads, parseHelperPath } from "../output-helper-download.js";
 import { pkgVersion } from "../updater.js";
 import { scrub } from "../scrub.js";
-import { originFromHost, stampOrigin } from "../kiosk-installer-origin.js";
+import { isStamped, originFromHost, stampOrigin } from "../kiosk-installer-origin.js";
 
 /** Exactly what may be served from scripts/kiosk. An allowlist rather than a
  *  path join, because this reads a file from disk on request. */
-const KIOSK_INSTALLERS = new Set(["install-linux.sh", "install-macos.sh", "install-windows.ps1"]);
+const KIOSK_INSTALLERS = new Set(["install-linux.sh", "install-macos.sh", "install-windows.ps1", "kiosk-windows.ps1", "kiosk-update-windows.ps1"]);
+
+/** What each Mac helper and Windows kiosk last said about its updates. Runtime;
+ *  see machine-updates.ts. A change pushes a `kiosk:devices` frame, which is the
+ *  channel Screens already refetches on. */
+const machineUpdates = new MachineUpdates(announceSoon);
+
+/** One `kiosk:devices` frame for a burst of machine changes, at most one a second:
+ *  the check is open, and a sender minting new machine ids must not turn each
+ *  into a broadcast to every Screens page. */
+let announceTimer: ReturnType<typeof setTimeout> | null = null;
+function announceSoon(): void {
+  if (announceTimer) return;
+  announceTimer = setTimeout(() => {
+    announceTimer = null;
+    announceDevices();
+  }, 1000);
+  announceTimer.unref?.();
+}
+
+/** Where every kiosk script this route serves lives. */
+const kioskScript = (name: string): string => path.join(APP_ROOT, "scripts", "kiosk", name);
+
+/** The SHA-256 of the Windows launcher as served, byte for byte: what a Windows
+ *  kiosk compares its own copy against. */
+async function windowsLauncherDigest(): Promise<string> {
+  return crypto.createHash("sha256").update(await readFile(kioskScript("kiosk-windows.ps1"))).digest("hex");
+}
 
 /** The Mac output helper's zips, fetched from the release on first request and
  *  kept in the data directory. See output-helper-download.ts. */
@@ -53,12 +83,15 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       res.end(holdingScreen({ id: null, reason: "no-device" }));
       return;
     }
-    const devices = await kioskDevicesStore.load();
+    // Strict here and below: while the bindings cannot be read, an empty list
+    // would show a bound screen the unclaimed holding screen. A failure says so.
+    const devices = await kioskDevicesStore.loadStrict();
     // Remember it even when unclaimed: this is what claim() pins, and it is the
     // only channel a shell-script-and-a-browser agent has to tell us its secret.
     if (token) rememberSecret(id, token);
     const device = authorise(devices, id, token);
     if (device) {
+      forgetSecretMismatch(id);
       // Claimed before it had ever enrolled — pin what it just showed us.
       if (device.token === "" && token) {
         await updateDevices((current) => pinSecret(current, id, token));
@@ -79,6 +112,15 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     }
     // Unbound, or a token that does not match. Both are the same thing from
     // here: this device is not (yet) allowed to show a display.
+    //
+    // A helper output whose token was replaced on its Mac is the second, and its
+    // screen only says "waiting to be assigned", so the log says why, once.
+    const pinned = findById(devices, id);
+    if (token && pinned?.output && firstSecretMismatch(id)) {
+      console.log(
+        `[output-helper] ${scrub(id)} showed a token other than the one pinned for screen ${scrub(pinned.outputId)}, so it gets the holding screen; if its token was replaced on its Mac, release it from that screen and set it up again`,
+      );
+    }
     // The holding screen puts its own size on the reload URL. It is the only
     // way a Mac or a PC reports one before it is claimed — the physical mode in
     // the probe comes from /sys/class/drm, which is Linux only.
@@ -100,7 +142,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   // ── The installer, served by the server it installs against ─────────────
   // So the whole setup is one line typed at the screen, and the URL in it is the
   // server you are standing in front of.
-  if (method === "GET" && pathname.startsWith("/kiosk/install-")) {
+  if (method === "GET" && (pathname.startsWith("/kiosk/install-") || pathname === "/kiosk/kiosk-windows.ps1" || pathname === "/kiosk/kiosk-update-windows.ps1")) {
     const name = pathname.slice("/kiosk/".length);
     // Allowlist, not a path join: this reads a file from disk on request.
     if (!KIOSK_INSTALLERS.has(name)) {
@@ -114,18 +156,19 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // install root, where "../../../scripts" resolves to file:///scripts and
       // 404s. app-root.ts exists for exactly this and is used in five other
       // places; this was the copy that drifted.
-      body = await readFile(path.join(APP_ROOT, "scripts", "kiosk", name), "utf8");
+      body = await readFile(kioskScript(name), "utf8");
     } catch {
       error(res, "installer not found in this build", 404);
       return;
     }
     // The Mac installer downloads the output helper from the server it came
-    // from, and is told which that is here. The others carry no address. A
-    // missing marker throws, and is the server's fault, not a missing file.
-    if (name === "install-macos.sh") {
+    // from, and the Windows one its launcher, and each is told which that is
+    // here. The Linux one carries no address. A missing marker throws, and is the
+    // server's fault, not a missing file.
+    if (isStamped(name)) {
       const secure = "encrypted" in req.socket && req.socket.encrypted === true;
       try {
-        body = stampOrigin(body, originFromHost(req.headers.host, secure));
+        body = stampOrigin(body, originFromHost(req.headers.host, secure), name);
       } catch (err) {
         console.error(`[output-helper] could not prepare ${scrub(name)}: ${scrub(err)}`);
         error(res, "installer could not be prepared", 500);
@@ -172,7 +215,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
 
   // ── Devices page ────────────────────────────────────────────────────────
   if (method === "GET" && pathname === "/api/devices") {
-    const bound = await kioskDevicesStore.load();
+    const bound = await kioskDevicesStore.loadStrict();
     const seen = seenDevices();
     json(res, {
       scanning: scanning(),
@@ -189,6 +232,9 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // What each helper output last reported about itself, for the ones that
       // are still reporting. Runtime: never stored, gone on restart.
       health: healthList(),
+      // Each Mac helper and Windows kiosk that has checked for updates lately.
+      updates: machineUpdates.list(),
+      updatesListeningSince: machineUpdates.listeningSince,
       // For each unclaimed device, which bound devices share a MAC — the
       // "this looks like Left Mic Display" hint. A suggestion, never a binding.
       matches: Object.fromEntries(
@@ -219,7 +265,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       error(res, "the device id in the path is not valid", 400);
       return;
     }
-    const devices = await kioskDevicesStore.load();
+    const devices = await kioskDevicesStore.loadStrict();
     const known = findById(devices, id);
     const secret = clean(headerValue(req.headers, "x-device-token") || null);
     // authorise() trusts the first secret an UNPINNED binding is shown, which is
@@ -234,6 +280,54 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     recordHealth(id, parsed.report, known.output?.kind);
+    json(res, { ok: true });
+    return;
+  }
+
+  // ── Updates for the machines that show screens ─────────────────────────
+  // Asked every five minutes by the updater a Mac or a Windows kiosk installed
+  // with it. The answer decides; the machine only does what it says. Not
+  // authenticated: see machine-updates.ts for why, and what that limits it to.
+  if (method === "GET" && pathname === "/api/machine-updates/check") {
+    const input = parseCheck(url.searchParams);
+    if ("error" in input) {
+      error(res, input.error, 400);
+      return;
+    }
+    // What a machine of this kind should have: the server's version, or for a
+    // Windows kiosk the digest of the launcher it serves.
+    let want = pkgVersion();
+    if (input.platform === "windows") {
+      try {
+        want = await windowsLauncherDigest();
+      } catch (err) {
+        console.error(`[helper-update] could not read kiosk-windows.ps1 to answer a Windows kiosk: ${scrub(err)}`);
+        error(res, "this build has no Windows launcher to offer", 500);
+        return;
+      }
+    }
+    const m = machineUpdates.check(input, {
+      want,
+      auto: stageController.getState().autoUpdateMachines,
+      live: stageController.isServiceLive(),
+      windowCloses: serviceWindow.activeUntil(),
+      serviceTimesKnown: stageController.serviceTimesKnown(),
+    });
+    json(res, { version: want, update: m.update, reason: m.reason });
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/machine-updates/request") {
+    const body = (await readBody(req)) as Record<string, unknown>;
+    const machine = typeof body.machine === "string" ? body.machine : "";
+    if (!machine) {
+      error(res, "body.machine is required");
+      return;
+    }
+    if (!machineUpdates.request(machine)) {
+      error(res, `That machine has not checked for updates in the last ${minutes(REPORT_TTL_MS)}, so there is nothing to tell. Check it is on, and that its updater is installed (run the installer once).`, 404);
+      return;
+    }
     json(res, { ok: true });
     return;
   }
@@ -286,7 +380,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // the screen it shows. Moving it is the operator naming the screen
       // (`outputId`), which stays allowed. Nothing else sends a claim without
       // one: the Screens page lists only devices that are not bound here.
-      const already = findById(await kioskDevicesStore.load(), id);
+      const already = findById(await kioskDevicesStore.loadStrict(), id);
       if (already) {
         error(res, alreadyBound(already.outputId), 409);
         return;
@@ -344,8 +438,12 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       // lingers in the unclaimed list for the whole TTL, which reads as the
       // claim not having worked.
       forgetSeen(id);
+      forgetSecretMismatch(id);
       // What a displaced device reported was about the screen it no longer shows.
-      if (displacedId) forgetHealth(displacedId);
+      if (displacedId) {
+        forgetHealth(displacedId);
+        forgetSecretMismatch(displacedId);
+      }
       if (seen?.output) {
         console.log(
           `[output-helper] claimed: ${scrub(id)} (${scrub(seen.output.kind)} "${scrub(seen.output.name)}") now shows screen ${scrub(outputId)}`
@@ -378,9 +476,11 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     try {
-      const output = findById(await kioskDevicesStore.load(), id)?.output;
+      const output = findById(await kioskDevicesStore.loadStrict(), id)?.output;
       await updateDevices((current) => release(current, id));
       forgetHealth(id);
+      forgetSecretMismatch(id);
+      forgetSecret(id);
       if (output) {
         console.log(`[output-helper] released: ${scrub(id)} (${scrub(output.kind)} "${scrub(output.name)}") is not set up again`);
       }
@@ -395,7 +495,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   // Which output a device is on, for the Screens page's per-output line.
   if (method === "GET" && pathname.startsWith("/api/devices/for-output/")) {
     const outputId = decodeURIComponent(pathname.slice("/api/devices/for-output/".length));
-    const bound = await kioskDevicesStore.load();
+    const bound = await kioskDevicesStore.loadStrict();
     const device = findByOutput(bound, outputId);
     json(res, { device: device ? withoutTokens([device])[0] : null });
     return;

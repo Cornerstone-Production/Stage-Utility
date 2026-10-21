@@ -38,6 +38,7 @@ import { fileURLToPath } from "node:url";
 import { describe, test } from "node:test";
 
 import { LAYOUT_OBJECTS } from "./layout-objects.js";
+import { LEGACY_TIMER_TYPES } from "./timer-config.js";
 
 const here = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const RENDERER = here("./layout-renderer.tsx").split("\n");
@@ -299,18 +300,52 @@ function readsByType(): Map<string, Set<string>> {
 
 // ---------------------------------------------------------------- the guard
 
+/** Which Timer source reads each gated `ctx` field. The service source reads only
+ *  the ungated PCO fields. */
+const TIMER_FIELD_SOURCE: Record<string, string> = {
+  baptism: "baptism",
+  baptismKnown: "baptism",
+  integrations: "propresenter",
+  propInstances: "propresenter",
+  propresenter: "propresenter",
+  propresenterKnown: "propresenter",
+};
+
 const { gated: GATED, ungated: UNGATED } = scanGates();
 const READS = readsByType();
 
 describe("every channel a widget draws is one its layout subscribes to", () => {
-  test("the scan covers exactly the object registry, both ways", () => {
+  test("the scan covers exactly the object registry, both ways, less the types read as a Timer", () => {
     // The anchor. Nothing below means anything if the scan quietly found
     // nothing, and a floor ("at least forty arms") is how that goes unnoticed.
+    //
+    // Four types have no arm: ObjectBody reads `countdown-timer`, `pp-timer`,
+    // `baptism-timer` and `home-live-status` as a Timer before its switch, so the
+    // Timer's arm draws them (and its source is what the gates name). The compiler
+    // holds that: the switch's `never` default, and HomeCard's, only compile while
+    // no arm is left for a type readConfig maps. Listed exactly, and held to the
+    // mapping's own list.
+    const arms = [...READS.keys()].sort();
+    const registry = Object.keys(LAYOUT_OBJECTS).sort();
     assert.deepEqual(
-      [...READS.keys()].sort(),
-      Object.keys(LAYOUT_OBJECTS).sort(),
+      arms.filter((t) => !registry.includes(t)),
+      [],
+      "an arm was found for a type the registry does not have",
+    );
+    const armless = registry.filter((t) => !arms.includes(t));
+    assert.deepEqual(
+      armless,
+      [
+        "baptism-timer",
+        "countdown-timer",
+        "home-live-status",
+        "pp-timer",
+      ],
       "the render arms found do not match the object registry — a type has no arm, or the scan missed one",
     );
+    for (const t of armless) {
+      assert.ok((LEGACY_TIMER_TYPES as readonly string[]).includes(t), `${t} has no arm and is not read as a Timer`);
+    }
   });
 
   test("the gates were actually parsed", () => {
@@ -335,6 +370,7 @@ describe("every channel a widget draws is one its layout subscribes to", () => {
     assert.deepEqual(UNGATED, [
       "now",
       "pcoLive",
+      "pcoLiveKnown",
       "state",
     ]);
   });
@@ -344,7 +380,20 @@ describe("every channel a widget draws is one its layout subscribes to", () => {
     for (const [type, fields] of READS) {
       for (const field of fields) {
         const gate = GATED.get(field);
-        if (gate && !gate.has(type)) {
+        // A Timer is named by SOURCE (`timer:propresenter`, `timer:baptism`), so
+        // each channel it can read must be gated by the source that reads it —
+        // and by no other: naming `timer:baptism` on the ProPresenter gate would
+        // pass a looser test while opening the wrong channel.
+        const named = type === "timer" ? `timer:${TIMER_FIELD_SOURCE[field] ?? "?"}` : type;
+        if (type === "timer" && gate && !(field in TIMER_FIELD_SOURCE)) {
+          holes.push(`timer draws ctx.${field}, a gated channel with no source declared for it in TIMER_FIELD_SOURCE`);
+          continue;
+        }
+        if (type === "timer" && gate) {
+          const wrong = [...gate].filter((g) => g.startsWith("timer") && g !== named);
+          if (wrong.length) holes.push(`ctx.${field} is also opened for ${wrong.join(", ")}, which is not the source that reads it`);
+        }
+        if (gate && !gate.has(named)) {
           holes.push(
             `${type} draws ctx.${field}, but that channel is opened only for [${[...gate].sort().join(", ")}] — ` +
               `a layout whose only such widget is a ${type} subscribes to nothing and shows the offline state for ever`,

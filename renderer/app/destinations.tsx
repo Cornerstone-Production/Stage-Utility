@@ -10,7 +10,6 @@
 // called Settings.
 
 import type { FunctionComponent, ReactNode } from "react";
-import { useParams } from "@tanstack/react-router";
 import {
   CableIcon,
   HouseIcon,
@@ -29,7 +28,6 @@ import {
 
 import { PatchView } from "../main/patch-view";
 import { ServiceCueIndex } from "../main/servicecue-index-view";
-import { ServiceCuePlan } from "../main/servicecue-plan-view";
 import { BaptismOperator } from "../main/baptism-operator";
 import { ServiceHistorySection } from "../settings/sections/service-history-section";
 import { AutomationSection } from "../settings/sections/automation-section";
@@ -41,6 +39,12 @@ import { ConsoleRoute } from "./console-route";
 import { ViewEditorRoute } from "./screens/view-editor-route";
 import { VideoFeedsRoute } from "./video-feeds/video-feeds-route";
 import { ServiceCueSection } from "../settings/sections/servicecue-section";
+import {
+  SERVICECUE_LANDING_PATH,
+  SERVICECUE_PLAN_PATH,
+  ServiceCuePlanRoute,
+  ServiceCueShared,
+} from "./servicecue-routes";
 import {
   AdvancedRoute,
   BrandingRoute,
@@ -209,27 +213,6 @@ export const NAV_GROUPS: { label: string; paths: string[] }[] = [
 ];
 
 /**
- * ServiceCuePlan takes its service type and layout as props, because the kiosk
- * router read them out of `window.location` and passed them down. Under a real
- * router they are route params, so this adapter supplies them.
- *
- * `strict: false` because this component is declared away from its route
- * definition; the params are validated by the route's path pattern.
- */
-function ServiceCuePlanRoute() {
-  const params = useParams({ strict: false }) as {
-    serviceType?: string;
-    layout?: string;
-  };
-  return (
-    <ServiceCuePlan
-      serviceTypeParam={params.serviceType ?? ""}
-      layoutParam={params.layout ?? ""}
-    />
-  );
-}
-
-/**
  * Nested routes that are reachable but not listed in the rail.
  *
  * The two editors live here rather than as rail entries because each is the
@@ -264,11 +247,6 @@ const HISTORY_SHARED_PAGE = {
  * ever say what it is — the same reason a console draws its own name in the
  * layout editor.
  */
-/** The tablet's ServiceCue launcher: chromeless, so it draws its own heading. */
-function ServiceCueShared() {
-  return <ServiceCueIndex standalone />;
-}
-
 function ServiceHistoryShared() {
   return (
     <div className="flex flex-col gap-4">
@@ -306,15 +284,17 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
     Component: ServiceHistoryShared,
     ...HISTORY_SHARED_PAGE,
   },
-  // Titled here for the same reason /history is: /servicecue/manage does not
-  // prefix-match /servicecue, so the tablet's page would have no name.
+  // The two ServiceCue pages are defined in servicecue-routes.tsx, which the public
+  // viewer mounts too. The launcher is titled here for the same reason /history is:
+  // /servicecue/manage does not prefix-match /servicecue, so the tablet's page would
+  // have no name.
   {
-    path: "/servicecue",
+    path: SERVICECUE_LANDING_PATH,
     Component: ServiceCueShared,
     label: "ServiceCue",
     description: "Pick a service and a layout to open its rundown.",
   },
-  { path: "/servicecue/$serviceType/$layout", Component: ServiceCuePlanRoute },
+  { path: SERVICECUE_PLAN_PATH, Component: ServiceCuePlanRoute },
   { path: "/servicecue/presets", Component: ServiceCueSection },
   { path: "/patch/edit", Component: PatchSection },
   // A view's editor is its own page rather than a panel beside a master list.

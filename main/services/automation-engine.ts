@@ -20,6 +20,7 @@ import { AUTOMATION_CONDITIONS, allConditionsHold, firstFailingCondition, servic
 import { sampleArchive } from "./archive/sample-archive.js";
 import { automationLog } from "./automation-log.js";
 import { automationStore } from "./automation-store.js";
+import type { StoreReadError } from "./data-store.js";
 import { integrationManager } from "./integration-manager.js";
 import { signalStore } from "./signal-store.js";
 import { obsService } from "./obs-service.js";
@@ -47,7 +48,7 @@ import {
 import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
 import { notePressForLearning } from "./companion-state-probe.js";
 import { cueLive } from "./cue-live.js";
-import { parseAliases } from "./cue-aliases.js";
+import { calledCueName, parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
 import { plural } from "./plural.js";
@@ -111,6 +112,8 @@ const CONFIRM_WINDOW_MS = 30_000;
 
 class AutomationEngine {
   private rules: Rule[] = [];
+  /** Set at init when the rules file could not be read: see assertRulesRead(). */
+  private rulesUnread: StoreReadError | null = null;
   private settings: AutomationSettings = { simulate: true, disarmed: false };
   /** Last snapshot seen per channel. Absent = not yet seeded. */
   private prev = new Map<string, unknown>();
@@ -131,6 +134,7 @@ class AutomationEngine {
     // Populate the signal cache before any client can ask for the hello burst.
     await signalStore.init();
     this.rules = await automationStore.loadRules();
+    this.rulesUnread = automationStore.rulesUnreadable();
     this.settings = await automationStore.loadSettings();
     // The rules file is not always something this app wrote. A restored config
     // archive, a hand edit, a merge of two installs: all three land here
@@ -275,7 +279,7 @@ class AutomationEngine {
    */
   private assertCueValid(rule: Pick<Rule, "trigger">, exceptId: string | null): void {
     if (rule.trigger?.id !== CALL_TRIGGER_ID) return;
-    const name = String(rule.trigger.params?.name ?? "").trim().toLowerCase();
+    const name = calledCueName(rule.trigger);
     if (!name) throw new Error("A called cue needs a name");
     if (!isValidCueName(name)) {
       throw new Error(`"${name}" is not a usable cue name — use lower_snake_case`);
@@ -377,23 +381,48 @@ class AutomationEngine {
     cueLive.rulesChanged();
   }
 
+  /**
+   * Throws while the rules in memory are the defaults of a file that could not
+   * be read. Called by what would act on "there are no cues" outside this
+   * process: Home Assistant removes an entity the manifest stops listing, so
+   * an empty manifest from a failed read deleted every cue's entity. And by
+   * every edit, which would otherwise go live before its save was refused.
+   * Held until a restart, as the store's refusal is: these rules were read
+   * once, at init.
+   */
+  assertRulesRead(): void {
+    if (this.rulesUnread) throw this.rulesUnread;
+  }
+
   async addRule(rule: Omit<Rule, "id">): Promise<Rule> {
+    this.assertRulesRead();
     this.assertCueValid(rule, null);
     const next: Rule = { ...rule, id: randomUUID() };
     this.rules.push(next);
     await automationStore.saveRules(this.rules);
-    console.log(`[automation] rule added "${scrub(next.name)}" (${scrub(next.id)})`);
+    const cue = calledCueName(next.trigger);
+    console.log(`[automation] rule added "${scrub(next.name)}" (${scrub(next.id)})${cue ? ` as cue "${scrub(cue)}"` : ""}`);
     this.rulesChanged();
     return next;
   }
 
   async updateRule(id: string, patch: Partial<Omit<Rule, "id">>): Promise<Rule[]> {
+    this.assertRulesRead();
     const r = this.rules.find((x) => x.id === id);
     if (!r) throw new Error(`Automation: unknown rule ${id}`);
     this.assertCueValid({ ...r, ...patch }, id);
+    const cueBefore = calledCueName(r.trigger);
     Object.assign(r, patch);
     await automationStore.saveRules(this.rules);
     console.log(`[automation] rule updated "${scrub(r.name)}" (${scrub(id)})`);
+    // A cue's name is a URL somebody else holds. When it changes or goes, "a console
+    // button reads Unbound" needs a line to be traced back to.
+    const cueAfter = calledCueName(r.trigger);
+    if (cueBefore && cueBefore !== cueAfter) {
+      console.log(
+        `[automation] cue "${scrub(cueBefore)}" ${cueAfter ? `is now "${scrub(cueAfter)}"` : "is no longer a cue"} (rule "${scrub(r.name)}")`,
+      );
+    }
     this.rulesChanged();
     return this.listRules();
   }
@@ -401,6 +430,7 @@ class AutomationEngine {
   async removeRule(id: string): Promise<Rule[]> {
     // The name has to be read before the filter — afterwards the rule is gone and
     // the log line that says which 300 rules went is the only record left.
+    this.assertRulesRead();
     const gone = this.rules.find((r) => r.id === id);
     this.rules = this.rules.filter((r) => r.id !== id);
     await automationStore.saveRules(this.rules);
@@ -460,8 +490,7 @@ class AutomationEngine {
 
   /** The cue name a rule answers to, or "" when it is not a cue at all. */
   cueNameOf(rule: Rule): string {
-    if (rule.trigger.id !== CALL_TRIGGER_ID) return "";
-    return String(rule.trigger.params.name ?? "").trim().toLowerCase();
+    return calledCueName(rule.trigger);
   }
 
   /** The former names a rule also answers to, oldest first. See cue-aliases.ts. */

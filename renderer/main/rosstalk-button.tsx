@@ -4,6 +4,7 @@ import { Loader2Icon, RadioTowerIcon } from "lucide-react";
 
 import { invoke } from "../lib/api";
 import { toast } from "../components/ui";
+import { ButtonLabel } from "./button-label";
 
 interface RossTalkButtonConfig {
   targetId?: string | null;
@@ -77,14 +78,15 @@ export function RossTalkButton({
         gap: "0.4em",
         border: "none",
         borderRadius: "inherit",
+        overflow: "hidden",
         cursor: interactive ? "pointer" : "default",
       }}
     >
-      {busy ? <Loader2Icon className="animate-spin" style={{ width: "1em", height: "1em" }} /> : null}
-      <span>{config.label || config.commandId || "RossTalk"}</span>
+      {busy ? <Loader2Icon className="animate-spin" style={{ width: "1em", height: "1em", flexShrink: 0 }} /> : null}
+      <ButtonLabel>{config.label || config.commandId || "RossTalk"}</ButtonLabel>
       {simulate ? (
         <RadioTowerIcon
-          style={{ width: "0.9em", height: "0.9em", opacity: 0.6 }}
+          style={{ width: "0.9em", height: "0.9em", opacity: 0.6, flexShrink: 0 }}
           aria-label="Simulate mode — this button will not reach the device"
         />
       ) : null}

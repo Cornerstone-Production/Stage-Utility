@@ -56,6 +56,27 @@ export class ServiceIsLiveError extends Error {
   }
 }
 
+/** Thrown when a recorder is holding a closed record it could not save yet. */
+export class ServiceNotSavedError extends Error {
+  readonly status = 409;
+  readonly code = "unsaved";
+  constructor(action: string, serviceKey: string) {
+    super(
+      `The service ${scrub(serviceKey)} has not been saved yet — the disk refused its last save, which keeps being retried. It cannot be ${action} until it is saved.`,
+    );
+    this.name = "ServiceNotSavedError";
+  }
+}
+
+/**
+ * Refuse a service a recorder is holding unsaved (see saveClosed in
+ * service-recorder.ts). The store has an older copy or none, so an edit
+ * would work from that and forget() would drop the only current one.
+ */
+export function assertSaved(action: string, ...serviceKeys: string[]): void {
+  for (const k of serviceKeys) if (RECORDERS.some((r) => r.isHolding(k))) throw new ServiceNotSavedError(action, k);
+}
+
 /**
  * Whether any recorder is actively writing this serviceKey right now — the
  * ONE definition of "live" for a service. `assertNotLive` refuses on it, and
@@ -97,10 +118,28 @@ export function assertNotLive(serviceKey: string, action: string): void {
   if (isServiceLive(serviceKey)) throw new ServiceIsLiveError(action);
 }
 
+/**
+ * Refuse to touch a service that is live, held unsaved by a recorder, or whose
+ * record is on disk and could not be read. Every edit here reads the record and
+ * writes back what it derived, and one it could not read answers as absent (see
+ * keyed-record-store.ts), so the edits stay off it until the server restarts
+ * with it readable.
+ */
+async function assertEditable(action: string, ...serviceKeys: string[]): Promise<void> {
+  for (const k of serviceKeys) assertNotLive(k, action);
+  assertSaved(action, ...serviceKeys);
+  for (const store of [serviceTimelineStore, attendanceStore, splHistoryStore]) {
+    for (const k of serviceKeys) await store.assertReadable(k);
+  }
+}
+
 /** Release every recorder's copy of these keys. Called BEFORE the first awaited
  *  write, never after: a debounce that fires mid-await writes the pre-edit
- *  record back over the one just saved. */
+ *  record back over the one just saved. Checks again that none is held
+ *  unsaved, with no await in between: a split during assertEditable's awaits
+ *  can hold one, and forget() would drop the only current copy. */
 function forgetAll(...serviceKeys: string[]): void {
+  assertSaved("changed", ...serviceKeys);
   for (const r of RECORDERS) for (const k of serviceKeys) r.forget(k);
 }
 
@@ -122,7 +161,7 @@ function forgetAll(...serviceKeys: string[]): void {
 export async function deleteServiceRecords(
   serviceKey: string,
 ): Promise<{ deleted: boolean; records: string[] }> {
-  assertNotLive(serviceKey, "deleted");
+  await assertEditable("deleted", serviceKey);
   forgetAll(serviceKey);
   const stores = [
     ["timeline", serviceTimelineStore],
@@ -226,7 +265,7 @@ export async function editServiceWindow(
   serviceKey: string,
   opts: { startedAt?: string; endedAt?: string },
 ): Promise<void> {
-  assertNotLive(serviceKey, "re-windowed");
+  await assertEditable("re-windowed", serviceKey);
   // The delete and merge paths were given this when a record was found
   // resurrecting itself; the two edit paths were missed, so a trimmed window
   // survived only until the recorder's next debounce wrote the untrimmed copy
@@ -291,7 +330,7 @@ export async function editServiceWindow(
  *  that id; `find` would have set it on one and left the row the operator clicked
  *  unchanged. */
 export async function setItemCounted(serviceKey: string, itemId: string, counted: boolean): Promise<void> {
-  assertNotLive(serviceKey, "edited");
+  await assertEditable("edited", serviceKey);
   forgetAll(serviceKey); // see editServiceWindow
   const tl = await serviceTimelineStore.get(serviceKey);
   if (!tl) return;
@@ -370,7 +409,7 @@ export async function setItemTimes(
    */
   times: { startedAt?: string | null; endedAt?: string | null },
 ): Promise<ServiceTimeline> {
-  assertNotLive(serviceKey, "edited");
+  await assertEditable("edited", serviceKey);
   forgetAll(serviceKey); // see editServiceWindow
   // Names the RUN, not just the item: an item can appear twice in one record, and
   // a log line naming only the title cannot tell an operator which row moved.
@@ -456,7 +495,7 @@ export async function setItemTimes(
 /** Re-derive attendance aggregates from the current samples (no window change) —
  *  for when the stored peak/min look stale but the samples are fine. */
 export async function recalcAttendance(serviceKey: string): Promise<void> {
-  assertNotLive(serviceKey, "recalculated");
+  await assertEditable("recalculated", serviceKey);
   forgetAll(serviceKey); // see editServiceWindow
   const att = await attendanceStore.get(serviceKey);
   if (!att) return;
@@ -587,7 +626,7 @@ export class RebuildFailedError extends Error {
  * same bad record believing it had been repaired.
  */
 export async function rebuildServiceRecords(serviceKey: string): Promise<RebuildOutcome> {
-  assertNotLive(serviceKey, "rebuilt");
+  await assertEditable("rebuilt", serviceKey);
   forgetAll(serviceKey); // see editServiceWindow
 
   const outcome: RebuildOutcome = {
@@ -1324,7 +1363,7 @@ export interface BaptismRebuildOutcome {
  * all — the caller's own confirm text says so.
  */
 export async function rebuildServiceBaptisms(serviceKey: string): Promise<BaptismRebuildOutcome> {
-  assertNotLive(serviceKey, "rebuilt");
+  await assertEditable("rebuilt", serviceKey);
 
   const serviceDate = await serviceDateOf(serviceKey);
   if (!serviceDate) {
@@ -1479,8 +1518,7 @@ async function mergeArchives(sourceKey: string, targetKey: string): Promise<bool
 export async function mergeServiceRecords(sourceKey: string, targetKey: string): Promise<MergeOutcome> {
   const outcome: MergeOutcome = { merged: [], moved: [], archivesMoved: false };
   if (!sourceKey || !targetKey || sourceKey === targetKey) return outcome;
-  assertNotLive(sourceKey, "merged");
-  assertNotLive(targetKey, "merged");
+  await assertEditable("merged", sourceKey, targetKey);
 
   // Read the target's identity BEFORE anything moves. A store that holds a
   // source record but no target record needs it to re-key onto, and finding

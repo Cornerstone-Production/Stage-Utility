@@ -74,7 +74,9 @@ function summarise(t: CueTokenRecord): CueTokenSummary {
  * `isCrossOrigin` the cross-origin write gate in remote-server uses — hostname,
  * so the friendly port 80, port 8788 and the Vite dev proxy on 3000 all still
  * work. A page on another origin cannot forge it, which is the confused-deputy
- * case this exists to close.
+ * case this exists to close. A page whose own hostname has been made to resolve
+ * to this server (DNS rebinding) sends that hostname as both Origin and Host and
+ * passes, as it passes the write gate: see SECURITY.md.
  *
  * `Sec-Fetch-Site` is NOT required, and it used to be. Browsers send the
  * Fetch-metadata headers only to a "potentially trustworthy" destination — HTTPS

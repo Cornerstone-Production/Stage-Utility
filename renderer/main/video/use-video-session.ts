@@ -254,13 +254,48 @@ export function startPlaybackAttempt(
     }
   };
 
+  /** Why the browser refused play(), so the first-frame deadline can name it. */
+  let playRefused: string | null = null;
+  /** Re-asks after an AbortError, at most this many times per attempt: each
+   *  one answers a reload, and an element aborting every ask must not spin. */
+  let playRetriesLeft = 3;
+  /**
+   * Starts playback as soon as a source is attached instead of leaving it to
+   * the element's `autoplay`: Safari's autoplay waits for HAVE_ENOUGH_DATA,
+   * which on the relay's low-latency HLS holds the first frame about 2.5 s past
+   * `canplay`. jsdom plays nothing, so that timing is measured in a browser —
+   * see "Measuring playback" in docs/integrations/video-feeds.md.
+   *
+   * A refused play() is not an outcome by itself; the first-frame deadline
+   * decides that and names the refusal. An AbortError is not a refusal: the
+   * source was reloaded under a pending play() (hls.js recovering a media
+   * error does this), which leaves the element paused, so play() is asked
+   * again rather than leaving the new source to Safari's autoplay. Called
+   * through a promise so that a throwing or promise-less play() can never end
+   * the attempt.
+   */
+  const startPlaying = () => {
+    Promise.resolve()
+      .then(() => video.play())
+      .catch((err: unknown) => {
+        if (ended) return;
+        const name = err instanceof Error ? err.name : "";
+        if (name === "AbortError") {
+          if (playRetriesLeft-- > 0) startPlaying();
+          return;
+        }
+        playRefused = name && name !== "Error" ? `${name}: ${errorMessage(err)}` : errorMessage(err);
+      });
+  };
+  const noFrame = (why: string) => (playRefused === null ? why : `${why}; the browser refused to play (${playRefused})`);
+
   /** The failure half: no frame within `timeoutMs` ends the attempt. */
   const firstFrameDeadline = (timeoutMs: number) => {
     clearTimeout(frameTimer);
     frameTimer = setTimeout(() => {
       if (gotFirstFrame) return;
-      if (choice.method === "webrtc") webrtcUnusable("connected, but no frame ever arrived");
-      else end(() => cb.onDropped("no frame arrived over HLS"));
+      if (choice.method === "webrtc") webrtcUnusable(noFrame("connected, but no frame ever arrived"));
+      else end(() => cb.onDropped(noFrame("no frame arrived over HLS")));
     }, timeoutMs);
   };
 
@@ -291,6 +326,7 @@ export function startPlaybackAttempt(
         cb.onSession?.({ method: "webrtc", pc: whep.pc });
         clearTimeout(connectTimer);
         watchForFirstFrame();
+        startPlaying();
         // A second, independent window: the handshake succeeded, so THIS
         // timer firing with no frame means WebRTC never delivered a picture on
         // this screen — that IS a verdict about WebRTC here. It fails the
@@ -298,6 +334,8 @@ export function startPlaybackAttempt(
         // "connected" with no frame is no less stuck than one that never did.
         connectTimer = setTimeout(() => {
           if (gotFirstFrame) return;
+          // A refused play() is named only by the first-frame deadline, the
+          // path a session takes once its "connected" event arrives.
           const why = whep.pc.connectionState === "connected" ? "connected, but no frame ever arrived" : "never connected after a successful handshake";
           webrtcUnusable(why);
         }, CONNECT_TIMEOUT_MS);
@@ -383,6 +421,7 @@ export function startPlaybackAttempt(
         session = { kind: "hls", s: hls };
         cb.onSession?.({ method: "hls" });
         watchForFirstFrame();
+        startPlaying();
         firstFrameDeadline(HLS_FIRST_FRAME_TIMEOUT_MS);
         video.addEventListener(
           "error",

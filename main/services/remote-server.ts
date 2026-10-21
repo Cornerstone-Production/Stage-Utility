@@ -1,6 +1,7 @@
 // LAN HTTP server on port 8788.
 // Serves public/control.html at GET / and the /api/* endpoints.
-// Permissive CORS on /api/*. Tracks sockets for clean shutdown.
+// No CORS: only pages on this server's own origin read it. Tracks sockets for
+// clean shutdown.
 
 
 import { errorMessage } from "./errors.js";
@@ -22,6 +23,7 @@ import {
   subscriptionsChanged,
 } from "./broadcaster.js";
 import { EventPollHub, serializePollResponse, type PollFrame } from "./event-poll.js";
+import { ChannelReports, MAX_CID_LENGTH, MAX_SUBSCRIBE_BODY_BYTES, usableCid } from "./channel-reports.js";
 
 import { APP_ROOT } from "./app-root.js";
 import { displayHeartbeat, displayLeaving, presenceSnapshot } from "./display-presence.js";
@@ -32,14 +34,19 @@ import { buildVersionPayload, describePortHolder, rawPortHolder } from "./port-h
 import { getUserDataPath } from "./app-paths.js";
 import { getLanIp } from "./lan-ip.js";
 import { isCrossOrigin } from "./http-origin.js";
+import { hostNames } from "./host-names.js";
+import { escapeHtml } from "./html-escape.js";
+import { hostNameRoutes } from "./routes/host-name-routes.js";
 import { isOperatorPath } from "./routes/operator-paths.js";
 import { legacyApiRoutes } from "./routes/legacy-api-routes.js";
 import { legacyPageRoutes } from "./routes/legacy-page-routes.js";
 import { logRoutes } from "./routes/log-routes.js";
+import { appIconRoutes } from "./routes/app-icon-routes.js";
+import { brandHtml } from "./install-metadata.js";
 
 import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
-import { readImage } from "./image-files.js";
+import { readImage, storedImageHeaders } from "./image-files.js";
 import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
@@ -72,6 +79,7 @@ import { archiveRoutes } from "./routes/archive-routes.js";
 import { proxyRoutes } from "./routes/proxy-routes.js";
 import { stateRoutes } from "./routes/state-routes.js";
 import { serviceCueRoutes } from "./routes/servicecue-routes.js";
+import { serviceCuePublishRoutes } from "./routes/servicecue-publish-routes.js";
 import { viewRoutes } from "./routes/view-routes.js";
 import { planRoutes } from "./routes/plan-routes.js";
 import { integrationRoutes } from "./routes/integration-routes.js";
@@ -115,6 +123,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   proxyRoutes,
   stateRoutes,
   serviceCueRoutes,
+  serviceCuePublishRoutes,
   viewRoutes,
   planRoutes,
   integrationRoutes,
@@ -129,6 +138,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   calendarRoutes,
   videoRoutes,
   messagesRoutes,
+  hostNameRoutes,
 ] as const;
 
 /**
@@ -152,7 +162,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
  * (/scriptview…, /api/scriptview…) is redirected before anything else looks at
  * it, so no later module is asked about the old path.
  */
-export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [legacyPageRoutes, legacyApiRoutes, logRoutes, videoProxyRoutes] as const;
+export const EARLY_ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [legacyPageRoutes, legacyApiRoutes, logRoutes, videoProxyRoutes, appIconRoutes] as const;
 
 // ── Static renderer build path candidates ──────────────────────────────────────
 // Resolved against the install root, NOT the working directory. A packaged
@@ -175,13 +185,19 @@ const FRIENDLY_PORT = process.env.STAGE_UTILITY_FRIENDLY_PORT !== undefined
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function cors(res: http.ServerResponse): void {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
-  // Authorization is here for the cue routes: a caller that presents a bearer
-  // token is not a browser and never sends a preflight, but a page on this app's
-  // own origin fetching the Home Assistant config is, and it does.
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+/** The answer to a request by a name not on the list: what is wrong and how to
+ *  fix it, as a page for a browser and as JSON for anything else. */
+function refuseHostName(req: http.IncomingMessage, res: http.ServerResponse, name: string): void {
+  const sentence =
+    `This server does not answer to the name ${name}. If that name is yours, open the server by its ` +
+    "IP address, go to Settings, Advanced, Host names, and add it.";
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  if (String(req.headers.accept ?? "").includes("text/html")) {
+    res.writeHead(403, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(`<!doctype html><meta charset="utf-8"><title>Not this server's name</title><body style="font-family:system-ui;background:#0a0a0a;color:#eee;padding:2rem"><p>${escapeHtml(sentence)}</p>`);
+    return;
+  }
+  error(res, sentence, 403);
 }
 
 // hostnameOf / isCrossOrigin live in http-origin.ts, because the cue routes'
@@ -210,7 +226,7 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  */
 export function handlerErrorStatus(err: unknown): number {
   const declared = (err as { status?: number } | null)?.status;
-  return declared === 413 || declared === 409 || declared === 400 ? declared : 500;
+  return declared === 413 || declared === 409 || declared === 400 || declared === 503 ? declared : 500;
 }
 
 /**
@@ -233,7 +249,8 @@ export function handlerErrorStatus(err: unknown): number {
  * test that restates the mapping and then agrees with itself.
  */
 export function handlerErrorCode(err: unknown, status: number): string | undefined {
-  if (status === 500) return undefined;
+  // 503 is a data file the server could not read; its code is that errno.
+  if (status === 500 || status === 503) return undefined;
   const code = (err as { code?: unknown } | null)?.code;
   return typeof code === "string" ? code : undefined;
 }
@@ -276,6 +293,19 @@ export function handlePresenceHeartbeat(
 
 // SSE client set — each entry is the ServerResponse for an open /api/events stream.
 const sseClients = new Set<http.ServerResponse>();
+/** The Host each stream was opened by, so turning host-name refusal on can close
+ *  one a page opened by a name that is now refused. */
+const sseHost = new WeakMap<http.ServerResponse, string | undefined>();
+hostNames.onRefusalOn(() => {
+  let closed = 0;
+  for (const client of sseClients) {
+    if (hostNames.answersTo(sseHost.get(client))) continue;
+    // Destroyed, as a stalled stream is: its close handler releases the rest.
+    client.destroy();
+    closed += 1;
+  }
+  if (closed > 0) console.warn(`[security] closed ${scrub(closed)} event stream(s) opened by a name now refused`);
+});
 // Keep the SSE pipe warm and surface dead clients: EventSource ignores comment
 // lines, but the write itself fails (or backs up) on a half-open socket so we can
 // reap it. Without this, a slept/dropped kiosk lingers forever holding memory and
@@ -290,8 +320,13 @@ const SSE_MAX_BUFFER_BYTES = 2_000_000;
 // client didn't ask for — so a mic display never receives the 4 Hz spl:metrics
 // firehose it discards anyway. Absent entry = no report yet → send everything (safe
 // fallback; filtering is a pure optimization, never a correctness dependency).
+// A report waits a bounded time for the stream or poll client that claims it: see
+// channel-reports.ts. Exported for the tests that hold it to those bounds.
 const resCid = new WeakMap<http.ServerResponse, string>();
-const clientChannels = new Map<string, Set<string>>();
+export const channelReports = new ChannelReports();
+/** What holds a cid on the poll transport: one live poll client per cid, so
+ *  one token does. A stream holds its cid with its own response. */
+const POLL_CLAIM = "poll";
 
 // Clients on the polling transport (`GET /api/events/poll`), which read the same
 // broadcasts out of a short replay buffer instead of holding a stream open. They
@@ -302,7 +337,7 @@ const eventPoll = new EventPollHub({
   // A cid's reported channel filter outlives its stream, so drop it with the
   // client the way the stream's close handler does — otherwise every panel that
   // ever polled leaves an entry behind for the life of the process.
-  onExpire: (cid) => clientChannels.delete(cid),
+  onExpire: (cid) => channelReports.release(cid, POLL_CLAIM),
 });
 
 // Currently-connected Companion-module clients (SSE streams opened with the
@@ -337,11 +372,11 @@ function countSubscribers(channel: string): number {
   let n = 0;
   for (const client of sseClients) {
     const cid = resCid.get(client);
-    const chans = cid ? clientChannels.get(cid) : undefined;
+    const chans = cid ? channelReports.get(cid) : undefined;
     if (!chans || chans.has(channel)) n++;
   }
   for (const cid of eventPoll.clientIds()) {
-    const chans = clientChannels.get(cid);
+    const chans = channelReports.get(cid);
     if (!chans || chans.has(channel)) n++;
   }
   return n;
@@ -353,10 +388,10 @@ function countSubscribers(channel: string): number {
 export function hasNamedSubscriber(channel: string): boolean {
   for (const client of sseClients) {
     const cid = resCid.get(client);
-    if (cid && clientChannels.get(cid)?.has(channel)) return true;
+    if (cid && channelReports.get(cid)?.has(channel)) return true;
   }
   for (const cid of eventPoll.clientIds()) {
-    if (clientChannels.get(cid)?.has(channel)) return true;
+    if (channelReports.get(cid)?.has(channel)) return true;
   }
   return false;
 }
@@ -600,10 +635,11 @@ export class RemoteServer {
       // (see useStageState). Content-hashed /assets are never rewritten.
       let out = data;
       if (ext === ".html") {
-        out = Buffer.from(
-          data.toString("utf-8").replace("</head>", `<script>window.__APP_VERSION__=${JSON.stringify(SERVER_VERSION)}</script></head>`),
-          "utf-8",
-        );
+        const stamped = data.toString("utf-8").replace("</head>", `<script>window.__APP_VERSION__=${JSON.stringify(SERVER_VERSION)}</script></head>`);
+        // Only the two app documents carry the operator's name: control.html is a
+        // different page with a title of its own.
+        const named = urlPath === "/index.html" || urlPath === "/app.html";
+        out = Buffer.from(named ? brandHtml(stamped, stageController.getState().appName) : stamped, "utf-8");
       }
       sendStatic(res, out, mime, cacheControl, ext, acceptEncoding, immutable ? candidate : null);
       return true;
@@ -615,7 +651,9 @@ export class RemoteServer {
     if (!path.extname(urlPath)) {
       const fallback = path.join(RENDERER_BUILD_DIR, "index.html");
       try {
-        const html = await fs.readFile(fallback);
+        // Branded like the entry documents above: /display-1 is the kiosk shell too,
+        // and an install from there reads the same home-screen label.
+        const html = Buffer.from(brandHtml((await fs.readFile(fallback)).toString("utf-8"), stageController.getState().appName), "utf-8");
         sendStatic(res, html, "text/html; charset=utf-8", "no-cache", ".html", acceptEncoding, null);
         return true;
       } catch {
@@ -746,6 +784,9 @@ export class RemoteServer {
   async start(): Promise<void> {
     if (this.server) return;
 
+    // Before the first request: until it has loaded, every name is answered.
+    hostNames.setPublicUrlSource(() => stageController.getState().publicUrl ?? null);
+    await hostNames.init();
     // Push state to SSE clients on every broadcast so the phone page can use
     // EventSource instead of polling.
     // Let producers idle when nothing is watching their channel: true if any client
@@ -763,12 +804,12 @@ export class RemoteServer {
       let frame: string | null = null; // serialize at most once, only if a client wants it
       for (const client of sseClients) {
         const cid = resCid.get(client);
-        const chans = cid ? clientChannels.get(cid) : undefined;
+        const chans = cid ? channelReports.get(cid) : undefined;
         if (chans && !chans.has(channel)) continue; // client filtered this channel out
         if (frame === null) frame = `event: ${channel}\ndata: ${serialized ?? JSON.stringify(payload)}\n\n`;
         if (!sseWriteFrame(client, frame)) {
           sseClients.delete(client);
-          if (cid) clientChannels.delete(cid);
+          if (cid) channelReports.release(cid, client);
           client.destroy();
         }
       }
@@ -796,55 +837,13 @@ export class RemoteServer {
     }, SSE_HEARTBEAT_MS);
     this.heartbeatTimer.unref?.();
 
-    // One request handler, shared by both listeners (PORT + the friendly port).
-    const handler = async (req: http.IncomingMessage, res: http.ServerResponse) => {
-      const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
-      const pathname = url.pathname;
-
-      if (DEBUG_HTTP) console.log(`[remote-server] ${req.method} ${pathname}`);
-
-      // CORS preflight. A cross-site caller is only offered the safe methods, so
-      // the browser blocks a state-changing request before it is ever sent.
-      if (req.method === "OPTIONS") {
-        cors(res);
-        if (isCrossOrigin(req.headers.origin, req.headers.host)) {
-          res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-        }
-        res.writeHead(204);
-        res.end();
-        return;
-      }
-
-      cors(res);
-
-      // Enforcement, independent of whatever the preflight advertised: reads stay
-      // open (LAN appliance), writes must be same-origin.
-      if (MUTATING_METHODS.has(req.method ?? "") && isCrossOrigin(req.headers.origin, req.headers.host)) {
-        console.warn(`[remote-server] rejected cross-origin ${scrub(req.method)} ${scrub(pathname)} from ${scrub(req.headers.origin)}`);
-        error(res, "cross-origin request rejected", 403);
-        return;
-      }
-
-      try {
-        await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
-      } catch (err) {
-        const msg = errorMessage(err);
-        const status = handlerErrorStatus(err);
-        const code = handlerErrorCode(err, status);
-        console.error(`[remote-server] handler error ${scrub(pathname)}: ${scrub(msg)}`);
-        // The reader paused an over-limit body rather than destroying the socket,
-        // so the response reaches the client; closing after it releases the rest.
-        if (status === 413) res.setHeader("Connection", "close");
-        error(res, msg, status, code);
-      }
-    };
-
     const trackConn = (socket: net.Socket) => {
       this.sockets.add(socket);
       socket.on("close", () => this.sockets.delete(socket));
     };
 
-    this.server = http.createServer(handler);
+    // One request handler, shared by both listeners (PORT + the friendly port).
+    this.server = http.createServer(this.handle);
     this.server.on("connection", trackConn);
 
     await this.listenWithRetry();
@@ -856,16 +855,15 @@ export class RemoteServer {
     // of it becoming free. With the privilege granted (CAP_NET_BIND_SERVICE on prod)
     // the only failure mode is that transient restart race, which the retry closes.
     if (FRIENDLY_PORT && FRIENDLY_PORT !== PORT) {
-      this.bindFriendlyPort(handler, trackConn);
+      this.bindFriendlyPort(trackConn);
     }
   }
 
   private bindFriendlyPort(
-    handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
     trackConn: (socket: net.Socket) => void,
     attempt = 0,
   ): void {
-    const friendly = http.createServer(handler);
+    const friendly = http.createServer(this.handle);
     friendly.on("connection", trackConn);
     friendly.once("error", (err: NodeJS.ErrnoException) => {
       friendly.close();
@@ -882,7 +880,7 @@ export class RemoteServer {
       // never give up, so 80 is reclaimed the moment it frees up.
       const next = attempt + 1;
       const delay = next <= 5 ? 1000 : next <= 15 ? 5000 : 30000;
-      this.friendlyRetryTimer = setTimeout(() => this.bindFriendlyPort(handler, trackConn, next), delay);
+      this.friendlyRetryTimer = setTimeout(() => this.bindFriendlyPort(trackConn, next), delay);
       this.friendlyRetryTimer.unref?.();
     });
     friendly.listen(FRIENDLY_PORT, "0.0.0.0", () => {
@@ -900,6 +898,8 @@ export class RemoteServer {
       this.heartbeatTimer = null;
     }
     eventPoll.reset();
+    channelReports.reset();
+    await hostNames.stop();
     // Force-close all tracked sockets so the server shuts down promptly.
     for (const socket of this.sockets) {
       socket.destroy();
@@ -926,6 +926,78 @@ export class RemoteServer {
     console.log("[remote-server] stopped");
   }
 
+  /**
+   * Every request on both listeners, from the first header to the error mapping.
+   *
+   * A property rather than a closure inside start(), so a test can serve exactly
+   * this on a real socket: what the browser is told about other origins, the
+   * write gate and the thrown-error statuses all happen here, and a route test
+   * calls handleRequest, after every one of them.
+   */
+  readonly handle = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+    const pathname = url.pathname;
+
+    if (DEBUG_HTTP) console.log(`[remote-server] ${req.method} ${pathname}`);
+
+    // A request by a name this server does not answer to is the shape of DNS
+    // rebinding: a page whose own hostname was made to resolve here. Checked
+    // before anything else, every method, because a rebinding page's reads send
+    // no Origin and would otherwise read everything. Recorded, and refused only
+    // while refusal is on: see host-names.ts.
+    const host = hostNames.check(req.headers.host, {
+      method: req.method,
+      path: pathname,
+      from: req.socket?.remoteAddress,
+      userAgent: req.headers["user-agent"],
+    });
+    if (!host.answer) {
+      refuseHostName(req, res, host.name ?? "");
+      return;
+    }
+
+    // The type each response names is the type the browser uses. Without it a
+    // browser may sniff an upload or an error body into something it will run.
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
+    // No Access-Control-* header, on any response. Every page this server
+    // serves calls it from its own origin, where CORS never applies, so the only
+    // thing such a header can do is let a page on ANOTHER origin read the
+    // answer. `Access-Control-Allow-Origin: *` did exactly that for every route,
+    // the log included: any website a staff member opened on the LAN could read
+    // the app's state.
+    //
+    // A cross-site preflight is therefore answered without permission, and the
+    // browser refuses to send the request it was asking about.
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // Enforcement, independent of the preflight: writes must be same-origin. A
+    // request with no Origin is not a browser's cross-site request (Companion,
+    // curl, a script), so it passes — see isCrossOrigin.
+    if (MUTATING_METHODS.has(req.method ?? "") && isCrossOrigin(req.headers.origin, req.headers.host)) {
+      console.warn(`[remote-server] rejected cross-origin ${scrub(req.method)} ${scrub(pathname)} from ${scrub(req.headers.origin)}`);
+      error(res, "cross-origin request rejected", 403);
+      return;
+    }
+
+    try {
+      await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
+    } catch (err) {
+      const msg = errorMessage(err);
+      const status = handlerErrorStatus(err);
+      const code = handlerErrorCode(err, status);
+      console.error(`[remote-server] handler error ${scrub(pathname)}: ${scrub(msg)}`);
+      // The reader paused an over-limit body rather than destroying the socket,
+      // so the response reaches the client; closing after it releases the rest.
+      if (status === 413) res.setHeader("Connection", "close");
+      error(res, msg, status, code);
+    }
+  };
+
   private async handleRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse,
@@ -945,7 +1017,7 @@ export class RemoteServer {
           return;
         }
         // Content-hashed name → immutable, cache forever.
-        res.writeHead(200, { "Content-Type": img.mime, "Cache-Control": "public, max-age=31536000, immutable" });
+        res.writeHead(200, storedImageHeaders(img.mime, "public, max-age=31536000, immutable"));
         res.end(img.data);
         return;
       }
@@ -962,7 +1034,7 @@ export class RemoteServer {
           res.end("Not found");
           return;
         }
-        res.writeHead(200, { "Content-Type": img.mime, "Cache-Control": "public, max-age=31536000, immutable" });
+        res.writeHead(200, storedImageHeaders(img.mime, "public, max-age=31536000, immutable"));
         res.end(img.data);
         return;
       }
@@ -1050,13 +1122,21 @@ export class RemoteServer {
       });
       writeHelloBurst(res);
       sseClients.add(res);
+      sseHost.set(res, req.headers.host);
       // Who is actually attached, on a tagged line. The only prior evidence that
       // a display had dropped its stream was the display itself going stale.
       console.log(`[events] stream client connected (${sseClients.size} streams)`);
       // Correlate this stream to its client id so POST /api/events/subscribe can set
       // its channel filter. No cid (or no report yet) → the fan-out sends everything.
-      const cid = _url.searchParams.get("cid");
-      if (cid) resCid.set(res, cid);
+      // A cid no client mints (an empty or oversized one) is treated as none: the
+      // stream still works, and its reports are refused the same way.
+      const rawCid = _url.searchParams.get("cid");
+      const cid = usableCid(rawCid) ? rawCid : null;
+      if (cid) {
+        resCid.set(res, cid);
+        // Claimed now, so a report that arrived before the stream keeps applying.
+        channelReports.claim(cid, res);
+      }
       // A Companion module marks its event stream so we can show a live
       // connected-client count in the integration panel. Re-broadcast the
       // integration states so the count updates everywhere immediately.
@@ -1070,7 +1150,7 @@ export class RemoteServer {
       req.on("close", () => {
         sseClients.delete(res);
         console.log(`[events] stream client closed (${sseClients.size} streams)`);
-        if (cid) clientChannels.delete(cid);
+        if (cid) channelReports.release(cid, res);
         if (isCompanion) {
           companionClients.delete(res);
           integrationManager.setCompanionClients(companionClients.size);
@@ -1088,14 +1168,16 @@ export class RemoteServer {
     // For a browser that cannot hold the stream above. See event-poll.ts.
     if (method === "GET" && pathname === "/api/events/poll") {
       const cid = _url.searchParams.get("cid");
-      if (!cid) {
-        error(res, "cid is required", 400);
+      if (!usableCid(cid)) {
+        error(res, `cid is required, at most ${MAX_CID_LENGTH} characters`, 400);
         return;
       }
       const sinceRaw = _url.searchParams.get("since");
       const sinceNum = sinceRaw === null ? null : Number(sinceRaw);
       const since = sinceNum !== null && Number.isFinite(sinceNum) ? sinceNum : null;
-      const chans = clientChannels.get(cid);
+      // Held while this client keeps polling; the hub's expiry releases it.
+      channelReports.claim(cid, POLL_CLAIM);
+      const chans = channelReports.get(cid);
       const result = eventPoll.buildPollResponse(cid, since, (c) => !chans || chans.has(c), helloSnapshot);
       const frames = result.frames.map((f) => `{"channel":${JSON.stringify(f.channel)},"data":${f.serialized}}`);
       // Serialized by event-poll.ts, beside the shape it serializes — see
@@ -1106,16 +1188,16 @@ export class RemoteServer {
       return;
     }
     if (method === "POST" && pathname === "/api/events/subscribe") {
-      const body = await readBodyOrEmpty(req);
-      const cid = typeof body.cid === "string" ? body.cid : null;
-      const channels = Array.isArray(body.channels)
-        ? body.channels.filter((c): c is string => typeof c === "string")
-        : null;
-      if (cid && channels) {
-        clientChannels.set(cid, new Set(channels));
-        subscriptionsChanged();
+      const body = await readBodyOrEmpty(req, MAX_SUBSCRIBE_BODY_BYTES);
+      const outcome = channelReports.report(body.cid, body.channels);
+      if (!outcome.stored && outcome.error) {
+        error(res, outcome.error, 400);
+        return;
       }
-      json(res, { ok: cid != null && channels != null });
+      // Only a claimed report changes what anything is sent. An unclaimed one
+      // waits for its stream or poll client, whose arrival announces itself.
+      if (outcome.stored && outcome.claimed) subscriptionsChanged();
+      json(res, { ok: outcome.stored });
       return;
     }
     // The connected set, on demand. The SSE hello burst carries this too, but a

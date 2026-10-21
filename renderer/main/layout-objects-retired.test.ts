@@ -15,22 +15,26 @@ import { LAYOUT_OBJECTS } from "./layout-objects.js";
 
 // Exact count, not a floor: a sixth retirement without a conversion must fail
 // this test rather than slip through on a >= check.
-const EXPECTED_RETIRED_COUNT = 5;
+const EXPECTED_RETIRED_COUNT = 9;
 
 describe("retired layout objects convert to their own replacement", () => {
   const retiredTypes = (Object.keys(LAYOUT_OBJECTS) as LayoutObjectType[]).filter(
     (t) => LAYOUT_OBJECTS[t].retired,
   );
 
-  test("exactly the five known retirements carry a `retired` block", () => {
+  test("exactly the nine known retirements carry a `retired` block", () => {
     assert.equal(retiredTypes.length, EXPECTED_RETIRED_COUNT);
     assert.deepEqual(
       retiredTypes.sort(),
       [
+        "baptism-timer",
+        "countdown-timer",
+        "home-live-status",
         "home-recording-obs",
         "home-recording-reaper",
         "home-streaming-resi",
         "home-streaming-youtube",
+        "pp-timer",
         "service-order",
       ].sort(),
     );
@@ -42,6 +46,10 @@ describe("retired layout objects convert to their own replacement", () => {
     "home-recording-reaper",
     "home-streaming-resi",
     "home-streaming-youtube",
+    "baptism-timer",
+    "countdown-timer",
+    "home-live-status",
+    "pp-timer",
   ] as LayoutObjectType[]) {
     test(`${t} converts to its replacedBy type`, () => {
       const spec = LAYOUT_OBJECTS[t];

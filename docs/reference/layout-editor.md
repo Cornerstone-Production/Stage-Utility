@@ -34,7 +34,7 @@ See [Widget reference](widgets.md) for what each widget's Content settings mean.
 A custom view can start blank or from a built-in layout. **Screens → New view →
 *Custom Layout*** offers **Start from**: *Blank canvas*, *Dashboard template*,
 *Confidence Monitor template*, and three Ultritouch strips, one per panel, each
-a row of unbound cue buttons and a countdown on that panel's canvas. Every
+a row of unbound Buttons (set to Fire a cue) and a countdown on that panel's canvas. Every
 template is built as ordinary editable objects rather than a fixed rendering —
 so it is a starting point you take apart, not a mode.
 
@@ -60,6 +60,11 @@ right default while you are still connecting things.
 
 Right-clicking the canvas — or tap and hold on a touch screen — offers the same
 catalogue as a menu.
+
+The two kinds of button, one that fires a cue and one that runs an action, are
+one tile, **Button**, under Control. It arrives firing a cue; its **Does**
+setting switches it (see [Control](widgets.md#control)). The OSC and RossTalk
+buttons keep tiles of their own.
 
 ## Groups you reuse
 

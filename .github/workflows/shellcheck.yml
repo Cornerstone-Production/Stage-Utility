@@ -1,0 +1,60 @@
+# ShellCheck over every shell script in the repo.
+#
+# The kiosk installers are fetched with `curl | sudo sh` and run as root on
+# display machines, and the updater and release scripts run unattended, so a
+# quoting slip here is a bug on someone else's machine rather than in a test.
+#
+# scripts/lint-shell.sh holds the file list and the rule for suppressions; this
+# only installs the tool and calls it, so the check you run locally is this one.
+#
+# ShellCheck has no SARIF output, so there is no code-scanning upload for it: a
+# failure is annotated on the PR diff and the full report is in the job log.
+#
+# Runs when a shell script changes, on every push to main, and weekly: a new
+# ShellCheck release can flag a script nobody touched.
+
+name: ShellCheck
+
+on:
+  pull_request:
+    paths:
+      - "*.sh"
+      - "**/*.sh"
+      - "scripts/stage-upgrade"
+      - ".github/workflows/shellcheck.yml"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 6 * * 1" # Mondays, off the hour to avoid the rush
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SHELLCHECK_VERSION: 0.11.0
+  # sha256 of the release tarball. ShellCheck publishes no checksums file, so the
+  # digest is pinned here: a changed download fails instead of running.
+  SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install ShellCheck
+        run: |
+          set -euo pipefail
+          tarball="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -fsSL -o "$tarball" "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/${tarball}"
+          echo "${SHELLCHECK_SHA256}  ${tarball}" | sha256sum -c -
+          tar xJf "$tarball" "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          sudo install -m 0755 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
+
+      - name: ShellCheck
+        run: scripts/lint-shell.sh

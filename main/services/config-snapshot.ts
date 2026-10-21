@@ -25,6 +25,8 @@ import { configFilenames, renamedStores, storesOfClass } from "./stores.js";
 import { initialFloor, type IdKind } from "./id-allocator.js";
 import { scrub } from "./scrub.js";
 import { atomicWrite } from "./write-queue.js";
+import { StoreReadError } from "./data-store.js";
+import { isNotFound } from "./errors.js";
 
 // main/services/config-snapshot.ts → repo root is two levels up.
 const REPO_ROOT = APP_ROOT;
@@ -313,10 +315,21 @@ class ConfigSnapshotService {
     return path.join(getUserDataPath(), "snapshots");
   }
 
-  /** Read + parse a config store file, or undefined if absent/unreadable. */
+  /**
+   * Read + parse a config store file, or undefined if it is absent or does not
+   * parse. A file that is there and cannot be read throws: left out, it made a
+   * backup that reported success without the operator's work in it, and the
+   * scheduler then pruned the older copies that still had it.
+   */
   private async readFile(name: string): Promise<unknown | undefined> {
+    let raw: string;
     try {
-      const raw = await fs.readFile(path.join(getUserDataPath(), name), "utf8");
+      raw = await fs.readFile(path.join(getUserDataPath(), name), "utf8");
+    } catch (err) {
+      if (isNotFound(err)) return undefined;
+      throw new StoreReadError(name, err, "could not be read for the backup");
+    }
+    try {
       return JSON.parse(raw);
     } catch {
       return undefined;
@@ -326,9 +339,15 @@ class ConfigSnapshotService {
   /** Every uploaded image, as `<dir>/<file>` → base64. */
   private async readImages(): Promise<Record<string, string>> {
     const out: Record<string, string> = {};
+    // Named in the failure, and failed the same way as a store file: the
+    // backup must not succeed without it.
+    const orFail = <R>(name: string, read: Promise<R>) =>
+      read.catch((err: unknown) => {
+        throw new StoreReadError(name, err, "could not be read for the backup");
+      });
     for (const dir of IMAGE_DIRS) {
-      for (const file of await listImages(dir)) {
-        const img = await readImage(dir, file);
+      for (const file of await orFail(dir, listImages(dir))) {
+        const img = await orFail(`${dir}/${file}`, readImage(dir, file));
         if (img) out[`${dir}/${file}`] = img.data.toString("base64");
       }
     }
@@ -406,6 +425,9 @@ class ConfigSnapshotService {
     // below would otherwise drop it without a word and the restore would report
     // success having put none of that work back.
     const renamedTo = new Map(renamedStores().map((s) => [s.renamedFrom.filename, s.filename]));
+    // What is about to be written, by today's file names, worked out first so
+    // the credentials below can be checked against all of it at once.
+    const toRestore = new Map<string, NonNullable<unknown>>();
     for (const [listed, contents] of Object.entries(bundle.files)) {
       const name = renamedTo.get(listed) ?? listed;
       if (name !== listed && Object.hasOwn(bundle.files, name)) {
@@ -416,6 +438,16 @@ class ConfigSnapshotService {
       }
       if (!configFiles().includes(name)) continue; // allowlist only
       if (contents === undefined || contents === null) continue;
+      toRestore.set(name, contents);
+    }
+    // A bundle carries addresses and no secrets, so a stored credential would
+    // follow whatever address it names. Cleared before anything is written: a
+    // write that then fails costs the operator a password typed again, where
+    // the other order could send one to an address it was never entered for.
+    // Imported lazily for the reason pauseBackgroundWriters is.
+    const { clearCredentialsARestoreMoves } = await import("./restore-credentials.js");
+    await clearCredentialsARestoreMoves(toRestore);
+    for (const [name, contents] of toRestore) {
       const dest = path.join(getUserDataPath(), name);
       const toWrite =
         name === "settings.json" && typeof contents === "object" && !Array.isArray(contents)

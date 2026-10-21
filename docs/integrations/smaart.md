@@ -44,5 +44,9 @@ chooses the reading. See
 
 **On Home:** add widget → **Sound level**. It reads whichever meter is loudest;
 right-click the tile — or tap and hold it — and use **Meter** to pin one
-instead. Pinning changes which meter is read, not which metric — both paths
-prefer the A-weighted reading.
+instead. **Metric** chooses what is read from it: **Automatic**, the default,
+prefers the A-weighted reading and otherwise takes the meter's first. The list
+shows every metric the meter reports, each with its live value. The caption under the
+number names both, as `SPL A Slow · FOH`. With **Loudest meter**, a picked
+metric is also what "loudest" is judged on. If Smaart stops reporting the
+picked metric the tile reads `—` and names it, rather than showing another.

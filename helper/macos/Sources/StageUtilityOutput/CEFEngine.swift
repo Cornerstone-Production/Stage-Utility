@@ -64,12 +64,17 @@ enum CEFEngine {
       _ = fail("could not make \(paths.userDir.path) for Chromium's profile: \(error.localizedDescription)")
       return app
     }
+    // The host copies the switches during `initialize`.
+    let switches = ChromiumSwitches.browser.map { strdup($0) }
+    defer { switches.forEach { free($0) } }
     let ok = profile.path.withCString { cache in
       paths.userDir.appendingPathComponent("chromium.log").path.withCString { logFile in
-        var settings = su_cef_settings(
-          cache_path: cache, log_file: logFile, context: nil,
-          context_initialized: { _ in MainActor.assumeIsolated { CEFEngine.contextInitialized() } })
-        return api.pointee.initialize!(&settings, &error, error.count)
+        switches.map { UnsafePointer($0) }.withUnsafeBufferPointer { list in
+          var settings = su_cef_settings(
+            cache_path: cache, log_file: logFile, switches: list.baseAddress, switch_count: list.count, context: nil,
+            context_initialized: { _ in MainActor.assumeIsolated { CEFEngine.contextInitialized() } })
+          return api.pointee.initialize!(&settings, &error, error.count)
+        }
       }
     }
     guard ok else {

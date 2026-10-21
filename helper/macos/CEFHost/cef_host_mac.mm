@@ -15,6 +15,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "include/base/cef_callback.h"
@@ -106,21 +107,24 @@ namespace {
 
 class App : public CefApp, public CefBrowserProcessHandler {
  public:
-  App(void* context, void (*initialized)(void*)) : context_(context), initialized_(initialized) {}
+  App(void* context, void (*initialized)(void*), std::vector<std::string> switches)
+      : context_(context), initialized_(initialized), switches_(std::move(switches)) {}
 
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
 
+  // The app's switches (ChromiumSwitches in the Swift core says what each is for),
+  // for the browser process only: Chromium hands its children what they need.
   void OnBeforeCommandLineProcessing(const CefString& process_type,
                                      CefRefPtr<CefCommandLine> command_line) override {
     if (!process_type.empty()) return;
-    // os_crypt would otherwise ask for the login keychain, a prompt nobody at an
-    // output Mac is there to answer.
-    command_line->AppendSwitch("use-mock-keychain");
-    // A display output keeps drawing when macOS thinks its window is hidden: a
-    // locked screen, an asleep display. These are public Chromium switches.
-    command_line->AppendSwitch("disable-backgrounding-occluded-windows");
-    command_line->AppendSwitch("disable-renderer-backgrounding");
-    command_line->AppendSwitch("disable-background-timer-throttling");
+    for (const std::string& s : switches_) {
+      size_t eq = s.find('=');
+      if (eq == std::string::npos) {
+        command_line->AppendSwitch(s);
+      } else {
+        command_line->AppendSwitchWithValue(s.substr(0, eq), s.substr(eq + 1));
+      }
+    }
   }
 
   void OnContextInitialized() override {
@@ -131,6 +135,7 @@ class App : public CefApp, public CefBrowserProcessHandler {
  private:
   void* context_;
   void (*initialized_)(void*);
+  std::vector<std::string> switches_;
   IMPLEMENT_REFCOUNTING(App);
 };
 
@@ -185,12 +190,18 @@ class Client : public CefClient,
 
   // CefLoadHandler
   void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType) override {
-    if (detached_ || !frame->IsMain() || !events_.committed) return;
+    if (!frame->IsMain()) return;
     // The entry on screen now is the one that committed, with its response status.
     int status = 0;
     if (CefRefPtr<CefNavigationEntry> entry = browser->GetHost()->GetVisibleNavigationEntry())
       status = entry->GetHttpStatusCode();
     std::string url = frame->GetURL().ToString();
+    // A page committed, and it is the app's to show, unless it is Chromium's error
+    // page for the load that just failed: that carries the failed address and no
+    // HTTP status (CEF documents OnLoadStart with OnLoadError for a failure after
+    // commit). The same address answered by the server has a status.
+    if (!(blanked_ && status == 0 && url == failed_url_)) Blank(browser, false);
+    if (detached_ || !events_.committed) return;
     events_.committed(events_.context, url.c_str(), status);
   }
 
@@ -199,8 +210,17 @@ class Client : public CefClient,
     events_.finished(events_.context, status);
   }
 
-  void OnLoadError(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, ErrorCode code, const CefString& text,
+  void OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, ErrorCode code, const CefString& text,
                    const CefString& failed_url) override {
+    // Chromium commits its own error page for a failed load, and that page prints
+    // the whole address it could not load: an output's token, on air. Nothing of it
+    // is shown. The app loads its own page in its place from `failed`, and that
+    // page's commit (OnLoadStart) shows the browser again. ERR_ABORTED commits no
+    // error page: it is a load replaced by another.
+    if (frame->IsMain() && code != ERR_ABORTED) {
+      failed_url_ = failed_url.ToString();
+      Blank(browser, true);
+    }
     if (detached_ || !frame->IsMain() || !events_.failed) return;
     std::string t = text.ToString(), u = failed_url.ToString();
     events_.failed(events_.context, static_cast<int>(code), t.c_str(), u.c_str());
@@ -250,6 +270,8 @@ class Client : public CefClient,
 
   void OnAcceleratedPaint(CefRefPtr<CefBrowser>, PaintElementType type, const RectList&,
                           const CefAcceleratedPaintInfo& info) override {
+    // A card output repeats its last picture meanwhile.
+    if (blanked_) return;
     if (detached_ || type != PET_VIEW || !events_.painted || !info.shared_texture_io_surface) return;
     events_.painted(events_.context, info.shared_texture_io_surface);
   }
@@ -297,9 +319,23 @@ class Client : public CefClient,
     su_devtools_done done;
   };
 
+  // While Chromium's error page is the committed page: a windowless browser's
+  // pictures are dropped, and a windowed browser's view is hidden, so the output
+  // shows its window's black. Set and cleared on the UI thread.
+  void Blank(CefRefPtr<CefBrowser> browser, bool on) {
+    if (blanked_ == on) return;
+    blanked_ = on;
+    if (windowless_) return;
+    NSView* view = (__bridge NSView*)browser->GetHost()->GetWindowHandle();
+    view.hidden = on ? YES : NO;
+  }
+
   su_browser* owner_;
   su_browser_events events_;
   bool windowless_;
+  std::atomic<bool> blanked_{false};
+  // The address whose load failed last, while blanked: its error page must not unblank.
+  std::string failed_url_;
   std::atomic<int> width_, height_;
   bool detached_ = false;
   CefRefPtr<CefRegistration> registration_;
@@ -377,7 +413,11 @@ bool Initialize(const su_cef_settings* s, char* error, size_t error_size) {
   }
   if (s->log_file) CefString(&settings.log_file) = s->log_file;
 
-  CefRefPtr<App> app(new App(s->context, s->context_initialized));
+  std::vector<std::string> switches;
+  for (size_t i = 0; i < s->switch_count; i++) {
+    if (s->switches[i]) switches.emplace_back(s->switches[i]);
+  }
+  CefRefPtr<App> app(new App(s->context, s->context_initialized, std::move(switches)));
   if (!CefInitialize(args, settings, app.get(), nullptr)) {
     CopyError(error, error_size, "CefInitialize failed, exit code " + std::to_string(CefGetExitCode()));
     return false;

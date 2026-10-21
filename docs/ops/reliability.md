@@ -12,8 +12,15 @@ Built for a room full of always-on screens.
 - **Planning Center requests are pooled and cached** in tiers, with backoff on rate
   limits. The live countdown stays uncached.
 - **Writes are atomic** — temp file then rename — and a file that will not parse is
-  backed up rather than overwritten. Recorded services are one file each, so
-  persisting a live service does not rewrite your whole history.
+  backed up rather than overwritten. One that cannot be read at all is never
+  taken for empty: see
+  [When a store file cannot be read](#when-a-store-file-cannot-be-read), and
+  for recordings,
+  [When a recorded file cannot be read](#when-a-recorded-file-cannot-be-read).
+  Recorded services are one file each, so persisting a live service does not
+  rewrite your whole history, and one that cannot be saved does not stop the next
+  from recording: see
+  [When a recorded service cannot be saved](#when-a-recorded-service-cannot-be-saved).
 - **Disk caches are pruned.** Photos and plan attachments go by age and size, and
   the Mac output helper's downloads (`cache/output-helper/`) are cut back to the
   running version. Images are served immutable so a screen fetches each one once.
@@ -61,6 +68,7 @@ the running server prints its own path in **Settings → Advanced**:
 | `presets.json`, `layout-templates.json`, `layout-groups.json` | saved slot presets and layout libraries |
 | `notes.json` | what an operator typed into a notes object |
 | `servicecue-config.json`, `servicecue-layouts.json`, `servicecue-roles.json` | ServiceCue columns and category roles. An install that has them as `scriptview-*.json` has them renamed on the next start; a backup taken before that restores into the new names. A release older than 1.25.0 reads only the old names, so a server switched back to one (for example from the beta track to an older stable) shows ServiceCue with no layouts until it runs 1.25.0 or later again; the files are not touched |
+| `servicecue-publish.json` | whether ServiceCue is published to the web, and the address of its page. Restored switched on, it has no token until one is entered again: the card then says so |
 | `patch.json` | the stage patch sheet |
 | `automation-rules.json`, `automation-settings.json` | rules, and simulate/disarm |
 | `osc-targets.json`, `rosstalk-targets.json`, `rosstalk-settings.json` | control targets |
@@ -98,7 +106,7 @@ machine's history rather than how you set it up:
 | `video-relay/` | the video relay's pinned MediaMTX download and its generated config, fetched again on a fresh machine. See [Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch) |
 | `update-track`, `update-progress.json`, `update-result.json`, `update-live.log`, `update-restart-pending` | the updater's own state: the track this install follows, and the files an update in flight and one waiting for its restart leave |
 | `server.log`, `update.log` | log history, replayed into `/log` on boot |
-| `secrets.bin` | integration and wireless credentials, AES-256-GCM encrypted |
+| `secrets.bin` | integration and wireless credentials and the ServiceCue publishing token, AES-256-GCM encrypted |
 | `encryption.key` | 32-byte key, generated on first run, mode `600` |
 | `snapshots/`, `backups/` | saved config snapshots, and what the scheduler wrote |
 
@@ -148,6 +156,136 @@ still holds. Fix the permissions or the mount and save again.
 Fix the cause and save again — the retry is an ordinary save, with nothing left
 over from the attempt that failed.
 
+### When a store file cannot be read
+
+Every JSON store in the data directory (`settings.json`, `views.json`,
+`kiosk-devices.json` and the rest) is read once and then served from memory. A
+missing file is a first run and starts from defaults. A file that is there and
+cannot be read — permissions after running the server as another user, a failing
+card, a directory where the file should be — is never treated as empty:
+
+- **The server keeps running.** That store is served as its defaults, in memory
+  only, and every read retries the file. A store needed at startup does not stop
+  the server starting, so `/log` stays reachable.
+- **Nothing is saved to it** once a read has failed, until the server restarts.
+  A save reports the failure, and the file is left exactly as it was. Not when
+  the file reads again either: what the server built from the defaults at boot,
+  the screens for one, would replace the real file on the next save.
+- **Nothing is decided from the defaults.** Start-up migrations of views and
+  screens are skipped, layout images are not pruned, kiosk discovery answers no
+  probe while `kiosk-devices.json` cannot be read (a screen that hears no answer
+  keeps its server and probes again), and the device routes fail rather than
+  answer from an empty list. With `automation-rules.json` unreadable the cue
+  manifest, states and YAML fail rather than list no cues, so Home Assistant
+  marks the cue entities unavailable instead of removing them, the app's own
+  cue buttons are gone, and rule edits are refused.
+- **A backup** fails rather than leaving the file out, and the same goes for an
+  uploaded image it cannot read.
+
+Expect the pages backed by that store to look empty while it lasts. That is the
+defaults, not your data, which is still on disk. With `settings.json` unreadable
+the app also follows the host clock rather than its configured time zone, so
+schedules and history days run in the host's zone, which is UTC on most servers.
+
+The reason is on `/log` under `[data-store]`, once per file until it reads again:
+
+```
+[data-store] settings.json could not be read (EACCES): EACCES: permission denied,
+open '…/settings.json'. Running on its defaults without saving them, and refusing
+saves to it until the server restarts. Fix the permissions or the disk, then
+restart.
+```
+
+Fix the cause, then restart the server. A read after the fix logs
+`[data-store] … is readable again; restart the server to save to it`, and some
+pages show the real data from then on, but saves stay refused until the restart.
+
+### When a recorded file cannot be read
+
+Recordings follow a different rule from the stores above, because nothing may
+stop a live service recording. A recorded file that is there and cannot be read
+is never written over, and recording carries on beside it:
+
+- **A service record** (one file per service in `spl-history/`,
+  `attendance-history/` and `service-timeline/`) that cannot be read or will not
+  parse is left as it is. The service is missing from History, and opening it
+  answers that its record could not be read rather than that it was never
+  recorded. Saves for
+  that service go to `<name>.json.held-<when the server started>` beside it until
+  the server restarts, and History shows that copy. A record still unreadable
+  after a restart starts another held file, each holding what its run recorded.
+  A folder that cannot be listed holds every save the same way.
+- **A raw CSV** (`archive/<date>_<service>/spl.csv` and the rest; see
+  [Data archive](../data-archive.md)) that cannot be read, or stops taking rows
+  mid-service, is passed over: rows go on into the next file of its roll
+  (`spl.2.csv`), which every reader already reads, starting with the row that
+  failed. A failure of the machine rather than the file (out of file handles,
+  memory or space) passes nothing over: that row is lost, and the next one
+  tries the same file again.
+- **Nothing is decided from the gap.** While any service record cannot be read,
+  the data archive's export, inspect and import refuse (an import took that
+  service for new and replaced it), and so does the History workbook; a
+  scheduled backup that includes the archive fails, writing nothing and keeping
+  its older copies.
+  That service cannot be edited in History (merge, delete, trim, rebuild,
+  recalculate, item times); every other service can. A raw file that cannot be
+  read refuses a merge with nothing moved, fails the SPL chart and the baptism
+  lane for that service rather than drawing part of it, and resumes SPL from
+  its stored record rather than rebuilding from the rows that did read. An
+  import merging into one leaves it as it is and lists it as not written.
+
+Each is on `/log`, once per file:
+
+```
+[attendance-history] st1-p1-t1.json in attendance-history could not be read
+(EACCES): EACCES: permission denied, open '…/st1-p1-t1.json'. Left as it is,
+missing from history, and a save for that service goes to a .held file beside it
+until the server restarts. Fix the file, then restart.
+[attendance-history] saving st1:p1:t1 to st1-p1-t1.json.held-2026-10-18T14-02-11-512Z
+rather than over st1-p1-t1.json, because …
+[archive] 2026-10-18_st1-p1-t1/spl.csv could not be read (EACCES). Recording spl
+into the next file beside it, and leaving this one as it is.
+```
+
+Fix the cause, then restart. A file passed over in the raw archive is read with
+the rest once it reads again. A held record is not folded back in for you: it is
+the part of that service recorded while the record could not be read, so compare
+the two and keep what you want. For SPL and the rundown timing,
+**Rebuild from raw** on the service page derives the record again from the raw
+rows, which hold the whole service.
+
+### When a recorded service cannot be saved
+
+A save that fails outright — the record folder not writable, the disk full —
+does not stop recording either. When a service closes, at the split to the next
+service on the same plan or when the plan leaves item mode, the closed record is
+published to History and the next service's record opens on that same tick,
+whether or not the save landed. A record that did not save is held in memory and
+saved again every few seconds (every minute for SPL) until it lands. Until then:
+
+- Opening that service shows the held copy, and a service that comes back
+  resumes from it. The History list, exports and backups read what is on disk,
+  so they leave the service out, or show the copy from before the failure.
+- History edits to it, delete included, and an archive import over it are
+  refused with a 409 (`code: "unsaved"`): each would work from the copy on disk
+  and drop the held one.
+
+Held in memory only: a restart before the save lands loses that service's record.
+For SPL and the rundown timing, **Rebuild from raw** recovers it from the raw
+archive when an earlier copy of the record reached disk; a service with nothing
+saved has no History row to rebuild. A write that hangs rather than fails, such as a
+stalled network mount, still holds up the tick it is on.
+
+```
+[service-timeline-recorder] could not save st1:p1:t1 (EACCES: permission denied,
+open '…'); recording carries on, and the save is retried every 4 s. A restart
+before it lands loses that service.
+[service-timeline-recorder] still could not save st1:p1:t1 (EACCES: …); still retrying
+[service-timeline-recorder] saved st1:p1:t1 on retry
+```
+
+The "still could not save" line repeats every ten minutes while it fails.
+
 ### When a credential could not be moved out of `settings.json`
 
 A box upgrading from a build that stored a credential as ordinary config moves it
@@ -190,8 +328,10 @@ off the machine; the app only writes to a path, so anything the OS can mount
 works — SMB, NFS, an external disk — with no credentials stored here.
 
 A failed run leaves the existing backups untouched and is retried on the next
-check rather than skipping an interval, and a machine that was switched off runs
-one backup when it returns rather than one per interval it missed.
+check rather than skipping an interval. A config file or uploaded image that is
+there but cannot be read fails the run rather than being left out of it. A
+machine that was switched off runs one backup when it returns rather than one per
+interval it missed.
 
 **Keeping the key out of a synced backup.** By default the key sits beside
 `secrets.bin` so the service can decrypt unattended at boot, which means it travels

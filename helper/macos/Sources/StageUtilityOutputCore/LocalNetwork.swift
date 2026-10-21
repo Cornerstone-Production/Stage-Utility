@@ -8,7 +8,8 @@ import Foundation
 /// Only a broadcast probe that failed on every interface is read as a denial
 /// (`ProbeLinkState.sent`). A page load or a health post that gets "no route to
 /// host" is a single unicast to a server, and a server that is switched off on the
-/// same subnet gives the same error.
+/// same subnet gives the same error; the page shown for a failed load says where to
+/// turn access on only with other evidence (`UnreachablePage`).
 public enum LocalNetworkAccess {
   public static let hostUnreachable: Int32 = 65  // EHOSTUNREACH on Darwin
 

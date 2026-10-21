@@ -96,6 +96,10 @@ class CEFPage {
     get { loader.onProcessGone }
     set { loader.onProcessGone = newValue }
   }
+  var localNetworkEvidence: (@MainActor (_ since: Date) -> UnreachablePage.Evidence)? {
+    get { loader.localNetworkEvidence }
+    set { loader.localNetworkEvidence = newValue }
+  }
 
   init(api: UnsafePointer<su_cef_api>, label: String) {
     self.api = api
@@ -169,6 +173,12 @@ final class CEFWindowedSurface: CEFPage, WebSurface {
   func snapshot(completion: @escaping @MainActor (CGImage?, String?) -> Void) {
     guard let browser else {
       completion(nil, "no page has been loaded yet")
+      return
+    }
+    // A screenshot draws the renderer's document whatever the host hides, and in the
+    // moment after a failed load that is Chromium's error page, with the token.
+    if loader.showingFailurePage {
+      completion(nil, "no snapshot: the page did not load")
       return
     }
     let box = Unmanaged.passRetained(CaptureBox(completion)).toOpaque()

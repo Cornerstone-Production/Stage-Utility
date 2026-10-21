@@ -36,7 +36,7 @@ import {
   type AppStateFamilyId,
   type AppStateSourceId,
 } from "./app-state-sources.js";
-import { CALL_TRIGGER_ID, parseAliases } from "./cue-aliases.js";
+import { CALL_TRIGGER_ID, calledCueName, parseAliases } from "./cue-aliases.js";
 import { errorMessage } from "./errors.js";
 import { stateBindingParams, type StateBinding } from "./cue-pairs.js";
 import { integrationManager } from "./integration-manager.js";
@@ -425,7 +425,7 @@ export function builtinCueRules(stored: readonly Rule[]): Rule[] {
   for (const r of stored) {
     if (r.trigger.id !== CALL_TRIGGER_ID) continue;
     const label = r.name || String(r.trigger.params.name ?? r.id);
-    const name = String(r.trigger.params.name ?? "").trim().toLowerCase();
+    const name = calledCueName(r.trigger);
     if (name && !owners.has(name)) owners.set(name, label);
     for (const alias of parseAliases(r.trigger.params)) {
       if (!owners.has(alias)) owners.set(alias, label);

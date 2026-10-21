@@ -24,9 +24,10 @@ after(() => fs.rm(TMP, { recursive: true, force: true }));
 
 const ctl = stageController as unknown as {
   listServiceTypes: () => Promise<{ id: string; name: string }[]>;
-  listPlans: (serviceTypeId: string) => Promise<unknown[]>;
+  readPlans: (serviceTypeId: string) => Promise<{ plans: unknown[]; recentFailed: boolean }>;
   state: Record<string, unknown>;
   upcomingCache: unknown;
+  lastRefreshLine: string;
   plansOutage: { forget: () => void };
 };
 
@@ -35,21 +36,26 @@ const PLAN = (id: string) => ({ id, title: `Plan ${id}`, seriesTitle: null, sort
 
 let reads: string[] = [];
 let failing = new Set<string>();
+/** Types whose upcoming plans read, and whose recent plans did not. */
+let recentFailing = new Set<string>();
 
 beforeEach(() => {
   reads = [];
+  ctl.lastRefreshLine = "";
   failing = new Set();
+  recentFailing = new Set();
   ctl.upcomingCache = null;
+  ctl.lastRefreshLine = "";
   ctl.plansOutage.forget();
   ctl.state = { ...ctl.state, allowedServiceTypeIds: [], planId: null };
   ctl.listServiceTypes = async () => [
     { id: "1", name: "Sunday" },
     { id: "2", name: "Wednesday" },
   ];
-  ctl.listPlans = async (id) => {
+  ctl.readPlans = async (id) => {
     reads.push(id);
     if (failing.has(id)) throw new Error("Planning Center returned 503");
-    return [PLAN(`p${id}`)];
+    return { plans: [PLAN(`p${id}`)], recentFailed: recentFailing.has(id) };
   };
 });
 
@@ -124,6 +130,47 @@ describe("getUpcomingPlanList caching", () => {
     failing.clear();
     await listAt(t, 3000 + UPCOMING_CACHE_MS + 1);
     assert.equal(lines.filter((l) => l.includes("[plans] upcoming list available again")).length, 1, JSON.stringify(lines));
+  });
+
+  it("names the types it could not read in full, and none when it read them all", async (t) => {
+    captureConsole(t, "log", "warn");
+    assert.equal("incompleteTypeIds" in (await listAt(t, 0)), false, "a whole list named types it had read");
+
+    failing.add("2");
+    ctl.upcomingCache = null;
+    const down = await listAt(t, 1000);
+    assert.deepEqual(down.incompleteTypeIds, ["2"]);
+    // From the cache too: the second reader must not be told the shorter list is the whole one.
+    assert.deepEqual((await listAt(t, 2000)).incompleteTypeIds, ["2"], "the cached partial list lost its note");
+  });
+
+  it("names a type whose recent plans failed, though its upcoming plans came back", async (t) => {
+    // The list keeps those plans, and the type is still partly unread: a plan from the recent half is missing, not gone.
+    captureConsole(t, "log", "warn");
+    recentFailing.add("1");
+    const list = await listAt(t, 0);
+    assert.deepEqual(list.plans.map((p) => p.serviceTypeId).sort(), ["1", "2"]);
+    assert.deepEqual(list.incompleteTypeIds, ["1"]);
+    await listAt(t, UPCOMING_PARTIAL_CACHE_MS - 1);
+    assert.equal(reads.length, 2, "the partial list was read again before its short window");
+    recentFailing.clear();
+    const later = await listAt(t, UPCOMING_PARTIAL_CACHE_MS + 1);
+    assert.equal("incompleteTypeIds" in later, false);
+  });
+
+  it("says the refreshed list once while it is the same, and again when it changes", async (t) => {
+    const lines = captureConsole(t, "log", "warn");
+    const said = () => lines.filter((l) => l.includes("[plans] upcoming list refreshed"));
+    await listAt(t, 0);
+    await listAt(t, UPCOMING_CACHE_MS + 1);
+    await listAt(t, 2 * UPCOMING_CACHE_MS + 2);
+    assert.equal(reads.length, 6, "the list was reused, so this proves nothing about the line");
+    assert.equal(said().length, 1, `an unchanged list said again at every refresh: ${JSON.stringify(said())}`);
+
+    failing.add("2");
+    await listAt(t, 3 * UPCOMING_CACHE_MS + 3);
+    assert.equal(said().length, 2, "a changed list was not said");
+    assert.match(said()[1]!, /1 plans across 2 types/);
   });
 
   it("still labels a plan from the partial list", async (t) => {

@@ -12,11 +12,11 @@
 // this track" means, prereleases included.
 
 import type { UpdateStatus } from "../../types/stage.js";
+import { GITHUB_API_REPO, rateLimitMessage } from "../github-repo.js";
 import { compareTags, latestOnTrack, newerThan, parseTag, type ParsedTag } from "../release-tags.js";
 import { parseReleaseIntro, parseReleaseSections, mergeReleaseSections, type ReleaseSection } from "./release-notes.js";
 
-const REPO = "Cornerstone-Production/Stage-Utility";
-const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
+const RELEASES_URL = `${GITHUB_API_REPO}/releases?per_page=30`;
 // The list endpoint is newest-first regardless of prerelease flag, so when many
 // betas ship between stables the whole first page is prereleases and the newest
 // STABLE falls off it — true of this repo at the time of writing (30 betas since
@@ -24,7 +24,7 @@ const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases?per_page=30`
 // forever: the exact silent no-op this module exists to fix. /releases/latest is
 // GitHub's own "newest stable, no prereleases, no drafts" and cannot be crowded
 // out, so it is always merged in.
-const LATEST_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
+const LATEST_URL = `${GITHUB_API_REPO}/releases/latest`;
 
 export interface ReleaseInfo {
   tag: string;
@@ -242,23 +242,6 @@ const conditional = new Map<string, { etag: string; body: unknown }>();
 /** Reset the ETag cache. For tests, and for a "check now" that must not 304. */
 export function clearReleaseCache(): void {
   conditional.clear();
-}
-
-/**
- * A 403 that is really a quota, told as one.
- *
- * GitHub sends x-ratelimit-remaining: 0 with a reset epoch. Saying "try again at
- * 10:47" is the difference between a message an operator can act on and one that
- * looks like the updater is broken.
- */
-function rateLimitMessage(res: { headers?: { get(name: string): string | null } }): string | null {
-  const remaining = res.headers?.get("x-ratelimit-remaining");
-  if (remaining !== "0") return null;
-  const reset = Number(res.headers?.get("x-ratelimit-reset"));
-  if (!Number.isFinite(reset)) return "GitHub's hourly limit for this network is used up.";
-  const at = new Date(reset * 1000);
-  const mins = Math.max(1, Math.round((at.getTime() - Date.now()) / 60_000));
-  return `GitHub's hourly limit for this network is used up — it resets in ${mins} min.`;
 }
 
 function getJson(url: string, doFetch: FetchLike) {

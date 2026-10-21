@@ -12,6 +12,7 @@ import { useState, type CSSProperties } from "react";
 import { Loader2Icon } from "lucide-react";
 
 import { invoke } from "../lib/api";
+import { ButtonLabel } from "./button-label";
 import { cueEntry, type CuesLive } from "./use-cue-live";
 
 export interface CallAnswer {
@@ -21,6 +22,8 @@ export interface CallAnswer {
   error?: string;
   reason?: string;
   skipped?: boolean;
+  /** Automation is in Simulate mode: the cue was accepted and nothing reached a device. */
+  simulated?: boolean;
 }
 
 /** The seam a test replaces; production posts the cue. */
@@ -117,6 +120,9 @@ export function CueButton({
       const r = await cueButtonDeps.call(target);
       if (r.status === 200) {
         if (r.skipped) setSaid(r.detail ?? "Already there");
+        // Said, not silent: a press that reached no device must not look like one
+        // that did.
+        else if (r.simulated) setSaid("Simulated: nothing was sent");
       } else if (r.status === 202) setSaid("Needs confirmation; use the rules page");
       else setSaid(r.error ?? r.detail ?? "Refused");
     } catch {
@@ -150,6 +156,9 @@ export function CueButton({
         gap: "0.15em",
         border: "none",
         borderRadius: "inherit",
+        // A long label wraps inside the button (ButtonLabel); what still does
+        // not fit is clipped here rather than drawn over the neighbouring widget.
+        overflow: "hidden",
         cursor: canFire ? "pointer" : "default",
         pointerEvents: interactive ? "auto" : "none",
         opacity: state === "unavailable" ? 0.4 : 1,
@@ -173,6 +182,7 @@ export function CueButton({
       <span
         aria-hidden
         style={{
+          flexShrink: 0,
           width: "0.55em",
           height: "0.55em",
           borderRadius: "50%",
@@ -185,7 +195,7 @@ export function CueButton({
                 : "var(--su-fg-faint)",
         }}
       />
-      <span
+      <ButtonLabel
         style={{
           fontWeight: 600,
           letterSpacing: "0.02em",
@@ -194,10 +204,12 @@ export function CueButton({
         }}
       >
         {busy ? <Loader2Icon className="size-[1em] animate-spin" /> : label}
-      </span>
+      </ButtonLabel>
       {line2 && (
         <span
           style={{
+            flexShrink: 0,
+            textAlign: "center",
             fontSize: "0.55em",
             opacity: 0.75,
             color: state === "stale" ? "var(--amber-9)" : undefined,

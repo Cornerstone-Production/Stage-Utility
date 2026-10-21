@@ -54,6 +54,17 @@ const seen = new Map<string, SeenDevice>();
 const secrets = new Map<string, string>();
 
 /**
+ * Bound helper outputs that showed /enroll a secret other than the one pinned, so
+ * the line saying so is written once, not on every reload of the holding screen.
+ * Cleared by the routes only (a match, a release, a claim), never by forgetSeen:
+ * the responder calls that on every probe from a bound device.
+ * An output whose token was replaced on its Mac (`--new-token`) lands here until it
+ * is released and set up again. Only ids this server holds a binding for are added
+ * (the route checks), so it is no bigger than the bindings.
+ */
+const mismatched = new Set<string>();
+
+/**
  * The last health each output helper device reported. RUNTIME, like everything
  * here: a reading of how an output is doing now, gone on restart and aged out
  * when the reports stop. Keyed by device id, which has been through authorise()
@@ -227,9 +238,30 @@ export function rememberSecret(id: string, secret: string): void {
   secrets.set(id, secret);
 }
 
+/** Forget the secret a device presented: its binding was released, and what it
+ *  showed before then (perhaps a leaked token, shown by someone else) must not be
+ *  what the next claim pins. */
+export function forgetSecret(id: string): void {
+  secrets.delete(id);
+}
+
 /** The secret a device presented, for pinning at claim. */
 export function secretFor(id: string): string | undefined {
   return secrets.get(id);
+}
+
+/** A binding's device showed a secret that does not match its pin. True the first
+ *  time only, until it matches again or the binding is released or claimed. */
+export function firstSecretMismatch(id: string): boolean {
+  if (mismatched.has(id)) return false;
+  mismatched.add(id);
+  return true;
+}
+
+/** The device matched its pin again, or its binding went: a mismatch after this is
+ *  news again. */
+export function forgetSecretMismatch(id: string): void {
+  mismatched.delete(id);
 }
 
 /** Record the size a device reported over HTTP from its holding screen. Merged
@@ -247,10 +279,29 @@ export function rememberScreen(id: string, size: { w: number; h: number; dpr?: n
 }
 
 /** Forget a device immediately — it was just claimed, so it stops being a
- *  candidate the moment the binding exists rather than a minute and a half later. */
+ *  candidate the moment the binding exists rather than a minute and a half later.
+ *  A later release is then announced again (noteReleased). */
 export function forgetSeen(id: string): void {
   secrets.delete(id);
+  toldReleased.delete(id);
   if (seen.delete(id)) announce();
+}
+
+/** Devices already told this server no longer claims them, so the line is logged
+ *  once per release and not once per probe from an agent that cannot act on it.
+ *  Cleared by forgetSeen, which a claim and a probe from a device bound here both
+ *  call. Bounded at the seen list's size, oldest dropped. */
+const toldReleased = new Set<string>();
+
+/**
+ * A device that still names this server, but is not set up here, is being told so.
+ * That answer is what makes it forget this server, so another can set it up.
+ */
+export function noteReleased(id: string): void {
+  if (toldReleased.has(id)) return;
+  if (toldReleased.size >= MAX_SEEN) toldReleased.delete(toldReleased.values().next().value!);
+  toldReleased.add(id);
+  console.log(`[kiosk-responder] ${scrub(id)} still names this server but is not set up here; told it so`);
 }
 
 /**
@@ -323,8 +374,10 @@ function ensureSweep(): void {
 /** Tests only: drop all state so cases cannot leak into each other. */
 export function resetKioskPresence(): void {
   secrets.clear();
+  mismatched.clear();
   health.clear();
   seen.clear();
+  toldReleased.clear();
   scans.clear();
   fullWarned = false;
   lastSig = "";

@@ -1,0 +1,200 @@
+# CodeQL code scanning, one job per language (codeql-language.yml does the work).
+#
+# Each language except JavaScript/TypeScript runs only when a change touches the
+# files it analyses, and always on a push to main (the release), on the weekly
+# schedule, and by hand:
+#
+#   swift                 helper/macos/**   (built by hand on macOS, which runners are scarce)
+#   c-cpp                 helper/macos/**   (the helper's DeckLink shim, built on macOS too)
+#   ruby                  **/*.rb
+#   actions               .github/**
+#   javascript-typescript always
+#
+# A change to this workflow, to codeql-language.yml or to the shared configuration
+# (.github/codeql/codeql-config.yml) runs every language. The model tests run when
+# .github/codeql changes. A language that does not run shows as skipped, not pending. On a pull request it also uploads
+# an empty result under its own category (see codeql-language.yml), so code scanning
+# still finds every configuration it has on the base branch.
+#
+# The scheduled run only ever runs on the default branch, which is main.
+#
+# Tested by scripts/codeql-workflow.test.ts, which runs the gate's own shell.
+
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [beta, main]
+  push:
+    branches: [beta, main]
+  schedule:
+    - cron: "17 5 * * 1"
+  # Lets a specific commit be scanned on demand.
+  workflow_dispatch:
+
+# Least privilege, stated rather than inherited. Jobs widen only what they need.
+permissions:
+  contents: read
+
+# A newer push to the same pull request makes the older run's result moot. Every
+# other run has a group of its own: a pending run is replaced by a newer one in its
+# group, and the replaced run may be the one that changed the Swift.
+concurrency:
+  group: codeql-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Decides which languages have anything to look at. Lists the changed files through
+  # the API rather than a checkout (no history to fetch, nothing to diff), and fails
+  # open: a listing it cannot read, or one the API truncates, runs every language.
+  changes:
+    name: Detect changed languages
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      swift: ${{ steps.gate.outputs.swift }}
+      c-cpp: ${{ steps.gate.outputs.c-cpp }}
+      ruby: ${{ steps.gate.outputs.ruby }}
+      actions: ${{ steps.gate.outputs.actions }}
+      models: ${{ steps.gate.outputs.models }}
+    steps:
+      - name: Which languages does this change touch?
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          emit() {
+            for lang in swift c-cpp ruby actions models; do echo "$lang=$1" >>"$GITHUB_OUTPUT"; done
+            echo "every language: $1 ($2)"
+          }
+          # flag <language> <pattern>: true when a changed file matches.
+          flag() { if grep -qE "$2" <<<"$files"; then v=true; else v=false; fi; echo "$1=$v" >>"$GITHUB_OUTPUT"; echo "$1: $v"; }
+
+          # A full scan: the schedule, a manual run, and every push to main.
+          case "$EVENT:$REF" in
+            schedule:* | workflow_dispatch:* | push:refs/heads/main) emit true "$EVENT"; exit 0 ;;
+          esac
+
+          if [ "$EVENT" = pull_request ]; then
+            # The listing stops at 3000 files.
+            limit=3000
+            # A rename lists the path it came from too, so a file moved out of the helper counts.
+            files=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" --jq '.[] | .filename, (.previous_filename // empty)') || { emit true "could not list the pull request's files"; exit 0; }
+          else
+            # The first push of a branch has no previous commit to compare with.
+            [ "$BEFORE" = 0000000000000000000000000000000000000000 ] && { emit true "no previous commit"; exit 0; }
+            # The comparison stops at 300 files.
+            limit=300
+            files=$(gh api "repos/$REPO/compare/$BEFORE...$SHA" --jq '.files[] | .filename, (.previous_filename // empty)') || { emit true "could not compare the push"; exit 0; }
+          fi
+          # An empty listing is a listing that was not ready, not a change with no files.
+          [ -z "$files" ] && { emit true "no files listed"; exit 0; }
+          [ "$(grep -c . <<<"$files")" -ge "$limit" ] && { emit true "file list may be truncated"; exit 0; }
+
+          # A change to the CodeQL workflows, or to the configuration every language reads,
+          # runs every language.
+          if grep -qE '^\.github/(workflows/codeql(-language)?\.yml|codeql/codeql-config\.yml)$' <<<"$files"; then emit true "CodeQL workflow or configuration changed"; exit 0; fi
+
+          # The Xcode selection is part of how the helper is built for analysis.
+          flag swift '^helper/macos/|^\.github/actions/select-xcode/'
+          flag c-cpp '^helper/macos/|^\.github/actions/select-xcode/'
+          flag ruby '\.rb$'
+          flag actions '^\.github/'
+          flag models '^\.github/codeql/'
+
+  # swift and c-cpp run on the runner the helper's own CI builds on (helper-macos.yml),
+  # with the same Xcode choice, so the build the tracer watches is one CI already proves.
+  swift:
+    needs: changes
+    if: ${{ !cancelled() }}
+    uses: $/.github/workflows/codeql-language.yml
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      language: swift
+      runner: macos-14
+      build-mode: manual
+      run: ${{ needs.changes.result != 'success' || needs.changes.outputs.swift == 'true' }}
+
+  c-cpp:
+    needs: changes
+    if: ${{ !cancelled() }}
+    uses: $/.github/workflows/codeql-language.yml
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      language: c-cpp
+      runner: macos-14
+      build-mode: manual
+      run: ${{ needs.changes.result != 'success' || needs.changes.outputs.c-cpp == 'true' }}
+
+  ruby:
+    needs: changes
+    if: ${{ !cancelled() }}
+    uses: $/.github/workflows/codeql-language.yml
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      language: ruby
+      run: ${{ needs.changes.result != 'success' || needs.changes.outputs.ruby == 'true' }}
+
+  actions:
+    needs: changes
+    if: ${{ !cancelled() }}
+    uses: $/.github/workflows/codeql-language.yml
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      language: actions
+      run: ${{ needs.changes.result != 'success' || needs.changes.outputs.actions == 'true' }}
+
+  # The model pack and its tests, which only the JavaScript/TypeScript analysis uses.
+  # Runs the pack's own CodeQL tests against the CLI the analysis installs, so a model
+  # that stops resolving (a renamed function, a CodeQL release that reads the path
+  # differently) goes red here instead of silently analysing less.
+  models:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.models == 'true') }}
+    name: CodeQL model tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: codeql
+        uses: github/codeql-action/setup-codeql@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: javascript-typescript
+      - name: Run the model tests
+        env:
+          CODEQL: ${{ steps.codeql.outputs.codeql-path }}
+        run: |
+          "$CODEQL" version
+          "$CODEQL" test run .github/codeql/tests --additional-packs="$GITHUB_WORKSPACE/.github/codeql/extensions"
+
+  # Nearly every change touches it, and Linux runners are not scarce.
+  javascript-typescript:
+    uses: $/.github/workflows/codeql-language.yml
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      language: javascript-typescript
+      run: true

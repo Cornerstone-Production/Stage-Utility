@@ -12,15 +12,20 @@ enum SingleInstance {
   /// Keyed on the bundle id, so a build run straight from `.build/` (no bundle, no
   /// id) never defers to an installed copy.
   static func handOverToRunningCopy() -> Bool {
-    guard let id = Bundle.main.bundleIdentifier else { return false }
-    let me = ProcessInfo.processInfo.processIdentifier
-    guard let other = NSRunningApplication.runningApplications(withBundleIdentifier: id).first(where: { $0.processIdentifier != me })
-    else { return false }
+    guard let id = Bundle.main.bundleIdentifier, let other = otherCopy(bundleId: id) else { return false }
     DistributedNotificationCenter.default().postNotificationName(
       showWindowRequest, object: nil, userInfo: nil, deliverImmediately: true)
     other.activate()
     // Let the notification leave before this process does.
     RunLoop.current.run(until: Date().addingTimeInterval(0.3))
     return true
+  }
+
+  /// Another running copy with this bundle id, or the installed one's when this copy
+  /// has none (a build run from `.build/`), which shares its state folder.
+  static func otherCopy(bundleId: String? = Bundle.main.bundleIdentifier) -> NSRunningApplication? {
+    let me = ProcessInfo.processInfo.processIdentifier
+    return NSRunningApplication.runningApplications(withBundleIdentifier: bundleId ?? "com.stageutility.output")
+      .first { $0.processIdentifier != me }
   }
 }

@@ -30,6 +30,7 @@ import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
 import { OutageLog } from "./repeat-log.js";
 import {
+  incompleteOf,
   isDefaultRundownPlan,
   planWindow,
   sameIds,
@@ -55,6 +56,8 @@ import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { resolveSlots, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
 import { PersonDirectory } from "./person-directory.js";
+import { iconToSettings, type AppIconInput } from "./app-icon.js";
+import { DEFAULT_ICON_BACKGROUND } from "./install-metadata.js";
 import { externalizeBrandingImages, migrateInlineBrandingImages } from "./branding-image-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { slotsStore, describeSlotsTarget, type SlotsTarget } from "./slots-store.js";
@@ -420,6 +423,7 @@ export class StageController {
     lanUrl: null,
     showQr: true,
     kioskDiscovery: false,
+    autoUpdateMachines: true,
     allowedServiceTypeIds: [],
     planSwitcherMode: "upcoming",
     checklistNoteCategories: [],
@@ -430,6 +434,9 @@ export class StageController {
     appLogoMonochrome: true,
     emptySlotLogo: null,
     defaultAvatar: null,
+    appIcon192: null,
+    appIconMaskable: null,
+    appIconBackground: DEFAULT_ICON_BACKGROUND,
     ndiEnabled: false,
     publicUrl: null,
     captionChannelColors: {},
@@ -502,9 +509,13 @@ export class StageController {
     days: number;
     allowed: string[];
     plans: UpcomingPlan[];
-    /** Some service type could not be read: reused for a shorter time. */
-    partial: boolean;
+    /** Service types whose plans could not be read in full (the type itself, or its
+     *  recent plans): reused for a shorter time, and named to the caller. */
+    incomplete: string[];
   } | null = null;
+  /** What the last `[plans] upcoming list refreshed` line said, so an unchanged list is not
+   *  said again every time its cache expires. */
+  private lastRefreshLine = "";
   /** Plan-list reads that keep failing, said once per outage. Keys:
    *  `followed:<serviceTypeId>` and `upcoming:<serviceTypeId>`. */
   private readonly plansOutage = new OutageLog();
@@ -615,6 +626,7 @@ export class StageController {
 
     const showQr = settings.showQr ?? true;
     const kioskDiscovery = settings.kioskDiscovery ?? false;
+    const autoUpdateMachines = settings.autoUpdateMachines ?? true;
 
     const { views, outputs } = await this.loadOrMigrateViewsAndOutputs(settings);
 
@@ -622,10 +634,15 @@ export class StageController {
     // floor falls back to `max(existing) + 1` — the bug. Seeding here, from what
     // was just loaded, is what stops the FIRST delete-then-create after an update
     // reissuing the highest id. Only kinds with no floor recorded are touched.
-    await settingsStore.seedIdFloors({
-      view: views.map((v) => v.id),
-      output: outputs.map((o) => o.id),
-    });
+    // Skipped once either file has failed a read: the views may be the
+    // defaults, and the save would be refused, which here, at a top-level
+    // await, would keep the server from starting.
+    if (!settingsStore.refusingSaves() && !viewsStore.refusingSaves()) {
+      await settingsStore.seedIdFloors({
+        view: views.map((v) => v.id),
+        output: outputs.map((o) => o.id),
+      });
+    }
 
     // An EMPTY list means "all allowed" and is passed through as such.
     //
@@ -658,6 +675,7 @@ export class StageController {
       outputs,
       showQr,
       kioskDiscovery,
+      autoUpdateMachines,
       allowedServiceTypeIds,
       planSwitcherMode: settings.planSwitcherMode === "within-type" ? "within-type" : "upcoming",
       checklistNoteCategories: settings.checklistNoteCategories ?? [],
@@ -668,6 +686,9 @@ export class StageController {
       appLogoMonochrome: settings.appLogoMonochrome ?? true,
       emptySlotLogo: settings.emptySlotLogo ?? null,
       defaultAvatar: settings.defaultAvatar ?? null,
+      appIcon192: settings.appIcon192 ?? null,
+      appIconMaskable: settings.appIconMaskable ?? null,
+      appIconBackground: settings.appIconBackground ?? DEFAULT_ICON_BACKGROUND,
       ndiEnabled: settings.ndiEnabled ?? false,
       publicUrl: settings.publicUrl ?? null,
       // Both of these are written to settings.json by their setters and were
@@ -728,6 +749,19 @@ export class StageController {
   ): Promise<{ views: View[]; outputs: Output[] }> {
     const storedViews = await viewsStore.load();
     const storedOutputs = settings.outputs;
+
+    // Either file unreadable is served as its defaults, which every pass below
+    // reads as a first run: it would rebuild the screens from the legacy
+    // displays and patch them over the real ones in settings.json. Show what
+    // could be read and change nothing; the passes run on the next start that
+    // reads both.
+    const unreadable = viewsStore.refusingSaves() ?? settingsStore.refusingSaves();
+    if (unreadable) {
+      console.error(
+        `[stage-controller] ${scrub(unreadable.message)}; start-up migrations of views and screens skipped until a restart reads it`,
+      );
+      return { views: storedViews, outputs: storedOutputs ?? [] };
+    }
 
     if (storedOutputs && storedOutputs.length > 0 && storedViews.length > 0) {
       const { views, changed } = retuneEmbedFontSize(storedViews);
@@ -1093,20 +1127,34 @@ export class StageController {
    * that has already happened.
    */
   async listPlans(serviceTypeId: string): Promise<PlanDTO[]> {
+    return (await this.readPlans(serviceTypeId)).plans;
+  }
+
+  /**
+   * `listPlans`, and whether its recent half came back. A failed recent read still leaves
+   * the upcoming plans, which is what the picker wants; a caller that must not mistake the
+   * shorter list for the whole one reads `recentFailed`.
+   */
+  private async readPlans(serviceTypeId: string): Promise<{ plans: PlanDTO[]; recentFailed: boolean }> {
     this.assertPco();
+    let recentFailed = false;
     const [past, future] = await Promise.all([
-      pcoService
-        .listRecentPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId)
-        .catch(() => [] as PlanDTO[]),
+      pcoService.listRecentPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId).catch(() => {
+        recentFailed = true;
+        return [] as PlanDTO[];
+      }),
       pcoService.listUpcomingPlans(this.pcoAppId!, this.pcoSecret!, serviceTypeId),
     ]);
     // Oldest → newest, and de-duplicated: a plan happening today can come back
     // from both filters depending on where PCO draws the line.
     const seen = new Set(future.map((p) => p.id));
-    return [
-      ...past.filter((p) => !seen.has(p.id)).reverse().map((p) => ({ ...p, past: true })),
-      ...future,
-    ];
+    return {
+      plans: [
+        ...past.filter((p) => !seen.has(p.id)).reverse().map((p) => ({ ...p, past: true })),
+        ...future,
+      ],
+      recentFailed,
+    };
   }
 
   /**
@@ -1124,7 +1172,9 @@ export class StageController {
    *
    * A type that fails on its own does NOT fail the list: its plans are missing
    * and the failure is logged, because one unreachable service type is not
-   * evidence about the other five.
+   * evidence about the other five. The types that could not be read in full, whether
+   * the type or only its recent plans, are named in `incompleteTypeIds`: a reader that
+   * keeps its own copy must not take their absent plans for deleted ones.
    */
   async getUpcomingPlanList(days: number): Promise<UpcomingPlansDTO> {
     const now = Date.now();
@@ -1138,9 +1188,9 @@ export class StageController {
       cached &&
       cached.days === days &&
       sameIds(cached.allowed, this.state.allowedServiceTypeIds) &&
-      now - cached.at < (cached.partial ? UPCOMING_PARTIAL_CACHE_MS : UPCOMING_CACHE_MS)
+      now - cached.at < (cached.incomplete.length > 0 ? UPCOMING_PARTIAL_CACHE_MS : UPCOMING_CACHE_MS)
     ) {
-      return { plans: cached.plans, cacheAgeMs: now - cached.at };
+      return { plans: cached.plans, cacheAgeMs: now - cached.at, ...incompleteOf(cached.incomplete) };
     }
 
     let types: ServiceTypeDTO[];
@@ -1153,11 +1203,14 @@ export class StageController {
     const w = planWindow(now, days);
     const currentPlanId = this.state.planId;
     const failures: string[] = [];
+    const incomplete: string[] = [];
     const perType = await Promise.all(
       types.map(async (t) => {
         const key = `upcoming:${t.id}`;
         try {
-          const rows = toUpcoming(t, await this.listPlans(t.id), w, currentPlanId);
+          const read = await this.readPlans(t.id);
+          if (read.recentFailed) incomplete.push(t.id);
+          const rows = toUpcoming(t, read.plans, w, currentPlanId);
           const recovered = this.plansOutage.ok(key, now);
           if (recovered.log) {
             console.log(`[plans] upcoming list: ${scrub(t.name)} can be read again${scrub(recovered.note)}`);
@@ -1169,6 +1222,7 @@ export class StageController {
           // logged so an operator with a missing type has something to read.
           const reason = errorMessage(err);
           failures.push(`${t.name}: ${reason}`);
+          incomplete.push(t.id);
           // Once per outage per type, not once per refresh: a partial list is
           // reused for only thirty seconds, so a type that stays down would
           // otherwise repeat this line every thirty seconds until it came back.
@@ -1195,12 +1249,16 @@ export class StageController {
       days,
       allowed: [...this.state.allowedServiceTypeIds],
       plans,
-      partial: failures.length > 0,
+      incomplete,
     };
-    console.log(
-      `[plans] upcoming list refreshed: ${scrub(plans.length)} plans across ${scrub(types.length)} types`,
-    );
-    return { plans, cacheAgeMs: 0 };
+    // Said when it changes, not every time the cache expires: a list nobody edited is the
+    // same line every five minutes, all week.
+    const shape = `${plans.length} plans across ${types.length} types`;
+    if (shape !== this.lastRefreshLine) {
+      this.lastRefreshLine = shape;
+      console.log(`[plans] upcoming list refreshed: ${scrub(plans.length)} plans across ${scrub(types.length)} types`);
+    }
+    return { plans, cacheAgeMs: 0, ...incompleteOf(incomplete) };
   }
 
   /** The unavailable answer: the last good list when there is one, else nothing.
@@ -1314,6 +1372,18 @@ export class StageController {
   /** True when a PCO Services Live session is running (used to defer auto-updates). */
   isServiceLive(): boolean {
     return this.lastLive != null && this.lastLive.mode !== "none";
+  }
+
+  /**
+   * Whether the service times and the live state are known well enough to restart
+   * a Mac's outputs on: always without Planning Center; with it, once the windows
+   * have been computed and, when a plan is followed, its live state read. Just
+   * after a restart, and while Planning Center cannot be reached, they are not.
+   */
+  serviceTimesKnown(): boolean {
+    if (!this.pcoAppId || !this.pcoSecret) return true;
+    if (!serviceWindow.isKnown()) return false;
+    return !this.state.serviceTypeId || !this.state.planId || this.lastLive !== null;
   }
 
   /** Latest PCO live snapshot (null if none fetched yet) — for the update-lock guard. */
@@ -2600,6 +2670,16 @@ export class StageController {
     return this.state;
   }
 
+  /** Let Mac output helpers and Windows kiosks update themselves, or stop them.
+   *  Read on every machine's next check; nothing is pushed. */
+  async setAutoUpdateMachines(on: boolean): Promise<StageState> {
+    console.log(`[stage-controller] setAutoUpdateMachines → ${scrub(on)}`);
+    this.state = { ...this.state, autoUpdateMachines: on };
+    await settingsStore.patch({ autoUpdateMachines: on });
+    this.broadcast();
+    return this.state;
+  }
+
   /** Dismiss (or restore) the first-run "Getting started" checklist, machine-wide. */
   async setOnboardingDismissed(dismissed: boolean): Promise<StageState> {
     this.state = { ...this.state, onboardingDismissed: dismissed };
@@ -2725,10 +2805,20 @@ export class StageController {
       const allowed = this.state.allowedServiceTypeIds;
       const types = allowed.length ? allTypes.filter((t) => allowed.includes(t.id)) : allTypes;
       const windows: { open: number; close: number }[] = [];
+      // A type or a plan whose times could not be read leaves a gap, not "nothing
+      // planned": the windows are still set, for reconnects, but counted as unknown,
+      // so what must not act blind (a Mac helper's restart) waits.
+      let gaps = 0;
       for (const t of types) {
-        const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, t.id).catch(() => [] as PlanDTO[]);
+        const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, t.id).catch(() => {
+          gaps++;
+          return [] as PlanDTO[];
+        });
         for (const p of plans.slice(0, 2)) { // next couple plans per type is plenty
-          const times = await pcoService.listPlanTimes(this.pcoAppId, this.pcoSecret, t.id, p.id).catch(() => []);
+          const times = await pcoService.listPlanTimes(this.pcoAppId, this.pcoSecret, t.id, p.id).catch(() => {
+            gaps++;
+            return [];
+          });
           const starts = times.map((x) => Date.parse(x.startsAt)).filter(Number.isFinite);
           if (!starts.length) continue;
           const ends = times.map((x) => (x.endsAt ? Date.parse(x.endsAt) : NaN)).filter(Number.isFinite);
@@ -2736,8 +2826,14 @@ export class StageController {
         }
       }
       serviceWindow.setWindows(windows);
-      console.log(`[stage-controller] reconnect windows recomputed: ${scrub(windows.length)}`);
+      if (gaps > 0) {
+        serviceWindow.markUnknown();
+        console.warn(`[stage-controller] reconnect windows recomputed with ${scrub(gaps)} plan read(s) failing, so the schedule counts as unknown until the next refresh`);
+      } else {
+        console.log(`[stage-controller] reconnect windows recomputed: ${scrub(windows.length)}`);
+      }
     } catch (err) {
+      serviceWindow.markUnknown();
       console.warn("[stage-controller] refreshServiceWindows failed:", scrubError(err));
     }
   }
@@ -2805,15 +2901,25 @@ export class StageController {
     avatar?: string | null;
     avatarOriginal?: string | null;
     avatarCrop?: { scale: number; x: number; y: number } | null;
+    /** The custom tab and home-screen icon, set as a whole; `null` removes it. */
+    icon?: AppIconInput | null;
   }): Promise<StageState> {
     // Fields that live in both the broadcast state and settings.
-    const stateNext: Partial<Pick<StageState, "appName" | "accentColor" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar">> = {};
+    const stateNext: Partial<Pick<StageState, "appName" | "accentColor" | "appLogo" | "appLogoMonochrome" | "emptySlotLogo" | "defaultAvatar" | "appIcon192" | "appIconMaskable" | "appIconBackground">> = {};
     if (typeof partial.name === "string") stateNext.appName = partial.name.trim() || "Stage Utility";
     if (partial.accentColor !== undefined) stateNext.accentColor = partial.accentColor;
     if (partial.logo !== undefined) stateNext.appLogo = partial.logo;
     if (typeof partial.monochrome === "boolean") stateNext.appLogoMonochrome = partial.monochrome;
     if (partial.emptyLogo !== undefined) stateNext.emptySlotLogo = partial.emptyLogo;
     if (partial.avatar !== undefined) stateNext.defaultAvatar = partial.avatar;
+    // One icon is five images that stand or fall together, so it is decided once
+    // here and fanned out to both halves below.
+    const iconSettings = partial.icon === undefined ? null : iconToSettings(partial.icon);
+    if (iconSettings) {
+      stateNext.appIcon192 = iconSettings.appIcon192;
+      stateNext.appIconMaskable = iconSettings.appIconMaskable;
+      stateNext.appIconBackground = iconSettings.appIconBackground;
+    }
 
     // Images arrive as base64 data URLs. settingsStore.patch stores them as files,
     // but only for the copy it writes: merged into this.state as-is, the full data
@@ -2823,7 +2929,9 @@ export class StageController {
     const stored = await externalizeBrandingImages(stateNext);
 
     // Settings-only fields (originals + crops), never broadcast.
-    const settingsNext: Record<string, unknown> = { ...stored };
+    // The icon's sizes are already stored references in `stored`; they win over the
+    // data URLs they came from, so no image is written twice.
+    const settingsNext: Record<string, unknown> = { ...iconSettings, ...stored };
     if (partial.logoOriginal !== undefined) settingsNext.appLogoOriginal = partial.logoOriginal;
     if (partial.logoCrop !== undefined) settingsNext.appLogoCrop = partial.logoCrop;
     if (partial.emptyLogoOriginal !== undefined) settingsNext.emptySlotLogoOriginal = partial.emptyLogoOriginal;
@@ -2862,6 +2970,12 @@ export class StageController {
     );
     this.state = { ...this.state, ...stored };
     await settingsStore.patch(settingsStored);
+    // After the write, so the line is only ever true. One per change, never per request.
+    if (partial.icon) {
+      console.log("[branding] custom tab and home-screen icon set, background", scrub(partial.icon.background));
+    } else if (partial.icon === null) {
+      console.log("[branding] custom tab and home-screen icon removed; the tab follows the logo and phones show the built-in icon");
+    }
     this.broadcast();
     return this.state;
   }
@@ -2895,9 +3009,12 @@ export class StageController {
   }
 
   /** Original upload + saved crop transform for a brand image, for re-editing. */
-  async getBrandingSource(target: "app" | "empty" | "avatar" = "app"): Promise<{
+  async getBrandingSource(target: "app" | "empty" | "avatar" | "icon" = "app"): Promise<{
     original: string | null;
     crop: { scale: number; x: number; y: number } | null;
+    /** The icon only: the square art its sizes are drawn from, so a new background
+     *  can redraw them without the operator uploading again. */
+    art?: string | null;
   }> {
     const settings = await settingsStore.load();
     if (target === "empty") {
@@ -2910,6 +3027,13 @@ export class StageController {
       return {
         original: settings.defaultAvatarOriginal ?? null,
         crop: settings.defaultAvatarCrop ?? null,
+      };
+    }
+    if (target === "icon") {
+      return {
+        original: settings.appIconOriginal ?? null,
+        crop: settings.appIconCrop ?? null,
+        art: settings.appIcon ?? null,
       };
     }
     return { original: settings.appLogoOriginal ?? null, crop: settings.appLogoCrop ?? null };

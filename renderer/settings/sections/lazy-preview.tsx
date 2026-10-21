@@ -66,6 +66,18 @@ export function opensInNewTab(e: { shiftKey: boolean; metaKey: boolean; ctrlKey:
   return e.shiftKey || (isApple() ? e.metaKey : e.ctrlKey);
 }
 
+/**
+ * The keyboard-focus ring, drawn OVER the preview. An outer ring is clipped by the
+ * card, and an inset one on the button paints beneath its opaque child, so
+ * neither shows; this sits above the preview and is lit by the button's own focus.
+ */
+const FOCUS_RING = (
+  <span
+    aria-hidden="true"
+    className="pointer-events-none absolute inset-0 ring-2 ring-inset ring-focus opacity-0 group-focus-visible:opacity-100"
+  />
+);
+
 export function LazyPreview({
   viewId,
   outputId = null,
@@ -150,7 +162,9 @@ export function LazyPreview({
     };
   }, [visible, forced]);
 
-  const preview = <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} />;
+  // Edge to edge: both callers are Screens cards, which clip to their own radius,
+  // so nothing here rounds a corner or draws outside the preview.
+  const preview = <ViewPreview viewId={viewId} outputId={outputId} aspect={aspect} bleed />;
 
   /** The live preview, wrapped for whatever the card does with a click on it. */
   function streamingPreview() {
@@ -175,9 +189,10 @@ export function LazyPreview({
                 following.onOpenDisplay();
               }
             }}
-            className="block w-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            className="group relative block w-full focus:outline-none"
           >
             {preview}
+            {FOCUS_RING}
           </button>
           {/* The way into the editor, as a control of its own: a click on it is
               its own and does not move the panel. */}
@@ -204,11 +219,11 @@ export function LazyPreview({
           onClick={onExpand}
           title={expandLabel}
           aria-label={expandLabel}
-          className="group relative block w-full rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          className="group relative block w-full focus:outline-none"
         >
           {preview}
           <span
-            className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
+            className="pointer-events-none absolute inset-0 grid place-items-center bg-black/0 opacity-0 transition-all duration-(--motion-quick) group-hover:bg-black/45 group-hover:opacity-100 group-focus-visible:bg-black/45 group-focus-visible:opacity-100"
             aria-hidden="true"
           >
             {/* A SOLID neutral grey, not white at reduced opacity. Opacity made
@@ -218,6 +233,8 @@ export function LazyPreview({
                 anything sitting on a dark surface. */}
             <ExpandIcon className="size-7 text-[#d4d4d4]" strokeWidth={1.5} />
           </span>
+          {/* After the scrim, so the hover and focus wash does not dim it. */}
+          {FOCUS_RING}
         </button>
       );
     }
@@ -233,7 +250,7 @@ export function LazyPreview({
           type="button"
           data-retarget
           onClick={() => setForced(true)}
-          className="grid aspect-video w-full place-items-center gap-1.5 rounded-lg border border-dashed border-line text-fg-subtle transition-colors hover:bg-fill hover:text-fg"
+          className="grid aspect-video w-full place-items-center gap-1.5 border border-dashed border-x-0 border-line text-fg-subtle transition-colors hover:bg-fill hover:text-fg"
           aria-label="Load this preview"
         >
           <PlayIcon className="size-4" />

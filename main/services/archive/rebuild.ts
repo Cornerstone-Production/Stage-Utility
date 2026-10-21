@@ -43,8 +43,12 @@ export async function rebuildSplItems(
   serviceKey: string,
   serviceDate: string,
 ): Promise<SplItemHistory[] | null> {
-  const rows = await readArchiveRows(serviceDirPath(serviceKey, serviceDate), "spl");
-  if (!rows || rows.length === 0) return null;
+  const raw = await readArchiveRows(serviceDirPath(serviceKey, serviceDate), "spl");
+  if (!raw || raw.length === 0) return null;
+  // In time order, not file order: rolled files are read in roll order, and a
+  // column set that comes back resumes the earlier file. An item's last row
+  // is its end, and a run splits on the gap between consecutive rows.
+  const rows = rowsByTime(raw);
 
   /** The run of each item currently being accumulated, and when it last sampled.
    *  An item can run twice in one record (a reprise, or a second service whose

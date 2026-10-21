@@ -22,8 +22,8 @@ letterboxed, so a few pixels of background at the sides is the worst case.
    and start from the strip for your panel. The canvas is set to the panel's
    pixels with Letterbox fit locked: the layout keeps its shape and scales
    evenly wherever it is previewed, and never reflows.
-2. **Edit** the console. Each starter button is a [cue button](../reference/widgets.md#control)
-   with no cue yet; pick one in the inspector — **Built in** lists the cues the
+2. **Edit** the console. Each starter button is a [Button](../reference/widgets.md#control) set to Fire
+   a cue, with no cue yet; pick one in the inspector — **Built in** lists the cues the
    app ships, so *OBS recording* needs no rule written first, and **Your cues**
    lists the ones from the rules page. Add, remove and resize as you like.
 3. **Screens → Add a screen** for the panel: give it a friendly link, say

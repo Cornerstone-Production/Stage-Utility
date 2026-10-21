@@ -4,11 +4,8 @@
 # main  -> the release   X.Y.Z          (tag + GitHub release)
 #
 # The level comes from every commit since the last STABLE release, per
-# docs/contributing.md:
-#   feat            -> minor
-#   fix | perf      -> patch
-#   `!` or BREAKING -> major
-#   everything else -> no release
+# docs/contributing.md: a `!` or BREAKING CHANGE is major, and every type's own
+# level is in main/services/commit-types.json, which scripts/release-level.sh reads.
 #
 # Since the last stable, not since the last tag — so the base version moves only
 # when the pending release changes class. A feature opens X.Y+1.0-beta.1, and the
@@ -35,12 +32,10 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# Read by default; the two jobs that write say so themselves (`release` and
+# `artifacts`, plus `verify-failed` for the failure status).
 permissions:
-  contents: write
-  # To mark the version-bump commit with the `build` status the verify jobs
-  # earned, so the release PR whose head it is shows a verified commit without
-  # a second run of the suite.
-  statuses: write
+  contents: read
 
 jobs:
   # Every push, releasable or not. This is the only gate a push to beta or main
@@ -57,6 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -77,6 +74,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           # The suite asks git questions about history; see ci.yml.
           fetch-depth: 0
       - name: Set up Node
@@ -98,6 +96,8 @@ jobs:
     needs: [verify-checks, verify-tests]
     if: ${{ failure() }}
     runs-on: ubuntu-latest
+    permissions:
+      statuses: write # the failure `build` status, and nothing else
     steps:
       - name: Mark the verified commit as failed
         env:
@@ -119,6 +119,12 @@ jobs:
   release:
     needs: [verify-checks, verify-tests]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the version-bump commit and the tag
+      # To mark the version-bump commit with the `build` status the verify jobs
+      # earned, so the release PR whose head it is shows a verified commit without
+      # a second run of the suite.
+      statuses: write
     outputs:
       # Consumed by the artifacts job below. `published` is only true when the tag
       # actually reached the remote, so a run that stood down builds nothing.
@@ -130,6 +136,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # Node for `node -p` and `npm version` only; this job installs nothing, so
@@ -221,14 +228,17 @@ jobs:
             # sat unreleased for a day before anyone thought to look. Say it on
             # the run page instead, and list what was actually considered — the
             # answer is nearly always "all of these were refactor/chore".
+            #
+            # The type lists below are main/services/commit-types.json spelled out.
+            # scripts/commit-types.test.ts runs this step and fails when they differ.
             {
               echo "## No release — nothing user-visible"
               echo
               echo "No version was minted and no artifacts were built."
               echo
-              echo "Only \`feat\`, \`fix\`, \`perf\` or a breaking change trigger a release."
-              echo "\`refactor\`, \`docs\`, \`test\`, \`build\`, \`ci\` and \`chore\` do not, and"
-              echo "neither does a \`feat\`/\`fix\`/\`perf\` scoped to the release tooling itself"
+              echo "Only \`feat\`, \`fix\`, \`perf\`, \`polish\` or a breaking change trigger a release."
+              echo "\`build\`, \`chore\`, \`ci\`, \`docs\`, \`refactor\`, \`test\` and \`revert\` do not, and"
+              echo "neither does a \`feat\`/\`fix\`/\`perf\`/\`polish\` scoped to the release tooling itself"
               echo "(\`release\`, \`ci\`, \`dx\`, \`test\`) — they ride along with the next one"
               echo "that does. See docs/contributing.md."
               echo
@@ -245,7 +255,7 @@ jobs:
               if [ "$TOTAL" -gt 40 ]; then echo "… and $((TOTAL - 40)) more"; fi
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::notice title=No release::Nothing user-visible since ${LAST:-the beginning} — $TOTAL commit(s), none of them feat/fix/perf. They will ship with the next release."
+            echo "::notice title=No release::Nothing user-visible since ${LAST:-the beginning} — $TOTAL commit(s), none of them feat/fix/perf/polish. They will ship with the next release."
             exit 0
           fi
 
@@ -307,8 +317,12 @@ jobs:
         if: steps.version.outputs.skip == 'false'
         env:
           V: ${{ steps.version.outputs.version }}
+          # The checkout does not keep the token (persist-credentials: false), so
+          # nothing after it can push by accident. This step is the one that may.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           npm version "$V" --no-git-tag-version
@@ -333,11 +347,20 @@ jobs:
           # release everything since the last tag, at the correct level for the
           # combined set. So stand down rather than erroring (or force-pushing:
           # deployments track beta and a rewrite breaks their in-app updater).
-          if git push origin "HEAD:${GITHUB_REF_NAME}"; then
-            git push origin "v$V"
+          #
+          # Only that rejection stands down. A push that fails for any other
+          # reason (a bad token, a protected branch, the network) is an error: it
+          # must not read as "someone else will release this".
+          if out=$(git push "$REMOTE" "HEAD:${GITHUB_REF_NAME}" 2>&1); then
+            git push "$REMOTE" "v$V"
             echo "pushed=true" >> "$GITHUB_OUTPUT"
             echo "bump=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           else
+            echo "$out"
+            if ! grep -qE '! \[rejected\].*(fetch first|non-fast-forward)' <<<"$out"; then
+              echo "::error::pushing the v$V bump to ${GITHUB_REF_NAME} failed, and not because the branch moved"
+              exit 1
+            fi
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "::notice::${GITHUB_REF_NAME} advanced during this run — skipping v$V. The run for the newer commit will release it."
             # Overwrites the "Releasing v$NEXT" summary written a step ago, which
@@ -399,7 +422,7 @@ jobs:
     needs: release
     if: ${{ always() && needs.release.outputs.published == 'true' }}
     runs-on: ubuntu-latest
-    # It only reads the tagged tree. The workflow's default is contents: write.
+    # It only reads the tagged tree.
     permissions:
       contents: read
     outputs:
@@ -407,9 +430,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: v${{ needs.release.outputs.version }}
       - name: Is the helper's build script in this tree
         id: probe
+        env:
+          V: ${{ needs.release.outputs.version }}
         run: |
           set -euo pipefail
           if [ -f helper/macos/build-app.sh ]; then
@@ -417,7 +443,7 @@ jobs:
             echo "helper/macos/build-app.sh is here: building the Mac output helper."
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Mac output helper::helper/macos/build-app.sh is not in this tree, so no helper is built for v${{ needs.release.outputs.version }}."
+            echo "::notice title=Mac output helper::helper/macos/build-app.sh is not in this tree, so no helper is built for v${V}."
           fi
 
   # The Mac output helper, one zip per architecture, built on macOS.
@@ -439,11 +465,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: v${{ needs.release.outputs.version }} # the tagged tree, not the branch
 
       # The helper is Swift 6, so it is built with the Xcode helper-macos.yml tests
       # with, not the runner image's default.
-      - uses: ./.github/actions/select-xcode
+      - uses: $/.github/actions/select-xcode
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -481,11 +508,12 @@ jobs:
             mkdir -p "$check"
             ditto -x -k "$zip" "$check"
             codesign --verify --strict "$check/StageUtilityOutput.app"
-
-            ( cd helper-dist && shasum -a 256 "StageUtilityOutput-$arch.zip" > "StageUtilityOutput-$arch.zip.sha256" )
           done
           ls -l helper-dist
-          cat helper-dist/*.sha256
+          # For people reading the log. Not uploaded: GitHub serves each release
+          # asset's SHA-256 as its `digest`, and that is what the server and the
+          # installer verify the zips against.
+          ( cd helper-dist && shasum -a 256 StageUtilityOutput-*.zip )
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -520,6 +548,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: v${{ needs.release.outputs.version }} # the tagged tree, not the branch
           # The release notes are a commit range from the previous tag, so the
           # default shallow clone would have nothing to compute them over.
@@ -536,7 +565,9 @@ jobs:
           npm run build
 
       - name: Assemble the archives
-        run: scripts/build-artifacts.sh "${{ needs.release.outputs.version }}" dist
+        env:
+          V: ${{ needs.release.outputs.version }}
+        run: scripts/build-artifacts.sh "$V" dist
 
       - name: Fetch the Mac output helper
         # Only a helper that built and verified. A skipped or failed one leaves the
@@ -561,6 +592,8 @@ jobs:
           echo "::error title=Mac output helper::the helper build failed or was cancelled, so v$V is released without StageUtilityOutput-<arch>.zip. Macs whose server runs this version cannot install the helper until the server updates to a release that has it."
 
       - name: Smoke-test the Linux archive
+        env:
+          V: ${{ needs.release.outputs.version }}
         # An archive that unpacks is not the same as one that runs. This starts the
         # real thing, using its own bundled runtime and nothing from the host, and
         # fails the release if it does not serve.
@@ -582,7 +615,7 @@ jobs:
           done
           got=$(curl -s --max-time 5 http://localhost:8912/api/update/status | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
           echo "  reported version: $got"
-          [ "$got" = "${{ needs.release.outputs.version }}" ] \
+          [ "$got" = "$V" ] \
             || { echo "::error::version reported as $got"; exit 1; }
 
       # Created WITH its assets, in one call.
@@ -608,8 +641,9 @@ jobs:
           if [ "$PRE" = true ]; then FROM="$LAST"; else FROM="$STABLE"; fi
           node scripts/release-notes.mjs "$V" "$FROM" > /tmp/notes.md
           assets=(dist/*.tar.gz)
-          # The Mac output helper's zips and checksums, when the helper job made them.
-          if [ -d helper-dist ]; then assets+=(helper-dist/*); fi
+          # The Mac output helper's two zips, when the helper job made them. Named by
+          # pattern, so nothing else that lands in helper-dist is published.
+          if [ -d helper-dist ]; then assets+=(helper-dist/StageUtilityOutput-*.zip); fi
           gh release create "v$V" \
             --title "v$V" \
             --notes-file /tmp/notes.md \

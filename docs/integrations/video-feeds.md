@@ -190,7 +190,14 @@ The relay only dials the address while something is actually showing the feed
 it connected. Once a password is stored, the field says "A password is
 saved. Type to replace it, or clear it." with a **Clear** button that
 removes it at once; typing a new one and saving replaces it, and leaving
-the field untouched on an edit leaves whatever is already stored.
+the field untouched on an edit leaves whatever is already stored, unless the
+edit points the feed at another camera. A password is only sent to the
+camera it was entered for, so a new host clears it, and so does moving from
+`rtsps` or `https` to a scheme that is not encrypted; a new path, port or
+protocol on the same camera does not. The editor says so, and `/log` records
+`[video] <feed>: cleared the stored password`. An SRT address on another
+camera is then not checked against the old password, since it is no longer
+kept.
 
 A Magewell Ultra Stream can serve one feed to Stage Utility this way while
 its first output keeps streaming to Resi: turn on the Ultra Stream's RTSP
@@ -370,15 +377,18 @@ on this server, each tagged:
   only reads "password differs", never the values), with a choice per feed:
   **Use the file's** (the default) or **Keep this server's**.
 - **Can't import**: this build cannot take the feed (a source kind it does not
-  offer, an address with a login inside it, an SRT address whose kept password
-  is not a valid passphrase); the reason is shown and the feed is skipped.
+  offer, an address with a login inside it, an SRT address on the same camera
+  whose kept password is not a valid passphrase); the reason is shown and the
+  feed is skipped.
 
 An import never removes a feed: the ones the file does not have are named and
 left alone. It never touches the **Video feeds** on/off switch, and it works
 with the switch off. A file that carries ports shows a **Use the file's relay
 ports** box, off by default; ticking it saves them, which restarts a running
 relay. A file with no passwords leaves this server's passwords alone on a feed
-it replaces, unless the feed's kind changes. A new push feed from a file
+it replaces, unless the feed's kind changes or its address is on another
+camera (or no longer encrypted); the result names each feed whose password was
+cleared that way. A new push feed from a file
 without a password gets a new publish password made here, and the result names
 it: its device needs the new password pasted in.
 
@@ -405,6 +415,52 @@ reference: see [Video](../reference/widgets.md#video).
 
 A Raspberry Pi decodes WebRTC in software. Plan on one 720p feed per Pi 4
 screen; a Pi 5 or a computer handles 1080p.
+
+### How each browser plays a feed
+
+A relay feed plays over WebRTC wherever the stream allows it, in every
+browser. When it needs HLS (B-frames, or WebRTC not reaching this screen),
+the player depends on what the browser has:
+
+| Browser | HLS player |
+|---|---|
+| Chrome, Firefox, Edge on a computer or Android | hls.js, on Media Source Extensions |
+| Safari on macOS, Safari on iPadOS | hls.js, on Media Source Extensions |
+| Any browser on iPhone, iOS 17.1 or later | hls.js, on Managed Media Source |
+| Any browser on iPhone before iOS 17.1 | Safari's own HLS player |
+
+The widget starts the picture itself as soon as the browser can play it,
+rather than leaving that to the browser's autoplay, which in Safari waits
+until it judges enough is buffered (about 2.5 seconds on the relay's
+low-latency HLS).
+
+Send the encoder's full frame rate, 59.94 or 60, rather than a setting that
+halves it to 30 (some encoders call it Auto). On a 60 Hz screen Safari
+sometimes shows a 30 fps picture with an uneven cadence, alternating short
+and long frames, which reads as judder: in half the sessions measured,
+and in the worst more than half its frames were held a refresh too short or
+too long. At 59.94 it stayed as close to even as Chrome does at either
+rate.
+
+### Measuring playback
+
+Playback timing and cadence are measured in a browser on a running server,
+the same way as a stutter reported on a real device:
+
+- **Cadence**: `requestVideoFrameCallback` on the widget's `<video>`, the
+  wall-clock interval between presented frames as a histogram. An even
+  picture sits at one bucket (16.7 ms at 60 fps, 33.3 ms at 30 fps); judder
+  shows as a spread across neighbouring buckets.
+- **Decode and freezes**: on WebRTC, the `inbound-rtp` video report from the
+  peer connection's `getStats()`: `framesDecoded`, `framesDropped`,
+  `freezeCount`, `totalFreezesDuration`, and `jitterBufferDelay` over
+  `jitterBufferEmittedCount`. Safari reports zero from
+  `getVideoPlaybackQuality()` for a WebRTC picture, so read these instead.
+- **Start and stalls**: the `<video>` element's `seeking`, `playing`,
+  `waiting` and `ratechange` events, timed from the first.
+
+On an iPhone or iPad, the same readings can be taken from Safari's Web
+Inspector console for that device, opened from a Mac's Develop menu.
 
 ## Health from the screens
 
@@ -511,7 +567,8 @@ the server's own log; see Logging below.
 Exporting and importing feeds writes one line each, tagged `[video-export]`
 and `[video-import]`: the count of feeds, and whether passwords or relay ports
 were included or applied. The import line also names each skipped feed and
-why. An import that fails writes `import failed, nothing was changed:` and the
+why, and says `cleared N passwords whose address changed` when it moved pull
+feeds to another camera. An import that fails writes `import failed, nothing was changed:` and the
 reason, or `import failed and could not restore:` when putting things back
 failed too. A password is never in any of them.
 
@@ -582,6 +639,11 @@ from the server:
 - A push feed's password rotating, and whether it dropped the device that
   was connected; `made a new publish password (none was stored)` for a push
   feed that had lost its password, which its device then needs.
+- `<feed>: cleared the stored password: its address changed from <old> to
+  <new>`, when an edit or an import moves a pull feed to another camera, or
+  off an encrypted scheme; `<feed>: cleared a password left behind by an
+  earlier feed with the same id` when a new feed lands on the slot of one
+  removed before it. Neither line carries the password.
 - A screen struggling with a feed — dropped frames and stalls, in the last
   minute — the moment its window crosses the threshold above, and playing it
   smoothly again the moment it clears; each once, not repeated while it stays
@@ -608,6 +670,9 @@ Each screen writes its own `[video]` lines from the browser:
   (with how many attempts and for how long), and a line when it is playing
   again after holding for 10 seconds. Individual retries are not logged; the
   browser console shows each one, with its delay, at the Verbose level.
+- When a picture never arrived because the browser refused to start it, the
+  reason on that line, or on the WebRTC fallback line below, ends with the
+  browser's own words.
 - A relay feed falling back to HLS on a screen because WebRTC did not carry
   it there, once per outage, and a line when WebRTC is carrying it again.
   Its retries every 5 minutes are not logged.

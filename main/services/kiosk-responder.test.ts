@@ -281,3 +281,115 @@ describe("a helper output bound to this server", () => {
     );
   });
 });
+
+// The datagrams the helper's ReleaseHandoverTests reads too: the probes it sends
+// and the replies it acts on. Here, the real responder must send exactly those
+// replies to those probes, first as server A and then as server B.
+const FIXTURE = JSON.parse(
+  await fs.readFile(new URL("../../helper/macos/Fixtures/release-handover.json", import.meta.url), "utf8"),
+) as {
+  device: { id: string; macs: string[]; output: { kind: "decklink"; name: string; port: string } };
+  servers: Record<"a" | "b", { serverId: string; name: string; url: string }>;
+  probes: Record<"boundToA" | "unbound" | "boundToB", string>;
+  replies: Record<"aClaimed" | "aReleased" | "bUnclaimed" | "bClaimed", string>;
+};
+
+describe("an output released on one server is set up on another", () => {
+  const { device, servers, probes, replies: want } = FIXTURE;
+  const claim = () =>
+    updateDevices(() => [{ id: device.id, token: "t", outputId: "display-1", macs: device.macs, output: device.output }]);
+
+  /** The server every other test in this file talks to, put back after each. */
+  const TEST_SERVER = { serverId: "srv-test", name: "Test server", url: "http://192.0.2.10:8788" };
+
+  async function serveAs(s: { serverId: string; name: string; url: string }): Promise<void> {
+    stopKioskResponder();
+    startKioskResponder({
+      serverId: s.serverId, serverName: s.name, url: () => s.url, port, ownMacs: () => new Set([THIS_MAC]),
+    });
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  /** Send a raw datagram and return the one reply, or null when none came. */
+  async function exchange(datagram: string, ms = 2000): Promise<string | null> {
+    replies = [];
+    await new Promise<void>((resolve, reject) =>
+      client.send(datagram, port, "127.0.0.1", (err) => (err ? reject(err) : resolve())),
+    );
+    return (await answered(ms)) ? replies[0] : null;
+  }
+
+  const lines: string[] = [];
+  const realLog = console.log;
+  beforeEach(() => {
+    lines.length = 0;
+    console.log = (...a: unknown[]) => {
+      lines.push(a.map(String).join(" "));
+    };
+  });
+  afterEach(async () => {
+    console.log = realLog;
+    await serveAs(TEST_SERVER);
+  });
+
+  test("A tells the released output so, and B lists it, answers it and claims it", async () => {
+    await serveAs(servers.a);
+    await claim();
+    assert.equal(await exchange(probes.boundToA), want.aClaimed, "A's answer to its own output did not say claimed");
+
+    await updateDevices((cur) => release(cur, device.id));
+    assert.equal(await exchange(probes.boundToA), want.aReleased, "A's answer to a released output did not say so");
+    assert.equal(await exchange(probes.boundToA), want.aReleased);
+    const told = lines.filter((l) => l.includes("still names this server"));
+    assert.deepEqual(
+      told,
+      [`[kiosk-responder] ${device.id} still names this server but is not set up here; told it so`],
+      "the release was not logged exactly once",
+    );
+
+    // B, with a Screens page open. While the output still names A, B leaves it
+    // alone: that is the state the release is there to end.
+    await serveAs(servers.b);
+    resetKioskPresence();
+    startScan("test");
+    assert.equal(await exchange(probes.boundToA, 400), null, "B answered an output that names A");
+    assert.deepEqual(seenDevices().map((d) => d.id), []);
+
+    assert.equal(await exchange(probes.unbound), want.bUnclaimed, "B did not answer the released output");
+    assert.deepEqual(seenDevices().map((d) => ({ id: d.id, boundTo: d.boundTo })), [{ id: device.id, boundTo: undefined }]);
+
+    await claim();
+    assert.equal(await exchange(probes.unbound), want.bClaimed, "B's answer after claiming did not say claimed");
+    assert.equal(await exchange(probes.boundToB), want.bClaimed);
+    assert.deepEqual(seenDevices().map((d) => d.id), [], "the output B claimed stayed in B's not-set-up list");
+  });
+});
+
+// Last in this file, deliberately: once a store has served defaults it refuses
+// saves for the rest of the process (DataStore.servedDefaults), so any test after
+// this one could not save a binding. Node runs each test file in its own process.
+//
+// A bindings file that is there but cannot be read is not an empty one, though
+// the store serves its defaults so the server keeps running. Answered from them,
+// a device bound here that names us reads as released, and is answered and
+// listed as one: the reply that makes a device forget its server.
+describe("bindings that cannot be read", () => {
+  const file = path.join(TMP, "kiosk-devices.json");
+
+  afterEach(async () => {
+    await fs.rm(file, { recursive: true, force: true });
+    await kioskDevicesStore.reload();
+  });
+
+  test("a device naming this server is neither answered nor listed", async () => {
+    await fs.rm(file, { force: true });
+    // A directory where the file should be fails the read for root as well.
+    await fs.mkdir(file);
+    await kioskDevicesStore.reload();
+    assert.equal(kioskDevicesStore.unreadable()?.code, "EISDIR");
+
+    await send({ id: "bound-pi", macs: [OTHER_MAC], hostname: "pi", boundTo: "srv-test" });
+    assert.equal(await answered(400), false, "the server answered from bindings it could not read");
+    assert.deepEqual(seenDevices().map((d) => d.id), [], "a device was listed from bindings that could not be read");
+  });
+});

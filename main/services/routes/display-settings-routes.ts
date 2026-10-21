@@ -8,6 +8,7 @@
 
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody } from "./context.js";
+import { hostNames } from "../host-names.js";
 import { stageController } from "../stage-controller.js";
 
 export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
@@ -67,6 +68,17 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       json(res, await stageController.setKioskDiscovery(body.enabled));
+      return;
+    }
+
+    // ── Mac helpers and Windows kiosks follow this server's version ───────
+    if (method === "POST" && pathname === "/api/machine-updates/auto") {
+      const body = (await readBody(req)) as Record<string, unknown>;
+      if (typeof body.enabled !== "boolean") {
+        error(res, "body.enabled (boolean) required");
+        return;
+      }
+      json(res, await stageController.setAutoUpdateMachines(body.enabled));
       return;
     }
 
@@ -142,6 +154,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
       const body = await readBody(req) as Record<string, unknown>;
       const url = typeof body.url === "string" ? body.url : null;
       const state = await stageController.setPublicUrl(url);
+      hostNames.publicUrlChanged();
       json(res, state);
       return;
     }

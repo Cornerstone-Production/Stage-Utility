@@ -33,13 +33,11 @@ import {
   SelectItem,
   SelectValue,
   ButtonGroup,
-  Switch,
   Separator,
   InfoHint,
   ChipToggle,
   ChipToggleRow,
   ErrorNote,
-  FieldLabel,
   StackedField,
 } from "../components/ui";
 import { loadProcessedAttachment, FILL_WHEN_ACTIVE, STATUS_TEXT, obsModeText } from "../main/layout-renderer";
@@ -53,6 +51,8 @@ import { usePeopleCountState } from "../main/use-people-count-state";
 import { useObsStatus } from "../main/use-obs-state";
 import { hasContent, type PvpStatusDTO } from "@main/types/pvp";
 import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS, pvpLayerStateWord, type PvpNowLabel } from "../main/pvp-now";
+import { WARN_MAX_SEC, pvpNowLayout, pvpNowRowStates, pvpWarnThresholds, withPvpNowLayout } from "../main/pvp-now-config";
+import { PvpLayoutRow } from "./pvp-layout-row";
 import { usePvpState } from "../main/use-pvp-state";
 import { useQuery } from "@tanstack/react-query";
 import { useReaperStatus } from "../main/use-reaper-state";
@@ -85,13 +85,14 @@ import { numberParamDefault } from "@main/services/automation-param-validation";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import {
-  Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls, Segmented,
+  Row, RowSwitch, StackedSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls, Segmented,
   ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, sizesTypeFromItsBox,
 } from "./inspector-rows";
+import { TimerInspector } from "./timer-inspector";
+import { readConfig, timerSource } from "../main/timer-config";
 import { ResponsiveControls } from "./responsive-controls";
-import { CuePicker } from "./cue-picker";
 import { MessagesGroupsPicker } from "./messages-groups-picker";
-import { ActionButtonInspector } from "./action-button-inspector";
+import { ButtonInspector } from "./button-inspector";
 import { cn } from "../lib/cn";
 import { ColorField } from "../components/ui/color-field";
 import {
@@ -192,7 +193,7 @@ function PvpLayerPicker({
             onChange(v);
           }}
         >
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label={label} className="w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="">{emptyLabel}</SelectItem>
             {layers.map((l) => (
@@ -391,10 +392,7 @@ export function VideoConfig({
           onChange={(v) => onConfig({ ...c, fit: v })}
         />
       </StackedField>
-      <div className="flex items-center justify-between gap-2.5">
-        <FieldLabel>Show feed name</FieldLabel>
-        <Switch aria-label="Show feed name" checked={c.showLabel ?? true} onCheckedChange={(v) => onConfig({ ...c, showLabel: v })} />
-      </div>
+      <StackedSwitch label="Show feed name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
       <StackedField label="When the feed is offline">
         <Select
           value={c.whenOffline ?? "message"}
@@ -626,18 +624,17 @@ export function PlanAttachmentConfig({
 
   return (
     <>
-      <Row label="Match" hint="Substring of the PCO attachment's filename to show (e.g. 'stage plot'). It auto-picks any matching PDF/image on the live plan, so it keeps working each week if you name files consistently.">
-        <Input
-          value={c.match ?? "stage plot"}
-          onChange={(e) => onConfig({ ...c, match: e.target.value })}
-          placeholder="filename contains…"
-          className="text-fg"
-        />
-      </Row>
+      <RowText
+        label="Match"
+        hint="Substring of the PCO attachment's filename to show (e.g. 'stage plot'). It auto-picks any matching PDF/image on the live plan, so it keeps working each week if you name files consistently."
+        value={c.match ?? "stage plot"}
+        placeholder="filename contains…"
+        onChange={(v) => onConfig({ ...c, match: v })}
+      />
       {pcoConfigured !== false && pickable.length > 0 && (
         <Row label="Current plan">
           <Select value="" onValueChange={(v: string) => onConfig({ ...c, match: v })}>
-            <SelectTrigger><SelectValue placeholder="Pick a file…" /></SelectTrigger>
+            <SelectTrigger aria-label="Current plan"><SelectValue placeholder="Pick a file…" /></SelectTrigger>
             <SelectContent>
               {pickable.map((f) => (
                 <SelectItem key={f.id} value={f.filename}>
@@ -661,36 +658,28 @@ export function PlanAttachmentConfig({
           with a matching file goes live.
         </p>
       ) : null}
-      <Row label="PDF page">
-        <NumberInput value={c.page ?? 1} step={1} min={1} max={99} onChange={(v) => onConfig({ ...c, page: Math.round(v) })} />
-      </Row>
+      <RowNumber label="PDF page" value={c.page ?? 1} step={1} min={1} max={99} onChange={(v) => onConfig({ ...c, page: Math.round(v) })} />
 
       <Separator />
 
-      <Row label="Trim white">
-        <Switch checked={c.trim ?? false} onCheckedChange={(v) => onConfig({ ...c, trim: v })} />
-      </Row>
-      <Row label="Background">
-        {/* Hand-rolled, so it sat outside the two-or-fewer rule and truncated
-            in a narrow panel like every other three-word group did. */}
-        <Select
-          value={c.background ?? "keep"}
-          onValueChange={(v: string) => onConfig({ ...c, background: v as typeof c.background })}
-        >
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="keep">Keep</SelectItem>
-            <SelectItem value="black">Black</SelectItem>
-            <SelectItem value="transparent">Clear</SelectItem>
-          </SelectContent>
-        </Select>
-      </Row>
+      <RowSwitch label="Trim white" checked={c.trim ?? false} onChange={(v) => onConfig({ ...c, trim: v })} />
+      {/* A dropdown rather than a RowToggle: three buttons truncated in a narrow panel. */}
+      <RowSelect
+        label="Background"
+        value={c.background ?? "keep"}
+        options={[
+          { value: "keep", label: "Keep" },
+          { value: "black", label: "Black" },
+          { value: "transparent", label: "Clear" },
+        ]}
+        onChange={(v) => onConfig({ ...c, background: v as typeof c.background })}
+      />
       <Row label="Crop %">
         <div className="grid grid-cols-2 gap-1 flex-1 @max-[288px]/insp:w-full">
-          <NumberInput value={Math.round((crop.top ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("top", v)} />
-          <NumberInput value={Math.round((crop.bottom ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("bottom", v)} />
-          <NumberInput value={Math.round((crop.left ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("left", v)} />
-          <NumberInput value={Math.round((crop.right ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("right", v)} />
+          <NumberInput aria-label="Crop top" value={Math.round((crop.top ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("top", v)} />
+          <NumberInput aria-label="Crop bottom" value={Math.round((crop.bottom ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("bottom", v)} />
+          <NumberInput aria-label="Crop left" value={Math.round((crop.left ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("left", v)} />
+          <NumberInput aria-label="Crop right" value={Math.round((crop.right ?? 0) * 100)} step={1} min={0} max={95} onChange={(v) => setCrop("right", v)} />
         </div>
       </Row>
       <p className="text-caption2 text-fg-muted -mt-1">Top · Bottom · Left · Right</p>
@@ -720,6 +709,113 @@ export function ObsLiveLabel({ mode }: { mode: string }) {
         ? "Active now"
         : "Connected · idle";
   return <span className="text-caption2 text-fg-muted">{label}</span>;
+}
+
+/**
+ * The ProVideoPlayer "now" settings, for the wall object and its Home card.
+ * Exported so a test can drive the rows themselves — which are greyed under
+ * which layout, and what the Warn thresholds write.
+ */
+export function PvpNowInspector({
+  c,
+  pvp,
+  onConfig,
+}: {
+  c: Extract<LayoutObjectConfig, { type: "pvp-now" | "home-pvp-now" }>;
+  pvp: PvpStatusDTO | null;
+  onConfig: (c: LayoutObjectConfig) => void;
+}) {
+  const layout = pvpNowLayout(c);
+  const rows = pvpNowRowStates(layout);
+  const { amberSec, redSec } = pvpWarnThresholds(c);
+  return (
+    <>
+      <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{pvpSummary(pvp)}</span></Row>
+      {c.type === "pvp-now" && (
+        <PvpLayerPicker
+          label="Layer"
+          emptyLabel="Any layer with content"
+          hint="Leave on Any layer with content to follow whichever layer has something on it — pinning a layer also names it in the widget's caption, in every state."
+          value={c.layerName ?? ""}
+          pvp={pvp}
+          onChange={(v) => onConfig({ ...c, layerName: v })}
+        />
+      )}
+      <PvpLayoutRow
+        value={layout}
+        onChange={(v) => onConfig(withPvpNowLayout(c, v))}
+      />
+      <RowSwitch label="Progress bar" checked={c.showProgress ?? true} onChange={(v) => onConfig({ ...c, showProgress: v })} />
+      <RowSwitch
+        label="Next cue"
+        // The caveat, where the operator makes the decision. It is the
+        // reason this is a switch at all.
+        hint="The next entry in the playlist — what plays next only while the playlist keeps auto-advancing. A cue fired by hand makes it wrong until the next poll."
+        checked={c.showNextCue ?? true}
+        onChange={(v) => onConfig({ ...c, showNextCue: v })}
+        disabled={rows.nextCue}
+      />
+      <RowSelect
+        label="Label"
+        value={c.nowLabel ?? DEFAULT_PVP_NOW_LABEL}
+        options={PVP_NOW_LABEL_OPTIONS}
+        onChange={(v) => onConfig({ ...c, nowLabel: v as PvpNowLabel })}
+        disabled={rows.label}
+      />
+      <RowSwitch
+        label="Warn near the end"
+        hint="The time turns amber, then red, as a clip runs out. Every layout."
+        checked={c.warnNearEnd ?? false}
+        onChange={(v) => onConfig({ ...c, warnNearEnd: v })}
+      />
+      {(c.warnNearEnd ?? false) && (
+        <>
+          <RowNumber
+            label="Amber at"
+            hint="Seconds left when the time turns amber."
+            suffix="s"
+            value={amberSec}
+            step={1}
+            min={0}
+            max={WARN_MAX_SEC}
+            onChange={(v) => onConfig({ ...c, warnAmberSec: Math.round(v) })}
+          />
+          <RowNumber
+            label="Red at"
+            suffix="s"
+            // Never above amber. The field's own `max` is the amber value, so
+            // a higher number is held at it as it is typed; and if amber is
+            // later lowered below a stored red, the reader holds red at amber
+            // — the stored number is left alone, so raising amber again gives
+            // it back.
+            hint="Seconds left when the time turns red. Never above Amber at: a higher number is held at the amber value."
+            value={redSec}
+            step={1}
+            min={0}
+            max={amberSec}
+            onChange={(v) => onConfig({ ...c, warnRedSec: Math.round(v) })}
+          />
+        </>
+      )}
+      <RowSwitch
+        label="Count down stills"
+        hint="Counts a still down from the image duration on the ProVideoPlayer card, or the hold below. For a layer whose cue advances on it, like a rotating pre-roll; off for a graphic that stays up."
+        checked={c.countStills ?? false}
+        onChange={(v) => onConfig({ ...c, countStills: v })}
+      />
+      {c.type === "pvp-now" && (c.countStills ?? false) && (
+        <RowNumber
+          label="Still hold (seconds)"
+          hint={`Left alone, it follows the card's Image duration (${pvp?.imageDurationSec ?? 20}s). Editing it pins this widget to its own number.`}
+          value={c.stillHoldSec ?? pvp?.imageDurationSec ?? 20}
+          step={1}
+          min={1}
+          max={3600}
+          onChange={(v) => onConfig({ ...c, stillHoldSec: Math.round(v) })}
+        />
+      )}
+    </>
+  );
 }
 
 /** REAPER's live state, under the REAPER status settings — as ObsLiveLabel. */
@@ -765,7 +861,9 @@ export function Inspector({
   onSnapToGrid: () => void;
 }) {
   const s = o.style ?? {};
-  const c = o.config;
+  // An object saved as one of the four widgets the Timer replaced is edited as the
+  // Timer, and the first edit writes it as one.
+  const c = readConfig(o.config);
   const chargerBays = useStageState().state?.chargerBays ?? [];
   const spl = useSplState();
   const { data: wirelessChannels = [] } = useWirelessChannels();
@@ -848,7 +946,7 @@ export function Inspector({
 
       {/* ProPresenter instance picker — only when >1 instance is configured
           (two-auditorium setups); otherwise everything reads the primary. */}
-      {usesPropInstance(c.type) && propInstances && propInstances.list.length > 1 && (
+      {(usesPropInstance(c.type) || (c.type === "timer" && timerSource(c) === "propresenter")) && propInstances && propInstances.list.length > 1 && (
         <RowSelect
           label="ProPresenter"
           hint="Which ProPresenter machine this object reads from — for multi-auditorium setups. Defaults to the primary instance; pick another to point this object at a second room's ProPresenter."
@@ -874,7 +972,7 @@ export function Inspector({
           does not say what it is counting to — and this is how it is changed or
           cleared. Emptying it removes the caption entirely; a default nobody can
           switch off would be worse than no default. */}
-      {"caption" in c && (
+      {"caption" in c && c.type !== "timer" && (
         <RowText
           label="Caption"
           value={(c as { caption?: string | null }).caption ?? ""}
@@ -902,30 +1000,17 @@ export function Inspector({
         </>
       )}
       {c.type === "section-chip" && (
-        <Row label="Which" hint="Which ProPresenter section to show. Current/Next follow the presentation's sections; Next section skips arrangement breaks to the next actual song/item.">
-          <Select value={c.which} onValueChange={(v: string) => onConfig({ type: "section-chip", which: v as "current" | "next" | "nextArrangement" })}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="current">Current</SelectItem>
-              <SelectItem value="next">Next</SelectItem>
-              <SelectItem value="nextArrangement">Next section</SelectItem>
-            </SelectContent>
-          </Select>
-        </Row>
-      )}
-      {c.type === "pp-timer" && (
-        <>
-          <RowText
-            label="Timer name"
-            hint="Exact name of a timer running INSIDE ProPresenter — distinct from the PCO countdown. Leave blank to show the first timer ProPresenter reports."
-            value={c.timerName ?? ""}
-            placeholder="First timer"
-            onChange={(v) => onConfig({ ...c, timerName: v.trim() || null })}
-          />
-          <RowSwitch label="Color on overrun" checked={c.warnStates ?? true} onChange={(v) => onConfig({ ...c, warnStates: v })} />
-          <RowSwitch label="Show timer name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-          <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
-        </>
+        <RowSelect
+          label="Which"
+          hint="Which ProPresenter section to show. Current/Next follow the presentation's sections; Next section skips arrangement breaks to the next actual song/item."
+          value={c.which}
+          options={[
+            { value: "current", label: "Current" },
+            { value: "next", label: "Next" },
+            { value: "nextArrangement", label: "Next section" },
+          ]}
+          onChange={(v) => onConfig({ type: "section-chip", which: v as "current" | "next" | "nextArrangement" })}
+        />
       )}
       {c.type === "slide-progress" && (
         <>
@@ -1113,15 +1198,16 @@ export function Inspector({
         const states = integrationsSnap.states;
         return (
           <>
-            <Row label="Integration" hint="Which integration's connection status to show. First available shows any that's online; pick a specific one to lock this object to it.">
-              <Select value={c.integrationId ?? ""} onValueChange={(v: string) => onConfig({ ...c, integrationId: v || null })}>
-                <SelectTrigger><SelectValue placeholder={states.length ? "First available" : "No integrations"} /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">First available</SelectItem>
-                  {states.map((st) => <SelectItem key={st.id} value={st.id}>{integrationsSnap.labels[st.id] ?? st.id}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Row>
+            <RowSelect
+              label="Integration"
+              hint="Which integration's connection status to show. First available shows any that's online; pick a specific one to lock this object to it."
+              value={c.integrationId ?? ""}
+              options={[
+                { value: "", label: "First available" },
+                ...states.map((st) => ({ value: st.id, label: integrationsSnap.labels[st.id] ?? st.id })),
+              ]}
+              onChange={(v) => onConfig({ ...c, integrationId: v || null })}
+            />
             <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
             {(c.showLabel ?? true) && (
               <RowText label="Label" value={c.label ?? ""} placeholder="integration name" onChange={(v) => onConfig({ ...c, label: v })} />
@@ -1148,15 +1234,13 @@ export function Inspector({
         const rfChannels = wirelessChannels.filter((d) => d.deviceType !== "charger");
         return (
         <>
-          <Row label="Channel" hint="Which wireless channel this tile shows. Auto uses the first one detected. Charger bays are not listed — use the Charger battery widget for those.">
-            <Select value={c.channelId ?? ""} onValueChange={(v: string) => onConfig({ ...c, channelId: v || null })}>
-              <SelectTrigger><SelectValue placeholder={rfChannels.length ? "Auto (first)" : "No channels detected"} /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">Auto (first)</SelectItem>
-                {rfChannels.map((d) => <SelectItem key={d.id} value={d.id}>{d.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Row>
+          <RowSelect
+            label="Channel"
+            hint="Which wireless channel this tile shows. Auto uses the first one detected. Charger bays are not listed — use the Charger battery widget for those."
+            value={c.channelId ?? ""}
+            options={[{ value: "", label: "Auto (first)" }, ...rfChannels.map((d) => ({ value: d.id, label: d.label }))]}
+            onChange={(v) => onConfig({ ...c, channelId: v || null })}
+          />
           <RowSwitch label="RF signal" checked={c.show?.rf ?? true} onChange={(v) => onConfig({ ...c, show: { ...c.show, rf: v } })} />
           <RowSwitch label="Battery %" checked={c.show?.battery ?? true} onChange={(v) => onConfig({ ...c, show: { ...c.show, battery: v } })} />
           <RowSwitch label="Time remaining" hint="Runtime left on the pack, the way Wireless Workbench shows it. Turn Battery % off to make it the headline figure. Shure AD and ULX-D report it; a dash means this receiver does not." checked={c.show?.runtime ?? false} onChange={(v) => onConfig({ ...c, show: { ...c.show, runtime: v } })} />
@@ -1192,21 +1276,18 @@ export function Inspector({
         const isInline = (c.source ?? "view") === "inline";
         return (
           <>
-            <Row label="Source">
-              <Select value={isInline ? "inline" : "view"} onValueChange={(v: string) => onConfig({ ...c, source: v === "inline" ? "inline" : "view" })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="inline">Define here</SelectItem>
-                  <SelectItem value="view">Embed a view</SelectItem>
-                </SelectContent>
-              </Select>
-            </Row>
+            <RowSelect
+              label="Source"
+              value={isInline ? "inline" : "view"}
+              options={[{ value: "inline", label: "Define here" }, { value: "view", label: "Embed a view" }]}
+              onChange={(v) => onConfig({ ...c, source: v === "inline" ? "inline" : "view" })}
+            />
             {isInline ? (
               <p className="text-caption2 text-fg-muted leading-snug">Edit this grid's slots below the canvas.</p>
             ) : (
               <Row label="View">
                 <Select value={c.sourceViewId ?? ""} onValueChange={(v: string) => onConfig({ ...c, source: "view", sourceViewId: v || null })}>
-                  <SelectTrigger><SelectValue placeholder="Mic-slots view…" /></SelectTrigger>
+                  <SelectTrigger aria-label="View"><SelectValue placeholder="Mic-slots view…" /></SelectTrigger>
                   <SelectContent>
                     {slotsViews.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
                   </SelectContent>
@@ -1231,6 +1312,7 @@ export function Inspector({
               return (
                 <div key={b.id} className="flex items-center gap-1.5">
                   <Input
+                    aria-label={`Label for ${placeholder}`}
                     value={b.label ?? ""}
                     placeholder={placeholder}
                     onChange={(e) => {
@@ -1244,7 +1326,7 @@ export function Inspector({
               );
             })}
             <Select value="" onValueChange={(id: string) => { if (id) onConfig({ ...c, bays: [...c.bays, { id }] }); }}>
-              <SelectTrigger><SelectValue placeholder={chargerBays.length ? "Add bay…" : "No charger bays detected"} /></SelectTrigger>
+              <SelectTrigger aria-label="Add bay"><SelectValue placeholder={chargerBays.length ? "Add bay…" : "No charger bays detected"} /></SelectTrigger>
               <SelectContent>
                 {chargerBays.filter((bay) => !c.bays.some((b) => b.id === bay.id)).map((bay) => (
                   <SelectItem key={bay.id} value={bay.id}>{`${bay.connectionName ?? `Charger ${bay.chargerIndex}`} · Bay ${bay.bay}${bay.battery != null ? ` (${bay.battery}%)` : ""}`}</SelectItem>
@@ -1265,26 +1347,23 @@ export function Inspector({
         const t = c.thresholds;
         return (
           <>
-            <Row label="Meter" hint="Which Smaart SPL meter/channel to read. Auto uses the first one detected — pick a specific device/channel if Smaart exposes more than one.">
-              <Select value={c.meterId ?? ""} onValueChange={(v: string) => onConfig({ ...c, meterId: v || null })}>
-                <SelectTrigger><SelectValue placeholder={meterIds.length ? "Auto (first)" : "No meters detected"} /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Auto (first)</SelectItem>
-                  {meterIds.map((id) => (
-                    <SelectItem key={id} value={id}>{`${meters[id].deviceName} · ${meters[id].channelName}`}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Row>
-            <Row label="Metric" hint="Which value from the meter to display (e.g. an SPL weighting/response like A-Slow or C-Fast, or Leq). Auto shows the meter's default. Options fill in once Smaart is reporting.">
-              <Select value={c.metricKey ?? ""} onValueChange={(v: string) => onConfig({ ...c, metricKey: v || null })}>
-                <SelectTrigger><SelectValue placeholder={metricKeys.length ? "Auto" : "No data yet"} /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Auto</SelectItem>
-                  {metricKeys.map((k) => <SelectItem key={k} value={k}>{k}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Row>
+            <RowSelect
+              label="Meter"
+              hint="Which Smaart SPL meter/channel to read. Auto uses the first one detected — pick a specific device/channel if Smaart exposes more than one."
+              value={c.meterId ?? ""}
+              options={[
+                { value: "", label: "Auto (first)" },
+                ...meterIds.map((id) => ({ value: id, label: `${meters[id].deviceName} · ${meters[id].channelName}` })),
+              ]}
+              onChange={(v) => onConfig({ ...c, meterId: v || null })}
+            />
+            <RowSelect
+              label="Metric"
+              hint="Which value from the meter to display (e.g. an SPL weighting/response like A-Slow or C-Fast, or Leq). Auto shows the meter's default. Options fill in once Smaart is reporting."
+              value={c.metricKey ?? ""}
+              options={[{ value: "", label: "Auto" }, ...metricKeys.map((k) => ({ value: k, label: k }))]}
+              onChange={(v) => onConfig({ ...c, metricKey: v || null })}
+            />
             <RowSwitch label="Show metric name" checked={c.showLabel ?? false} onChange={(v) => onConfig({ ...c, showLabel: v })} />
             <RowSwitch label="Peak hold" hint="Also show the highest reading seen, held on screen — useful for catching transient peaks during loud moments." checked={c.peakHold ?? false} onChange={(v) => onConfig({ ...c, peakHold: v })} />
             <RowSwitch label="Color thresholds" checked={!!t} onChange={(v) => onConfig({ ...c, thresholds: v ? { amber: 95, red: 100 } : null })} />
@@ -1323,16 +1402,16 @@ export function Inspector({
         const { active: activePlaceholder, idle: idlePlaceholder } = obsModeText(mode);
         return (
           <>
-            <Row label="Show">
-              <Select value={mode} onValueChange={(v: string) => onConfig({ ...c, mode: v as "recording" | "streaming" | "virtualcam" })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="recording">Recording</SelectItem>
-                  <SelectItem value="streaming">Streaming</SelectItem>
-                  <SelectItem value="virtualcam">Virtual camera</SelectItem>
-                </SelectContent>
-              </Select>
-            </Row>
+            <RowSelect
+              label="Show"
+              value={mode}
+              options={[
+                { value: "recording", label: "Recording" },
+                { value: "streaming", label: "Streaming" },
+                { value: "virtualcam", label: "Virtual camera" },
+              ]}
+              onChange={(v) => onConfig({ ...c, mode: v as "recording" | "streaming" | "virtualcam" })}
+            />
             <Row label="OBS"><ObsLiveLabel mode={mode} /></Row>
             <RowText label="Active text" value={c.recordingText ?? ""} placeholder={activePlaceholder} onChange={(v) => onConfig({ ...c, recordingText: v })} />
             <RowText label="Idle text" value={c.idleText ?? ""} placeholder={idlePlaceholder} onChange={(v) => onConfig({ ...c, idleText: v })} />
@@ -1427,59 +1506,7 @@ export function Inspector({
       {c.type === "home-pvp" && (
         <RowSwitch label="Progress bar" hint="A hairline rule under each rolling clip. The time remaining is always shown." checked={c.showProgress ?? false} onChange={(v) => onConfig({ ...c, showProgress: v })} />
       )}
-      {(c.type === "pvp-now" || c.type === "home-pvp-now") && (
-          <>
-            <Row label="ProVideoPlayer"><span className="text-caption2 text-fg-muted">{pvpSummary(pvp)}</span></Row>
-            {c.type === "pvp-now" && (
-              <PvpLayerPicker
-                label="Layer"
-                emptyLabel="Any layer with content"
-                hint="Leave on Any layer with content to follow whichever layer has something on it — pinning a layer also names it in the widget's caption, in every state."
-                value={c.layerName ?? ""}
-                pvp={pvp}
-                onChange={(v) => onConfig({ ...c, layerName: v })}
-              />
-            )}
-            <RowSwitch label="Progress bar" checked={c.showProgress ?? true} onChange={(v) => onConfig({ ...c, showProgress: v })} />
-            <RowSwitch
-              label="Next cue"
-              // The caveat, where the operator makes the decision. It is the
-              // reason this is a switch at all.
-              hint="The next entry in the playlist — what plays next only while the playlist keeps auto-advancing. A cue fired by hand makes it wrong until the next poll."
-              checked={c.showNextCue ?? true}
-              onChange={(v) => onConfig({ ...c, showNextCue: v })}
-            />
-            <RowSwitch
-              label="Compact"
-              hint="Two lines instead of three or four: the caption becomes PVP · <label>, and the value is the countdown alone."
-              checked={c.compact ?? false}
-              onChange={(v) => onConfig({ ...c, compact: v })}
-            />
-            <RowSelect
-              label="Label"
-              value={c.nowLabel ?? DEFAULT_PVP_NOW_LABEL}
-              options={PVP_NOW_LABEL_OPTIONS}
-              onChange={(v) => onConfig({ ...c, nowLabel: v as PvpNowLabel })}
-            />
-            <RowSwitch
-              label="Count down stills"
-              hint="Counts a still down from the image duration on the ProVideoPlayer card, or the hold below. For a layer whose cue advances on it, like a rotating pre-roll; off for a graphic that stays up."
-              checked={c.countStills ?? false}
-              onChange={(v) => onConfig({ ...c, countStills: v })}
-            />
-            {c.type === "pvp-now" && (c.countStills ?? false) && (
-              <RowNumber
-                label="Still hold (seconds)"
-                hint={`Left alone, it follows the card's Image duration (${pvp?.imageDurationSec ?? 20}s). Editing it pins this widget to its own number.`}
-                value={c.stillHoldSec ?? pvp?.imageDurationSec ?? 20}
-                step={1}
-                min={1}
-                max={3600}
-                onChange={(v) => onConfig({ ...c, stillHoldSec: Math.round(v) })}
-              />
-            )}
-          </>
-      )}
+      {(c.type === "pvp-now" || c.type === "home-pvp-now") && <PvpNowInspector c={c} pvp={pvp} onConfig={onConfig} />}
       {/* Both scores widgets, because both carry `game` and it means the same
           thing on each. The sport-detail switch below is the wall object's
           alone — the Home card draws a list of rows, not a strip with a
@@ -1513,15 +1540,7 @@ export function Inspector({
           </>
         );
       })()}
-      {c.type === "countdown-timer" && (
-        <>
-          <RowSwitch label="Amber warning" checked={c.warnSeconds != null} onChange={(v) => onConfig({ ...c, warnSeconds: v ? 60 : undefined })} />
-          {c.warnSeconds != null && (
-            <RowNumber label="Warn at (s)" value={c.warnSeconds} step={5} min={0} max={3600} onChange={(v) => onConfig({ ...c, warnSeconds: Math.round(v) })} />
-          )}
-          <RowSwitch label="Hide when idle" checked={c.hideWhenIdle ?? false} onChange={(v) => onConfig({ ...c, hideWhenIdle: v })} />
-        </>
-      )}
+      {c.type === "timer" && <TimerInspector c={c} onConfig={onConfig} propInstances={propInstances} />}
       {c.type === "rosstalk-button" && <RossTalkButtonConfig c={c} onConfig={onConfig} />}
 
       {c.type === "osc-button" && (() => {
@@ -1536,7 +1555,7 @@ export function Inspector({
           <>
             <Row label="Target" hint="The OSC device this button sends to — mixer, lighting board, etc. Set these up under Integrations → OSC.">
               <Select value={c.targetId ?? ""} onValueChange={(v: string) => onConfig({ ...c, targetId: v || null })}>
-                <SelectTrigger><SelectValue placeholder={oscTargets.length ? "Select target" : "No OSC targets"} /></SelectTrigger>
+                <SelectTrigger aria-label="Target"><SelectValue placeholder={oscTargets.length ? "Select target" : "No OSC targets"} /></SelectTrigger>
                 <SelectContent>
                   {oscTargets.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                 </SelectContent>
@@ -1556,7 +1575,7 @@ export function Inspector({
               {args.map((a, i) => (
                 <div key={i} className="flex items-center gap-1">
                   <Select value={a.type} onValueChange={(v: string) => setArg(i, { type: v as OscArg["type"] })}>
-                    <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
+                    <SelectTrigger aria-label={`Argument ${i + 1} type`} className="w-20"><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="i">int</SelectItem>
                       <SelectItem value="f">float</SelectItem>
@@ -1566,7 +1585,7 @@ export function Inspector({
                     </SelectContent>
                   </Select>
                   {a.type !== "T" && a.type !== "F" && (
-                    <Input value={String(a.value ?? "")} onChange={(e) => setArg(i, { value: e.target.value })} placeholder="value" className="flex-1 min-w-0 text-fg" />
+                    <Input aria-label={`Argument ${i + 1} value`} value={String(a.value ?? "")} onChange={(e) => setArg(i, { value: e.target.value })} placeholder="value" className="flex-1 min-w-0 text-fg" />
                   )}
                   <Button variant="transparent" size="small" iconOnly onClick={() => onConfig({ ...c, args: args.filter((_, idx) => idx !== i) })} aria-label="Remove argument"><Trash2Icon className="size-3.5 text-fg-muted" /></Button>
                 </div>
@@ -1584,18 +1603,7 @@ export function Inspector({
           </>
         );
       })()}
-      {c.type === "action-button" && <ActionButtonInspector c={c} onConfig={onConfig} />}
-      {c.type === "cue-button" && (() => {
-        return (
-          <>
-            <Row label="Cue" hint="Built in cues drive OBS, REAPER, ProVideoPlayer and the app itself with no rule behind them. Your own cues come from the rules list: a pair shows on and off, a lone cue is a momentary button. Pairs hidden from Home Assistant are listed too.">
-              <CuePicker cues={cues} value={c.cue} onChange={(v) => onConfig({ ...c, cue: v })} />
-            </Row>
-            <RowText label="Label" hint="Blank uses the cue's own name." value={c.label ?? ""} placeholder="Cue's name" onChange={(v) => onConfig({ ...c, label: v })} />
-            <RowSwitch label="Show device" hint="The room or device under the label, and the reason when a reading is stale." checked={c.showDevice !== false} onChange={(v) => onConfig({ ...c, showDevice: v })} />
-          </>
-        );
-      })()}
+      {(c.type === "action-button" || c.type === "cue-button") && <ButtonInspector c={c} cues={cues} onConfig={onConfig} />}
       {c.type === "people-counter" && (() => {
         const zones = peopleCount?.zones ?? [];
         const metric = c.metric ?? "attendance";
@@ -1603,38 +1611,32 @@ export function Inspector({
         const labelHint: Record<string, string> = { attendance: "people", occupancy: "in room", peak: "peak", min: "low", avg: "average" };
         return (
           <>
-            <Row label="Count">
-              <Select
-                value={metric}
-                onValueChange={(v: string) => {
-                  const m = v as NonNullable<typeof c.metric>;
-                  // peak/min/avg are building-wide only — drop any zone selection.
-                  onConfig({ ...c, metric: m, zoneId: m === "attendance" || m === "occupancy" ? c.zoneId : null });
-                }}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="occupancy">In room (now)</SelectItem>
-                  <SelectItem value="peak">Peak attendance (today)</SelectItem>
-                  <SelectItem value="min">Lowest attendance (today)</SelectItem>
-                  <SelectItem value="avg">Avg attendance (today)</SelectItem>
-                  <SelectItem value="servicePeak">Peak in room (this service)</SelectItem>
-                  <SelectItem value="servicePeakAttendance">Peak attendance (this service)</SelectItem>
-                  <SelectItem value="serviceAttendance">Total entries (this service)</SelectItem>
-                  <SelectItem value="attendance">Total entries (day)</SelectItem>
-                </SelectContent>
-              </Select>
-            </Row>
+            <RowSelect
+              label="Count"
+              value={metric}
+              options={[
+                { value: "occupancy", label: "In room (now)" },
+                { value: "peak", label: "Peak attendance (today)" },
+                { value: "min", label: "Lowest attendance (today)" },
+                { value: "avg", label: "Avg attendance (today)" },
+                { value: "servicePeak", label: "Peak in room (this service)" },
+                { value: "servicePeakAttendance", label: "Peak attendance (this service)" },
+                { value: "serviceAttendance", label: "Total entries (this service)" },
+                { value: "attendance", label: "Total entries (day)" },
+              ]}
+              onChange={(v) => {
+                const m = v as NonNullable<typeof c.metric>;
+                // peak/min/avg are building-wide only — drop any zone selection.
+                onConfig({ ...c, metric: m, zoneId: m === "attendance" || m === "occupancy" ? c.zoneId : null });
+              }}
+            />
             {perZone ? (
-              <Row label="Zone">
-                <Select value={c.zoneId ?? ""} onValueChange={(v: string) => onConfig({ ...c, zoneId: v || null })}>
-                  <SelectTrigger><SelectValue placeholder={zones.length ? "Building total" : "No zones detected"} /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">Building total</SelectItem>
-                    {zones.map((z) => <SelectItem key={z.id} value={z.id}>{z.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </Row>
+              <RowSelect
+                label="Zone"
+                value={c.zoneId ?? ""}
+                options={[{ value: "", label: "Building total" }, ...zones.map((z) => ({ value: z.id, label: z.name }))]}
+                onChange={(v) => onConfig({ ...c, zoneId: v || null })}
+              />
             ) : (
               <p className="text-caption2 text-fg-muted leading-snug">Peak, low and average are building-wide (today), from the occupancy sensor.</p>
             )}
@@ -1685,31 +1687,6 @@ export function Inspector({
           </>
         );
       })()}
-      {c.type === "baptism-timer" && (
-        <>
-          <Row label="Show">
-            <Select value={c.field ?? "live"} onValueChange={(v: string) => onConfig({ ...c, field: v as NonNullable<typeof c.field> })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="live">Live (running clock)</SelectItem>
-                <SelectItem value="testimony">Testimony (this person's, once banked)</SelectItem>
-                <SelectItem value="session">Session (wall clock)</SelectItem>
-                <SelectItem value="phase">Phase (the word)</SelectItem>
-                <SelectItem value="person">Person (number, or N of M)</SelectItem>
-                <SelectItem value="count">Count baptized</SelectItem>
-                <SelectItem value="total">Total time</SelectItem>
-                <SelectItem value="average">Average per person</SelectItem>
-                <SelectItem value="last">Last person</SelectItem>
-              </SelectContent>
-            </Select>
-          </Row>
-          <RowSwitch label="Show label" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-          {(c.showLabel ?? true) && (
-            <RowText label="Label" value={c.label ?? ""} placeholder="(auto)" onChange={(v) => onConfig({ ...c, label: v })} />
-          )}
-          <p className="text-caption2 text-fg-muted leading-snug">Driven by the Baptisms tab. &ldquo;Live&rdquo; ticks the current testimony/baptism; others summarize the session.</p>
-        </>
-      )}
       {c.type === "messages" && (
         <MessagesGroupsPicker groups={c.groups} onChange={(groups) => onConfig({ ...c, groups })} />
       )}
@@ -1760,20 +1737,13 @@ export function Inspector({
       {/* SURFACE and TINT, separately — they are independent questions, and the
           single list that mixed them (Glass, Glass·Green, Glass·Red, …) was both
           longer and less capable: it had no way to ask for a tinted Solid. */}
-      <Row label="Surface" hint="What the widget sits on. None draws no card at all; Glass is translucent, so the screen shows through; Solid is an opaque card with a shadow; Outline is a hairline and nothing behind it.">
-        <Select
-          value={surfaceOf(s)}
-          onValueChange={(v: string) => onStyle(applySurface(s, v as SurfaceKind))}
-        >
-          {/* No placeholder: every style IS one of the four, so there is nothing
-              for the trigger to fall back to. "Custom" was never an entry in
-              this list and has no business being what it reads. */}
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {SURFACES.map((x) => <SelectItem key={x.value} value={x.value}>{x.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </Row>
+      <RowSelect
+        label="Surface"
+        hint="What the widget sits on. None draws no card at all; Glass is translucent, so the screen shows through; Solid is an opaque card with a shadow; Outline is a hairline and nothing behind it."
+        value={surfaceOf(s)}
+        options={SURFACES}
+        onChange={(v) => onStyle(applySurface(s, v as SurfaceKind))}
+      />
       {/* ONE colour row, not a Tint row and a Fill row that both wrote the same
           field and disagreed about it. The swatches are the quick answers and
           the picker is any other, so what an object is filled with is asked and
@@ -1871,7 +1841,7 @@ export function Inspector({
         </>
       )}
 
-      <Row label="Radius"><NumberField value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} /></Row>
+      <RowNumber label="Radius" value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} />
       <Row label="Border">
         <ColorField
           label="Border colour"
@@ -1879,6 +1849,7 @@ export function Inspector({
           onChange={(v) => onStyle({ borderColor: v, borderWidth: s.borderWidth ?? 0 })}
         />
         <NumberField
+          aria-label="Border width"
           value={Math.round((s.borderWidth ?? 0) * canvas.height)}
           step={1}
           min={0}
@@ -1902,7 +1873,7 @@ export function Inspector({
           a "More options" that opens onto nothing is worse than no disclosure. */}
       {isText && !sizesTypeFromItsBox(c.type) && (
         <MoreControls>
-          <Row label="Uppercase"><Switch checked={s.uppercase ?? false} onCheckedChange={(v) => onStyle({ uppercase: v })} /></Row>
+          <RowSwitch label="Uppercase" checked={s.uppercase ?? false} onChange={(v) => onStyle({ uppercase: v })} />
         </MoreControls>
       )}
 

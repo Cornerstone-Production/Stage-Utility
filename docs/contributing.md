@@ -24,11 +24,12 @@ type(scope): subject
   `recorders`, `layout`, `layout-editor`, `advanced`, `server`, `pco`, `updater`,
   `types`, `rosstalk`.
 - **scope, when it names the machinery** — `release`, `ci`, `dx` and `test` name
-  this project's own tooling. A `feat`, `fix` or `perf` under one of them is typed
-  honestly and still invisible to every operator, so it appears in no release
-  notes and mints no release. The list is `main/services/internal-scopes.json`,
-  read by the notes generator, the update dialog and the workflow alike. A
-  breaking `!` is shown and counted whatever its scope.
+  this project's own tooling. A `feat`, `fix`, `perf` or `polish` under one of them
+  is typed honestly and still invisible to every operator, so it appears in no
+  release notes and mints no release. The list is
+  `main/services/internal-scopes.json`, read by the notes generator, the update
+  dialog and the workflow alike. A breaking `!` is shown and counted whatever its
+  scope.
 - **subject** — imperative mood, no trailing period. Say what the change does, not
   what you did: "add rack color to the header", not "added rack color".
 
@@ -42,20 +43,23 @@ explaining *why* in the body is worth keeping.
 | `feat` | A new capability a user can see | **minor** |
 | `fix` | A bug fix | **patch** |
 | `perf` | Faster or lighter with no behavior change | **patch** |
+| `polish` | A visible refinement with no new capability: spacing, layout, wording | **patch** |
 | `refactor` | Restructuring with no behavior change | none |
 | `docs` | Documentation only | none |
 | `test` | Tests only | none |
 | `build` | Build system, dependencies | none |
 | `ci` | CI configuration | none |
 | `chore` | Anything else with no user impact | none |
-| `revert` | Reverts a previous commit | matches what it reverts |
+| `revert` | Reverts a previous commit; takes no `!` | none |
 
-Those ten are the whole list: `style:` and any other type fails the check.
+The table is the whole list: `style:` and any other type fails the check. The
+types and what each releases are `main/services/commit-types.json`.
 `git revert`'s own `Revert "<original subject>"` form is accepted as written.
 
 ### Breaking changes
 
-Append `!` after the type/scope, **and** explain the break in the body:
+Append `!` after the type/scope of any type but `revert`, **and** explain the break
+in the body:
 
 ```
 feat(types)!: rename Slot.channel to Slot.channelId
@@ -72,8 +76,15 @@ in the store instead, the way the data-dir rename was.
 
 The release flow reads these to decide the version, so the type is not cosmetic. A
 `feat` shipped as `fix` produces a version number that lies about what changed. When
-in doubt: could a user tell? Then it is `feat` or `fix`. Could only a developer tell?
-Then it is `refactor`, `docs`, `test`, `build`, `ci` or `chore`.
+in doubt: could a user tell? Then it is `feat`, `fix`, `perf` or `polish`. Could only
+a developer tell? Then it is `refactor`, `docs`, `test`, `build`, `ci` or `chore`.
+
+The minor number is for capabilities. A change that makes something that already
+exists look or behave better, and lets nobody do anything they could not before, is
+`polish`, not `feat`; one that repairs something broken is `fix`. `polish` is a patch
+like `fix` and `perf`, and it is listed under **Improved** in the release notes,
+beside `perf`. A release whose only releasable commits are `polish`, `fix` and `perf`
+is X.Y.Z+1; any `feat` among them makes it a minor.
 
 ### Merge commits
 
@@ -89,8 +100,9 @@ is `Beta-only: true`, below.
 
 #### `Beta-only: true`
 
-Put this on a `fix:` or `perf:` commit whose bug **never reached a stable
-release** — a regression introduced and repaired inside the same release cycle.
+Put this on a `fix:`, `perf:` or `polish:` commit whose bug, or unrefined state,
+**never reached a stable release** — a regression introduced and repaired, or a
+feature built and refined, inside the same release cycle.
 
 ```
 fix(integrations): the Setup guide links to this build's branch
@@ -99,10 +111,11 @@ Beta-only: true
 ```
 
 The release-notes generator drops such a commit from a stable release's
-**Fixed** list, and counts it into the "N further fixes … were never in a
-released version" line, so the omission is stated rather than silent. A
-prerelease keeps it: somebody on the beta track has been running the broken
-version, and for them the fix is the news.
+**Fixed** list (**Improved**, for `perf` and `polish`), and counts it into a line
+at the end of that section — "N further fixes … were never in a released version",
+or "N further improvements …" under **Improved** — so the omission is stated rather
+than silent. A prerelease keeps it: somebody on the beta track has been running the
+broken version, and for them the fix is the news.
 
 The generator already suppresses a fix whose whole **scope** is new this release.
 That rule cannot see a new feature built under an existing scope — in 1.13.0,
@@ -114,11 +127,11 @@ Rule of thumb: if somebody upgrading from the last stable release could not have
 hit the bug, mark it.
 
 CI runs a heuristic check (`scripts/check-beta-only.mjs`) that warns, but never
-fails the build, on a `fix:`/`perf:` commit that touches a file also touched by
-a `feat:` commit from this release cycle. It is a reminder, not a judge: sharing
-a file does not mean sharing a bug, and a fix to a new feature in a file no
-`feat:` commit happened to touch is invisible to it — the trailer remains the
-author's call.
+fails the build, on a `fix:`, `perf:` or `polish:` commit that touches a file also
+touched by a `feat:` commit from this release cycle. It is a reminder, not a
+judge: sharing a file does not mean sharing a bug, and a fix to a new feature in a
+file no `feat:` commit happened to touch is invisible to it — the trailer remains
+the author's call.
 
 #### Correcting a trailer after the commit is on `beta`
 
@@ -152,8 +165,8 @@ run says what it changed and why.
 Everything here is a hard failure rather than a fallback: unreadable or
 unparseable JSON, a missing field, a commit that does not resolve, one commit
 listed twice, and an override naming a commit that is not a non-breaking
-`fix:`/`perf:` in the release's range — that last one is a correction that would
-never be applied, which reads as handled and is not.
+`fix:`/`perf:`/`polish:` in the release's range — that last one is a correction
+that would never be applied, which reads as handled and is not.
 
 A prerelease reads no override file. It keeps every fix regardless, because
 somebody on the beta track has been running the broken version.
@@ -168,12 +181,13 @@ commit type is what picks the version, so it is worth getting right.
 | `beta` | a prerelease `X.Y.Z-beta.N`, tagged, published as a GitHub prerelease |
 | `main` | the release `X.Y.Z`, tagged, published as the latest GitHub release |
 
-A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build`, or only
-`feat`/`fix`/`perf` commits scoped to the tooling (`release`, `ci`, `dx`, `test`),
-produces **no release at all**, so documentation churn and release-machinery fixes
-do not mint versions. The rule is `scripts/release-level.sh`. Otherwise the level
-is the highest severity among every commit since the last stable release — one `feat`
-among twenty `docs` makes it a minor.
+A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build`/`revert`, or only
+`feat`/`fix`/`perf`/`polish` commits scoped to the tooling (`release`, `ci`, `dx`,
+`test`), produces **no release at all**, so documentation churn and
+release-machinery fixes do not mint versions. The rule is
+`scripts/release-level.sh`. Otherwise the level is the highest severity among
+every commit since the last stable release — one `feat` among twenty `docs` makes
+it a minor.
 
 How that turns into a number, and how a running server gets the result, is in
 [Releases and distribution](ops/distribution.md).
@@ -189,6 +203,14 @@ marked with a `build` status.
 
 To force a major, mark the commit breaking — `feat(types)!: …` plus an explanation in
 the body.
+
+### Release rhythm
+
+Beta prereleases ship continuously: every push to `beta` that carries a releasable
+commit mints one. Stable releases are promoted on a cadence instead: the release PR
+from `beta` to `main` stays open and accumulates, and is merged about every two
+weeks, or sooner for a fix that cannot wait. The release it produces is the level of
+everything since the last stable tag.
 
 ## Branching
 
@@ -237,22 +259,43 @@ running first: `node scripts/check-public-hygiene.mjs` (see
 [Public hygiene](#public-hygiene)) and `node scripts/check-commit-subjects.mjs`.
 
 CI runs them side by side rather than one after another: lint, type-check, build
-and the audit in one job, and the test suite split across four more with
-`npm test -- --test-shard=N/4`. A PR shows each, plus one `build` check that
-passes only when all of them did. The release workflow verifies a push with the
-same split, minus the audit and the action-pin check. Coverage is not part of the
-PR gate: `coverage.yml` reports it for `beta` weekly, and on demand from the
-Actions tab once the workflow is on `main`.
+and the audit in one job, the test suite split across four more with
+`npm test -- --test-shard=N/4`, and the public ServiceCue Worker package
+(`publish/servicecue/`, which has its own dependencies) in one of its own: install,
+type-check, audit, and a test that runs the Worker in workerd. A PR shows each, plus
+one `build` check that passes only when all of them did. The release workflow
+verifies a push with the same split, minus the audit, the action-pin check and the
+Worker package's job. Coverage is not part of the PR gate: `coverage.yml` reports it
+for `beta` weekly, and on demand from the Actions tab once the workflow is on `main`.
+
+When a change touches `publish/servicecue/`, run that job's three commands too. The
+root `npm run type-check` and `npm test` cannot see the files that import
+`cloudflare:workers`, so a type error in the Durable Object passes them:
+
+```bash
+npm --prefix publish/servicecue ci
+npm --prefix publish/servicecue run typecheck && npm --prefix publish/servicecue test
+```
 
 Not every check runs on every pull request. The secret scan, the commit
 convention check and the public-hygiene check (below) run on all of them,
-docs-only included. CodeQL is GitHub's default setup, configured in the
-repository's settings rather than by a workflow file: the extended query suite
-for JavaScript/TypeScript and the workflows themselves, on a weekly schedule and
-on pull requests (see [Code scanning](reference/code-scanning.md)). No check is a required status check on `beta` or
-`main`: the release workflow pushes its version bump to both directly, which a
-required check would refuse, so a merge is gated by review of a green PR. The
-build and tests skip a PR that touches only `docs/` and Markdown; dependency
+docs-only included. The script and workflow checks (below) run only when the files
+they read change. CodeQL (`codeql.yml`, the extended query suite; see
+[CodeQL](#codeql)) runs on pull requests to `beta` or `main`, on pushes to them,
+weekly, and by hand. JavaScript/TypeScript is analysed every time; the other
+languages only when a change touches what they analyse: Swift and C/C++ for
+`helper/macos/` or the Xcode selection (`.github/actions/select-xcode`), Ruby for a
+`.rb` file, and the workflows for `.github/`. A change to either CodeQL workflow,
+or to the configuration they share, runs all of them, and so does every push to
+`main`, the weekly run and a manual one. A change under `.github/codeql/` also runs
+the model tests. A language that does not run shows as skipped, and on a pull
+request uploads an empty result under its own category, so the `CodeQL` check still
+finds every configuration the base branch has instead of reporting "configurations
+not found". What the scanner flags, and what is dismissed, is in
+[Code scanning](reference/code-scanning.md). No check is a required status check on
+`beta` or `main`: the release workflow pushes its version bump to both directly,
+which a required check would refuse, so a merge is gated by review of a green PR.
+The build and tests skip a PR that touches only `docs/` and Markdown; dependency
 review runs only when `package.json` or the lockfile changes; the updater
 survival matrix runs only for the updater, the installers and its own scripts;
 and the Mac output helper's Swift build and tests (`helper-macos.yml`, on a
@@ -278,6 +321,55 @@ Green is not finished. Two more questions, answered in the PR body:
 "No docs needed" and "nothing worth logging" are fine answers — say which, so
 it reads as a decision rather than an omission.
 
+### Script and workflow checks
+
+Four checks cover the code that is not TypeScript. The installers run as root or
+elevated on display machines, and the release workflow holds write access to the
+repository.
+
+| Check | Looks at | Runs when | Locally |
+|---|---|---|---|
+| ShellCheck | every tracked `*.sh`, and extensionless scripts with a shell shebang (`scripts/stage-upgrade`) | a shell script changes | `brew install shellcheck`, then `scripts/lint-shell.sh` |
+| PSScriptAnalyzer | `scripts/kiosk/install-windows.ps1`, `kiosk-windows.ps1`, `kiosk-update-windows.ps1` | any `.ps1` changes | `brew install powershell`, `pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'`, then `pwsh scripts/lint-powershell.ps1` |
+| zizmor | `.github/**`: workflows, composite actions, Dependabot config | anything under `.github` changes | `brew install zizmor` (or `pip install zizmor`), then `GH_TOKEN=$(gh auth token) zizmor .github` |
+| Secret scan | the PR's commits and the working tree | every pull request | `gitleaks git . --log-opts="origin/beta..HEAD" --redact` |
+
+The first three also run on every push to `main` and weekly, because a new
+release of the tool can flag a file nobody touched. All four fail the job on any
+finding.
+
+`scripts/lint-shell.sh` and `scripts/lint-powershell.ps1` hold the file lists and
+CI calls them, so a local run is the CI run. PSScriptAnalyzer covers the Windows
+kiosk's installer, launcher and updater only. `install.ps1`, `scripts/update.ps1` and
+`scripts/survival/run-windows.ps1` are listed as deferred in
+`scripts/lint-powershell.ps1` and fail the analyzer today; a `.ps1` in neither
+list fails the check, so a new script is linted or deferred on purpose. The
+installer stays ASCII (see the header of that script for why).
+
+A script piped to `sh` carries a `#!/bin/sh` shebang, because ShellCheck picks the
+dialect from it and a bash shebang would check one shell and run another.
+
+Findings are fixed. Where one is kept on purpose, suppress it where it stands,
+naming the check and giving the reason on the same line:
+
+```sh
+# shellcheck disable=SC2086 # $_logs is a space-separated list of paths, meant to split
+```
+
+```powershell
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'why')]
+```
+
+`scripts/lint-shell.sh` rejects a `disable=` that names no `SCxxxx` check, and a
+`.shellcheckrc`. For zizmor, fix the workflow rather than adding a
+`# zizmor: ignore`.
+
+zizmor and the secret scan upload SARIF to code scanning, so their findings show
+in the Security tab as well as the job log. ShellCheck and PSScriptAnalyzer have
+no SARIF output; theirs are annotations on the PR diff. A fork or Dependabot pull
+request cannot write to code scanning and skips the upload; the job still gates on
+the scan.
+
 ### Merge-friendly guards
 
 A test that pins an exact registry (every layout object type, every route,
@@ -287,6 +379,91 @@ different entry touch different lines and merge without a conflict; a bare
 count sits on the same line every time, so the second PR to land always
 conflicts with the first. A count is also a weaker guard on its own: two
 additions and one removal leave the number unchanged and the test still green.
+
+## CodeQL
+
+Code scanning is a workflow in this repository, not GitHub's default setup, so its
+configuration is reviewed like code.
+
+| File | What it is |
+|---|---|
+| `.github/workflows/codeql.yml` | Decides which languages a change touches, calls one analysis per language, and runs the model tests |
+| `.github/workflows/codeql-language.yml` | One language's analysis, or an empty result for a language that was skipped |
+| `.github/codeql/codeql-config.yml` | The query suite (`security-extended`) and the paths ignored, read by every language |
+| `.github/codeql/extensions/stage-utility-models/` | The model pack: data extensions that teach the JavaScript analysis about this code |
+| `.github/codeql/tests/` | The model pack's own CodeQL tests |
+
+An alert is fixed in the code, not dismissed. [Code scanning decisions](reference/code-scanning.md)
+lists the two rules whose alerts are dismissed once each, with the reason.
+
+### Paths ignored
+
+`paths-ignore` lists tests and their support code, the vendored DeckLink SDK
+(`helper/macos/Vendor`), the model pack's own test fixtures, the docs screenshot
+tool, and the output of builds. For JavaScript/TypeScript an ignored file is not
+extracted at all: it raises no alert and no flow runs through it. Swift and C/C++ do
+not support path filtering, and CodeQL says so in their logs, so the helper entries
+are inert and an alert under them would still be reported.
+
+Ignoring the tests has a cost. They call route handlers directly, and that is the
+only path CodeQL has into a handler's `c: RouteCtx` (see Models). With the tests
+out of the database, a query parameter or header a future handler logs or writes to
+a path has no source, and only request bodies are covered. The alerts on the tree
+are the same either way today.
+
+Add a path to the config and to the sorted list in `scripts/codeql-workflow.test.ts`.
+That test also fails when a test or a test harness is not covered, when a pattern
+covers product code, and when a pattern matches nothing and is not a build's output.
+
+### Swift and C/C++
+
+Both are built by hand on macOS (`build-mode: manual`) on the runner the helper's own
+CI uses, so the tracer watches a build CI already proves. The C/C++ leg builds only
+the DeckLink shim, not the whole package. Both run only when a change touches
+`helper/macos/` or the Xcode selection.
+
+### Models
+
+The model pack extends `codeql/javascript-all`. The action has no input for a
+repository's own model pack, so the JavaScript run passes it to the CLI through
+`CODEQL_ACTION_EXTRA_OPTIONS`. It holds two kinds of model, in
+`extensions/stage-utility-models/models/`:
+
+- **Sources.** The three body readers in `main/services/routes/context.ts` return
+  remote data: every route handler reads its request body through one of them.
+- **Barriers for `js/log-injection`.** Functions whose result cannot hold a newline
+  or a terminal escape, each with its reason in the model file. `js/log-injection`
+  honours a barrier, not a barrier guard, so a predicate such as `isPcoId` cannot be
+  modelled for it.
+
+A route handler's `c: RouteCtx` cannot be a source. A data extension can name a
+function's parameter only when the function is passed to a library call, and
+handlers are called through a loop over an array, which CodeQL does not resolve.
+Making `c.url` and `c.req` reachable would mean changing how handlers are dispatched.
+
+A model's type is `file:<path>`, relative to the source root, naming the module the
+calling code imports.
+
+To add a model:
+
+1. Add the row to a file under `extensions/stage-utility-models/models/`, with a
+   comment saying why the function qualifies. A barrier belongs there only if it
+   neutralises every newline and control character.
+2. Add the row to the sorted list in `scripts/codeql-workflow.test.ts`. That test
+   checks that the file exports the function and that a fixture stands in for it.
+3. Add the stand-in under `.github/codeql/tests/models/`, at the same path as the real
+   file, and a call to it in `log-barriers.ts` or `route-sources.ts` there.
+4. Record the alerts and read the diff of `LogInjection.expected`: a barrier's call
+   shows no alert, a source's call shows one.
+5. Delete the row and run the test again. It must fail.
+
+```bash
+codeql test run .github/codeql/tests --additional-packs=$PWD/.github/codeql/extensions --learn
+```
+
+Drop `--learn` to run the tests. CI runs them whenever `.github/codeql/` changes, with
+the CLI version the `models` job prints at the start. Record with that version: a
+newer CLI can change how the expected output is written.
 
 ## React state
 

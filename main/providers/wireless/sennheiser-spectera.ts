@@ -33,6 +33,16 @@ const RECONNECT_MAX_MS = 3_600_000; // internal ceiling; the service-window sche
 // Resource branches we ask the base station to push.
 const SUBSCRIBE_PATHS = ["/api/mts/paired/all", "/api/rf/channels", "/api/audio/links"];
 
+/** The host and port connect() dials. Exported because the credential check in
+ *  wireless-credentials.ts must agree with it exactly: the API password goes
+ *  wherever this says, and a port left unset is 443, not "somewhere else". */
+export function specteraTarget(cfg: Record<string, unknown>): { host: string | null; port: number } {
+  return {
+    host: typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null,
+    port: typeof cfg.port === "number" && cfg.port > 0 ? Math.floor(cfg.port) : DEFAULT_PORT,
+  };
+}
+
 export class SennheiserSpectera extends DeviceProviderBase implements DeviceProvider {
   readonly id = "sennheiser-spectera";
   readonly label = "Sennheiser Spectera";
@@ -71,8 +81,9 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
 
 
   async connect(cfg: Record<string, unknown>): Promise<void> {
-    this.host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
-    this.port = typeof cfg.port === "number" && cfg.port > 0 ? Math.floor(cfg.port) : DEFAULT_PORT;
+    const target = specteraTarget(cfg);
+    this.host = target.host;
+    this.port = target.port;
     this.password = typeof cfg.password === "string" ? cfg.password : "";
     this.running = true;
     this.openStream();

@@ -89,6 +89,7 @@ import { cacheMaintenance } from "./main/services/cache-maintenance.js";
 import { calendarBroadcaster } from "./main/services/calendar-broadcaster.js";
 import { reconcileOpenRecords } from "./main/services/reconcile-records.js";
 import { videoService } from "./main/services/video/video-service.js";
+import { servicecuePublisher } from "./main/services/servicecue-publisher-instance.js";
 
 // ── Data directory ────────────────────────────────────────────────────────────
 //
@@ -158,6 +159,11 @@ await deviceManager.start();
 // plan is selected / PCO isn't configured.
 livePoller.start();
 
+// Push ServiceCue out to the public page, if the operator switched that on. This waits
+// for the settings and the token, which are files, and for no request: a page that is
+// down must not hold the server back, and its first request is a timer away.
+await servicecuePublisher.start();
+
 // Keep the photo + attachment disk caches from growing unbounded over months.
 cacheMaintenance.start();
 calendarBroadcaster.start();
@@ -172,6 +178,8 @@ async function shutdown(signal: string): Promise<void> {
   stageController.stopUpdateChecks();
   stageController.stopDeviceStatusUpdates();
   livePoller.stop();
+  // The public page keeps what it holds: a restart is not a reason to blank it.
+  servicecuePublisher.stop();
   cacheMaintenance.stop();
   propresenterService.stop();
   resiService.stop();

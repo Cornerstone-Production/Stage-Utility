@@ -325,6 +325,9 @@ export interface LayoutCanvas {
 export type LayoutHAlign = "left" | "center" | "right";
 export type LayoutVAlign = "top" | "middle" | "bottom";
 
+/** How much a ProVideoPlayer "now" widget draws — see `pvp-now`'s `layout`. */
+export type PvpNowLayout = "full" | "compact" | "countdown";
+
 /** Generic visual styling. Every field optional; the renderer applies defaults. */
 export interface LayoutStyle {
   /** Fraction of canvas HEIGHT (e.g. 0.06 ≈ 64px on a 1080-tall canvas). */
@@ -357,6 +360,13 @@ export interface LayoutStyle {
 
 /** The four materials offered in the inspector's Look section. */
 export type LayoutSurface = "flat" | "glass" | "solid" | "outline";
+
+/** Where a Timer reads its time. */
+export type TimerSource = "service" | "propresenter" | "baptism";
+
+/** The nine readouts of a baptism session a Timer or Baptism timer can show. */
+export type BaptismTimerField =
+  | "live" | "count" | "total" | "average" | "last" | "testimony" | "session" | "phase" | "person";
 
 /** Per-type configuration. The discriminant is `type`. */
 export type LayoutObjectConfig =
@@ -480,7 +490,13 @@ export type LayoutObjectConfig =
   // null falls back to the FIRST meter. Two cards, two defaults, because the
   // wall object is one chosen instrument and this one answers "how loud is it
   // in here" without being told where.
-  | { type: "home-spl"; meterId?: string | null }
+  //
+  // `metricKey` pins which Smaart metric the card reads, named exactly as Smaart
+  // names it. ABSENT or "" is Automatic: the A-weighted metric when the meter
+  // has one, else its first. A pinned metric the meter stops reporting reads "—"
+  // naming it; the card never substitutes another. Same field name `spl-meter`
+  // uses, with a different automatic rule (see resolveSplValue).
+  | { type: "home-spl"; meterId?: string | null; metricKey?: string | null }
   | { type: "home-screens" }
   // `showSpl` draws the service-level SPL line under the attendance curve;
   // `splMetric` names which Smaart metric it plots (null = the preferred
@@ -728,18 +744,27 @@ export type LayoutObjectConfig =
        */
       showNextCue?: boolean;
       /**
-       * Two lines instead of four: caption + countdown, nothing else.
-       *
-       * The countdown-first treatment for a small tile — the caption becomes
-       * `PVP · <label>` (see `nowLabel`), the value is the remaining time alone
-       * (no "remaining" word), and the next-cue footer never draws. Off by
-       * default: the three-line composition above is what the mockup approved
-       * first, and this is the alternative for a tile too small for it.
+       * How much the widget draws. `"full"` is the three-line composition the
+       * mockup approved first; `"compact"` is two lines, caption + countdown
+       * (the caption becomes `PVP · <label>` — see `nowLabel` — the value is the
+       * remaining time alone, and the next-cue footer never draws);
+       * `"countdown"` draws the time left and NOTHING else, as large as the box
+       * allows. Absent reads as `"full"`, unless the object still carries the
+       * legacy `compact` below — see `pvpNowLayout` in renderer/main/pvp-now-config.ts.
+       */
+      layout?: PvpNowLayout;
+      /**
+       * LEGACY, read-only: the two-way switch `layout` replaced. An object saved
+       * before then has `compact: true` and no `layout`, and `pvpNowLayout` reads
+       * that as `"compact"`. Nothing writes it any more; `layout`, once set,
+       * wins over it. Kept in the type only so the one reader that migrates it
+       * type-checks.
+       * @deprecated use `layout`
        */
       compact?: boolean;
       /**
-       * Which name `compact`'s caption borrows. Ignored outside compact mode —
-       * the normal composition's value stays the media name, always.
+       * Which name the compact layout's caption borrows. Ignored in the other
+       * layouts — the full composition's value stays the media name, always.
        *
        * Named `nowLabel`, not `label`: `label` is already a required string on
        * several other members of this union — a button's own caption — and
@@ -747,6 +772,18 @@ export type LayoutObjectConfig =
        * so reusing it would have pulled every button type into this setting.
        */
       nowLabel?: "cue" | "file" | "file-ext" | "layer";
+      /**
+       * Turn the time (and the progress rule) amber, then red, as a clip runs
+       * out. Off by default, so a widget saved before this existed is unchanged.
+       * Every layout. Thresholds below.
+       */
+      warnNearEnd?: boolean;
+      /** Seconds left at or under which the time reads amber. Default 30. */
+      warnAmberSec?: number;
+      /** Seconds left at or under which the time reads red. Default 10. Never
+       *  above `warnAmberSec`: the reader clamps it, so a red that would come
+       *  before the amber is read as the amber. */
+      warnRedSec?: number;
       /**
        * Count a STILL down, the same way a rolling clip already counts down.
        *
@@ -777,9 +814,16 @@ export type LayoutObjectConfig =
       showProgress?: boolean;
       showNextCue?: boolean;
       /** Same meaning as the wall object's — see `pvp-now`. */
+      layout?: PvpNowLayout;
+      /** Legacy, read-only — see `pvp-now`. @deprecated use `layout` */
       compact?: boolean;
       /** Same meaning as the wall object's — see `pvp-now`. */
       nowLabel?: "cue" | "file" | "file-ext" | "layer";
+      /** Same meaning as the wall object's — see `pvp-now`. The switch is on
+       *  Home's card menu; the thresholds are the inspector's. */
+      warnNearEnd?: boolean;
+      warnAmberSec?: number;
+      warnRedSec?: number;
       /** Same meaning as the wall object's — see `pvp-now`. No `stillHoldSec`
        *  here: that field is inspector-only on the wall object too. */
       countStills?: boolean;
@@ -954,9 +998,48 @@ export type LayoutObjectConfig =
   | {
       type: "baptism-timer";
       caption?: string | null;
-      field?: "live" | "count" | "total" | "average" | "last" | "testimony" | "session" | "phase" | "person";
+      field?: BaptismTimerField;
       label?: string;
       showLabel?: boolean;
+    }
+  // One timer for everything that counts: the Planning Center service clock, a
+  // ProPresenter timer, or a baptism readout. Replaces `countdown-timer`,
+  // `home-live-status`, `pp-timer` and `baptism-timer`, which still render
+  // forever — see `readTimerConfig` in renderer/main/timer-config.ts, which maps
+  // each of them onto this shape wherever a layout object is read.
+  //
+  // Every field is optional and a field left unset means that source's default,
+  // so a saved object never needs rewriting when a setting is added. Which fields
+  // a source reads is stated beside each; a field a source does not read is
+  // carried, not cleared, so flipping the source back and forth loses nothing.
+  | {
+      type: "timer";
+      /** Where the time comes from. Absent reads as "service". */
+      source?: TimerSource;
+      /**
+       * A caption above the value. Unset is the source's own default (the live
+       * item's name, "Stage timer", "Baptisms"); an EMPTY string is no caption,
+       * which is how an object converted from one that had none stays that way.
+       */
+      caption?: string | null;
+      /** The sub-line: the timer's name (propresenter), the readout's word
+       *  (baptism), or the next item and the like (service). Default on. */
+      showLabel?: boolean;
+      hideWhenIdle?: boolean;
+      /** service and propresenter. Amber once this many seconds remain; unset is
+       *  off. */
+      warnSeconds?: number;
+      /** service and propresenter. Red once the time is over. Default on. */
+      redOnOverrun?: boolean;
+      /** service. "Next · <title>" on the sub-line. Default off. */
+      nextItem?: boolean;
+      /** propresenter. A timer by name; null or unset is the first reported. */
+      timerName?: string | null;
+      propresenterInstanceId?: string | null;
+      /** baptism. Which readout; absent reads as "live". */
+      field?: BaptismTimerField;
+      /** baptism. Replaces the readout's own word on the sub-line. */
+      label?: string;
     }
   // A styled box that holds other objects. Children are positioned as fractions
   // of THIS container's box (not the canvas), so moving/resizing the container

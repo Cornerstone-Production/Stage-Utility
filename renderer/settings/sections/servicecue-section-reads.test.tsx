@@ -33,6 +33,7 @@ const teardown = installRenderDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
 const { TooltipProvider } = await import("../../components/ui/index.js");
@@ -117,7 +118,7 @@ const previewShows = () =>
   (screen.getByRole("combobox", { name: "Preview with" }) as HTMLSelectElement).selectedOptions[0]?.textContent ?? "";
 
 async function mount(): Promise<void> {
-  render(React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection)));
+  render(React.createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) }, React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection))));
   await settle();
   await settle();
   await settle();
@@ -285,7 +286,7 @@ test("the landing page's first enabled type is the preview default, whichever re
     config: () => new Promise((resolve) => { answerConfig = () => resolve(ok({ serviceTypeIds: ["st2"] })); }),
   });
   try {
-    render(React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection)));
+    render(React.createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) }, React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection))));
     await settle();
     await settle();
     await act(async () => answerConfig());
