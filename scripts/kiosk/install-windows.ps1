@@ -12,17 +12,103 @@
 #
 # Run in an ELEVATED PowerShell: the device id lives in ProgramData so that
 # clearing a browser profile, or the user profile, cannot cost you a claim.
+#
+# The launcher (kiosk-windows.ps1) and an updater task (kiosk-update-windows.ps1) are
+# downloaded from the server this was fetched from, so the launcher follows the
+# server's version. From a copy that was not fetched from a server, say where to
+# download from:  $env:STAGE_DOWNLOAD_FROM = 'http://<server>:<port>'
 
 $ErrorActionPreference = 'Stop'
 
+# The server stamps its own address over this line when it sends the installer, so
+# the launcher and the updater can be downloaded from it. Empty when the file did
+# not come from a server.
+$FetchedFrom = ''
+
 $StateDir = Join-Path $env:ProgramData 'StageUtility'
+# ProgramW6432 is the real Program Files even from a 32-bit PowerShell.
+$ProgramFiles = if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }
+$AppDir   = Join-Path $ProgramFiles 'StageUtility'
 $Port     = if ($env:STAGE_KIOSK_PORT) { [int]$env:STAGE_KIOSK_PORT } else { 8789 }
 $Server   = $env:STAGE_SERVER
+
+# Where the launcher and the updater are downloaded from, best first, and so the
+# server the updater asks from then on: STAGE_DOWNLOAD_FROM (which does not pin the
+# PC), the server this PC is pinned to as it is installed (STAGE_SERVER), the server
+# this installer came from, the server it is already pinned to.
+# A server root and nothing else: the same pattern as kiosk-update-windows.ps1's
+# and is_origin in install-macos.sh (scripts/origin-shape.test.ts).
+$OriginPattern = '^https?://([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]{2,45}\])(:[0-9]{1,5})?$'
+
+function Get-DownloadOrigin {
+  $pinned = Join-Path $StateDir 'server'
+  $candidates = @($env:STAGE_DOWNLOAD_FROM, $env:STAGE_SERVER, $FetchedFrom)
+  if (Test-Path -LiteralPath $pinned) { $candidates += ([string](Get-Content -LiteralPath $pinned -Raw)).Trim() }
+  foreach ($candidate in $candidates) {
+    if (-not $candidate) { continue }
+    $origin = $candidate.Trim().TrimEnd('/')
+    # A server root, the shape kiosk-update-windows.ps1 and the server's HOST_RE
+    # admit: anything else is refused here rather than downloaded from.
+    if ($origin -notmatch $OriginPattern) {
+      throw "$origin is not a server address (http://<host>:<port>, nothing after it)"
+    }
+    return $origin
+  }
+  return ''
+}
+
+# One script from the server, parsed before it replaces anything. It is staged in
+# Program Files, under a name nobody could have guessed, never beside $To: the state
+# folder in ProgramData lets any user create files, and one who pre-created the
+# staging file would still own it after it was moved into place.
+function Save-KioskScript([string]$From, [string]$Name, [string]$To) {
+  New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
+  $temp = Join-Path $AppDir ('{0}.{1}.tmp' -f $Name, [guid]::NewGuid().ToString('N'))
+  try {
+    Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -Uri "$From/kiosk/$Name" -OutFile $temp
+    $tokens = $null
+    $errors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($temp, [ref]$tokens, [ref]$errors)
+    if ($errors -and $errors.Count -gt 0) { throw "$Name from $From does not parse: $($errors[0].Message)" }
+    Move-Item -Force -LiteralPath $temp -Destination $To
+  } finally {
+    if (Test-Path -LiteralPath $temp) { Remove-Item -Force -LiteralPath $temp }
+  }
+}
+
+# The updater: a SYSTEM task, so its script is in Program Files, where only an
+# administrator can write. Returns why it could not be installed, or '' when it was.
+function Install-Updater([string]$From) {
+  try {
+    New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
+    $updater = Join-Path $AppDir 'kiosk-update.ps1'
+    Save-KioskScript -From $From -Name 'kiosk-update-windows.ps1' -To $updater
+    [IO.File]::WriteAllText((Join-Path $AppDir 'update-from'), $From)
+    $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+      -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$updater`""
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+      -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration ([TimeSpan]::MaxValue)
+    $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+      -MultipleInstances IgnoreNew -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+    Register-ScheduledTask -TaskName 'StageUtilityKioskUpdate' -Action $action -Trigger $trigger `
+      -Principal $principal -Settings $settings -Force | Out-Null
+    return ''
+  } catch {
+    return $_.Exception.Message
+  }
+}
 
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
            ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
   Write-Error 'Run this in an elevated PowerShell - the device id lives in ProgramData.'
+  exit 1
+}
+
+$Origin = Get-DownloadOrigin
+if (-not $Origin) {
+  Write-Error 'This installer does not know which server to download from. Set STAGE_DOWNLOAD_FROM to its address (http://<server>:<port>) and run it again.'
   exit 1
 }
 
@@ -45,134 +131,18 @@ if ($Server) { $Server | Set-Content -NoNewline (Join-Path $StateDir 'server') }
 Write-Output "    device id: $(Get-Content $IdFile)"
 
 # -- The launcher ------------------------------------------------------------
+# Downloaded from the server rather than written from this script, so the launcher
+# a PC runs is whatever the server has, and the updater below can replace it later.
+# The bytes are kept exactly as served: the server's digest of the file is what the
+# updater compares, and Set-Content would re-encode it.
 $Launcher = Join-Path $StateDir 'kiosk.ps1'
-@"
-`$ErrorActionPreference = 'SilentlyContinue'
-`$StateDir = '$StateDir'
-`$Port     = $Port
-
-`$id    = Get-Content (Join-Path `$StateDir 'device-id')
-`$token = Get-Content (Join-Path `$StateDir 'token')
-`$boundFile = Join-Path `$StateDir 'bound-to'
-`$serverFile = Join-Path `$StateDir 'server'
-
-function Get-Macs {
-  Get-NetAdapter | Where-Object Status -ne 'Disabled' |
-    ForEach-Object { '"' + (`$_.MacAddress -replace '-', ':').ToLower() + '"' }
+try {
+  Save-KioskScript -From $Origin -Name 'kiosk-windows.ps1' -To $Launcher
+} catch {
+  Write-Error "could not get the kiosk launcher from ${Origin}: $($_.Exception.Message) Set STAGE_DOWNLOAD_FROM to the server's address (http://<server>:<port>) and run this again."
+  exit 1
 }
-
-# More than one server can answer in the two seconds. The answer kept is the one
-# from the server this screen remembers, else one from a server that says it is
-# set up there, else the first.
-function Select-Reply(`$replies, `$bound) {
-  if (`$bound) {
-    `$mine = `$replies | Where-Object { `$_ -match ('"serverId":"' + [regex]::Escape(`$bound) + '"') } | Select-Object -First 1
-    if (`$mine) { return `$mine }
-  }
-  `$claimed = `$replies | Where-Object { `$_ -match '"claimed":true' } | Select-Object -First 1
-  if (`$claimed) { return `$claimed }
-  return `$replies | Select-Object -First 1
-}
-
-# What this screen remembers, and puts in every probe as boundTo: a server that
-# says it is set up there, forgotten when that same server says it no longer is.
-# Every other server ignores a screen that names somebody else, so remembering one
-# that merely answered would keep a released screen away from them for good. An
-# answer that does not say either way, from a server older than the field, is
-# remembered. True when it has just forgotten its server.
-function Save-Binding(`$reply, `$bound) {
-  `$srv = if (`$reply -match '"serverId":"([^"]+)"') { `$matches[1] } else { '' }
-  `$claimed = if (`$reply -match '"claimed":(true|false)') { `$matches[1] } else { '' }
-  if (-not `$srv) { return `$false }
-  if (`$claimed -ne 'false') {
-    `$srv | Set-Content -NoNewline `$boundFile
-    return `$false
-  }
-  if (`$srv -ne `$bound) { return `$false }
-  Remove-Item `$boundFile
-  if (Test-Path `$boundFile) { return `$false }
-  Write-Host "[kiosk] server `$srv no longer has this screen set up; forgot it, so any server can set it up"
-  return `$true
-}
-
-# One probe, and every answer within two seconds, at most eight: a host that
-# keeps sending to the probe's port must not hold the screen off its display. The
-# replies are unicast, so nothing has to be open on this machine.
-function Send-Probe(`$probe) {
-  `$client = New-Object System.Net.Sockets.UdpClient
-  `$replies = @()
-  try {
-    `$client.EnableBroadcast = `$true
-    `$bytes = [Text.Encoding]::UTF8.GetBytes(`$probe)
-    `$null = `$client.Send(`$bytes, `$bytes.Length, '255.255.255.255', `$Port)
-    `$remote = New-Object System.Net.IPEndPoint([System.Net.IPAddress]::Any, 0)
-    `$deadline = [DateTime]::UtcNow.AddSeconds(2)
-    while (`$replies.Count -lt 8) {
-      `$left = [int](`$deadline - [DateTime]::UtcNow).TotalMilliseconds
-      # 0 would mean wait for ever.
-      if (`$left -le 0) { break }
-      `$client.Client.ReceiveTimeout = `$left
-      `$replies += [Text.Encoding]::UTF8.GetString(`$client.Receive([ref]`$remote))
-    }
-  } catch { } finally { `$client.Close() }
-  return `$replies
-}
-
-# One probe: the answer kept, remembered, and the address it gives. An answer that
-# makes this screen forget its server is followed straight away by one more probe
-# without it, so a server with its Screens page open can answer in this boot
-# rather than the next. If none does, the address the old server gave stands.
-function Find-Server {
-  `$bound = if (Test-Path `$boundFile) { Get-Content `$boundFile } else { '' }
-  `$macs = (Get-Macs) -join ','
-  `$probe = '{"stageUtility":"discover","v":1,"id":"' + `$id + '","macs":[' + `$macs +
-           '],"hostname":"' + `$env:COMPUTERNAME + '","os":"Windows"'
-  if (`$bound) { `$probe += ',"boundTo":"' + `$bound + '"' }
-  `$probe += '}'
-
-  `$replies = @(Send-Probe `$probe)
-  if (-not `$replies) { return '' }
-  `$reply = Select-Reply `$replies `$bound
-  `$url = if (`$reply -match '"url":"([^"]+)"') { `$matches[1] } else { '' }
-  if (Save-Binding `$reply `$bound) {
-    `$again = Find-Server
-    if (`$again) { `$url = `$again }
-  }
-  return `$url
-}
-
-if (Test-Path `$serverFile) {
-  `$url = Get-Content `$serverFile
-} else {
-  `$url = ''; `$fails = 0
-  while (-not `$url) {
-    `$url = Find-Server
-    if (-not `$url) {
-      `$fails++
-      # Two seconds while the server might still be booting, then thirty so a
-      # screen left on overnight is not shouting all night.
-      Start-Sleep -Seconds `$(if (`$fails -lt 10) { 2 } else { 30 })
-    }
-  }
-}
-
-`$target = "`$url/enroll?device=`$id&token=`$token"
-
-`$chrome = @(
-  "`$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
-  "`${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
-  "`$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
-) | Where-Object { Test-Path `$_ } | Select-Object -First 1
-
-# --no-first-run and the crash flags together stop the "Restore pages?" bar after
-# a power cut, which otherwise sits over the display until somebody walks to it.
-if (`$chrome) {
-  & `$chrome --kiosk --noerrdialogs --disable-infobars --no-first-run ``
-    --disable-session-crashed-bubble --user-data-dir="`$StateDir\browser" `$target
-} else {
-  Start-Process `$target
-}
-"@ | Set-Content -Encoding UTF8 $Launcher
+[IO.File]::WriteAllText((Join-Path $StateDir 'port'), "$Port")
 
 # -- Survive a reboot, and a browser that dies ------------------------------
 # At logon, not at boot: this needs a desktop session to put a window on a
@@ -196,6 +166,15 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
 
 Register-ScheduledTask -TaskName 'StageUtilityKiosk' -Action $action `
   -Trigger @($atLogon, $repeat) -Settings $settings -Force | Out-Null
+
+# -- Keep the launcher on the server's version --------------------------------
+$updaterWhy = Install-Updater -From $Origin
+if ($updaterWhy) {
+  Write-Warning "automatic launcher updates are NOT installed: $updaterWhy; run the installer again"
+} else {
+  Write-Output "==> The launcher now follows $Origin's version: it is checked every five minutes,"
+  Write-Output '    and a new one takes effect at the next sign-in.'
+}
 
 # Display sleep is the difference between a display and a black rectangle.
 powercfg /change monitor-timeout-ac 0  2>$null

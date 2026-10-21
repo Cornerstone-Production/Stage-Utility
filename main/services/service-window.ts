@@ -32,6 +32,9 @@ class ServiceWindowService {
   private windows: { open: number; close: number }[] = [];
   /** Whether the last answer failed open, so the log says so once per change. */
   private failingOpen: boolean | null = null;
+  /** Whether the windows are known: set once a computation of them has succeeded,
+   *  cleared when one fails. False from boot until the first. */
+  private known = false;
 
   setSchedule(sched: ReconnectSchedule): void {
     this.sched = sched;
@@ -40,6 +43,20 @@ class ServiceWindowService {
   /** Replace the known windows (controller recomputes from PCO periodically). */
   setWindows(windows: { open: number; close: number }[]): void {
     this.windows = [...windows].sort((a, b) => a.open - b.open);
+    this.known = true;
+  }
+
+  /** The last computation failed (Planning Center could not be read): the windows
+   *  kept are a guess, and whatever must not act blind treats them as unknown. */
+  markUnknown(): void {
+    this.known = false;
+  }
+
+  /** Whether the windows are what Planning Center last said, rather than not yet
+   *  read or left from before a failure. An empty list can be known: nothing
+   *  planned, or no Planning Center at all. */
+  isKnown(): boolean {
+    return this.known;
   }
 
   /**
@@ -61,6 +78,18 @@ class ServiceWindowService {
 
   isActive(now = Date.now()): boolean {
     return this.windows.some((w) => now >= w.open && now <= w.close);
+  }
+
+  /** When the window open now closes, or null outside one. Windows can overlap (a
+   *  rehearsal's tail running into the service's lead), so a run of overlapping
+   *  ones reads as one. One pass: the windows are sorted by when they open, so any
+   *  window that extends the run comes after the one it extends. */
+  activeUntil(now = Date.now()): number | null {
+    let until: number | null = null;
+    for (const w of this.windows) {
+      if (until === null ? now >= w.open && now <= w.close : w.open <= until && w.close > until) until = w.close;
+    }
+    return until;
   }
 
   /** ms until the next window opens (0 if inside one, Infinity if none known). */

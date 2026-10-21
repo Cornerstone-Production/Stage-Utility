@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 
+import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
 import { findBetaOnlyCandidates } from "./check-beta-only.mjs";
 
 const repos: string[] = [];
@@ -60,42 +61,56 @@ function inRepo<T>(dir: string, fn: () => T): T {
   }
 }
 
-describe("findBetaOnlyCandidates", () => {
-  it("flags a fix that shares a file with a feat since the stable tag, naming the feat", () => {
-    const dir = makeRepo();
-    commit(dir, "old.txt", "old", "chore: seed");
-    run(dir, ["tag", "v1.0.0"]);
-    commit(dir, "thing.txt", "new", "feat(thing): add the thing");
-    commit(dir, "thing.txt", "fixed", "fix(thing): a bug in the new thing");
+// Every patch type is checked the same way, against a commit of every minor type:
+// both lists are main/services/commit-types.json's, so a type added there is
+// covered the day it is added.
+const PATCH_TYPES = COMMIT_TYPE_FILE.patch;
+const MINOR_TYPES = COMMIT_TYPE_FILE.minor;
 
-    const flagged = inRepo(dir, () => findBetaOnlyCandidates("v1.0.0", "v1.0.0"));
-    assert.equal(flagged.length, 1);
-    assert.match(flagged[0].subject, /^fix\(thing\)/);
-    assert.equal(flagged[0].sharedWith.length, 1);
-    assert.equal(flagged[0].sharedWith[0].file, "thing.txt");
-    assert.match(flagged[0].sharedWith[0].subject, /^feat\(thing\)/);
+describe("findBetaOnlyCandidates", () => {
+  it("flags a patch-level commit that shares a file with a feature since the stable tag, naming the feature", () => {
+    for (const type of PATCH_TYPES) {
+      for (const feat of MINOR_TYPES) {
+        const dir = makeRepo();
+        commit(dir, "old.txt", "old", "chore: seed");
+        run(dir, ["tag", "v1.0.0"]);
+        commit(dir, "thing.txt", "new", `${feat}(thing): add the thing`);
+        commit(dir, "thing.txt", "changed", `${type}(thing): a change to the new thing`);
+
+        const flagged = inRepo(dir, () => findBetaOnlyCandidates("v1.0.0", "v1.0.0"));
+        assert.equal(flagged.length, 1, `${type} after ${feat}`);
+        assert.match(flagged[0].subject, new RegExp(`^${type}\\(thing\\)`));
+        assert.equal(flagged[0].sharedWith.length, 1);
+        assert.equal(flagged[0].sharedWith[0].file, "thing.txt");
+        assert.match(flagged[0].sharedWith[0].subject, new RegExp(`^${feat}\\(thing\\)`));
+      }
+    }
   });
 
   it("does not flag the same commit with a Beta-only: true trailer", () => {
-    const dir = makeRepo();
-    commit(dir, "old.txt", "old", "chore: seed");
-    run(dir, ["tag", "v1.0.0"]);
-    commit(dir, "thing.txt", "new", "feat(thing): add the thing");
-    commitWithBody(dir, "thing.txt", "fixed", "fix(thing): a bug in the new thing", "Beta-only: true");
+    for (const type of PATCH_TYPES) {
+      const dir = makeRepo();
+      commit(dir, "old.txt", "old", "chore: seed");
+      run(dir, ["tag", "v1.0.0"]);
+      commit(dir, "thing.txt", "new", "feat(thing): add the thing");
+      commitWithBody(dir, "thing.txt", "changed", `${type}(thing): a change to the new thing`, "Beta-only: true");
 
-    const flagged = inRepo(dir, () => findBetaOnlyCandidates("v1.0.0", "v1.0.0"));
-    assert.equal(flagged.length, 0);
+      const flagged = inRepo(dir, () => findBetaOnlyCandidates("v1.0.0", "v1.0.0"));
+      assert.equal(flagged.length, 0, type);
+    }
   });
 
-  it("does not flag a fix touching only files no feat commit touched", () => {
-    const dir = makeRepo();
-    commit(dir, "old.txt", "old", "chore: seed");
-    run(dir, ["tag", "v1.0.0"]);
-    commit(dir, "thing.txt", "new", "feat(thing): add the thing");
-    commit(dir, "unrelated.txt", "fixed", "fix(other): a bug nothing feat touched");
+  it("does not flag a patch-level commit touching only files no feat commit touched", () => {
+    for (const type of PATCH_TYPES) {
+      const dir = makeRepo();
+      commit(dir, "old.txt", "old", "chore: seed");
+      run(dir, ["tag", "v1.0.0"]);
+      commit(dir, "thing.txt", "new", "feat(thing): add the thing");
+      commit(dir, "unrelated.txt", "changed", `${type}(other): a change nothing feat touched`);
 
-    const flagged = inRepo(dir, () => findBetaOnlyCandidates("v1.0.0", "v1.0.0"));
-    assert.equal(flagged.length, 0);
+      const flagged = inRepo(dir, () => findBetaOnlyCandidates("v1.0.0", "v1.0.0"));
+      assert.equal(flagged.length, 0, type);
+    }
   });
 
   it("never flags a feat: commit itself", () => {

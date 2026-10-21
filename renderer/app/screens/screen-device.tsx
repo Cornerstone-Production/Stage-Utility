@@ -18,6 +18,8 @@ import type { PublicDevice } from "@main/services/kiosk-devices-store";
 import type { DeviceOutput } from "@main/types/kiosk";
 import { useDevices, refreshDevices, describeScreen } from "./use-devices";
 import { outputModeLine } from "./output-helpers";
+import { readUpdate, TONE_CLASS } from "./machine-update";
+import { cn } from "../../lib/cn";
 
 /**
  * Unbind a device from the screen it shows, and say so. One function for the two
@@ -49,10 +51,13 @@ function outputSummary(device: PublicDevice & { output: DeviceOutput }, videoMod
 }
 
 export function ScreenDevice({ outputId, name, videoMode }: { outputId: string; name: string; videoMode?: string }) {
-  const { bound } = useDevices();
+  const data = useDevices();
   const [busy, setBusy] = useState(false);
-  const device = bound.find((d) => d.outputId === outputId);
+  const device = data.bound.find((d) => d.outputId === outputId);
   if (!device) return null;
+  // The machine's own software: a Mac helper's version and whether it is following
+  // this server, or a Windows kiosk's launcher. One line, the server's sentence.
+  const update = readUpdate(device, data);
 
   const size = describeScreen(device.screen);
 
@@ -79,6 +84,14 @@ export function ScreenDevice({ outputId, name, videoMode }: { outputId: string; 
             </>
           )}
         </div>
+        {/* A Mac's reason can carry a path with no break in it, and the card is
+            narrow: it wraps anywhere, stops at three lines, and says the rest on
+            hover. Screen settings shows it whole. */}
+        {update && (
+          <div title={update.text} className={cn("mt-0.5 line-clamp-3 text-caption1 [overflow-wrap:anywhere]", TONE_CLASS[update.tone])}>
+            {update.text}
+          </div>
+        )}
         <div className="truncate font-mono text-caption2 text-fg-faint">{device.id}</div>
       </div>
       <Tooltip label="Unbind the machine. The screen keeps its view and its URL.">

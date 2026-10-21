@@ -128,6 +128,7 @@ next login with the real state.
 | Per-output state: `outputs.json` (enabled, token, the server it is bound to, whether it holds the kiosk's identity, a card output's format) | `~/Library/Application Support/StageUtilityOutput/` |
 | Chromium's profile (cookies, local storage, cache) and its own log, `chromium.log` | `Chromium/` and `chromium.log` in the same user folder |
 | A device id, when `device-id` is missing from the folder above | `generated-device-id` in the same user folder. The window says so. |
+| `helper-status.json`: for the updater, this copy's version and pid, whether Chromium started (and why not), and whether Local Network access looks refused | The same user folder. Rewritten only when one of those changes. See [Updates](#updates) |
 
 `STAGE_UTILITY_OUTPUT_STATE_DIR` replaces both folders, for tests and development, and the LaunchAgent is then looked for in its `LaunchAgents/`.
 Nothing then reads or writes the real ones, nor the per-user login item.
@@ -537,6 +538,31 @@ the logs on a Mac running it show; the signature is not what is checked. If it e
 ask again, the window, the log line with the version, and the output's screen all say
 so. The app has to run from `/Applications`, where the installer puts it, for the answer
 to stay with it.
+
+## Updates
+
+The helper does not update itself: it runs as the logged-in account and its bundle
+in `/Applications` is root's. `install-macos.sh` leaves a root LaunchDaemon,
+`com.stageutility.output-updater`, that runs a copy of the installer with
+`--check-update` every five minutes. It asks the server whether to update (the server
+decides, never during a service), downloads and verifies the new app as an install
+does, swaps it in, restarts the helper through launchd, and puts the old app back
+unless the new one says, in `helper-status.json`, within 90 s, that it is the new
+version with the pid launchd started and that Chromium started. The whole of it, and
+what Screens and `/log` show, is in
+[Keeping the helper on the server's version](../../docs/kiosk-devices.md#keeping-the-helper-on-the-servers-version).
+
+`helper-status.json` is the helper's half of that contract (`HelperStatus`, core): one
+line of JSON with sorted keys, which the installer reads with `sed`. Its name and
+folder are checked against the installer's (`InstallerContractTests`). A copy that
+cannot write it says so in its window and the log, because an update can then not
+tell it started, and is undone. It holds nothing secret, and nothing the updater acts
+on beyond those facts: which server to ask, and which Mac this is, the updater keeps
+in its own root-owned folder.
+
+The Local Network answer is kept across an update (below). If it is not, the helper
+says so as it always does, and the updater, which can still reach the server, reports
+it there too.
 
 ## Logging
 

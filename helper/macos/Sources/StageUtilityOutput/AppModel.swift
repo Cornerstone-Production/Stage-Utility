@@ -618,6 +618,7 @@ final class AppModel: ObservableObject {
       Log.error(.app, "Local Network access may be off for this app (version \(version))")
     }
     setNote("local-network", LocalNetworkAccess.windowMessage)
+    writeStatus()
   }
 
   /// What says a failed load is Local Network access rather than the server being
@@ -632,6 +633,7 @@ final class AppModel: ObservableObject {
     if noteTable["local-network"] != nil {
       Log.notice(.app, "the network is reachable again; the Local Network warning is cleared")
       clearNote("local-network")
+      writeStatus()
     }
   }
 
@@ -670,6 +672,37 @@ final class AppModel: ObservableObject {
       order.compactMap { runtimes[$0] }.map {
         .init(active: $0.sink != nil, serverURL: $0.serverURL, serverName: $0.serverName, loaded: $0.loaded, unreachable: $0.unreachable)
       })
+    writeStatus()
+  }
+
+  // MARK: The updater's status file
+
+  /// The bytes last written, so a refresh that changed none of its facts writes
+  /// nothing: refresh runs on every probe answer.
+  private var lastStatus: Data?
+
+  /// `helper-status.json`, for the updater that installed this copy (`HelperStatus`).
+  private func writeStatus() {
+    let status = HelperStatus(
+      version: version, pid: getpid(), chromium: CEFEngine.failure == nil ? .started : .failed,
+      chromiumProblem: CEFEngine.failure, localNetworkRefused: noteTable["local-network"] != nil)
+    let data = status.encoded()
+    guard data != lastStatus else { return }
+    do {
+      try PrivateFiles.makeDirectory(paths.userDir)
+      try PrivateFiles.write(data, to: paths.userDir.appendingPathComponent(HelperStatus.fileName))
+      lastStatus = data
+      if noteTable["status-file"] != nil { clearNote("status-file") }
+    } catch {
+      // Said once per cause: the next refresh tries again and would say it again.
+      // In the window too: without the file an automatic update cannot tell this
+      // copy started, and puts the previous one back.
+      let text = "Could not write \(HelperStatus.fileName) for the updater: \(error.localizedDescription)"
+      if noteTable["status-file"] != text {
+        Log.error(.state, text)
+        setNote("status-file", text)
+      }
+    }
   }
 
   // MARK: Open at login

@@ -6,8 +6,9 @@
 // said this screen is set up there, and lose it when that server says it no longer
 // is — or a screen released on one server can never be set up on another.
 //
-// Each launcher is rendered from its installer exactly as the installer renders it,
-// and its own discovery loop is run with only the network stubbed: each probe is
+// Each launcher is taken as its installer gets it (the shell ones from the here-document
+// the installer renders, the PowerShell one from the file the server serves), and its
+// own discovery loop is run with only the network stubbed: each probe is
 // answered with replies from the helper's release-handover fixture, which the
 // server's responder test proves the server sends. Nothing past the loop runs (no
 // browser is opened).
@@ -115,11 +116,12 @@ function bashAgent(script: string): Agent {
   });
 }
 
-/** The PowerShell launcher, rendered from the installer's here-string, with
- *  `Send-Probe` replaced the same way. */
+/** The PowerShell launcher, read from the file the server serves and the installer
+ *  downloads, with `Send-Probe` replaced the same way. The loop is written into the
+ *  state folder, which is where kiosk.ps1 runs from: it finds that folder as
+ *  $PSScriptRoot, as it does on a PC. */
 function pwshAgent(): Agent {
-  const bodyFile = path.join(TMP, "launcher-body.txt");
-  fs.writeFileSync(bodyFile, between("install-windows.ps1", /\n@"\n([\s\S]*?)\n"@ \| Set-Content -Encoding UTF8 \$Launcher/));
+  const launcher = fs.readFileSync(path.join(ROOT, "scripts/kiosk/kiosk-windows.ps1"), "utf8");
   const stub = [
     "$script:n = 0",
     "function Send-Probe($probe) {",
@@ -130,12 +132,8 @@ function pwshAgent(): Agent {
     "  if (Test-Path $f) { Get-Content $f }",
     "}",
   ].join("\n");
+  const loop = cut(launcher, "if (Test-Path $serverFile)", "$target =", stub);
   return boot((dir) => {
-    const launcher = run("pwsh", [
-      "-NoProfile", "-Command",
-      `$StateDir = '${dir}'; $Port = 8789; $ExecutionContext.InvokeCommand.ExpandString((Get-Content -Raw '${bodyFile}'))`,
-    ]).out;
-    const loop = cut(launcher, "if (Test-Path $serverFile)", "$target =", stub);
     // Write-Host goes to the information stream; 6>&1 is not wanted, so it is
     // mirrored to stderr for the log check.
     const script = path.join(dir, "loop.ps1");
@@ -148,7 +146,7 @@ const LAUNCHERS: { name: string; make: () => Agent; skip?: string | false; older
   { name: "install-linux.sh", make: () => bashAgent("install-linux.sh"), olderServerRemembered: false },
   { name: "install-macos.sh", make: () => bashAgent("install-macos.sh"), olderServerRemembered: true },
   {
-    name: "install-windows.ps1", make: pwshAgent, olderServerRemembered: true,
+    name: "kiosk-windows.ps1", make: pwshAgent, olderServerRemembered: true,
     skip: !has("pwsh") && "pwsh is not installed",
   },
 ];

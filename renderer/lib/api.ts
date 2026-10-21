@@ -420,6 +420,7 @@ export type IpcChannel =
   | "devices:claim"
   | "devices:list"
   | "devices:release"
+  | "devices:requestUpdate"
   | "devices:scan"
   | "displays:getPresence"
   | "displays:refresh"
@@ -565,6 +566,7 @@ export type IpcChannel =
   | "stage:setAllowedServiceTypes"
   | "stage:setBranding"
   | "stage:setKioskDiscovery"
+  | "stage:setAutoUpdateMachines"
   | "stage:setNdiEnabled"
   | "stage:setOnboardingDismissed"
   | "stage:setPlan"
@@ -1037,6 +1039,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/devices/claim", p);
     case "devices:release":
       return post<T>("/api/devices/release", p);
+    // Update now, or Try again, for one Mac helper or Windows kiosk.
+    case "devices:requestUpdate":
+      return post<T>("/api/machine-updates/request", p);
+    case "stage:setAutoUpdateMachines":
+      return post<T>("/api/machine-updates/auto", p);
 
     case "stage:setBranding":
       return post<T>("/api/branding", p);

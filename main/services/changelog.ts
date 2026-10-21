@@ -14,8 +14,13 @@
 // does not parse as a conventional commit is KEPT rather than dropped — an
 // unrecognised subject is more likely to be a real change than something to hide.
 
-/** Commit types that change nothing an operator could notice. */
-const INVISIBLE = new Set(["chore", "ci", "build", "docs", "test", "refactor", "style"]);
+import COMMIT_TYPE_FILE from "./commit-types.json" with { type: "json" };
+
+/**
+ * Commit types that change nothing an operator could notice, and the legacy ones
+ * the lint refuses but old history may still carry.
+ */
+const INVISIBLE = new Set<string>([...COMMIT_TYPE_FILE.invisible, ...COMMIT_TYPE_FILE.legacy]);
 
 /** `type(optional-scope)!: subject`, with the scope captured so it can lead the line. */
 const SCOPED = /^([a-z]+)(?:\(([^)]*)\))?!?:\s*(.+)$/i;
@@ -24,7 +29,7 @@ const SCOPED = /^([a-z]+)(?:\(([^)]*)\))?!?:\s*(.+)$/i;
 const BREAKING = /^[a-z]+(?:\([^)]*\))?!:/i;
 
 /** Types whose name tells an operator nothing the dialog has not already said. */
-const DROPPABLE = new Set(["feat", "fix", "perf"]);
+const DROPPABLE = new Set<string>([...COMMIT_TYPE_FILE.minor, ...COMMIT_TYPE_FILE.patch]);
 
 const MERGE = /^Merge (pull request|branch|remote-tracking)\b/i;
 

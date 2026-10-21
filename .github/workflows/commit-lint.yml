@@ -26,6 +26,14 @@ jobs:
           # Need the full range between base and head to inspect every commit.
           fetch-depth: 0
 
+      # Both scripts read main/services/commit-types.json with an import
+      # attribute, so they run on the Node the app ships, not the runner image's
+      # default. This job installs nothing, so no npm cache.
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
       - name: Check commit subjects
         env:
           BASE_REF: ${{ github.base_ref }}
@@ -37,13 +45,13 @@ jobs:
           git fetch -q origin "$BASE_REF"
           node scripts/check-commit-subjects.mjs "origin/$BASE_REF"
 
-      - name: Flag fixes that look beta-only
+      - name: Flag changes that look beta-only
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
           set -uo pipefail
-          # A heuristic reminder, not a gate: warns when a fix shares a file
-          # with a feat commit from this release cycle. See
+          # A heuristic reminder, not a gate: warns when a fix, perf or polish
+          # shares a file with a feat commit from this release cycle. See
           # scripts/check-beta-only.mjs for what it catches and what it
           # cannot. Always exits 0.
           git fetch -q origin "$BASE_REF"

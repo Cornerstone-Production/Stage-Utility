@@ -15,10 +15,22 @@
 // from. Exits non-zero and names every subject that does not conform.
 
 import { execFileSync } from "node:child_process";
+import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
+
+/**
+ * The types that may carry a `!`: all but revert. A revert releases nothing, so a
+ * breaking one would head the notes' Breaking list while the release level
+ * ignored it.
+ */
+const BREAKABLE = [...COMMIT_TYPE_FILE.minor, ...COMMIT_TYPE_FILE.patch, ...COMMIT_TYPE_FILE.invisible];
+const ALL_TYPES = [...BREAKABLE, ...COMMIT_TYPE_FILE.revert];
+
+const SCOPE = "(?:\\([a-z0-9.+/-]+\\))?";
 
 /** type(scope)!: subject — scope is lower-case and takes no spaces or commas. */
-export const SUBJECT_PATTERN =
-  /^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([a-z0-9.+/-]+\))?!?: .+/;
+export const SUBJECT_PATTERN = new RegExp(
+  `^(?:(?:${BREAKABLE.join("|")})${SCOPE}!?|(?:${COMMIT_TYPE_FILE.revert.join("|")})${SCOPE}): .+`,
+);
 
 /**
  * `git revert` writes `Revert "<original subject>"`.
@@ -70,14 +82,14 @@ One or more commit subjects do not follow the convention.
   type(scope): subject
 
 type must be one of:
-  feat fix perf refactor docs test build ci chore revert
+  ${ALL_TYPES.join(" ")}
 
 scope is optional, lower-case, and takes NO spaces or commas —
 "fix(editor, resi):" is the shape that keeps failing; use one scope,
 or none at all.
 
-Add "!" after the type/scope for a breaking change. Subject is
-imperative mood, no trailing period.
+Add "!" after the type/scope for a breaking change (any type but
+revert). Subject is imperative mood, no trailing period.
 
 See docs/contributing.md. Reword with:
   git rebase -i ${base}`);
