@@ -182,13 +182,13 @@ const UNCHANGED: PushResult = { ok: true };
 /** The live frames go out only once what is public is known; the state does not wait. */
 const FRAME_ORDER: readonly FrameChannel[] = ["stage:state-changed", "pco:live", "spl:history"];
 
+/** What one read said: its value, or why there is none. */
+type ReadResult<T> = { ok: true; value: T } | { ok: false; reason: string };
+
 /**
  * Everything one run knows. Made when publishing starts, dropped when it stops or its settings
  * change: nothing here is ever reset, so nothing here can be left over from the run before.
  */
-/** What one read said: its value, or why there is none. */
-type ReadResult<T> = { ok: true; value: T } | { ok: false; reason: string };
-
 class Run {
   readonly abort = new AbortController();
   readonly client: PushClient;
