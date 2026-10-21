@@ -24,11 +24,12 @@ type(scope): subject
   `recorders`, `layout`, `layout-editor`, `advanced`, `server`, `pco`, `updater`,
   `types`, `rosstalk`.
 - **scope, when it names the machinery** — `release`, `ci`, `dx` and `test` name
-  this project's own tooling. A `feat`, `fix` or `perf` under one of them is typed
-  honestly and still invisible to every operator, so it appears in no release
-  notes and mints no release. The list is `main/services/internal-scopes.json`,
-  read by the notes generator, the update dialog and the workflow alike. A
-  breaking `!` is shown and counted whatever its scope.
+  this project's own tooling. A `feat`, `fix`, `perf` or `polish` under one of them
+  is typed honestly and still invisible to every operator, so it appears in no
+  release notes and mints no release. The list is
+  `main/services/internal-scopes.json`, read by the notes generator, the update
+  dialog and the workflow alike. A breaking `!` is shown and counted whatever its
+  scope.
 - **subject** — imperative mood, no trailing period. Say what the change does, not
   what you did: "add rack color to the header", not "added rack color".
 
@@ -42,20 +43,23 @@ explaining *why* in the body is worth keeping.
 | `feat` | A new capability a user can see | **minor** |
 | `fix` | A bug fix | **patch** |
 | `perf` | Faster or lighter with no behavior change | **patch** |
+| `polish` | A visible refinement with no new capability: spacing, layout, wording | **patch** |
 | `refactor` | Restructuring with no behavior change | none |
 | `docs` | Documentation only | none |
 | `test` | Tests only | none |
 | `build` | Build system, dependencies | none |
 | `ci` | CI configuration | none |
 | `chore` | Anything else with no user impact | none |
-| `revert` | Reverts a previous commit | matches what it reverts |
+| `revert` | Reverts a previous commit; takes no `!` | none |
 
-Those ten are the whole list: `style:` and any other type fails the check.
+The table is the whole list: `style:` and any other type fails the check. The
+types and what each releases are `main/services/commit-types.json`.
 `git revert`'s own `Revert "<original subject>"` form is accepted as written.
 
 ### Breaking changes
 
-Append `!` after the type/scope, **and** explain the break in the body:
+Append `!` after the type/scope of any type but `revert`, **and** explain the break
+in the body:
 
 ```
 feat(types)!: rename Slot.channel to Slot.channelId
@@ -72,8 +76,15 @@ in the store instead, the way the data-dir rename was.
 
 The release flow reads these to decide the version, so the type is not cosmetic. A
 `feat` shipped as `fix` produces a version number that lies about what changed. When
-in doubt: could a user tell? Then it is `feat` or `fix`. Could only a developer tell?
-Then it is `refactor`, `docs`, `test`, `build`, `ci` or `chore`.
+in doubt: could a user tell? Then it is `feat`, `fix`, `perf` or `polish`. Could only
+a developer tell? Then it is `refactor`, `docs`, `test`, `build`, `ci` or `chore`.
+
+The minor number is for capabilities. A change that makes something that already
+exists look or behave better, and lets nobody do anything they could not before, is
+`polish`, not `feat`; one that repairs something broken is `fix`. `polish` is a patch
+like `fix` and `perf`, and it is listed under **Improved** in the release notes,
+beside `perf`. A release whose only releasable commits are `polish`, `fix` and `perf`
+is X.Y.Z+1; any `feat` among them makes it a minor.
 
 ### Merge commits
 
@@ -89,8 +100,9 @@ is `Beta-only: true`, below.
 
 #### `Beta-only: true`
 
-Put this on a `fix:` or `perf:` commit whose bug **never reached a stable
-release** — a regression introduced and repaired inside the same release cycle.
+Put this on a `fix:`, `perf:` or `polish:` commit whose bug, or unrefined state,
+**never reached a stable release** — a regression introduced and repaired, or a
+feature built and refined, inside the same release cycle.
 
 ```
 fix(integrations): the Setup guide links to this build's branch
@@ -99,10 +111,11 @@ Beta-only: true
 ```
 
 The release-notes generator drops such a commit from a stable release's
-**Fixed** list, and counts it into the "N further fixes … were never in a
-released version" line, so the omission is stated rather than silent. A
-prerelease keeps it: somebody on the beta track has been running the broken
-version, and for them the fix is the news.
+**Fixed** list (**Improved**, for `perf` and `polish`), and counts it into a line
+at the end of that section — "N further fixes … were never in a released version",
+or "N further improvements …" under **Improved** — so the omission is stated rather
+than silent. A prerelease keeps it: somebody on the beta track has been running the
+broken version, and for them the fix is the news.
 
 The generator already suppresses a fix whose whole **scope** is new this release.
 That rule cannot see a new feature built under an existing scope — in 1.13.0,
@@ -114,11 +127,11 @@ Rule of thumb: if somebody upgrading from the last stable release could not have
 hit the bug, mark it.
 
 CI runs a heuristic check (`scripts/check-beta-only.mjs`) that warns, but never
-fails the build, on a `fix:`/`perf:` commit that touches a file also touched by
-a `feat:` commit from this release cycle. It is a reminder, not a judge: sharing
-a file does not mean sharing a bug, and a fix to a new feature in a file no
-`feat:` commit happened to touch is invisible to it — the trailer remains the
-author's call.
+fails the build, on a `fix:`, `perf:` or `polish:` commit that touches a file also
+touched by a `feat:` commit from this release cycle. It is a reminder, not a
+judge: sharing a file does not mean sharing a bug, and a fix to a new feature in a
+file no `feat:` commit happened to touch is invisible to it — the trailer remains
+the author's call.
 
 #### Correcting a trailer after the commit is on `beta`
 
@@ -152,8 +165,8 @@ run says what it changed and why.
 Everything here is a hard failure rather than a fallback: unreadable or
 unparseable JSON, a missing field, a commit that does not resolve, one commit
 listed twice, and an override naming a commit that is not a non-breaking
-`fix:`/`perf:` in the release's range — that last one is a correction that would
-never be applied, which reads as handled and is not.
+`fix:`/`perf:`/`polish:` in the release's range — that last one is a correction
+that would never be applied, which reads as handled and is not.
 
 A prerelease reads no override file. It keeps every fix regardless, because
 somebody on the beta track has been running the broken version.
@@ -168,12 +181,13 @@ commit type is what picks the version, so it is worth getting right.
 | `beta` | a prerelease `X.Y.Z-beta.N`, tagged, published as a GitHub prerelease |
 | `main` | the release `X.Y.Z`, tagged, published as the latest GitHub release |
 
-A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build`, or only
-`feat`/`fix`/`perf` commits scoped to the tooling (`release`, `ci`, `dx`, `test`),
-produces **no release at all**, so documentation churn and release-machinery fixes
-do not mint versions. The rule is `scripts/release-level.sh`. Otherwise the level
-is the highest severity among every commit since the last stable release — one `feat`
-among twenty `docs` makes it a minor.
+A push containing only `docs`/`chore`/`refactor`/`test`/`ci`/`build`/`revert`, or only
+`feat`/`fix`/`perf`/`polish` commits scoped to the tooling (`release`, `ci`, `dx`,
+`test`), produces **no release at all**, so documentation churn and
+release-machinery fixes do not mint versions. The rule is
+`scripts/release-level.sh`. Otherwise the level is the highest severity among
+every commit since the last stable release — one `feat` among twenty `docs` makes
+it a minor.
 
 How that turns into a number, and how a running server gets the result, is in
 [Releases and distribution](ops/distribution.md).
@@ -189,6 +203,14 @@ marked with a `build` status.
 
 To force a major, mark the commit breaking — `feat(types)!: …` plus an explanation in
 the body.
+
+### Release rhythm
+
+Beta prereleases ship continuously: every push to `beta` that carries a releasable
+commit mints one. Stable releases are promoted on a cadence instead: the release PR
+from `beta` to `main` stays open and accumulates, and is merged about every two
+weeks, or sooner for a fix that cannot wait. The release it produces is the level of
+everything since the last stable tag.
 
 ## Branching
 

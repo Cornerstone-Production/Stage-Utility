@@ -83,10 +83,11 @@ rather than skipping it.
 ### What's new
 
 The panel lists the pending commits, filtered to what an operator could actually
-notice (`changelog.ts`). Types that produce no release — `chore`, `ci`, `build`,
-`docs`, `test`, `refactor`, `style` — are dropped, along with merge commits and the
-release workflow's own `chore(release): vX.Y.Z [skip ci]` bump. Without that filter
-the commonest thing on offer was an update whose only listed change was the version
+notice (`changelog.ts`). Types that change nothing an operator could notice — `chore`,
+`ci`, `build`, `docs`, `test`, `refactor`, and the legacy `style` — are dropped, along
+with merge commits and the release workflow's own `chore(release): vX.Y.Z [skip ci]`
+bump. A `revert` is kept whole: the word is the meaning. Without that filter the
+commonest thing on offer was an update whose only listed change was the version
 number being written down.
 
 A subject that does not parse as a conventional commit is kept rather than dropped:
@@ -398,18 +399,26 @@ at the foot of the release notes is the complete list.
 
 **Fixed is bugs.** Work that made something quicker rather than repairing it —
 holding one stream open instead of polling, dropping a field from a
-once-per-second read — is listed under **Improved**, so it does not read as a
-report of something that had been broken on your install.
+once-per-second read, or giving a table a little more room (a `polish` commit) —
+is listed under **Improved**, so it does not read as a report of something that
+had been broken on your install.
+
+**A hand-written notice and the generated lists share a heading.** A release
+whose notice (the opening words above) carries its own **Breaking**, **New**,
+**Improved** or **Fixed** list gets one list under one heading: the written
+bullets first, then the generated ones, then anything the notice wrote under a
+sub-heading of its own.
 
 **A stable release does not list the fixes that built its own new features.** It
-folds in thirty-odd betas, so Fixed would otherwise fill with the polish commits
-behind whatever is announced under New — of no use to somebody meeting the
-feature whole, and enough of them to push out the fixes to things they already
-had. A fix is held back only where its scope both shipped a feature in the same
-release and had never appeared before it; a fix to anything that was already
-released is always listed. Fixed and Improved each state their own held-back
-count at the end of the section, so the filter is never silent. Prereleases list
-everything: on the beta track, the fix is the reason to update.
+folds in thirty-odd betas, so Fixed would otherwise fill with the small
+corrections behind whatever is announced under New — of no use to somebody
+meeting the feature whole, and enough of them to push out the fixes to things
+they already had. A fix or improvement is held back only where its scope both
+shipped a feature in the same release and had never appeared before it, or where
+its author marked it `Beta-only`; a change to anything that was already released
+is always listed. Fixed and Improved each state their own held-back count at the
+end of the section, so the filter is never silent. Prereleases list everything:
+on the beta track, the fix is the reason to update.
 
 Notes are captured **before** the update runs. Afterwards the update status
 describes the next pending release rather than the one just installed, so there
