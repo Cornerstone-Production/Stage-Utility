@@ -12,7 +12,7 @@
 // SplitView needs the same values to size the panel and to decide between the
 // inline rail and the mobile drawer.
 
-import { Fragment, useState } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { ConsoleRailIcon } from "../components/console-rail-icon";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { PanelLeftCloseIcon, PanelLeftOpenIcon } from "lucide-react";
@@ -30,6 +30,7 @@ import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
 import { ContextMenu } from "../components/ui/context-menu";
 import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import { useTheme } from "../lib/use-theme";
+import { plural } from "@main/services/plural";
 import { buildLabel } from "../lib/build-label";
 import { withViewTransition } from "../lib/view-transition";
 import { resetCurrentRoute } from "./route-reset";
@@ -39,6 +40,7 @@ import { errorMessage } from "@main/services/errors";
 import { isUpdateAvailable } from "@main/services/update/availability";
 import { useUpdateStatus } from "./queries";
 import { useNotSetUpCount } from "./screens/use-devices";
+import { useHostNamesWaiting } from "./host-names-query";
 import {
   ALL_DESTINATIONS,
   DESTINATIONS,
@@ -113,6 +115,10 @@ export function Rail({
   // Screens: the server records them with no scan, and tells this tab on the
   // channel Screens already listens to, so a screen switched on is noticed here.
   const notSetUpCount = useNotSetUpCount();
+  // Names the server was reached by that wait for an accept or a dismiss, on the
+  // Host names card under Advanced. A count of NAMES, not requests: one display
+  // asks every few seconds, and the number to act on is how many need a decision.
+  const hostNamesWaiting = useHostNamesWaiting();
 
   // A rail entry per console View the operator has not hidden from the sidebar.
   // A hidden console is still a page — the shell titles it from the full list —
@@ -244,15 +250,25 @@ export function Rail({
           // Advanced is where an update is installed, so it is where the dot
           // goes. It follows AVAILABILITY, not whether the toast fired: dismiss
           // a toast and the dot stays until the update is actually taken.
-          const flagged = updateAvailable && d.path === "/settings/advanced";
+          // Host names waiting for a decision live there too, and take the
+          // badge as a count, the way Screens counts devices not set up.
+          const advanced = d.path === "/settings/advanced";
+          const flagged = updateAvailable && advanced;
+          const names = advanced ? hostNamesWaiting : 0;
+          const said: string[] = [];
+          if (flagged) said.push("update available");
+          if (names > 0) said.push(`${plural(names, "host name")} waiting`);
+          let badge: ReactNode;
+          if (names > 0) badge = <CountBadge count={names} compact={railed} />;
+          else if (flagged) badge = <span title="Update available" className="block size-1.5 rounded-full bg-accent" />;
           return (
             <SidebarListItem
               key={d.path}
               item={d}
               icon={d.icon}
               title={d.label}
-              ariaLabel={flagged ? `${d.label}, update available` : undefined}
-              badge={flagged ? <span title="Update available" className="block size-1.5 rounded-full bg-accent" /> : undefined}
+              ariaLabel={said.length > 0 ? `${d.label}, ${said.join(", ")}` : undefined}
+              badge={badge}
             />
           );
         })}
