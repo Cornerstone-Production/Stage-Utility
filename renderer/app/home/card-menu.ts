@@ -10,6 +10,7 @@ import type { LayoutObject } from "@main/types/views";
 import type { ContextMenuItem } from "../../components/ui/context-menu";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
 import { gameOptions } from "../../main/scores-object";
+import { displayType } from "../../main/timer-config";
 import { preferredSplMetric } from "../../settings/sections/overview-data";
 import { metricOptions, meterOptions, sourceOptions, type SplMeters } from "../recording-status";
 import { PICK_OPTIONS, pickedValue, togglesFor, withToggle } from "./card-toggles";
@@ -43,7 +44,8 @@ export interface CardMenuDeps {
 export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMenuItem[] {
   const { scoresFavourites, spl, splSummary, save, close } = deps;
   const type = (card.config as { type: string }).type;
-  const label = LAYOUT_OBJECTS[type as keyof typeof LAYOUT_OBJECTS]?.label ?? type;
+  // A retired timer is named as the Timer it opens as.
+  const label = LAYOUT_OBJECTS[displayType(card.config) as keyof typeof LAYOUT_OBJECTS]?.label ?? type;
   const toggles = togglesFor(card);
   const items: ContextMenuItem[] = [];
 

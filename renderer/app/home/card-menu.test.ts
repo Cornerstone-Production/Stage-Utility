@@ -93,3 +93,30 @@ describe("the SPL card's right-click menu", () => {
     assert.deepEqual(metric.items!.map((i) => i.label), ["LAeq 10"]);
   });
 });
+
+describe("the right-click menu of a retired timer card", () => {
+  // A Home saved with the Service timer keeps `home-live-status`; the menu opens it
+  // as the Timer it reads as, so the ticks reflect what is drawn and the first
+  // click writes a Timer that still sits in the tile the old card held.
+  const live = { ...card({ type: "home-live-status" }), id: "home-live-status" } as LayoutObject;
+
+  test("offers the Timer's switches, ticked as the old card drew, and names it a Timer", () => {
+    const menu = buildCardMenu(live, page().deps(live));
+    assert.deepEqual(shape(menu), ["Red on overrun", "Show the next item", "Hide when idle", "-", "Size", "Show", "-", "Remove Timer"]);
+    const ticks = Object.fromEntries(menu.filter((i) => !i.separator && "checked" in i).map((i) => [i.label, i.checked]));
+    assert.deepEqual(ticks, { "Red on overrun": true, "Show the next item": true, "Hide when idle": false });
+  });
+
+  test("a click writes a Timer and keeps the card's xl live tile", () => {
+    const p = page();
+    buildCardMenu(live, p.deps(live)).find((i) => i.label === "Show the next item")!.onSelect!();
+    const written = p.saved[0][0];
+    assert.deepEqual(written.config, { type: "timer", source: "service", nextItem: false, redOnOverrun: true });
+    assert.deepEqual(written.home, { size: "xl", when: "live" });
+  });
+
+  test("a baptism Timer is offered no red and no next item, which it cannot show", () => {
+    const b = card({ type: "timer", source: "baptism" });
+    assert.deepEqual(shape(buildCardMenu(b, page().deps(b))), ["Hide when idle", "-", "Size", "Show", "-", "Remove Timer"]);
+  });
+});
