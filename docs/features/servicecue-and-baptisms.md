@@ -238,6 +238,113 @@ then set with **A−** or **A+** is written back into the address's `?text=`
 so a refresh keeps it. An address with no `?text=` is left without one. An Embedded
 view object inside a layout takes neither; it keeps its own font size.
 
+## On the web
+
+ServiceCue can be put on a public address for volunteers who are not on the building's
+network: the same pages and links, no login, on a free Cloudflare Workers address you
+[deploy yourself](../ops/servicecue-on-the-web.md). **Anyone with the link can read
+everything it shows, plan notes included.** The page is ServiceCue with nothing to edit
+(no **Edit column presets** link), a bar saying **Not updating** when the church has sent
+nothing for two minutes, and a reload, once, of a page left open when the public page is
+updated. Its link is the page's address with `/servicecue` on the end, and
+`/servicecue/weekend/audio`, `?plan=` and `?text=` work on it as they do here.
+
+The server sends; nothing on the internet connects to it. **Public link**, on the
+ServiceCue presets page (`/servicecue/presets`) under **Shown on the landing page**, is
+where it is switched on: the page's address, the publishing token set on it, and the link
+to hand out. The page holds copies of what is sent and nothing else: no Planning Center
+access, no settings, no network addresses. The card's **Setup guide** link opens the
+[deploy guide](../ops/servicecue-on-the-web.md); what the server and the page say to each
+other is in the [publishing protocol](../reference/servicecue-publishing.md).
+
+The card has three states:
+
+| | |
+|---|---|
+| **Off** | The page address and the publishing token, and a switch that stays off until both are filled in. Switching it on asks the page first, so a wrong address or token is said on the card and nothing is switched on |
+| **Publishing** | The link, with **Copy** and a **QR code** to print (dark on white in either theme), how long ago the page last accepted something, how many service types, layouts and upcoming plans (those dated today or later; last week's are on the page but not counted) it holds, and what the public sees. **Cloudflare connection** opens the address and token to change them |
+| **Not reaching the page** | The same, and why. The card names the cause: the token was refused, a rule on the Cloudflare account blocked this server, the page is limiting requests, the page has no token of its own, another server error, an address that is not the ServiceCue page, a redirect (never followed), no answer, or a page that speaks another protocol version. The connection fields open themselves when the fix is in them |
+
+What the public sees is what ServiceCue shows here:
+
+- the service types under **Shown on the landing page**, and no others, with every
+  layout and **All columns**
+- the rundown each of those types opens on, and every plan of theirs in the plan
+  switcher, from the last 7 days through the next 60 days: last week's rundowns stay
+  public for up to 7 days
+- the live position and the SPL peaks, for the plan the page offers and only that one.
+  Of the live position that is the current item's id, label and length, the countdown
+  target, the mode and the clock; of the SPL recording, each item's id and peak. While
+  nothing on the landing page is live or recording they are `null`
+- the brand logo and accent colour, the hour cycle and the time zone the app's clocks
+  run in (the configured zone, or the server's own while none is set, so the page's
+  clocks never fall back to the visitor's zone)
+
+Editing stays in the building: **Edit column presets** and the operator's landing
+page are not on the public page.
+
+### How it sends
+
+| What | How often |
+|---|---|
+| The layouts, category roles and landing page settings | Every minute, and an edit is sent within a second or so. A document is sent only when its text changed |
+| The service types, the plan list and the rundown each type opens on | Every minute from the app's own Planning Center cache while a [service window](../ops/reliability.md) is open or none is known; once an hour outside one, and at once after an edit to the landing page |
+| The other plans in the switcher | One at a time, 2 seconds apart, each read again at most every 15 minutes in a window and every 4 hours outside one |
+| The public state, the live position and the SPL peaks | As the app's own live updates happen, at most once a second each, and not again while only the clock moved. The page stores each as the document it belongs to, so none is sent twice |
+| A heartbeat | On first contact, then every 30 seconds, so the page can tell a quiet service from a server that has stopped sending |
+| What to keep | The server tells the page which documents and images it should hold, and the page deletes the rest: that is how a service type taken off the landing page, or a plan that has gone by, leaves the public page. It is sent once the landing page settings and the plan list have been read this run, and again only when the list changed or the page held something not on it. It also waits while a service type's plan list was read only in part and this run knows none of its plans (a restart during a partial Planning Center outage), so the plans the page holds for it stay |
+| What the page holds | Every 5 minutes the page is asked, and anything it lost (a redeploy that changed its storage) is sent again |
+
+Every Planning Center read goes through the same request gate and cache as the rest
+of the app. While that gate reports tight rate-limit headroom the refresh waits.
+The gate is first come, first served, so a live read that falls due during a refresh
+waits behind its requests for a moment.
+
+### When the page does not answer
+
+Each request that fails waits 5 seconds before it is tried again, then 10, doubling
+to 5 minutes, counted for that request alone: a heartbeat that gets through in
+between does not reset it. The page keeps the last copy it was sent. The problem
+ends when the request that failed goes through, or a full pass finds nothing
+failing; the server then sends what changed meanwhile.
+
+| The page answered | The card says | Then |
+|---|---|---|
+| 401 | The token does not match the page's | Sending stops until the address or token changes |
+| 403 | A rule on the Cloudflare account (a firewall or Access) blocked this server | Sending stops until the connection is saved again |
+| 404 or another 4xx to the first request | The address is not the ServiceCue page | Sending stops until the address changes |
+| 429, or a 5xx | The page is limiting requests, or had a problem of its own | Tried again, as above |
+| 503 to the first request | The page has no token of its own, or one under 32 characters | Tried again, as above |
+| A redirect, or no answer | The address redirects, or could not be reached | Tried again, as above |
+
+A 4xx for one document, image or frame (too large, an unknown key) says nothing
+against the page: that one thing is skipped until it changes. A page that comes and
+goes within two minutes is one outage in the log, not one per flap.
+
+### The token and switching off
+
+The publishing token is kept encrypted in `secrets.bin`, beside the address it was
+saved for. It is never sent back to the browser, never logged, and not in a
+[config backup](../ops/reliability.md#where-your-data-lives), which carries the
+page's address and the switch only. It has to be at least 32 characters of printable
+ASCII with no space: the page treats a shorter secret as not set and answers 503 to
+every request, so a shorter one is refused where it is entered. Changing the address
+needs the token typed again, and a saved token is never sent to an address it was
+not saved for.
+
+The address has to start with `https://`. For development, `http://localhost` and
+`http://127.0.0.1` are accepted when the server is started with
+`STAGE_UTILITY_PUBLISH_ALLOW_LOCAL=1`, for a page run on this machine; without it an
+address cannot name the server's own machine. A redirect from the page is never followed,
+so the token cannot be sent to wherever one points.
+
+Switching the card off, or moving it to another address, asks the page that was left
+to drop what this server sent it. If it cannot be asked, or this server has no token
+for it any more, the card says the page may still show the last rundown it was sent.
+Restarting the server leaves the page's copy alone.
+
+Each of these is on [`/log`](../ops/updates-and-logs.md) as a `[publish]` line.
+
 ## On different screens
 
 ServiceCue renders on stage panels, laptops and phones, and changes shape rather
@@ -253,17 +360,6 @@ The page's header makes room for the switcher and the text-size control on a
 narrow screen: below 1100px the clock is dropped (the Remaining and Over timer
 stays), the plan title shortens, and below what still fits the bar wraps onto a
 second line.
-
-## On the web
-
-ServiceCue can be put on a public address for volunteers who are not on the building's
-network: the same pages and links, no login, on a free Cloudflare Workers address you
-[deploy yourself](../ops/servicecue-on-the-web.md). **Anyone with the link can read
-everything it shows, plan notes included.** It is this page with nothing to edit (no
-**Edit column presets** link), a bar saying **Not updating** when the church has sent
-nothing for two minutes, and a reload, once, of a page left open when the public page
-is updated. The address and what it accepts are in the
-[publishing protocol](../reference/servicecue-publishing.md).
 
 # Baptisms
 

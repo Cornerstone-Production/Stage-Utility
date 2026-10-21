@@ -92,6 +92,16 @@ class ServiceWindowService {
     return until;
   }
 
+  /**
+   * Is it between service windows, with the schedule known? The question a background
+   * reader asks to slow down: false inside a window, and false whenever the schedule is
+   * unknown or the feature is off, because going quiet on a schedule nobody could work
+   * out is how a service gets missed. The same answer `pollDelayMs` stretches by.
+   */
+  isDormant(now = Date.now()): boolean {
+    return this.sched.enabled && !this.scheduleUnknown(now) && !this.isActive(now);
+  }
+
   /** ms until the next window opens (0 if inside one, Infinity if none known). */
   msUntilNextOpen(now = Date.now()): number {
     if (this.isActive(now)) return 0;
@@ -133,9 +143,7 @@ class ServiceWindowService {
    * we could not work out the schedule is how a service gets missed.
    */
   pollDelayMs(activeMs: number, dormantCeilingMs = 5 * 60_000, now = Date.now()): number {
-    if (!this.sched.enabled) return activeMs;
-    if (this.scheduleUnknown(now)) return activeMs;
-    if (this.isActive(now)) return activeMs;
+    if (!this.isDormant(now)) return activeMs;
     // Never sleep past the moment the next window opens, so the ramp-up is not
     // missed by up to a whole dormant interval.
     const untilOpen = this.msUntilNextOpen(now);

@@ -305,5 +305,6 @@ connected and a church that is quiet costs nothing while it waits.
 address with more than 25 devices raises the second.
 
 A publisher should send a frame when something changed and a heartbeat every 30
-seconds. What each costs against the free plan is in
+seconds. Stage Utility's own does, and how it paces the rest, retries and what it logs
+is in [On the web](../features/servicecue-and-baptisms.md#on-the-web). What each costs against the free plan is in
 [ServiceCue on the web](../ops/servicecue-on-the-web.md#what-it-costs-and-what-it-limits).

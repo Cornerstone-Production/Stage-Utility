@@ -122,6 +122,9 @@ const EXPECTED_CONFIG = [
   "scores-favourites.json",
   "servicecue-config.json",
   "servicecue-layouts.json",
+  // Whether web publishing is on, and the address it publishes to. The token is in
+  // secrets.bin, which a snapshot never carries.
+  "servicecue-publish.json",
   "servicecue-roles.json",
   "settings.json",
   "slots.json",

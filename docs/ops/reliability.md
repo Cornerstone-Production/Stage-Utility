@@ -68,6 +68,7 @@ the running server prints its own path in **Settings → Advanced**:
 | `presets.json`, `layout-templates.json`, `layout-groups.json` | saved slot presets and layout libraries |
 | `notes.json` | what an operator typed into a notes object |
 | `servicecue-config.json`, `servicecue-layouts.json`, `servicecue-roles.json` | ServiceCue columns and category roles. An install that has them as `scriptview-*.json` has them renamed on the next start; a backup taken before that restores into the new names. A release older than 1.25.0 reads only the old names, so a server switched back to one (for example from the beta track to an older stable) shows ServiceCue with no layouts until it runs 1.25.0 or later again; the files are not touched |
+| `servicecue-publish.json` | whether ServiceCue is published to the web, and the address of its page. Restored switched on, it has no token until one is entered again: the card then says so |
 | `patch.json` | the stage patch sheet |
 | `automation-rules.json`, `automation-settings.json` | rules, and simulate/disarm |
 | `osc-targets.json`, `rosstalk-targets.json`, `rosstalk-settings.json` | control targets |
@@ -105,7 +106,7 @@ machine's history rather than how you set it up:
 | `video-relay/` | the video relay's pinned MediaMTX download and its generated config, fetched again on a fresh machine. See [Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch) |
 | `update-track`, `update-progress.json`, `update-result.json`, `update-live.log`, `update-restart-pending` | the updater's own state: the track this install follows, and the files an update in flight and one waiting for its restart leave |
 | `server.log`, `update.log` | log history, replayed into `/log` on boot |
-| `secrets.bin` | integration and wireless credentials, AES-256-GCM encrypted |
+| `secrets.bin` | integration and wireless credentials and the ServiceCue publishing token, AES-256-GCM encrypted |
 | `encryption.key` | 32-byte key, generated on first run, mode `600` |
 | `snapshots/`, `backups/` | saved config snapshots, and what the scheduler wrote |
 

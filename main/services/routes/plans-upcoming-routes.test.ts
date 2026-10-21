@@ -6,7 +6,7 @@
 // screen during an outage. A 5xx there would read as "this app is broken" while
 // the editor was in fact perfectly usable.
 //
-// Planning Center is never contacted: `listServiceTypes` and `listPlans` on the
+// Planning Center is never contacted: `listServiceTypes` and `readPlans` on the
 // controller singleton are replaced, which is exactly the seam the route calls
 // through.
 
@@ -34,9 +34,9 @@ type Mutable = {
   // Typed rather than `unknown`, so a change to the cache's shape — the allowlist
   // joined its key — fails tsc here instead of throwing at runtime inside a case
   // about something else entirely.
-  upcomingCache: { at: number; days: number; allowed: string[]; plans: UpcomingPlan[] } | null;
+  upcomingCache: { at: number; days: number; allowed: string[]; plans: UpcomingPlan[]; incomplete: string[] } | null;
   listServiceTypes: () => Promise<ServiceTypeDTO[]>;
-  listPlans: (serviceTypeId: string) => Promise<PlanDTO[]>;
+  readPlans: (serviceTypeId: string) => Promise<{ plans: PlanDTO[]; recentFailed: boolean }>;
 };
 const ctl = stageController as unknown as Mutable;
 
@@ -57,16 +57,16 @@ const TYPES: ServiceTypeDTO[] = [
   { id: "st-youth", name: "Youth" },
 ];
 
-/** Per-type answers the fake `listPlans` serves; a case rewrites this. */
+/** Per-type answers the fake `readPlans` serves; a case rewrites this. */
 let byType: Record<string, PlanDTO[] | Error> = {};
 
 before(() => {
   ctl.broadcast = () => {};
   ctl.listServiceTypes = async () => TYPES;
-  ctl.listPlans = async (id: string) => {
+  ctl.readPlans = async (id: string) => {
     const answer = byType[id] ?? [];
     if (answer instanceof Error) throw answer;
-    return answer;
+    return { plans: answer, recentFailed: false };
   };
 });
 
@@ -269,6 +269,7 @@ describe("when Planning Center cannot answer", () => {
       at: NOW - 10 * 60 * 1000,
       days: 60,
       allowed: [],
+      incomplete: [],
       plans: [
         {
           serviceTypeId: "st-sun",

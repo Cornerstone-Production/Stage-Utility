@@ -562,6 +562,7 @@ describe("the model pack", () => {
         "barrierModel | file:main/services/export-filename.ts | Member[filenameSlug].ReturnValue | log-injection",
         "barrierModel | file:main/services/scrub.ts | Member[scrubError].ReturnValue | log-injection",
         "barrierModel | file:main/services/scrub.ts | Member[scrub].ReturnValue | log-injection",
+        "barrierModel | file:main/services/servicecue-publish-rules.ts | Member[parsePublishUrl].ReturnValue | request-forgery",
         "sourceModel | file:main/services/routes/context.ts | Member[readBodyOrEmpty].ReturnValue.Awaited | remote",
         "sourceModel | file:main/services/routes/context.ts | Member[readBody].ReturnValue.Awaited | remote",
         "sourceModel | file:main/services/routes/context.ts | Member[readRawBody].ReturnValue.Awaited | remote",

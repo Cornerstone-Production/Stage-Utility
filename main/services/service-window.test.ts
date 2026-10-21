@@ -201,3 +201,23 @@ describe("activeUntil", () => {
     assert.equal(s.activeUntil(150), 450);
   });
 });
+
+// ── isDormant — the question a slow background reader asks ──────────────────
+
+test("isDormant is true only between windows, with the schedule known and the feature on", () => {
+  const now = Date.now();
+  const day = 24 * 3600_000;
+  const cases: { name: string; enabled: boolean; windows: { open: number; close: number }[]; dormant: boolean }[] = [
+    { name: "the next window is a day off", enabled: true, windows: [{ open: now + day, close: now + day + 3600_000 }], dormant: true },
+    { name: "inside a window", enabled: true, windows: [{ open: now - 60_000, close: now + 60_000 }], dormant: false },
+    { name: "no window is known", enabled: true, windows: [], dormant: false },
+    { name: "every window known has closed", enabled: true, windows: [{ open: now - 5 * 3600_000, close: now - 3600_000 }], dormant: false },
+    { name: "the feature is off", enabled: false, windows: [{ open: now + day, close: now + day + 3600_000 }], dormant: false },
+  ];
+  for (const c of cases) {
+    serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE, enabled: c.enabled });
+    serviceWindow.setWindows(c.windows);
+    assert.equal(serviceWindow.isDormant(now), c.dormant, c.name);
+  }
+  serviceWindow.setSchedule({ ...DEFAULT_RECONNECT_SCHEDULE });
+});

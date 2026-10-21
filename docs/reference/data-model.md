@@ -370,6 +370,7 @@ class means for backups.
 | `scores-favourites.json` | config | Followed teams |
 | `servicecue-config.json` | config | Which service types the ServiceCue landing shows |
 | `servicecue-layouts.json` | config | ServiceCue column layouts |
+| `servicecue-publish.json` | config | Whether ServiceCue is [published to the web](../features/servicecue-and-baptisms.md#on-the-web), and the address of its page. The token is in `secrets.bin`, which a backup does not carry |
 | `servicecue-roles.json` | config | ServiceCue category roles |
 | `service-timeline.json` | runtime | Per-item timing recordings, one file per service in a folder of the same name |
 | `settings.json` | config | Service type and plan mode, screens, integration settings (not credentials), branding, schedules, time zone |

@@ -41,7 +41,7 @@ the URL can cause) is logged on the integration's tagged line, by origin only,
 and the pinned URL is the one sent.
 
 `main/services/pinned-fetch.test.ts` holds the guards. The brand is checked by
-`tsc`, each helper is run against a forged URL, and a parse of the four files with
+`tsc`, each helper is run against a forged URL, and a parse of the five files with
 the TypeScript compiler API asserts the exact list of `fetch` call sites in them.
 
 | Integration | Fetch function | Pinned to |
@@ -51,6 +51,7 @@ the TypeScript compiler API asserts the exact list of `fetch` call sites in them
 | SenSource Vea API | `veaFetch` in `main/services/sensource-service.ts` | `https://vea.sensourceinc.com` |
 | SafeSpace | `safeSpaceFetch` in `main/services/safespace-client.ts` | `https://app.safespace.io` |
 | ProVideoPlayer | `pvpFetch` in `main/services/pvp-service.ts` | the operator's configured `scheme://host:port` |
+| ServiceCue publishing | `publishFetch` in `main/services/servicecue-publish-client.ts` | the operator's configured page origin |
 
 ### Planning Center
 
@@ -83,6 +84,26 @@ port and refuses a host that parses with a path, query, fragment or credentials
 (`/`, `?`, `#`, `@` and `\` in a host name). `pvpFetch` takes that `PvpOrigin`
 and a `PvpUrl` (`pvpUrl(origin, path)`) and re-pins the URL onto the origin, so a
 path beginning `//` or holding `@` cannot move the bearer token to another host.
+
+### ServiceCue publishing
+
+The page the Public link card publishes to is the operator's own. `parsePublishUrl`
+keeps only the origin of an `https://` address and returns a `PublishOrigin`; plain
+`http://` is accepted for `localhost` and `127.0.0.1` only while
+`STAGE_UTILITY_PUBLISH_ALLOW_LOCAL=1` is set on the server (development), so in
+production the address cannot name the server's own machine or its ports. `publishFetch`
+takes that origin and a `PublishUrl` (`publishUrl(origin, path)`) and re-pins the URL, so
+the publishing token cannot leave for another host. It is also the only `fetch` in
+the client, and it never follows a redirect.
+
+`js/request-forgery` flags this request, because the address is typed by an operator.
+Unlike the two rules above, it honours a barrier model, so the parse is declared as the
+barrier: `.github/codeql/extensions/stage-utility-models/models/request-forgery-barriers.model.yml`
+marks the result of `parsePublishUrl` (kind `request-forgery`), and an address that has not
+been through it stays tainted. The fixture
+`.github/codeql/tests/models/main/services/publish-forgery.ts` requests once from the raw
+address, which must alert, and once from the parsed origin, which must not; removing the
+model makes the second alert too. The alert is not dismissed and carries no suppression.
 
 ## Cached responses
 
