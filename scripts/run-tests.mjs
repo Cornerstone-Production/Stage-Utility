@@ -18,6 +18,9 @@ const TEST_PATTERNS = [
   "renderer/**/*.test.ts",
   "renderer/**/*.test.tsx",
   "scripts/**/*.test.ts",
+  // The ServiceCue Worker's routing, auth and validation. Its own folder has its
+  // own package and node_modules, so the pattern names src/ and never reaches them.
+  "publish/servicecue/src/**/*.test.ts",
 ];
 
 const result = spawnSync(

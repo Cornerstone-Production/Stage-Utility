@@ -61,6 +61,12 @@ function px(utility: string): number {
  */
 const ALLOWED = new Set([
   "app/shell.tsx",
+  // The public ServiceCue viewer's own frame (see public/public-router.tsx). It is a
+  // shell, not a route inside one: the two ServiceCue pages are served there with no
+  // operator shell around them, and its <main> pads them exactly as shell.tsx's does at
+  // /servicecue. Listed so that the day the gutter changes it is found here, with the
+  // number the rundown's negative margins (CANCELLERS) cancel.
+  "public/public-router.tsx",
 ]);
 
 /**

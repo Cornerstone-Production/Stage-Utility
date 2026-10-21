@@ -2,11 +2,11 @@ import { defineConfig, type PluginOption } from "vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
-import { readFileSync } from "fs";
 import { resolve } from "path";
 import { MANIFEST_PATH } from "./main/services/install-metadata";
 import { cleanUrlsMiddleware } from "./main/services/routes/dev-clean-urls";
 import { serverPort } from "./main/services/server-port";
+import { tsconfigAliases } from "./main/services/vite-aliases";
 
 // Dev-only: map clean URLs to their entry HTML so the dev server matches what
 // the production Node server serves (see remote-server.ts tryServeStatic).
@@ -28,18 +28,6 @@ function cleanUrls(): PluginOption {
   };
 }
 
-/** `{"@x/*": ["./x/*"]}` from tsconfig → `{"@x": "<root>/x"}` for Vite. */
-function tsconfigAliases(): Record<string, string> {
-  const paths: Record<string, string[]> =
-    JSON.parse(readFileSync(resolve(__dirname, "tsconfig.json"), "utf8")).compilerOptions?.paths ?? {};
-  const out: Record<string, string> = {};
-  for (const [k, [v]] of Object.entries(paths)) {
-    if (!v) continue;
-    out[k.replace(/\/\*$/, "")] = resolve(__dirname, v.replace(/^\.\//, "").replace(/\/\*$/, ""));
-  }
-  return out;
-}
-
 /** Where the dev server forwards API traffic. Announced on start, because a
  *  proxy pointing at somebody else's server is invisible until it is not. */
 const API_TARGET = `http://localhost:${serverPort()}`;
@@ -58,9 +46,11 @@ export default defineConfig({
   // Path aliases come from tsconfig, which tsc and the production build already
   // read. The dev server does not, so an import through an alias would type-check,
   // build, and then 500 the page in dev. Deriving them here rather than repeating
-  // the list keeps the two from drifting apart when a new alias is added.
+  // the list keeps the two from drifting apart when a new alias is added. The
+  // derivation is shared with the public ServiceCue viewer's own config
+  // (vite.servicecue.config.ts).
   resolve: {
-    alias: tsconfigAliases(),
+    alias: tsconfigAliases(__dirname),
   },
 
   // Multi-page: kiosk display + settings panel

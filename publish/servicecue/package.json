@@ -1,0 +1,22 @@
+{
+  "name": "servicecue-public",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The public side of ServiceCue on the web: a Cloudflare Worker that receives what a Stage Utility server publishes and serves it to anyone with the link.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261013.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.150.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

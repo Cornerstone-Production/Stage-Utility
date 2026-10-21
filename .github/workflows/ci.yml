@@ -22,16 +22,18 @@ on:
 permissions:
   contents: read
 
-# Three jobs run side by side so the slowest one sets the wait, not the sum:
+# Four jobs run side by side so the slowest one sets the wait, not the sum:
 # lint, type-check, build and audit in one; the test suite split four ways across
 # the others (Node's --test-shard, with the file patterns in scripts/run-tests.mjs
-# only); and `build`, which passes only when all of them did. The suite is most
-# of the time: every test file runs in its own process, on a 4-core runner. Coverage
-# used to run the suite a second time here; it is informational and moved to
-# coverage.yml on a schedule.
+# only); the ServiceCue Worker package, which has its own dependencies and so its
+# own install, type-check, audit and test, in one; and `build`, which passes only
+# when all of them did. The suite is most of the time: every test file runs in its
+# own process, on a 4-core runner. Coverage used to run the suite a second time
+# here; it is informational and moved to coverage.yml on a schedule.
 #
 # `build` keeps the single name release.yml writes as a commit status, so a PR
-# and the release PR read the same check.
+# and the release PR read the same check. release.yml does not run the Worker's
+# job: nothing in a release builds or deploys it.
 jobs:
   checks:
     name: lint, type-check, build
@@ -117,23 +119,71 @@ jobs:
       - name: Test
         run: npm test -- --test-shard=${{ matrix.shard }}/4
 
+  # The public ServiceCue Worker (publish/servicecue/). It is a package of its own,
+  # with its own lockfile, and the root checks above cannot reach what it needs: the
+  # root `tsc` and `npm test` cover the parts of the Worker that import no Workers
+  # API, and this covers the rest. `worker.ts`, `hub.ts` and `env.ts` import
+  # `cloudflare:workers` and are only type-checked by the package's own tsc; the
+  # Durable Object's storage and the viewers' sockets are only real in workerd, which
+  # the package's test starts locally with `wrangler dev`. Nothing is sent to
+  # Cloudflare, and there is no account or token in this job.
+  #
+  # Only the package's dependencies are installed: the type-check includes the
+  # shared contract (main/types/servicecue-publish.ts), which imports nothing, and
+  # the test builds its own stand-in for the page.
+  worker:
+    name: worker (install, type-check, audit, test)
+    if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'beta' && github.base_ref == 'main') }}
+    runs-on: ubuntu-latest
+    # The one job that starts a long-lived process (workerd). The test kills it when it
+    # ends; this is for the day it does not, so a hang costs fifteen minutes and not
+    # the runner's six hours.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: publish/servicecue/package-lock.json
+
+      - name: Install the Worker's dependencies
+        run: npm --prefix publish/servicecue ci
+
+      - name: Type-check
+        run: npm --prefix publish/servicecue run typecheck
+
+      # The same bar the root package is held to: a known-vulnerable dependency fails
+      # the PR that brings it, high and critical only.
+      - name: Audit dependencies
+        run: npm --prefix publish/servicecue audit --audit-level=high
+
+      - name: Test
+        run: npm --prefix publish/servicecue test
+
   # The one check that says the whole gate passed. It runs whatever the others
   # did, so a failed shard turns it red rather than leaving it skipped; a
   # cancelled run stays cancelled rather than reading as a failure; and a skipped
   # gate (the release PR) skips it too.
   build:
-    needs: [checks, test]
+    needs: [checks, test, worker]
     if: ${{ !cancelled() && !(github.event_name == 'pull_request' && github.head_ref == 'beta' && github.base_ref == 'main') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Every check and every test shard passed
+      - name: Every check, every test shard and the Worker package passed
         env:
           CHECKS: ${{ needs.checks.result }}
           TESTS: ${{ needs.test.result }}
+          WORKER: ${{ needs.worker.result }}
         run: |
           echo "lint, type-check, build: $CHECKS"
           echo "tests: $TESTS"
-          if [ "$CHECKS" != success ] || [ "$TESTS" != success ]; then
+          echo "worker: $WORKER"
+          if [ "$CHECKS" != success ] || [ "$TESTS" != success ] || [ "$WORKER" != success ]; then
             echo "::error::the gate did not pass"
             exit 1
           fi

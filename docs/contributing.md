@@ -259,12 +259,23 @@ running first: `node scripts/check-public-hygiene.mjs` (see
 [Public hygiene](#public-hygiene)) and `node scripts/check-commit-subjects.mjs`.
 
 CI runs them side by side rather than one after another: lint, type-check, build
-and the audit in one job, and the test suite split across four more with
-`npm test -- --test-shard=N/4`. A PR shows each, plus one `build` check that
-passes only when all of them did. The release workflow verifies a push with the
-same split, minus the audit and the action-pin check. Coverage is not part of the
-PR gate: `coverage.yml` reports it for `beta` weekly, and on demand from the
-Actions tab once the workflow is on `main`.
+and the audit in one job, the test suite split across four more with
+`npm test -- --test-shard=N/4`, and the public ServiceCue Worker package
+(`publish/servicecue/`, which has its own dependencies) in one of its own: install,
+type-check, audit, and a test that runs the Worker in workerd. A PR shows each, plus
+one `build` check that passes only when all of them did. The release workflow
+verifies a push with the same split, minus the audit, the action-pin check and the
+Worker package's job. Coverage is not part of the PR gate: `coverage.yml` reports it
+for `beta` weekly, and on demand from the Actions tab once the workflow is on `main`.
+
+When a change touches `publish/servicecue/`, run that job's three commands too. The
+root `npm run type-check` and `npm test` cannot see the files that import
+`cloudflare:workers`, so a type error in the Durable Object passes them:
+
+```bash
+npm --prefix publish/servicecue ci
+npm --prefix publish/servicecue run typecheck && npm --prefix publish/servicecue test
+```
 
 Not every check runs on every pull request. The secret scan, the commit
 convention check and the public-hygiene check (below) run on all of them,

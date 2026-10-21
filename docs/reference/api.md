@@ -415,6 +415,11 @@ Requests to `/api/scriptview/…` answer `308` with the same path and query unde
 `/api/servicecue/…`, keeping the method and body, so a script written against the
 old paths still works once its client follows redirects.
 
+The routes above, the live state and the live position are also what the **public**
+ServiceCue page asks a Cloudflare Worker for, and what a server sends out to it:
+[ServiceCue publishing protocol](servicecue-publishing.md). Those are the Worker's
+routes, not this server's.
+
 **Patch sheet** — see [Patch sheet](../patch-sheet/README.md).
 
 | Method | Path | Purpose |
