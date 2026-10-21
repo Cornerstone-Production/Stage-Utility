@@ -10,6 +10,7 @@ import { describe, it } from "node:test";
 
 import { PUBLISH_MAX_BODY_BYTES } from "../types/servicecue-publish.js";
 import { FakeReceiver, PAGE_STATUS, waitFor } from "./fixtures/publish-receiver.js";
+import { startSelfSignedPage } from "./fixtures/self-signed-page.js";
 import { framesOf, harness, installPublisherHooks, logs, publishAll, sleep, TOKEN, type Harness } from "./fixtures/publisher-harness.js";
 
 installPublisherHooks();
@@ -21,6 +22,25 @@ const attemptsAt = (h: Harness, key: string) => h.page.requests.filter((r) => r.
 const refusing = (h: Harness, key: string, status: number) => {
   h.page.respond = (req) => (req.path.endsWith(`/doc/${key}`) ? { status } : h.page.worker(req));
 };
+
+describe("a firewall that intercepts the connection", () => {
+  it("is said on the card in the operator's words, keeps being tried, and logs what Node said with its code", async (t) => {
+    const lines = logs(t);
+    const firewall = await startSelfSignedPage();
+    t.after(() => firewall.close());
+    const h = await harness();
+    h.settings.url = firewall.origin;
+    await h.pub.start();
+    await h.pub.runCycle();
+    const problem = h.pub.status().lastError;
+    assert.equal(h.pub.status().state, "problem");
+    assert.equal(problem?.kind, "intercepted");
+    assert.match(problem?.message ?? "", /^Something on this network is intercepting the connection to localhost:\d+/);
+    assert.doesNotMatch(problem?.message ?? "", /use-system-ca/);
+    // Waiting is what fixes it once the firewall allows the address, so it is retried, not held.
+    assert.ok(lines.some((l) => /^\[publish\] the page is not accepting what is sent — Something on this network .*\((DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN): .*self-signed.*\) Trying again/.test(l)), JSON.stringify(lines));
+  });
+});
 
 describe("a request the page keeps failing", () => {
   it("waits longer each time, by that request's failures in a row, and not by the heartbeat that goes through", async (t) => {

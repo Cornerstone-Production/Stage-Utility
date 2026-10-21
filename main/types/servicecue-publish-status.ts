@@ -17,7 +17,8 @@ export type PublishState = "off" | "publishing" | "problem";
  *  server       another 5xx, or a 503 to a request the page had been answering
  *  rejected     the address answered, but not as the ServiceCue page does. Held
  *  redirect     the address answered with a redirect, which is never followed
- *  unreachable  no answer: DNS, a refused connection, TLS, a timeout
+ *  unreachable  no answer: DNS, a refused connection, a TLS failure other than the certificate, a timeout
+ *  intercepted  a certificate this server would not trust: a firewall or web filter swapping in its own
  *  protocol     the page speaks another protocol version than this server. Held
  *  config       nothing was sent: no address or token, or one the rules refuse. Held
  */
@@ -30,6 +31,7 @@ export type PublishProblemKind =
   | "rejected"
   | "redirect"
   | "unreachable"
+  | "intercepted"
   | "protocol"
   | "config";
 

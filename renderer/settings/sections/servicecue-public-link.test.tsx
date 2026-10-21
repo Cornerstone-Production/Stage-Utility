@@ -567,6 +567,7 @@ describe("Problem", () => {
     ["rejected", true],
     ["redirect", true],
     ["unreachable", true],
+    ["intercepted", false],
     ["config", true],
     ["blocked", false],
     ["limited", false],
@@ -685,6 +686,11 @@ describe("the problem text", () => {
     assert.equal(
       say({ kind: "unreachable", message: "getaddrinfo ENOTFOUND x.example" }),
       "This server couldn't reach the page: getaddrinfo ENOTFOUND x.example. Check the address below, and that this server can get to the internet. Until then the public page keeps showing the rundown it last got, with a note saying how old it is.",
+    );
+    const FIREWALL = "Something on this network is intercepting the connection to servicecue.io, usually a firewall or web filter blocking the address. Ask whoever runs the firewall to allow servicecue.io.";
+    assert.equal(
+      say({ kind: "intercepted", message: FIREWALL }),
+      `${FIREWALL} Until then the public page keeps showing the rundown it last got, with a note saying how old it is.`,
     );
     assert.equal(say({ kind: "config", message: "No publishing token is set." }), "No publishing token is set.");
     assert.equal(say({ kind: "protocol", message: "The page speaks protocol 2 and this server speaks 1. Update whichever is older." }), "The page speaks protocol 2 and this server speaks 1. Update whichever is older.");

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { PUBLISH_MAX_BODY_BYTES } from "../types/servicecue-publish.js";
 import { FakeReceiver, PAGE_STATUS } from "./fixtures/publish-receiver.js";
+import { startSelfSignedPage } from "./fixtures/self-signed-page.js";
 import { within } from "./fixtures/within.js";
 import { createPushClient, type PushClient, type PushResult } from "./servicecue-publish-client.js";
 import { parsePublishUrl } from "./servicecue-publish-rules.js";
@@ -155,6 +156,26 @@ describe("the push client", () => {
     // Bounded by the test, so a client with no ceiling fails here instead of hanging the suite.
     const r = await within(clientFor(page.origin, { timeoutMs: 150 }).putDoc("state", "{}"), "a request to a silent page to give up on its own", 3000);
     assert.ok(!r.ok && r.kind === "unreachable" && /No answer/.test(r.message), JSON.stringify(r));
+  });
+
+  it("says a certificate it will not trust is something on the network intercepting the connection, in the operator's words, and keeps Node's for the log", async () => {
+    const firewall = await startSelfSignedPage();
+    try {
+      const host = new URL(firewall.origin).host;
+      for (const r of [await clientFor(firewall.origin).putDoc("state", "{}"), await clientFor(firewall.origin).status()]) {
+        assert.ok(!r.ok, JSON.stringify(r));
+        assert.equal(r.kind, "intercepted", JSON.stringify(r));
+        assert.equal(
+          r.message,
+          `Something on this network is intercepting the connection to ${host}, usually a firewall or web filter blocking the address. Ask whoever runs the firewall to allow ${host}.`,
+        );
+        assert.doesNotMatch(r.message, /use-system-ca|self-signed/);
+        assert.match(r.detail ?? "", /^(DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN): .*self-signed/, JSON.stringify(r));
+      }
+      assert.equal(firewall.requests, 0, "a request got past a certificate that was not trusted");
+    } finally {
+      await firewall.close();
+    }
   });
 
   it("gives a large body longer: a logo on a slow uplink is not a failure", async () => {

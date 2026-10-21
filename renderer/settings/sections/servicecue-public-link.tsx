@@ -145,6 +145,14 @@ export function ProblemText({ problem }: { problem: PublishProblem }): ReactNode
           the internet.{KEEPS_SHOWING}
         </>
       );
+    case "intercepted":
+      // The server's sentence names the host and who can fix it; Node's own words are only in the log.
+      return (
+        <>
+          {sentence(problem.message)}
+          {KEEPS_SHOWING}
+        </>
+      );
     case "protocol":
     case "config":
       // Said by the server in full, and nothing has been sent for it to keep showing.
