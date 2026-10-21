@@ -186,6 +186,9 @@ const FRAME_ORDER: readonly FrameChannel[] = ["stage:state-changed", "pco:live",
  * Everything one run knows. Made when publishing starts, dropped when it stops or its settings
  * change: nothing here is ever reset, so nothing here can be left over from the run before.
  */
+/** What one read said: its value, or why there is none. */
+type ReadResult<T> = { ok: true; value: T } | { ok: false; reason: string };
+
 class Run {
   readonly abort = new AbortController();
   readonly client: PushClient;
@@ -417,8 +420,8 @@ export class ServiceCuePublisher {
   /** Why Planning Center could not be read, from the first failed read of a document the page still wants: none while it is not connected. */
   private sourceProblem(run: Run): SourceProblem | null {
     const wanted = new Set(this.wantedDocs(run));
-    const key = [...run.sourceFailures.keys()].filter((k) => wanted.has(k)).sort()[0];
-    return key === undefined ? null : { message: scrub(run.sourceFailures.get(key)!) };
+    const failed = [...run.sourceFailures].find(([key]) => wanted.has(key));
+    return failed ? { message: scrub(failed[1]) } : null;
   }
 
   /** The layouts, roles or landing page were edited: bring the page up to date soon. */
@@ -639,12 +642,7 @@ export class ServiceCuePublisher {
    * What one read said: its value, or why there is none. Said once per outage; the page keeps the last copy of what could not be
    * read. `failure` is for an answer that is a failure in disguise: the app serves its last list with the reason it could not refresh it.
    */
-  private async read<T>(
-    run: Run,
-    what: string,
-    fn: () => Promise<T>,
-    failure?: (value: T) => string | undefined,
-  ): Promise<{ ok: true; value: T } | { ok: false; reason: string }> {
+  private async read<T>(run: Run, what: string, fn: () => Promise<T>, failure?: (value: T) => string | undefined): Promise<ReadResult<T>> {
     let reason: string | undefined;
     let value: T | undefined;
     try {
@@ -663,13 +661,7 @@ export class ServiceCuePublisher {
   }
 
   /** A read from Planning Center, for the document `key`: as `read`, and remembered for the card's source problem. */
-  private async pcoRead<T>(
-    run: Run,
-    key: string,
-    what: string,
-    fn: () => Promise<T>,
-    failure?: (value: T) => string | undefined,
-  ): Promise<{ ok: true; value: T } | { ok: false; reason: string }> {
+  private async pcoRead<T>(run: Run, key: string, what: string, fn: () => Promise<T>, failure?: (value: T) => string | undefined): Promise<ReadResult<T>> {
     const r = await this.read(run, what, fn, failure);
     if (r.ok) this.sourceRead(run, key);
     else run.sourceFailures.set(key, r.reason);
@@ -679,7 +671,8 @@ export class ServiceCuePublisher {
   /** The document `key` was read from Planning Center. */
   private sourceRead(run: Run, key: string): void {
     if (!run.sourceFailures.delete(key)) return;
-    if (run.sourceFailures.size === 0) {
+    // Said for what the page still wants: a plan that failed and then left the switcher is no reason to stay quiet.
+    if (this.sourceProblem(run) === null) {
       console.log("[publish] Planning Center can be read again");
       return;
     }
@@ -775,6 +768,7 @@ export class ServiceCuePublisher {
       const planKey = planId ? rundownKey(id, planId) : null;
       if (planKey !== null && this.plansOf(run).some((p) => p.serviceTypeId === id && p.planId === planId)) {
         run.currentKeys.add(planKey);
+        // The one read is that plan's too, which a trickle that failed it is waiting to retry.
         this.sourceRead(run, planKey);
         run.nextDue.set(planKey, Date.now() + this.slowEveryMs());
         await this.put(run, planKey, JSON.stringify(r.value));
@@ -958,6 +952,8 @@ export class ServiceCuePublisher {
     // What the page dropped is no longer held, so it is sent afresh if it is ever wanted again; and its schedule goes with it.
     for (const doc of [...run.sent.keys()]) if (!docs.includes(doc)) run.sent.delete(doc);
     for (const doc of [...run.nextDue.keys()]) if (!docs.includes(doc)) run.nextDue.delete(doc);
+    // And its failure: a plan that comes back is not shown as failing before it has been read again.
+    for (const doc of [...run.sourceFailures.keys()]) if (!docs.includes(doc)) run.sourceFailures.delete(doc);
     for (const name of [...run.assets.sent]) if (!assets.includes(name)) run.assets.sent.delete(name);
     // The page's own account of what it deleted: the evidence that a type or a plan that left the landing page has left the public one.
     const removed = r.removed;

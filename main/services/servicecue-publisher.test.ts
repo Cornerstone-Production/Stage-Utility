@@ -278,6 +278,35 @@ describe("when Planning Center is read", () => {
     assert.equal(h.pub.status().sourceProblem, null);
   });
 
+  it("says Planning Center can be read again once nothing the page still wants is failing, though a plan that failed has left it", async (t) => {
+    const lines = logs(t);
+    const h = await harness();
+    h.source.data.failPlan = "1002";
+    await h.pub.start();
+    await h.pub.runCycle();
+    await h.pub.trickle();
+    assert.deepEqual(h.pub.status().sourceProblem, { message: "Planning Center returned 503" });
+    h.source.data.unavailable = "PCO API error 500";
+    h.pub.nudge();
+    await h.pub.runCycle();
+    // The plan's type comes off the landing page while the plan list is failing, and then the list is read again.
+    h.source.data.landing = ["200"];
+    h.source.data.unavailable = null;
+    h.pub.nudge();
+    await h.pub.runCycle();
+    assert.equal(h.pub.status().sourceProblem, null);
+    assert.equal(lines.filter((l) => l === "[publish] Planning Center can be read again").length, 1, JSON.stringify(lines));
+    // Back on the landing page, the plan is not shown failing before it has been read again.
+    h.source.data.landing = ["100", "200"];
+    h.source.data.failPlan = null;
+    // Its read is held open, so what the status says is what was known before it.
+    const read = h.source.rundown;
+    h.source.rundown = (typeId, planId) => (planId === "1002" ? new Promise(() => {}) : read(typeId, planId));
+    h.pub.nudge();
+    await h.pub.runCycle();
+    assert.equal(h.pub.status().sourceProblem, null);
+  });
+
   it("brings an edit to the layouts or the landing page to the page before the next minute", async () => {
     // The cycle is a minute apart; the nudge an edit sends is what makes it a moment.
     const h = await harness({ firstCycleMs: 5, cycleMs: 60_000, nudgeMs: 20 });
