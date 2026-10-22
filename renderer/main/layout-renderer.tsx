@@ -360,11 +360,21 @@ const TABULAR_TYPES = new Set<string>([
   "spl-meter", "people-counter", "service-pacing", "slide-progress", "charger-battery",
 ]);
 
+/**
+ * The ink a widget draws when its style names none.
+ *
+ * White, which is right on a black wall. A host that paints its own ground sets
+ * `--layout-ink` instead: Home's card sets the theme's text colour, so a widget
+ * added on Home (which starts with no colour) reads on a light page as well as a
+ * dark one. A colour the operator picks still wins on either surface.
+ */
+export const DEFAULT_INK = "var(--layout-ink, #ffffff)";
+
 /** Text-level CSS for the inner span. */
 function textStyle(o: LayoutObject, H: number): CSSProperties {
   const s = o.style ?? {};
   const css: CSSProperties = {
-    color: s.color ?? "#ffffff",
+    color: s.color ?? DEFAULT_INK,
     fontSize: `${(s.fontSize ?? 0.05) * H}px`,
     fontWeight: s.fontWeight ?? 400,
     lineHeight: 1.1,
@@ -1148,7 +1158,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         const pct = Math.min(100, Math.round((idx / count) * 100));
         return (
           <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center" }}>
-            <div style={{ width: "100%", height: `${0.02 * ctx.H}px`, background: "rgba(255,255,255,0.15)", borderRadius: 999, overflow: "hidden" }}>
+            <div style={{ width: "100%", height: `${0.02 * ctx.H}px`, background: `color-mix(in srgb, ${DEFAULT_INK} 15%, transparent)`, borderRadius: 999, overflow: "hidden" }}>
               <div style={{ width: `${pct}%`, height: "100%", background: ts.color ?? "#fff", borderRadius: 999 }} />
             </div>
           </div>
@@ -2052,7 +2062,8 @@ function PeopleGraph({
           style={{
             position: "absolute", left: `${hoverX}%`, top: `${PADT}%`,
             transform: hoverX > 60 ? "translate(-102%, 0)" : "translate(2%, 0)",
-            background: "rgba(0,0,0,0.78)", color: stroke, borderRadius: `${0.01 * H}px`,
+            // White whatever the ink: this ground is near-black on every surface.
+            background: "rgba(0,0,0,0.78)", color: stroke === DEFAULT_INK ? "#ffffff" : stroke, borderRadius: `${0.01 * H}px`,
             padding: `${0.008 * H}px ${0.012 * H}px`, fontSize: `${fontPx}px`, lineHeight: 1.25,
             fontWeight: 600, pointerEvents: "none", whiteSpace: "nowrap", zIndex: 2,
           }}
@@ -2088,7 +2099,7 @@ function GraphToggle({ mode, onToggle, stroke, H }: { mode: "live" | "recorded";
           position: "absolute", top: `${0.008 * H}px`, right: `${0.008 * H}px`,
           display: "inline-flex", alignItems: "center", gap: `${0.006 * H}px`,
           // Faint surface only on hover/press — a touch affordance that stays invisible at rest.
-          background: down ? "rgba(255,255,255,0.16)" : hot ? "rgba(255,255,255,0.08)" : "transparent",
+          background: down ? `color-mix(in srgb, ${DEFAULT_INK} 16%, transparent)` : hot ? `color-mix(in srgb, ${DEFAULT_INK} 8%, transparent)` : "transparent",
           color: stroke, border: "none", borderRadius: `${0.02 * H}px`,
           padding: `${pad} ${0.01 * H}px`, margin: `-${pad} -${0.004 * H}px`,
           fontSize: `${Math.max(7, 0.03 * H)}px`, fontWeight: 700, letterSpacing: "0.06em",
@@ -3013,7 +3024,7 @@ function ServiceOrderObject({
 
   const s = o.style ?? {};
   const base = (s.fontSize ?? 0.035) * H * fitScale;
-  const color = s.color ?? "#ffffff";
+  const color = s.color ?? DEFAULT_INK;
 
   if (items.length === 0) {
     // Three different nothings; see noPlanWord.
