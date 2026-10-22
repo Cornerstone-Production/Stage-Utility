@@ -80,9 +80,11 @@ A filename rule fires on that every time, so the skip never happened. Anything
 unreadable or unparseable is treated as changed, so an unknown state does the work
 rather than skipping it.
 
-The build also runs when the update changes the public ServiceCue page's inputs: the
-Worker's source or config, `servicecue.html`, `vite.servicecue.config.ts` or the shared
-contract in `main/types/servicecue-publish.ts`.
+Which files count is one list, `scripts/build-inputs.mjs`, used by both update scripts:
+the interface (`renderer/`, `main/`, `public/`, the HTML documents, the Vite, Tailwind,
+PostCSS and TypeScript config) and the public ServiceCue page's Worker source and config.
+A checkout with no `build/servicecue/deploy.json`, because the last build could not make
+the page's bundle, reinstalls and rebuilds on the next update whatever changed.
 
 ### What's new
 
