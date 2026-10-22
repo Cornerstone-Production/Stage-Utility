@@ -11,9 +11,11 @@ import { isMain } from "./is-main.mjs";
 
 /** Sorted, one per line. A path that starts with any of these is a build input. */
 export const BUILD_INPUT_PREFIXES = [
+  "app.html",
   "index.html",
-  "main/types/servicecue-publish.ts", // the public ServiceCue page and its Worker share it
+  "main/", // the interface and the page's Worker both build from shared modules here
   "postcss.config",
+  "public/", // copied into the interface, and the page's icons are read from it
   "publish/servicecue/src/", // the Worker, bundled into build/servicecue
   "publish/servicecue/wrangler", // its compatibility date, bindings and asset rules
   "renderer/",
