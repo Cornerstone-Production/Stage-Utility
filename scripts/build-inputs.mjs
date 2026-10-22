@@ -7,6 +7,8 @@
 // Usage:  git diff --name-only <old> <new> | node scripts/build-inputs.mjs
 // Output: true | false      (an unreadable list reports true: do the work)
 
+import { isMain } from "./is-main.mjs";
+
 /** Sorted, one per line. A path that starts with any of these is a build input. */
 export const BUILD_INPUT_PREFIXES = [
   "index.html",
@@ -28,7 +30,7 @@ export function needsBuild(paths) {
   return paths.some((p) => BUILD_INPUT_PREFIXES.some((prefix) => p.startsWith(prefix)));
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop() ?? "")) {
+if (isMain(import.meta.url, process.argv[1])) {
   let text = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (c) => (text += c));

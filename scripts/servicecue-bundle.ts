@@ -28,11 +28,12 @@
 import { build as esbuild, type BuildOptions } from "esbuild";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { build as viteBuild } from "vite";
 
 import { errorMessage } from "../main/services/errors.js";
+import { isMain } from "./is-main.mjs";
 import { PUBLISH_PROTOCOL_VERSION, VIEWER_HTML, viewerBuildFromHtml } from "../main/types/servicecue-publish.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -218,7 +219,7 @@ export async function bundleServiceCue(outDir: string = DEFAULT_OUT, quiet = fal
 
 // ── As a command ──────────────────────────────────────────────────────────────
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url, process.argv[1])) {
   const soft = process.argv.includes("--soft");
   try {
     const { outDir, manifest } = await bundleServiceCue();

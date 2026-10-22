@@ -15,6 +15,7 @@
 // from. Exits non-zero and names every subject that does not conform.
 
 import { execFileSync } from "node:child_process";
+import { isMain } from "./is-main.mjs";
 import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
 
 /**
@@ -98,4 +99,4 @@ See docs/contributing.md. Reword with:
 }
 
 // Only when run directly, so the patterns can be imported by a test.
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) main();
+if (isMain(import.meta.url, process.argv[1])) main();
