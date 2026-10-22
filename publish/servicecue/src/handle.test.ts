@@ -597,6 +597,24 @@ describe("telling a page which build is being served", () => {
     }
   });
 
+  test("the status still answers, with no build and a line on the log, when the asset service throws", async () => {
+    const logged: unknown[][] = [];
+    mock.method(console, "error", (...args: unknown[]) => void logged.push(args));
+    const s = setup({
+      assets: async () => {
+        throw new Error("the asset service is down");
+      },
+    });
+    s.hub.docs.set("state", "{}");
+    const res = await s.run("GET", "/_publish/v1/status", { headers: AUTH });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body.build, null);
+    assert.deepEqual(body.docs, ["state"]);
+    assert.equal(logged.length, 1);
+    assert.match(String(logged[0]![0]), /^\[servicecue-worker\] the status could not read/);
+  });
+
   test("an id a visitor puts on the handshake is not the one passed on", async () => {
     const s = setup();
     await s.run("GET", "/api/live", { headers: { Upgrade: "websocket", "X-Servicecue-Build": "ffffffffffff" } });

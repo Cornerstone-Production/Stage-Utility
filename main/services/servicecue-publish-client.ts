@@ -193,7 +193,7 @@ function parsePageStatus(raw: unknown): (PageStatus & { protocol: number }) | nu
   const o = raw as Record<string, unknown>;
   if (typeof o.protocol !== "number" || !isStringList(o.docs) || !isStringList(o.assets)) return null;
   // A Worker from before `build` leaves it out, and one with something else in it has no build to name.
-  return { protocol: o.protocol, docs: o.docs, assets: o.assets, build: typeof o.build === "string" && isViewerBuildId(o.build) ? o.build : null };
+  return { protocol: o.protocol, docs: o.docs, assets: o.assets, build: isViewerBuildId(o.build) ? o.build : null };
 }
 
 /** The manifest's answer, if it has the shape the protocol promises. */

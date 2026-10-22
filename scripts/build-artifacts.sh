@@ -38,8 +38,8 @@ node scripts/bundle-server.mjs
 [ -d build/renderer ] || { echo "build/renderer missing — run npm run build first" >&2; exit 1; }
 # The public ServiceCue page, ready to upload. `npm run build` makes it too, but lets a
 # failure pass so an update never stops on it; a release must not ship without it, so
-# this runs the command that fails.
-node --import tsx scripts/servicecue-bundle.ts
+# one that is missing here is made by the command that fails.
+[ -f build/servicecue/deploy.json ] || node --import tsx scripts/servicecue-bundle.ts
 [ -f build/servicecue/deploy.json ] || { echo "build/servicecue/deploy.json missing" >&2; exit 1; }
 
 # One checksum file from nodejs.org covers every download below, so fetch it once

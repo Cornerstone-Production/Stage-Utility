@@ -159,7 +159,22 @@ async function publish(request: Request, url: URL, deps: HandlerDeps): Promise<R
     }
 
     case "getStatus":
-      return forMethod(request, json({ ...(await deps.hub.status()), build: await viewerBuild(deps.assets, url) }));
+      return forMethod(request, json({ ...(await deps.hub.status()), build: await statusBuild(deps.assets, url) }));
+  }
+}
+
+/**
+ * The build id for the status answer, which is worth having and not worth failing for: the
+ * publisher asks the status to learn what is stored and whether the token works, and an
+ * asset service that threw must not turn that into a 500. The answer says no build, and the
+ * Worker's log says why.
+ */
+async function statusBuild(assets: HandlerDeps["assets"], url: URL): Promise<string | null> {
+  try {
+    return await viewerBuild(assets, url);
+  } catch (err) {
+    console.error("[servicecue-worker] the status could not read the page's build id, and says none:", err);
+    return null;
   }
 }
 
