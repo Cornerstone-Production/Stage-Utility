@@ -111,7 +111,12 @@ write_result() {
   fi
   NEED_INSTALL=1
   NEED_BUILD=1
-  if [ "$OLD_REV" != "none" ] && [ "$NEW_REV" != "none" ] && [ -d build ] && [ -f build/servicecue/deploy.json ]; then
+  # A missing page bundle is a reason to build, unless the build that left it missing says it
+  # failed on the commit this update starts from (build/servicecue.failed: the commit, then why):
+  # a bundle that keeps failing must not cost every update a reinstall and a build.
+  BUNDLE_KNOWN_FAILED=0
+  if [ ! -f build/servicecue/deploy.json ] && [ -f build/servicecue.failed ] && [ "$(head -n 1 build/servicecue.failed)" = "$OLD_REV" ]; then BUNDLE_KNOWN_FAILED=1; fi
+  if [ "$OLD_REV" != "none" ] && [ "$NEW_REV" != "none" ] && [ -d build ] && { [ -f build/servicecue/deploy.json ] || [ "$BUNDLE_KNOWN_FAILED" = "1" ]; }; then
     CHANGED="$(git diff --name-only "$OLD_REV" "$NEW_REV" 2>/dev/null || echo "")"
     echo "[update] $(printf '%s\n' "$CHANGED" | grep -c .) file(s) changed"
     NEED_INSTALL=0; NEED_BUILD=0
@@ -125,6 +130,12 @@ write_result() {
     # Any build input change (scripts/build-inputs.mjs lists them: the interface, and the
     # public ServiceCue page's Worker and contract) -> rebuild. Unreadable means rebuild.
     [ "$(printf '%s\n' "$CHANGED" | node "$REPO/scripts/build-inputs.mjs" 2>/dev/null || echo true)" = "false" ] || NEED_BUILD=1
+  fi
+
+  # Nothing changed that the build reads: the failed bundle is still the failed bundle, now on this commit.
+  if [ "$BUNDLE_KNOWN_FAILED" = "1" ] && [ "$NEED_BUILD" = "0" ]; then
+    { printf '%s\n' "$NEW_REV"; tail -n +2 build/servicecue.failed; } > build/servicecue.failed.tmp && mv build/servicecue.failed.tmp build/servicecue.failed
+    echo "[update] the page bundle failed to build on the last build and no build input changed — not retrying (build/servicecue.failed)"
   fi
 
   if [ "$NEED_INSTALL" = "1" ]; then

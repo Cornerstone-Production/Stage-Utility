@@ -94,7 +94,14 @@ try {
   $newRev = (git rev-parse HEAD 2>$null); if (-not $newRev) { $newRev = "none" }
   $needInstall = $true
   $needBuild = $true
-  if ($oldRev -ne "none" -and $newRev -ne "none" -and (Test-Path "build") -and (Test-Path "build/servicecue/deploy.json")) {
+  # A missing page bundle is a reason to build, unless the build that left it missing says it
+  # failed on the commit this update starts from (build/servicecue.failed: the commit, then why):
+  # a bundle that keeps failing must not cost every update a reinstall and a build.
+  $bundleKnownFailed = $false
+  if (-not (Test-Path "build/servicecue/deploy.json") -and (Test-Path "build/servicecue.failed")) {
+    if ((Get-Content "build/servicecue.failed" -TotalCount 1) -eq $oldRev) { $bundleKnownFailed = $true }
+  }
+  if ($oldRev -ne "none" -and $newRev -ne "none" -and (Test-Path "build") -and ((Test-Path "build/servicecue/deploy.json") -or $bundleKnownFailed)) {
     $changed = (git diff --name-only $oldRev $newRev 2>$null)
     "[update] changed files:" | Out-File -Append $log
     ($changed | ForEach-Object { "[update]   $_" }) | Out-File -Append $log
@@ -112,6 +119,13 @@ try {
     $inputs = "true"
     try { $inputs = (($changed | Out-String) | node (Join-Path $repo "scripts/build-inputs.mjs")) } catch {}
     if ($inputs -ne "false") { $needBuild = $true }
+  }
+
+  # Nothing changed that the build reads: the failed bundle is still the failed bundle, now on this commit.
+  if ($bundleKnownFailed -and -not $needBuild) {
+    $why = @(Get-Content "build/servicecue.failed" | Select-Object -Skip 1)
+    (@($newRev) + $why) | Set-Content "build/servicecue.failed"
+    "[update] the page bundle failed to build on the last build and no build input changed - not retrying (build/servicecue.failed)" | Out-File -Append $log
   }
 
   if ($needInstall) {

@@ -176,7 +176,11 @@ update is never stopped by it:
 [servicecue-bundle] FAILED, so this server cannot update the public ServiceCue page from this build (the app is unaffected): <reason>
 ```
 
-It removes whatever it had written, so a folder that is there is a finished one. An
+It removes whatever it had written, so a folder that is there is a finished one, and
+leaves `build/servicecue.failed` beside it: the commit it failed on, then the reason.
+A build that succeeds removes the marker. An update on a checkout with no bundle rebuilds,
+unless the marker names the commit the update starts from and nothing the build reads
+changed, in which case it does not retry; the marker then moves to the new commit. An
 update that changes the Worker, its config, the page's document or the shared contract
 rebuilds, and so does a change to anything the interface is built from. `version` in
 `deploy.json` is the version the folder was made at: a release that changes none of those

@@ -49,10 +49,12 @@ interface Case {
   changes: string[];
   /** Whether the checkout has the page's bundle from the last build. */
   hasBundle?: boolean;
+  /** A failure marker left by the last build: for the commit the update starts from, or an older one. */
+  marker?: "this-commit" | "older-commit";
 }
 
 /** One update, whole: what npm was asked to do. */
-function runUpdate(script: "update.sh" | "update.ps1", c: Case): string[] {
+function runUpdate(script: "update.sh" | "update.ps1", c: Case): { calls: string[]; marker: string | null; head: string } {
   const dir = fs.mkdtempSync(path.join(SCRATCH, "case-"));
   const origin = path.join(dir, "origin.git");
   const repo = path.join(dir, "repo");
@@ -72,6 +74,7 @@ function runUpdate(script: "update.sh" | "update.ps1", c: Case): string[] {
   // The checkout has been built before.
   fs.mkdirSync(path.join(repo, "build/renderer"), { recursive: true });
   if (c.hasBundle !== false) write(repo, "build/servicecue/deploy.json", "{}");
+  if (c.marker) write(repo, "build/servicecue.failed", `${c.marker === "this-commit" ? git(repo, "rev-parse", "HEAD").trim() : "0".repeat(40)}\nthe reason\n`);
 
   // The update lands: a second commit on origin, from another clone.
   const other = path.join(dir, "other");
@@ -102,7 +105,12 @@ function runUpdate(script: "update.sh" | "update.ps1", c: Case): string[] {
   const result = JSON.parse(fs.readFileSync(path.join(dir, "result.json"), "utf8")) as { ok: boolean };
   assert.equal(result.ok, true, log);
   const calls = path.join(dir, "npm-calls");
-  return fs.existsSync(calls) ? fs.readFileSync(calls, "utf8").trim().split("\n") : [];
+  const marker = path.join(repo, "build/servicecue.failed");
+  return {
+    calls: fs.existsSync(calls) ? fs.readFileSync(calls, "utf8").trim().split("\n") : [],
+    marker: fs.existsSync(marker) ? fs.readFileSync(marker, "utf8") : null,
+    head: git(repo, "rev-parse", "HEAD").trim(),
+  };
 }
 
 const SCRIPT_LIST: ["update.sh" | "update.ps1", boolean | string][] = [
@@ -113,23 +121,37 @@ const SCRIPT_LIST: ["update.sh" | "update.ps1", boolean | string][] = [
 for (const [script, available] of SCRIPT_LIST) {
   describe(`${script}, run whole`, { skip: available === true ? false : String(available) }, () => {
     test("a renderer change builds, and does not reinstall", () => {
-      assert.deepEqual(runUpdate(script, { changes: ["renderer/app/x.tsx"] }), ["run build"]);
+      assert.deepEqual(runUpdate(script, { changes: ["renderer/app/x.tsx"] }).calls, ["run build"]);
     });
 
     test("a change to the page's Worker builds", () => {
-      assert.deepEqual(runUpdate(script, { changes: ["publish/servicecue/src/hub.ts"] }), ["run build"]);
+      assert.deepEqual(runUpdate(script, { changes: ["publish/servicecue/src/hub.ts"] }).calls, ["run build"]);
     });
 
     test("a change to a module the interface and the page share builds", () => {
-      assert.deepEqual(runUpdate(script, { changes: ["main/services/clamp.ts"] }), ["run build"]);
+      assert.deepEqual(runUpdate(script, { changes: ["main/services/clamp.ts"] }).calls, ["run build"]);
     });
 
     test("a change to docs only builds nothing", () => {
-      assert.deepEqual(runUpdate(script, { changes: ["docs/ops/x.md", "README.md"] }), []);
+      assert.deepEqual(runUpdate(script, { changes: ["docs/ops/x.md", "README.md"] }).calls, []);
     });
 
-    test("a checkout with no page bundle, because the last bundle failed, reinstalls and builds even for docs", () => {
-      assert.deepEqual(runUpdate(script, { changes: ["docs/ops/x.md"], hasBundle: false }), ["ci --include=dev", "run build"]);
+    test("a checkout with no page bundle and no failure marker reinstalls and builds even for docs", () => {
+      assert.deepEqual(runUpdate(script, { changes: ["docs/ops/x.md"], hasBundle: false }).calls, ["ci --include=dev", "run build"]);
+    });
+
+    test("a missing bundle that the last build failed to make, on this commit, is not retried for docs, and the marker follows the commit", () => {
+      const r = runUpdate(script, { changes: ["docs/ops/x.md"], hasBundle: false, marker: "this-commit" });
+      assert.deepEqual(r.calls, []);
+      assert.equal(r.marker, `${r.head}\nthe reason\n`, "the marker still names the commit the checkout is on, so the next update can tell");
+    });
+
+    test("a build input still builds, marker or not", () => {
+      assert.deepEqual(runUpdate(script, { changes: ["publish/servicecue/src/hub.ts"], hasBundle: false, marker: "this-commit" }).calls, ["run build"]);
+    });
+
+    test("a marker from an older commit is not trusted: the bundle is retried", () => {
+      assert.deepEqual(runUpdate(script, { changes: ["docs/ops/x.md"], hasBundle: false, marker: "older-commit" }).calls, ["ci --include=dev", "run build"]);
     });
   });
 }
