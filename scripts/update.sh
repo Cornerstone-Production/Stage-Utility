@@ -121,8 +121,10 @@ write_result() {
     MANIFEST="$(node "$REPO/scripts/manifest-changed.mjs" "$OLD_REV" "$NEW_REV" 2>/dev/null || echo '{"deps":true,"manifest":true}')"
     case "$MANIFEST" in *'"deps":true'*) NEED_INSTALL=1; NEED_BUILD=1 ;; esac
     case "$MANIFEST" in *'"manifest":true'*) NEED_BUILD=1 ;; esac
-    # Any renderer/build input change → rebuild the bundle.
-    if echo "$CHANGED" | grep -qE '^(renderer/|index\.html|vite\.config|tailwind\.config|postcss\.config|tsconfig)'; then NEED_BUILD=1; fi
+    # Any renderer/build input change → rebuild the bundle. The public ServiceCue page's
+    # bundle (build/servicecue) is made by the same build, from the Worker's source, its
+    # config and the shared contract, so those count too.
+    if echo "$CHANGED" | grep -qE '^(renderer/|index\.html|servicecue\.html|vite\.config|vite\.servicecue\.config|tailwind\.config|postcss\.config|tsconfig|publish/servicecue/(src|wrangler)|main/types/servicecue-publish\.ts|scripts/servicecue-bundle\.ts)'; then NEED_BUILD=1; fi
   fi
 
   if [ "$NEED_INSTALL" = "1" ]; then

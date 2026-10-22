@@ -107,7 +107,7 @@ try {
     try { $manifest = (node (Join-Path $repo "scripts/manifest-changed.mjs") $oldRev $newRev) } catch {}
     if ($manifest -match '"deps":true') { $needInstall = $true; $needBuild = $true }
     if ($manifest -match '"manifest":true') { $needBuild = $true }
-    if ($changed -match '^(renderer/|index\.html|vite\.config|tailwind\.config|postcss\.config|tsconfig)') { $needBuild = $true }
+    if ($changed -match '^(renderer/|index\.html|servicecue\.html|vite\.config|vite\.servicecue\.config|tailwind\.config|postcss\.config|tsconfig|publish/servicecue/(src|wrangler)|main/types/servicecue-publish\.ts|scripts/servicecue-bundle\.ts)') { $needBuild = $true }
   }
 
   if ($needInstall) {

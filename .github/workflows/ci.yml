@@ -165,6 +165,17 @@ jobs:
       - name: Test
         run: npm --prefix publish/servicecue test
 
+      # The bundle a server uploads (build/servicecue) against what `wrangler deploy
+      # --dry-run` produces. It needs the root package's build tooling as well as the
+      # Worker's wrangler, which no other job has both of; the root shards skip it.
+      - name: Install the root dependencies
+        run: npm ci --include=dev
+
+      - name: The bundle is what wrangler uploads
+        run: node --import tsx --test scripts/servicecue-bundle-wrangler.test.ts
+        env:
+          SERVICECUE_REQUIRE_WRANGLER: "1"
+
   # The one check that says the whole gate passed. It runs whatever the others
   # did, so a failed shard turns it red rather than leaving it skipped; a
   # cancelled run stays cancelled rather than reading as a failure; and a skipped
