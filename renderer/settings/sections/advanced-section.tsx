@@ -33,6 +33,7 @@ import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon
 import { DataArchivePanel } from "./data-archive-panel";
 import { HostNamesCard } from "./host-names-card";
 import { HistoryMilestonesPanel } from "./history-milestones-panel";
+import { VideoRelayFfmpegPanel } from "./video-relay-ffmpeg";
 import { VideoRelayPortsPanel, VIDEO_PORTS_FLASH_ID } from "./video-relay-ports";
 import { BarConfigurator } from "../../app/bar-configurator";
 import { clockOptions, formatClock } from "../../lib/clock-format";
@@ -1434,6 +1435,7 @@ export function AdvancedSection({
             <h3 className="text-callout font-semibold text-fg">Video relay</h3>
           </div>
           <VideoRelayPortsPanel />
+          <VideoRelayFfmpegPanel />
         </div>
       </div>
 

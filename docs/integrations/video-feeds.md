@@ -61,6 +61,78 @@ names folders relative to the data folder and a busy port's holder by
 program name only. The server log has the full path and the holder's
 process id.
 
+### ffmpeg
+
+The Video relay's audio conversion runs the operating system's own ffmpeg as a
+separate process. The server never downloads or bundles it, so system updates
+patch it. Video itself works without it. The server finds ffmpeg, checks it, and
+shows the result under **Advanced, Video relay, ffmpeg**.
+
+| Platform | Install |
+|---|---|
+| Linux | `sudo apt install ffmpeg` (or your distribution's package) |
+| macOS | `brew install ffmpeg`. The Homebrew formula installs it with Stage Utility |
+| Windows | `winget install ffmpeg` |
+
+**Where it looks,** in this order: the path set in Advanced; every absolute
+directory on `PATH` (a relative or empty entry is skipped); then
+`/opt/homebrew/bin` and `/usr/local/bin` on macOS and Linux, because a launchd
+service starts with no Homebrew on its `PATH`. When a path is set, only that path
+is tried, and one that does not run is reported rather than replaced by another
+ffmpeg.
+
+**What it will run.** The path is a setting, so the server only runs an ffmpeg
+that passes all of these, whether it came from Advanced, `PATH` or a Homebrew
+directory:
+
+- its file name is exactly `ffmpeg` (`ffmpeg.exe` on Windows, in any case);
+- the file it resolves to after following symlinks is named the same, so a link
+  called `ffmpeg` that points at another program is refused while Homebrew's link
+  into its Cellar is not (the log line names the target);
+- on macOS and Linux, that file is not writable by group or other users and its
+  folder is not writable by other users, which rules out `/tmp` and `/var/tmp`;
+- on Windows, the file is on a local drive: a path set in Advanced, and the file
+  it resolves to, must not be a network share or `\\?\` device path.
+
+What this does not check:
+
+- On macOS and Linux only the file and its immediate folder are looked at, not
+  the folders above it. A folder writable by its group is allowed, because
+  Intel Homebrew's `/usr/local/bin` is one.
+- On Windows the file's folder is not checked for who can write to it. Keep
+  ffmpeg in Program Files or a folder only administrators can write.
+- A mapped network drive (`Z:` on a share) looks like a local drive and is not
+  detected.
+
+A refused one is named in the status line and the log. When it was found on
+`PATH` or in a Homebrew directory, the search carries on to the next candidate.
+
+The path is specific to this machine. It is kept in `video-ffmpeg.json`, which is
+never in a backup or a feeds export and is ignored by an import.
+
+**What it must be able to do:** decode AAC, encode Opus (`libopus`), read HTTP
+and write RTSP. That is checked once, by running `ffmpeg -version`, `-decoders`,
+`-encoders`, `-protocols` and `-muxers` (each given 10 seconds). The answer, good
+or bad, is remembered until the path is saved again, so a newly installed ffmpeg
+is picked up with **Save and check again** under Advanced, not a restart. Each
+save runs those five commands, so saves are taken one at a time, simultaneous
+ones share one check, and an unchanged path saved again within 10 seconds reuses
+the last answer.
+
+**What is shown.** The status line, like the rest of what a browser on the
+network can read, names no folder:
+
+- A usable ffmpeg reads `ffmpeg <version>, found automatically` (on `PATH`),
+  `found in a Homebrew folder`, or `at the path set above`.
+- Otherwise it says what is missing or refused, in words that name no folder
+  (`ffmpeg is not installed on this server`, `ffmpeg was found but it cannot
+  encode Opus (libopus)`, `the ffmpeg found was refused: it is in a folder anyone
+  can write to`), and gives this platform's install command.
+
+`GET /api/video/ffmpeg` answers the same. The server log has the full paths,
+including where a symlink resolves to. The file the checks ran against is
+internal: code that runs ffmpeg starts that file, never the link.
+
 Once running, the relay is a child process of this server. If it exits for
 any reason it is restarted automatically, backing off from 1 second up to 60
 between attempts, and it never gives up.
@@ -587,6 +659,10 @@ from the server:
 - Downloading the pinned MediaMTX release, and a checksum that does not
   match — from a fresh download or a hand-placed archive — refused rather
   than run, with where to place the archive by hand.
+- ffmpeg, once per check: `ffmpeg <version> at <path>` when it is found and
+  capable, `ffmpeg is not installed on this server`, `ffmpeg was not found at
+  the path set in Advanced`, or `found at <path> but it cannot <what>`. A check
+  runs the first time something asks and again only after the path is saved.
 - `removed old relay files (...), freeing N MB` when a release bump leaves
   earlier versions behind and they are cleared, only when something was
   removed; `could not remove old relay file <name>` when one cannot be.
