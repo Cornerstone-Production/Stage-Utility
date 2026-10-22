@@ -215,6 +215,9 @@ const REQUEST_FACING = [
   // outside data by every measure this file uses, and the same exposure
   // pco-service.ts is scanned for.
   "service-timeline-recorder.ts",
+  // Its lines name a build id and version read out of what Cloudflare holds, and Cloudflare's own
+  // error words, which echo what a request carried. It never names a token.
+  "servicecue-deployer.ts",
   // Its lines name the host of the page address typed into POST /api/servicecue/publish,
   // a document key built from Planning Center ids, and whatever the page or the network
   // said back. It never names the token.
@@ -520,6 +523,8 @@ function requestFacingFiles(): string[] {
     // and, for the timeline, on the carried-over-item line. A title is typed
     // into Planning Center and reaches this process in an HTTP response body.
     path.join(HERE, "service-timeline-recorder.ts"),
+    // Its lines name what Cloudflare answered; see REQUEST_FACING.
+    path.join(HERE, "servicecue-deployer.ts"),
     // Its lines name the host of the page address typed into POST /api/servicecue/publish
     // and whatever the page or the network said back; see REQUEST_FACING.
     path.join(HERE, "servicecue-publisher.ts"),

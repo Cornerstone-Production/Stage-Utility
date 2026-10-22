@@ -46,8 +46,9 @@ export interface WrittenBundle {
 }
 
 /** A folder of the real shape. `manifest` overrides fields of deploy.json; `files` is the page; `worker` the module. */
-export function writeBundle(opts: { manifest?: Partial<DeployManifest>; files?: Record<string, string>; worker?: string } = {}): WrittenBundle {
-  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "servicecue-fixture-")), "servicecue");
+export function writeBundle(opts: { manifest?: Partial<DeployManifest>; files?: Record<string, string>; worker?: string; dir?: string } = {}): WrittenBundle {
+  const dir = opts.dir ?? path.join(fs.mkdtempSync(path.join(os.tmpdir(), "servicecue-fixture-")), "servicecue");
+  fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "public"), { recursive: true });
   fs.writeFileSync(path.join(dir, "worker.js"), opts.worker ?? "export default { fetch() { return new Response('ok'); } };\nexport class PublishHub {}\n");
   for (const [name, text] of Object.entries(opts.files ?? FILES)) {
@@ -56,5 +57,5 @@ export function writeBundle(opts: { manifest?: Partial<DeployManifest>; files?: 
     fs.writeFileSync(file, text);
   }
   fs.writeFileSync(path.join(dir, "deploy.json"), JSON.stringify({ ...MANIFEST, ...opts.manifest }, null, 2));
-  return { dir, remove: () => fs.rmSync(path.dirname(dir), { recursive: true, force: true }) };
+  return { dir, remove: () => fs.rmSync(opts.dir ?? path.dirname(dir), { recursive: true, force: true }) };
 }

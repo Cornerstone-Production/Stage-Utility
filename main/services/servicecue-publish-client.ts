@@ -94,7 +94,7 @@ export type PageHolds = Pick<PublishStatus, "docs" | "assets">;
 /** What a request that worked may carry back: the status answer, or the manifest's removals. */
 export interface PushOk {
   ok: true;
-  page?: PageHolds;
+  page?: PageStatus;
   /** From the manifest: what the page deleted because the manifest did not name it. */
   removed?: { docs: string[]; assets: string[] };
 }

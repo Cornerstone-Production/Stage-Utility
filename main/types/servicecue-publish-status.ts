@@ -70,6 +70,64 @@ export interface PublisherStatus {
   now: number;
 }
 
+
+// ── Keeping the page up to date ──────────────────────────────────────────────
+
+/**
+ * Where updating the public page itself stands, from this server's side.
+ *
+ *  off        no Cloudflare API token is set for this page: nothing updates it from here
+ *  unchecked  a token is set, and the page's build has not been read: publishing is off, or has not reached the page yet
+ *  current    the page is the build this server carries
+ *  updating   a deploy is under way
+ *  waiting    a service is live; the update goes out when it ends
+ *  failed     the last attempt did not work, or a read of what is deployed did not; the page is unchanged
+ *  newer      the page was deployed from a newer version than this server runs; it is left as it is
+ *  no-bundle  this build carries no copy of the page, so there is nothing to deploy
+ */
+export type DeployState = "off" | "unchecked" | "current" | "updating" | "waiting" | "failed" | "newer" | "no-bundle";
+
+export interface DeployError {
+  /** Cloudflare's own words, or this side's when there was no answer. Never a token. */
+  message: string;
+  /** Cloudflare's error code, when it gave one. */
+  code: number | null;
+  /** The HTTP status, when it answered. */
+  status: number | null;
+  /** Which request: "verify the token", "upload the files". */
+  step: string;
+  /** Epoch ms of the attempt. */
+  at: number;
+  /** The token is refused (401 or 403): no retry until it changes. */
+  refused: boolean;
+  /** Epoch ms of the next attempt, or null when there will not be one on its own. */
+  retryAt: number | null;
+}
+
+export interface DeployStatus {
+  state: DeployState;
+  /** The Cloudflare account ID, or "" before one is set. Not a secret. */
+  accountId: string;
+  /** The mask when an API token is stored for this page's address, "" when none is. The token itself never leaves. */
+  token: string;
+  /** The page this build carries: the build id and the version it was made at (which can be older than the running version). Null when there is none. */
+  bundle: { build: string; version: string } | null;
+  /** Why there is no copy of the page, while `state` is "no-bundle". */
+  noBundle: string | null;
+  /** The version this server runs: what the no-downgrade rule compares. */
+  runningVersion: string;
+  /** What the page serves, as far as is known: its build, the version it was deployed from (null when it was deployed by hand), and when. */
+  page: { build: string | null; version: string | null; at: number | null } | null;
+  /** The last deploy's files: how many were uploaded (the number to upload, while `state` is "updating") and how many Cloudflare already held. */
+  files: { uploaded: number; held: number } | null;
+  /** Why an update is not going out yet, while `state` is "waiting". */
+  waiting: "service-live" | null;
+  /** The last failure, until a deploy or a read works again. */
+  error: DeployError | null;
+  /** The server's clock when this was built. */
+  now: number;
+}
+
 /** What GET and POST /api/servicecue/publish answer. */
 export interface PublishSettingsDTO {
   enabled: boolean;
@@ -78,6 +136,8 @@ export interface PublishSettingsDTO {
   /** The mask when a token is stored for this address, "" when none is. The token itself never leaves. */
   token: string;
   status: PublisherStatus;
+  /** Keeping the page itself up to date: see DeployStatus. */
+  deploy: DeployStatus;
   /**
    * Set only on the answer to a request that switched publishing off or moved it to another
    * address: whether the old page was asked to drop its copy and agreed. A failure here means
