@@ -15,6 +15,7 @@ import * as http from "node:http";
 // A page on this machine is plain http, which the address rules accept only under this switch (development).
 process.env.STAGE_UTILITY_PUBLISH_ALLOW_LOCAL = "1";
 
+import type { PublishStatus } from "../../types/servicecue-publish.js";
 import { handle } from "../../../publish/servicecue/src/handle.js";
 import { MemoryHub } from "../../../publish/servicecue/src/memory-hub-harness.js";
 
@@ -40,7 +41,7 @@ export interface Answer {
 }
 
 /** A status answer with nothing stored and no heartbeat yet, for a test that needs a fixed one. */
-export const PAGE_STATUS = { protocol: 1, docs: [] as string[], assets: [] as string[], lastHeartbeat: null, viewers: 0 };
+export const PAGE_STATUS = { protocol: 1, docs: [] as string[], assets: [] as string[], lastHeartbeat: null, viewers: 0, build: null } satisfies PublishStatus;
 
 const DOC = /^\/_publish\/v1\/doc\/([^/]+)$/;
 const ASSET = "/_publish/v1/asset/";
@@ -68,6 +69,8 @@ export class FakeReceiver {
   };
   /** The token the page was set up with. null: whatever a request carries is it (the handler still refuses one under 32 characters). */
   token: string | null = null;
+  /** The page's document, which the Worker reads its build id from. null: the deploy has none. */
+  document: string | null = null;
   /** How to answer. `"hang"` never does: the sender's own ceiling is what ends it. */
   respond: (req: Received) => Answer | "hang" | Promise<Answer> = (req) => this.worker(req);
 
@@ -84,7 +87,7 @@ export class FakeReceiver {
     const response = await handle(request, {
       hub: this.hub,
       upgrade: async () => new Response("no sockets here", { status: 501 }),
-      assets: async () => new Response("missing", { status: 404 }),
+      assets: async () => (this.document === null ? new Response("missing", { status: 404 }) : new Response(this.document, { headers: { "Content-Type": "text/html" } })),
       token: this.token ?? bearer ?? "",
       now: () => Date.now(),
     });

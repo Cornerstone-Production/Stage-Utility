@@ -147,6 +147,45 @@ A change to ServiceCue reaches the public page when you run `npm run servicecue:
 again. The docs and rundowns the page shows are not part of the deploy: they come from
 what Stage Utility sends.
 
+### The copy every build prepares
+
+Every build of Stage Utility, a release archive included, also prepares the public page
+for upload, in `build/servicecue/`:
+
+| File | What it is |
+|---|---|
+| `worker.js` | The Worker as one module, the same one `wrangler deploy` uploads |
+| `public/` | The built page: every file the asset service serves |
+| `deploy.json` | The build id of the page, the app's version, the Worker's compatibility date and flags, its asset rules, its bindings and variables, its Durable Object `exports`, and `keep_bindings`, each read from `wrangler.jsonc` and the build |
+
+The page's `_headers` file is not in `public/`. Wrangler does not upload it as an asset:
+it reads it as configuration and sends its text in the assets config. `deploy.json` does
+the same, in `assets._headers` beside `run_worker_first`, so `assets` is the config an
+upload sends as it stands and `public/` is the list of files to upload. `keep_bindings`
+(`secret_text`, `secret_key`) is what keeps the publishing token across an upload that
+does not name it, as it does for `wrangler deploy`.
+
+`npm run servicecue:bundle` makes the same folder on its own. It needs nothing but what
+`npm ci --include=dev` installs: not wrangler, not a login. It does not touch
+`publish/servicecue/public/` or change what `npm run servicecue:deploy` does.
+
+A build that cannot make the folder says so in the update log and carries on, so an
+update is never stopped by it:
+
+```
+[servicecue-bundle] FAILED, so this server cannot update the public ServiceCue page from this build (the app is unaffected): <reason>
+```
+
+It removes whatever it had written, so a folder that is there is a finished one, and
+leaves `build/servicecue.failed` beside it: the commit it failed on, then the reason.
+A build that succeeds removes the marker. An update on a checkout with no bundle rebuilds,
+unless the marker names the commit the update starts from and nothing the build reads
+changed, in which case it does not retry; the marker then moves to the new commit. An
+update that changes the Worker, its config, the page's document or the shared contract
+rebuilds, and so does a change to anything the interface is built from. `version` in
+`deploy.json` is the version the folder was made at: a release that changes none of those
+leaves the folder, and its version, as they were.
+
 A page someone left open reloads itself, once, soon after a deploy that changed the
 page, and keeps the address it was on
 ([how](../reference/servicecue-publishing.md#reloading-after-a-deploy)).

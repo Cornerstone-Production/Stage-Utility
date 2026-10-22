@@ -62,7 +62,7 @@ jobs:
       - name: Lint, type-check, build
         run: |
           set -euo pipefail
-          npm ci --include=dev && npm run lint && npm run type-check && npm run build
+          npm ci --include=dev && npm run lint && npm run type-check && npx vite build && npm run servicecue:bundle
 
   verify-tests:
     name: verify tests (${{ matrix.shard }}/4)
