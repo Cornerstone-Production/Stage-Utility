@@ -41,7 +41,7 @@ the URL can cause) is logged on the integration's tagged line, by origin only,
 and the pinned URL is the one sent.
 
 `main/services/pinned-fetch.test.ts` holds the guards. The brand is checked by
-`tsc`, each helper is run against a forged URL, and a parse of the five files with
+`tsc`, each helper is run against a forged URL, and a parse of the credentialed files with
 the TypeScript compiler API asserts the exact list of `fetch` call sites in them.
 
 | Integration | Fetch function | Pinned to |
@@ -52,6 +52,7 @@ the TypeScript compiler API asserts the exact list of `fetch` call sites in them
 | SafeSpace | `safeSpaceFetch` in `main/services/safespace-client.ts` | `https://app.safespace.io` |
 | ProVideoPlayer | `pvpFetch` in `main/services/pvp-service.ts` | the operator's configured `scheme://host:port` |
 | ServiceCue publishing | `publishFetch` in `main/services/servicecue-publish-client.ts` | the operator's configured page origin |
+| ServiceCue page deploys | `cloudflareFetch` in `main/services/servicecue-cloudflare.ts` | `https://api.cloudflare.com` |
 
 ### Planning Center
 
@@ -104,6 +105,18 @@ been through it stays tainted. The fixture
 `.github/codeql/tests/models/main/services/publish-forgery.ts` requests once from the raw
 address, which must alert, and once from the parsed origin, which must not; removing the
 model makes the second alert too. The alert is not dismissed and carries no suppression.
+
+### ServiceCue page deploys
+
+The server keeps the public page up to date through Cloudflare's API with an API token
+the operator enters. `cloudflareFetch` takes a `CloudflareOrigin` (`cloudflareOrigin()`:
+`https://api.cloudflare.com`, or plain `http` to a loopback address, which the server
+accepts from the environment only while publishing to this machine is already allowed)
+and a `CloudflareUrl` (`cloudflareUrl(origin, path)`), and re-pins the URL, so the token
+cannot leave for another host. It is the only `fetch` in the file, it never follows a
+redirect, and the file takes the token out of anything a failure says. The upload and
+completion tokens Cloudflare hands back travel only to the same origin, through the same
+function.
 
 ## Cached responses
 
