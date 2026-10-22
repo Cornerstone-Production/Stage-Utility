@@ -8,7 +8,11 @@ and displays read from.
 
 Stage talks to PCO's Services v2 REST API
 (`https://api.planningcenteronline.com/services/v2`) using **Basic Auth** — a
-Personal Access Token's App ID + Secret. Every request pins the API version with
+Personal Access Token's App ID + Secret. A [slot](../slots.md) linked to a person
+who is not on any Services team also reads that person from the People API with the
+same credentials, so the token needs People read access for those slots; without it
+`/log` shows `[pco] could not read Planning Center person <id>; retrying in 10 min: People API: … 403`.
+Every request pins the API version with
 an `X-PCO-API-Version` header (see [API version](#api-version)). The client
 (`pco-service.ts`) flattens JSON:API responses into slim DTOs and caches by
 volatility:
@@ -153,6 +157,7 @@ beside its pin:
 |---|---|---|---|
 | Services | `PCO_API_VERSION` | `2018-11-01` | `pco-service.ts` |
 | Calendar | `CALENDAR_API_VERSION` | `2026-06-22` | `pco-calendar-service.ts` |
+| People | `PEOPLE_API_VERSION` | `2026-10-05` | `pco-service.ts` |
 
 Always an exact date, never a "give me the newest" sentinel — a floating request
 would let a PCO release change field names, defaults or pagination under a running
@@ -160,11 +165,15 @@ install with no code change here. Services publishes exactly two versions,
 `2018-08-01` (deprecated, documented as identical) and `2018-11-01`, so its pin is
 the newest. The single documented difference between them is that `2018-11-01`
 makes the `/people` endpoint respect the "Can view people not on My Teams"
-permission; Stage calls no `/people` endpoint. Calendar publishes five —
+permission; Stage reads only one person by ID from it (`/people/:id`, for a
+by-person slot), which is not affected. People publishes eighteen, newest
+`2026-10-05`, and is reached only for that same read: Services answers 404 for a
+person never added to Services, so the by-ID read then asks
+`/people/v2/people/:id`. Calendar publishes five —
 `2018-08-01`, `2020-04-08`, `2021-07-20`, `2022-07-07` and `2026-06-22` — and its
 pin is the newest of those.
 
-Both pins are typed as a union of their own product's published versions, so
+The pins are typed as a union of their own product's published versions, so
 another product's date does not compile, and `pco-api-version.test.ts` runs PCO's
 resolution rule over each list and fails when a pin does not resolve to itself.
 
