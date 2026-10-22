@@ -1,9 +1,9 @@
 // servicecue-cloudflare.ts — the public ServiceCue page, put on Cloudflare by plain `fetch`.
 //
-// What `wrangler deploy` does for the Worker in publish/servicecue/, from the folder every build
-// prepares (build/servicecue/, see scripts/servicecue-bundle.ts): no SDK, no wrangler, no login.
-// Every request and every field here is what wrangler 4.150 sends; the places it is not are
-// said where they are. Nothing here decides WHEN to deploy: that is servicecue-deployer.ts.
+// What `wrangler deploy` (4.150) does for the Worker in publish/servicecue/, from the folder every
+// build prepares (build/servicecue/, see scripts/servicecue-bundle.ts): no SDK, no wrangler, no
+// login. Every request and field is wrangler's; the places that are not say so. Nothing here
+// decides WHEN to deploy: that is servicecue-deployer.ts.
 //
 //   1. GET  /user/tokens/verify                        is the token still good
 //   2. POST /accounts/:id/workers/scripts/:name/assets-upload-session
@@ -30,7 +30,9 @@ import * as path from "node:path";
 
 import { errorMessage, fetchFailureMessage } from "./errors.js";
 import { readCapped } from "./capped-download.js";
+import { isRecord } from "./is-record.js";
 import { pinToOrigin } from "./pinned-origin.js";
+import { parseTag } from "./release-tags.js";
 import { isViewerBuildId } from "../types/servicecue-publish.js";
 import type { DeployBinding, DeployManifest } from "../types/servicecue-deploy.js";
 
@@ -45,7 +47,7 @@ export type CloudflareOrigin = string & { readonly [CLOUDFLARE_ORIGIN]: true };
 /**
  * Cloudflare's API, or this machine standing in for it: plain http to a loopback address is
  * accepted so a test (and a developer's fake) can be dialled, and nothing else is. Whether the
- * server may be pointed at one is the caller's: servicecue-deployer-instance.ts reads it from the
+ * server may be pointed at one is the caller's: servicecue-publisher-instance.ts reads it from the
  * environment only while publishing to this machine is already allowed.
  */
 export function cloudflareOrigin(text: string = CLOUDFLARE_API_ORIGIN): CloudflareOrigin {
@@ -94,8 +96,16 @@ export class CloudflareError extends Error {
   get refused(): boolean {
     return this.status === 401 || this.status === 403;
   }
+
+  /** For the log and the terminal: `at "upload the files" (HTTP 500, code 10013): <Cloudflare's words>`. */
+  describe(): string {
+    const answer = this.status === null ? "no answer" : `HTTP ${this.status}`;
+    return `at "${this.step}" (${answer}${this.code === null ? "" : `, code ${this.code}`}): ${this.message}`;
+  }
 }
 
+/** How long one request may take. */
+const REQUEST_TIMEOUT_MS = 60_000;
 /** Longest part of Cloudflare's words that is kept: they reach the log and the card. */
 const MAX_MESSAGE = 400;
 /** The largest answer read: every one is a small JSON document. */
@@ -107,8 +117,6 @@ interface Envelope {
   result?: unknown;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-
 // ── The files ────────────────────────────────────────────────────────────────
 
 /** wrangler's own size ceiling for one asset. */
@@ -116,11 +124,7 @@ export const MAX_ASSET_BYTES = 25 * 1024 * 1024;
 /** What wrangler never uploads as an asset, found at the root of the folder. `_headers` is config: see DeployManifest. */
 const NOT_ASSETS = new Set(["/.assetsignore", "/_redirects", "/_headers"]);
 
-/**
- * wrangler's content types, from the `mime` package it bundles (4.0.7), for what a page build writes.
- * A type it does not know has none (`application/null` on the wire), as in wrangler. Text types
- * carry a charset, as wrangler adds.
- */
+/** wrangler's content types for what a page build writes (its bundled `mime`); an unknown type has none, and text gets a charset. */
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
   avif: "image/avif",
   css: "text/css",
@@ -154,12 +158,7 @@ export function contentTypeOf(file: string): string | null {
   return type.startsWith("text/") ? `${type}; charset=utf-8` : type;
 }
 
-/**
- * What Cloudflare calls a file: 32 hex digits of the BLAKE3 hash of the file's base64 text followed
- * by its extension, as wrangler computes it (hashFile in its source). The docs page for direct
- * uploads says SHA-256; wrangler 4.150 does not use it, and a hash only dedupes against uploads
- * made the same way, so this one matches the tool that made the files already on the Worker.
- */
+/** What Cloudflare calls a file: 32 hex digits of the BLAKE3 hash of its base64 text and extension, as wrangler computes it (the direct-upload docs say SHA-256). */
 export function assetHash(bytes: Uint8Array, file: string): string {
   const base64 = Buffer.from(bytes).toString("base64");
   return bytesToHex(blake3(utf8ToBytes(base64 + path.extname(file).slice(1)))).slice(0, 32);
@@ -192,7 +191,9 @@ export function failureMarkerOf(dir: string): string {
   return `${dir}.failed`;
 }
 
-const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+/** A Cloudflare account ID: 32 lower-case hex digits. */
+export const ACCOUNT_ID_PATTERN = /^[0-9a-f]{32}$/;
+const isVersion = (text: string): boolean => parseTag(`v${text}`) !== null;
 const WORKER_NAME = /^[A-Za-z0-9_-]{1,63}$/;
 const BINDING_TYPES: Readonly<Record<string, readonly string[]>> = {
   assets: ["name"],
@@ -212,7 +213,7 @@ export function parseManifest(raw: unknown): DeployManifest {
   const { name, build, version, mainModule, compatibilityDate, compatibilityFlags, protocol, assets, bindings, keep_bindings: keep, exports } = raw;
   if (typeof name !== "string" || !WORKER_NAME.test(name)) bad("has no usable Worker name");
   if (!isViewerBuildId(build)) bad("has no build id");
-  if (typeof version !== "string" || !SEMVER.test(version)) bad("has no version");
+  if (typeof version !== "string" || !isVersion(version)) bad("has no version");
   if (typeof mainModule !== "string" || !/^[A-Za-z0-9._-]+$/.test(mainModule)) bad("has no usable main module");
   if (typeof compatibilityDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(compatibilityDate)) bad("has no compatibility date");
   if (!isStringList(compatibilityFlags)) bad("has compatibility flags that are not a list of names");
@@ -223,7 +224,7 @@ export function parseManifest(raw: unknown): DeployManifest {
     const fields = isRecord(b) && typeof b.type === "string" ? BINDING_TYPES[b.type] : undefined;
     if (!isRecord(b) || !fields || !fields.every((f) => typeof b[f] === "string")) bad(`has a binding it cannot read: ${JSON.stringify(b)?.slice(0, 80)}`);
   }
-  if (!isStringList(keep)) bad("has no keep_bindings list");
+  if (!isStringList(keep) || !keep.includes("secret_text")) bad("does not keep secret_text bindings, which would delete the publishing token");
   if (!isRecord(exports)) bad("has no exports");
   return raw as unknown as DeployManifest;
 }
@@ -268,9 +269,8 @@ function walk(dir: string, rel = ""): string[] {
   });
 }
 
-/** The whole folder: manifest, Worker module and every page file, hashed. */
-export function readBundle(dir: string): LoadedBundle {
-  const manifest = readManifest(dir);
+/** The whole folder: manifest (read here unless the caller has), Worker module and every page file, hashed. */
+export function readBundle(dir: string, manifest: DeployManifest = readManifest(dir)): LoadedBundle {
   try {
     const worker = fs.readFileSync(path.join(dir, manifest.mainModule));
     const publicDir = path.join(dir, "public");
@@ -298,9 +298,6 @@ export interface CloudflareOptions {
   token: string;
   /** The Worker's name. */
   script: string;
-  /** How long one request may take. */
-  timeoutMs?: number;
-  signal?: AbortSignal;
 }
 
 /** What Cloudflare holds of the page's last deploy: the build and version this server annotated it with. */
@@ -317,10 +314,7 @@ export interface DeployedFiles {
   held: number;
 }
 
-/**
- * What wrangler sends with a Worker that has Durable Object classes: they change under a new
- * version a little at a time, not all at once (its DEFAULT_DURABLE_OBJECTS_CODE_UPDATE_STRATEGY).
- */
+/** wrangler's default for a Worker with Durable Object classes. */
 const DURABLE_OBJECT_UPDATES = { mode: "deferred", max_delay: 300 } as const;
 
 /** "Stage Utility 1.28.0": the message this server puts on the version it uploads, and reads the version back from. */
@@ -330,7 +324,13 @@ export const DEPLOY_MESSAGE_PREFIX = "Stage Utility ";
 export function versionOfMessage(message: unknown): string | null {
   if (typeof message !== "string" || !message.startsWith(DEPLOY_MESSAGE_PREFIX)) return null;
   const version = message.slice(DEPLOY_MESSAGE_PREFIX.length);
-  return SEMVER.test(version) ? version : null;
+  return isVersion(version) ? version : null;
+}
+
+/** The one clear failure for a Worker that is not there: creating it is the manual first-time step, never an upload's side effect. */
+function missingWorker(err: unknown, script: string): unknown {
+  if (!(err instanceof CloudflareError) || err.status !== 404) return err;
+  return new CloudflareError(`the Worker '${script}' does not exist on this account, or this token has no role on it: create it once by hand, and give the token Editor on it (docs/ops/servicecue-on-the-web.md)`, 404, err.code, "check the Worker exists");
 }
 
 export interface CloudflareClient {
@@ -351,8 +351,8 @@ function jwtPayload(jwt: string): Record<string, unknown> {
 }
 
 export function createCloudflare(opts: CloudflareOptions): CloudflareClient {
-  const { origin, accountId, token, script, signal, timeoutMs = 60_000 } = opts;
-  if (!/^[0-9a-f]{32}$/.test(accountId)) throw new Error("the Cloudflare account ID is 32 letters and digits");
+  const { origin, accountId, token, script } = opts;
+  if (!ACCOUNT_ID_PATTERN.test(accountId)) throw new Error("the Cloudflare account ID is 32 letters and digits");
   if (!WORKER_NAME.test(script)) throw new Error("the Worker's name is not one Cloudflare takes");
   const account = `/accounts/${accountId}`;
   const scriptPath = `${account}/workers/scripts/${encodeURIComponent(script)}`;
@@ -368,7 +368,7 @@ export function createCloudflare(opts: CloudflareOptions): CloudflareClient {
   /** One request. The result is the answer's `result`; anything else throws a CloudflareError. */
   async function call(step: string, method: string, apiPath: string, init: { bearer?: string; body?: BodyInit; contentType?: string; query?: Record<string, string> } = {}): Promise<unknown> {
     const query = init.query ? `?${new URLSearchParams(init.query).toString()}` : "";
-    const timeout = AbortSignal.timeout(timeoutMs);
+    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     let res: Response;
     try {
       res = await cloudflareFetch(origin, cloudflareUrl(origin, `${apiPath}${query}`), {
@@ -377,11 +377,10 @@ export function createCloudflare(opts: CloudflareOptions): CloudflareClient {
         body: init.body,
         // Never followed: a redirect would carry the token where the answer pointed.
         redirect: "error",
-        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        signal: timeout,
       });
     } catch (err) {
-      if ((err as { name?: string } | null)?.name === "TimeoutError") throw new CloudflareError(`Cloudflare did not answer within ${timeoutMs / 1000} seconds`, null, null, step);
-      if ((err as { name?: string } | null)?.name === "AbortError") throw new CloudflareError("Stopped", null, null, step);
+      if ((err as { name?: string } | null)?.name === "TimeoutError") throw new CloudflareError(`Cloudflare did not answer within ${REQUEST_TIMEOUT_MS / 1000} seconds`, null, null, step);
       throw new CloudflareError(redact(fetchFailureMessage(err, origin)), null, null, step);
     }
     let body: Envelope | undefined;
@@ -397,7 +396,7 @@ export function createCloudflare(opts: CloudflareOptions): CloudflareClient {
     const code = typeof errors[0]?.code === "number" ? errors[0].code : null;
     const words = errors.map((e) => (typeof e.message === "string" ? e.message : "")).filter((m) => m !== "").join("; ");
     const said = words || (body ? "no reason given" : "an answer that is not Cloudflare's API");
-    throw new CloudflareError(redact(`HTTP ${res.status}: ${said}`), res.status, code, step);
+    throw new CloudflareError(redact(said), res.status, code, step);
   }
 
   async function verifyToken(): Promise<void> {
@@ -421,7 +420,9 @@ export function createCloudflare(opts: CloudflareOptions): CloudflareClient {
 
   async function deployedPage(): Promise<DeployedPage> {
     const step = "read the deployed version";
-    const listed = await call(step, "GET", `${scriptPath}/deployments`);
+    const listed = await call(step, "GET", `${scriptPath}/deployments`).catch((err: unknown) => {
+      throw missingWorker(err, script);
+    });
     const deployments = isRecord(listed) && Array.isArray(listed.deployments) ? listed.deployments.filter(isRecord) : [];
     const latest = deployments[0];
     if (!latest) return { build: null, version: null, at: null };
@@ -484,6 +485,10 @@ export function createCloudflare(opts: CloudflareOptions): CloudflareClient {
 
   async function deploy(bundle: LoadedBundle, version: string, onPlan?: (plan: DeployedFiles) => void): Promise<DeployedFiles> {
     const { manifest } = bundle;
+    // The PUT creates a Worker that is not there: that must be somebody's choice, made once, by hand.
+    await call("check the Worker exists", "GET", `${scriptPath}/settings`).catch((err: unknown) => {
+      throw missingWorker(err, script);
+    });
     const assets = await syncAssets(bundle, onPlan);
     const metadata = {
       main_module: manifest.mainModule,

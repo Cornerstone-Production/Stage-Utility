@@ -9,11 +9,13 @@ import * as path from "node:path";
 
 import { APP_ROOT } from "./app-root.js";
 import { appTimeZone } from "./app-timezone.js";
+import { errorMessage } from "./errors.js";
+import { scrub } from "./scrub.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { readImage } from "./image-files.js";
 import { pcoService } from "./pco-service.js";
 import { cloudflareOrigin, type CloudflareOrigin } from "./servicecue-cloudflare.js";
-import { ServiceCueDeployer } from "./servicecue-deployer.js";
+import { ServiceCueDeployer, type DeployerDeps } from "./servicecue-deployer.js";
 import { readDeployCredentials } from "./servicecue-deploy-store.js";
 import { localAllowed, parsePublishUrl } from "./servicecue-publish-rules.js";
 import { readPublishToken, servicecuePublishStore } from "./servicecue-publish-store.js";
@@ -43,36 +45,40 @@ export const appSource = {
 /**
  * Cloudflare's API. A developer's fake of it on this machine is dialled only when publishing to this machine
  * is already allowed (STAGE_UTILITY_PUBLISH_ALLOW_LOCAL=1) and the address is named, so a production server
- * cannot be pointed anywhere else.
+ * cannot be pointed anywhere else. Null for an address that is not usable: updating the page from this
+ * server is then off, and said so once.
  */
 export const CLOUDFLARE_API_ENV = "STAGE_UTILITY_CLOUDFLARE_API";
-export function deployApiOrigin(env: Record<string, string | undefined> = process.env, allowLocal: boolean = localAllowed()): CloudflareOrigin {
+export function deployApiOrigin(env: Record<string, string | undefined> = process.env, allowLocal: boolean = localAllowed()): CloudflareOrigin | null {
   const named = env[CLOUDFLARE_API_ENV];
-  return allowLocal && named ? cloudflareOrigin(named) : cloudflareOrigin();
-}
-
-/** Where the page's copy is: `build/servicecue/`, or, under the same development switch, a folder a developer names. */
-export const SERVICECUE_BUNDLE_ENV = "STAGE_UTILITY_SERVICECUE_BUNDLE";
-export function deployBundleDir(env: Record<string, string | undefined> = process.env, allowLocal: boolean = localAllowed()): string {
-  const named = env[SERVICECUE_BUNDLE_ENV];
-  return allowLocal && named ? path.resolve(named) : path.join(APP_ROOT, "build", "servicecue");
+  if (!allowLocal || !named) return cloudflareOrigin();
+  try {
+    return cloudflareOrigin(named);
+  } catch (err) {
+    console.error(`[servicecue-deploy] ${CLOUDFLARE_API_ENV} is not usable (${scrub(errorMessage(err))}), so the page is not updated from this server`);
+    return null;
+  }
 }
 
 /** The version this process runs: package.json does not change under a running server, so it is read once. */
 const runningVersion = pkgVersion();
+const apiOrigin = deployApiOrigin();
 
-/** Keeps the public page itself up to date, from the copy every build carries, on the page the publisher reaches. */
-export const servicecueDeployer = new ServiceCueDeployer({
-  bundleDir: deployBundleDir(),
+/** What the deployer reads from the app: a test holds each to the real thing. */
+export const deployerDeps: DeployerDeps = {
+  bundleDir: path.join(APP_ROOT, "build", "servicecue"),
   version: () => runningVersion,
   live: () => stageController.getLastLive(),
-  // Read back only for the address they were saved with: the page's current one.
+  serviceTimesKnown: () => stageController.serviceTimesKnown(),
+  // Read back only for the address they were saved with: the page's current one. None, with no usable API address.
   credentials: async () => {
+    if (apiOrigin === null) return null;
     const parsed = parsePublishUrl((await servicecuePublishStore.load()).url);
     return parsed.ok ? readDeployCredentials(parsed.origin) : null;
   },
-  apiOrigin: deployApiOrigin(),
-});
+  ...(apiOrigin ? { apiOrigin } : {}),
+};
+export const servicecueDeployer = new ServiceCueDeployer(deployerDeps);
 
 export const servicecuePublisher = new ServiceCuePublisher({
   source: appSource,

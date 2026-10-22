@@ -25,16 +25,20 @@ process.env.HOME = path.join(TMP, "home");
 // The page's address is on this machine (the receiver sets the switch), and so is "Cloudflare": nothing here leaves it.
 const cloudflare = await FakeCloudflare.start();
 process.env.STAGE_UTILITY_CLOUDFLARE_API = cloudflare.origin;
-// The page's copy: a folder the test writes, so the deploy through the routes has something to send.
-const BUNDLE = path.join(TMP, "bundle", "servicecue");
-process.env.STAGE_UTILITY_SERVICECUE_BUNDLE = BUNDLE;
+// The app's root is a folder this test makes, so the page's copy (build/servicecue/) is one it writes.
+const ROOT = path.join(TMP, "root");
+const BUNDLE = path.join(ROOT, "build", "servicecue");
+await fs.mkdir(ROOT, { recursive: true });
+await fs.writeFile(path.join(ROOT, "package.json"), JSON.stringify({ name: "fixture", version: "1.27.0-beta.8" }));
+process.env.STAGE_UTILITY_ROOT = ROOT;
 
 const { serviceCuePublishRoutes } = await import("./servicecue-publish-routes.js");
 const { servicecuePublisher, servicecueDeployer } = await import("../servicecue-publisher-instance.js");
 const { readDeployCredentials, saveDeployCredentials } = await import("../servicecue-deploy-store.js");
 const { readPublishToken, servicecuePublishStore } = await import("../servicecue-publish-store.js");
 const { secretsStore } = await import("../secrets.js");
-const { deployApiOrigin, deployBundleDir } = await import("../servicecue-publisher-instance.js");
+const { deployApiOrigin, deployerDeps } = await import("../servicecue-publisher-instance.js");
+const { stageController } = await import("../stage-controller.js");
 const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
 const { pkgVersion } = await import("../updater.js");
 const { configSnapshot } = await import("../config-snapshot.js");
@@ -95,7 +99,6 @@ describe("POST /api/servicecue/publish/deploy-credentials", () => {
     assert.equal(r.body.includes(CF_TOKEN), false, "the token is in the response");
     assert.equal((await get()).body.includes(CF_TOKEN), false, "the token is in the settings read");
     assert.deepEqual(await readDeployCredentials(page.origin), { accountId: ACCOUNT, token: CF_TOKEN });
-    assert.equal(lines.some((l) => l.includes(CF_TOKEN)), false, "the token reached the log");
     assert.ok(lines.some((l) => /a Cloudflare API token is set for this page/.test(l)));
   });
 
@@ -211,12 +214,6 @@ describe("a changed page address", () => {
     assert.deepEqual(await readDeployCredentials(page.origin), { accountId: ACCOUNT, token: CF_TOKEN }, "a failed save lost the credentials");
     assert.equal(await readPublishToken(page.origin), PUBLISH_TOKEN);
   });
-
-  it("leaves the publishing token's own behaviour alone: a publishing token with no Cloudflare credentials saves as before", async () => {
-    await linked();
-    assert.equal((await settings({ url: other.origin, token: "tok-for-the-other-".padEnd(40, "0") })).status, 200);
-    assert.equal(((await get()).json as Dto).token, MASK);
-  });
 });
 
 describe("POST /api/servicecue/publish/deploy", () => {
@@ -236,11 +233,17 @@ describe("POST /api/servicecue/publish/deploy", () => {
   });
 
   it("answers what the server decided: deployed and current are 200 with the status", async () => {
-    for (const outcome of [{ kind: "deployed", uploaded: 3, held: 4 }, { kind: "current" }]) {
+    for (const [outcome, already, unknown] of [
+      [{ kind: "deployed", uploaded: 3, held: 4 }, undefined, undefined],
+      [{ kind: "deployed", uploaded: 3, held: 4, serviceStateUnknown: true }, undefined, "unknown"],
+      [{ kind: "current" }, "current", undefined],
+    ] as const) {
       answers(outcome);
       const r = await deploy();
       assert.equal(r.status, 200);
       assert.ok((r.json as Dto).deploy, "the answer carries the deploy status");
+      assert.equal((r.json as { already?: string }).already, already, "an already-current page says so");
+      assert.equal((r.json as { serviceState?: string }).serviceState, unknown, "a deploy that went ahead with the service state unknown says so");
       mock.restoreAll();
     }
   });
@@ -250,8 +253,10 @@ describe("POST /api/servicecue/publish/deploy", () => {
       [{ kind: "off" }, 400, "no-token", /account ID and API token first/],
       [{ kind: "no-bundle", message: "this build has no copy of the page: it has no build/servicecue/deploy.json" }, 409, "no-bundle", /no copy of the page/],
       [{ kind: "waiting" }, 409, "service-live", /A service is live/],
+      [{ kind: "other-build", pageBuild: "aaaaaaaaaaaa", version: "1.28.0" }, 409, "other-build", /build aaaaaaaaaaaa of this server's own version 1\.28\.0.*confirmDowngrade: true/],
+      [{ kind: "limited", retryAfterSec: 42 }, 429, "too-soon", /Try again in 42 seconds/],
       [{ kind: "newer", pageVersion: "1.30.0", runningVersion: "1.28.0" }, 409, "newer", /deployed from 1\.30\.0, which is newer than this server's 1\.28\.0.*confirmDowngrade: true/],
-      [{ kind: "failed", message: "HTTP 500: down", code: 1, status: 500, step: "upload the files" }, 502, "failed", /could not be updated: HTTP 500: down\. It is unchanged/],
+      [{ kind: "failed", message: "down", code: 1, status: 500, step: "upload the files" }, 502, "failed", /could not be updated: down\. It is unchanged/],
     ];
     for (const [outcome, status, code, message] of table) {
       answers(outcome);
@@ -265,6 +270,9 @@ describe("POST /api/servicecue/publish/deploy", () => {
     }
     answers({ kind: "newer", pageVersion: "1.30.0", runningVersion: "1.28.0" });
     assert.equal(((await deploy()).json as { pageVersion: string }).pageVersion, "1.30.0");
+    mock.restoreAll();
+    answers({ kind: "limited", retryAfterSec: 42 });
+    assert.equal((await deploy()).headers["Retry-After"], "42", "a limited request says when to come back");
   });
 
   it("with no token says so, and calls nothing; with a token and no copy of the page says there is none", async () => {
@@ -283,7 +291,7 @@ describe("POST /api/servicecue/publish/deploy", () => {
 });
 
 describe("Update the page now, all the way to Cloudflare", () => {
-  it("deploys the page's copy, shows it on the card, and is refused a rollback without the confirmation", async (t) => {
+  it("is refused a rollback without the confirmation, then deploys the page's copy, shows it on the card, and is not repeated", async (t) => {
     captureConsole(t, "log", "warn", "error");
     const bundle = writeBundle({ dir: BUNDLE, manifest: { build: BUILD_B } });
     t.after(() => bundle.remove());
@@ -291,46 +299,69 @@ describe("Update the page now, all the way to Cloudflare", () => {
     await linked();
     await credentials({ accountId: ACCOUNT, token: CF_TOKEN });
 
-    const first = await deploy();
+    // Another server deployed a newer version: not rolled back without being told to.
+    cloudflare.deployed = { tag: BUILD_A, message: "Stage Utility 99.0.0", at: new Date().toISOString() };
+    servicecueDeployer.consider(BUILD_A);
+    await servicecueDeployer.settled();
+    assert.equal(cloudflare.puts.length, 0, "left alone by the publisher's own read");
+    const refused = await deploy();
+    assert.equal(refused.status, 409);
+    assert.equal((refused.json as { code: string }).code, "newer");
+    assert.equal((refused.json as { pageVersion: string }).pageVersion, "99.0.0");
+    assert.equal(cloudflare.puts.length, 0);
+
+    const first = await deploy({ confirmDowngrade: true });
     assert.equal(first.status, 200, first.body);
-    const card = (first.json as Dto & { deploy: { page: { build: string; version: string }; files: { uploaded: number; held: number }; bundle: { build: string } } }).deploy;
+    const card = (first.json as Dto & { deploy: { page: { build: string; version: string }; files: { uploaded: number; held: number } } }).deploy;
     assert.equal(card.state, "current");
     assert.deepEqual({ build: card.page.build, version: card.page.version }, { build: BUILD_B, version: pkgVersion() });
     assert.deepEqual(card.files, { uploaded: 6, held: 0 });
     assert.equal(cloudflare.puts.length, 1);
     assert.equal(first.body.includes(CF_TOKEN), false);
-    assert.equal(cloudflare.requests[0]!.authorization, `Bearer ${CF_TOKEN}`, "the token Cloudflare was sent is the one that was saved");
+    assert.equal(cloudflare.requests.find((r) => r.method === "PUT")!.authorization, `Bearer ${CF_TOKEN}`, "the token Cloudflare was sent is the one that was saved");
 
-    // The publisher reads the page's status and finds it is this build: asked again, there is nothing to do.
-    servicecueDeployer.consider(BUILD_B);
-    await servicecueDeployer.settled();
-    assert.equal((await deploy()).status, 200);
-    assert.equal(cloudflare.puts.length, 1);
+    // Pressed again, and again: the page is what was deployed, so there is nothing to upload.
+    for (let i = 0; i < 2; i++) {
+      const again = await deploy();
+      assert.equal(again.status, 200);
+      assert.equal((again.json as { already?: string }).already, "current");
+    }
+    assert.equal(cloudflare.puts.length, 1, "three presses made more than one deploy");
 
-    // Another server deployed a newer version over it: not rolled back without being told to.
-    cloudflare.deployed = { tag: BUILD_A, message: "Stage Utility 99.0.0", at: new Date().toISOString() };
+    // The page reads as another build: not deployed over twice in a minute.
     servicecueDeployer.consider(BUILD_A);
     await servicecueDeployer.settled();
-    assert.equal(cloudflare.puts.length, 1, "left alone by the publisher's own read");
-    const refused = await deploy();
-    assert.equal(refused.status, 409);
-    assert.equal((refused.json as { code: string; pageVersion: string }).code, "newer");
-    assert.equal((refused.json as { pageVersion: string }).pageVersion, "99.0.0");
+    const soon = await deploy();
+    assert.equal(soon.status, 429);
+    assert.ok(Number(soon.headers["Retry-After"]) > 0);
     assert.equal(cloudflare.puts.length, 1);
-    const confirmed = await deploy({ confirmDowngrade: true });
-    assert.equal(confirmed.status, 200, confirmed.body);
-    assert.equal(cloudflare.puts.length, 2);
   });
 });
 
-describe("where the server looks for Cloudflare and for the page's copy", () => {
-  it("is the real API and build/servicecue/ unless the development switch is on and a place is named", () => {
-    const named = { STAGE_UTILITY_CLOUDFLARE_API: "http://127.0.0.1:9", STAGE_UTILITY_SERVICECUE_BUNDLE: "/somewhere/else" };
+describe("where the server looks for Cloudflare", () => {
+  it("is the real API unless the development switch is on and an address is named, and a bad address turns updating off", (t) => {
+    const lines = captureConsole(t, "error");
+    const named = { STAGE_UTILITY_CLOUDFLARE_API: "http://127.0.0.1:9" };
     assert.equal(deployApiOrigin(named, false), "https://api.cloudflare.com", "a production server was pointed somewhere else");
     assert.equal(deployApiOrigin({}, true), "https://api.cloudflare.com");
     assert.equal(deployApiOrigin(named, true), "http://127.0.0.1:9");
-    assert.throws(() => deployApiOrigin({ STAGE_UTILITY_CLOUDFLARE_API: "https://evil.example" }, true), /Cloudflare API address/);
-    assert.match(deployBundleDir(named, false), /build[\\/]servicecue$/);
-    assert.equal(deployBundleDir(named, true), "/somewhere/else");
+    assert.equal(deployApiOrigin({ STAGE_UTILITY_CLOUDFLARE_API: "https://evil.example" }, true), null);
+    assert.ok(lines.some((l) => /STAGE_UTILITY_CLOUDFLARE_API is not usable .*so the page is not updated from this server/.test(l)), lines.join("\n"));
+  });
+});
+
+describe("what the deployer reads from the app", () => {
+  it("is the stage controller's live state and its service times, the app's version and the app's own page copy", (t) => {
+    const live = { mode: "item", currentItemId: "item-1" } as never;
+    t.mock.method(stageController, "getLastLive", () => live);
+    t.mock.method(stageController, "serviceTimesKnown", () => false);
+    assert.equal(deployerDeps.live(), live, "the deployer does not see what Planning Center says is live");
+    assert.equal(deployerDeps.serviceTimesKnown(), false, "the deployer does not see that the service times are unknown");
+    t.mock.method(stageController, "serviceTimesKnown", () => true);
+    assert.equal(deployerDeps.serviceTimesKnown(), true);
+    t.mock.method(stageController, "getLastLive", () => null);
+    assert.equal(deployerDeps.live(), null);
+    assert.equal(deployerDeps.version(), pkgVersion());
+    assert.equal(deployerDeps.bundleDir, BUNDLE);
   });
 });

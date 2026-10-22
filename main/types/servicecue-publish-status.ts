@@ -80,12 +80,13 @@ export interface PublisherStatus {
  *  unchecked  a token is set, and the page's build has not been read: publishing is off, or has not reached the page yet
  *  current    the page is the build this server carries
  *  updating   a deploy is under way
- *  waiting    a service is live; the update goes out when it ends
+ *  waiting    a service is live, or the live state is not known yet after a restart; the update goes out when that is over
  *  failed     the last attempt did not work, or a read of what is deployed did not; the page is unchanged
  *  newer      the page was deployed from a newer version than this server runs; it is left as it is
+ *  other-build  the page was deployed from this server's own version by another build; it is left as it is
  *  no-bundle  this build carries no copy of the page, so there is nothing to deploy
  */
-export type DeployState = "off" | "unchecked" | "current" | "updating" | "waiting" | "failed" | "newer" | "no-bundle";
+export type DeployState = "off" | "unchecked" | "current" | "updating" | "waiting" | "failed" | "newer" | "other-build" | "no-bundle";
 
 export interface DeployError {
   /** Cloudflare's own words, or this side's when there was no answer. Never a token. */
@@ -120,8 +121,6 @@ export interface DeployStatus {
   page: { build: string | null; version: string | null; at: number | null } | null;
   /** The last deploy's files: how many were uploaded (the number to upload, while `state` is "updating") and how many Cloudflare already held. */
   files: { uploaded: number; held: number } | null;
-  /** Why an update is not going out yet, while `state` is "waiting". */
-  waiting: "service-live" | null;
   /** The last failure, until a deploy or a read works again. */
   error: DeployError | null;
   /** The server's clock when this was built. */

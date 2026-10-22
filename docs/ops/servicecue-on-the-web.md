@@ -194,7 +194,8 @@ the build it carries. When they differ:
 
 | If | The server |
 |---|---|
-| a service is live in Planning Center, or the server has not yet read Planning Center since it started | waits, looking again every 30 seconds, and deploys when it ends. It never deploys through a live service, as recording never stops for one, and it counts the live state as unknown (so live) until the first read |
+| a service is live in Planning Center | waits, looking again every 30 seconds, and deploys when it ends. It never deploys through a live service, as recording never stops for one |
+| the live state is not known: the server has just started and not yet read Planning Center, or Planning Center cannot be reached | waits the same way, counting unknown as live. Only an explicit "Update the page now" goes ahead of it |
 | the page was deployed from a **newer** version than this server runs, or from this server's own version by **another build** | leaves it |
 | otherwise | deploys, and logs the files uploaded and the files Cloudflare already held |
 
@@ -204,8 +205,8 @@ deployed from a newer version than the one it is running, so a development machi
 pointed at the same page cannot roll it back. The comparison is semver (a prerelease is
 older than its release) and is against the version the server is **running**, not the
 `version` in `deploy.json`, which is only the version the folder was last made at. A page
-with no recorded version, as one deployed with `npm run servicecue:deploy` has, is
-deployed over. The same version from another build is left alone too: two servers at one
+with no recorded version (one deployed with plain `wrangler deploy`, or before this
+existed) is deployed over. The same version from another build is left alone too: two servers at one
 version would otherwise take the page back from each other every few minutes. A page
 deployed with `npm run servicecue:deploy` carries the same record (its version's message is
 `Stage Utility <version>` and its tag the build id), so a hand deploy is not mistaken for
@@ -216,16 +217,22 @@ below, with a confirmation.
 page is older or another build; answers `200` with `already: "current"` and uploads nothing
 when the page is already this build; refuses with `409` and `code: "newer"` or
 `"other-build"` when the page was left alone, unless the body says
-`{"confirmDowngrade": true}`; refuses with `409` and `code: "service-live"` (or
-`"service-unknown"`, just after a restart) while a service is, or may be, live; and
-answers `429` with a `Retry-After` when it has deployed in the last minute.
+`{"confirmDowngrade": true}`; refuses with `409` and `code: "service-live"` while a
+service is live, always; goes ahead when the live state is merely unknown (just after a
+restart, or with Planning Center unreachable), and then the answer carries
+`serviceState: "unknown"`; and answers `429` with a `Retry-After` when it has deployed in
+the last minute.
 
 **If the page still does not change.** A deploy that goes through while the page keeps
-serving the old build means the Worker the token and account name is not the one the page
-address points at. After the first status read past a couple of minutes the server says
-so in the log and on the card (`deployed build X to Worker 'servicecue', but the page
-still serves Y: is that Worker the page?`) and deploys nothing more on its own until the
-credentials or the build change.
+serving the old build can mean the Worker the token and account name is not the one the
+page address points at. The server gives the page two minutes to catch up. After that, a
+second status read that still shows another build, with Cloudflare holding this server's
+build, is reported in the log and on the card (`deployed build X to Worker 'servicecue',
+but the page still serves Y: is that Worker the page?`), and nothing more is deployed on
+its own. A read with no build says nothing either way, and if Cloudflare holds another
+server's build instead, that is the newer or other-build case, not this. The hold lifts
+when a status read shows the page serving this build, when the credentials change, or on
+a successful "Update the page now".
 
 **If an update fails.** The page keeps what it had: Cloudflare swaps a Worker's version
 all at once. The server records Cloudflare's error code and words, and tries again after
@@ -235,7 +242,15 @@ until the token changes. The card for this is in the status the `GET
 ([API](../reference/api.md)).
 
 **Try one by hand.** `npm run servicecue:deploy-try` runs the server's own deployer once,
-printing each step, against a Worker you name. Use it on a scratch Worker first:
+printing each step, against a Worker you name. Try it on a scratch Worker first.
+
+1. Make the scratch Worker once, by hand, with an Admin login: `npx wrangler login` in
+   `publish/servicecue`, then a deploy under another name (`npx wrangler deploy --name
+   scratch` after `npm run servicecue:build`), or create one in the dashboard. The
+   script never creates a Worker: a Worker that is not there is an error.
+2. Make a token with the Editor role on **that scratch Worker** (see above), not on
+   `servicecue`.
+3. Run it:
 
 ```bash
 CLOUDFLARE_ACCOUNT_ID=<id> CLOUDFLARE_API_TOKEN=<token> \
@@ -243,7 +258,10 @@ CLOUDFLARE_ACCOUNT_ID=<id> CLOUDFLARE_API_TOKEN=<token> \
 ```
 
 `--check` verifies the token and reads what the Worker holds and sends nothing. Without
-it the deploy is made. The real Worker's name is refused unless `--production` is added.
+it the deploy is made, and the script reads back the version and build it recorded. The
+real Worker's name is refused unless `--production` is added. "The Worker does not exist
+on this account, or this token has no role on it" is a missing Worker or a token with no
+role on this one.
 
 ### The copy every build prepares
 

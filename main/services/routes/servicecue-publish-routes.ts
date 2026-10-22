@@ -71,6 +71,12 @@ async function testPage(origin: PublishOrigin, token: string): Promise<PublishTe
   return { ok: true, message: `Reached the page: it holds ${plural(r.page.docs.length, "document")} and ${plural(r.page.assets.length, "image")}.` };
 }
 
+/** Put a secrets slot back as it was (or empty), after a write that failed: a failure to do so is said, and the original failure still reaches the caller. */
+async function restoreSlot(slot: string, previous: Record<string, string>, what: string): Promise<void> {
+  const put = Object.keys(previous).length > 0 ? secretsStore.setSecrets(slot, previous) : secretsStore.clearSecrets(slot);
+  await put.catch((e: unknown) => console.error(`[publish] could not put the saved ${scrub(what)} back: ${scrub(errorMessage(e))}`));
+}
+
 /** Two requests that change the settings at once would each read the settings before either wrote them. */
 let writing: Promise<unknown> = Promise.resolve();
 function serialized<T>(work: () => Promise<T>): Promise<T> {
@@ -223,15 +229,14 @@ async function saveDeployCredentialsFrom(c: RouteCtx, body: DeployCredentialsBod
       await saveDeployCredentials(parsed.origin, { accountId, token });
     }
   } catch (err) {
-    const putBack = Object.keys(previous).length > 0 ? secretsStore.setSecrets(DEPLOY_SECRET_SLOT, previous) : secretsStore.clearSecrets(DEPLOY_SECRET_SLOT);
-    await putBack.catch((e: unknown) => console.error(`[servicecue-deploy] could not put the saved credentials back: ${scrub(errorMessage(e))}`));
+    await restoreSlot(DEPLOY_SECRET_SLOT, previous, "Cloudflare credentials");
     throw err;
   }
   await servicecueDeployer.credentialsChanged();
   json(res, await settingsDto());
 }
 
-/** POST /api/servicecue/publish/deploy: the card's "Update the page now". */
+/** POST /api/servicecue/publish/deploy: the card's "Update the page now". Every outcome has its status and code; the compiler holds this to all of them. */
 async function deployNow(c: RouteCtx, confirmDowngrade: boolean): Promise<void> {
   const { res } = c;
   const outcome = await servicecueDeployer.deployNow({ confirmDowngrade });
@@ -239,11 +244,13 @@ async function deployNow(c: RouteCtx, confirmDowngrade: boolean): Promise<void> 
   const refuse = (message: string, status: number, code: string, more: Record<string, unknown> = {}) => json(res, { error: message, code, ...more, deploy: dto.deploy }, status);
   switch (outcome.kind) {
     case "deployed":
+      // Went ahead on the request with no word from Planning Center about whether a service is live (never when one is known to be): the answer says so.
+      json(res, outcome.serviceStateUnknown ? { ...dto, serviceState: "unknown" } : dto);
+      return;
     case "current":
-      json(res, dto);
+      json(res, { ...dto, already: "current" });
       return;
     case "off":
-    case "unchecked":
       refuse("Enter the Cloudflare account ID and API token first.", 400, "no-token");
       return;
     case "no-bundle":
@@ -260,12 +267,21 @@ async function deployNow(c: RouteCtx, confirmDowngrade: boolean): Promise<void> 
         { pageVersion: outcome.pageVersion, runningVersion: outcome.runningVersion },
       );
       return;
+    case "other-build":
+      refuse(
+        `The page is build ${outcome.pageBuild ?? "unknown"} of this server's own version ${outcome.version}, deployed by another server. It is not replaced unless the request says confirmDowngrade: true.`,
+        409,
+        "other-build",
+        { pageBuild: outcome.pageBuild, pageVersion: outcome.version },
+      );
+      return;
+    case "limited":
+      res.setHeader("Retry-After", String(outcome.retryAfterSec));
+      refuse(`The page was updated a moment ago. Try again in ${outcome.retryAfterSec} seconds.`, 429, "too-soon", { retryAfterSec: outcome.retryAfterSec });
+      return;
     case "failed":
       refuse(`The page could not be updated: ${outcome.message}. It is unchanged.`, 502, "failed");
       return;
-    default:
-      // Held and backoff are what the server decides on its own: a request is never answered with either.
-      refuse("The page could not be updated.", 500, "failed");
   }
 }
 
@@ -333,9 +349,8 @@ async function saveSettings(c: RouteCtx, body: SaveBody): Promise<void> {
     if (dropDeploy) await forgetDeployCredentials();
     await servicecuePublishStore.save({ enabled, url });
   } catch (err) {
-    const putBack = Object.keys(previous).length > 0 ? secretsStore.setSecrets(PUBLISH_SECRET_SLOT, previous) : secretsStore.clearSecrets(PUBLISH_SECRET_SLOT);
-    await putBack.catch((e: unknown) => console.error(`[publish] could not put the saved token back: ${scrub(errorMessage(e))}`));
-    if (dropDeploy) await secretsStore.setSecrets(DEPLOY_SECRET_SLOT, previousDeploy).catch((e: unknown) => console.error(`[servicecue-deploy] could not put the saved credentials back: ${scrub(errorMessage(e))}`));
+    await restoreSlot(PUBLISH_SECRET_SLOT, previous, "token");
+    if (dropDeploy) await restoreSlot(DEPLOY_SECRET_SLOT, previousDeploy, "Cloudflare credentials");
     throw err;
   }
   if (dropDeploy) await servicecueDeployer.credentialsChanged();

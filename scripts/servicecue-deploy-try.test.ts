@@ -70,7 +70,7 @@ describe("servicecue-deploy-try", () => {
     fake.respond = (r) => (r.method === "PUT" ? failure(403, 10000, "Authentication error") : undefined);
     const { status, out } = await go(["--script", "scratch"]);
     assert.equal(status, 1);
-    assert.match(out, /FAILED +at "upload the Worker": HTTP 403, code 10000: HTTP 403: Authentication error/);
+    assert.match(out, /FAILED +at "upload the Worker" \(HTTP 403, code 10000\): Authentication error/);
   });
 
   test("needs the account and the token from the environment, and a Worker", async () => {

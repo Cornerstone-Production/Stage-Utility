@@ -1,37 +1,31 @@
 // servicecue-deployer.ts — the server that publishes to the public ServiceCue page keeps the page
 // itself up to date.
 //
-// The Worker and the page it serves are a build of this app, and every build carries a copy
-// (build/servicecue/). servicecue-cloudflare.ts is HOW that copy is put on Cloudflare; this is WHEN,
-// and what to say about it. The publisher tells this the page's build each time it reads the page's
+// servicecue-cloudflare.ts is HOW the copy every build carries (build/servicecue/) is put on
+// Cloudflare; this is WHEN. The publisher tells this the page's build each time it reads the page's
 // status (once a run, then every few minutes), and this decides:
 //
-//   no token                   nothing: updating is on once an API token is entered, and off once
-//                              it is cleared. The server holding the page's address and publishing
-//                              token is the one that updates it: there is no other switch.
-//   no copy of the page        nothing to deploy: a build whose bundle failed says so on /log
-//   the page is this build     nothing. Said once, not at every status read.
-//   a service is live          wait, and look again each half minute: a deploy is never made while
-//                              Planning Center says a service is live (the rule the recorders keep)
-//   the page is NEWER          leave it. The page records the version it was deployed from; one
-//                              deployed by a newer server than this is not rolled back by this, so
-//                              a dev box pointed at the same page cannot undo it. The button can,
-//                              after a confirmation.
-//   otherwise                  deploy.
+//   no token                   nothing: updating is on while an API token is stored for the page
+//   no copy of the page        nothing to deploy
+//   the page is this build     nothing; what Cloudflare holds about it is read once
+//   a service is live, or      wait, and look again each half minute. Never a deploy during a live
+//   not known to be over       service, and after a restart the live state is unknown until the
+//                              first Planning Center read
+//   the page was deployed      leave it: from a NEWER version, or from the same version by another
+//   by someone else's build    build (two servers at one version would otherwise undo each other).
+//                              Only "Update the page now", confirmed, replaces it
+//   otherwise                  deploy
 //
-// NEWER IS BY THE RUNNING VERSION, NOT deploy.json's. A release that changes nothing the page is
-// built from leaves the folder, and its `version`, as an earlier build made it. So the version the
-// server compares is package.json's at runtime, and it is what is recorded with an upload (the
-// version's message, "Stage Utility 1.28.0") and read back from Cloudflare by the next server that
-// asks. A page with no such record (deployed by hand) is not "newer": there is nothing to say it is.
+// The version compared is the RUNNING one (package.json), never deploy.json's, which a release that
+// changes nothing the page is built from leaves stale. It is recorded with each upload and read
+// back from Cloudflare. A page with no such record (deployed by hand) is deployed over.
 //
-// A FAILURE leaves the page as it was (Cloudflare swaps versions atomically) and is recorded for the
-// card. It is retried on the publisher's doubling backoff, from a minute to once an hour: each
-// attempt is a token check and an upload, not a heartbeat. A 401 or 403 is not retried until the
-// token changes. ONE DEPLOY AT A TIME: a request that arrives during one joins it.
+// A failure leaves the page as it was and is retried on the publisher's doubling backoff, a minute to
+// once an hour; a 401 or 403 is not retried until the credentials change. A deploy that succeeds but
+// leaves the page serving the old build means the Worker is not the page: auto deploys stop until the
+// credentials or the bundle change. One deploy at a time: a request during one joins it.
 //
-// The log line is `[servicecue-deploy]`: each decision once, each failure with Cloudflare's code
-// and words. Never a token, and not what a token was handed back as.
+// Log lines are `[servicecue-deploy]`, each decision once. Never a token.
 
 import { errorMessage } from "./errors.js";
 import { shouldRecordLive } from "./live-service-gate.js";
@@ -48,7 +42,6 @@ import {
   readBundle,
   readManifest,
   type CloudflareOrigin,
-  type DeployedPage,
 } from "./servicecue-cloudflare.js";
 import type { DeployCredentials } from "./servicecue-deploy-store.js";
 import { backoffMs } from "./servicecue-publisher.js";
@@ -70,52 +63,75 @@ export interface DeployTimings {
   backoffMaxMs: number;
   /** How often a deploy waiting for a service to end looks again. */
   liveRecheckMs: number;
+  /** How long after its own deploy a page still showing the old build is not yet a problem. */
+  justDeployedMs: number;
+  /** At most one "Update the page now" that deploys in this long. */
+  nowEveryMs: number;
 }
 
 export const DEFAULT_DEPLOY_TIMINGS: DeployTimings = {
   backoffMinMs: 60_000,
   backoffMaxMs: 60 * 60_000,
   liveRecheckMs: 30_000,
+  justDeployedMs: 2 * 60_000,
+  nowEveryMs: 60_000,
 };
 
 export interface DeployerDeps {
   /** Where build/servicecue/ is. */
   bundleDir: string;
-  /** The version this server runs, as package.json says it: what the no-downgrade rule compares. */
+  /** The version this server runs, as package.json says it. */
   version(): string;
   /** What Planning Center says is live. */
   live(): PcoLiveDTO | null;
+  /** Are the service times and the live state known well enough to say nothing is live? False just after a restart. */
+  serviceTimesKnown(): boolean;
   /** The credentials saved for the page's current address, or null. */
   credentials(): Promise<DeployCredentials | null>;
   /** Cloudflare's API. A test points it at a fake on this machine. */
   apiOrigin?: CloudflareOrigin;
-  /** The Worker's name when it is not the bundle's (the one real-deploy script, to a scratch Worker). */
-  script?: string;
   timings?: Partial<DeployTimings>;
 }
 
-/** What one attempt came to. `deployNow` hands it to the route, which has its own words for each. */
-export type DeployOutcome =
-  | { kind: "deployed"; uploaded: number; held: number }
+/** What an attempt made on the server's own account came to, and nothing a request can be answered with. */
+type AutoOnly = { kind: "unchecked" } | { kind: "held" } | { kind: "backoff" } | { kind: "waiting-unknown" };
+
+/** What "Update the page now" is answered with. */
+export type DeployNowOutcome =
+  | { kind: "deployed"; uploaded: number; held: number; /** It went ahead on the explicit request with the service state unknown (never with a service known to be live). */ serviceStateUnknown?: true }
   | { kind: "current" }
   | { kind: "off" }
-  | { kind: "unchecked" }
   | { kind: "no-bundle"; message: string }
   | { kind: "waiting" }
   | { kind: "newer"; pageVersion: string; runningVersion: string }
-  | { kind: "held" }
-  | { kind: "backoff" }
+  | { kind: "other-build"; pageBuild: string | null; version: string }
+  | { kind: "limited"; retryAfterSec: number }
   | { kind: "failed"; message: string; code: number | null; status: number | null; step: string };
+
+type DeployOutcome = DeployNowOutcome | AutoOnly;
+
+const isNowOutcome = (o: DeployOutcome): o is DeployNowOutcome => o.kind !== "unchecked" && o.kind !== "held" && o.kind !== "backoff" && o.kind !== "waiting-unknown";
+
+/** What the last decision was made for, so the same question is not put to Cloudflare at every status read. Reset when the credentials change. */
+interface Memo {
+  kind: "current" | "newer" | "other-build" | "deployed" | "broken";
+  /** Reads of the page past the grace that still showed another build than the one deployed. */
+  strikes?: number;
+  /** The credentials, the page's build, ours and the running version: the question. */
+  key: string;
+  /** The build of ours it is about. */
+  build: string;
+  at: number;
+  /** What a repeated question is answered with, for the two refusals. */
+  answer?: DeployNowOutcome;
+}
 
 /** Is Planning Center reporting a service live? The recorders' own test with a record open: an item is current, and the plan's SERVICE END has not been passed. */
 export function serviceIsLive(live: PcoLiveDTO | null): boolean {
   return live !== null && shouldRecordLive(live, true) && live.serviceEnded !== true;
 }
 
-/**
- * Is `running` older than `deployed`, by semver precedence (a prerelease is older than its release)?
- * A version that cannot be read is older: nothing is deployed over a page on a guess.
- */
+/** Is `running` older than `deployed`, by semver precedence? A version that cannot be read is older: nothing is deployed over a page on a guess. */
 export function isOlderVersion(running: string, deployed: string): boolean {
   const a = parseTag(`v${running}`);
   const b = parseTag(`v${deployed}`);
@@ -126,16 +142,15 @@ export function isOlderVersion(running: string, deployed: string): boolean {
 /** The most of one decision's line that reaches the log: scrub's usual 200 would cut Cloudflare's words short. */
 const SAID_MAX = 600;
 
-/** How long after a deploy of its own this ignores a page that still says it serves the old build. */
-const JUST_DEPLOYED_MS = 2 * 60_000;
-
 export class ServiceCueDeployer implements DeployHook {
   private readonly timings: DeployTimings;
   private readonly apiOrigin: CloudflareOrigin;
 
   private creds: DeployCredentials | null = null;
+  /** Bumped when the credentials change: an attempt that began before it has its failure ignored. */
+  private generation = 0;
   /** What the publisher last read from the page. Undefined: nothing, so nothing is decided. */
-  private read: { build: string | null } | undefined;
+  private read: { build: string | null; /** Set by this process after its own deploy, not read from the page. */ assumed?: true } | undefined;
   private inflight: Promise<DeployOutcome> | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -145,21 +160,13 @@ export class ServiceCueDeployer implements DeployHook {
   private noBundle: string | null = null;
   private page: DeployStatus["page"] = null;
   private files: DeployStatus["files"] = null;
-  private waiting: DeployStatus["waiting"] = null;
   private error: DeployError | null = null;
 
   private failures = 0;
-  private retryAt = 0;
-  /** The token was refused: nothing on its own until it changes. */
-  private held = false;
+  private memo: Memo | null = null;
+  private lastNowDeployAt = 0;
   /** The last decision logged, so a status read that changes nothing says nothing. */
   private said = "";
-  /** What the page's deployed version was read for, so a page that is current is read about once. */
-  private shownFor = "";
-  /** What the last "newer" was decided for: the same question is not put to Cloudflare at every status read. */
-  private newerFor = "";
-  /** The last deploy this process made: the page may still report the old build for a moment after it. */
-  private lastDeploy: { build: string; at: number } | null = null;
 
   constructor(private readonly deps: DeployerDeps) {
     this.timings = { ...DEFAULT_DEPLOY_TIMINGS, ...deps.timings };
@@ -176,37 +183,57 @@ export class ServiceCueDeployer implements DeployHook {
   stop(): void {
     this.clearTimer();
     this.read = undefined;
-    if (this.state !== "updating") this.state = this.creds ? "unchecked" : "off";
+    if (this.state !== "updating") this.state = this.restState();
+  }
+
+  /** What the card says when nothing is under way: what the last decision left, and only then that the page has not been read. */
+  private restState(): DeployState {
+    if (this.error?.refused || this.memo?.kind === "broken") return "failed";
+    switch (this.memo?.kind) {
+      case "newer":
+        return "newer";
+      case "other-build":
+        return "other-build";
+      case "current":
+      case "deployed":
+        return "current";
+    }
+    if (this.error) return "failed";
+    return this.creds ? "unchecked" : "off";
   }
 
   /**
-   * The explicit "Update the page now". Deploys even when the page is the build this server has,
-   * for a card that says it is stale; and, with `confirmDowngrade`, over a newer page. Joins a
-   * deploy already under way. Never during a live service.
+   * The explicit "Update the page now": deploys over an older page or another build's, but over a
+   * newer page, or the same version's other build, only with `confirmDowngrade`. A page that is
+   * already this build is not uploaded again, and at most one request in `nowEveryMs` deploys.
+   * Joins a deploy already under way.
    */
-  async deployNow(opts: { confirmDowngrade?: boolean } = {}): Promise<DeployOutcome> {
-    if (this.inflight) {
-      const joined = await this.inflight;
-      if (joined.kind === "deployed" || joined.kind === "current") return joined;
+  async deployNow(opts: { confirmDowngrade?: boolean } = {}): Promise<DeployNowOutcome> {
+    // An attempt of the server's own that is under way answers first; this makes its own when that settles, at most a few times.
+    for (let turn = 0; turn < 3; turn++) {
+      if (this.inflight) {
+        const joined = await this.inflight;
+        if (joined.kind === "deployed" || joined.kind === "current") return joined;
+      }
+      const outcome = await this.begin("now", opts.confirmDowngrade === true);
+      if (isNowOutcome(outcome)) return outcome;
     }
-    return this.begin("now", opts.confirmDowngrade === true);
+    return { kind: "failed", message: "another attempt was under way each time: try again", code: null, status: null, step: "deploy" };
   }
 
   /** The token or the account changed, or went: every hold is off, and the page is looked at again. */
   async credentialsChanged(): Promise<void> {
+    this.generation += 1;
     this.clearTimer();
     this.failures = 0;
-    this.retryAt = 0;
-    this.held = false;
     this.error = null;
-    this.shownFor = "";
-    this.newerFor = "";
+    this.memo = null;
     this.said = "";
     await this.refresh();
-    if (this.creds) console.log("[servicecue-deploy] a Cloudflare API token is set for this page: it is kept up to date from this server");
-    else console.log("[servicecue-deploy] the Cloudflare API token was cleared: the page is no longer updated from this server");
+    this.log("info", this.creds ? "a Cloudflare API token is set for this page: it is kept up to date from this server" : "the Cloudflare API token was cleared: the page is no longer updated from this server");
     this.said = this.creds ? "" : "no-token";
-    if (this.read !== undefined) void this.begin("auto", false);
+    // After an attempt that began under the old credentials, which would otherwise be joined and say nothing new.
+    if (this.read !== undefined) void this.settled().then(() => this.begin("auto", false));
   }
 
   /** Resolves once no attempt is under way. Public for tests, which wait on it. */
@@ -223,7 +250,7 @@ export class ServiceCueDeployer implements DeployHook {
       // Said on the card as a failed read, and the stored credentials are not touched.
       this.creds = null;
       this.error = { message: scrub(`the Cloudflare credentials could not be read: ${errorMessage(err)}`, 300), code: null, status: null, step: "read the credentials", at: Date.now(), refused: false, retryAt: null };
-      console.error(`[servicecue-deploy] the Cloudflare credentials could not be read: ${scrub(errorMessage(err))}`);
+      this.log("warn", `the Cloudflare credentials could not be read: ${errorMessage(err)}`);
     }
     if (!this.creds && this.state !== "updating") this.state = "off";
     else if (this.creds && this.state === "off") this.state = "unchecked";
@@ -239,7 +266,6 @@ export class ServiceCueDeployer implements DeployHook {
       runningVersion: this.deps.version(),
       page: this.page,
       files: this.files,
-      waiting: this.waiting,
       error: this.error,
       now: Date.now(),
     };
@@ -267,16 +293,24 @@ export class ServiceCueDeployer implements DeployHook {
     this.timer.unref?.();
   }
 
+  /** The one place a line reaches the log: whatever it was built from (a build id, Cloudflare's words) is scrubbed here, whole. */
+  private log(level: "info" | "warn", line: string): void {
+    if (level === "warn") console.warn(`[servicecue-deploy] ${scrub(line, SAID_MAX)}`);
+    else console.log(`[servicecue-deploy] ${scrub(line, SAID_MAX)}`);
+  }
+
   /** Each decision once, until it changes. */
   private say(key: string, line: string): void {
     if (this.said === key) return;
     this.said = key;
-    console.log(`[servicecue-deploy] ${scrub(line, SAID_MAX)}`);
+    this.log("info", line);
   }
 
   /** Never rejects: a failure is the outcome, and is recorded on the card and the log. */
   private async attempt(mode: "auto" | "now", confirm: boolean): Promise<DeployOutcome> {
-    this.clearTimer();
+    const generation = this.generation;
+    // A request's own attempt leaves a pending wait for the service to end, or a retry, as it is.
+    if (mode === "auto") this.clearTimer();
     await this.refresh();
     const creds = this.creds;
     if (!creds) {
@@ -292,154 +326,201 @@ export class ServiceCueDeployer implements DeployHook {
     }
     this.bundle = { build: manifest.build, version: manifest.version };
     this.noBundle = null;
+    const memo = this.memo?.build === manifest.build ? this.memo : null;
 
-    // What the publisher has read, and nothing has been decided without it, except by the button.
+    // On its own account, nothing is decided before the page has been read, or while a refusal or the backoff says wait.
     if (mode === "auto") {
-      if (this.read === undefined) {
-        if (this.state !== "updating") this.state = this.error ? "failed" : "unchecked";
-        return { kind: "unchecked" };
+      const held = (outcome: AutoOnly): AutoOnly => {
+        if (this.state !== "updating") this.state = this.restState();
+        return outcome;
+      };
+      if (this.read === undefined) return held({ kind: "unchecked" });
+      if (this.error?.refused) return held({ kind: "held" });
+      if (this.error?.retryAt && Date.now() < this.error.retryAt) {
+        // A timer may fire a moment before the wait is up: it is set again for what is left, not forgotten.
+        if (this.timer === null) this.arm(this.error.retryAt - Date.now());
+        return held({ kind: "backoff" });
       }
-      if (this.held) return { kind: "held" };
-      if (Date.now() < this.retryAt) return { kind: "backoff" };
     }
 
     const running = this.deps.version();
-    const client = createCloudflare({ origin: this.apiOrigin, accountId: creds.accountId, token: creds.token, script: this.deps.script ?? manifest.name });
-    const pageBuild = this.read?.build ?? null;
+    // What the page serves: the publisher's last read, or, with none, what is known to be there.
+    const pageBuild = this.read ? this.read.build : memo?.kind === "deployed" || memo?.kind === "current" ? memo.build : undefined;
+    // The page's own word that it is this build lifts anything held against the Worker, before any hold is asked.
+    if (pageBuild === manifest.build) return this.current(creds, manifest.name, manifest.build, generation);
 
-    // The page is this build: nothing to deploy, and once per build, what Cloudflare says about it.
-    if (this.read !== undefined && pageBuild === manifest.build) {
-      return this.current(client, creds, manifest.build, pageBuild);
+    // A page read with no build is no evidence either way: a Worker whose asset read threw says so.
+    const evidence = pageBuild !== null && pageBuild !== undefined;
+    if (mode === "auto" && memo?.kind === "broken") {
+      this.state = "failed";
+      return { kind: "held" };
     }
-    // Just deployed by this process: a status read in the next moments may still show the old build.
-    if (mode === "auto" && this.lastDeploy?.build === manifest.build && Date.now() - this.lastDeploy.at < JUST_DEPLOYED_MS) {
+    // Deployed by this process a moment ago: the page may still say the old build.
+    if (mode === "auto" && memo?.kind === "deployed" && (!evidence || Date.now() - memo.at < this.timings.justDeployedMs)) {
+      this.state = this.restState();
       return { kind: "current" };
     }
 
-    if (serviceIsLive(this.deps.live())) {
+    const live = serviceIsLive(this.deps.live());
+    const unknown = !this.deps.serviceTimesKnown();
+    // A live service always waits. Unknown (just after a restart, or while Planning Center cannot be reached) waits on its own account, and goes ahead when somebody asks.
+    if (live || (unknown && mode === "auto")) {
       this.state = "waiting";
-      this.waiting = "service-live";
-      this.say(`waiting:${manifest.build}`, `a service is live, so the page is not updated now (build ${scrub(pageBuild ?? "unknown")} to ${scrub(manifest.build)}); it will be when the service ends`);
+      this.say(
+        `waiting:${manifest.build}:${live}`,
+        live
+          ? `a service is live, so the page is not updated now (build ${pageBuild ?? "unknown"} to ${manifest.build}); it will be when the service ends`
+          : `the service times are not known (the server has just started, or Planning Center cannot be reached), so the page is not updated now; it will be once they are (build ${pageBuild ?? "unknown"} to ${manifest.build})`,
+      );
       if (mode === "auto") this.arm(this.timings.liveRecheckMs);
-      return { kind: "waiting" };
-    }
-    this.waiting = null;
-
-    const newerKey = `${creds.accountId}:${pageBuild}:${manifest.build}:${running}`;
-    if (mode === "auto" && this.state === "newer" && this.newerFor === newerKey && this.page?.version) {
-      return { kind: "newer", pageVersion: this.page.version, runningVersion: running };
+      return live ? { kind: "waiting" } : { kind: "waiting-unknown" };
     }
 
     try {
+      const client = createCloudflare({ origin: this.apiOrigin, accountId: creds.accountId, token: creds.token, script: manifest.name });
+      // Past the grace the page still shows another build: the second such read asks Cloudflare what the Worker holds.
+      if (mode === "auto" && memo?.kind === "deployed") {
+        memo.strikes = (memo.strikes ?? 0) + 1;
+        if (memo.strikes < 2) {
+          this.state = this.restState();
+          return { kind: "current" };
+        }
+        const holds = await client.deployedPage();
+        if (holds.build === manifest.build) return this.notThePage(manifest.name, manifest.build, pageBuild ?? null, creds.accountId, running);
+        // Another server's build is there now: that is the newer and other-build cases below, not a Worker that is not the page.
+        this.memo = null;
+      }
+      const key = `${creds.accountId}|${pageBuild ?? ""}|${manifest.build}|${running}`;
+      if (mode === "auto" && (memo?.kind === "newer" || memo?.kind === "other-build") && memo.key === key && memo.answer) {
+        this.state = memo.answer.kind === "newer" ? "newer" : "other-build";
+        return memo.answer;
+      }
       await client.verifyToken();
       const deployed = await client.deployedPage();
       this.page = { build: pageBuild ?? deployed.build, version: deployed.version, at: deployed.at };
       const older = deployed.version !== null && isOlderVersion(running, deployed.version);
-      if (older && !(mode === "now" && confirm)) {
-        this.state = "newer";
-        this.newerFor = newerKey;
+      // The same version from another build: two servers at one version would flip the page between them.
+      const otherBuild = deployed.version !== null && !older && !isOlderVersion(deployed.version, running) && deployed.build !== null && deployed.build !== manifest.build;
+      const confirmed = mode === "now" && confirm;
+      if ((older || otherBuild) && !confirmed) {
+        const answer: DeployNowOutcome = older
+          ? { kind: "newer", pageVersion: deployed.version as string, runningVersion: running }
+          : { kind: "other-build", pageBuild: deployed.build, version: deployed.version as string };
+        this.state = answer.kind === "newer" ? "newer" : "other-build";
+        this.memo = { kind: answer.kind as "newer" | "other-build", key, build: manifest.build, at: Date.now(), answer };
         this.error = null;
-        this.say(`newer:${newerKey}`, `the page was deployed from ${scrub(deployed.version)}, newer than this server's ${scrub(running)}, so it is left as it is`);
-        return { kind: "newer", pageVersion: deployed.version as string, runningVersion: running };
+        this.say(
+          `${answer.kind}:${key}`,
+          older
+            ? `the page was deployed from ${deployed.version}, newer than this server's ${running}, so it is left as it is`
+            : `the page is build ${deployed.build} of ${running}, this server's own version but another build than its ${manifest.build}, so it is left as it is`,
+        );
+        return answer;
       }
-      this.newerFor = "";
+      if (mode === "now") {
+        const wait = this.lastNowDeployAt + this.timings.nowEveryMs - Date.now();
+        if (wait > 0) return { kind: "limited", retryAfterSec: Math.ceil(wait / 1000) };
+      }
       this.state = "updating";
       this.files = null;
       this.say(
         `deploy:${manifest.build}:${running}`,
-        `deploying build ${scrub(manifest.build)} as ${scrub(running)}: the page ${pageBuild === null ? "reports no build" : `serves build ${scrub(pageBuild)}`}${mode === "now" ? ", and the update was asked for" : ""}${older ? ", over a newer page, as confirmed" : ""}`,
+        `deploying build ${manifest.build} as ${running}: the page ${pageBuild === null || pageBuild === undefined ? "reports no build" : `serves build ${pageBuild}`}${mode === "now" ? ", and the update was asked for" : ""}${confirmed && (older || otherBuild) ? ", over a page left alone until now, as confirmed" : ""}${mode === "now" && unknown ? ", with the service state unknown, as asked (no service is known to be live)" : ""}`,
       );
-      const loaded = readBundle(this.deps.bundleDir);
-      const files = await client.deploy(loaded, running, (plan) => {
+      const files = await client.deploy(readBundle(this.deps.bundleDir, manifest), running, (plan) => {
         this.files = plan;
-        console.log(`[servicecue-deploy] ${scrub(plural(plan.uploaded, "file"))} to upload, ${scrub(plan.held)} already on Cloudflare`);
+        this.log("info", `${plural(plan.uploaded, "file")} to upload, ${plan.held} already on Cloudflare`);
       });
-      return this.deployed(manifest.build, running, files);
+      if (mode === "now") this.lastNowDeployAt = Date.now();
+      return this.deployed(manifest.build, running, key, files, mode === "now" && unknown);
     } catch (err) {
-      return this.failedWith(err);
+      return this.failedWith(err, generation);
     }
   }
 
-  private noCopy(err: unknown): DeployOutcome {
-    const message = err instanceof BundleUnavailable ? err.message : `the bundle could not be read: ${errorMessage(err)}`;
+  private noCopy(err: unknown): DeployNowOutcome {
+    const message = errorMessage(err);
     this.state = "no-bundle";
     this.bundle = null;
     this.noBundle = scrub(message, 300);
-    this.say(`no-bundle:${message}`, `nothing to deploy: ${scrub(message, 400)}`);
+    this.say(`no-bundle:${message}`, `nothing to deploy: ${message}`);
     return { kind: "no-bundle", message: this.noBundle };
   }
 
   /** The page serves this server's build. What Cloudflare holds about it is read once, for the card's "deployed at". */
-  private async current(client: ReturnType<typeof createCloudflare>, creds: DeployCredentials, build: string, pageBuild: string | null): Promise<DeployOutcome> {
-    this.waiting = null;
-    const key = `${creds.accountId}:${build}`;
-    if (this.shownFor !== key) {
-      let deployed: DeployedPage;
+  private async current(creds: DeployCredentials, name: string, build: string, generation: number): Promise<DeployOutcome> {
+    const key = `${creds.accountId}|${build}`;
+    const pageBuild = build;
+    if (this.memo?.kind === "deployed" && this.memo.build === build) {
+      // This process put it there, and what it was told is what it assumed: only the page's own word that it is this build ends the watch for a Worker that is not the page.
+      if (this.read && !this.read.assumed) this.memo = { kind: "current", key, build, at: Date.now() };
+    } else if (!(this.memo?.kind === "current" && this.memo.key === key)) {
       try {
-        deployed = await client.deployedPage();
+        const deployed = await createCloudflare({ origin: this.apiOrigin, accountId: creds.accountId, token: creds.token, script: name }).deployedPage();
+        this.page = { build: pageBuild, version: deployed.version, at: deployed.at };
+        this.memo = { kind: "current", key, build, at: Date.now() };
+        this.error = null;
+        this.failures = 0;
       } catch (err) {
         // The page is current whatever this read says; the failure is on the card, and a refused token is held.
-        const outcome = this.failedWith(err, true);
+        const outcome = this.failedWith(err, generation, true);
         this.page = { build: pageBuild, version: null, at: null };
-        this.state = this.held ? "failed" : "current";
+        if (this.generation === generation) this.state = this.error?.refused ? "failed" : "current";
         return outcome;
       }
-      this.page = { build: pageBuild, version: deployed.version, at: deployed.at };
-      this.shownFor = key;
-      this.error = null;
-      this.failures = 0;
     }
     this.state = "current";
-    this.say(`current:${build}`, `the page is current: build ${scrub(build)}${this.page?.version ? `, deployed from ${scrub(this.page.version)}` : ""}`);
+    this.say(`current:${build}`, `the page is current: build ${build}${this.page?.version ? `, deployed from ${this.page.version}` : ""}`);
     return { kind: "current" };
   }
 
-  private deployed(build: string, version: string, files: { uploaded: number; held: number }): DeployOutcome {
+  private deployed(build: string, version: string, key: string, files: { uploaded: number; held: number }, serviceStateUnknown: boolean): DeployNowOutcome {
     this.state = "current";
     this.page = { build, version, at: Date.now() };
     this.files = files;
-    this.waiting = null;
     this.error = null;
     this.failures = 0;
-    this.retryAt = 0;
-    this.held = false;
-    this.shownFor = `${this.creds?.accountId ?? ""}:${build}`;
-    this.lastDeploy = { build, at: Date.now() };
-    console.log(`[servicecue-deploy] deployed build ${scrub(build)} as ${scrub(version)}: ${scrub(plural(files.uploaded, "file"))} uploaded, ${scrub(files.held)} already on Cloudflare`);
+    this.memo = { kind: "deployed", key, build, at: Date.now() };
+    // Until the publisher reads the page again, it is what was deployed.
+    if (this.read !== undefined) this.read = { build, assumed: true };
+    this.log("info", `deployed build ${build} as ${version}: ${plural(files.uploaded, "file")} uploaded, ${files.held} already on Cloudflare`);
     this.said = `current:${build}`;
-    return { kind: "deployed", ...files };
+    return { kind: "deployed", ...files, ...(serviceStateUnknown ? { serviceStateUnknown: true as const } : {}) };
   }
 
-  /** The failure goes to the card, the log and the caller. Retried on the backoff, unless the token was refused. `quiet`: what failed was a read, not a deploy. */
-  private failedWith(err: unknown, read = false): DeployOutcome {
+  /** A deploy went through and the page still serves another build: the Worker is not the page. Nothing more is deployed on its own. */
+  private notThePage(name: string, build: string, serves: string | null, accountId: string, running: string): DeployNowOutcome {
+    const message = `deployed build ${build} to Worker '${name}', but the page still serves ${serves ?? "no build"}: is that Worker the page?`;
+    this.memo = { kind: "broken", key: `${accountId}|${serves ?? ""}|${build}|${running}`, build, at: Date.now() };
+    this.state = "failed";
+    this.error = { message, code: null, status: null, step: "check the page", at: Date.now(), refused: false, retryAt: null };
+    this.say(`broken:${build}`, `${message} Nothing more is deployed on its own until the credentials or the bundle change.`);
+    return { kind: "failed", message, code: null, status: null, step: "check the page" };
+  }
+
+  /** The failure goes to the card, the log and the caller. Retried on the backoff, unless the token was refused; ignored when the credentials changed under the attempt. */
+  private failedWith(err: unknown, generation: number, read = false): DeployNowOutcome {
     if (err instanceof BundleUnavailable) return this.noCopy(err);
     const failure = err instanceof CloudflareError ? err : new CloudflareError(errorMessage(err), null, null, "deploy");
+    const where = read ? "reading what is deployed failed" : "the update failed";
+    const outcome = { kind: "failed", message: scrub(failure.message, 300), code: failure.code, status: failure.status, step: failure.step } as const;
+    if (generation !== this.generation) {
+      this.log("warn", `${where} ${failure.describe()}; that was with credentials since replaced, so it is ignored`);
+      if (this.state === "updating") this.state = this.creds ? "unchecked" : "off";
+      return outcome;
+    }
     this.failures += 1;
     const refused = failure.refused;
     const wait = backoffMs(this.failures, this.timings.backoffMinMs, this.timings.backoffMaxMs);
-    this.held = refused;
-    this.retryAt = refused ? 0 : Date.now() + wait;
-    this.error = {
-      message: scrub(failure.message, 300),
-      code: failure.code,
-      status: failure.status,
-      step: failure.step,
-      at: Date.now(),
-      refused,
-      retryAt: refused ? null : this.retryAt,
-    };
+    this.error = { message: outcome.message, code: failure.code, status: failure.status, step: failure.step, at: Date.now(), refused, retryAt: refused ? null : Date.now() + wait };
     if (!read || refused) this.state = "failed";
     this.files = null;
-    this.waiting = null;
     this.said = "";
-    const where = `${read ? "reading what is deployed" : "the update"} failed at "${failure.step}"`;
-    const code = `${failure.status === null ? "no answer" : `HTTP ${failure.status}`}${failure.code === null ? "" : `, code ${failure.code}`}`;
-    console.warn(
-      `[servicecue-deploy] ${scrub(where)} (${scrub(code)}): ${scrub(failure.message, 400)}. The page is unchanged. ${
-        refused ? "Not trying again until the token changes." : `Trying again in ${scrub(Math.round(wait / 1000))} s (attempt ${scrub(this.failures)}).`
-      }`,
+    this.log(
+      "warn",
+      `${where} ${failure.describe()}. The page is unchanged. ${refused ? "Not trying again until the token changes." : `Trying again in ${Math.round(wait / 1000)} s (attempt ${this.failures}).`}`,
     );
     if (!refused && this.read !== undefined) this.arm(wait);
-    return { kind: "failed", message: this.error.message, code: failure.code, status: failure.status, step: failure.step };
+    return outcome;
   }
 }

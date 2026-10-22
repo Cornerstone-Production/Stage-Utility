@@ -66,6 +66,8 @@ export class FakeCloudflare {
   accountToken = false;
   /** What the Worker's last deploy was annotated with, as the deployments and versions answers say it. null: no deployment. */
   deployed: { tag?: string; message?: string; at: string } | null = null;
+  /** The Worker is not on the account: its own reads answer 404. */
+  missingWorker = false;
   /** Put annotations on the version answer. false: a version from before this server's deploys. */
   serveAnnotations = true;
   /** Sees each request first. Returning an answer sends it; undefined carries on. */
@@ -115,6 +117,7 @@ export class FakeCloudflare {
     this.singleUploads = false;
     this.accountToken = false;
     this.serveAnnotations = true;
+    this.missingWorker = false;
     this.token = API_TOKEN;
   }
 
@@ -184,6 +187,9 @@ export class FakeCloudflare {
     const script = /^\/workers\/scripts\/([^/]+)(\/.*)?$/.exec(rest);
     if (!script) return failure(404, 7003, "no route");
     const [, , tail = ""] = script;
+
+    if (this.missingWorker && req.method === "GET") return failure(404, 10007, "This Worker does not exist on your account.");
+    if (req.method === "GET" && tail === "/settings") return this.ok({ bindings: [] });
 
     if (req.method === "POST" && tail === "/assets-upload-session") {
       const manifest = (req.json as { manifest: Record<string, { hash: string; size: number }> }).manifest;

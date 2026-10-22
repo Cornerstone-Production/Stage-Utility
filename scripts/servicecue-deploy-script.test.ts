@@ -28,6 +28,7 @@ describe("deployPlan", () => {
   test("refuses to deploy without a version and a build id to say", () => {
     assert.throws(() => deployPlan(null, CONFIG, undefined), /annotated with the app's version and the built page's build id/);
     assert.throws(() => deployPlan(null, CONFIG, { version: "1.0.0", build: "not-a-build" }), /build id/);
+    assert.throws(() => deployPlan(null, CONFIG, { version: "", build: "0123456789ab" }), /version/);
   });
 });
 

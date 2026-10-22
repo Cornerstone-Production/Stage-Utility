@@ -342,6 +342,11 @@ const NOT_SCANNED = new Map<string, string>([
       "interpolates nothing. Audited, not just excused.",
   ],
   ["servicecue-layouts-store.ts", UNAUDITED],
+  [
+    "servicecue-publisher-instance.ts",
+    "logs one sentence, when the address STAGE_UTILITY_CLOUDFLARE_API names is not usable, naming only " +
+      "the fixed reason the address parser gives. An environment variable is the operator's, not a request's.",
+  ],
   ["slots-store.ts", UNAUDITED],
   ["smaart-service.ts", DEVICE],
   [

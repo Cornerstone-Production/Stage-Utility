@@ -186,7 +186,7 @@ describe("a deploy", () => {
     fake.respond = (r) => (r.method === "PUT" ? failure(403, 10000, "Authentication error") : undefined);
     await assert.rejects(
       client().deploy(readBundle(bundle.dir), "1.28.0"),
-      (err: unknown) => err instanceof CloudflareError && err.refused && err.code === 10000 && err.step === "upload the Worker" && err.message === "HTTP 403: Authentication error",
+      (err: unknown) => err instanceof CloudflareError && err.refused && err.code === 10000 && err.step === "upload the Worker" && err.message === "Authentication error",
     );
   });
 
@@ -218,6 +218,31 @@ describe("a deploy", () => {
   });
 });
 
+describe("a Worker that is not on the account", () => {
+  it("is said plainly before anything is uploaded or created, and a read says it too", async () => {
+    fake.missingWorker = true;
+    await assert.rejects(
+      client().deploy(readBundle(bundle.dir), "1.28.0"),
+      (err: unknown) => err instanceof CloudflareError && err.step === "check the Worker exists" && /the Worker 'servicecue' does not exist on this account, or this token has no role on it: create it once by hand/.test(err.message),
+    );
+    assert.equal(fake.requests.filter((r) => r.method !== "GET").length, 0, "something was sent that would have created the Worker");
+    await assert.rejects(client().deployedPage(), /the Worker 'servicecue' does not exist/);
+  });
+
+  it("does not hide another failure of the check as a missing Worker", async () => {
+    fake.respond = (r) => (r.path.endsWith("/settings") ? failure(500, 1, "down") : undefined);
+    await assert.rejects(client().deploy(readBundle(bundle.dir), "1.28.0"), (err: unknown) => err instanceof CloudflareError && err.status === 500 && !/does not exist/.test(err.message));
+    assert.equal(fake.puts.length, 0);
+  });
+});
+
+describe("a failure, described", () => {
+  it("names the request, what answered, Cloudflare's code and its words, in one line", () => {
+    assert.equal(new CloudflareError("down", 500, 10013, "upload the files").describe(), 'at "upload the files" (HTTP 500, code 10013): down');
+    assert.equal(new CloudflareError("no route to host", null, null, "verify the token").describe(), 'at "verify the token" (no answer): no route to host');
+  });
+});
+
 describe("verifying the token", () => {
   it("is one request to the user's address, for a token made under a person", async () => {
     await client().verifyToken();
@@ -233,7 +258,7 @@ describe("verifying the token", () => {
   it("is refused when neither accepts it, with the first answer's code and words", async () => {
     await assert.rejects(
       client({ token: "some-other-token-0123456789abcdef" }).verifyToken(),
-      (err: unknown) => err instanceof CloudflareError && err.refused && err.code === 1000 && err.message === "HTTP 401: Invalid API Token",
+      (err: unknown) => err instanceof CloudflareError && err.refused && err.code === 1000 && err.message === "Invalid API Token",
     );
   });
 
@@ -277,7 +302,7 @@ describe("reading what is deployed", () => {
   });
 
   it("says why when Cloudflare will not tell", async () => {
-    fake.respond = () => failure(404, 10007, "This Worker does not exist on your account.");
+    fake.respond = () => failure(500, 10007, "down");
     await assert.rejects(client().deployedPage(), (err: unknown) => err instanceof CloudflareError && err.code === 10007 && err.step === "read the deployed version");
   });
 });
@@ -319,7 +344,9 @@ describe("the folder", () => {
       ["no compatibility date", { compatibilityDate: "yesterday" }],
       ["no assets config with the headers text", { assets: { html_handling: "none" } }],
       ["a binding it cannot read", { bindings: [{ type: "kv", name: "X" }] }],
-      ["no keep_bindings list", { keep_bindings: "secret_text" }],
+      ["does not keep secret_text bindings, which would delete the publishing token", { keep_bindings: "secret_text" }],
+      ["does not keep secret_text bindings, which would delete the publishing token", { keep_bindings: ["secret_key"] }],
+      ["does not keep secret_text bindings, which would delete the publishing token", { keep_bindings: [] }],
       ["no exports", { exports: null }],
     ];
     for (const [what, over] of cases) {

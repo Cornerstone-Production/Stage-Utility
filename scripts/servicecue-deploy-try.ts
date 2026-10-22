@@ -86,7 +86,7 @@ export async function run(args: string[], env: Record<string, string | undefined
     return 0;
   } catch (err) {
     if (err instanceof CloudflareError) {
-      say(`FAILED     at "${err.step}": ${err.status === null ? "no answer" : `HTTP ${err.status}`}${err.code === null ? "" : `, code ${err.code}`}: ${err.message}`);
+      say(`FAILED     ${err.describe()}`);
     } else if (err instanceof BundleUnavailable) {
       say(`FAILED     ${err.message}`);
     } else {

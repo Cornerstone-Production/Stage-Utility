@@ -37,7 +37,7 @@ export function buildIdOf(html) {
 
 /** The wrangler arguments and, when workers.dev is off, the config text to deploy with. `release` is `{ version, build }`. */
 export function deployPlan(local, configText, release) {
-  if (!release || typeof release.version !== "string" || !/^[0-9a-f]{12}$/.test(release.build ?? "")) {
+  if (!release || typeof release.version !== "string" || release.version === "" || !/^[0-9a-f]{12}$/.test(release.build ?? "")) {
     throw new Error("a deploy is annotated with the app's version and the built page's build id, and one of them is missing");
   }
   const args = ["deploy", "--message", `Stage Utility ${release.version}`, "--tag", release.build];

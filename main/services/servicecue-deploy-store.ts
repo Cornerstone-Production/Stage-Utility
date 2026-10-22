@@ -7,6 +7,7 @@
 // not for another a stranger typed in. The routes drop them when the address changes.
 
 import { secretsStore } from "./secrets.js";
+import { ACCOUNT_ID_PATTERN } from "./servicecue-cloudflare.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 
 export const DEPLOY_SECRET_SLOT = "servicecue-deploy";
@@ -18,7 +19,7 @@ export interface DeployCredentials {
 
 /** Why `text` cannot be a Cloudflare account ID, or null: 32 hexadecimal digits. */
 export function checkAccountId(text: string): string | null {
-  return /^[0-9a-fA-F]{32}$/.test(text) ? null : "The Cloudflare account ID is 32 letters and digits (Workers & Pages, on the right of the page).";
+  return ACCOUNT_ID_PATTERN.test(text.toLowerCase()) ? null : "The Cloudflare account ID is 32 letters and digits (Workers & Pages, on the right of the page).";
 }
 
 /** Why `text` cannot be a Cloudflare API token, or null. They are about 40 characters of letters, digits, `-` and `_`. */
