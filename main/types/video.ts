@@ -68,6 +68,14 @@ export interface VideoFeedsFile {
   ports: VideoPorts;
 }
 
+/** Whether this server has a usable ffmpeg (main/services/video/ffmpeg-system.ts),
+ *  as a browser may see it: the version and where it was found as a class, or a
+ *  reason that names no folder. `hint` is the install command for this platform.
+ *  The folders stay in the server log. */
+export type FfmpegStatus =
+  | { ok: true; version: string; source: "automatic" | "homebrew" | "configured" }
+  | { ok: false; reason: string; hint: string };
+
 /** null state: an external feed, which Stage Utility cannot see. */
 export type FeedState = "live" | "delayed" | "standby" | "waiting" | "offline" | "embed";
 

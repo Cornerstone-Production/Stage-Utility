@@ -221,6 +221,9 @@ const REQUEST_FACING = [
   "servicecue-publisher.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
+  // The ffmpeg path is typed into PATCH /api/video/ffmpeg and reaches its
+  // "not found at" and "found at" log lines.
+  "video/ffmpeg-system.ts",
   // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
   // file's own "is live"/"went offline"/B-frames log lines on a transition.
   "video/video-service.ts",
@@ -443,6 +446,9 @@ function requestFacingFiles(): string[] {
     // caller put on the /api/events/poll query string — an attacker's value,
     // verbatim, reaching /log.
     path.join(HERE, "event-poll.ts"),
+    // The ffmpeg path is typed into PATCH /api/video/ffmpeg and reaches its
+    // "not found at" and "found at" log lines.
+    path.join(HERE, "video/ffmpeg-system.ts"),
     // Every rebuild/merge line names a serviceKey, which arrives verbatim in an
     // HTTP body — POST /api/history/rebuild and /api/history/merge both take it
     // from the caller — and the rebuild it drives reaches plan item titles.
