@@ -1,7 +1,9 @@
 // servicecue-bundle.ts — the public ServiceCue page, ready to upload.
 //
 //   npm run servicecue:bundle         fails the command when anything is wrong
-//   ... servicecue-bundle.ts --soft   what `npm run build` runs: says so and carries on
+//   ... servicecue-bundle.ts --soft   what `npm run build` runs: says so and carries on, and
+//                                     leaves build/servicecue.failed (the commit, then why)
+//   --out <dir>  --wrangler <file>    elsewhere to write, another config to read: for tests
 //
 // The Worker in publish/servicecue/ and the page it serves reach Cloudflare through
 // `npm run servicecue:deploy`, which needs wrangler, a login and the Worker's own
@@ -26,6 +28,7 @@
 // `build/` is gitignored, shipped in the release archives, and rebuilt by the update.
 
 import type { BuildOptions } from "esbuild";
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,10 +40,8 @@ import { STATIC_HEADERS_FILE } from "../publish/servicecue/src/headers.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WORKER_DIR = path.join(ROOT, "publish/servicecue");
-// Where the bundle goes and which wrangler.jsonc it reads. The environment overrides are for
-// the test that runs this command against a broken config; nothing else sets them.
-const DEFAULT_OUT = process.env.SERVICECUE_BUNDLE_OUT ?? path.join(ROOT, "build/servicecue");
-const WRANGLER_CONFIG = process.env.SERVICECUE_BUNDLE_WRANGLER ?? path.join(WORKER_DIR, "wrangler.jsonc");
+const DEFAULT_OUT = path.join(ROOT, "build/servicecue");
+const WRANGLER_CONFIG = path.join(WORKER_DIR, "wrangler.jsonc");
 
 /** The Worker's file in the bundle, and `mainModule` in the manifest. */
 const MAIN_MODULE = "worker.js";
@@ -199,11 +200,11 @@ export interface BundleResult {
 }
 
 /** Build the page and the Worker into `outDir`, and write deploy.json beside them. */
-export async function bundleServiceCue(outDir: string = DEFAULT_OUT, quiet = false): Promise<BundleResult> {
+export async function bundleServiceCue(outDir: string = DEFAULT_OUT, quiet = false, wranglerConfig: string = WRANGLER_CONFIG): Promise<BundleResult> {
   // The cheap failures first: a config this cannot describe should not cost a page build.
   const version = (JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as { version?: unknown }).version;
   if (typeof version !== "string" || version === "") throw new Error("package.json has no version");
-  const wrangler = await parseWranglerConfig(fs.readFileSync(WRANGLER_CONFIG, "utf8"));
+  const wrangler = await parseWranglerConfig(fs.readFileSync(wranglerConfig, "utf8"));
   deployManifest({ wrangler, version, build: "unknown", headers: "" });
 
   // Whatever an earlier run left is not this build's: a half-written folder must not look finished.
@@ -255,21 +256,65 @@ export async function bundleServiceCue(outDir: string = DEFAULT_OUT, quiet = fal
 
 // ── As a command ──────────────────────────────────────────────────────────────
 
+/** The commit this checkout is on, or "unknown" where there is no git to ask. */
+function currentCommit(): string {
+  const r = spawnSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : "unknown";
+}
+
+/**
+ * What a soft failure leaves beside the folder: the commit it failed on, then why, so the update
+ * scripts can tell a bundle that is missing because it failed here from one that was never made.
+ * `<folder>.failed`, i.e. build/servicecue.failed.
+ */
+export function failureMarker(outDir: string): string {
+  return `${outDir}.failed`;
+}
+
 if (isMain(import.meta.url, process.argv[1])) {
-  const soft = process.argv.includes("--soft");
+  const args = process.argv.slice(2);
+  const soft = args.includes("--soft");
+  // Flags and not environment variables: this command deletes its output folder, and nothing in
+  // an environment may point that at another. The tests pass these.
+  const flag = (name: string): string | undefined => {
+    const i = args.indexOf(name);
+    if (i < 0) return undefined;
+    const value = args[i + 1];
+    if (!value || value.startsWith("--")) {
+      console.error(`[servicecue-bundle] ${name} needs a value`);
+      process.exit(2);
+    }
+    return value;
+  };
+  const out = path.resolve(flag("--out") ?? DEFAULT_OUT);
+  const wrangler = flag("--wrangler");
   try {
-    const { outDir, manifest } = await bundleServiceCue();
-    console.log(`[servicecue-bundle] ${path.relative(ROOT, outDir) || "."}: build ${manifest.build}, version ${manifest.version}`);
+    const { manifest } = await bundleServiceCue(out, false, wrangler ? path.resolve(wrangler) : undefined);
+    // The bundle is whole again: nothing is missing for an update to wait on.
+    fs.rmSync(failureMarker(out), { force: true });
+    console.log(`[servicecue-bundle] ${path.relative(ROOT, out) || "."}: build ${manifest.build}, version ${manifest.version}`);
   } catch (err) {
     const message = errorMessage(err);
-    // Not a partial folder: a deployer reading one would upload half a page.
-    fs.rmSync(DEFAULT_OUT, { recursive: true, force: true });
+    // Cleaning up can fail too, and that is part of the same report: it must not turn a soft
+    // failure into a crash, nor go unsaid.
+    const also: string[] = [];
+    try {
+      // Not a partial folder: a deployer reading one would upload half a page.
+      fs.rmSync(out, { recursive: true, force: true });
+    } catch (cleanup) {
+      also.push(`could not remove ${out}: ${errorMessage(cleanup)}`);
+    }
     if (!soft) {
-      console.error(`[servicecue-bundle] FAILED: ${message}`);
+      console.error(`[servicecue-bundle] FAILED: ${message}${also.length ? ` (also ${also.join("; ")})` : ""}`);
       process.exit(1);
+    }
+    try {
+      fs.writeFileSync(failureMarker(out), `${currentCommit()}\n${message.replace(/\s+/g, " ")}\n`);
+    } catch (marker) {
+      also.push(`could not write ${failureMarker(out)}: ${errorMessage(marker)}`);
     }
     // The page's bundle is one feature's: an update that cannot make it must still update
     // the app. The line is the evidence, and this server will have no bundle to deploy.
-    console.error(`[servicecue-bundle] FAILED, so this server cannot update the public ServiceCue page from this build (the app is unaffected): ${message}`);
+    console.error(`[servicecue-bundle] FAILED, so this server cannot update the public ServiceCue page from this build (the app is unaffected): ${message}${also.length ? ` (also ${also.join("; ")})` : ""}`);
   }
 }
