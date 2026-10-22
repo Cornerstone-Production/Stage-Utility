@@ -11,7 +11,7 @@
 //   build/servicecue/
 //     worker.js      the Worker as one ES module, exporting the default handler and
 //                    the PublishHub Durable Object: what `wrangler deploy` uploads
-//     public/        the built page, `_headers` included
+//     public/        the built page (its `_headers` is in deploy.json, not here)
 //     deploy.json    what to say about them when uploading (DeployManifest below)
 //
 // Every value in deploy.json is read from where it lives: wrangler.jsonc (a date, flags,
@@ -25,20 +25,22 @@
 //
 // `build/` is gitignored, shipped in the release archives, and rebuilt by the update.
 
-import { build as esbuild, type BuildOptions } from "esbuild";
+import type { BuildOptions } from "esbuild";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
-import { build as viteBuild } from "vite";
 
 import { errorMessage } from "../main/services/errors.js";
 import { isMain } from "./is-main.mjs";
 import { PUBLISH_PROTOCOL_VERSION, VIEWER_HTML, viewerBuildFromHtml } from "../main/types/servicecue-publish.js";
+import { STATIC_HEADERS_FILE } from "../publish/servicecue/src/headers.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WORKER_DIR = path.join(ROOT, "publish/servicecue");
-const DEFAULT_OUT = path.join(ROOT, "build/servicecue");
+// Where the bundle goes and which wrangler.jsonc it reads. The environment overrides are for
+// the test that runs this command against a broken config; nothing else sets them.
+const DEFAULT_OUT = process.env.SERVICECUE_BUNDLE_OUT ?? path.join(ROOT, "build/servicecue");
+const WRANGLER_CONFIG = process.env.SERVICECUE_BUNDLE_WRANGLER ?? path.join(WORKER_DIR, "wrangler.jsonc");
 
 /** The Worker's file in the bundle, and `mainModule` in the manifest. */
 const MAIN_MODULE = "worker.js";
@@ -60,20 +62,38 @@ export interface DeployManifest {
   compatibilityDate: string;
   compatibilityFlags: string[];
   protocol: number;
-  /** wrangler.jsonc's `assets` less where the files are and what the Worker calls them. */
+  /**
+   * The `config` the upload's assets metadata takes: wrangler.jsonc's `assets` less where the
+   * files are and what the Worker calls them, and `_headers`, the text of the headers file the
+   * asset service reads. wrangler does not upload `_headers` as an asset (it says "Ignoring
+   * asset: _headers" and sends the text in this config), so the bundle does the same: the file
+   * is not in `public/`, and a deployer sends these fields as they are.
+   */
   assets: Record<string, unknown>;
   bindings: DeployBinding[];
+  /** Which existing bindings an upload keeps when it names none for them: the secrets `wrangler secret put` set, such as PUBLISH_TOKEN. wrangler sends the same two on every deploy. */
+  keep_bindings: string[];
+  /** wrangler.jsonc's `exports`, as it is: what each Durable Object class is (wrangler 4.150 sends it with the script). */
+  exports: Record<string, unknown>;
 }
 
 /**
  * Every top-level key of wrangler.jsonc, sorted, by what this does with it. A key in
  * neither list throws: wrangler would act on it and the manifest would not know.
  */
-export const CARRIED_KEYS = ["assets", "compatibility_date", "compatibility_flags", "durable_objects", "vars"];
+export const CARRIED_KEYS = [
+  "assets",
+  "compatibility_date",
+  "compatibility_flags",
+  "durable_objects",
+  "exports",
+  "vars",
+];
+/** What wrangler keeps of a Worker's bindings across a deploy (its `keepSecrets`). */
+export const KEEP_BINDINGS = ["secret_text", "secret_key"];
 export const DEPLOYED_ELSEWHERE_KEYS = [
   "$schema", // editor help
   "dependencies_instrumentation", // what wrangler tells Cloudflare about npm packages
-  "exports", // a Durable Object class's storage, settled when the class was first created
   "main", // the entry point: bundled here
   "name", // the Worker's name is the deployer's to be told
   "preview_urls", // set once, on the Worker
@@ -81,7 +101,9 @@ export const DEPLOYED_ELSEWHERE_KEYS = [
 ];
 
 /** wrangler.jsonc is JSON with comments and trailing commas. TypeScript's own reader takes both. */
-export function parseWranglerConfig(text: string): Record<string, unknown> {
+export async function parseWranglerConfig(text: string): Promise<Record<string, unknown>> {
+  // Loaded here so a box without it fails inside the command's own handler, which is soft.
+  const ts = (await import("typescript")).default;
   const { config, error } = ts.parseConfigFileTextToJson("wrangler.jsonc", text);
   if (error || typeof config !== "object" || config === null) {
     const why = error ? ts.flattenDiagnosticMessageText(error.messageText, "\n") : "it is not an object";
@@ -103,6 +125,8 @@ export function deployManifest(input: {
   wrangler: Record<string, unknown>;
   version: string;
   build: string;
+  /** The text of the page's headers file. */
+  headers: string;
 }): DeployManifest {
   const { wrangler } = input;
   const known = new Set([...CARRIED_KEYS, ...DEPLOYED_ELSEWHERE_KEYS]);
@@ -143,8 +167,10 @@ export function deployManifest(input: {
     compatibilityDate: stringField(wrangler, "compatibility_date"),
     compatibilityFlags: flags as string[],
     protocol: PUBLISH_PROTOCOL_VERSION,
-    assets: assetConfig,
+    assets: { ...assetConfig, [STATIC_HEADERS_FILE]: input.headers },
     bindings,
+    keep_bindings: KEEP_BINDINGS,
+    exports: isRecord(wrangler.exports) ? wrangler.exports : {},
   };
 }
 
@@ -177,12 +203,17 @@ export async function bundleServiceCue(outDir: string = DEFAULT_OUT, quiet = fal
   // The cheap failures first: a config this cannot describe should not cost a page build.
   const version = (JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as { version?: unknown }).version;
   if (typeof version !== "string" || version === "") throw new Error("package.json has no version");
-  const wrangler = parseWranglerConfig(fs.readFileSync(path.join(WORKER_DIR, "wrangler.jsonc"), "utf8"));
-  deployManifest({ wrangler, version, build: "unknown" });
+  const wrangler = await parseWranglerConfig(fs.readFileSync(WRANGLER_CONFIG, "utf8"));
+  deployManifest({ wrangler, version, build: "unknown", headers: "" });
 
   // Whatever an earlier run left is not this build's: a half-written folder must not look finished.
   fs.rmSync(outDir, { recursive: true, force: true });
   fs.mkdirSync(outDir, { recursive: true });
+
+  // Loaded here, inside the command's handler: a box that cannot load them has no bundle,
+  // which is the soft failure, and not a crash before the handler is reached.
+  const { build: viteBuild } = await import("vite");
+  const { build: esbuild } = await import("esbuild");
 
   const publicDir = path.join(outDir, "public");
   await viteBuild({
@@ -211,7 +242,12 @@ export async function bundleServiceCue(outDir: string = DEFAULT_OUT, quiet = fal
     if (!workerExports.includes(needed)) throw new Error(`the bundled Worker does not export ${needed}: it exports ${workerExports.join(", ") || "nothing"}`);
   }
 
-  const manifest = deployManifest({ wrangler, version, build });
+  // `_headers` is config and not an asset: its text goes in the manifest and the file out of the folder.
+  const headersPath = path.join(publicDir, STATIC_HEADERS_FILE);
+  const headers = fs.readFileSync(headersPath, "utf8");
+  fs.rmSync(headersPath);
+
+  const manifest = deployManifest({ wrangler, version, build, headers });
   fs.writeFileSync(path.join(outDir, "deploy.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 
   return { outDir, manifest, workerInputs: Object.keys(bundled.metafile.inputs).sort(), workerExports };

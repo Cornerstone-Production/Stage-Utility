@@ -6,7 +6,8 @@
 //
 //   - the Worker module, byte for byte (less the source map comment wrangler adds);
 //   - what that module exports and the source files it was bundled from;
-//   - the bindings wrangler reports, and how many files it read as the page.
+//   - the bindings wrangler reports, and the files it reads from the bundle's page (and that
+//     `_headers` is config to it, which is why deploy.json carries its text).
 //
 // The compatibility date, flags and asset rules are not in a dry run's output: wrangler reads
 // them from wrangler.jsonc and so does the manifest, and servicecue-bundle.test.ts holds the
@@ -37,6 +38,27 @@ const required = process.env.SERVICECUE_REQUIRE_WRANGLER === "1";
 const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), "servicecue-wrangler-"));
 after(() => fs.rmSync(SCRATCH, { recursive: true, force: true }));
 
+/** `wrangler deploy --dry-run` of the Worker with `assets` as its page. */
+function dryRun(outdir: string, assets: string, metafile?: string) {
+  return spawnSync(WRANGLER, ["deploy", "--dry-run", "--outdir", outdir, ...(metafile ? ["--metafile", metafile] : []), "--assets", assets], {
+    cwd: WORKER,
+    encoding: "utf8",
+    // No account and no telemetry: nothing here talks to Cloudflare. Debug logging is what lists the files it read.
+    env: { ...process.env, WRANGLER_LOG: "debug", WRANGLER_SEND_METRICS: "false", CLOUDFLARE_API_TOKEN: "", CLOUDFLARE_ACCOUNT_ID: "" },
+  });
+}
+
+/** The files wrangler lists after "Read N files from the assets directory": its lines that start with "/", less the folders among them. */
+function listedFiles(output: string): string[] {
+  const after = output.slice(output.indexOf("from the assets directory"));
+  const entries = after.split("\n").filter((l) => /^\/\S+$/.test(l.trim())).map((l) => l.trim());
+  return entries.filter((e) => !entries.some((o) => o.startsWith(`${e}/`))).sort();
+}
+
+function filesUnder(dir: string, base = ""): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesUnder(path.join(dir, e.name), `${base}${e.name}/`) : [`${base}${e.name}`]));
+}
+
 describe("the bundle against wrangler deploy --dry-run", { skip: present || required ? false : "wrangler is not installed (npm --prefix publish/servicecue ci)" }, () => {
   test("is the same Worker, the same bindings and the same page", async () => {
     assert.equal(present, true, "SERVICECUE_REQUIRE_WRANGLER is set and wrangler is not installed in publish/servicecue");
@@ -44,12 +66,7 @@ describe("the bundle against wrangler deploy --dry-run", { skip: present || requ
 
     const theirs = path.join(SCRATCH, "wrangler");
     const metafile = path.join(SCRATCH, "wrangler-meta.json");
-    const run = spawnSync(WRANGLER, ["deploy", "--dry-run", "--outdir", theirs, "--metafile", metafile, "--assets", path.join(ours.outDir, "public")], {
-      cwd: WORKER,
-      encoding: "utf8",
-      // No account and no telemetry: nothing here talks to Cloudflare.
-      env: { ...process.env, WRANGLER_SEND_METRICS: "false", CLOUDFLARE_API_TOKEN: "", CLOUDFLARE_ACCOUNT_ID: "" },
-    });
+    const run = dryRun(theirs, path.join(ours.outDir, "public"), metafile);
     assert.equal(run.status, 0, `wrangler: ${run.stdout}${run.stderr}`);
 
     // The module.
@@ -76,10 +93,16 @@ describe("the bundle against wrangler deploy --dry-run", { skip: present || requ
     );
     assert.deepEqual(listed.sort(), declared.sort());
 
-    // The page: every entry in the folder, `_headers` included. wrangler's count takes in a
-    // folder as it does a file (`assets/`), so a folder counts too.
-    const entries = (dir: string): number =>
-      fs.readdirSync(dir, { withFileTypes: true }).reduce((n, e) => n + 1 + (e.isDirectory() ? entries(path.join(dir, e.name)) : 0), 0);
-    assert.equal(/Read (\d+) files? from the assets directory/.exec(run.stdout)?.[1], String(entries(path.join(ours.outDir, "public"))));
+    // The page: the files wrangler reads from our folder are the files in it, and `_headers`,
+    // which is not among them, is the one file wrangler reads as config and does not upload.
+    const files = listedFiles(run.stdout + run.stderr);
+    assert.deepEqual(files, filesUnder(path.join(ours.outDir, "public")).map((f) => `/${f}`).sort());
+    assert.equal(files.includes("/_headers"), false);
+
+    const withHeaders = path.join(SCRATCH, "with-headers");
+    fs.cpSync(path.join(ours.outDir, "public"), withHeaders, { recursive: true });
+    fs.writeFileSync(path.join(withHeaders, "_headers"), String(ours.manifest.assets._headers));
+    const second = dryRun(path.join(SCRATCH, "wrangler-2"), withHeaders);
+    assert.match(second.stdout + second.stderr, /Ignoring asset: _headers/, "wrangler uploads _headers as an asset after all: deploy.json's assets._headers is wrong");
   });
 });

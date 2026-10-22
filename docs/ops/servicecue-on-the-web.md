@@ -155,8 +155,15 @@ for upload, in `build/servicecue/`:
 | File | What it is |
 |---|---|
 | `worker.js` | The Worker as one module, the same one `wrangler deploy` uploads |
-| `public/` | The built page, with its `_headers` file |
-| `deploy.json` | The build id of the page, the app's version, the Worker's compatibility date and flags, its asset rules, its bindings and its variables, each read from `wrangler.jsonc` and the build |
+| `public/` | The built page: every file the asset service serves |
+| `deploy.json` | The build id of the page, the app's version, the Worker's compatibility date and flags, its asset rules, its bindings and variables, its Durable Object `exports`, and `keep_bindings`, each read from `wrangler.jsonc` and the build |
+
+The page's `_headers` file is not in `public/`. Wrangler does not upload it as an asset:
+it reads it as configuration and sends its text in the assets config. `deploy.json` does
+the same, in `assets._headers` beside `run_worker_first`, so `assets` is the config an
+upload sends as it stands and `public/` is the list of files to upload. `keep_bindings`
+(`secret_text`, `secret_key`) is what keeps the publishing token across an upload that
+does not name it, as it does for `wrangler deploy`.
 
 `npm run servicecue:bundle` makes the same folder on its own. It needs nothing but what
 `npm ci --include=dev` installs: not wrangler, not a login. It does not touch

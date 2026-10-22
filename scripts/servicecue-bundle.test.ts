@@ -17,6 +17,7 @@ import { after, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { PUBLISH_PROTOCOL_VERSION, VIEWER_HTML, viewerBuildFromHtml } from "../main/types/servicecue-publish.js";
+import { staticHeaders } from "../publish/servicecue/src/headers.js";
 import { CARRIED_KEYS, DEPLOYED_ELSEWHERE_KEYS, bundleServiceCue, deployManifest, parseWranglerConfig } from "./servicecue-bundle.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -27,11 +28,12 @@ after(() => fs.rmSync(OUT, { recursive: true, force: true }));
 const bundled = await bundleServiceCue(OUT, true);
 
 const written = JSON.parse(fs.readFileSync(path.join(OUT, "deploy.json"), "utf8")) as Record<string, unknown>;
-const wrangler = parseWranglerConfig(WRANGLER_TEXT) as {
+const wrangler = (await parseWranglerConfig(WRANGLER_TEXT)) as {
   compatibility_date: string;
   compatibility_flags?: string[];
   assets: Record<string, unknown> & { directory: string; binding: string };
   durable_objects: { bindings: { name: string; class_name: string }[] };
+  exports: Record<string, unknown>;
 };
 
 function filesUnder(dir: string, base = ""): string[] {
@@ -49,7 +51,7 @@ describe("deploy.json, as the bundle wrote it", () => {
 
   test("carries wrangler.jsonc's asset rules, less where the files are and what the Worker calls them", () => {
     const { directory: _directory, binding: _binding, ...rules } = wrangler.assets;
-    assert.deepEqual(written.assets, rules);
+    assert.deepEqual(written.assets, { ...rules, _headers: staticHeaders() });
     assert.ok(Array.isArray((written.assets as { run_worker_first?: unknown }).run_worker_first), "run_worker_first is the rule that keeps the Worker in front of every path");
   });
 
@@ -58,6 +60,12 @@ describe("deploy.json, as the bundle wrote it", () => {
       { type: "assets", name: wrangler.assets.binding },
       ...wrangler.durable_objects.bindings.map((b) => ({ type: "durable_object_namespace", name: b.name, class_name: b.class_name })),
     ]);
+  });
+
+  test("carries wrangler.jsonc's exports as they are, and keeps the secrets an upload does not name", () => {
+    assert.deepEqual(written.exports, wrangler.exports);
+    assert.ok(Object.keys(written.exports as object).includes("PublishHub"));
+    assert.deepEqual(written.keep_bindings, ["secret_text", "secret_key"]);
   });
 
   test("names the build id stamped into the document it ships, the app's version and the protocol", () => {
@@ -74,21 +82,25 @@ describe("deploy.json, as the bundle wrote it", () => {
   });
 
   test("has exactly these fields", () => {
-    assert.deepEqual(Object.keys(written).sort(), ["assets", "bindings", "build", "compatibilityDate", "compatibilityFlags", "mainModule", "protocol", "version"]);
+    assert.deepEqual(Object.keys(written).sort(), ["assets", "bindings", "build", "compatibilityDate", "compatibilityFlags", "exports", "keep_bindings", "mainModule", "protocol", "version"]);
   });
 });
 
 describe("the folder", () => {
-  test("holds the Worker, the manifest and the page, and the page has its headers file", () => {
-    const top = fs.readdirSync(OUT).sort();
-    assert.deepEqual(top, ["deploy.json", "public", "worker.js"]);
-    const page = filesUnder(path.join(OUT, "public"));
-    assert.ok(page.includes("_headers") && page.includes("servicecue.html"));
+  test("holds the Worker, the manifest and the page", () => {
+    assert.deepEqual(fs.readdirSync(OUT).sort(), ["deploy.json", "public", "worker.js"]);
+    assert.ok(filesUnder(path.join(OUT, "public")).includes("servicecue.html"));
+  });
+
+  test("keeps `_headers` out of the page's files: wrangler does not upload it as an asset, it sends its text as config", () => {
+    assert.equal(filesUnder(path.join(OUT, "public")).includes("_headers"), false);
+    assert.equal((written.assets as Record<string, unknown>)._headers, staticHeaders());
+    assert.ok(staticHeaders().length > 0);
   });
 });
 
 describe("deployManifest follows its sources", () => {
-  const base = { wrangler: wrangler as unknown as Record<string, unknown>, version: "9.9.9", build: "abcdef012345" };
+  const base = { wrangler: wrangler as unknown as Record<string, unknown>, version: "9.9.9", build: "abcdef012345", headers: "/*\n  X-Test: 1\n" };
 
   test("a date, a flag, a binding and an asset rule changed in the config change the manifest", () => {
     const changed = {
@@ -106,6 +118,7 @@ describe("deployManifest follows its sources", () => {
       { type: "assets", name: "FILES" },
       { type: "durable_object_namespace", name: "ROOM", class_name: "Room" },
     ]);
+    assert.equal(m.assets._headers, "/*\n  X-Test: 1\n");
     assert.equal(m.version, "9.9.9");
     assert.equal(m.build, "abcdef012345");
   });
@@ -142,8 +155,8 @@ describe("deployManifest follows its sources", () => {
 });
 
 describe("parseWranglerConfig", () => {
-  test("reads comments and trailing commas, and refuses what is not JSON", () => {
-    assert.deepEqual(parseWranglerConfig('{ // note\n "a": [1, 2,], /* b */ "c": "// not a comment" }'), { a: [1, 2], c: "// not a comment" });
-    assert.throws(() => parseWranglerConfig("{ nope"), /could not be read/);
+  test("reads comments and trailing commas, and refuses what is not JSON", async () => {
+    assert.deepEqual(await parseWranglerConfig('{ // note\n "a": [1, 2,], /* b */ "c": "// not a comment" }'), { a: [1, 2], c: "// not a comment" });
+    await assert.rejects(parseWranglerConfig("{ nope"), /could not be read/);
   });
 });
