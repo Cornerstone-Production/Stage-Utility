@@ -325,12 +325,15 @@ The requests are `wrangler deploy`'s, made with `fetch` from `main/services/serv
    The answer lists the hashes Cloudflare does not hold, in buckets.
 3. `POST /accounts/:id/workers/assets/upload?base64=true` once per bucket, with the session's token. The last
    answer carries the completion token; with nothing to upload, the session's token is it.
-4. `PUT /accounts/:id/workers/scripts/:name?excludeScript=true&bindings_inherit=strict`, multipart: `metadata` and
+4. `PUT /accounts/:id/workers/scripts/:name?excludeScript=true&bindings_inherit=strict`, multipart, after a
+   `GET .../settings` that confirms the Worker exists (the PUT would create one): `metadata` and
    the module. The metadata is `main_module`, `bindings`, `compatibility_date` (and `compatibility_flags` when
    there are some), `code_update_strategy`, `exports`, `keep_bindings`, `annotations` and
    `assets: {jwt, config}`, all read from `deploy.json` but the strategy and the annotations. `keep_bindings`
    is what keeps `PUBLISH_TOKEN`. The annotations are `workers/tag` (the build id) and `workers/message`
    (`Stage Utility <running version>`).
+   `npm run servicecue:deploy` sends the same two (`--message` and `--tag`), so a deploy by hand is read back
+   the same way.
 
 The version recorded in the message is what the next server reads back, from the deployment's
 version annotations, for the no-downgrade rule. The deployer's own status is in

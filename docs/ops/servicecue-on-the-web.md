@@ -158,11 +158,16 @@ account ID and an API token for the page's Worker, and stops when the token is c
 There is no other switch. The first Worker and its domain stay a manual, one-time job:
 the server only ever updates a Worker that exists.
 
-**Make the token.** In Cloudflare, create an API token for the `servicecue` Worker only:
-the **Workers Scripts: Edit** permission on that one Worker, nothing else. Such a token
-can replace what the Worker runs and serves. It cannot create or delete Workers, change
-DNS, a domain, the zone's settings or any other Worker, or read anything else on the
-account. Prefer a token owned by the church's account over one owned by a person.
+**Make the token.** Cloudflare's [Workers roles](https://developers.cloudflare.com/workers/authorization/workers/)
+apply to API tokens as they do to members: "API tokens use the same Workers roles and
+scopes", and "per-Worker roles apply only to the Workers you select". Create a token with
+the **Editor** Workers role on the `servicecue` Worker only. Editor "can read, update,
+deploy, and rename existing Workers" and "cannot create or delete Workers"; scoped to one
+Worker it reaches no other Worker, no DNS, domain or zone setting, and nothing else on the
+account. Creating a Worker needs the **Admin** role, which the server never needs: the
+Worker is made once, by hand, before the token (a role cannot be given on a Worker that
+does not exist yet). Prefer a token owned by the church's account over one owned by a
+person.
 
 **Find the account ID.** It is the 32-character id in the address of any page of the
 Cloudflare dashboard (`dash.cloudflare.com/<account id>/...`), and on the **Workers &
@@ -189,8 +194,8 @@ the build it carries. When they differ:
 
 | If | The server |
 |---|---|
-| a service is live in Planning Center | waits, looking again every 30 seconds, and deploys when it ends. It never deploys through a live service, as recording never stops for one |
-| the page was deployed from a **newer** version than this server runs | leaves it |
+| a service is live in Planning Center, or the server has not yet read Planning Center since it started | waits, looking again every 30 seconds, and deploys when it ends. It never deploys through a live service, as recording never stops for one, and it counts the live state as unknown (so live) until the first read |
+| the page was deployed from a **newer** version than this server runs, or from this server's own version by **another build** | leaves it |
 | otherwise | deploys, and logs the files uploaded and the files Cloudflare already held |
 
 **The no-downgrade rule.** The page records the version of the server that deployed it,
@@ -200,13 +205,27 @@ pointed at the same page cannot roll it back. The comparison is semver (a prerel
 older than its release) and is against the version the server is **running**, not the
 `version` in `deploy.json`, which is only the version the folder was last made at. A page
 with no recorded version, as one deployed with `npm run servicecue:deploy` has, is
-deployed over. The one way to roll back is the explicit request below, with a
-confirmation.
+deployed over. The same version from another build is left alone too: two servers at one
+version would otherwise take the page back from each other every few minutes. A page
+deployed with `npm run servicecue:deploy` carries the same record (its version's message is
+`Stage Utility <version>` and its tag the build id), so a hand deploy is not mistaken for
+an old page. The one way to replace a page that is left alone is the explicit request
+below, with a confirmation.
 
 **Update the page now** is `POST /api/servicecue/publish/deploy`. It deploys when the
-page is older or not this build; refuses with `409` and `code: "newer"` when the page was
-deployed from a newer version, unless the body says `{"confirmDowngrade": true}`; and
-refuses with `409` and `code: "service-live"` during a live service.
+page is older or another build; answers `200` with `already: "current"` and uploads nothing
+when the page is already this build; refuses with `409` and `code: "newer"` or
+`"other-build"` when the page was left alone, unless the body says
+`{"confirmDowngrade": true}`; refuses with `409` and `code: "service-live"` (or
+`"service-unknown"`, just after a restart) while a service is, or may be, live; and
+answers `429` with a `Retry-After` when it has deployed in the last minute.
+
+**If the page still does not change.** A deploy that goes through while the page keeps
+serving the old build means the Worker the token and account name is not the one the page
+address points at. After the first status read past a couple of minutes the server says
+so in the log and on the card (`deployed build X to Worker 'servicecue', but the page
+still serves Y: is that Worker the page?`) and deploys nothing more on its own until the
+credentials or the build change.
 
 **If an update fails.** The page keeps what it had: Cloudflare swaps a Worker's version
 all at once. The server records Cloudflare's error code and words, and tries again after
