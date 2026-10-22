@@ -159,7 +159,7 @@ async function publish(request: Request, url: URL, deps: HandlerDeps): Promise<R
     }
 
     case "getStatus":
-      return forMethod(request, json(await deps.hub.status()));
+      return forMethod(request, json({ ...(await deps.hub.status()), build: await viewerBuild(deps.assets, url) }));
   }
 }
 

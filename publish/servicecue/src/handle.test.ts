@@ -475,7 +475,7 @@ describe("manifest and status", () => {
     assert.deepEqual([...s.hub.docs.keys()], ["state"]);
   });
 
-  test("status reports the protocol, what is stored, the last heartbeat and the viewers", async () => {
+  test("status reports the protocol, what is stored, the last heartbeat, the viewers and the build served", async () => {
     const s = setup();
     s.hub.viewers = 4;
     s.hub.clock = 4_000_000;
@@ -489,6 +489,7 @@ describe("manifest and status", () => {
       assets: [],
       lastHeartbeat: { at: 4_000_000, sentAt: 3_999_000, version: "1.0.0" },
       viewers: 4,
+      build: BUILD,
     });
     assert.equal(await (await s.run("HEAD", "/_publish/v1/status", { headers: AUTH })).text(), "");
   });
@@ -581,6 +582,19 @@ describe("telling a page which build is being served", () => {
     assert.deepEqual(s.hub.heartbeatBuilds, [BUILD]);
     assert.deepEqual(s.upgrades, [BUILD]);
     assert.deepEqual(s.assetCalls, ["GET /servicecue.html", "GET /servicecue.html"], "the document is asked for by its own name, once each");
+  });
+
+  test("the status answer names the build of the page being served, and null when there is none", async () => {
+    const s = setup();
+    s.hub.docs.set("state", "{}");
+    const served = (await (await s.run("GET", "/_publish/v1/status", { headers: AUTH })).json()) as Record<string, unknown>;
+    assert.equal(served.build, BUILD);
+    assert.deepEqual(served.docs, ["state"], "the hub's own fields are still the answer");
+    for (const assets of [async () => new Response("<!doctype html><title>older</title>"), async () => new Response("missing", { status: 404 })]) {
+      const bare = (await (await setup({ assets }).run("GET", "/_publish/v1/status", { headers: AUTH })).json()) as Record<string, unknown>;
+      assert.equal(bare.build, null);
+      assert.equal(bare.protocol, 1, "no build is still a status");
+    }
   });
 
   test("an id a visitor puts on the handshake is not the one passed on", async () => {
