@@ -89,11 +89,12 @@ try {
   # Decide what's actually needed. The backend runs via tsx (no build), so a
   # backend-only update just needs a restart. Reinstall only when the lockfile
   # changed; rebuild only when renderer/build inputs changed. Default to doing the
-  # work whenever we can't tell (no OLD rev, or build/ missing).
+  # work whenever we can't tell (no OLD rev, or build/ missing, or no build/servicecue:
+  # a build whose page bundle failed leaves none, and the next update tries again).
   $newRev = (git rev-parse HEAD 2>$null); if (-not $newRev) { $newRev = "none" }
   $needInstall = $true
   $needBuild = $true
-  if ($oldRev -ne "none" -and $newRev -ne "none" -and (Test-Path "build")) {
+  if ($oldRev -ne "none" -and $newRev -ne "none" -and (Test-Path "build") -and (Test-Path "build/servicecue/deploy.json")) {
     $changed = (git diff --name-only $oldRev $newRev 2>$null)
     "[update] changed files:" | Out-File -Append $log
     ($changed | ForEach-Object { "[update]   $_" }) | Out-File -Append $log

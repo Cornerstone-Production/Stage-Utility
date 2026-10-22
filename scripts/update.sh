@@ -95,7 +95,8 @@ write_result() {
   # Decide what's actually needed. The backend runs via tsx (no build), so a
   # backend-only update just needs a restart. Reinstall only when the lockfile
   # changed; rebuild only when renderer/build inputs changed. Default to doing the
-  # work whenever we can't tell (no OLD rev, or build/ missing).
+  # work whenever we can't tell (no OLD rev, or build/ missing, or no build/servicecue:
+  # a build whose page bundle failed leaves none, and the next update tries again).
   NEW_REV="$(git rev-parse HEAD 2>/dev/null || echo none)"
   if [ "$OLD_REV" != "none" ] && [ "$NEW_REV" != "none" ] && [ "$OLD_REV" != "$NEW_REV" ]; then
     echo "[update] $(git rev-parse --short "$OLD_REV") -> $(git rev-parse --short "$NEW_REV") ($(git rev-list --count "$OLD_REV..$NEW_REV" 2>/dev/null || echo '?') commits)"
@@ -110,7 +111,7 @@ write_result() {
   fi
   NEED_INSTALL=1
   NEED_BUILD=1
-  if [ "$OLD_REV" != "none" ] && [ "$NEW_REV" != "none" ] && [ -d build ]; then
+  if [ "$OLD_REV" != "none" ] && [ "$NEW_REV" != "none" ] && [ -d build ] && [ -f build/servicecue/deploy.json ]; then
     CHANGED="$(git diff --name-only "$OLD_REV" "$NEW_REV" 2>/dev/null || echo "")"
     echo "[update] $(printf '%s\n' "$CHANGED" | grep -c .) file(s) changed"
     NEED_INSTALL=0; NEED_BUILD=0
