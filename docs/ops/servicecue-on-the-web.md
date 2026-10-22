@@ -143,9 +143,88 @@ A domain whose DNS is on Cloudflare, in the same account, can stand in for the
 
 ## Updating it
 
-A change to ServiceCue reaches the public page when you run `npm run servicecue:deploy`
-again. The docs and rundowns the page shows are not part of the deploy: they come from
+A change to ServiceCue reaches the public page in one of two ways: the server that
+publishes to it updates it once it has a Cloudflare API token
+([Keeping it up to date](#keeping-it-up-to-date)), or you run `npm run servicecue:deploy`
+again. The docs and rundowns the page shows are not part of a deploy: they come from
 what Stage Utility sends.
+
+### Keeping it up to date
+
+The server the page is linked to (the one holding its address and its publishing token)
+can put each new build of the page on Cloudflare itself, from the copy every build
+carries ([below](#the-copy-every-build-prepares)). It does so once it has a Cloudflare
+account ID and an API token for the page's Worker, and stops when the token is cleared.
+There is no other switch. The first Worker and its domain stay a manual, one-time job:
+the server only ever updates a Worker that exists.
+
+**Make the token.** In Cloudflare, create an API token for the `servicecue` Worker only:
+the **Workers Scripts: Edit** permission on that one Worker, nothing else. Such a token
+can replace what the Worker runs and serves. It cannot create or delete Workers, change
+DNS, a domain, the zone's settings or any other Worker, or read anything else on the
+account. Prefer a token owned by the church's account over one owned by a person.
+
+**Find the account ID.** It is the 32-character id in the address of any page of the
+Cloudflare dashboard (`dash.cloudflare.com/<account id>/...`), and on the **Workers &
+Pages** overview, on the right.
+
+**Give them to the server.** They are saved for the page's address, so set that first.
+From any machine on the network:
+
+```bash
+curl -X POST http://<server>:8788/api/servicecue/publish/deploy-credentials \
+  -H 'Content-Type: application/json' \
+  -d '{"accountId": "<account id>", "token": "<api token>"}'
+```
+
+The token is stored encrypted beside the publishing token and is never sent back or
+included in a backup. Changing the page's address drops both, and a token of `""` clears
+them: updating then stops. To replace a token, send the new one. Revoking it in
+Cloudflare is enough to stop it too: the next attempt is refused, the log says so and
+nothing more is tried until the token is changed.
+
+**What the server does, and when.** Each time it reads the page's status (when
+publishing starts, then every few minutes) it compares the build the page serves with
+the build it carries. When they differ:
+
+| If | The server |
+|---|---|
+| a service is live in Planning Center | waits, looking again every 30 seconds, and deploys when it ends. It never deploys through a live service, as recording never stops for one |
+| the page was deployed from a **newer** version than this server runs | leaves it |
+| otherwise | deploys, and logs the files uploaded and the files Cloudflare already held |
+
+**The no-downgrade rule.** The page records the version of the server that deployed it,
+in the Worker version's message (`Stage Utility 1.28.0`). A server never replaces a page
+deployed from a newer version than the one it is running, so a development machine
+pointed at the same page cannot roll it back. The comparison is semver (a prerelease is
+older than its release) and is against the version the server is **running**, not the
+`version` in `deploy.json`, which is only the version the folder was last made at. A page
+with no recorded version, as one deployed with `npm run servicecue:deploy` has, is
+deployed over. The one way to roll back is the explicit request below, with a
+confirmation.
+
+**Update the page now** is `POST /api/servicecue/publish/deploy`. It deploys when the
+page is older or not this build; refuses with `409` and `code: "newer"` when the page was
+deployed from a newer version, unless the body says `{"confirmDowngrade": true}`; and
+refuses with `409` and `code: "service-live"` during a live service.
+
+**If an update fails.** The page keeps what it had: Cloudflare swaps a Worker's version
+all at once. The server records Cloudflare's error code and words, and tries again after
+a minute, then two, doubling to at most once an hour. A `401` or `403` is not tried again
+until the token changes. The card for this is in the status the `GET
+/api/servicecue/publish` answer carries as `deploy`
+([API](../reference/api.md)).
+
+**Try one by hand.** `npm run servicecue:deploy-try` runs the server's own deployer once,
+printing each step, against a Worker you name. Use it on a scratch Worker first:
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=<id> CLOUDFLARE_API_TOKEN=<token> \
+  npm run servicecue:deploy-try -- --script scratch --check
+```
+
+`--check` verifies the token and reads what the Worker holds and sends nothing. Without
+it the deploy is made. The real Worker's name is refused unless `--production` is added.
 
 ### The copy every build prepares
 
@@ -207,6 +286,12 @@ page, and keeps the address it was on
   says why the Worker is not being reached: the token was refused, a Cloudflare rule
   blocked the server, the address is not the page, or the Worker has no secret set or one
   under 32 characters.
+- **The page is behind the server's build.** The server's side is the `[servicecue-deploy]`
+  lines in the app's [log](updates-and-logs.md): each decision once (deploying and why,
+  the page already current, skipped as the page is newer, waiting for a live service, no
+  token, no copy of the page in this build), the files uploaded and the files already
+  held, the build deployed, and every failure with Cloudflare's code and words. A refused
+  token reads `HTTP 401` or `403` and `Not trying again until the token changes`.
 - **The card says something on this network is intercepting the connection.** A firewall
   or web filter on the church's network is answering for the Worker with a certificate of
   its own, usually because its filter blocks the address. Ask whoever runs it to allow the
@@ -248,7 +333,13 @@ A leaked token lets someone, from anywhere:
 
 It reaches no part of your network, your Planning Center account or your settings.
 
-To rotate it, set a new one with the two commands in step 4 and update Stage Utility;
+A Cloudflare API token for [keeping the page up to date](#keeping-it-up-to-date) is a
+different secret. Held by someone else, it lets them put their own page on this address
+for as long as it works, which the publishing token cannot do. Delete it in Cloudflare
+when it may have been seen or the person who made it leaves, and clear it from the
+server by sending `{"token": ""}` to `/api/servicecue/publish/deploy-credentials`.
+
+To rotate the publishing token, set a new one with the two commands in step 4 and update Stage Utility;
 the old one stops working at once, and the **Public link** card shows it as the problem until the new one is entered under **Cloudflare connection**. Do it when someone who had it leaves, and whenever it
 may have been seen.
 
