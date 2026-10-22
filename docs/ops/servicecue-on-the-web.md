@@ -156,7 +156,7 @@ for upload, in `build/servicecue/`:
 |---|---|
 | `worker.js` | The Worker as one module, the same one `wrangler deploy` uploads |
 | `public/` | The built page: every file the asset service serves |
-| `deploy.json` | The build id of the page, the app's version, the Worker's compatibility date and flags, its asset rules, its bindings and variables, its Durable Object `exports`, and `keep_bindings`, each read from `wrangler.jsonc` and the build |
+| `deploy.json` | The Worker's name, the build id of the page, the app's version, the Worker's compatibility date and flags, its asset rules, its bindings and variables, its Durable Object `exports`, and `keep_bindings`, each read from `wrangler.jsonc` and the build |
 
 The page's `_headers` file is not in `public/`. Wrangler does not upload it as an asset:
 it reads it as configuration and sends its text in the assets config. `deploy.json` does
