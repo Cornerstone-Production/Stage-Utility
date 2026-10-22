@@ -46,8 +46,9 @@ import { displayType } from "../../main/timer-config";
  * Colour that is decoration does not survive onto Home — one grid of tiles that
  * reads in both themes beats per-widget tinting that only works in one.
  *
- * Subtracts, with ONE addition: `position: relative`, which is what makes
- * "inside the card" true rather than aspirational. See the note on it below.
+ * Subtracts, with two additions: `position: relative`, which is what makes
+ * "inside the card" true rather than aspirational, and the theme's ink for a
+ * widget that names no colour. See the notes on each below.
  */
 export function cardFrame(o: LayoutObject, H: number): CSSProperties {
   const {
@@ -82,7 +83,9 @@ export function cardFrame(o: LayoutObject, H: number): CSSProperties {
   // because that is the half a test can read: jsdom loads no stylesheet, so a
   // `relative` in the className resolves to "static" and a containing-block
   // guard over it would pass on the bug.
-  return { ...rest, position: "relative" };
+  // And the ink a widget without a colour of its own draws: the theme's, not
+  // the wall's white. See DEFAULT_INK in layout-renderer.tsx.
+  return { ...rest, position: "relative", ["--layout-ink" as string]: "var(--color-fg)" };
 }
 
 /**
