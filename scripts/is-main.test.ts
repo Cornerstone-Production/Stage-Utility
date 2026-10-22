@@ -24,6 +24,19 @@ describe("isMain", () => {
     assert.equal(isMain(`file://${SCRIPTS}/is-main.mjs`, path.join(SCRIPTS, "is-main.mjs")), true);
   });
 
+  test("on a Windows host, with no option given, reads Windows paths and ignores case", () => {
+    const real = Object.getOwnPropertyDescriptor(process, "platform")!;
+    try {
+      Object.defineProperty(process, "platform", { value: "win32" });
+      assert.equal(isMain("file:///C:/repo/scripts/a.mjs", "c:\\REPO\\scripts\\a.mjs"), true);
+      assert.equal(isMain("file:///C:/repo/scripts/a.mjs", "C:\\other\\a.mjs"), false);
+      Object.defineProperty(process, "platform", { value: "linux" });
+      assert.equal(isMain("file:///repo/Scripts/a.mjs", "/repo/scripts/a.mjs"), false, "case matters off Windows");
+    } finally {
+      Object.defineProperty(process, "platform", real);
+    }
+  });
+
   test("is false for another script of the same name elsewhere, and for no script", () => {
     assert.equal(isMain("file:///C:/repo/scripts/x.mjs", "C:\\other\\scripts\\x.mjs", { windows: true }), false);
     assert.equal(isMain("file:///repo/scripts/x.mjs", "/other/x.mjs"), false);
