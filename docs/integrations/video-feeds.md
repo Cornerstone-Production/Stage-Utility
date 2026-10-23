@@ -258,15 +258,15 @@ path a listener should read:
 | `audio.state` | Meaning | Path to read |
 |---|---|---|
 | `none` | The source has no audio track | nothing |
-| `unknown` | The feed has not been seen yet, so its audio is not known | |
+| `unknown` | The feed has not been seen yet, so its audio is not known | nothing |
 | `direct` | Opus, G.711, G.722 or LPCM: playable as the relay has it | the feed's own path |
 | `converted` | AAC, re-encoded to Opus on demand | `<id>-listen` |
 | `pass-through` | Read from the audio source address and copied | `<id>-listen` |
-| `unavailable` | Cannot be heard; `reason` says why | |
+| `unavailable` | Cannot be heard; `reason` says why | nothing |
 
-The status names the path; no browser can play `<id>-listen` yet, because the
-playback proxy serves only a feed's own path. A Listen control that plays it is
-still to come.
+The status names the path. No page plays `<id>-listen` yet: the playback proxy
+serves only a feed's own path, and the relay serves `<id>-listen` to RTSP and
+WHEP readers on this machine.
 
 The editor shows it under the audio source address ("Audio unavailable: ffmpeg is
 not installed on this server."). The codec is learned from the relay's track
