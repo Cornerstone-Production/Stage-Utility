@@ -873,9 +873,56 @@ test("a pull feed's Address, Username and password fields render, the Magewell c
     assert.ok(patch, "expected a video:updateFeed request");
     assert.deepEqual(
       patch!.body,
-      { name: "Program (IMAG)", source: { kind: "pull", url: "rtsp://192.0.2.99:8554/stream9", username: "" } },
+      {
+        name: "Program (IMAG)",
+        source: { kind: "pull", url: "rtsp://192.0.2.99:8554/stream9", username: "" },
+        audioConversion: "auto",
+        audioSourceUrl: "",
+      },
       "an untouched password field must not send a password key at all",
     );
+  } finally {
+    g.restore();
+  }
+});
+
+test("the audio setting and address save with the feed, and the editor says what the feed's audio is", async () => {
+  const g = stubGlobals(
+    { ...makeState([pullFeed({ audio: { state: "converted", listenPath: "program-imag-listen" }, audioConversion: "auto", audioSourceUrl: "" })]), kinds: ALL_KINDS },
+    { onUpdateFeed: (id, body) => ({ status: 200, body: echoUpdate(id, body) }) },
+  );
+  try {
+    const { container } = mount();
+    await pageReady();
+    assert.match(screen.getByTestId("audio-status").textContent ?? "", /converted to Opus on this server/);
+
+    fireEvent.change(container.querySelector('input[aria-label="Audio source address"]') as HTMLInputElement, {
+      target: { value: " http://192.0.2.28/0.ts " },
+    });
+    fireEvent.change(container.querySelector('select[aria-label="Audio conversion"]') as HTMLSelectElement, { target: { value: "always" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settle();
+    await settle();
+
+    const patch = g.calls.find((c) => c.method === "PATCH");
+    assert.ok(patch, "expected a video:updateFeed request");
+    const body = patch!.body as Record<string, unknown>;
+    assert.equal(body.audioConversion, "always");
+    assert.equal(body.audioSourceUrl, "http://192.0.2.28/0.ts");
+  } finally {
+    g.restore();
+  }
+});
+
+test("an unavailable feed shows the reason beside the setting", async () => {
+  const g = stubGlobals(
+    { ...makeState([pullFeed({ audio: { state: "unavailable", reason: "ffmpeg is not installed on this server" } })]), kinds: ALL_KINDS },
+    {},
+  );
+  try {
+    mount();
+    await pageReady();
+    assert.equal(screen.getByTestId("audio-status").textContent, "Audio unavailable: ffmpeg is not installed on this server.");
   } finally {
     g.restore();
   }

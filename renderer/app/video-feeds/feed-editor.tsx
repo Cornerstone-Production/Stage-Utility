@@ -11,10 +11,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { errorMessage } from "@main/services/errors";
 import {
+  AUDIO_CONVERSIONS,
   EMBED_PLAYERS,
   PUSH_PROTOCOL_LABEL,
   PUSH_PROTOCOLS,
+  type AudioConversion,
   type EmbedPlayer,
+  type FeedAudioStatus,
   type KickResult,
   type PushProtocol,
   type VideoFeedView,
@@ -125,6 +128,34 @@ interface Draft {
   embedPlayer: EmbedPlayer;
   embedRef: string;
   externalUrl: string;
+  audioConversion: AudioConversion;
+  audioSourceUrl: string;
+}
+
+const AUDIO_CONVERSION_LABEL: Record<AudioConversion, string> = {
+  auto: "Auto (convert AAC)",
+  off: "Off",
+  always: "Always",
+};
+
+/** What a feed's audio status says, in a sentence, for the editor's line under
+ *  the setting. */
+export function audioStatusText(a: FeedAudioStatus | undefined): string {
+  if (!a) return "";
+  switch (a.state) {
+    case "none":
+      return "This feed has no audio.";
+    case "unknown":
+      return "Audio is checked once the feed is showing.";
+    case "direct":
+      return "Audio plays as it is: no conversion needed.";
+    case "converted":
+      return "Audio is converted to Opus on this server while someone listens.";
+    case "pass-through":
+      return "Audio comes from the audio source address, copied as it is, while someone listens.";
+    case "unavailable":
+      return `Audio unavailable: ${a.reason}.`;
+  }
 }
 
 function draftFrom(feed: VideoFeedView | null, kinds: readonly VideoSourceKind[]): Draft {
@@ -138,6 +169,8 @@ function draftFrom(feed: VideoFeedView | null, kinds: readonly VideoSourceKind[]
     embedPlayer: feed?.source.kind === "embed" ? feed.source.player : "youtube-channel",
     embedRef: feed?.source.kind === "embed" ? feed.source.ref : "",
     externalUrl: feed?.source.kind === "external" ? feed.source.url : "",
+    audioConversion: feed?.audioConversion ?? "auto",
+    audioSourceUrl: feed?.audioSourceUrl ?? "",
   };
 }
 
@@ -277,6 +310,12 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
       // stored password; leaving the key out entirely is how it is told to
       // leave the existing one alone.
       if (draft.kind === "pull" && pullPasswordTouched) body.password = draft.pullPassword;
+      // Always sent for a feed the relay carries, so clearing the address saves
+      // as "" rather than being read as "unchanged".
+      if (draft.kind === "pull" || draft.kind === "push") {
+        body.audioConversion = draft.audioConversion;
+        body.audioSourceUrl = draft.audioSourceUrl.trim();
+      }
       // Nothing reads as saved until this resolves: onSaved only fires with
       // the server's own view of the feed, never the local draft.
       const result =
@@ -510,6 +549,46 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
             onChange={(e) => setDraft({ ...draft, externalUrl: e.target.value })}
           />
         </StackedField>
+      )}
+
+      {(draft.kind === "pull" || draft.kind === "push") && (
+        <>
+          <StackedField
+            label="Audio conversion"
+            description="Browsers cannot play AAC live. Auto converts it to Opus on this server, only while someone listens, and needs ffmpeg."
+          >
+            <Select value={draft.audioConversion} onValueChange={(v) => setDraft({ ...draft, audioConversion: v as AudioConversion })}>
+              <SelectTrigger aria-label="Audio conversion" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {AUDIO_CONVERSIONS.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {AUDIO_CONVERSION_LABEL[c]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </StackedField>
+
+          <StackedField
+            label="Audio source address"
+            description="Optional. An http or https address that already carries this feed's audio as Opus; the server copies it as it is. No username or password."
+          >
+            <Input
+              aria-label="Audio source address"
+              placeholder="http://"
+              className="font-mono text-caption1"
+              value={draft.audioSourceUrl}
+              onChange={(e) => setDraft({ ...draft, audioSourceUrl: e.target.value })}
+            />
+            {!isNew && feed && audioStatusText(feed.audio) !== "" && (
+              <span data-testid="audio-status" className="text-caption1 text-fg-subtle">
+                {audioStatusText(feed.audio)}
+              </span>
+            )}
+          </StackedField>
+        </>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
