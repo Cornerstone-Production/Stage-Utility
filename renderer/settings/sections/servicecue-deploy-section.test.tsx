@@ -23,7 +23,6 @@ const { render, screen, cleanup, fireEvent, act, within } = await import("@testi
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
 const { PublicLinkCard } = await import("./servicecue-public-link.js");
-const { deployLine, deployedAt, inHowLong } = await import("./servicecue-deploy-section.js");
 const { setDisplayHourCycle } = await import("../../lib/clock-format.js");
 const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
 const { TooltipProvider } = await import("../../components/ui/index.js");
@@ -222,17 +221,20 @@ describe("the status line, by state", () => {
     assert.equal(updateButton()?.disabled, true);
   });
 
-  test("updating, with the count not known yet and one file", async () => {
-    const one = deployLine(deployOf({ state: "updating", files: { uploaded: 1, held: 0 } }), "UTC", 0);
-    assert.equal(one.text, "Updating the page… 1 file to upload, 0 already on Cloudflare");
-    assert.equal(deployLine(deployOf({ state: "updating", files: null }), "UTC", 0).text, "Updating the page…");
+  test("updating, with one file, and with the count not known yet", async () => {
+    await with_(deployOf({ state: "updating", files: { uploaded: 1, held: 0 } }));
+    assert.equal(status(), "Updating the page… 1 file to upload, 0 already on Cloudflare");
+    cleanup();
+    await with_(deployOf({ state: "updating", files: null }));
+    assert.equal(status(), "Updating the page…");
   });
 
   test("waiting for a live service: says so, and what the build is", async () => {
     await with_(deployOf({ state: "waiting", waitingFor: "live", page: { build: "9c41e07", version: "1.27.0", at: DEPLOYED_AT } }));
     assert.equal(status(), "Waiting for the service to end, then updating to build 3f2a91c (1.28.0)");
     assert.ok(sectionText().includes("A service is live in Planning Center, so the page is left alone until it ends."));
-    assert.equal(updateButton()?.disabled, false);
+    // A request now could only be refused: the status line says why.
+    assert.equal(updateButton()?.disabled, true);
   });
 
   test("waiting to hear whether one is live: says that, and that Update the page now goes ahead when it is merely unknown", async () => {
@@ -240,6 +242,8 @@ describe("the status line, by state", () => {
     assert.equal(status(), "Waiting to hear whether a service is live, then updating");
     assert.ok(sectionText().includes("Update the page now goes ahead when the state is merely unknown, never through a live service."));
     assert.ok(!sectionText().includes("A service is live in Planning Center"));
+    // Allowed when the state is merely unknown, so it can be pressed.
+    assert.equal(updateButton()?.disabled, false);
   });
 
   test("failed, refused: the token is named, the page is unchanged, and the fix is to paste a new one", async () => {
@@ -266,13 +270,22 @@ describe("the status line, by state", () => {
     assert.ok(sectionText().includes("Tries again in about 5 min."));
   });
 
-  test("failed, with a retry time already gone by: tries again shortly; with none: says it will not on its own", () => {
+  test("failed, with a retry time already gone by: tries again shortly; with none: says it will not on its own", async () => {
     const e = { message: "x", code: null, status: null, step: "upload the files", at: NOW, refused: false };
-    assert.equal(deployLine(deployOf({ state: "failed", error: { ...e, retryAt: NOW - 1 } }), "UTC", 0).detail, "Tries again shortly.");
-    assert.equal(
-      deployLine(deployOf({ state: "failed", error: { ...e, retryAt: null } }), "UTC", 0).detail,
-      "It is not tried again on its own. Update the page now tries once more.",
-    );
+    await with_(deployOf({ state: "failed", error: { ...e, retryAt: NOW - 1 } }));
+    assert.ok(sectionText().includes("Tries again shortly."));
+    cleanup();
+    await with_(deployOf({ state: "failed", error: { ...e, retryAt: null } }));
+    assert.ok(sectionText().includes("It is not tried again on its own. Update the page now tries once more."));
+  });
+
+  test("the retry time is in seconds, minutes or hours, rounded up", async () => {
+    const e = { message: "x", code: null, status: null, step: "upload the files", at: NOW, refused: false };
+    for (const [ms, said] of [[20_000, "20 s"], [150_000, "3 min"], [9_000_000, "3 h"]] as const) {
+      await with_(deployOf({ state: "failed", error: { ...e, retryAt: NOW + ms } }));
+      assert.ok(sectionText().includes(`Tries again in about ${said}.`), said);
+      cleanup();
+    }
   });
 
   test("newer: names both versions", async () => {
@@ -299,35 +312,38 @@ describe("the status line, by state", () => {
     assert.equal(status(), "Updating is on. The page's build has not been read yet.");
   });
 
-  test("the time is written in the app's zone, not this machine's", () => {
-    assert.equal(deployedAt(DEPLOYED_AT, "America/Chicago"), "21 Oct, 8:14 AM");
-    assert.equal(deployedAt(DEPLOYED_AT, "UTC"), "21 Oct, 1:14 PM");
-    assert.equal(deployedAt(DEPLOYED_AT, "Asia/Tokyo"), "21 Oct, 10:14 PM");
-    // In the operator's own clock format, as every other time in the app.
+  test("the time is written in the app's zone, not this machine's, and in the operator's clock format", async () => {
+    for (const [zone, said] of [["America/Chicago", "21 Oct, 8:14 AM"], ["UTC", "21 Oct, 1:14 PM"], ["Asia/Tokyo", "21 Oct, 10:14 PM"]] as const) {
+      await with_(deployOf(), { timeZone: zone });
+      assert.equal(status(), `Up to date: build 3f2a91c (1.28.0), deployed ${said}`, zone);
+      cleanup();
+    }
     setDisplayHourCycle("24h");
-    assert.equal(deployedAt(DEPLOYED_AT, "America/Chicago"), "21 Oct, 08:14");
-    // A zone Intl does not know is the host's, never an error in the card.
-    assert.ok(deployedAt(DEPLOYED_AT, "Mars/Olympus_Mons").length > 0);
+    await with_(deployOf(), { timeZone: "America/Chicago" });
+    assert.ok(status().endsWith("deployed 21 Oct, 08:14"));
   });
 
-  test("how long from now rounds up, so a wait still to come is never zero", () => {
-    assert.equal(inHowLong(1), "1 s");
-    assert.equal(inHowLong(59_000), "59 s");
-    assert.equal(inHowLong(60_001), "2 min");
-    assert.equal(inHowLong(3_600_001), "2 h");
+  test("a month is three letters whatever the locale calls it: September is Sep, not Sept", async () => {
+    await with_(deployOf({ page: { build: "3f2a91c", version: "1.28.0", at: Date.UTC(2026, 8, 4, 13, 14) } }), { timeZone: "UTC" });
+    assert.equal(status(), "Up to date: build 3f2a91c (1.28.0), deployed 4 Sep, 1:14 PM");
+  });
+
+  test("a zone Intl does not know is the host's, never an error in the card", async () => {
+    await with_(deployOf(), { timeZone: "Mars/Olympus_Mons" });
+    assert.ok(status().startsWith("Up to date: build 3f2a91c (1.28.0), deployed 21 Oct"));
   });
 });
 
 describe("the Cloudflare connection disclosure", () => {
   const opened = () => screen.getByRole("button", { name: "Cloudflare connection" }).getAttribute("aria-expanded");
-  const mountRaw = async (deploy: DeployStatus) => {
-    server.dto = dtoOf(deploy);
+  const mountRaw = async (deploy: DeployStatus, pollMs = 5_000, setDto = true) => {
+    if (setDto) server.dto = dtoOf(deploy);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     const router = routerAt("/servicecue/manage", "/servicecue/manage", "/settings/integrations");
     render(
       React.createElement(RouterContextProvider, {
         router,
-        children: React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, React.createElement(PublicLinkCard, { ...NAMES, timeZone: "UTC" }))),
+        children: React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, React.createElement(PublicLinkCard, { ...NAMES, timeZone: "UTC", pollMs }))),
       } as never),
     );
     await eventually(() => assert.ok(screen.getByRole("button", { name: "Cloudflare connection" })));
@@ -341,6 +357,30 @@ describe("the Cloudflare connection disclosure", () => {
     cleanup();
     await mountRaw(deployOf({ state: "no-bundle", bundle: null, noBundle: "none" }));
     assert.equal(opened(), "true");
+  });
+
+  test("stays open when the update is fixed after it failed, until the operator shuts it", async () => {
+    await mountRaw(deployOf({ state: "failed", error: { message: "x", code: null, status: null, step: "upload the files", at: NOW, refused: false, retryAt: NOW + 60_000 } }), 40);
+    assert.equal(opened(), "true");
+    server.dto = dtoOf(deployOf());
+    await eventually(() => assert.ok(status().startsWith("Up to date:")));
+    assert.equal(opened(), "true");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+      await settle();
+    });
+    assert.equal(opened(), "false");
+  });
+
+  test("a publish answer with no deploy status opens the disclosure without throwing", async () => {
+    server.dto = { ...dtoOf(deployOf()), deploy: undefined } as unknown as PublishSettingsDTO;
+    await mountRaw(deployOf(), 5_000, false);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+      await settle();
+    });
+    assert.equal(opened(), "true");
+    assert.equal(screen.queryByRole("heading", { name: "Keep the page up to date" }) === null, true);
   });
 
   test("stays shut for the states that need nothing, and the operator can still shut an open one", async () => {
@@ -411,6 +451,55 @@ describe("the API token", () => {
     assert.deepEqual(server.posts, []);
     assert.equal(tokField().value, FORM_MASK);
     assert.ok(status().startsWith("Up to date:"));
+  });
+
+  test("emptying the account ID with a token stored asks the same question, and on yes clears both", async () => {
+    await with_(deployOf());
+    type(acctField(), "");
+    await leave(acctField());
+    const d = await dialog();
+    assert.ok((d.textContent ?? "").includes("Stop keeping the page up to date?"));
+    assert.deepEqual(server.posts, []);
+    await answer("Delete the token");
+    await eventually(() => assert.deepEqual(server.posts, [["credentials", { token: "" }]]));
+    await eventually(() => assert.ok(status().startsWith("Not updating:")));
+  });
+
+  test("saying no to that puts the stored account ID back and sends nothing", async () => {
+    await with_(deployOf());
+    type(acctField(), "");
+    await leave(acctField());
+    await answer("Cancel");
+    await settle();
+    assert.deepEqual(server.posts, []);
+    assert.equal(acctField().value, ACCOUNT);
+    assert.equal(tokField().value, FORM_MASK);
+    assert.ok(status().startsWith("Up to date:"));
+  });
+
+  test("a save the route refuses leaves nothing typed behind: the mask and the stored account are back, and the next blur sends nothing", async () => {
+    const f = stubFetchWithLog((url, init) => {
+      if (init?.method === "POST" && url.endsWith("/deploy-credentials")) {
+        server.posts.push(["credentials", JSON.parse(String(init.body))]);
+        return reply(400, { error: "Cloudflare did not accept that account ID." });
+      }
+      if (url === "/api/servicecue/publish") return ok(server.dto);
+      return ok({});
+    });
+    try {
+      await with_(deployOf());
+      type(acctField(), "fedcba9876543210fedcba9876543210");
+      type(tokField(), TOKEN);
+      await leave(tokField());
+      await eventually(() => assert.ok(sectionText().includes("Cloudflare did not accept that account ID.")));
+      assert.equal(tokField().value, FORM_MASK);
+      assert.equal(acctField().value, ACCOUNT);
+      await leave(tokField());
+      await leave(acctField());
+      assert.equal(server.posts.length, 1, "the typed token was sent again");
+    } finally {
+      f.restore();
+    }
   });
 
   test("leaving the mask as it is sends nothing", async () => {

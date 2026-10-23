@@ -20,23 +20,11 @@ import { plural } from "@main/services/plural";
 import { useState, type ReactNode } from "react";
 
 import { Button, ErrorNote, Input, confirm } from "../../components/ui";
+import { ConnectionField } from "./connection-field";
 import { invoke, type ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { formatClock } from "../../lib/clock-format";
 import type { DeployState, DeployStatus, PublishSettingsDTO } from "../../../main/types/servicecue-publish-status.js";
-
-/** A label with its hint on the left and the input on the right, as the mockup lays it out. */
-export function ConnectionField({ label, hint, id, children }: { label: string; hint?: string; id: string; children: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[150px_minmax(0,1fr)] items-start gap-2.5 max-[560px]:grid-cols-1">
-      <label htmlFor={id} className="pt-1.5 text-footnote text-fg">
-        {label}
-        {hint && <span className="block text-caption2 text-fg-muted">{hint}</span>}
-      </label>
-      {children}
-    </div>
-  );
-}
 
 type Tone = "ok" | "busy" | "warn" | "bad" | "quiet";
 
@@ -49,7 +37,7 @@ const TONE: Record<Tone, { text: string; dot: string }> = {
 };
 
 /** How long from now, as the card's facts say it: "20 s", "6 min", "2 h". Rounded up: it is never "0 s" while it is still to come. */
-export function inHowLong(ms: number): string {
+function inHowLong(ms: number): string {
   const s = Math.max(1, Math.ceil(ms / 1000));
   if (s < 60) return `${s} s`;
   const m = Math.ceil(s / 60);
@@ -57,11 +45,18 @@ export function inHowLong(ms: number): string {
   return `${Math.ceil(m / 60)} h`;
 }
 
-/** A time in the app's zone, as the mockup writes it: "21 Oct, 8:14 AM". */
-export function deployedAt(at: number, zone: string): string {
-  const timeZone = isValidTimeZone(zone) ? zone : undefined;
-  const day = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", ...(timeZone ? { timeZone } : {}) }).format(at);
-  return `${day}, ${formatClock(at, { timeZone })}`;
+/** Three letters each, fixed: a locale's own short month is "Sept" in some and "Sep." in others. */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+/**
+ * A time in the app's zone, as the mockup writes it: "21 Oct, 8:14 AM". The one place the zone is
+ * resolved: a zone that is missing or that Intl does not know is the host's.
+ */
+function deployedAt(at: number, zone: string | undefined): string {
+  const timeZone = zone && isValidTimeZone(zone) ? zone : undefined;
+  const parts = new Intl.DateTimeFormat("en-US", { day: "numeric", month: "numeric", ...(timeZone ? { timeZone } : {}) }).formatToParts(at);
+  const num = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return `${num("day")} ${MONTHS[num("month") - 1]}, ${formatClock(at, { timeZone })}`;
 }
 
 /** What Cloudflare said, without the stop it ended with, so it can sit inside a sentence of ours. */
@@ -71,7 +66,7 @@ function bare(text: string): string {
 
 const Code = ({ children }: { children: ReactNode }) => <code className="font-mono text-caption2">{children}</code>;
 
-export interface DeployLine {
+interface DeployLine {
   tone: Tone;
   text: ReactNode;
   detail: ReactNode;
@@ -81,7 +76,7 @@ export interface DeployLine {
  * What the status line and its detail say, for a state. `elapsedMs` is how long ago the answer was
  * read, so a retry time the server stamped is counted from its own clock and not the browser's.
  */
-export function deployLine(d: DeployStatus, zone: string, elapsedMs: number): DeployLine {
+function deployLine(d: DeployStatus, zone: string | undefined, elapsedMs: number): DeployLine {
   const build = d.page?.build ?? d.bundle?.build ?? "unknown";
   const state: DeployState = d.state;
   switch (state) {
@@ -172,7 +167,7 @@ export function deployLine(d: DeployStatus, zone: string, elapsedMs: number): De
         text: "This server's build has no copy of the page",
         detail: (
           <>
-            {d.noBundle ? `${sentence(d.noBundle)} ` : ""}
+            {d.noBundle ? `${bare(d.noBundle)}. ` : ""}
             The reason is in the{" "}
             <a href="/log" target="_blank" rel="noreferrer" className="font-semibold underline underline-offset-2">
               log
@@ -182,10 +177,6 @@ export function deployLine(d: DeployStatus, zone: string, elapsedMs: number): De
         ),
       };
   }
-}
-
-function sentence(text: string): string {
-  return `${bare(text)}.`;
 }
 
 /** The pieces of a refused request the card acts on. */
@@ -215,31 +206,37 @@ function downgradeQuestion(code: "newer" | "other-build", body: Record<string, u
   };
 }
 
+/** What the section does to the card's one copy of the settings. */
+export interface DeployCache {
+  /** Called before a write, so a poll in flight does not put back what it is changing. */
+  quiet: () => Promise<void>;
+  /** A write's answer is the newest settings there are: it is kept in place of what had been read. */
+  setSettings: (next: PublishSettingsDTO) => void;
+  /** A refusal's own copy of the status, newer than the read. */
+  setDeploy: (next: DeployStatus) => void;
+}
+
 export function KeepPageUpToDate({
   deploy,
   zone,
-  elapsedMs,
   clock,
+  readAt,
   guideHref,
-  onAnswer,
-  onDeploy,
-  quiet,
+  cache,
 }: {
   deploy: DeployStatus;
-  /** The app's time zone, which the times are written in. */
-  zone: string;
-  /** How long ago `deploy` was read, by the browser's clock. */
-  elapsedMs: number;
+  /** The app's time zone, which the times are written in. Undefined: the host's. */
+  zone: string | undefined;
   /** The browser's clock now, ticking: what a retry countdown is read from. */
   clock: number;
+  /** When `deploy` was read, by the same clock: how long ago it is, is what a retry time is counted from. */
+  readAt: number;
   guideHref: string;
-  /** A write's answer is the newest settings there are: the card keeps it in place of what it had read. */
-  onAnswer: (next: PublishSettingsDTO) => void;
-  /** A refusal's own copy of the status, newer than the read. */
-  onDeploy: (next: DeployStatus) => void;
-  /** Called before a write, so a poll in flight does not put back what it is changing. */
-  quiet: () => Promise<void>;
+  /** The card's one copy of the settings, which this keeps true. */
+  cache: DeployCache;
 }) {
+  const { quiet, setSettings: onAnswer, setDeploy: onDeploy } = cache;
+  const elapsedMs = Math.max(0, clock - readAt);
   // What the operator has typed. null follows the server.
   const [acctDraft, setAcctDraft] = useState<string | null>(null);
   const [tokDraft, setTokDraft] = useState<string | null>(null);
@@ -259,6 +256,7 @@ export function KeepPageUpToDate({
   // The tick can be up to a second old, so it never reads more than the server said.
   const wait = tooSoon === null ? 0 : Math.min(tooSoon.sec, Math.ceil((tooSoon.until - clock) / 1000));
 
+  /** Runs a write; a failure is shown as the notice. */
   async function run(action: () => Promise<void>) {
     setBusy(true);
     setNotice(null);
@@ -273,23 +271,31 @@ export function KeepPageUpToDate({
     }
   }
 
+  /** Deleting the token cannot be undone from here: it has to be made again in Cloudflare. */
+  async function confirmStop(): Promise<boolean> {
+    setBusy(true);
+    const yes = await confirm({
+      title: "Stop keeping the page up to date?",
+      message: "The token is deleted from this server; to turn updating on again you will need a new token from Cloudflare.",
+      confirmLabel: "Delete the token",
+      destructive: true,
+    });
+    setBusy(false);
+    return yes;
+  }
+
   /** Saved when the operator leaves a field. A token with no account (or the reverse) waits for the other; the route needs both. */
   async function saveCredentials() {
     if (busy) return;
-    const cleared = stored && tokDraft !== null && tokDraft.trim() === "";
+    // Emptying either field clears BOTH credentials on the server: updating stops.
+    const tokenCleared = stored && tokDraft !== null && tokDraft.trim() === "";
+    const accountCleared = stored && acctDraft !== null && acctDraft.trim() === "" && deploy.accountId !== "";
     const body: Record<string, string> = {};
-    if (cleared) {
-      // Deleting the token cannot be undone from here: it has to be made again in Cloudflare.
-      setBusy(true);
-      const yes = await confirm({
-        title: "Stop keeping the page up to date?",
-        message: "The token is deleted from this server; to turn updating on again you will need a new token from Cloudflare.",
-        confirmLabel: "Delete the token",
-        destructive: true,
-      });
-      setBusy(false);
-      if (!yes) {
+    if (tokenCleared || accountCleared) {
+      if (!(await confirmStop())) {
+        // Both fields go back to what is stored.
         setTokDraft(null);
+        setAcctDraft(null);
         return;
       }
       body.token = "";
@@ -300,14 +306,15 @@ export function KeepPageUpToDate({
       }
       body.accountId = acct.trim();
       body.token = typedToken;
-    } else if (acctDraft !== null && acctDraft.trim() !== deploy.accountId && (stored || acctDraft.trim() === "")) {
+    } else if (acctDraft !== null && acctDraft.trim() !== "" && acctDraft.trim() !== deploy.accountId && stored) {
       body.accountId = acctDraft.trim();
     } else return;
     await run(async () => {
       onAnswer(await invoke<PublishSettingsDTO>("servicecue:setDeployCredentials", body));
-      setAcctDraft(null);
-      setTokDraft(null);
     });
+    // Whatever was typed is let go either way: a refused save is shown with the stored values back, so a token is pasted again on purpose and never re-sent by the next blur.
+    setAcctDraft(null);
+    setTokDraft(null);
   }
 
   /** "Update the page now". A page that was left alone is replaced only once the operator has said so, in a dialog that names both versions. */
@@ -410,7 +417,7 @@ export function KeepPageUpToDate({
             variant="filled"
             size="small"
             className="ml-auto border border-line-strong bg-surface-raised hover:bg-fill-hover"
-            disabled={busy || updating || wait > 0 || deploy.state === "no-bundle"}
+            disabled={busy || updating || wait > 0 || deploy.state === "no-bundle" || deploy.waitingFor === "live"}
             onClick={() => void updateNow()}
           >
             Update the page now

@@ -14,7 +14,6 @@
 // for a live status). The answer to every write goes into the same cache entry: it is
 // newer than anything read, and a poll in flight when a write starts is cancelled.
 
-import { hostTimeZone } from "@main/services/app-timezone";
 import { errorMessage } from "@main/services/errors";
 import { FORM_MASK, isMask } from "@main/services/mask";
 import { plural } from "@main/services/plural";
@@ -32,7 +31,8 @@ import { copyText } from "../../lib/clipboard";
 import { docsPageUrl } from "../../lib/docs-url";
 import { cn } from "../../lib/cn";
 import { useFailedReads } from "../../lib/use-failed-reads";
-import { ConnectionField, KeepPageUpToDate } from "./servicecue-deploy-section";
+import { ConnectionField } from "./connection-field";
+import { KeepPageUpToDate } from "./servicecue-deploy-section";
 import type {
   PublishProblem,
   PublishSettingsDTO,
@@ -483,16 +483,18 @@ export function PublicLinkCard({
           </div>
           {/* Not drawn at all while closed, so a closed disclosure holds nothing to tab to or to find. */}
           {connShown && fields}
-          {connShown && (
+          {connShown && dto.deploy && (
             <KeepPageUpToDate
               deploy={dto.deploy}
-              zone={timeZone ?? hostTimeZone()}
-              elapsedMs={Math.max(0, clock - dataUpdatedAt)}
+              zone={timeZone}
               clock={clock}
+              readAt={dataUpdatedAt}
               guideHref={`${docsPageUrl("ops/servicecue-on-the-web", branch)}#keeping-it-up-to-date`}
-              onAnswer={(next) => queryClient.setQueryData(QUERY_KEY, next)}
-              onDeploy={(deploy) => queryClient.setQueryData<PublishSettingsDTO>(QUERY_KEY, (old) => (old ? { ...old, deploy } : old))}
-              quiet={() => queryClient.cancelQueries({ queryKey: QUERY_KEY })}
+              cache={{
+                quiet: () => queryClient.cancelQueries({ queryKey: QUERY_KEY }),
+                setSettings: (next) => queryClient.setQueryData(QUERY_KEY, next),
+                setDeploy: (deploy) => queryClient.setQueryData<PublishSettingsDTO>(QUERY_KEY, (old) => (old ? { ...old, deploy } : old)),
+              }}
             />
           )}
         </div>

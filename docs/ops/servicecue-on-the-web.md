@@ -173,21 +173,22 @@ person.
 Cloudflare dashboard (`dash.cloudflare.com/<account id>/...`), and on the **Workers &
 Pages** overview, on the right.
 
-**Give them to the server.** On the ServiceCue presets page (`/servicecue/presets`), switch
-the **Public link** card on first (the credentials are saved for the page's address), open
-**Cloudflare connection** and find **Keep the page up to date**:
+**Give them to the server.** The credentials are saved for the page's address, so the address has
+to be set first. On the ServiceCue presets page (`/servicecue/presets`), open **Cloudflare
+connection** on the **Public link** card (it shows once the card has been switched on, as in the
+steps above) and find **Keep the page up to date**:
 
 1. Paste the account ID into **Cloudflare account ID**.
 2. Paste the token into **API token**, and leave the field. Both are saved together, and
    the status line below them says where the page stands. The field shows dots from then
    on, and the token is never shown again.
 
-There is no switch: pasting a token turns updating on, and clearing the field turns it
-off, after the card asks to be sure (the token is deleted from the server, and turning updating
-on again needs a new token from Cloudflare). A token pasted with no account ID (or the reverse) is not saved until the other is
-filled in. To replace a token, paste the new one over the dots. The same two writes are
-`POST /api/servicecue/publish/deploy-credentials` ([API](../reference/api.md)), for a
-script or `curl`.
+There is no switch: pasting a token turns updating on. Emptying the token field, or the
+account ID field, turns it off, after the card asks to be sure (the token is deleted from the
+server, and turning updating on again needs a new token from Cloudflare). A token pasted with
+no account ID (or the reverse) is not saved until the other is filled in. To replace a token, paste the new one over the dots. The same two writes are
+`POST /api/servicecue/publish/deploy-credentials` ([API](../reference/api.md)), which needs
+only the address saved and not publishing on, for a script or `curl`.
 
 The token is stored encrypted beside the publishing token and is never sent back or
 included in a backup. Changing the page's address drops both. Revoking the token in
