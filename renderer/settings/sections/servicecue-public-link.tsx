@@ -14,6 +14,7 @@
 // for a live status). The answer to every write goes into the same cache entry: it is
 // newer than anything read, and a poll in flight when a write starts is cancelled.
 
+import { hostTimeZone } from "@main/services/app-timezone";
 import { errorMessage } from "@main/services/errors";
 import { FORM_MASK, isMask } from "@main/services/mask";
 import { plural } from "@main/services/plural";
@@ -31,6 +32,7 @@ import { copyText } from "../../lib/clipboard";
 import { docsPageUrl } from "../../lib/docs-url";
 import { cn } from "../../lib/cn";
 import { useFailedReads } from "../../lib/use-failed-reads";
+import { ConnectionField, DeploySection } from "./servicecue-deploy-section";
 import type {
   PublishProblem,
   PublishSettingsDTO,
@@ -183,10 +185,13 @@ function viewOf(dto: PublishSettingsDTO | undefined): View {
 export function PublicLinkCard({
   typeNames,
   layoutNames,
+  timeZone,
   pollMs = POLL_MS,
 }: {
   typeNames: string[];
   layoutNames: string[];
+  /** The app's zone, which the page's deploy time is written in. The browser's own when the app's is not known yet. */
+  timeZone?: string;
   /** How often it asks how it is going. A seam for the test that watches it change. */
   pollMs?: number;
 }) {
@@ -473,6 +478,18 @@ export function PublicLinkCard({
           </div>
           {/* Not drawn at all while closed, so a closed disclosure holds nothing to tab to or to find. */}
           {connShown && fields}
+          {connShown && (
+            <DeploySection
+              deploy={dto.deploy}
+              zone={timeZone ?? hostTimeZone()}
+              elapsedMs={Math.max(0, clock - dataUpdatedAt)}
+              clock={clock}
+              guideHref={`${docsPageUrl("ops/servicecue-on-the-web", branch)}#keeping-it-up-to-date`}
+              onAnswer={(next) => queryClient.setQueryData(QUERY_KEY, next)}
+              onDeploy={(deploy) => queryClient.setQueryData<PublishSettingsDTO>(QUERY_KEY, (old) => (old ? { ...old, deploy } : old))}
+              quiet={() => queryClient.cancelQueries({ queryKey: QUERY_KEY })}
+            />
+          )}
         </div>
       )}
     </section>
@@ -555,19 +572,6 @@ function ConnectionFields({
         />
       </ConnectionField>
       {hint && !setup && <p className="text-caption2 text-warn-11">{hint}</p>}
-    </div>
-  );
-}
-
-/** A label with its hint on the left and the input on the right, as the mockup lays it out. */
-function ConnectionField({ label, hint, id, children }: { label: string; hint?: string; id: string; children: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[150px_minmax(0,1fr)] items-center gap-2.5 max-[560px]:grid-cols-1">
-      <label htmlFor={id} className="text-footnote text-fg">
-        {label}
-        {hint && <span className="block text-caption2 text-fg-muted">{hint}</span>}
-      </label>
-      {children}
     </div>
   );
 }

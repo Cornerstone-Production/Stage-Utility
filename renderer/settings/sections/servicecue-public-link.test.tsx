@@ -28,6 +28,7 @@ const { TooltipProvider } = await import("../../components/ui/index.js");
 const { RouterContextProvider } = await import("@tanstack/react-router");
 const { routerAt } = await import("../../test-fixtures/router.js");
 const { FORM_MASK, MASK } = await import("../../../main/services/mask.js");
+import type { DeployStatus } from "../../../main/types/servicecue-publish-status.js";
 
 after(() => unmountAndTeardown(cleanup, teardown));
 // Whatever the last answer set going (react-query tells its observers a tick later) lands inside an act, then the card goes.
@@ -52,7 +53,22 @@ type Dto = {
     counts: { types: number; plans: number; layouts: number };
     now: number;
   };
+  deploy: DeployStatus;
   dropped?: { ok: true } | { ok: false; message: string };
+};
+
+/** Keeping the page up to date, with no API token: what every fixture carries unless it says otherwise. */
+const NO_DEPLOY: DeployStatus = {
+  state: "off",
+  accountId: "",
+  token: "",
+  bundle: { build: "3f2a91c", version: "1.28.0" },
+  noBundle: null,
+  runningVersion: "1.28.0",
+  page: null,
+  files: null,
+  error: null,
+  now: NOW,
 };
 
 const off = (): Dto => ({
@@ -60,6 +76,7 @@ const off = (): Dto => ({
   url: "",
   token: "",
   status: { enabled: false, state: "off", lastSentAt: null, lastError: null, sourceProblem: null, counts: { types: 0, plans: 0, layouts: 0 }, now: NOW },
+  deploy: NO_DEPLOY,
 });
 
 const publishing = (over: Partial<Dto["status"]> = {}): Dto => ({
@@ -76,6 +93,7 @@ const publishing = (over: Partial<Dto["status"]> = {}): Dto => ({
     now: NOW,
     ...over,
   },
+  deploy: NO_DEPLOY,
 });
 
 const AUTH_PROBLEM = { kind: "auth", status: 401, message: "The page answered 401: it did not accept the publishing token." };
