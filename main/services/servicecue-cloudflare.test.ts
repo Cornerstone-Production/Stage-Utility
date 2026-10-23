@@ -223,10 +223,19 @@ describe("a Worker that is not on the account", () => {
     fake.missingWorker = true;
     await assert.rejects(
       client().deploy(readBundle(bundle.dir), "1.28.0"),
-      (err: unknown) => err instanceof CloudflareError && err.step === "check the Worker exists" && /the Worker 'servicecue' does not exist on this account, or this token has no role on it: create it once by hand/.test(err.message),
+      (err: unknown) => err instanceof CloudflareError && err.step === "check the Worker exists" && /the Worker 'servicecue' does not exist on this account: create it once by hand/.test(err.message),
     );
     assert.equal(fake.requests.filter((r) => r.method !== "GET").length, 0, "something was sent that would have created the Worker");
     await assert.rejects(client().deployedPage(), /the Worker 'servicecue' does not exist/);
+  });
+
+  it("names a Worker outside the token's scope, as real Cloudflare answers it (403 after an accepted token)", async () => {
+    fake.noRoleOnWorker = true;
+    const scoped = (err: unknown) =>
+      err instanceof CloudflareError && err.status === 403 && err.refused && /this token has no access to the Worker 'servicecue': it may not exist, or the token is not given Editor on it/.test(err.message);
+    await assert.rejects(client().deployedPage(), scoped);
+    await assert.rejects(client().deploy(readBundle(bundle.dir), "1.28.0"), scoped);
+    assert.equal(fake.puts.length, 0);
   });
 
   it("does not hide another failure of the check as a missing Worker", async () => {

@@ -260,8 +260,9 @@ CLOUDFLARE_ACCOUNT_ID=<id> CLOUDFLARE_API_TOKEN=<token> \
 `--check` verifies the token and reads what the Worker holds and sends nothing. Without
 it the deploy is made, and the script reads back the version and build it recorded. The
 real Worker's name is refused unless `--production` is added. "The Worker does not exist
-on this account, or this token has no role on it" is a missing Worker or a token with no
-role on this one.
+on this account" is a 404. A token scoped to other Workers gets a 403 instead, for a
+missing Worker as well, so "this token has no access to the Worker" means either it does
+not exist or the token is not given Editor on it.
 
 ### The copy every build prepares
 

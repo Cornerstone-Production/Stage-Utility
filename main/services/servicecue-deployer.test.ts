@@ -879,7 +879,7 @@ describe("a Worker that is not there", () => {
     const d = makeDeployer();
     const outcome = await d.deployNow();
     assert.equal(outcome.kind, "failed");
-    assert.match((outcome as { message: string }).message, /the Worker 'servicecue' does not exist on this account, or this token has no role on it: create it once by hand/);
+    assert.match((outcome as { message: string }).message, /the Worker 'servicecue' does not exist on this account: create it once by hand/);
     assert.equal(puts(), 0);
     assert.equal(fake.requests.filter((r) => r.method === "PUT" || r.method === "POST").length, 0, "something was sent to a Worker that is not there");
   });

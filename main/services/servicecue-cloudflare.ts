@@ -327,10 +327,21 @@ export function versionOfMessage(message: unknown): string | null {
   return isVersion(version) ? version : null;
 }
 
-/** The one clear failure for a Worker that is not there: creating it is the manual first-time step, never an upload's side effect. */
+/**
+ * The clear failures for a Worker this token cannot use. Creating it is the manual
+ * first-time step, never an upload's side effect. These reads come after the token
+ * itself was accepted, so a 403 here is a token with no role on this one Worker:
+ * Cloudflare answers so for a Worker that is missing as well, and does not say which.
+ */
 function missingWorker(err: unknown, script: string): unknown {
-  if (!(err instanceof CloudflareError) || err.status !== 404) return err;
-  return new CloudflareError(`the Worker '${script}' does not exist on this account, or this token has no role on it: create it once by hand, and give the token Editor on it (docs/ops/servicecue-on-the-web.md)`, 404, err.code, "check the Worker exists");
+  if (!(err instanceof CloudflareError)) return err;
+  if (err.status === 404) {
+    return new CloudflareError(`the Worker '${script}' does not exist on this account: create it once by hand (docs/ops/servicecue-on-the-web.md)`, 404, err.code, "check the Worker exists");
+  }
+  if (err.status === 403) {
+    return new CloudflareError(`this token has no access to the Worker '${script}': it may not exist, or the token is not given Editor on it (docs/ops/servicecue-on-the-web.md)`, 403, err.code, "check the Worker exists");
+  }
+  return err;
 }
 
 export interface CloudflareClient {

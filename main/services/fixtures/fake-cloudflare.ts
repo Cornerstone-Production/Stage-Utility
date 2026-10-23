@@ -68,6 +68,8 @@ export class FakeCloudflare {
   deployed: { tag?: string; message?: string; at: string } | null = null;
   /** The Worker is not on the account: its own reads answer 404. */
   missingWorker = false;
+  /** The token has no role on this Worker: its own reads answer 403, as real Cloudflare does for a Worker outside a per-Worker token's scope. */
+  noRoleOnWorker = false;
   /** Put annotations on the version answer. false: a version from before this server's deploys. */
   serveAnnotations = true;
   /** Sees each request first. Returning an answer sends it; undefined carries on. */
@@ -118,6 +120,7 @@ export class FakeCloudflare {
     this.accountToken = false;
     this.serveAnnotations = true;
     this.missingWorker = false;
+    this.noRoleOnWorker = false;
     this.token = API_TOKEN;
   }
 
@@ -189,6 +192,7 @@ export class FakeCloudflare {
     const [, , tail = ""] = script;
 
     if (this.missingWorker && req.method === "GET") return failure(404, 10007, "This Worker does not exist on your account.");
+    if (this.noRoleOnWorker && req.method === "GET") return failure(403, 10000, "No access to the specified resource.");
     if (req.method === "GET" && tail === "/settings") return this.ok({ bindings: [] });
 
     if (req.method === "POST" && tail === "/assets-upload-session") {
