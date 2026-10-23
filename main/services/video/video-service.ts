@@ -21,6 +21,7 @@ import { stageController } from "../stage-controller.js";
 import { cleared } from "../timers.js";
 import { walkLayoutObjects } from "../view-refs.js";
 import { viewsStore } from "../views-store.js";
+import { audioFieldsOf } from "./audio-input.js";
 import { embedSrc } from "./embed.js";
 import { FEED_ID_PATTERN, feedIdFor, feedSecretSlot } from "./feed-id.js";
 import { feedState, type BFramesMark } from "./feed-state.js";
@@ -104,16 +105,16 @@ const REVIEW_KEY = randomBytes(32);
 function reviewFingerprint(feed: VideoFeed | undefined, secretRevision: number): string {
   if (!feed) return "";
   return createHmac("sha256", REVIEW_KEY)
-    .update(JSON.stringify({ name: feed.name, source: feed.source, secretRevision }))
+    .update(JSON.stringify({ name: feed.name, source: feed.source, ...audioFieldsOf(feed), secretRevision }))
     .digest("hex")
     .slice(0, 32);
 }
 const FINGERPRINT_FORMAT = /^(?:[0-9a-f]{32})?$/;
 
-/** The same feed, by what the import compares: name and source, or both absent. */
+/** The same feed, by what the import compares: name, source and audio settings, or both absent. */
 function sameFeed(a: VideoFeed | undefined, b: VideoFeed | undefined): boolean {
   if (!a || !b) return !a && !b;
-  return isDeepStrictEqual({ name: a.name, source: a.source }, { name: b.name, source: b.source });
+  return isDeepStrictEqual({ name: a.name, source: a.source, ...audioFieldsOf(a) }, { name: b.name, source: b.source, ...audioFieldsOf(b) });
 }
 
 /** Where a feed's picture comes from, as far as what the service remembers
@@ -245,7 +246,10 @@ const feedsOf = (current: VideoFeedsFile): VideoFeed[] => (Array.isArray(current
  * it silently dropped a pull feed's new password. Guarded through the real
  * route in video-routes.test.ts.
  */
-function mergedFeedPatch(existing: VideoFeed, body: unknown): { name: unknown; source: unknown; password: unknown } {
+function mergedFeedPatch(
+  existing: VideoFeed,
+  body: unknown,
+): { name: unknown; source: unknown; password: unknown; audioConversion: unknown; audioSourceUrl: unknown } {
   const obj = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
   return {
     // Present means supplied, whatever its type: a name that is not text
@@ -253,6 +257,9 @@ function mergedFeedPatch(existing: VideoFeed, body: unknown): { name: unknown; s
     name: "name" in obj ? obj.name : existing.name,
     source: obj.source !== undefined ? obj.source : existing.source,
     password: obj.password,
+    // Left out of the body means unchanged; "" clears the address.
+    audioConversion: obj.audioConversion !== undefined ? obj.audioConversion : existing.audioConversion,
+    audioSourceUrl: obj.audioSourceUrl !== undefined ? obj.audioSourceUrl : existing.audioSourceUrl,
   };
 }
 
@@ -1764,7 +1771,12 @@ class VideoService {
     let feed: VideoFeed | undefined;
     await videoFeedsStore.update((current) => {
       const feeds = feedsOf(current);
-      feed = { id: feedIdFor(parsed.name, new Set(feeds.map((f) => f.id))), name: parsed.name, source: parsed.source };
+      feed = {
+        id: feedIdFor(parsed.name, new Set(feeds.map((f) => f.id))),
+        name: parsed.name,
+        source: parsed.source,
+        ...audioFieldsOf(parsed),
+      };
       return { ...current, feeds: [...feeds, feed] };
     });
     if (!feed) throw new Error("[video] the feed store's update never ran");
@@ -1830,7 +1842,7 @@ class VideoService {
 
     // The id never changes on update — it is the layout binding's permanent
     // key (see main/types/video.ts). Only feedIdFor(), at creation, mints one.
-    const feed: VideoFeed = { id, name: parsed.name, source: parsed.source };
+    const feed: VideoFeed = { id, name: parsed.name, source: parsed.source, ...audioFieldsOf(parsed) };
 
     // A pull feed moving to another camera loses the old camera's password
     // BEFORE the new address is written, the order a restore uses
@@ -2155,7 +2167,7 @@ class VideoService {
             changed.push({ name: plan.preview.name, reason: CHANGED_SINCE_REVIEW });
             continue;
           }
-          const feed: VideoFeed = { id, name: plan.parsed.name, source: plan.parsed.source };
+          const feed: VideoFeed = { id, name: plan.parsed.name, source: plan.parsed.source, ...audioFieldsOf(plan.parsed) };
           if (!prior) {
             next.push(feed);
             landed.push({ plan, outcome: "added" });

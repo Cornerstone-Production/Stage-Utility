@@ -21,6 +21,7 @@ import {
   type VideoSource,
   type VideoSourceKind,
 } from "../../types/video.js";
+import { audioFieldsOf, type AudioFields } from "./audio-input.js";
 import { FEED_ID_PATTERN } from "./feed-id.js";
 import { keptPassphraseError, parseFeedInput, passphraseProblem, pullCredentialTarget } from "./feed-input.js";
 import { credentialTargetMoved } from "../credential-target.js";
@@ -120,7 +121,7 @@ export async function buildVideoBundle(
   const feeds: VideoFeedsBundle["feeds"] = [];
   for (const f of file.feeds) {
     if (wanted && !wanted.has(f.id)) continue;
-    const entry: VideoFeedsBundle["feeds"][number] = { id: f.id, name: f.name, source: f.source };
+    const entry: VideoFeedsBundle["feeds"][number] = { id: f.id, name: f.name, source: f.source, ...audioFieldsOf(f) };
     if (options.passwords && (f.source.kind === "pull" || f.source.kind === "push")) {
       const password = await readPassword(f.id);
       if (password) entry.password = password;
@@ -144,7 +145,20 @@ export async function buildVideoBundle(
 /** One file feed, compared with what is here. `parsed` is set unless invalid. */
 export interface FeedPlan {
   preview: ImportFeedPreview;
-  parsed?: { name: string; source: VideoSource; password?: string };
+  parsed?: { name: string; source: VideoSource; password?: string } & AudioFields;
+}
+
+/** The audio settings, here and in the file, as a person reads them: the
+ *  conversion by name ("auto" when unset), the address as text ("" when none). */
+function audioDifferences(here: AudioFields, file: AudioFields): FeedDifference[] {
+  const out: FeedDifference[] = [];
+  const a = here.audioConversion ?? "auto";
+  const b = file.audioConversion ?? "auto";
+  if (a !== b) out.push({ field: "audioConversion", here: a, file: b });
+  const u = here.audioSourceUrl ?? "";
+  const v = file.audioSourceUrl ?? "";
+  if (u !== v) out.push({ field: "audioSourceUrl", here: u, file: v });
+  return out;
 }
 
 function sourceDifferences(here: VideoSource, file: VideoSource): FeedDifference[] {
@@ -220,7 +234,7 @@ export async function planImport(
       kind: parsed.source.kind as string,
       ...(pw.password !== undefined ? { filePassword: true } : {}),
     };
-    const parsedOut = { name: parsed.name, source: parsed.source, ...(pw.password !== undefined ? { password: pw.password } : {}) };
+    const parsedOut = { name: parsed.name, source: parsed.source, ...audioFieldsOf(parsed), ...(pw.password !== undefined ? { password: pw.password } : {}) };
     const existing = local.get(id);
     if (!existing) {
       plans.push({ preview: { ...base, status: "new", differences: [] }, parsed: parsedOut });
@@ -230,6 +244,7 @@ export async function planImport(
     const differences: FeedDifference[] = [];
     if (existing.name !== parsed.name) differences.push({ field: "name", here: existing.name, file: parsed.name });
     differences.push(...sourceDifferences(existing.source, parsed.source));
+    differences.push(...audioDifferences(existing, parsed));
     // Only a password the file carries is compared, against the stored one, and
     // the difference names neither value.
     if (pw.password !== undefined && pw.password !== (await readPassword(id))) differences.push({ field: "password" });

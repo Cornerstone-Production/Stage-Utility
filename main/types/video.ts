@@ -38,10 +38,22 @@ export type VideoSource =
 
 export type VideoSourceKind = VideoSource["kind"];
 
+/** Whether the server converts a feed's audio so a browser can listen to it live.
+ *  "auto" converts only AAC, which WebRTC cannot carry; "off" never runs ffmpeg
+ *  for the feed; "always" converts whatever the audio is. */
+export const AUDIO_CONVERSIONS = ["auto", "off", "always"] as const;
+export type AudioConversion = (typeof AUDIO_CONVERSIONS)[number];
+
 export interface VideoFeed {
   id: string;
   name: string;
   source: VideoSource;
+  /** Only on a pull or push feed, and only when not "auto": absent means "auto". */
+  audioConversion?: AudioConversion;
+  /** An http or https address that carries the feed's audio in a form a browser
+   *  can receive (Opus), for an encoder whose RTSP output does not. No
+   *  username or password in it. Absent means the feed's own audio is used. */
+  audioSourceUrl?: string;
 }
 
 /** LAN inputs (rtmp, srt, webrtcUdp) and loopback-only listeners (the rest). */
@@ -348,7 +360,7 @@ export interface VideoFeedsBundle {
   appVersion: string;
   createdAt: string;
   source: { server: string };
-  feeds: { id: string; name: string; source: VideoSource; password?: string }[];
+  feeds: { id: string; name: string; source: VideoSource; password?: string; audioConversion?: AudioConversion; audioSourceUrl?: string }[];
   ports?: VideoPorts;
 }
 
@@ -357,7 +369,7 @@ export type ImportFeedStatus = "new" | "same" | "differs" | "invalid";
 /** One field that differs between a file's feed and the one here. A password
  *  difference carries no values, ever. */
 export interface FeedDifference {
-  field: "name" | "kind" | "url" | "username" | "protocol" | "player" | "ref" | "password";
+  field: "name" | "kind" | "url" | "username" | "protocol" | "player" | "ref" | "password" | "audioConversion" | "audioSourceUrl";
   here?: string;
   file?: string;
 }
