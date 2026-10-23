@@ -6,6 +6,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
 const teardown = installRenderDom();
 
@@ -21,7 +22,7 @@ afterEach(() => {
   __resetReplayCacheForTests();
 });
 
-const PORTS: VideoPorts = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 };
+const PORTS: VideoPorts = DEFAULT_VIDEO_PORTS;
 
 interface Call {
   method: string;

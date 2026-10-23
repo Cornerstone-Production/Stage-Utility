@@ -48,6 +48,7 @@ import { fileURLToPath } from "node:url";
 
 import { installDom, unmountAndTeardown } from "../test-dom.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
+import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const STYLES = path.join(HERE, "..", "styles.css");
@@ -104,7 +105,7 @@ const VIDEO_STATE: import("@main/types/video").VideoState = {
   rev: 0,
   relay: { state: "off" },
   kinds: [],
-  ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 },
+  ports: DEFAULT_VIDEO_PORTS,
   binaryPresent: false,
   archivePresent: false,
   feeds: [],

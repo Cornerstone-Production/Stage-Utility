@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { errorMessage } from "@main/services/errors";
+import { resolveAudioFields } from "@main/services/video/audio-input";
 import {
   AUDIO_CONVERSIONS,
   EMBED_PLAYERS,
@@ -27,6 +28,7 @@ import {
 
 import {
   Button,
+  Callout,
   confirm,
   ErrorNote,
   Input,
@@ -169,8 +171,7 @@ function draftFrom(feed: VideoFeedView | null, kinds: readonly VideoSourceKind[]
     embedPlayer: feed?.source.kind === "embed" ? feed.source.player : "youtube-channel",
     embedRef: feed?.source.kind === "embed" ? feed.source.ref : "",
     externalUrl: feed?.source.kind === "external" ? feed.source.url : "",
-    audioConversion: feed?.audioConversion ?? "auto",
-    audioSourceUrl: feed?.audioSourceUrl ?? "",
+    ...resolveAudioFields(feed ?? {}),
   };
 }
 
@@ -401,9 +402,9 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
       </div>
 
       {warning && (
-        <p className="rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">
+        <Callout tone="warn">
           <b>{warning.headline}</b> {warning.body}
-        </p>
+        </Callout>
       )}
 
       <StackedField label="Name" description="What layouts and Home show. Renaming keeps every layout using it.">
@@ -585,12 +586,9 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
           </StackedField>
 
           {!isNew && feed && audioStatusText(feed.audio) !== "" && (
-            <p
-              data-testid="audio-status"
-              className={`rounded-lg px-2.5 py-2 text-caption1 ${feed.audio?.state === "unavailable" ? "bg-warn-9/14 text-warn-11" : "bg-fill text-fg-muted"}`}
-            >
+            <Callout data-testid="audio-status" tone={feed.audio?.state === "unavailable" ? "warn" : "neutral"}>
               {audioStatusText(feed.audio)}
-            </p>
+            </Callout>
           )}
         </>
       )}

@@ -15,6 +15,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
 import { installDom } from "../../test-dom.js";
+import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
 const teardown = installDom();
 // Sibling files set this so React act-wraps a
@@ -31,7 +32,7 @@ type RelayStatus = import("@main/types/video").RelayStatus;
 after(() => teardown());
 afterEach(() => cleanup());
 
-const PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 };
+const PORTS = DEFAULT_VIDEO_PORTS;
 
 function renderRow(
   relay: RelayStatus,
