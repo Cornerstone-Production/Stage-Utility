@@ -31,6 +31,8 @@ import { copyText } from "../../lib/clipboard";
 import { docsPageUrl } from "../../lib/docs-url";
 import { cn } from "../../lib/cn";
 import { useFailedReads } from "../../lib/use-failed-reads";
+import { ConnectionField } from "./connection-field";
+import { KeepPageUpToDate } from "./servicecue-deploy-section";
 import type {
   PublishProblem,
   PublishSettingsDTO,
@@ -183,10 +185,13 @@ function viewOf(dto: PublishSettingsDTO | undefined): View {
 export function PublicLinkCard({
   typeNames,
   layoutNames,
+  timeZone,
   pollMs = POLL_MS,
 }: {
   typeNames: string[];
   layoutNames: string[];
+  /** The app's zone, which the page's deploy time is written in. The browser's own when the app's is not known yet. */
+  timeZone?: string;
   /** How often it asks how it is going. A seam for the test that watches it change. */
   pollMs?: number;
 }) {
@@ -212,6 +217,8 @@ export function PublicLinkCard({
   // null follows the problem: open when the fix is in these fields, shut otherwise.
   const [connOpen, setConnOpen] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
+  // Once the update has needed the operator the section stays in view: fixing it must not make the answer disappear.
+  const [deployShown, setDeployShown] = useState(false);
   const { failed, fail, clear } = useFailedReads<"publish">("servicecue");
 
   useEffect(() => {
@@ -251,7 +258,10 @@ export function PublicLinkCard({
   const link = dto?.url ? `${dto.url}/servicecue` : "";
   // `now` and `lastSentAt` are the server's; what has passed since the answer came is the browser's own.
   const ageMs = status?.lastSentAt != null ? status.now - status.lastSentAt + Math.max(0, clock - dataUpdatedAt) : null;
-  const connShown = connOpen ?? (view === "problem" && !!status?.lastError && FIXED_BELOW.has(status.lastError.kind));
+  // A failed update, or a build with no page to deploy, is fixed (or at least explained) in the section that is in here.
+  const deployNeedsYou = dto?.deploy?.state === "failed" || dto?.deploy?.state === "no-bundle";
+  if (deployNeedsYou && !deployShown) setDeployShown(true);
+  const connShown = connOpen ?? ((view === "problem" && !!status?.lastError && FIXED_BELOW.has(status.lastError.kind)) || deployShown);
 
   /** An answer from a write: newer than any read, so it replaces what was read, and the drafts it settled are dropped. */
   function adopt(next: PublishSettingsDTO) {
@@ -473,6 +483,20 @@ export function PublicLinkCard({
           </div>
           {/* Not drawn at all while closed, so a closed disclosure holds nothing to tab to or to find. */}
           {connShown && fields}
+          {connShown && dto.deploy && (
+            <KeepPageUpToDate
+              deploy={dto.deploy}
+              zone={timeZone}
+              clock={clock}
+              readAt={dataUpdatedAt}
+              guideHref={`${docsPageUrl("ops/servicecue-on-the-web", branch)}#keeping-it-up-to-date`}
+              cache={{
+                quiet: () => queryClient.cancelQueries({ queryKey: QUERY_KEY }),
+                setSettings: (next) => queryClient.setQueryData(QUERY_KEY, next),
+                setDeploy: (deploy) => queryClient.setQueryData<PublishSettingsDTO>(QUERY_KEY, (old) => (old ? { ...old, deploy } : old)),
+              }}
+            />
+          )}
         </div>
       )}
     </section>
@@ -555,19 +579,6 @@ function ConnectionFields({
         />
       </ConnectionField>
       {hint && !setup && <p className="text-caption2 text-warn-11">{hint}</p>}
-    </div>
-  );
-}
-
-/** A label with its hint on the left and the input on the right, as the mockup lays it out. */
-function ConnectionField({ label, hint, id, children }: { label: string; hint?: string; id: string; children: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[150px_minmax(0,1fr)] items-center gap-2.5 max-[560px]:grid-cols-1">
-      <label htmlFor={id} className="text-footnote text-fg">
-        {label}
-        {hint && <span className="block text-caption2 text-fg-muted">{hint}</span>}
-      </label>
-      {children}
     </div>
   );
 }

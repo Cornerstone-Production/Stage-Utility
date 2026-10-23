@@ -524,6 +524,7 @@ export type IpcChannel =
   | "security:hostNames"
   | "security:setHostNames"
   | "servicecue:getConfig"
+  | "servicecue:deployNow"
   | "servicecue:getPublish"
   | "servicecue:listLayouts"
   | "servicecue:listRoles"
@@ -532,6 +533,7 @@ export type IpcChannel =
   | "servicecue:saveLayouts"
   | "servicecue:saveRoles"
   | "servicecue:setConfig"
+  | "servicecue:setDeployCredentials"
   | "servicecue:setPublish"
   | "servicecue:testPublish"
   | "sensource:listLocations"
@@ -691,6 +693,13 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "servicecue:testPublish":
       return post<T>("/api/servicecue/publish/test", p);
+
+    // Keeping the page itself up to date: the Cloudflare account and token, and "Update the page now".
+    case "servicecue:setDeployCredentials":
+      return post<T>("/api/servicecue/publish/deploy-credentials", p);
+
+    case "servicecue:deployNow":
+      return post<T>("/api/servicecue/publish/deploy", p);
 
     case "servicecue:listRoles":
       return apiFetch<T>("/api/servicecue/roles");
