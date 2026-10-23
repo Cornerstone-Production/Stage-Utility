@@ -173,20 +173,25 @@ person.
 Cloudflare dashboard (`dash.cloudflare.com/<account id>/...`), and on the **Workers &
 Pages** overview, on the right.
 
-**Give them to the server.** They are saved for the page's address, so set that first.
-From any machine on the network:
+**Give them to the server.** On the ServiceCue presets page (`/servicecue/presets`), switch
+the **Public link** card on first (the credentials are saved for the page's address), open
+**Cloudflare connection** and find **Keep the page up to date**:
 
-```bash
-curl -X POST http://<server>:8788/api/servicecue/publish/deploy-credentials \
-  -H 'Content-Type: application/json' \
-  -d '{"accountId": "<account id>", "token": "<api token>"}'
-```
+1. Paste the account ID into **Cloudflare account ID**.
+2. Paste the token into **API token**, and leave the field. Both are saved together, and
+   the status line below them says where the page stands. The field shows dots from then
+   on, and the token is never shown again.
+
+There is no switch: pasting a token turns updating on, and clearing the field turns it
+off. A token pasted with no account ID (or the reverse) is not saved until the other is
+filled in. To replace a token, paste the new one over the dots. The same two writes are
+`POST /api/servicecue/publish/deploy-credentials` ([API](../reference/api.md)), for a
+script or `curl`.
 
 The token is stored encrypted beside the publishing token and is never sent back or
-included in a backup. Changing the page's address drops both, and a token of `""` clears
-them: updating then stops. To replace a token, send the new one. Revoking it in
-Cloudflare is enough to stop it too: the next attempt is refused, the log says so and
-nothing more is tried until the token is changed.
+included in a backup. Changing the page's address drops both. Revoking the token in
+Cloudflare is enough to stop it too: the next attempt is refused, the card and the log say
+so, and nothing more is tried until the token is changed.
 
 **What the server does, and when.** Each time it reads the page's status (when
 publishing starts, then every few minutes) it compares the build the page serves with
@@ -213,7 +218,13 @@ deployed with `npm run servicecue:deploy` carries the same record (its version's
 an old page. The one way to replace a page that is left alone is the explicit request
 below, with a confirmation.
 
-**Update the page now** is `POST /api/servicecue/publish/deploy`. It deploys when the
+**Update the page now** is the button under the status line, and `POST /api/servicecue/publish/deploy`.
+When the page was left alone because it is newer, or another build of this server's version,
+the card asks first, naming both versions, and **Replace the page** sends the request again
+with `confirmDowngrade`. A request made within a minute of a deploy says "Try again in N s", a page
+already on this build says "Already up to date", and a deploy that went ahead while Planning
+Center had not said whether a service is live says so. The button waits while an update is under way.
+The route deploys when the
 page is older or another build; answers `200` with `already: "current"` and uploads nothing
 when the page is already this build; refuses with `409` and `code: "newer"` or
 `"other-build"` when the page was left alone, unless the body says
@@ -237,9 +248,24 @@ a successful "Update the page now".
 **If an update fails.** The page keeps what it had: Cloudflare swaps a Worker's version
 all at once. The server records Cloudflare's error code and words, and tries again after
 a minute, then two, doubling to at most once an hour. A `401` or `403` is not tried again
-until the token changes. The card for this is in the status the `GET
-/api/servicecue/publish` answer carries as `deploy`
-([API](../reference/api.md)).
+until the token changes. The status line says what failed, in Cloudflare's own
+words, that the page is unchanged, and when it tries again; for a refused token it says to
+make a new one and paste it. The same status is the `deploy` the `GET
+/api/servicecue/publish` answer carries ([API](../reference/api.md)).
+
+**The status line** on the card says one of:
+
+| It says | Meaning |
+|---|---|
+| Up to date: build X (version), deployed *time* | the page is the build this server carries; the time is in the app's time zone |
+| Updating the page… N files to upload, M already on Cloudflare | a deploy is under way |
+| Waiting for the service to end, then updating | a service is live, or the live state is not known yet after a restart |
+| Couldn't update the page: *reason*. The page is unchanged. | the last attempt, or a read of what is deployed, failed |
+| The page runs build X (version), newer than this server's Y | the page is left alone (no-downgrade rule) |
+| The page runs build X of this server's own version, deployed by another server | the page is left alone |
+| This server's build has no copy of the page | the reason is in the log |
+| Updating is on. The page's build has not been read yet. | a token is set, and publishing has not reached the page yet |
+| Not updating: with no API token, the page stays on the build it has… | no token is set |
 
 **Try one by hand.** `npm run servicecue:deploy-try` runs the server's own deployer once,
 printing each step, against a Worker you name. Try it on a scratch Worker first.
@@ -375,7 +401,8 @@ A Cloudflare API token for [keeping the page up to date](#keeping-it-up-to-date)
 different secret. Held by someone else, it lets them put their own page on this address
 for as long as it works, which the publishing token cannot do. Delete it in Cloudflare
 when it may have been seen or the person who made it leaves, and clear it from the
-server by sending `{"token": ""}` to `/api/servicecue/publish/deploy-credentials`.
+server by clearing the **API token** field under **Keep the page up to date** (or by sending
+`{"token": ""}` to `/api/servicecue/publish/deploy-credentials`).
 
 To rotate the publishing token, set a new one with the two commands in step 4 and update Stage Utility;
 the old one stops working at once, and the **Public link** card shows it as the problem until the new one is entered under **Cloudflare connection**. Do it when someone who had it leaves, and whenever it
