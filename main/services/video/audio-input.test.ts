@@ -31,7 +31,7 @@ test("a wrong type or an unknown mode is refused, not ignored", () => {
 });
 
 test("an address that is not plain http or https is refused", () => {
-  for (const url of ["rtsp://192.0.2.28/x", "ftp://h/x", "http://", "not a url", "http://u:p@192.0.2.28/0.ts", "file:///etc/passwd"]) {
+  for (const url of ["rtsp://192.0.2.28/x", "ftp://h/x", "http://", "not a url", "http://u:p@192.0.2.28/0.ts", "http://:pw@192.0.2.28/0.ts", "http://u@192.0.2.28/0.ts", "file:///etc/passwd"]) {
     assert.notEqual(audioSourceUrlProblem(url), null, `accepted ${url}`);
   }
 });

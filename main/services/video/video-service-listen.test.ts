@@ -370,3 +370,55 @@ test("a stored feed whose id ends in -listen is not given to the relay, and the 
   assert.deepEqual(reconciled.at(-1)!.map((f) => f.id), [real]);
   assert.equal(warns.filter((l) => l.includes("ends in -listen")).length, 1);
 });
+
+// ── What is remembered is forgotten with its feed and with its relay ────────
+
+test("removing a feed, or making another under its id, starts its audio memory afresh", async (t) => {
+  useFfmpeg(FFMPEG_MISSING);
+  const warns = captureConsole(t, "warn");
+  const id = await addFeed({ name: "Forgetful" });
+  let paths: RelayPath[] = [ready(id, MPEG4)];
+  await attachWith(() => paths);
+  await videoService.reconcileRelay();
+  assert.equal((await audioOf(id))?.state, "unavailable");
+  assert.equal(warns.filter((l) => l.includes("Forgetful: audio unavailable")).length, 1);
+
+  await videoService.removeFeed(id);
+  paths = [];
+  const again = await addFeed({ name: "Forgetful" });
+  assert.equal(again, id, "the same name did not give the same id back");
+  // Nothing about the old feed's audio carries over: its codec is not known, and
+  // its unavailable reason is news again.
+  assert.deepEqual(await audioOf(again), { state: "unknown" });
+  await videoService.reconcileRelay();
+  paths = [ready(again, MPEG4)];
+  await pollsIdle();
+  await poll();
+  await pollsIdle();
+  await videoService.whenBackgroundIdle();
+  await videoService.reconcileRelay();
+  assert.equal(warns.filter((l) => l.includes("Forgetful: audio unavailable")).length, 2);
+});
+
+test("a relay that goes takes with it what was learned from it: codecs, and which converters were running", async (t) => {
+  useFfmpeg(FFMPEG_OK);
+  const logs = captureConsole(t, "log");
+  const id = await addFeed({ name: "Gone relay" });
+  const sup = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  const attach = () => videoService.attachRelay(fakeRelay({ status: async () => [ready(id, MPEG4)] }), sup as never, DEFAULT_VIDEO_PORTS, { on: true });
+  attach();
+  await pollsIdle();
+  await poll();
+  await pollsIdle();
+  assert.equal((await audioOf(id))?.state, "converted");
+  sup.emit("line", `2026/10/22 21:00:42 INF [path ${id}-listen] runOnDemand command started`);
+  await videoService.whenBackgroundIdle();
+
+  await videoService.detachRelay();
+  videoService.attachRelay(fakeRelay({ status: async () => [] }), sup as never, DEFAULT_VIDEO_PORTS, { on: true });
+  assert.deepEqual(await audioOf(id), { state: "unknown" }, "the old relay's codec survived its detach");
+  sup.emit("line", `2026/10/22 21:05:00 INF [path ${id}-listen] runOnDemand command started`);
+  await videoService.whenBackgroundIdle();
+  assert.equal(logs.filter((l) => l.includes("audio converter started")).length, 2, "a converter of the old relay still counted as running");
+});
