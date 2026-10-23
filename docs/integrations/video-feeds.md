@@ -174,7 +174,7 @@ The relay listens on seven ports, all editable on that same card in
 | WebRTC signalling | 8889 | TCP | 127.0.0.1 only | Proxied by Stage Utility's own server; never reached directly |
 | HLS | 8888 | TCP | 127.0.0.1 only | Proxied by Stage Utility's own server; never reached directly |
 | Relay API | 9997 | TCP | 127.0.0.1 only | Only this server ever calls it, with a password made fresh at every relay start; nothing else on the machine can read or change the relay's paths, a pull feed's address among them |
-| RTSP (audio conversion) | 8554 | TCP | 127.0.0.1 only | This server's own ffmpeg, reading a feed and publishing its `-listen` path (see [Listening to a feed's audio](#listening-to-a-feeds-audio)). Bound only while ffmpeg is usable, so a machine without it loses nothing if something else holds 8554, and TCP only, so the relay opens no UDP ports for it |
+| RTSP (audio conversion) | 8554 | TCP | 127.0.0.1 only | This server's own ffmpeg, reading a feed and publishing its `-listen` path (see [Listening to a feed's audio](#listening-to-a-feeds-audio)). Bound only while ffmpeg is usable, and TCP only, so the relay opens no UDP ports for it. If something else holds the port when the relay starts, the relay starts without RTSP: video is unaffected, audio conversion is off for that run, and every feed that needs it says "the RTSP port 8554 is in use by …: change it in Advanced" (logged once). Saving the ports restarts the relay and tries again |
 
 If the server sits behind a firewall, or the gear it talks to is on another
 VLAN, two directions matter — the loopback-only four never need a rule,
@@ -206,7 +206,7 @@ second relay path, `<feed id>-listen`, holding the same video and Opus audio.
 
 | Setting | What the feed does |
 |---|---|
-| Auto (default) | Converts only AAC. Opus, G.711 and G.722 are listened to as they are, on the feed's own path. Any other codec (MP3, AC-3) is reported unavailable; Auto does not convert it |
+| Auto (default) | Converts only AAC. Opus, G.711, G.722 and LPCM are listened to as they are, on the feed's own path. Any other codec (MP3, AC-3) is reported unavailable; Auto does not convert it |
 | Off | Never runs ffmpeg for the feed. AAC then cannot be heard live |
 | Always | Converts whatever the audio is |
 
@@ -221,6 +221,13 @@ second RTSP session. The address takes no username or password, and only letters
 digits and the punctuation `- . _ ~ : / ? [ ] @ ! & ( ) * + , ; = %`, because it
 becomes an argument of the command the relay runs. Auto and Always use it; Off
 ignores it.
+
+The `-listen` suffix is reserved: a feed is never given an id ending in it (a feed
+named "Cam Listen" becomes `cam-listen-2`), an import refuses such an id, and a stored
+feed that has one is not given to the relay and says so in the log. The address is
+checked again when the command is built, so a restored or hand-edited store cannot
+make ffmpeg read a file or open a socket, and each input is limited to the protocols
+it needs (`-protocol_whitelist`).
 
 Both settings are saved with the feed in `video-feeds.json`, carried by the feeds
 export and import (the import review lists a difference in either), and ignored
@@ -248,14 +255,18 @@ listened feed, not per listener, and only while someone listens.
 **Status.** Each pull or push feed's view carries an `audio` status and the relay
 path a listener should read:
 
-| `audio.state` | Meaning | Listen to |
+| `audio.state` | Meaning | Path to read |
 |---|---|---|
 | `none` | The source has no audio track | nothing |
 | `unknown` | The feed has not been seen yet, so its audio is not known | |
-| `direct` | Opus or G.711: playable as the relay has it | the feed's own path |
+| `direct` | Opus, G.711, G.722 or LPCM: playable as the relay has it | the feed's own path |
 | `converted` | AAC, re-encoded to Opus on demand | `<id>-listen` |
 | `pass-through` | Read from the audio source address and copied | `<id>-listen` |
 | `unavailable` | Cannot be heard; `reason` says why | |
+
+The status names the path; no browser can play `<id>-listen` yet, because the
+playback proxy serves only a feed's own path. A Listen control that plays it is
+still to come.
 
 The editor shows it under the audio source address ("Audio unavailable: ffmpeg is
 not installed on this server."). The codec is learned from the relay's track
@@ -274,7 +285,9 @@ changes.
 installs ffmpeg with `apt-get`, `dnf` or `pacman` when it runs as root and finds
 none; `install.ps1` runs `winget install --id Gyan.FFmpeg -e` when `winget`
 exists. Both are best effort: a failure is printed and the install carries on.
-On Windows the server runs as SYSTEM, whose `PATH` may not include a per-user
+On RHEL, Rocky and Alma without RPM Fusion there is no ffmpeg package, so
+`dnf` fails and the line says so; install ffmpeg another way and save its path in
+Advanced if the server does not find it. On Windows the server runs as SYSTEM, whose `PATH` may not include a per-user
 install; if Advanced says ffmpeg is not found, save its path there.
 
 ## Kinds
@@ -745,7 +758,7 @@ from the server:
   audio source address copied as it is), once, not again for a restart after a
   failure; `audio converter stopped (not needed by anyone)` when the last
   listener has gone; `audio converter failed: <reason> — ffmpeg said: <its last
-  line>` once per failing run, not on each of the relay's retries every 5
+  line>` once per failing session, not on each of the relay's retries every 5
   seconds. Nothing is logged per listener. When two converters run at once their
   output interleaves, so the line quoted may be the other's.
 - `<feed>: audio unavailable: <reason>`, once per reason, for a feed that needs

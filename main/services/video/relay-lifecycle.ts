@@ -57,7 +57,7 @@ import { busyPorts, type BusyPort } from "./port-check.js";
 import { relayUsers } from "./reconcile-plan.js";
 import type { VideoRelay } from "./relay.js";
 import { RelaySupervisor, restartDelayMs, type LeftoverResult, type SupervisorStatus } from "./supervisor.js";
-import { videoService, type RelaySupervisorLike } from "./video-service.js";
+import { RTSP_OFF, videoService, type RelayRtsp, type RelaySupervisorLike } from "./video-service.js";
 
 /** RelayStatus -> the integration manager's connection state, in exactly one
  *  place (see the file header). Exported and pure, so the mapping itself is
@@ -170,6 +170,8 @@ export class RelayLifecycle {
   private currentPorts: VideoPorts | null = null;
   /** Whether the CURRENT supervisor was started with the loopback RTSP listener. */
   private currentRtsp: boolean | null = null;
+  /** The busy-RTSP-port reason last logged, so a retry does not repeat it. */
+  private loggedRtspBlock: string | null = null;
   /** Pre-supervisor failure backoff (a busy port, a failed download, a
    *  config write that could not be written) — reset once those checks pass
    *  and a supervisor is created; the supervisor's OWN crash-loop backoff
@@ -550,8 +552,24 @@ export class RelayLifecycle {
       // Decided once per start, like the ports: a relay either listens for RTSP
       // or it does not for as long as it runs, and a change in whether ffmpeg is
       // usable restarts it (listenCapabilityChanged).
-      const rtsp = await this.deps.listenCapable();
-      const busy = await this.deps.busyPorts(ports, rtsp);
+      let rtsp = await this.deps.listenCapable();
+      const all = await this.deps.busyPorts(ports, rtsp);
+      // The RTSP listener is for audio, which is optional: a port something else
+      // holds turns audio off for this run, and never stops the video.
+      const rtspBusy = rtsp ? all.find((b) => b.port === ports.rtsp) : undefined;
+      const busy = all.filter((b) => b !== rtspBusy);
+      let rtspAttach: RelayRtsp = rtsp ? { on: true } : RTSP_OFF;
+      if (rtspBusy) {
+        rtsp = false;
+        const log = `the RTSP port ${ports.rtsp} is in use by ${holderPhrase(rtspBusy.holder, "log")}`;
+        rtspAttach = { on: false, why: `the RTSP port ${ports.rtsp} is in use by ${holderPhrase(rtspBusy.holder, "lan")}: change it in Advanced` };
+        if (this.loggedRtspBlock !== log) {
+          this.loggedRtspBlock = log;
+          console.warn(`[video] audio conversion is off: ${scrub(log)}. The relay started without it; change the port in Advanced.`);
+        }
+      } else {
+        this.loggedRtspBlock = null;
+      }
       if (busy.length > 0) {
         const { reason, logReason } = busyPortReason(busy);
         this.failPreSupervisor(reason, "port-conflict", undefined, undefined, logReason);
@@ -595,7 +613,7 @@ export class RelayLifecycle {
         // forever, and every later setEnabled()/feedsChanged() believed the
         // relay was already up and never tried again.
         this.supervisor = supervisor;
-        videoService.attachRelay(this.deps.makeRelay(ports.api, apiPassword), supervisor, ports, { rtsp });
+        videoService.attachRelay(this.deps.makeRelay(ports.api, apiPassword), supervisor, ports, rtspAttach);
         this.startReadinessPoll();
         // Reset ONLY here, once attach has
         // genuinely succeeded — resetting it before this try (as it used

@@ -4,7 +4,6 @@
 // probe-scheduler.test.ts; the probe itself is probe.test.ts.
 
 import { strict as assert } from "node:assert";
-import { EventEmitter } from "node:events";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -13,6 +12,7 @@ import { beforeEach, test, type TestContext } from "node:test";
 import { captureConsole } from "../fixtures/capture-console.js";
 import { fakeRelay } from "../fixtures/fake-relay.js";
 import { within } from "../fixtures/within.js";
+import { FakeSupervisor } from "../fixtures/fake-supervisor.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-probe-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -26,7 +26,6 @@ const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
 
 type ProbeResult = import("./probe.js").ProbeResult;
 type RelayPath = import("./relay.js").RelayPath;
-type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
 type VideoProbeState = import("../../types/video.js").VideoProbeState;
 
 const PASSWORD = "hunter2-secret";
@@ -36,15 +35,6 @@ addBroadcastListener((channel, payload) => {
   if (channel === "video:probe") probeFrames.push(structuredClone(payload as VideoProbeState));
 });
 
-class FakeSupervisor extends EventEmitter {
-  current: SupervisorStatus = { state: "running", since: 1 };
-  status(): SupervisorStatus {
-    return this.current;
-  }
-  version(): string | null {
-    return null;
-  }
-}
 
 const notReadyPath = (name: string): RelayPath => ({ name, ready: false, readyTime: null, source: null, video: null, readers: 0 });
 const readyPath = (name: string): RelayPath => ({
@@ -196,7 +186,7 @@ test("a probe failure then the relay's dial failing on the same feed is ONE line
   const id = await addPull("Both cam", "rtsp://192.0.2.62:554/BOX");
   const r = rig();
   r.answer = { state: "failed", reason: "No answer from 192.0.2.62 for this path · check the address and path" };
-  videoService.attachRelay(fakeRelay({ status: async () => [notReadyPath(id)] }), new FakeSupervisor(), DEFAULT_VIDEO_PORTS);
+  videoService.attachRelay(fakeRelay({ status: async () => [notReadyPath(id)] }), new FakeSupervisor(), DEFAULT_VIDEO_PORTS, { on: false, why: null });
   try {
     await r.watch(true);
     const poll = () => (videoService as unknown as { pollOnce(): Promise<void> }).pollOnce();
@@ -219,7 +209,7 @@ test("the relay's dial failing first, then a probe failure on the same feed, is 
   const id = await addPull("Dial first cam", "rtsp://192.0.2.63:554/BOX");
   const r = rig();
   r.answer = { state: "failed", reason: "No answer from 192.0.2.63 for this path · check the address and path" };
-  videoService.attachRelay(fakeRelay({ status: async () => [notReadyPath(id)] }), new FakeSupervisor(), DEFAULT_VIDEO_PORTS);
+  videoService.attachRelay(fakeRelay({ status: async () => [notReadyPath(id)] }), new FakeSupervisor(), DEFAULT_VIDEO_PORTS, { on: false, why: null });
   try {
     const poll = () => (videoService as unknown as { pollOnce(): Promise<void> }).pollOnce();
     await poll();
@@ -285,7 +275,7 @@ test("with nobody on the page nothing is asked; a feed the relay reports ready i
   const idle = await addPull("Idle cam", "rtsp://192.0.2.66:554/BOX");
   const live = await addPull("Live cam", "rtsp://192.0.2.67:554/BOX");
   const r = rig();
-  videoService.attachRelay(fakeRelay({ status: async () => [readyPath(live), notReadyPath(idle)] }), new FakeSupervisor(), DEFAULT_VIDEO_PORTS);
+  videoService.attachRelay(fakeRelay({ status: async () => [readyPath(live), notReadyPath(idle)] }), new FakeSupervisor(), DEFAULT_VIDEO_PORTS, { on: false, why: null });
   try {
     await r.watch(false);
     await r.tick();

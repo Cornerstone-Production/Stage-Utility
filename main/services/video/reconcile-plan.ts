@@ -103,13 +103,10 @@ export function pathConf(feed: RelayFeed): PathConf {
 }
 
 /** How long a reader of a `-listen` path waits for ffmpeg to start publishing
- *  before it is told no. A start measured at about a second locally; a Raspberry
- *  Pi on a slow card is several. */
+ *  before it is told no. */
 export const LISTEN_START_TIMEOUT_MS = 15_000;
-/** How long after the last reader leaves the converter keeps running. Long
- *  enough that switching Listen off and on again reuses it rather than paying
- *  the start twice; short enough that an abandoned page costs a few seconds of
- *  CPU, not a session. */
+/** How long after the last reader leaves the converter keeps running: long enough
+ *  that switching Listen off and on reuses it, short enough to cost little CPU. */
 export const LISTEN_CLOSE_AFTER_MS = 10_000;
 
 /** The config of a feed's `<id>-listen` path. MediaMTX runs `command` when the

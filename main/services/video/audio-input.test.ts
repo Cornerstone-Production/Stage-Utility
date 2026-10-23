@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { audioFieldsOf, audioSourceUrlProblem, isCommandSafe, parseAudioFields } from "./audio-input.js";
+import { audioFieldsOf, audioSourceUrlProblem, parseAudioFields } from "./audio-input.js";
 import { parseFeedInput } from "./feed-input.js";
 
 const KINDS = new Set(["pull", "push", "embed", "external"] as const);
@@ -56,7 +56,6 @@ test("an address with a quote, a $, a backtick, a backslash, a space or a contro
   for (const url of hostile) {
     assert.notEqual(audioSourceUrlProblem(url), null, `accepted ${JSON.stringify(url)}`);
     assert.equal(parseAudioFields({ audioSourceUrl: url }).ok, false, `parse accepted ${JSON.stringify(url)}`);
-    assert.equal(isCommandSafe(url), false);
   }
 });
 

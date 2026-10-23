@@ -7,6 +7,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { captureConsole } from "../fixtures/capture-console.js";
 import { within } from "../fixtures/within.js";
+import { FakeSupervisor } from "../fixtures/fake-supervisor.js";
 
 // Before any store is constructed: every import below builds its stores
 // against this directory, never the default data folder.
@@ -27,7 +28,6 @@ const { fakeRelay } = await import("../fixtures/fake-relay.js");
 type RelayPath = import("./relay.js").RelayPath;
 type RelayFeed = import("./relay.js").RelayFeed;
 type VideoRelay = import("./relay.js").VideoRelay;
-type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
 type VideoPorts = import("../../types/video.js").VideoPorts;
 type RelayStatus = import("../../types/video.js").RelayStatus;
 type RelaySupervisorLike = import("./video-service.js").RelaySupervisorLike;
@@ -42,7 +42,7 @@ type RelaySupervisorLike = import("./video-service.js").RelaySupervisorLike;
  * production method itself.
  */
 const attach = (relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts = DEFAULT_VIDEO_PORTS) =>
-  videoService.attachRelay(relay, supervisor, ports);
+  videoService.attachRelay(relay, supervisor, ports, { on: false, why: null });
 
 /** Real wall-clock polling, never affected by a test's own mocked setTimeout
  *  or Date (performance.now() is neither), for a condition the service offers
@@ -151,21 +151,6 @@ test("a pull or push feed reads standby, not offline, while no relay is attached
 // to a single process), a failing poll's behaviour, the seen store's
 // write-failure handling, and the guard against a stale in-flight poll.
 
-class FakeSupervisor extends EventEmitter {
-  // "running" by default — the service never polls while the supervisor
-  // reports "off" (see pollOnce()'s own guard), so every test that expects
-  // pollOnce() to actually call relay.status() would otherwise need its own
-  // explicit override. The handful of tests ABOUT off/starting/failing set
-  // their own.
-  current: SupervisorStatus = { state: "running", since: 1 };
-  ver: string | null = null;
-  status(): SupervisorStatus {
-    return this.current;
-  }
-  version(): string | null {
-    return this.ver;
-  }
-}
 
 /** A fake child process for the tests that drive a REAL RelaySupervisor —
  *  structurally satisfies SupervisedChild (an EventEmitter with

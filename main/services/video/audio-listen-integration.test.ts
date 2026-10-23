@@ -182,3 +182,18 @@ test("an audio source address is passed through with -c copy: H.264 and Opus out
     assert.deepEqual(r.streams.map((s) => s.codec_name).sort(), ["h264", "opus"]);
   }, ffmpeg.resolvedPath, { audioSourceUrl: url });
 });
+
+test("the protocol whitelist on the pass-through input refuses a file: address even if one reached it", { skip, timeout: 30_000 }, async () => {
+  assert.ok(ffmpeg.ok);
+  const { PASS_THROUGH_PROTOCOLS } = await import("./audio-listen.js");
+  const hosts = path.join(TMP, "secret.txt");
+  await fs.writeFile(hosts, "not media");
+  const run = (whitelist: string) =>
+    execFileP(ffmpeg.resolvedPath, ["-hide_banner", "-loglevel", "debug", "-protocol_whitelist", whitelist, "-i", `file:${hosts}`, "-f", "null", "-"], { timeout: 10_000 }).then(
+      () => "",
+      (e: { stderr?: string }) => e.stderr ?? "",
+    );
+  assert.match(await run(PASS_THROUGH_PROTOCOLS), /Protocol .file. not on whitelist/);
+  // Without the whitelist ffmpeg opens it and fails on the content instead, which is the difference that matters.
+  assert.doesNotMatch(await run("file,http,https,tls,tcp"), /not on whitelist/);
+});

@@ -2,8 +2,9 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import { parsePorts, PORT_KEYS } from "./ports.js";
+import { DEFAULT_VIDEO_PORTS } from "../../types/video.js";
 
-const GOOD = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 };
+const GOOD = DEFAULT_VIDEO_PORTS;
 
 test("accepts six distinct in-range integers", () => {
   const r = parsePorts(GOOD);

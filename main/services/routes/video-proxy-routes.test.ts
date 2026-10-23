@@ -17,13 +17,13 @@
 
 import { strict as assert } from "node:assert";
 import { after, before, describe, test } from "node:test";
-import { EventEmitter } from "node:events";
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { captureConsole } from "../fixtures/capture-console.js";
+import { FakeSupervisor } from "../fixtures/fake-supervisor.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-proxy-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -36,20 +36,9 @@ const { handlerErrorStatus } = await import("../remote-server.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
 const { PULL_START_TIMEOUT_MS } = await import("../video/reconcile-plan.js");
 const { fakeRelay } = await import("../fixtures/fake-relay.js");
-type SupervisorStatus = import("../video/supervisor.js").SupervisorStatus;
 
-/** Structurally satisfies RelaySupervisorLike — an EventEmitter plus
- *  status()/version(). videoProxyRoutes never calls either method itself
- *  (routing reads videoService's published snapshot, not the live relay);
- *  this exists only so attachRelay() has something to attach. */
-class FakeSupervisor extends EventEmitter {
-  current: SupervisorStatus = { state: "running", since: Date.now() };
-  status(): SupervisorStatus {
-    return this.current;
-  }
-  version(): string | null {
-    return "v1.21.1";
-  }
+class VersionedSupervisor extends FakeSupervisor {
+  override ver: string | null = "v1.21.1";
 }
 
 const relay = fakeRelay();
@@ -314,7 +303,7 @@ describe("relay not running", () => {
 
 describe("a running relay not yet reconciled", () => {
   before(async () => {
-    videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+    videoService.attachRelay(relay, new VersionedSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort }, { on: false, why: null });
     await publish();
   });
   after(async () => {
@@ -332,7 +321,7 @@ describe("a running relay not yet reconciled", () => {
 
 describe("once the relay is attached and running", () => {
   before(async () => {
-    videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+    videoService.attachRelay(relay, new VersionedSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort }, { on: false, why: null });
     await videoService.reconcileRelay();
     await publish();
   });
@@ -612,7 +601,7 @@ describe("once the relay is attached and running", () => {
 
 describe("a viewer leaving mid-hold", () => {
   before(async () => {
-    videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+    videoService.attachRelay(relay, new VersionedSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort }, { on: false, why: null });
     await videoService.reconcileRelay();
     await publish();
     proxyOutage.forget();
@@ -653,7 +642,7 @@ describe("an unreachable relay", () => {
     deadPort = (probe.address() as AddressInfo).port;
     await new Promise<void>((r) => probe.close(() => r()));
 
-    videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: deadPort, hls: deadPort });
+    videoService.attachRelay(relay, new VersionedSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: deadPort, hls: deadPort }, { on: false, why: null });
     await videoService.reconcileRelay();
     await publish();
     proxyOutage.forget();
@@ -690,7 +679,7 @@ describe("an unreachable relay", () => {
       const made = await videoService.addFeed({ name: "gonecam", source: { kind: "push", protocol: "whip" } });
       assert.ok(made.ok, "the feed must be added for this to mean anything");
       // A feed change tells relay-lifecycle, which (the Video switch being off here) detaches the relay.
-      videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: deadPort, hls: deadPort });
+      videoService.attachRelay(relay, new VersionedSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: deadPort, hls: deadPort }, { on: false, why: null });
       await videoService.reconcileRelay();
       await publish();
       return (made as { feed: { id: string } }).feed.id;
@@ -709,7 +698,7 @@ describe("an unreachable relay", () => {
     } finally {
       await videoService.removeFeed(id);
       // Removing it detached the relay again; the tests after this one expect it attached.
-      videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: deadPort, hls: deadPort });
+      videoService.attachRelay(relay, new VersionedSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: deadPort, hls: deadPort }, { on: false, why: null });
       await videoService.reconcileRelay();
       await publish();
     }
@@ -722,7 +711,7 @@ describe("an unreachable relay", () => {
       await fetchSu(`/video/${camId}/whep`, { method: "POST", headers: { "content-type": "application/sdp" }, body: "v=0" }); // one failure, opens the outage
 
       // Point back at the real fake upstream — the relay "answering again".
-      videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+      videoService.attachRelay(relay, new VersionedSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort }, { on: false, why: null });
       await videoService.reconcileRelay();
       await publish();
       await new Promise((r) => setTimeout(r, 20)); // past the 1 ms settle window
@@ -739,7 +728,7 @@ describe("an unreachable relay", () => {
 
 describe("a relay that never answers", () => {
   before(async () => {
-    videoService.attachRelay(relay, new FakeSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort });
+    videoService.attachRelay(relay, new VersionedSupervisor(), { ...DEFAULT_VIDEO_PORTS, webrtcHttp: upstreamPort, hls: upstreamPort }, { on: false, why: null });
     await videoService.reconcileRelay();
     await publish();
   });

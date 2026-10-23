@@ -64,10 +64,8 @@ export function relayConfig({
     metrics: false,
     pprof: false,
     playback: false,
-    // No push kind uses RTSP and pulling RTSP needs no listener. The one reader
-    // and publisher of RTSP here is this server's own ffmpeg, over TCP on
-    // loopback, and only while ffmpeg is usable: no LAN listener, and with TCP
-    // alone MediaMTX does not open its default UDP ports (8000, 8001) either.
+    // RTSP is for this server's own ffmpeg alone: TCP on loopback, bound only
+    // while ffmpeg is usable. With TCP only MediaMTX opens no UDP ports (8000, 8001).
     rtsp,
     ...(rtsp ? { rtspAddress: `127.0.0.1:${ports.rtsp}`, rtspTransports: ["tcp"] } : {}),
     rtspEncryption: "no",

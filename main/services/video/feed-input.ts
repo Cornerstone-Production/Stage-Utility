@@ -4,20 +4,13 @@ import { PUSH_PROTOCOLS, EMBED_PLAYERS, type VideoSourceKind, type VideoSource }
 import type { CredentialTarget } from "../credential-target.js";
 import { parseAudioFields, type AudioFields } from "./audio-input.js";
 import { normalizeEmbedRef } from "./embed.js";
+import { hasUserinfo } from "./url-userinfo.js";
 
 /** Longest name a feed may have, after trimming. */
 export const MAX_NAME_LENGTH = 60;
 
 function isOneOf<T extends string>(list: readonly T[], v: unknown): v is T {
   return typeof v === "string" && (list as readonly string[]).includes(v);
-}
-
-/** A username or password inside the address itself. Refused for every kind
- *  that takes an address: stored there it would sit in the config store and
- *  go out on video:state to every screen, and a browser refuses to fetch an
- *  address that carries one, so it could never play either. */
-function hasUserinfo(u: URL): boolean {
-  return u.username !== "" || u.password !== "";
 }
 
 /** Printable ASCII, space to tilde — what an encoder's own settings page

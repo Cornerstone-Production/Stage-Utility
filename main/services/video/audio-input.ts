@@ -8,6 +8,7 @@
 // the address, that keeps it from ever changing what runs.
 
 import { AUDIO_CONVERSIONS, type AudioConversion } from "../../types/video.js";
+import { hasUserinfo } from "./url-userinfo.js";
 
 /** Longest audio source address, in characters. */
 export const MAX_AUDIO_URL_LENGTH = 1024;
@@ -17,11 +18,6 @@ export const MAX_AUDIO_URL_LENGTH = 1024;
  *  backtick, a space, `#`, `<`, `>`, `|`, `^`, `{`, `}` nor a control character. */
 const COMMAND_SAFE = /^[A-Za-z0-9\-._~:/?[\]@!&()*+,;=%]+$/;
 
-/** Whether `text` can be one argument of a runOnDemand command exactly as it is. */
-export function isCommandSafe(text: string): boolean {
-  return COMMAND_SAFE.test(text);
-}
-
 export interface AudioFields {
   audioConversion?: AudioConversion;
   audioSourceUrl?: string;
@@ -30,7 +26,7 @@ export interface AudioFields {
 /** Why `url` cannot be an audio source address, or null. */
 export function audioSourceUrlProblem(url: string): string | null {
   if (url.length > MAX_AUDIO_URL_LENGTH) return `The audio source address must be at most ${MAX_AUDIO_URL_LENGTH} characters.`;
-  if (!isCommandSafe(url)) {
+  if (!COMMAND_SAFE.test(url)) {
     return "The audio source address can use only letters, digits and the punctuation - . _ ~ : / ? [ ] @ ! & ( ) * + , ; = %.";
   }
   let u: URL;
@@ -41,7 +37,7 @@ export function audioSourceUrlProblem(url: string): string | null {
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return "The audio source address must be http or https.";
   if (u.hostname === "") return "Enter the address, including the host (for example http://192.0.2.10/0.ts).";
-  if (u.username !== "" || u.password !== "") {
+  if (hasUserinfo(u)) {
     return "The audio source address cannot carry a username or password; use an address the encoder serves without one.";
   }
   return null;
@@ -82,4 +78,11 @@ export function audioFieldsOf(feed: AudioFields): AudioFields {
   if (feed.audioConversion !== undefined) out.audioConversion = feed.audioConversion;
   if (feed.audioSourceUrl !== undefined) out.audioSourceUrl = feed.audioSourceUrl;
   return out;
+}
+
+/** A feed's audio settings as a person reads them: the conversion by name
+ *  ("auto" when none is stored), the address as text ("" when none). The view, the
+ *  editor's draft and the import review all read it this way. */
+export function resolveAudioFields(feed: AudioFields): { audioConversion: AudioConversion; audioSourceUrl: string } {
+  return { audioConversion: feed.audioConversion ?? "auto", audioSourceUrl: feed.audioSourceUrl ?? "" };
 }

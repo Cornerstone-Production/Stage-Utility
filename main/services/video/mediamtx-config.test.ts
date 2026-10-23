@@ -2,18 +2,11 @@ import { deepEqual, strictEqual } from "assert";
 import { describe, it } from "node:test";
 import { apiUser, relayConfig, READER_USER, type RelayUser } from "./mediamtx-config.ts";
 import type { VideoPorts } from "../../types/video.ts";
+import { DEFAULT_VIDEO_PORTS } from "../../types/video.ts";
 
 describe("relayConfig", () => {
   it("produces the exact config structure with all keys pinned", () => {
-    const ports: VideoPorts = {
-      rtmp: 1935,
-      srt: 8890,
-      webrtcUdp: 8189,
-      webrtcHttp: 8889,
-      hls: 8888,
-      api: 9997,
-      rtsp: 8554,
-    };
+    const ports: VideoPorts = DEFAULT_VIDEO_PORTS;
 
     const config = relayConfig({
       ports,
@@ -95,7 +88,7 @@ function allowsApi(users: RelayUser[], creds: { user: string; pass: string }): b
 }
 
 describe("the relay API's own user", () => {
-  const ports: VideoPorts = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 };
+  const ports: VideoPorts = DEFAULT_VIDEO_PORTS;
   const config = relayConfig({ ports, lanIp: "192.0.2.1", users: [READER_USER, apiUser("s3cret-api-pw")] });
 
   it("an unauthenticated API request is refused by the generated config", () => {

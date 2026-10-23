@@ -21,8 +21,8 @@ import {
   type VideoSource,
   type VideoSourceKind,
 } from "../../types/video.js";
-import { audioFieldsOf, type AudioFields } from "./audio-input.js";
-import { FEED_ID_PATTERN } from "./feed-id.js";
+import { audioFieldsOf, resolveAudioFields, type AudioFields } from "./audio-input.js";
+import { FEED_ID_PATTERN, isReservedFeedId } from "./feed-id.js";
 import { keptPassphraseError, parseFeedInput, passphraseProblem, pullCredentialTarget } from "./feed-input.js";
 import { credentialTargetMoved } from "../credential-target.js";
 import { PORT_KEYS, parsePorts } from "./ports.js";
@@ -44,7 +44,7 @@ const PUSH_PASSWORD_FORMAT = /^[A-Za-z0-9]{16,64}$/;
  * take (a kind it does not offer, say) is not a reason to refuse the file; the
  * review marks it invalid and the import skips it.
  */
-export function assertVideoBundle(raw: unknown): VideoFeedsBundle {
+export function assertVideoBundle(raw: unknown, currentPorts: VideoPorts): VideoFeedsBundle {
   if (!isRecord(raw)) throw new Error("That is not a video feeds file.");
   if (raw.kind !== VIDEO_FEEDS_BUNDLE_KIND) {
     const found = typeof raw.kind === "string" && raw.kind !== "" ? `"${raw.kind.slice(0, 60)}"` : "unknown";
@@ -59,7 +59,7 @@ export function assertVideoBundle(raw: unknown): VideoFeedsBundle {
   for (const [i, entry] of raw.feeds.entries()) {
     if (!isRecord(entry)) throw new Error(`Feed ${i + 1} in the file is not an object.`);
     const id = entry.id;
-    if (typeof id !== "string" || !FEED_ID_PATTERN.test(id)) {
+    if (typeof id !== "string" || !FEED_ID_PATTERN.test(id) || isReservedFeedId(id)) {
       throw new Error(`Feed ${i + 1} in the file has an id this server cannot use.`);
     }
     if (seen.has(id)) throw new Error(`The file lists the feed id "${id}" more than once.`);
@@ -68,7 +68,7 @@ export function assertVideoBundle(raw: unknown): VideoFeedsBundle {
 
   let ports: VideoPorts | undefined;
   if (raw.ports !== undefined) {
-    const parsed = parsePorts(raw.ports);
+    const parsed = parsePorts(raw.ports, currentPorts);
     if (!parsed.ok) throw new Error(`The relay ports in the file are not usable: ${parsed.error}`);
     ports = parsed.ports;
   }
@@ -148,16 +148,13 @@ export interface FeedPlan {
   parsed?: { name: string; source: VideoSource; password?: string } & AudioFields;
 }
 
-/** The audio settings, here and in the file, as a person reads them: the
- *  conversion by name ("auto" when unset), the address as text ("" when none). */
+/** The audio settings, here and in the file, compared as a person reads them. */
 function audioDifferences(here: AudioFields, file: AudioFields): FeedDifference[] {
+  const a = resolveAudioFields(here);
+  const b = resolveAudioFields(file);
   const out: FeedDifference[] = [];
-  const a = here.audioConversion ?? "auto";
-  const b = file.audioConversion ?? "auto";
-  if (a !== b) out.push({ field: "audioConversion", here: a, file: b });
-  const u = here.audioSourceUrl ?? "";
-  const v = file.audioSourceUrl ?? "";
-  if (u !== v) out.push({ field: "audioSourceUrl", here: u, file: v });
+  if (a.audioConversion !== b.audioConversion) out.push({ field: "audioConversion", here: a.audioConversion, file: b.audioConversion });
+  if (a.audioSourceUrl !== b.audioSourceUrl) out.push({ field: "audioSourceUrl", here: a.audioSourceUrl, file: b.audioSourceUrl });
   return out;
 }
 

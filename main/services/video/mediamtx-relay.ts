@@ -36,6 +36,7 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { errorMessage } from "../errors.js";
+import { normalizeCodecName } from "./codec-name.js";
 import { planReconcile, relayUsers } from "./reconcile-plan.js";
 import { withoutCredentials } from "./redact-url.js";
 import { RelayReconcileError, type RelayFeed, type RelayPath, type VideoRelay } from "./relay.js";
@@ -67,7 +68,7 @@ interface GlobalConfig {
 const VIDEO_CODECS = new Set(["AV1", "VP9", "VP8", "H265", "H264", "MJPEG", "MPEG4VIDEO", "MPEG12VIDEO"]);
 
 function isVideoCodec(codec: string): boolean {
-  return VIDEO_CODECS.has(codec.toUpperCase().replace(/[^A-Z0-9]/g, ""));
+  return VIDEO_CODECS.has(normalizeCodecName(codec));
 }
 
 /** MediaMTX's names for the audio codecs it can carry, compared like VIDEO_CODECS. */
@@ -83,7 +84,7 @@ const AUDIO_CODECS = new Set([
 function audioCodec(item: RuntimePathItem): string | null | undefined {
   if (!item.ready || item.tracks2 === undefined) return undefined;
   const track = item.tracks2.find(
-    (t) => AUDIO_CODECS.has(t.codec.toUpperCase().replace(/[^A-Z0-9]/g, "")) || t.codecProps?.sampleRate !== undefined,
+    (t) => AUDIO_CODECS.has(normalizeCodecName(t.codec)) || t.codecProps?.sampleRate !== undefined,
   );
   return track?.codec ?? null;
 }

@@ -331,7 +331,11 @@ export function createFfmpegFinder(deps: FfmpegFinderDeps): { find: () => Promis
   };
 }
 
-const finder = createFfmpegFinder({
+export type FfmpegFinder = ReturnType<typeof createFfmpegFinder>;
+
+/** The server's own finder, and its cache. The video service asks it, and resets
+ *  it when the file it found has gone (a Homebrew upgrade moves the Cellar path). */
+export const systemFfmpegFinder: FfmpegFinder = createFfmpegFinder({
   configuredPath: loadFfmpegPath,
   env: () => process.env,
   platform: process.platform,
@@ -344,7 +348,7 @@ const finder = createFfmpegFinder({
  *  against, not `path` (which may be a link that now points elsewhere). Never
  *  send this to a browser as it is: use publicFfmpegStatus. */
 export function findFfmpeg(): Promise<FfmpegResult> {
-  return finder.find();
+  return systemFfmpegFinder.find();
 }
 
 export type ParsedFfmpegPath = { ok: true; path: string } | { ok: false; error: string };
@@ -376,8 +380,8 @@ async function applyFfmpegPath(body: unknown, now: () => number): Promise<{ ok: 
   // the button into a stream of spawns, and concurrent saves share one check.
   if (lastSet && lastSet.path === parsed.path && now() - lastSet.at < RECHECK_AFTER_MS) return { ok: true, result: lastSet.result };
   await ffmpegPathStore.save({ path: parsed.path });
-  finder.reset();
-  const result = await finder.find();
+  systemFfmpegFinder.reset();
+  const result = await systemFfmpegFinder.find();
   lastSet = { path: parsed.path, at: now(), result };
   return { ok: true, result };
 }

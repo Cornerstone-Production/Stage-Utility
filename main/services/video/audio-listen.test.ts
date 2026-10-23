@@ -2,7 +2,10 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import type { AudioConversion } from "../../types/video.js";
-import { classifyAudio, listenArgv, listenPathName, planAudio, quoteForMediaMtx, resolveAudio, type ListenCapability, type RelayAudio } from "./audio-listen.js";
+import {
+  PASS_THROUGH_PROTOCOLS, RELAY_PROTOCOLS, WHY_AAC, classifyAudio, listenArgv, listenPathName, planAudio, quoteForMediaMtx, resolveAudio,
+  type ListenCapability, type RelayAudio,
+} from "./audio-listen.js";
 
 const CAP: ListenCapability = { ok: true, ffmpegPath: "/usr/bin/ffmpeg", rtspPort: 8554 };
 const NO_FFMPEG: ListenCapability = { ok: false, reason: "ffmpeg is not installed on this server" };
@@ -18,12 +21,12 @@ test("converting: ffmpeg reads the relay's copy, copies the video and re-encodes
   assert.equal(
     r.listenCommand,
     "'/usr/bin/ffmpeg' '-hide_banner' '-nostdin' '-nostats' '-loglevel' 'warning' '-fflags' 'nobuffer' '-flags' 'low_delay' " +
-      "'-probesize' '65536' '-analyzeduration' '500000' '-rtsp_transport' 'tcp' '-i' 'rtsp://127.0.0.1:8554/cam' " +
+      "'-probesize' '65536' '-analyzeduration' '500000' '-protocol_whitelist' 'rtsp,rtp,tcp' '-rtsp_transport' 'tcp' '-i' 'rtsp://127.0.0.1:8554/cam' " +
       "'-c:v' 'copy' '-c:a' 'libopus' '-b:a' '128k' '-application' 'lowdelay' '-frame_duration' '20' " +
       "'-f' 'rtsp' '-rtsp_transport' 'tcp' 'rtsp://127.0.0.1:8554/cam-listen'",
   );
   assert.deepEqual(r.status, { state: "converted", listenPath: "cam-listen" });
-  assert.equal(r.why, "AAC");
+  assert.equal(r.why, WHY_AAC);
 });
 
 test("pass-through: ffmpeg reads the audio source address and copies everything", () => {
@@ -31,7 +34,7 @@ test("pass-through: ffmpeg reads the audio source address and copies everything"
   assert.equal(
     r.listenCommand,
     "'/usr/bin/ffmpeg' '-hide_banner' '-nostdin' '-nostats' '-loglevel' 'warning' '-fflags' 'nobuffer' '-flags' 'low_delay' " +
-      "'-probesize' '65536' '-analyzeduration' '500000' '-rw_timeout' '10000000' '-i' 'http://192.0.2.28/0.ts' " +
+      "'-probesize' '65536' '-analyzeduration' '500000' '-protocol_whitelist' 'http,https,tls,tcp' '-rw_timeout' '10000000' '-i' 'http://192.0.2.28/0.ts' " +
       "'-c' 'copy' '-f' 'rtsp' '-rtsp_transport' 'tcp' 'rtsp://127.0.0.1:8554/cam-listen'",
   );
   assert.deepEqual(r.status, { state: "pass-through", listenPath: "cam-listen" });
@@ -109,30 +112,25 @@ test("classifying codec names as MediaMTX spells them", () => {
   assert.equal(classifyAudio("AC-3"), "other");
 });
 
-// MediaMTX splits the string with shell quoting rules then expands $NAME in each word.
-test("a word that a quote or $ could change is refused, never escaped", () => {
+// MediaMTX splits the string with shell quoting rules, then expands $NAME in each
+// word, so each of these would change what runs. One table, three entry points.
+test("anything that could change what runs is refused: a word, an ffmpeg path, an id, an address", () => {
   for (const word of ["/tmp/it's/ffmpeg", "/tmp/$HOME/ffmpeg", "/tmp/a\nb/ffmpeg", "/tmp/a\u0000b"]) {
     assert.equal(quoteForMediaMtx([word]).ok, false, JSON.stringify(word));
+    const r = settle("auto", AAC, undefined, { ok: true, ffmpegPath: word, rtspPort: 8554 });
+    assert.equal(r.listenCommand, undefined, word);
+    assert.equal(r.status.state, "unavailable", word);
   }
-  const odd = quoteForMediaMtx(["C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe", "-i", "x"]);
-  assert.deepEqual(odd, { ok: true, command: "'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe' '-i' 'x'" });
-});
-
-test("an ffmpeg path MediaMTX could not pass on makes the feed unavailable, with no -listen path", () => {
-  const r = settle("auto", AAC, undefined, { ok: true, ffmpegPath: "/opt/$HOME/ffmpeg", rtspPort: 8554 });
-  assert.equal(r.listenCommand, undefined);
-  assert.equal(r.status.state, "unavailable");
-});
-
-test("a feed id that is not a safe relay path never reaches a command", () => {
+  // A path with spaces and backslashes is fine: single quotes keep it whole.
+  assert.deepEqual(quoteForMediaMtx(["C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe", "-i", "x"]), {
+    ok: true,
+    command: "'C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe' '-i' 'x'",
+  });
   for (const id of ["a'b", "a b", "../x", "A", "", "a;b"]) {
     const r = resolveAudio(planAudio({ conversion: "always", audio: AAC }, id), id, CAP);
-    assert.equal(r.listenCommand, undefined, id);
-    assert.equal(r.status.state, "unavailable", id);
+    assert.equal(r.listenCommand, undefined, `id ${id}`);
+    assert.equal(r.status.state, "unavailable", `id ${id}`);
   }
-});
-
-test("an audio source address with shell syntax never reaches a command", () => {
   for (const url of ["http://h/x'; touch /tmp/x; '", "http://h/$X", "http://h/a b"]) {
     const r = settle("auto", AAC, url);
     assert.equal(r.listenCommand, undefined, url);
@@ -140,8 +138,28 @@ test("an audio source address with shell syntax never reaches a command", () => 
   }
 });
 
+// A store restored from a backup or edited by hand is not validated when it is
+// loaded, so the command builder is where an address is held to http and https.
+test("an address that is not plain http or https never reaches ffmpeg, whatever the store holds", () => {
+  for (const url of ["file:/etc/passwd", "tcp://0.0.0.0:9999?listen=1", "subfile:,start,0,end,0,,:/etc/passwd", "udp://@:5000", "rtsp://192.0.2.9/x", "http://u:p@192.0.2.28/0.ts"]) {
+    const r = settle("auto", "Opus", url);
+    assert.equal(r.listenCommand, undefined, url);
+    assert.equal(r.status.state, "unavailable", url);
+  }
+});
+
+test("each input may open only what it needs", () => {
+  const convert = listenArgv("/usr/bin/ffmpeg", "cam", { mode: "convert", why: WHY_AAC }, 8554);
+  assert.equal(convert[convert.indexOf("-protocol_whitelist") + 1], RELAY_PROTOCOLS);
+  assert.ok(convert.indexOf("-protocol_whitelist") < convert.indexOf("-i"), "the whitelist must come before the input");
+  const pass = settle("auto", "Opus", "http://192.0.2.28/0.ts");
+  assert.ok(pass.listenCommand?.includes(`'-protocol_whitelist' '${PASS_THROUGH_PROTOCOLS}' '-rw_timeout' '10000000' '-i'`), pass.listenCommand);
+  assert.equal(RELAY_PROTOCOLS, "rtsp,rtp,tcp");
+  assert.equal(PASS_THROUGH_PROTOCOLS, "http,https,tls,tcp");
+});
+
 test("listenArgv has the program first and nothing in it is shell syntax", () => {
-  const argv = listenArgv("/usr/bin/ffmpeg", "cam", { mode: "convert", why: "AAC" }, 18554);
+  const argv = listenArgv("/usr/bin/ffmpeg", "cam", { mode: "convert", why: WHY_AAC }, 18554);
   assert.equal(argv[0], "/usr/bin/ffmpeg");
   assert.ok(argv.includes("rtsp://127.0.0.1:18554/cam"));
   assert.ok(argv.includes("rtsp://127.0.0.1:18554/cam-listen"));

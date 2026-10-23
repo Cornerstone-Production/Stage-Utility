@@ -1500,3 +1500,39 @@ test("ffmpeg changing while the relay is off starts nothing", async () => {
   await idle(lifecycle);
   assert.equal(supervisors.length, 0);
 });
+
+test("a busy RTSP port starts the relay without RTSP, says so once, and never stops the video", async (t) => {
+  const warns = captureConsole(t, "warn");
+  const { deps, supervisors } = makeDeps({
+    listenCapable: async () => true,
+    busyPorts: async (ports, rtsp) => (rtsp ? [{ port: ports.rtsp, proto: "tcp" as const, holder: OBS_STUDIO }] : []),
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+  assert.equal((await videoService.state()).relay.state, "running", "the video relay did not start for a busy audio port");
+  const config = await configOf(supervisors[0]!);
+  assert.equal(config.rtsp, false);
+  assert.equal("rtspAddress" in config, false);
+  await videoService.setPorts({ ...DEFAULT_VIDEO_PORTS, rtmp: 21935 }); // restarts: the same block, said again?
+  await waitUntil(() => supervisors.length > 1);
+  assert.equal(warns.filter((l) => l.includes("audio conversion is off")).length, 1, JSON.stringify(warns));
+  assert.match(warns[0] ?? "", /the RTSP port 8554 is in use by/);
+});
+
+test("another port busy beside RTSP still fails the start as before", async () => {
+  const { deps, supervisors } = makeDeps({
+    listenCapable: async () => true,
+    busyPorts: async (ports) => [
+      { port: ports.rtsp, proto: "tcp" as const, holder: OBS_STUDIO },
+      { port: ports.rtmp, proto: "tcp" as const, holder: OBS_STUDIO },
+    ],
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await idle(lifecycle);
+  assert.equal(supervisors.length, 0);
+  assert.equal((await videoService.state()).relay.state, "failing");
+});

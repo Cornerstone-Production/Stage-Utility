@@ -5,6 +5,7 @@
 
 import { createHmac, randomBytes, randomInt } from "node:crypto";
 import { EventEmitter } from "node:events";
+import * as fs from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 
 import { withoutDataDir } from "../app-paths.js";
@@ -21,11 +22,12 @@ import { stageController } from "../stage-controller.js";
 import { cleared } from "../timers.js";
 import { walkLayoutObjects } from "../view-refs.js";
 import { viewsStore } from "../views-store.js";
-import { audioFieldsOf } from "./audio-input.js";
+import { audioFieldsOf, resolveAudioFields } from "./audio-input.js";
 import { planAudio, resolveAudio, type ConverterWhy, type ListenCapability } from "./audio-listen.js";
-import { findFfmpeg } from "./ffmpeg-system.js";
+import { systemFfmpegFinder, type FfmpegFinder } from "./ffmpeg-system.js";
+import { AudioMemory } from "./audio-memory.js";
 import { embedSrc } from "./embed.js";
-import { FEED_ID_PATTERN, feedIdFor, feedSecretSlot } from "./feed-id.js";
+import { FEED_ID_PATTERN, feedIdFor, feedSecretSlot, isReservedFeedId } from "./feed-id.js";
 import { feedState, type BFramesMark } from "./feed-state.js";
 import { externalProtocol, parseFeedInput, pullCredentialTarget } from "./feed-input.js";
 import { credentialTargetMoved, describeTarget, type CredentialTarget } from "../credential-target.js";
@@ -87,13 +89,20 @@ const KICK_LOG_TEXT: Record<KickResult, string> = {
   failed: "could not drop the current publisher",
 };
 
-/** What ConverterWhy says in the log line a converter's start writes. */
-const AUDIO_WHY_TEXT: Record<ConverterWhy, string> = {
-  AAC: "the feed's audio is AAC",
-  Always: "Audio conversion is Always",
-  "pass-through": "audio source address, copied as it is",
-  "codec not known yet": "the feed's audio was not known when it was set up",
-};
+/** How MediaMTX words a converter that never started: "fork/exec ...: no such file or directory". */
+const LAUNCH_ERROR = /fork\/exec|no such file|not found|permission denied|exec format/i;
+const FFMPEG_RECHECK_MS = 60_000;
+
+/** Whether the relay was started listening for RTSP (what `-listen` paths need),
+ *  and when it was not, why: set only when an RTSP port busy with another program
+ *  is the reason, so the feeds can say so. Without a reason, ffmpeg's own status
+ *  is the one to report. */
+export type RelayRtsp = { on: true } | { on: false; why: string | null };
+export const RTSP_OFF: RelayRtsp = { on: false, why: null };
+
+async function fileExists(p: string): Promise<boolean> {
+  return fs.access(p).then(() => true, () => false);
+}
 
 const CHANGED_SINCE_REVIEW = "Changed on this server since the review. Review the file again.";
 
@@ -192,10 +201,6 @@ export interface RelaySupervisorLike extends EventEmitter {
   off(event: "line", listener: (text: string) => void): this;
   off(event: "status", listener: (status: SupervisorStatus) => void): this;
 }
-
-/** The one thing audio conversion asks of the outside world: the server's
- *  ffmpeg. A seam so a test decides what ffmpeg is without running one. */
-export const audioDeps: { findFfmpeg: typeof findFfmpeg } = { findFfmpeg: () => findFfmpeg() };
 
 /**
  * The status poll's timer, injected — the same seam cue-live.ts's
@@ -401,25 +406,19 @@ class VideoService {
    * listening on yet.
    */
   private attachedPorts: VideoPorts | null = null;
-  /** Whether the current relay process was started with its loopback RTSP
-   *  listener, which is what the `-listen` paths need (audio-listen.ts). Pinned
-   *  at attachRelay() like the ports: it is a fact about the process. */
-  private attachedRtsp = false;
-  /** Each relay feed's audio codec as last seen on its path while ready: null
-   *  for "no audio track". Kept while the feed is idle, because an on-demand
-   *  pull feed shows no tracks until someone watches it, and forgotten when the
-   *  feed's source changes or the relay goes. */
-  private readonly audioCodecs = new Map<string, string | null>();
-  /** Why each feed's converter runs, as of the last reconcile: the reason the
-   *  start line gives. */
-  private readonly audioWhy = new Map<string, ConverterWhy>();
-  /** The "audio unavailable" reason last logged per feed, so it is said once. */
-  private readonly audioUnavailableLogged = new Map<string, string>();
-  /** Feeds whose converter MediaMTX is running now, so a restart after a failure
-   *  is not announced as a new start. */
-  private readonly converterRunning = new Set<string>();
-  /** A failing converter restarts every few seconds; one line per outage. */
-  private readonly converterOutage = new OutageLog();
+  /** How the current relay process was started as to RTSP, the listener the
+   *  `-listen` paths need (audio-listen.ts). Pinned at attachRelay() like the
+   *  ports: it is a fact about the process. */
+  private attachedRtsp: RelayRtsp = RTSP_OFF;
+  /** What is remembered about each relay feed's audio; see AudioMemory. */
+  private readonly audio = new AudioMemory();
+  /** Feed ids already reported as reserved, so the log says it once. */
+  private readonly reservedIdLogged = new Set<string>();
+  /** ffmpeg as the server finds it. The one seam: a test hands in its own. */
+  private ffmpegFinder: FfmpegFinder = systemFfmpegFinder;
+  /** When the finder was last reset because a converter could not launch, so a
+   *  broken ffmpeg is looked for again at most once a minute, not every restart. */
+  private lastLaunchRecheckAt = 0;
   /** Whether the connection row has already been told THIS attachment's
    *  version — see handleLine()'s own comment. Reset on every
    *  attachRelay()/detachInternal(), since a fresh attachment (a genuinely
@@ -723,8 +722,7 @@ class VideoService {
       out.hasPassword = (await this.storedPassword(feed.id)) !== undefined;
     }
     if (feed.source.kind === "pull" || feed.source.kind === "push") {
-      out.audioConversion = feed.audioConversion ?? "auto";
-      out.audioSourceUrl = feed.audioSourceUrl ?? "";
+      Object.assign(out, resolveAudioFields(feed));
       out.audio = (await this.resolveFeedAudio(feed)).status;
     }
     return out;
@@ -925,13 +923,13 @@ class VideoService {
    *  "off" is published for that half: a caller replacing one relay with
    *  another gets ONE settled state at the end, published once below, not
    *  an "off" broadcast between the two. */
-  attachRelay(relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts, options: { rtsp?: boolean } = {}): void {
+  attachRelay(relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts, rtsp: RelayRtsp): void {
     if (this.relay) this.detachInternal();
     this.relayGeneration++;
     this.relay = relay;
     this.supervisor = supervisor;
     this.attachedPorts = ports;
-    this.attachedRtsp = options.rtsp === true;
+    this.attachedRtsp = rtsp;
     // Irrelevant from here on — relayStatus() only reads this while
     // `this.supervisor` is null — but cleared anyway so it cannot survive
     // stale into a later detach that leaves it behind.
@@ -982,11 +980,10 @@ class VideoService {
     this.relay = null;
     this.supervisor = null;
     this.attachedPorts = null;
-    this.attachedRtsp = false;
+    this.attachedRtsp = RTSP_OFF;
     // Nothing about a feed's audio is known of a relay that is not there, and a
     // converter of the old process is gone with it.
-    this.audioCodecs.clear();
-    this.converterRunning.clear();
+    this.audio.relayGone();
     // A caller that just detached is telling relay-lifecycle.ts's own
     // sequence to report from scratch (setPreAttachStatus, next) — never
     // whatever a previous run last set.
@@ -1177,8 +1174,8 @@ class VideoService {
       const kind = feed.source.kind;
       if (kind !== "pull" && kind !== "push") continue;
       const path = this.lastPaths.get(feed.id);
-      if (path?.ready && path.audio !== undefined && this.audioCodecs.get(feed.id) !== path.audio) {
-        this.audioCodecs.set(feed.id, path.audio);
+      if (path?.ready && path.audio !== undefined && this.audio.peek(feed.id)?.codec !== path.audio) {
+        this.audio.get(feed.id).codec = path.audio;
         audioChanged = true;
       }
 
@@ -1405,29 +1402,48 @@ class VideoService {
   /** One line per converter start, stop and failure, on [video]. Nothing per
    *  listener: MediaMTX starts the command once for the first reader and keeps it
    *  for the rest, and these are that command's own lifecycle. A converter that
-   *  fails restarts every few seconds (runOnDemandRestart), so its failure is
-   *  one line per outage, and its restarts are not announced as starts. */
+   *  fails restarts every few seconds (runOnDemandRestart), so a failing session
+   *  is one line, and its restarts are not announced as starts. A session that
+   *  starts after the last one ended starts its failure count afresh: the outage
+   *  log would otherwise hold the next session's failure quiet for minutes. */
   private async logConverterEvent(event: Extract<RelayLogEvent, { feedId: string }>): Promise<void> {
     const id = event.feedId;
     const name = (await loadFeedsFile()).feeds.find((f) => f.id === id)?.name ?? id;
     const now = Date.now();
+    const state = this.audio.get(id);
     if (event.kind === "listen-started") {
-      if (this.converterRunning.has(id)) return;
-      this.converterRunning.add(id);
-      const why = this.audioWhy.get(id);
-      console.log(`[video] ${scrub(name)}: audio converter started${why ? ` (${scrub(AUDIO_WHY_TEXT[why])})` : ""}`);
+      if (state.running) return;
+      state.running = true;
+      this.audio.outage.forget(id);
+      console.log(`[video] ${scrub(name)}: audio converter started${state.why ? ` (${scrub(state.why)})` : ""}`);
     } else if (event.kind === "listen-stopped") {
-      this.converterRunning.delete(id);
-      const decision = this.converterOutage.ok(id, now);
-      console.log(`[video] ${scrub(name)}: audio converter stopped (${scrub(event.reason || "no listeners")})${scrub(decision.log ? decision.note : "")}`);
+      state.running = false;
+      console.log(`[video] ${scrub(name)}: audio converter stopped (${scrub(event.reason || "no listeners")})`);
     } else {
-      const decision = this.converterOutage.fail(id, event.reason, now);
+      // A converter that cannot even launch (the ffmpeg file moved, say) is a
+      // reason to look for ffmpeg again, not only to log.
+      if (LAUNCH_ERROR.test(event.reason)) this.recheckFfmpeg(now);
+      const decision = this.audio.outage.fail(id, event.reason, now);
       if (!decision.log) return;
       const output = event.lastOutput ? ` — ffmpeg said: ${event.lastOutput}` : "";
       console.warn(
-        `[video] ${scrub(name)}: audio converter failed: ${scrub(event.reason)}${scrub(output)}; the relay tries again while someone is listening${scrub(decision.note)}`,
+        `[video] ${scrub(name)}: audio converter failed: ${scrub(event.reason)}${scrub(output, 400)}; the relay tries again while someone is listening${scrub(decision.note)}`,
       );
     }
+  }
+
+  /** Forget the kept ffmpeg answer and reconcile, so the next command names the
+   *  file that is there now. At most once a minute. */
+  private recheckFfmpeg(now: number): void {
+    if (now - this.lastLaunchRecheckAt < FFMPEG_RECHECK_MS) return;
+    this.lastLaunchRecheckAt = now;
+    this.ffmpegFinder.reset();
+    void this.background.track(this.reconcileRelay());
+  }
+
+  /** Swap the ffmpeg finder (a test's). */
+  useFfmpegFinder(finder: FfmpegFinder): void {
+    this.ffmpegFinder = finder;
   }
 
   private handleLine(text: string): void {
@@ -1620,6 +1636,17 @@ class VideoService {
     for (const feed of feeds) {
       const s = feed.source;
       if (s.kind !== "pull" && s.kind !== "push") continue;
+      // Its path would be another feed's `-listen` path. Never deleted, never
+      // renamed: it is the operator's, and the log says what to do.
+      if (isReservedFeedId(feed.id)) {
+        if (!this.reservedIdLogged.has(feed.id)) {
+          this.reservedIdLogged.add(feed.id);
+          console.warn(
+            `[video] ${scrub(feed.name)}: its id "${scrub(feed.id)}" ends in -listen, which is reserved for audio, so it is not given to the relay. Make the feed again under another name.`,
+          );
+        }
+        continue;
+      }
       const resolved = await this.resolveFeedAudio(feed);
       audio.set(feed.id, { name: feed.name, status: resolved.status, why: resolved.why });
       const listen = resolved.listenCommand !== undefined ? { listenCommand: resolved.listenCommand } : {};
@@ -1637,19 +1664,25 @@ class VideoService {
    *  nothing to convert never runs the check. */
   private async listenCapability(): Promise<ListenCapability> {
     if (!this.relay || !this.attachedPorts) return { ok: false, reason: "the video relay is not running" };
-    const ffmpeg = await audioDeps.findFfmpeg();
+    if (!this.attachedRtsp.on && this.attachedRtsp.why) return { ok: false, reason: this.attachedRtsp.why };
+    let ffmpeg = await this.ffmpegFinder.find();
+    // The answer is kept, so a file that has moved since (`brew upgrade` replaces
+    // the Cellar folder the link resolved into) is found out here, not by a
+    // converter that fails to launch.
+    if (ffmpeg.ok && !(await fileExists(ffmpeg.resolvedPath))) {
+      this.ffmpegFinder.reset();
+      ffmpeg = await this.ffmpegFinder.find();
+    }
     if (!ffmpeg.ok) return { ok: false, reason: ffmpeg.reason };
-    if (!this.attachedRtsp) return { ok: false, reason: "the relay is restarting to turn on audio conversion" };
+    if (!this.attachedRtsp.on) return { ok: false, reason: "the relay is restarting to turn on audio conversion" };
     return { ok: true, ffmpegPath: ffmpeg.resolvedPath, rtspPort: this.attachedPorts.rtsp };
   }
 
   /** A feed's audio, settled: the rule table (audio-listen.ts) against what the
    *  relay last reported of the feed and what ffmpeg can do. */
   private async resolveFeedAudio(feed: VideoFeed) {
-    const plan = planAudio(
-      { conversion: feed.audioConversion ?? "auto", sourceUrl: feed.audioSourceUrl, audio: this.audioCodecs.get(feed.id) },
-      feed.id,
-    );
+    const { audioConversion, audioSourceUrl } = resolveAudioFields(feed);
+    const plan = planAudio({ conversion: audioConversion, sourceUrl: audioSourceUrl, audio: this.audio.peek(feed.id)?.codec }, feed.id);
     return plan.converter ? resolveAudio(plan, feed.id, await this.listenCapability()) : { status: plan.status };
   }
 
@@ -1657,18 +1690,16 @@ class VideoService {
    *  reason, and a feed whose audio cannot be heard, each said once. */
   private reportAudio(audio: Map<string, { name: string; status: FeedAudioStatus; why?: ConverterWhy }>): void {
     for (const [id, { name, status, why }] of audio) {
-      if (why !== undefined) this.audioWhy.set(id, why);
-      else this.audioWhy.delete(id);
+      const state = this.audio.get(id);
+      state.why = why;
       if (status.state !== "unavailable") {
-        this.audioUnavailableLogged.delete(id);
+        state.unavailableLogged = undefined;
         continue;
       }
-      if (this.audioUnavailableLogged.get(id) === status.reason) continue;
-      this.audioUnavailableLogged.set(id, status.reason);
+      if (state.unavailableLogged === status.reason) continue;
+      state.unavailableLogged = status.reason;
       console.warn(`[video] ${scrub(name)}: audio unavailable: ${scrub(status.reason)}`);
     }
-    for (const id of [...this.audioWhy.keys()]) if (!audio.has(id)) this.audioWhy.delete(id);
-    for (const id of [...this.audioUnavailableLogged.keys()]) if (!audio.has(id)) this.audioUnavailableLogged.delete(id);
   }
 
   /** True while a reconcileOnce() chain is running — see reconcileRelay()'s
@@ -2100,11 +2131,7 @@ class VideoService {
     this.unansweredSince.delete(id);
     this.lastLoggedState.delete(id);
     // What was seen of its audio, and said of it, describes the old source.
-    this.audioCodecs.delete(id);
-    this.audioWhy.delete(id);
-    this.audioUnavailableLogged.delete(id);
-    this.converterRunning.delete(id);
-    this.converterOutage.forget(id);
+    this.audio.forget(id);
     // An outage still open for it would swallow the new feed's first failure
     // as a repeat, and its recovery line would count the old one's.
     this.dialOutage.forget(id);
@@ -2218,13 +2245,13 @@ class VideoService {
 
   /** `POST /api/video/import/preview`: each feed in the file against what is here. */
   async previewImport(raw: unknown): Promise<{ ok: true; preview: ImportPreview } | { ok: false; error: string }> {
+    const here = await loadFeedsFile();
     let bundle: VideoFeedsBundle;
     try {
-      bundle = assertVideoBundle(raw);
+      bundle = assertVideoBundle(raw, here.ports);
     } catch (err) {
       return { ok: false, error: errorMessage(err) };
     }
-    const here = await loadFeedsFile();
     const plans = await planImport(bundle, here.feeds, (id) => this.storedPassword(id), this.allowedKinds());
     const preview = buildPreview(bundle, plans, here);
     const local = new Map(here.feeds.map((f) => [f.id, f]));
@@ -2270,7 +2297,7 @@ class VideoService {
     }
     let bundle: VideoFeedsBundle;
     try {
-      bundle = assertVideoBundle(req.bundle);
+      bundle = assertVideoBundle(req.bundle, (await loadFeedsFile()).ports);
     } catch (err) {
       return { ok: false, error: errorMessage(err) };
     }

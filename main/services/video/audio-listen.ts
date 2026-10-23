@@ -21,10 +21,9 @@
 // what ffmpeg-system.ts found; reconcile-plan.ts turns the command into a path.
 
 import type { AudioConversion, FeedAudioStatus } from "../../types/video.js";
-import { isCommandSafe } from "./audio-input.js";
-import { FEED_ID_PATTERN } from "./feed-id.js";
-
-export const LISTEN_SUFFIX = "-listen";
+import { audioSourceUrlProblem } from "./audio-input.js";
+import { normalizeCodecName } from "./codec-name.js";
+import { FEED_ID_PATTERN, LISTEN_SUFFIX, isReservedFeedId } from "./feed-id.js";
 
 /** The relay path a converter publishes to for feed `id`. */
 export function listenPathName(id: string): string {
@@ -36,12 +35,6 @@ export function listenPathName(id: string): string {
  *  name as MediaMTX spells it. */
 export type RelayAudio = string | null | undefined;
 
-/** MediaMTX's audio codec names, compared with everything but letters and
- *  digits dropped (v1.21.1 spells them "MPEG-4 Audio", "Opus", "G711"). */
-function normalized(codec: string): string {
-  return codec.toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
 /** What a browser can receive from the relay as it is: WebRTC carries these. */
 const DIRECT = new Set(["OPUS", "G711", "G722", "LPCM"]);
 /** AAC, which MediaMTX calls MPEG-4 Audio. */
@@ -50,14 +43,18 @@ const AAC = new Set(["MPEG4AUDIO", "AAC"]);
 export type AudioClass = "aac" | "direct" | "other";
 
 export function classifyAudio(codec: string): AudioClass {
-  const n = normalized(codec);
+  const n = normalizeCodecName(codec);
   if (DIRECT.has(n)) return "direct";
   if (AAC.has(n)) return "aac";
   return "other";
 }
 
-/** Why a feed runs a converter. Goes in the log line when it starts. */
-export type ConverterWhy = "AAC" | "Always" | "pass-through" | "codec not known yet";
+/** Why a feed runs a converter, as the sentence the log line says when it starts. */
+export const WHY_AAC = "the feed's audio is AAC";
+export const WHY_ALWAYS = "Audio conversion is Always";
+export const WHY_PASS_THROUGH = "audio source address, copied as it is";
+export const WHY_UNKNOWN = "the feed's audio was not known when it was set up";
+export type ConverterWhy = typeof WHY_AAC | typeof WHY_ALWAYS | typeof WHY_PASS_THROUGH | typeof WHY_UNKNOWN;
 
 export interface AudioInput {
   conversion: AudioConversion;
@@ -69,7 +66,7 @@ export interface AudioPlan {
   status: FeedAudioStatus;
   /** What the feed's `-listen` path would run, or null when it needs none. It
    *  still waits on ffmpeg being usable: see resolveAudio. */
-  converter: { mode: "convert"; why: ConverterWhy } | { mode: "pass-through"; url: string; why: "pass-through" } | null;
+  converter: { mode: "convert"; why: ConverterWhy } | { mode: "pass-through"; url: string; why: typeof WHY_PASS_THROUGH } | null;
 }
 
 /**
@@ -89,27 +86,26 @@ export interface AudioPlan {
  */
 export function planAudio(input: AudioInput, id: string): AudioPlan {
   const { conversion, sourceUrl, audio } = input;
-  const own = id;
   if (sourceUrl && conversion !== "off") {
     return {
       status: { state: "pass-through", listenPath: listenPathName(id) },
-      converter: { mode: "pass-through", url: sourceUrl, why: "pass-through" },
+      converter: { mode: "pass-through", url: sourceUrl, why: WHY_PASS_THROUGH },
     };
   }
   if (audio === null) return { status: { state: "none" }, converter: null };
   if (audio === undefined) {
     return {
       status: { state: "unknown" },
-      converter: conversion === "off" ? null : { mode: "convert", why: "codec not known yet" },
+      converter: conversion === "off" ? null : { mode: "convert", why: WHY_UNKNOWN },
     };
   }
   const cls = classifyAudio(audio);
   const converted: AudioPlan = {
     status: { state: "converted", listenPath: listenPathName(id) },
-    converter: { mode: "convert", why: cls === "aac" ? "AAC" : "Always" },
+    converter: { mode: "convert", why: cls === "aac" ? WHY_AAC : WHY_ALWAYS },
   };
   if (conversion === "always") return converted;
-  if (cls === "direct") return { status: { state: "direct", listenPath: own }, converter: null };
+  if (cls === "direct") return { status: { state: "direct", listenPath: id }, converter: null };
   if (conversion === "off") {
     return {
       status: { state: "unavailable", reason: `the audio is ${audio}, which a browser cannot play live, and Audio conversion is Off` },
@@ -126,6 +122,13 @@ export function planAudio(input: AudioInput, id: string): AudioPlan {
 /** What the relay and ffmpeg can do for a `-listen` path right now. */
 export type ListenCapability = { ok: true; ffmpegPath: string; rtspPort: number } | { ok: false; reason: string };
 
+/** What each input may open, so an address that slipped past validation (`file:`,
+ *  `subfile:`, `tcp://...?listen=1`, `udp://`) cannot be read by ffmpeg. The relay's
+ *  own RTSP over TCP needs rtsp, rtp and tcp; an audio source address needs http
+ *  or https over tcp or tls. */
+export const RELAY_PROTOCOLS = "rtsp,rtp,tcp";
+export const PASS_THROUGH_PROTOCOLS = "http,https,tls,tcp";
+
 /** The one ffmpeg command of a `-listen` path, as argv. Every argument after the
  *  program is a fixed flag, a validated feed id or a validated address; the
  *  program itself is checked by quoteForMediaMtx. */
@@ -136,26 +139,21 @@ export function listenArgv(
   rtspPort: number,
 ): string[] {
   const relay = `rtsp://127.0.0.1:${rtspPort}`;
-  // Input flags, for a start in about a second rather than three:
-  //  -fflags nobuffer, -flags low_delay: hand packets on as they arrive.
-  //  -probesize 65536, -analyzeduration 500000: the codecs are in the stream's own
-  //   description (the relay's SDP, or the MPEG-TS tables), so ffmpeg need not
-  //   read seconds of media to learn them; the defaults (5 s, 5 MB) were the
-  //   whole of the delay measured on a local relay.
-  //  -nostdin: MediaMTX's child has no terminal.
-  //  -loglevel warning, -nostats: a line on stderr is a problem, and the last
-  //   one is what the log shows when the converter fails.
+  // -fflags nobuffer, -flags low_delay: hand packets on as they arrive. The small
+  // probe: both inputs describe their own codecs, so ffmpeg need not read the
+  // default 5 s of media. -nostdin: MediaMTX's child has no terminal. -loglevel
+  // warning, -nostats: a line on stderr is a problem, the last one is what the log shows.
   const common = [
     "-hide_banner", "-nostdin", "-nostats", "-loglevel", "warning",
     "-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "65536", "-analyzeduration", "500000",
   ];
   const out = ["-f", "rtsp", "-rtsp_transport", "tcp", `${relay}/${listenPathName(id)}`];
   if (converter.mode === "pass-through") {
-    return [ffmpegPath, ...common, "-rw_timeout", "10000000", "-i", converter.url, "-c", "copy", ...out];
+    return [ffmpegPath, ...common, "-protocol_whitelist", PASS_THROUGH_PROTOCOLS, "-rw_timeout", "10000000", "-i", converter.url, "-c", "copy", ...out];
   }
   return [
     ffmpegPath, ...common,
-    "-rtsp_transport", "tcp", "-i", `${relay}/${id}`,
+    "-protocol_whitelist", RELAY_PROTOCOLS, "-rtsp_transport", "tcp", "-i", `${relay}/${id}`,
     "-c:v", "copy", "-c:a", "libopus", "-b:a", "128k", "-application", "lowdelay", "-frame_duration", "20",
     ...out,
   ];
@@ -191,11 +189,17 @@ export function resolveAudio(
 ): { status: FeedAudioStatus; listenCommand?: string; why?: ConverterWhy } {
   const { converter } = plan;
   if (!converter) return { status: plan.status };
-  const speculative = converter.why === "codec not known yet";
+  const speculative = converter.why === WHY_UNKNOWN;
   const fail = (reason: string) => ({ status: speculative ? plan.status : ({ state: "unavailable", reason } as FeedAudioStatus) });
   if (!capability.ok) return fail(capability.reason);
-  if (!FEED_ID_PATTERN.test(id)) return fail("the feed's id cannot be used as a relay path");
-  if (converter.mode === "pass-through" && !isCommandSafe(converter.url)) return fail("the audio source address cannot be passed to ffmpeg");
+  if (!FEED_ID_PATTERN.test(id) || isReservedFeedId(id)) return fail("the feed's id cannot be used as a relay path");
+  // The one choke point for an address: a store restored or edited by hand is not
+  // validated on load, and `file:`, `tcp://...?listen=1` or `udp://` must never
+  // reach ffmpeg.
+  if (converter.mode === "pass-through") {
+    const problem = audioSourceUrlProblem(converter.url);
+    if (problem) return fail(problem);
+  }
   const quoted = quoteForMediaMtx(listenArgv(capability.ffmpegPath, id, converter, capability.rtspPort));
   if (!quoted.ok) return fail(quoted.reason);
   return { status: plan.status, listenCommand: quoted.command, why: converter.why };
