@@ -120,10 +120,59 @@ describe("the two shell installers", () => {
   it("carry the same install_ffmpeg", () => {
     assert.equal(functionText(SCRIPTS["install.sh"]), functionText(SCRIPTS["scripts/install.sh"]));
   });
-  it("both call it", () => {
-    for (const [label, file] of Object.entries(SCRIPTS)) {
-      assert.match(fs.readFileSync(file, "utf8"), /^ {0,2}install_ffmpeg$/m, `${label} defines install_ffmpeg and never calls it`);
+
+  /** The lines of the ffmpeg step: from its header to the first blank line. */
+  function step(file: string): { before: string[]; section: string } {
+    const lines = fs.readFileSync(file, "utf8").split("\n");
+    const at = lines.findIndex((l) => /^# ── (?:3c\. )?ffmpeg \(optional\)/.test(l));
+    assert.ok(at > 0, `${file} has no ffmpeg step`);
+    let end = at;
+    while (end < lines.length && lines[end]!.trim() !== "") end++;
+    return { before: lines.slice(0, at), section: lines.slice(at, end).join("\n") };
+  }
+
+  /** How many if/case/for/while blocks are still open after `lines`. Crude (it counts
+   *  the shell's own keywords at the start of a statement, and skips awk's `if (`), but
+   *  the scripts it reads are plain, and it is checked against them below. */
+  function openBlocks(lines: string[]): number {
+    let depth = 0;
+    for (const raw of lines) {
+      const l = raw.replace(/#.*$/, "");
+      for (const m of l.matchAll(/(?:^\s*|[;&|]\s*|\bthen\s+|\bdo\s+|\belse\s+)(if|case|for|while|until|fi|esac|done)\b(?!\s*\()/g)) {
+        depth += /^(?:if|case|for|while|until)$/.test(m[1]!) ? 1 : -1;
+      }
     }
+    return depth;
+  }
+
+  for (const [label, file] of Object.entries(SCRIPTS)) {
+    it(`${label} runs install_ffmpeg: at the top level, after the update swap, and when the step is run`, () => {
+      const { before, section } = step(file);
+      // Not inside an `if`, a loop or a case: wrapping the call, or the whole step, in one
+      // (`if false; then ... fi`) leaves its text unchanged and stops it running.
+      assert.equal(openBlocks(before), 0, `the ffmpeg step in ${label} sits inside an unclosed block`);
+      // After the update-swap branch, which exits: a swap installs no packages.
+      if (label === "install.sh") {
+        assert.ok(before.some((l) => /STAGE_UPDATE_MODE:-\}" = "swap"/.test(l)), "no swap branch before the ffmpeg step");
+      }
+      // And running the step, with install_ffmpeg standing in for the real function, calls it.
+      const run = spawnSync("/bin/bash", ["-c", `OS=linux\nlog() { :; }\ninstall_ffmpeg() { echo CALLED; }\n${section}`], { encoding: "utf8" });
+      assert.equal(run.status, 0, run.stderr);
+      assert.match(run.stdout, /CALLED/, "the step never called install_ffmpeg");
+    });
+  }
+
+  it("the one-line installer leaves macOS to brew: the step logs instead of calling it", () => {
+    const { section } = step(SCRIPTS["install.sh"]);
+    const run = spawnSync("/bin/bash", ["-c", `OS=darwin\nlog() { echo "LOG $*"; }\ninstall_ffmpeg() { echo CALLED; }\n${section}`], { encoding: "utf8" });
+    assert.doesNotMatch(run.stdout, /CALLED/);
+    assert.match(run.stdout, /brew install ffmpeg/);
+  });
+
+  it("the nesting check itself sees a wrapper that the old text match could not", () => {
+    assert.equal(openBlocks(["if false; then", "  echo x"]), 1);
+    assert.equal(openBlocks(["if false; then", "  echo x", "fi"]), 0);
+    assert.equal(openBlocks(["for t in a b; do", "  echo $t", "done", "while read l; do", "done"]), 0);
   });
 });
 
