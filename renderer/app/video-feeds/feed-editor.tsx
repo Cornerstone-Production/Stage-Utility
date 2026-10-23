@@ -582,12 +582,16 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
               value={draft.audioSourceUrl}
               onChange={(e) => setDraft({ ...draft, audioSourceUrl: e.target.value })}
             />
-            {!isNew && feed && audioStatusText(feed.audio) !== "" && (
-              <span data-testid="audio-status" className="text-caption1 text-fg-subtle">
-                {audioStatusText(feed.audio)}
-              </span>
-            )}
           </StackedField>
+
+          {!isNew && feed && audioStatusText(feed.audio) !== "" && (
+            <p
+              data-testid="audio-status"
+              className={`rounded-lg px-2.5 py-2 text-caption1 ${feed.audio?.state === "unavailable" ? "bg-warn-9/14 text-warn-11" : "bg-fill text-fg-muted"}`}
+            >
+              {audioStatusText(feed.audio)}
+            </p>
+          )}
         </>
       )}
 
