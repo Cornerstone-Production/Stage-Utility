@@ -80,7 +80,7 @@ test("no ffmpeg anywhere: a returned failure saying not installed, with the plat
   for (const [platform, cmd] of [
     ["linux", "sudo apt install ffmpeg (or your distribution's package)"],
     ["darwin", "brew install ffmpeg"],
-    ["win32", "winget install ffmpeg"],
+    ["win32", "winget install --id Gyan.FFmpeg -e"],
   ] as const) {
     const r = await finderFor({ PATH: empty, platform }).find();
     assert.equal(r.ok, false);

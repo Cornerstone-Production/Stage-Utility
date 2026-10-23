@@ -81,7 +81,7 @@ export function configuredPathProblem(p: string, platform: NodeJS.Platform = pro
 /** The install command for a platform, as the status line says it. */
 export function installHint(platform: NodeJS.Platform = process.platform): string {
   if (platform === "darwin") return "brew install ffmpeg";
-  if (platform === "win32") return "winget install ffmpeg";
+  if (platform === "win32") return "winget install --id Gyan.FFmpeg -e";
   return "sudo apt install ffmpeg (or your distribution's package)";
 }
 
