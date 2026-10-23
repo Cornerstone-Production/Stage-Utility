@@ -104,7 +104,7 @@ const VIDEO_STATE: import("@main/types/video").VideoState = {
   rev: 0,
   relay: { state: "off" },
   kinds: [],
-  ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 },
+  ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 },
   binaryPresent: false,
   archivePresent: false,
   feeds: [],

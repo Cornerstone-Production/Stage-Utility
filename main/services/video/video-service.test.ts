@@ -1332,7 +1332,7 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
-  const OLD_PORTS = { rtmp: 11935, srt: 18890, webrtcUdp: 18189, webrtcHttp: 18889, hls: 18888, api: 19997 };
+  const OLD_PORTS = { rtmp: 11935, srt: 18890, webrtcUdp: 18189, webrtcHttp: 18889, hls: 18888, api: 19997, rtsp: 18554 };
   const relay = fakeRelay({ status: async () => [] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
@@ -1350,7 +1350,7 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
     // restarted and is still bound to OLD_PORTS.
     await videoFeedsStore.update((current) => ({
       ...current,
-      ports: { rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997 },
+      ports: { rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997, rtsp: 28554 },
     }));
     // A poll/publish after the store write — the moment a proxy reading the
     // store would point at a port the relay is not listening on yet.
@@ -3245,11 +3245,11 @@ test("setPortsChangedListener fires from setPorts, and only on a body that valid
   const calls: string[] = [];
   videoService.setPortsChangedListener(() => calls.push("changed"));
   try {
-    const bad = await videoService.setPorts({ rtmp: 80, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 });
+    const bad = await videoService.setPorts({ rtmp: 80, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 });
     assert.equal(bad.ok, false, "a port below 1024 must be refused");
     assert.equal(calls.length, 0, "the hook fired on a body that never saved anything");
 
-    const ok = await videoService.setPorts({ rtmp: 31935, srt: 38890, webrtcUdp: 38189, webrtcHttp: 38889, hls: 38888, api: 39997 });
+    const ok = await videoService.setPorts({ rtmp: 31935, srt: 38890, webrtcUdp: 38189, webrtcHttp: 38889, hls: 38888, api: 39997, rtsp: 38554 });
     assert.ok(ok.ok);
     assert.equal(calls.length, 1, "a valid ports save never fired the hook");
   } finally {
@@ -3260,7 +3260,7 @@ test("setPortsChangedListener fires from setPorts, and only on a body that valid
 });
 
 test("saving the SAME ports never fires the hook — an unchanged save must not restart a running relay and drop every publisher", async () => {
-  const CHANGED = { rtmp: 41935, srt: 48890, webrtcUdp: 48189, webrtcHttp: 48889, hls: 48888, api: 49997 };
+  const CHANGED = { rtmp: 41935, srt: 48890, webrtcUdp: 48189, webrtcHttp: 48889, hls: 48888, api: 49997, rtsp: 48554 };
   const calls: string[] = [];
   try {
     const setup = await videoService.setPorts(CHANGED);

@@ -12,6 +12,7 @@ describe("relayConfig", () => {
       webrtcHttp: 8889,
       hls: 8888,
       api: 9997,
+      rtsp: 8554,
     };
 
     const config = relayConfig({
@@ -53,6 +54,19 @@ describe("relayConfig", () => {
     deepEqual(config, expected);
   });
 
+  it("binds RTSP only when asked: loopback, TCP alone, on the RTSP port", () => {
+    const ports: VideoPorts = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 18554 };
+    const off = relayConfig({ ports, lanIp: "192.0.2.1", users: [READER_USER] }) as Record<string, unknown>;
+    strictEqual(off.rtsp, false);
+    strictEqual("rtspAddress" in off, false, "an address with RTSP off invites a bind");
+    const on = relayConfig({ ports, lanIp: "192.0.2.1", users: [READER_USER], rtsp: true }) as Record<string, unknown>;
+    strictEqual(on.rtsp, true);
+    strictEqual(on.rtspAddress, "127.0.0.1:18554");
+    // With TCP alone MediaMTX does not open its UDP RTP and RTCP ports (8000, 8001).
+    deepEqual(on.rtspTransports, ["tcp"]);
+    strictEqual(on.rtspEncryption, "no");
+  });
+
   it("READER_USER reads from loopback, and nothing else", () => {
     strictEqual(READER_USER.user, "any");
     strictEqual(READER_USER.pass, "");
@@ -81,7 +95,7 @@ function allowsApi(users: RelayUser[], creds: { user: string; pass: string }): b
 }
 
 describe("the relay API's own user", () => {
-  const ports: VideoPorts = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
+  const ports: VideoPorts = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 };
   const config = relayConfig({ ports, lanIp: "192.0.2.1", users: [READER_USER, apiUser("s3cret-api-pw")] });
 
   it("an unauthenticated API request is refused by the generated config", () => {

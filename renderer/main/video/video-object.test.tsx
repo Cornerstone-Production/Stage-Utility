@@ -54,7 +54,7 @@ function makeFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
   };
 }
 
-const TEST_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
+const TEST_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 };
 
 function makeState(feeds: VideoFeedView[], relay: VideoState["relay"] = { state: "running", version: "1.21.1", ports: TEST_PORTS }): VideoState {
   return {

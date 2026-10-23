@@ -103,7 +103,7 @@ function pushFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
   };
 }
 
-const TEST_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
+const TEST_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 };
 
 function makeState(feeds: VideoFeedView[], screens: VideoState["screens"] = []): VideoState {
   return { rev: 1, relay: { state: "off" }, kinds: ["embed", "external"], ports: TEST_PORTS, binaryPresent: true, archivePresent: true, feeds, screens };
@@ -1563,7 +1563,7 @@ test("blurring the address field clears the fallback's \"Press Ctrl+C / Cmd+C\" 
 const RUNNING_RELAY = {
   state: "running" as const,
   version: "1.21.1",
-  ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 },
+  ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 },
 };
 
 /** Mounts, rotates once, and returns whether the "could not be dropped" /

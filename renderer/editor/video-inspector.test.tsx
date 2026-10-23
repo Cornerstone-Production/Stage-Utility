@@ -38,7 +38,7 @@ const FEEDS_STATE = {
   rev: 1,
   relay: { state: "off" as const },
   kinds: ["pull", "push", "embed", "external"],
-  ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 },
+  ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 },
   binaryPresent: true,
   archivePresent: true,
   feeds: [

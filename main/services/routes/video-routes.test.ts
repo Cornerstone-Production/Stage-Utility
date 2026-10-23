@@ -407,7 +407,7 @@ test("the source line names the kind, then the address, protocol or ref", async 
   }
 });
 
-const GOOD_PORTS = { rtmp: 41935, srt: 48890, webrtcUdp: 48189, webrtcHttp: 48889, hls: 48888, api: 49997 };
+const GOOD_PORTS = { rtmp: 41935, srt: 48890, webrtcUdp: 48189, webrtcHttp: 48889, hls: 48888, api: 49997, rtsp: 48554 };
 
 test("PATCH /api/video/ports saves six distinct in-range ports, and GET /api/video/state reflects them", async () => {
   const saved = await callRoute(videoRoutes, "/api/video/ports", { method: "PATCH", body: GOOD_PORTS });

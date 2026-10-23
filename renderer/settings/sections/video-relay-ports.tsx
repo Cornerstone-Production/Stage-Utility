@@ -1,12 +1,12 @@
-// video-relay-ports.tsx — Advanced's own card for the video relay's six
+// video-relay-ports.tsx — Advanced's own card for the video relay's seven
 // ports: PATCH /api/video/ports, which saves them and restarts the relay if
 // it is running.
 //
-// Six fields validated as ONE body (all different, each 1024-65535) is why
+// Seven fields validated as ONE body (all different, each 1024-65535) is why
 // this does not follow the ordinary NumberInput rule of persisting on every
 // change: a value mid-edit ("193" on the way to "1935") can legitimately
 // collide with another field for a keystroke, and PATCHing on every one of
-// those would refuse constantly. Local state buffers the six until Save.
+// those would refuse constantly. Local state buffers the seven until Save.
 
 import { useState } from "react";
 
@@ -34,6 +34,7 @@ const LOOPBACK_FIELDS: { key: keyof VideoPorts; label: string }[] = [
   { key: "webrtcHttp", label: "WebRTC signalling" },
   { key: "hls", label: "HLS" },
   { key: "api", label: "Relay API" },
+  { key: "rtsp", label: "RTSP (audio conversion)" },
 ];
 
 function PortRow({

@@ -21,8 +21,8 @@ const { ffmpegPathStore } = await import("../video/ffmpeg-path-store.js");
 const PULL = { name: "BOX", source: { kind: "pull", url: "rtsp://192.0.2.31:554/box", username: "admin" }, password: "cam-pass-1" };
 const PUSH = { name: "OBS Lobby", source: { kind: "push", protocol: "srt" } };
 const EMBED = { name: "Resi", source: { kind: "embed", player: "youtube-video", ref: "dQw4w9WgXcQ" } };
-const DEFAULT_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
-const OTHER_PORTS = { rtmp: 2935, srt: 9890, webrtcUdp: 9189, webrtcHttp: 9889, hls: 9888, api: 10997 };
+const DEFAULT_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 };
+const OTHER_PORTS = { rtmp: 2935, srt: 9890, webrtcUdp: 9189, webrtcHttp: 9889, hls: 9888, api: 10997, rtsp: 9554 };
 
 type Json = Record<string, any>;
 

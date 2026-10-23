@@ -12,7 +12,7 @@ test("a file with no ports gets every default port", async () => {
   await fs.writeFile(path.join(TMP, "video-feeds.json"), JSON.stringify({ feeds: [] }));
   await videoFeedsStore.reload();
   const file = await loadFeedsFile();
-  assert.deepEqual(file.ports, { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 });
+  assert.deepEqual(file.ports, { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 });
 });
 
 test("a partial ports object keeps what it has", async () => {

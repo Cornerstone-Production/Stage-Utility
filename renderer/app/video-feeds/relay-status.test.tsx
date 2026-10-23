@@ -31,7 +31,7 @@ type RelayStatus = import("@main/types/video").RelayStatus;
 after(() => teardown());
 afterEach(() => cleanup());
 
-const PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
+const PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 };
 
 function renderRow(
   relay: RelayStatus,

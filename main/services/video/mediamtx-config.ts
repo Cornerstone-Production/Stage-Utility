@@ -29,14 +29,30 @@ export function apiUser(pass: string): RelayUser {
   return { user: "stage-utility", pass, ips: ["127.0.0.1", "::1"], permissions: [{ action: "api", path: "" }] };
 }
 
+/** Anyone on loopback may publish to the `-listen` path of a feed that has one:
+ *  that is where the server's own ffmpeg writes (audio-listen.ts). Only those
+ *  exact paths, only from this machine, and no user of the LAN reaches the RTSP
+ *  listener at all (it is bound to 127.0.0.1). */
+export function listenPublisherUser(paths: string[]): RelayUser {
+  return {
+    user: "any",
+    pass: "",
+    ips: ["127.0.0.1", "::1"],
+    permissions: paths.map((path) => ({ action: "publish" as const, path })),
+  };
+}
+
 export function relayConfig({
   ports,
   lanIp,
   users,
+  rtsp = false,
 }: {
   ports: VideoPorts;
   lanIp: string;
   users: RelayUser[];
+  /** Whether to bind the loopback RTSP listener the `-listen` paths need. */
+  rtsp?: boolean;
 }) {
   return {
     logLevel: "info",
@@ -48,8 +64,12 @@ export function relayConfig({
     metrics: false,
     pprof: false,
     playback: false,
-    // No push kind uses RTSP and pulling RTSP needs no listener.
-    rtsp: false,
+    // No push kind uses RTSP and pulling RTSP needs no listener. The one reader
+    // and publisher of RTSP here is this server's own ffmpeg, over TCP on
+    // loopback, and only while ffmpeg is usable: no LAN listener, and with TCP
+    // alone MediaMTX does not open its default UDP ports (8000, 8001) either.
+    rtsp,
+    ...(rtsp ? { rtspAddress: `127.0.0.1:${ports.rtsp}`, rtspTransports: ["tcp"] } : {}),
     rtspEncryption: "no",
     rtmp: true,
     rtmpAddress: `:${ports.rtmp}`,
