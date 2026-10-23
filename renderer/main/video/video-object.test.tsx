@@ -21,6 +21,7 @@ import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js"
 import { FAKE_SDP, FakePeerConnection, installFakePeerConnection } from "../../test-fixtures/fake-peer-connection.js";
 import { installFakeHls } from "../../test-fixtures/fake-hls.js";
 import { captureConsole } from "../../../main/services/fixtures/capture-console.js";
+import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
 const teardown = installRenderDom();
 
@@ -54,7 +55,7 @@ function makeFeed(overrides: Partial<VideoFeedView> = {}): VideoFeedView {
   };
 }
 
-const TEST_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
+const TEST_PORTS = DEFAULT_VIDEO_PORTS;
 
 function makeState(feeds: VideoFeedView[], relay: VideoState["relay"] = { state: "running", version: "1.21.1", ports: TEST_PORTS }): VideoState {
   return {

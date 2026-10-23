@@ -86,8 +86,12 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
   // value saved twice is "check again".
   if (method === "PATCH" && pathname === "/api/video/ffmpeg") {
     const r = await setFfmpegPath(await readBody(req));
-    if (r.ok) json(res, { status: publicFfmpegStatus(r.result) });
-    else error(res, r.error);
+    if (r.ok) {
+      // A `-listen` path appears or goes with ffmpeg, and the relay's RTSP
+      // listener with it.
+      await videoService.ffmpegChanged();
+      json(res, { status: publicFfmpegStatus(r.result) });
+    } else error(res, r.error);
     return;
   }
   if (method === "PATCH" && pathname === "/api/video/ports") {

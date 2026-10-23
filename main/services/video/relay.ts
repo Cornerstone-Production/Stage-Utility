@@ -10,9 +10,14 @@
  *  `source` is a full URL with any credentials already folded in (query
  *  string or userinfo, whichever the protocol takes); a push feed's
  *  `password` is what a device must send to publish to it. */
-export type RelayFeed =
+export type RelayFeed = (
   | { id: string; kind: "pull"; source: string }
-  | { id: string; kind: "push"; password: string };
+  | { id: string; kind: "push"; password: string }
+) & {
+  /** Set when the feed's `<id>-listen` path should exist: the one string
+   *  MediaMTX runs, on demand, to fill it (audio-listen.ts). */
+  listenCommand?: string;
+};
 
 /** One path as the relay's runtime API reports it. */
 export interface RelayPath {
@@ -21,6 +26,9 @@ export interface RelayPath {
   readyTime: string | null;
   source: { type: string; id: string } | null;
   video: { codec: string; width?: number; height?: number; profile?: string } | null;
+  /** The first audio track's codec as MediaMTX names it; null for a ready path
+   *  with no audio track; undefined when the relay did not say (not ready). */
+  audio?: string | null;
   readers: number;
 }
 

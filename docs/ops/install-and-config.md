@@ -27,10 +27,12 @@ download against the published checksums, register an auto-starting service, wai
 for the server to answer, and print the address to open. If any of that fails
 they stop before writing anything.
 
-Neither one installs ffmpeg, which the Video relay's audio conversion needs (see
-[ffmpeg](../integrations/video-feeds.md#ffmpeg)); the Homebrew formula does. On
-the others run `sudo apt install ffmpeg` (or your distribution's package),
-`brew install ffmpeg` or `winget install ffmpeg`. Video works without it.
+Both install ffmpeg, which the Video relay's audio conversion needs (see
+[ffmpeg](../integrations/video-feeds.md#ffmpeg)), as a best-effort step that never
+fails the install: `install.sh` uses `apt-get`, `dnf` or `pacman` when it runs as
+root and ffmpeg is missing; `install.ps1` runs `winget install --id Gyan.FFmpeg -e`
+when `winget` exists. On macOS run `brew install ffmpeg` (the Homebrew formula
+installs it). Video works without it.
 
 | Platform | Architectures | Auto-start | Installs to |
 |---|---|---|---|
