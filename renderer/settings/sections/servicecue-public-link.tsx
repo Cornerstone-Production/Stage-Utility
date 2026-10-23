@@ -259,7 +259,7 @@ export function PublicLinkCard({
   // `now` and `lastSentAt` are the server's; what has passed since the answer came is the browser's own.
   const ageMs = status?.lastSentAt != null ? status.now - status.lastSentAt + Math.max(0, clock - dataUpdatedAt) : null;
   // A failed update, or a build with no page to deploy, is fixed (or at least explained) in the section that is in here.
-  const deployNeedsYou = dto?.deploy.state === "failed" || dto?.deploy.state === "no-bundle";
+  const deployNeedsYou = dto?.deploy?.state === "failed" || dto?.deploy?.state === "no-bundle";
   if (deployNeedsYou && !deployShown) setDeployShown(true);
   const connShown = connOpen ?? ((view === "problem" && !!status?.lastError && FIXED_BELOW.has(status.lastError.kind)) || deployShown);
 
