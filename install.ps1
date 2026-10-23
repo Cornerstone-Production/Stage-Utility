@@ -225,6 +225,30 @@ try {
     exit 0
   }
 
+  # ── ffmpeg (optional) ───────────────────────────────────────────────────────
+  # The Video relay's audio conversion needs the system's own ffmpeg. Best
+  # effort, like install.sh: whatever happens here the install carries on, since
+  # video works without it and Advanced says whether the server found one.
+  # Only when winget is there; an update swap returned above and installs nothing.
+  if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+    Log "ffmpeg is already installed."
+  } elseif (Get-Command winget -ErrorAction SilentlyContinue) {
+    Say "Installing ffmpeg (winget)"
+    try {
+      $wingetOut = winget install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements 2>&1 | Out-String
+      if ($LASTEXITCODE -eq 0) {
+        Log "ffmpeg installed. If the server does not find it, set its path in Settings -> Advanced."
+      } else {
+        Write-Host "warn: could not install ffmpeg (winget exit $LASTEXITCODE). Audio conversion needs it; video works without it."
+        Log ("winget ffmpeg output: " + $wingetOut.Trim())
+      }
+    } catch {
+      Write-Host "warn: could not install ffmpeg: $($_.Exception.Message). Audio conversion needs it; video works without it."
+    }
+  } else {
+    Write-Host "warn: winget was not found, so ffmpeg was not installed. Audio conversion needs it; video works without it."
+  }
+
   # ── Register it ─────────────────────────────────────────────────────────────
   # A scheduled task rather than a Windows service: Node is not a service-aware
   # binary, so a real service would need a third-party wrapper downloaded onto
