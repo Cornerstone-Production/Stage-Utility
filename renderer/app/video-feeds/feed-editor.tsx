@@ -156,7 +156,7 @@ export function audioStatusText(a: FeedAudioStatus | undefined): string {
     case "pass-through":
       return "Audio comes from the audio source address, copied as it is, while someone listens.";
     case "unavailable":
-      return `Audio unavailable: ${a.reason}.`;
+      return `Audio unavailable: ${a.reason.replace(/\.+$/, "")}.`;
   }
 }
 

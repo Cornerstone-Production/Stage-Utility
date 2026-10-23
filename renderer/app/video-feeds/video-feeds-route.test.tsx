@@ -1973,3 +1973,9 @@ test("a busy camera that has never answered says so on a Checking row", async ()
     g.restore();
   }
 });
+
+test("audioStatusText ends the unavailable sentence with one full stop, whether or not the reason had one", async () => {
+  const { audioStatusText } = await import("./feed-editor");
+  assert.equal(audioStatusText({ state: "unavailable", reason: "ffmpeg is not installed on this server" }), "Audio unavailable: ffmpeg is not installed on this server.");
+  assert.equal(audioStatusText({ state: "unavailable", reason: "the path is not valid." }), "Audio unavailable: the path is not valid.");
+});
