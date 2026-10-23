@@ -1536,3 +1536,20 @@ test("another port busy beside RTSP still fails the start as before", async () =
   assert.equal(supervisors.length, 0);
   assert.equal((await videoService.state()).relay.state, "failing");
 });
+
+test("saving ffmpeg's path while the RTSP port is busy does not restart a relay that is running fine", async (t) => {
+  const logs = captureConsole(t, "log");
+  const { deps, supervisors } = makeDeps({
+    listenCapable: async () => true,
+    busyPorts: async (ports, rtsp) => (rtsp ? [{ port: ports.rtsp, proto: "tcp" as const, holder: OBS_STUDIO }] : []),
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+  lifecycle.listenCapabilityChanged();
+  await idle(lifecycle);
+  assert.equal(supervisors.length, 1, "the live relay was restarted for nothing");
+  assert.equal(supervisors[0]!.stopCalls, 0);
+  assert.equal(logs.some((l) => l.includes("restarting to turn")), false, JSON.stringify(logs));
+});

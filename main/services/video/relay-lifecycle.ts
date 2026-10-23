@@ -168,8 +168,8 @@ export class RelayLifecycle {
    *  a respawn's "running", handed on by video-service.ts) and both already
    *  know it by the time they need it. */
   private currentPorts: VideoPorts | null = null;
-  /** Whether the CURRENT supervisor was started with the loopback RTSP listener. */
-  private currentRtsp: boolean | null = null;
+  /** Whether ffmpeg was usable when the CURRENT supervisor started (not whether RTSP is bound: see startRelay). */
+  private currentCapable: boolean | null = null;
   /** The busy-RTSP-port reason last logged, so a retry does not repeat it. */
   private loggedRtspBlock: string | null = null;
   /** Pre-supervisor failure backoff (a busy port, a failed download, a
@@ -357,9 +357,9 @@ export class RelayLifecycle {
    */
   listenCapabilityChanged(): void {
     this.enqueue(async () => {
-      if (!this.isUp() || this.currentRtsp === null) return;
+      if (!this.isUp() || this.currentCapable === null) return;
       const capable = await this.deps.listenCapable();
-      if (capable === this.currentRtsp) return;
+      if (capable === this.currentCapable) return;
       await this.restartRelay(
         capable
           ? "[video] relay restarting to turn on audio conversion (ffmpeg is usable now)"
@@ -553,6 +553,9 @@ export class RelayLifecycle {
       // or it does not for as long as it runs, and a change in whether ffmpeg is
       // usable restarts it (listenCapabilityChanged).
       let rtsp = await this.deps.listenCapable();
+      // What this start saw of ffmpeg, kept apart from whether RTSP ended up bound: a
+      // port something else holds leaves RTSP off with ffmpeg perfectly usable.
+      const capableAtStart = rtsp;
       const all = await this.deps.busyPorts(ports, rtsp);
       // The RTSP listener is for audio, which is optional: a port something else
       // holds turns audio off for this run, and never stops the video.
@@ -599,7 +602,7 @@ export class RelayLifecycle {
       }
 
       this.currentPorts = ports;
-      this.currentRtsp = rtsp;
+      this.currentCapable = capableAtStart;
       this.starting = false;
       const recovered = this.prelaunchOutage.ok("relay-prelaunch", Date.now());
       if (recovered.log) console.log(`[video] the relay's pre-launch checks are passing again${recovered.note}`);
@@ -626,7 +629,7 @@ export class RelayLifecycle {
       } catch (err) {
         this.supervisor = null;
         this.currentPorts = null;
-        this.currentRtsp = null;
+        this.currentCapable = null;
         let reason = `could not start the relay: ${errorMessage(err)}`;
         try {
           await supervisor.stop();
@@ -735,7 +738,7 @@ export class RelayLifecycle {
     const supervisor = this.supervisor;
     this.supervisor = null;
     this.currentPorts = null;
-    this.currentRtsp = null;
+    this.currentCapable = null;
     this.starting = false;
     this.attempt = 0;
     try {
