@@ -217,6 +217,8 @@ export function PublicLinkCard({
   // null follows the problem: open when the fix is in these fields, shut otherwise.
   const [connOpen, setConnOpen] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
+  // Once the update has needed the operator the section stays in view: fixing it must not make the answer disappear.
+  const [deployShown, setDeployShown] = useState(false);
   const { failed, fail, clear } = useFailedReads<"publish">("servicecue");
 
   useEffect(() => {
@@ -256,7 +258,10 @@ export function PublicLinkCard({
   const link = dto?.url ? `${dto.url}/servicecue` : "";
   // `now` and `lastSentAt` are the server's; what has passed since the answer came is the browser's own.
   const ageMs = status?.lastSentAt != null ? status.now - status.lastSentAt + Math.max(0, clock - dataUpdatedAt) : null;
-  const connShown = connOpen ?? (view === "problem" && !!status?.lastError && FIXED_BELOW.has(status.lastError.kind));
+  // A failed update, or a build with no page to deploy, is fixed (or at least explained) in the section that is in here.
+  const deployNeedsYou = dto?.deploy.state === "failed" || dto?.deploy.state === "no-bundle";
+  if (deployNeedsYou && !deployShown) setDeployShown(true);
+  const connShown = connOpen ?? ((view === "problem" && !!status?.lastError && FIXED_BELOW.has(status.lastError.kind)) || deployShown);
 
   /** An answer from a write: newer than any read, so it replaces what was read, and the drafts it settled are dropped. */
   function adopt(next: PublishSettingsDTO) {

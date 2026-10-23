@@ -183,7 +183,8 @@ the **Public link** card on first (the credentials are saved for the page's addr
    on, and the token is never shown again.
 
 There is no switch: pasting a token turns updating on, and clearing the field turns it
-off. A token pasted with no account ID (or the reverse) is not saved until the other is
+off, after the card asks to be sure (the token is deleted from the server, and turning updating
+on again needs a new token from Cloudflare). A token pasted with no account ID (or the reverse) is not saved until the other is
 filled in. To replace a token, paste the new one over the dots. The same two writes are
 `POST /api/servicecue/publish/deploy-credentials` ([API](../reference/api.md)), for a
 script or `curl`.
@@ -253,13 +254,14 @@ words, that the page is unchanged, and when it tries again; for a refused token 
 make a new one and paste it. The same status is the `deploy` the `GET
 /api/servicecue/publish` answer carries ([API](../reference/api.md)).
 
-**The status line** on the card says one of:
+**The status line** on the card says one of (a failed update, or a build with no copy of the page, opens **Cloudflare connection** by itself):
 
 | It says | Meaning |
 |---|---|
 | Up to date: build X (version), deployed *time* | the page is the build this server carries; the time is in the app's time zone |
 | Updating the page… N files to upload, M already on Cloudflare | a deploy is under way |
-| Waiting for the service to end, then updating | a service is live, or the live state is not known yet after a restart |
+| Waiting for the service to end, then updating to build X (version) | a service is live in Planning Center; the page is left alone until it ends |
+| Waiting to hear whether a service is live, then updating | the live state is not known yet (the server has just started, or Planning Center cannot be reached); Update the page now goes ahead when the state is merely unknown, never through a live service |
 | Couldn't update the page: *reason*. The page is unchanged. | the last attempt, or a read of what is deployed, failed |
 | The page runs build X (version), newer than this server's Y | the page is left alone (no-downgrade rule) |
 | The page runs build X of this server's own version, deployed by another server | the page is left alone |

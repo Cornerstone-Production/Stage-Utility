@@ -123,13 +123,19 @@ export function deployLine(d: DeployStatus, zone: string, elapsedMs: number): De
         detail: null,
       };
     case "waiting":
-      return {
-        tone: "warn",
-        text: `Waiting for the service to end, then updating${d.bundle ? ` to build ${d.bundle.build} (${d.bundle.version})` : ""}`,
-        // The status does not say which, and the two are the same to the page: it is left alone until the server knows no service is live.
-        detail:
-          "A service is live in Planning Center, or this server has not heard yet whether one is (just after it starts). The page is left alone until it is known to be over. Update the page now goes ahead when the state is merely unknown, never through a live service.",
-      };
+      // The status says which: a live service is waited out, and a live state not yet known is waited on its own account.
+      return d.waitingFor === "unknown"
+        ? {
+            tone: "warn",
+            text: "Waiting to hear whether a service is live, then updating",
+            detail:
+              "This server has just started, or Planning Center cannot be reached. Update the page now goes ahead when the state is merely unknown, never through a live service.",
+          }
+        : {
+            tone: "warn",
+            text: `Waiting for the service to end, then updating${d.bundle ? ` to build ${d.bundle.build} (${d.bundle.version})` : ""}`,
+            detail: "A service is live in Planning Center, so the page is left alone until it ends.",
+          };
     case "failed": {
       const e = d.error;
       if (!e) return { tone: "bad", text: "Couldn't update the page. The page is unchanged.", detail: null };
@@ -272,8 +278,22 @@ export function KeepPageUpToDate({
     if (busy) return;
     const cleared = stored && tokDraft !== null && tokDraft.trim() === "";
     const body: Record<string, string> = {};
-    if (cleared) body.token = "";
-    else if (typedToken !== null) {
+    if (cleared) {
+      // Deleting the token cannot be undone from here: it has to be made again in Cloudflare.
+      setBusy(true);
+      const yes = await confirm({
+        title: "Stop keeping the page up to date?",
+        message: "The token is deleted from this server; to turn updating on again you will need a new token from Cloudflare.",
+        confirmLabel: "Delete the token",
+        destructive: true,
+      });
+      setBusy(false);
+      if (!yes) {
+        setTokDraft(null);
+        return;
+      }
+      body.token = "";
+    } else if (typedToken !== null) {
       if (acct.trim() === "") {
         setNotice("Enter the Cloudflare account ID with the token.");
         return;

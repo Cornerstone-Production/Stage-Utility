@@ -273,12 +273,14 @@ describe("a service being live", () => {
     d.consider(BUILD_A);
     await d.settled();
     assert.equal(d.status().state, "waiting");
+    assert.equal(d.status().waitingFor, "live");
     await sleep(100);
     assert.equal(apiCalls(), 0, "Cloudflare was called during a live service");
     assert.equal(lines.filter((l) => /a service is live/.test(l)).length, 1, "said once, however long the wait");
 
     world.live = null;
     await reaches(d, "current");
+    assert.equal(d.status().waitingFor, null, "a reason for waiting outlived the wait");
     assert.equal(puts(), 1);
   });
 
@@ -633,6 +635,7 @@ describe("a live state that is not known", () => {
     d.consider(BUILD_A);
     await d.settled();
     assert.equal(d.status().state, "waiting");
+    assert.equal(d.status().waitingFor, "unknown");
     await sleep(100);
     assert.equal(apiCalls(), 0, "a deploy went out before the live state was known");
     assert.ok(lines.some((l) => /the service times are not known \(the server has just started, or Planning Center cannot be reached\)/.test(l)));

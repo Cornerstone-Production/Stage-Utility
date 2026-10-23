@@ -67,6 +67,7 @@ const NO_DEPLOY: DeployStatus = {
   runningVersion: "1.28.0",
   page: null,
   files: null,
+  waitingFor: null,
   error: null,
   now: NOW,
 };

@@ -54,6 +54,7 @@ const deployOf = (over: Partial<DeployStatus> = {}): DeployStatus => ({
   runningVersion: "1.28.0",
   page: { build: "3f2a91c", version: "1.28.0", at: DEPLOYED_AT },
   files: { uploaded: 2, held: 21 },
+  waitingFor: null,
   error: null,
   now: NOW,
   ...over,
@@ -145,11 +146,16 @@ async function mount(over: Partial<React.ComponentProps<typeof PublicLinkCard>> 
   await eventually(() => assert.ok(screen.getByRole("switch", { name: "Publish ServiceCue to the web" })));
   await settle();
   // Behind "Cloudflare connection", as the card keeps it.
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
-    await settle();
-  });
+  if (!autoOpened()) {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+      await settle();
+    });
+  }
 }
+
+/** Is "Cloudflare connection" open without anyone having opened it? */
+const autoOpened = () => screen.getByRole("button", { name: "Cloudflare connection" }).getAttribute("aria-expanded") === "true";
 
 /** The status line's words, as a person reads them. */
 const status = () => (screen.getByRole("status").textContent ?? "").replace(/\s+/g, " ").trim();
@@ -222,11 +228,18 @@ describe("the status line, by state", () => {
     assert.equal(deployLine(deployOf({ state: "updating", files: null }), "UTC", 0).text, "Updating the page…");
   });
 
-  test("waiting: says it waits for the service, and what the build is; the detail covers a live and an unknown state", async () => {
-    await with_(deployOf({ state: "waiting", page: { build: "9c41e07", version: "1.27.0", at: DEPLOYED_AT } }));
+  test("waiting for a live service: says so, and what the build is", async () => {
+    await with_(deployOf({ state: "waiting", waitingFor: "live", page: { build: "9c41e07", version: "1.27.0", at: DEPLOYED_AT } }));
     assert.equal(status(), "Waiting for the service to end, then updating to build 3f2a91c (1.28.0)");
-    assert.ok(sectionText().includes("A service is live in Planning Center, or this server has not heard yet whether one is"));
+    assert.ok(sectionText().includes("A service is live in Planning Center, so the page is left alone until it ends."));
     assert.equal(updateButton()?.disabled, false);
+  });
+
+  test("waiting to hear whether one is live: says that, and that Update the page now goes ahead when it is merely unknown", async () => {
+    await with_(deployOf({ state: "waiting", waitingFor: "unknown" }));
+    assert.equal(status(), "Waiting to hear whether a service is live, then updating");
+    assert.ok(sectionText().includes("Update the page now goes ahead when the state is merely unknown, never through a live service."));
+    assert.ok(!sectionText().includes("A service is live in Planning Center"));
   });
 
   test("failed, refused: the token is named, the page is unchanged, and the fix is to paste a new one", async () => {
@@ -305,6 +318,46 @@ describe("the status line, by state", () => {
   });
 });
 
+describe("the Cloudflare connection disclosure", () => {
+  const opened = () => screen.getByRole("button", { name: "Cloudflare connection" }).getAttribute("aria-expanded");
+  const mountRaw = async (deploy: DeployStatus) => {
+    server.dto = dtoOf(deploy);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const router = routerAt("/servicecue/manage", "/servicecue/manage", "/settings/integrations");
+    render(
+      React.createElement(RouterContextProvider, {
+        router,
+        children: React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, React.createElement(PublicLinkCard, { ...NAMES, timeZone: "UTC" }))),
+      } as never),
+    );
+    await eventually(() => assert.ok(screen.getByRole("button", { name: "Cloudflare connection" })));
+    await settle();
+  };
+
+  test("opens by itself for a failed update and for a build with no page, so neither hides", async () => {
+    await mountRaw(deployOf({ state: "failed", error: { message: "x", code: null, status: null, step: "upload the files", at: NOW, refused: false, retryAt: null } }));
+    assert.equal(opened(), "true");
+    assert.ok(status().startsWith("Couldn't update the page"));
+    cleanup();
+    await mountRaw(deployOf({ state: "no-bundle", bundle: null, noBundle: "none" }));
+    assert.equal(opened(), "true");
+  });
+
+  test("stays shut for the states that need nothing, and the operator can still shut an open one", async () => {
+    for (const state of ["current", "updating", "waiting", "newer", "off"] as const) {
+      await mountRaw(deployOf({ state }));
+      assert.equal(opened(), "false", state);
+      cleanup();
+    }
+    await mountRaw(deployOf({ state: "no-bundle", bundle: null, noBundle: "none" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+      await settle();
+    });
+    assert.equal(opened(), "false");
+  });
+});
+
 describe("the API token", () => {
   test("is never shown: a stored one reads as the mask, and nothing the card draws holds it", async () => {
     await with_(deployOf());
@@ -325,13 +378,39 @@ describe("the API token", () => {
     assert.equal(status(), "Up to date: build 3f2a91c (1.28.0), deployed 21 Oct, 8:14 AM");
   });
 
-  test("clearing it sends an empty token, and updating is off", async () => {
+  const dialog = () => screen.findByRole("alertdialog");
+  const answer = async (name: string) => {
+    const d = await dialog();
+    await act(async () => {
+      fireEvent.click(within(d).getByRole("button", { name }));
+      await settle();
+    });
+  };
+
+  test("clearing it asks first, and on yes sends an empty token, and updating is off", async () => {
     await with_(deployOf());
     type(tokField(), "");
     await leave(tokField());
-    assert.deepEqual(server.posts, [["credentials", { token: "" }]]);
+    const d = await dialog();
+    assert.ok((d.textContent ?? "").includes("Stop keeping the page up to date?"));
+    assert.ok((d.textContent ?? "").includes("The token is deleted from this server; to turn updating on again you will need a new token from Cloudflare."));
+    // Nothing is deleted while the question is open.
+    assert.deepEqual(server.posts, []);
+    await answer("Delete the token");
+    await eventually(() => assert.deepEqual(server.posts, [["credentials", { token: "" }]]));
     await eventually(() => assert.equal(updateButton() === null, true));
     assert.ok(status().startsWith("Not updating:"));
+  });
+
+  test("saying no to that puts the mask back and sends nothing", async () => {
+    await with_(deployOf());
+    type(tokField(), "");
+    await leave(tokField());
+    await answer("Cancel");
+    await settle();
+    assert.deepEqual(server.posts, []);
+    assert.equal(tokField().value, FORM_MASK);
+    assert.ok(status().startsWith("Up to date:"));
   });
 
   test("leaving the mask as it is sends nothing", async () => {
