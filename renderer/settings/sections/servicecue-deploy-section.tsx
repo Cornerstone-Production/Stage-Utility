@@ -209,7 +209,7 @@ function downgradeQuestion(code: "newer" | "other-build", body: Record<string, u
   };
 }
 
-export function DeploySection({
+export function KeepPageUpToDate({
   deploy,
   zone,
   elapsedMs,

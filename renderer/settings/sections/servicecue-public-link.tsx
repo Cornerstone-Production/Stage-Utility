@@ -32,7 +32,7 @@ import { copyText } from "../../lib/clipboard";
 import { docsPageUrl } from "../../lib/docs-url";
 import { cn } from "../../lib/cn";
 import { useFailedReads } from "../../lib/use-failed-reads";
-import { ConnectionField, DeploySection } from "./servicecue-deploy-section";
+import { ConnectionField, KeepPageUpToDate } from "./servicecue-deploy-section";
 import type {
   PublishProblem,
   PublishSettingsDTO,
@@ -479,7 +479,7 @@ export function PublicLinkCard({
           {/* Not drawn at all while closed, so a closed disclosure holds nothing to tab to or to find. */}
           {connShown && fields}
           {connShown && (
-            <DeploySection
+            <KeepPageUpToDate
               deploy={dto.deploy}
               zone={timeZone ?? hostTimeZone()}
               elapsedMs={Math.max(0, clock - dataUpdatedAt)}
