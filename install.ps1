@@ -26,6 +26,36 @@ $taskName = "StageUtility"
 function Say  ($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Fail ($m) { Write-Host "error $m" -ForegroundColor Red; Log "FAILED: $m"; Write-UpdateResult $false $m; exit 1 }
 
+# The Video relay's audio conversion needs the system's own ffmpeg. Best effort,
+# like install.sh: whatever happens here the install carries on, since video works
+# without it and Advanced says whether the server found one.
+function Install-Ffmpeg {
+  if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+    Log "ffmpeg is already installed."
+    return
+  }
+  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Write-Host "warn: winget was not found, so ffmpeg was not installed. Audio conversion needs it; video works without it."
+    return
+  }
+  Say "Installing ffmpeg (winget)"
+  # winget reports progress on stderr. Under "Stop", Windows PowerShell 5.1 turns
+  # each such line into a terminating error, so the outcome is judged by exit code.
+  $ErrorActionPreference = "Continue"
+  try {
+    $out = winget install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements 2>&1 | Out-String
+    $code = $LASTEXITCODE
+    if ($code -eq 0) {
+      Log "ffmpeg installed. If the server does not find it, set its path in Settings -> Advanced."
+    } else {
+      Write-Host "warn: could not install ffmpeg (winget exit $code). Audio conversion needs it; video works without it."
+      Log ("winget ffmpeg output: " + $out.Trim())
+    }
+  } catch {
+    Write-Host "warn: could not install ffmpeg: $($_.Exception.Message). Audio conversion needs it; video works without it."
+  }
+}
+
 # ── Update protocol (optional) ────────────────────────────────────────────────
 # Mirrors install.sh. When the app drives this script it passes these paths and
 # polls them to narrate the update; run by hand, both are unset and these are
@@ -226,28 +256,8 @@ try {
   }
 
   # ── ffmpeg (optional) ───────────────────────────────────────────────────────
-  # The Video relay's audio conversion needs the system's own ffmpeg. Best
-  # effort, like install.sh: whatever happens here the install carries on, since
-  # video works without it and Advanced says whether the server found one.
-  # Only when winget is there; an update swap returned above and installs nothing.
-  if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
-    Log "ffmpeg is already installed."
-  } elseif (Get-Command winget -ErrorAction SilentlyContinue) {
-    Say "Installing ffmpeg (winget)"
-    try {
-      $wingetOut = winget install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements 2>&1 | Out-String
-      if ($LASTEXITCODE -eq 0) {
-        Log "ffmpeg installed. If the server does not find it, set its path in Settings -> Advanced."
-      } else {
-        Write-Host "warn: could not install ffmpeg (winget exit $LASTEXITCODE). Audio conversion needs it; video works without it."
-        Log ("winget ffmpeg output: " + $wingetOut.Trim())
-      }
-    } catch {
-      Write-Host "warn: could not install ffmpeg: $($_.Exception.Message). Audio conversion needs it; video works without it."
-    }
-  } else {
-    Write-Host "warn: winget was not found, so ffmpeg was not installed. Audio conversion needs it; video works without it."
-  }
+  # An update swap returned above and installs nothing.
+  Install-Ffmpeg
 
   # ── Register it ─────────────────────────────────────────────────────────────
   # A scheduled task rather than a Windows service: Node is not a service-aware

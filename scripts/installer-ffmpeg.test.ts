@@ -1,11 +1,11 @@
-// install_ffmpeg, from install.sh and scripts/install.sh, run for real against
-// stand-in package managers. The function is best effort by design: whatever a
-// package manager does, it returns 0, because a failed ffmpeg must never fail
-// an install (video works without it).
+// install_ffmpeg in install.sh and scripts/install.sh, and Install-Ffmpeg in install.ps1,
+// run for real against stand-in package managers. Each is best effort by design:
+// whatever a package manager does, the install carries on, because video works
+// without ffmpeg.
 //
-// The two scripts carry the same function; this extracts each from its own source
-// so a fix to one that the other lacks fails here. install.ps1 is PowerShell and
-// is not run: it is only checked for the winget command and for being guarded.
+// The two shell scripts carry the same function, asserted identical once; the matrix
+// then runs against one. install.ps1 runs under pwsh when it is installed; without
+// it these are skipped, or fail under UPDATE_REQUIRE_PWSH=1.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -51,8 +51,9 @@ function run(file: string): { status: number | null; out: string } {
   return { status: r.status, out: r.stdout + r.stderr };
 }
 
-for (const [label, file] of Object.entries(SCRIPTS)) {
-  describe(`install_ffmpeg in ${label}`, () => {
+{
+  const file = SCRIPTS["install.sh"];
+  describe("install_ffmpeg", () => {
     it("installs with apt-get when that is what the machine has", () => {
       manager("apt-get", "exit 0");
       const r = run(file);
@@ -115,7 +116,7 @@ for (const [label, file] of Object.entries(SCRIPTS)) {
   });
 }
 
-describe("the two installers", () => {
+describe("the two shell installers", () => {
   it("carry the same install_ffmpeg", () => {
     assert.equal(functionText(SCRIPTS["install.sh"]), functionText(SCRIPTS["scripts/install.sh"]));
   });
@@ -126,20 +127,81 @@ describe("the two installers", () => {
   });
 });
 
-describe("install.ps1", () => {
-  const ps1 = fs.readFileSync(path.join(HERE, "..", "install.ps1"), "utf8");
-  // PowerShell is not run here, so this reads the source: the command, that it is
-  // only tried when winget exists, and that its failure is caught, not thrown.
-  const block = /\$wingetOut = (winget install [^\n]*)/.exec(ps1);
-  it("installs Gyan.FFmpeg with winget", () => {
-    assert.ok(block, "no winget install of ffmpeg");
-    assert.match(block[1]!, /^winget install --id Gyan\.FFmpeg -e /);
+const PS1 = path.join(HERE, "..", "install.ps1");
+const pwsh = spawnSync("pwsh", ["-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"], { encoding: "utf8" });
+const hasPwsh = pwsh.status === 0;
+if (!hasPwsh && process.env.UPDATE_REQUIRE_PWSH === "1") throw new Error("UPDATE_REQUIRE_PWSH=1 but pwsh is not installed");
+
+describe("Install-Ffmpeg in install.ps1", { skip: hasPwsh ? false : "pwsh is not installed" }, () => {
+  function ps1Function(): string {
+    const m = /^function Install-Ffmpeg \{\n[\s\S]*?\n\}\n/m.exec(fs.readFileSync(PS1, "utf8"));
+    assert.ok(m, "Install-Ffmpeg is not defined at the top level of install.ps1");
+    return m[0];
+  }
+  /** Runs the function under `$ErrorActionPreference = "Stop"`, as the installer does,
+   *  with a PATH holding nothing, `winget` and `ffmpeg` being whatever `stubs` defines. */
+  function run(stubs: string): { status: number | null; out: string } {
+    const script = [
+      '$ErrorActionPreference = "Stop"',
+      "$env:PATH = $env:TEMP_EMPTY",
+      "$global:calls = @()",
+      'function Say($m) { Write-Host "SAY $m" }',
+      'function Log($m) { Write-Host "LOG $m" }',
+      stubs,
+      ps1Function(),
+      "Install-Ffmpeg",
+      'Write-Host "END calls=$($global:calls -join \';\')"',
+    ].join("\n");
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), "su-ps1-"));
+    try {
+      const r = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", env: { ...process.env, TEMP_EMPTY: empty } });
+      return { status: r.status, out: r.stdout + r.stderr };
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
+  }
+  const winget = (body: string) => `function winget { $global:calls += ($args -join ' '); ${body} }`;
+
+  it("installs Gyan.FFmpeg with winget when winget exists", () => {
+    const r = run(winget("$global:LASTEXITCODE = 0"));
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /END calls=install --id Gyan\.FFmpeg -e /);
+    assert.match(r.out, /LOG ffmpeg installed/);
   });
-  it("only when winget exists, and a failure is a warning inside try/catch", () => {
-    const i = ps1.indexOf("$wingetOut =");
-    const before = ps1.slice(0, i);
-    assert.ok(before.lastIndexOf("Get-Command winget") > before.lastIndexOf("Register it") - 3000, "winget is not checked first");
-    assert.ok(before.lastIndexOf("try {") > before.lastIndexOf("Get-Command winget"), "the winget call is not inside try");
-    assert.match(ps1.slice(i, i + 900), /\} catch \{\s*\n\s*Write-Host "warn: could not install ffmpeg/);
+  it("says so and carries on when winget is not there", () => {
+    const r = run("");
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /warn: winget was not found/);
+    assert.match(r.out, /END calls=$/m);
+  });
+  it("judges winget by its exit code: an error record on stderr with exit 0 is a success", () => {
+    const r = run(winget('Write-Error "progress"; $global:LASTEXITCODE = 0'));
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /LOG ffmpeg installed/);
+    assert.doesNotMatch(r.out, /could not install/);
+  });
+  it("warns, and still finishes, when winget fails", () => {
+    const r = run(winget("$global:LASTEXITCODE = 1"));
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /warn: could not install ffmpeg \(winget exit 1\)/);
+    assert.match(r.out, /END/);
+  });
+  it("warns, and still finishes, when winget throws", () => {
+    const r = run(winget('throw "boom"'));
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /warn: could not install ffmpeg: boom/);
+    assert.match(r.out, /END/);
+  });
+  it("does nothing when ffmpeg is already installed", () => {
+    const r = run(`function ffmpeg { }\n${winget("$global:LASTEXITCODE = 0")}`);
+    assert.equal(r.status, 0, r.out);
+    assert.match(r.out, /LOG ffmpeg is already installed/);
+    assert.match(r.out, /END calls=$/m);
+  });
+  it("is called by the installer, after the update swap has returned", () => {
+    const text = fs.readFileSync(PS1, "utf8");
+    const call = text.search(/^ {2}Install-Ffmpeg$/m);
+    assert.ok(call > 0, "the installer never calls Install-Ffmpeg");
+    assert.ok(call > text.indexOf('$env:STAGE_UPDATE_MODE -eq "swap"'), "an update swap would install packages");
   });
 });
