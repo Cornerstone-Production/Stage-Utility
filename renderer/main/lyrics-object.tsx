@@ -41,19 +41,23 @@ const FIT_STEPS = 12;
 /**
  * The lyric's font size in px, and the two elements it is measured against.
  *
- * S, M and L are a fraction of the box's own height. Fit is the largest size at
- * which the whole content block still fits the box, found by bisection: wrapping
- * makes the height jump with the size, so a back-derived scale (which is exact
- * only for text that does not wrap) lands on a size that overflows.
+ * S, M and L are a fraction of the object's own box height, and Fit's ceiling is
+ * the box height itself. Both are CEILINGS, not promises: when the whole block
+ * would not fit the box at that size the size comes down until it does, because a
+ * widget cannot scroll and a clipped last line is a lyric the room never reads.
+ * Where the block fits, S, M and L are exactly their size and Fit is the largest
+ * size that fits.
  *
- * Every probe happens inside one layout effect, mutating the wrapper's style
- * directly, so no probe is ever painted.
+ * Found by bisection, not by scaling: wrapping makes the height jump with the
+ * size, so a back-derived scale (exact only for text that does not wrap) lands on
+ * a size that overflows. Every probe happens inside one layout effect, mutating
+ * the wrapper's style directly, so none is ever painted.
  */
 function useLyricsSize(size: LyricsSettings["size"], contentKey: string, fallbackBoxH: number) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
-  const [fitPx, setFitPx] = useState<number | null>(null);
+  const [fitted, setFitted] = useState<number | null>(null);
 
   useLayoutEffect(() => {
     const el = wrapRef.current;
@@ -65,29 +69,35 @@ function useLyricsSize(size: LyricsSettings["size"], contentKey: string, fallbac
     return () => ro.disconnect();
   }, []);
 
-  useLayoutEffect(() => {
-    if (size !== "fit") return;
-    const wrap = wrapRef.current;
-    const content = contentRef.current;
-    if (!wrap || !content || box.h <= 0) return;
-    let lo = FIT_MIN_PX;
-    let hi = Math.max(FIT_MIN_PX, box.h);
-    const fits = () => content.offsetHeight <= wrap.clientHeight && content.scrollWidth <= wrap.clientWidth + 1;
-    for (let i = 0; i < FIT_STEPS; i++) {
-      const mid = (lo + hi) / 2;
-      wrap.style.fontSize = `${mid}px`;
-      if (fits()) lo = mid;
-      else hi = mid;
-    }
-    wrap.style.fontSize = `${lo}px`;
-    setFitPx(lo);
-  }, [size, contentKey, box.w, box.h]);
-
   // Before the box is measured (and wherever it never is, as in jsdom) the canvas
   // stands in for it, so a first paint is a plausible size rather than none.
   const boxH = box.h > 0 ? box.h : fallbackBoxH;
-  const px = size === "fit" ? (fitPx ?? boxH * 0.1) : boxH * LYRICS_SIZE_OF_BOX[size];
-  return { wrapRef, contentRef, px: Math.max(FIT_MIN_PX, px) };
+  const ceiling = Math.max(FIT_MIN_PX, size === "fit" ? boxH : boxH * LYRICS_SIZE_OF_BOX[size]);
+
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    const content = contentRef.current;
+    if (!wrap || !content || box.h <= 0) return;
+    const fitsAt = (px: number) => {
+      wrap.style.fontSize = `${px}px`;
+      return content.offsetHeight <= wrap.clientHeight && content.scrollWidth <= wrap.clientWidth + 1;
+    };
+    let best = ceiling;
+    if (!fitsAt(ceiling)) {
+      let lo = FIT_MIN_PX;
+      let hi = ceiling;
+      for (let i = 0; i < FIT_STEPS; i++) {
+        const mid = (lo + hi) / 2;
+        if (fitsAt(mid)) lo = mid;
+        else hi = mid;
+      }
+      best = lo;
+    }
+    wrap.style.fontSize = `${best}px`;
+    setFitted(best);
+  }, [size, ceiling, contentKey, box.w, box.h]);
+
+  return { wrapRef, contentRef, px: fitted ?? (size === "fit" ? ceiling * 0.1 : ceiling) };
 }
 
 function tagStyle(tag: LyricsTag, s: LyricsSettings, under: boolean): CSSProperties {
