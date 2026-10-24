@@ -31,6 +31,11 @@ describe("the four states", () => {
   test("connected with no presentation is none, and a media slide is not that", () => {
     const empty = lyricsStatus({ currentItem: null, currentSlideText: null, currentSection: null });
     assert.equal(readLyrics(cfg(), { pro: empty, known: true }).kind, "none");
+    // Empty or blank words are no words: a presentation closed can leave "" behind.
+    for (const text of ["", "   \n "]) {
+      const blank = lyricsStatus({ currentItem: null, currentSlideText: text, currentSection: null });
+      assert.equal(readLyrics(cfg(), { pro: blank, known: true }).kind, "none", JSON.stringify(text));
+    }
     // A media slide: no words and no group, but a presentation is open.
     const media = lyricsStatus({ currentSlideText: null, currentSection: null });
     assert.equal(readLyrics(cfg({ under: false }), { pro: media, known: true }).kind, "slide");
@@ -52,8 +57,8 @@ describe("the rows", () => {
   test("the default: the current slide with its tag, then the next group's tag with no words", () => {
     const r = slide(readLyrics(cfg(), { pro: lyricsStatus(), known: true }));
     assert.deepEqual(r.rows, [
-      { under: false, tag: { name: "Chorus", text: "Chorus", colorHex: "#e5484d" }, words: WORDS.chorusFirst },
-      { under: true, tag: { name: "Verse 2", text: "Verse 2", colorHex: "#3b82f6" }, words: null },
+      { under: false, tag: { text: "Chorus", colorHex: "#e5484d" }, words: WORDS.chorusFirst },
+      { under: true, tag: { text: "Verse 2", colorHex: "#3b82f6" }, words: null },
     ]);
     assert.equal(r.strip, null);
     assert.equal(r.title, null);
@@ -62,7 +67,7 @@ describe("the rows", () => {
   test("Shows the next slide: its group, and its words only when Its lyrics is on", () => {
     const pro = lyricsStatus();
     const slideOnly = slide(readLyrics(cfg({ underShows: "slide" }), { pro, known: true }));
-    assert.equal(slideOnly.rows[1].tag?.name, "Chorus");
+    assert.equal(slideOnly.rows[1].tag?.text, "Chorus");
     assert.equal(slideOnly.rows[1].words, null);
     const withWords = slide(readLyrics(cfg({ underShows: "slide", underWords: true }), { pro, known: true }));
     assert.equal(withWords.rows[1].words, WORDS.chorusSecond);
@@ -83,7 +88,7 @@ describe("the rows", () => {
 
   test("a slide with no words: Tag only keeps its tag, Blank drops the row", () => {
     const tagOnly = slide(readLyrics(cfg({ noWords: "tag" }), { pro: atIntro(), known: true }));
-    assert.deepEqual(tagOnly.rows[0], { under: false, tag: { name: "Intro", text: "Intro", colorHex: "#808080" }, words: null });
+    assert.deepEqual(tagOnly.rows[0], { under: false, tag: { text: "Intro", colorHex: "#808080" }, words: null });
     const blank = slide(readLyrics(cfg({ noWords: "blank" }), { pro: atIntro(), known: true }));
     assert.equal(blank.rows.some((r) => !r.under), false);
     // The next group has words, so its row stays.
@@ -97,11 +102,10 @@ describe("the rows", () => {
     assert.equal(slide(readLyrics(cfg({ noWords: "blank" }), { pro: toOutro, known: true })).rows.length, 1);
   });
 
-  test("Text changes the words of the tag and never its name", () => {
+  test("Text changes the words of the tag", () => {
     const tag = (tagText: "named" | "short" | "caps") =>
       slide(readLyrics(cfg({ tagText }), { pro: lyricsStatus({ currentSection: { name: "Verse 1", colorHex: "#3b82f6" } }), known: true })).rows[0].tag;
     assert.deepEqual([tag("named")?.text, tag("short")?.text, tag("caps")?.text], ["Verse 1", "V1", "VERSE 1"]);
-    assert.equal(tag("short")?.name, "Verse 1");
   });
 
   test("Song title is the presentation's name, and only when on", () => {
@@ -133,7 +137,7 @@ describe("the arrangement strip", () => {
   test("the current row has no tag of its own, and the row underneath still does", () => {
     const r = slide(readLyrics(cfg({ display: "strip" }), { pro: lyricsStatus(), known: true }));
     assert.equal(r.rows[0].tag, null);
-    assert.equal(r.rows[1].tag?.name, "Verse 2");
+    assert.equal(r.rows[1].tag?.text, "Verse 2");
   });
 
   test("an unknown position lights nothing, and no arrangement draws no strip", () => {

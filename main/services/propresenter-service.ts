@@ -1595,8 +1595,10 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     }
 
     if (idxZero != null && total > 0) {
-      playOrderGroupIndex = occurrenceAt.get(play[idxZero].occurrence) ?? null;
       const cur = play[idxZero];
+      // idxZero is clamped into 0..total-1 above, so `cur` is always there; the
+      // unnamed groups have no entry in the strip, and a slide in one has no place.
+      playOrderGroupIndex = cur ? (occurrenceAt.get(cur.occurrence) ?? null) : null;
       if (cur?.name) currentSection = { name: cur.name, colorHex: cur.colorHex };
       const nxt = play[idxZero + 1];
       if (nxt?.name) nextSection = { name: nxt.name, colorHex: nxt.colorHex };
@@ -1604,8 +1606,6 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       for (let i = idxZero + 1; i < total; i++) {
         if (play[i].name && play[i].name !== currentSection?.name) {
           nextArrangementSection = { name: play[i].name, colorHex: play[i].colorHex };
-          // The words on the first slide of that group: `i` is where the new
-          // group STARTS, being the first slide past the current group's name.
           nextGroupText = play[i].text;
           break;
         }

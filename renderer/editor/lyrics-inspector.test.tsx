@@ -81,7 +81,7 @@ describe("what the inspector offers", () => {
         ["Width (beside)", ["Column", "Fit"]],
         ["Size", ["Fit", "S", "M", "L"]],
         ["Weight", ["Regular", "Bold"]],
-        ["Align (above)", ["Left", "Centre"]],
+        ["Align", ["Left", "Centre"]],
         ["No words", ["Blank", "Tag only"]],
         ["Shows", ["Next slide", "Next group"]],
         ["Dimmed", ["A little", "More"]],
@@ -107,7 +107,7 @@ describe("what the inspector offers", () => {
     try {
       const expected: [string, string][] = [
         ["Group tag", "Above"], ["Style", "Filled"], ["Colour", "ProPresenter"], ["Text", "As named"], ["Width (beside)", "Column"],
-        ["Size", "L"], ["Weight", "Bold"], ["Align (above)", "Left"], ["No words", "Tag only"], ["Shows", "Next group"], ["Dimmed", "A little"],
+        ["Size", "L"], ["Weight", "Bold"], ["Align", "Left"], ["No words", "Tag only"], ["Shows", "Next group"], ["Dimmed", "A little"],
       ];
       for (const [label, option] of expected) assert.deepEqual(pressed(m, label), [option], label);
       assert.equal(m.getByRole("switch", { name: "Show what comes next" }).getAttribute("aria-checked"), "true");
@@ -162,10 +162,20 @@ describe("each control writes the field it names, and keeps the rest", () => {
     cleanup();
     const above = await mount(created());
     try {
-      pick(above, "Align (above)", "Centre");
+      pick(above, "Align", "Centre");
       assert.equal((above.writes.at(-1) as { align?: string }).align, "center");
     } finally {
       above.restore();
+    }
+  });
+
+  test("Align writes in the Arrangement too, where it centres the chips", async () => {
+    const m = await mount({ ...created(), display: "strip" });
+    try {
+      pick(m, "Align", "Centre");
+      assert.deepEqual(m.writes.at(-1), { ...created(), display: "strip", align: "center" });
+    } finally {
+      m.restore();
     }
   });
 
@@ -185,7 +195,7 @@ describe("each control writes the field it names, and keeps the rest", () => {
 });
 
 describe("a control that would change nothing is greyed, not live", () => {
-  test("Width is for Beside only, Align for Above and the Arrangement only", async () => {
+  test("Width is for Beside only, Align for everything but Beside", async () => {
     const above = await mount(created());
     try {
       pick(above, "Width (beside)", "Fit");
@@ -196,7 +206,7 @@ describe("a control that would change nothing is greyed, not live", () => {
     cleanup();
     const beside = await mount({ ...created(), display: "beside" });
     try {
-      pick(beside, "Align (above)", "Centre");
+      pick(beside, "Align", "Centre");
       assert.equal(beside.writes.length, 0, "Align wrote while the tag is beside");
     } finally {
       beside.restore();

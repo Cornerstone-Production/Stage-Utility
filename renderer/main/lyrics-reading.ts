@@ -14,10 +14,8 @@ import type { ProPresenterStatusDTO } from "@main/types/live";
 import type { ProSection } from "@main/types/views";
 import { lyricsSettings, tagLabel, shortGroupName, type LyricsConfig } from "./lyrics-config";
 
-/** One group's tag: its name as ProPresenter has it, the words to draw, its colour. */
+/** One group's tag: the words to draw, and its colour. */
 export interface LyricsTag {
-  /** The name exactly as ProPresenter reports it. */
-  name: string;
   /** What the Text setting turns that into. */
   text: string;
   colorHex: string;
@@ -36,7 +34,6 @@ export interface LyricsRow {
 export interface LyricsChip {
   /** The short form: a strip is a row of small marks, never a row of names. */
   text: string;
-  name: string;
   colorHex: string;
   /** Already played, playing now, or still to come. */
   state: "done" | "now" | "next";
@@ -63,34 +60,32 @@ export interface LyricsInput {
   known: boolean;
 }
 
-const hasWords = (text: string | null): text is string => text != null && text.trim() !== "";
+function hasWords(text: string | null): text is string {
+  return text != null && text.trim() !== "";
+}
 
 export function readLyrics(config: LyricsConfig, { pro, known }: LyricsInput): LyricsReading {
   if (!known) return { kind: "loading" };
   if (!pro?.connected) return { kind: "none" };
-  // Connected, with nothing loaded: no presentation, so there is no slide to be
-  // the current one. A media slide has a section or a name and so is not this.
-  if (pro.currentItem == null && pro.currentSlideText == null && pro.currentSection == null) {
+  // Connected with nothing loaded: no presentation name, no group, no words (empty
+  // or blank counts as none). A media slide still has a name, so it is not this.
+  if (pro.currentItem == null && !hasWords(pro.currentSlideText) && pro.currentSection == null) {
     return { kind: "none" };
   }
 
   const s = lyricsSettings(config);
   const strip = s.display === "strip";
   const tagOf = (section: ProSection | null): LyricsTag | null =>
-    section ? { name: section.name, text: tagLabel(section.name, s.tagText), colorHex: section.colorHex } : null;
+    section ? { text: tagLabel(section.name, s.tagText), colorHex: section.colorHex } : null;
 
   const rows: LyricsRow[] = [];
 
-  // The current slide. A slide with no words is dropped altogether under Blank,
-  // and is its tag alone under Tag only.
   const currentWords = hasWords(pro.currentSlideText) ? pro.currentSlideText : null;
   if (currentWords != null || s.noWords === "tag") {
     const tag = strip ? null : tagOf(pro.currentSection);
     if (tag || currentWords != null) rows.push({ under: false, tag, words: currentWords });
   }
 
-  // What comes next. Nothing on the last slide, and nothing when the next one has
-  // no group the status could name.
   if (s.under) {
     const group = s.underShows === "group";
     const section = group ? pro.nextArrangementSection : pro.nextSection;
@@ -109,7 +104,6 @@ export function readLyrics(config: LyricsConfig, { pro, known }: LyricsInput): L
     const at = pro.playOrderGroupIndex;
     chips = pro.playOrderGroups.map((g, i) => ({
       text: shortGroupName(g.name),
-      name: g.name,
       colorHex: g.colorHex,
       state: at == null ? "next" : i < at ? "done" : i === at ? "now" : "next",
     }));

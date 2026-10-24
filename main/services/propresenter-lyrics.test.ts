@@ -161,3 +161,28 @@ describe("the arrangement as a strip", () => {
     assert.equal(s.nextGroupText, null);
   });
 });
+
+describe("what the arrangement may not do to the strip's position", () => {
+  const unnamed = group("g-blank", "", colour(0, 0, 0), ["blank slide"]);
+
+  it("a group the presentation does not have is skipped, and shifts nothing", () => {
+    // 'g-gone' is in the arrangement and not in the presentation.
+    const s = status(presentation(["g-intro", "g-gone", "g-v1", "g-gone", "g-c"]), 3); // intro 0, v1 1-2, c 3-4
+    assert.deepEqual(s.playOrderGroups.map((g) => g.name), ["Intro", "Verse 1", "Chorus"]);
+    assert.equal(s.playOrderGroupIndex, 2);
+    assert.equal(status(presentation(["g-intro", "g-gone", "g-v1"]), 1).playOrderGroupIndex, 1);
+  });
+
+  it("an unnamed group has no place in the strip, and does not move the ones after it", () => {
+    const active = presentation(["g-intro", "g-blank", "g-v1"], { groups: [...GROUPS, unnamed] });
+    const onBlank = status(active, 1); // intro 0, blank 1, v1 2-3
+    assert.deepEqual(onBlank.playOrderGroups.map((g) => g.name), ["Intro", "Verse 1"]);
+    assert.equal(onBlank.playOrderGroupIndex, null, "a slide in an unnamed group sits at no chip");
+    assert.equal(status(active, 2).playOrderGroupIndex, 1, "Verse 1 is the second chip, whatever came before it");
+  });
+
+  it("an index past the end is clamped onto the last slide", () => {
+    const s = status(presentation(ARRANGEMENT), 99);
+    assert.equal(s.playOrderGroupIndex, 7);
+  });
+});

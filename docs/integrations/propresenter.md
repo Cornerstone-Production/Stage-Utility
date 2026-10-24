@@ -73,9 +73,11 @@ one auditorium being switched off does not affect the other.
 The status also carries what the Lyrics widget needs beyond the slide: the words on
 the first slide of the next group (`nextGroupText`, empty for a group with no
 words) and the arrangement's groups in play order (`playOrderGroups`, with
-`playOrderGroupIndex` for where the slide is). Both come from the same
-presentation document as the section names, so the widget asks ProPresenter for
-nothing more, and they blank together with them.
+`playOrderGroupIndex` for where the slide is, null when the slide index is not
+known). All three come from the same presentation document as the section names,
+so the widget asks ProPresenter for nothing more. The groups stay listed while the
+index is unknown; when the document cannot be read they empty with the section
+names.
 
 ### What the log says
 

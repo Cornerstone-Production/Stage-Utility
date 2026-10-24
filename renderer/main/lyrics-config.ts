@@ -35,18 +35,22 @@ export const LYRICS_DEFAULTS: LyricsSettings = {
 
 /** A config with every unset setting read as its default. */
 export function lyricsSettings(c: LyricsConfig): LyricsSettings {
-  // Spread over the defaults, but an explicit `undefined` (a field a JSON round
-  // trip or an inspector patch can leave) must still read as the default.
-  const out: Record<string, unknown> = { ...LYRICS_DEFAULTS };
-  for (const key of Object.keys(LYRICS_DEFAULTS)) {
-    const v = (c as Record<string, unknown>)[key];
-    if (v !== undefined && v !== null) out[key] = v;
+  // Not a spread over the defaults: an explicit `undefined` or null (what a JSON
+  // round trip or an inspector patch can leave) must still read as the default.
+  const out = { ...LYRICS_DEFAULTS };
+  function take<K extends keyof LyricsSettings>(key: K): void {
+    const v = c[key];
+    if (v != null) out[key] = v as LyricsSettings[K];
   }
-  return out as unknown as LyricsSettings;
+  for (const key of Object.keys(LYRICS_DEFAULTS) as (keyof LyricsSettings)[]) take(key);
+  return out;
 }
 
+/** The settings that are a choice from a list of words (the rest are switches). */
+export type LyricsChoice = { [K in keyof LyricsSettings]: LyricsSettings[K] extends string ? K : never }[keyof LyricsSettings];
+
 /** Choices for each setting, in the order the inspector lists them. */
-export const LYRICS_OPTIONS = {
+export const LYRICS_OPTIONS: { [K in LyricsChoice]: readonly { value: LyricsSettings[K]; label: string }[] } = {
   display: [
     { value: "beside", label: "Beside" },
     { value: "above", label: "Above" },
@@ -96,7 +100,7 @@ export const LYRICS_OPTIONS = {
     { value: "light", label: "A little" },
     { value: "strong", label: "More" },
   ],
-} as const;
+};
 
 /**
  * The size of the lyric as a fraction of the object's own box height, for the
@@ -123,7 +127,9 @@ const KNOWN_SHORT: Readonly<Record<string, string>> = {
 const STAYS_WHOLE = new Set(["intro", "outro"]);
 
 /** The first character of a word, by code point, in capitals. */
-const initial = (word: string): string => (Array.from(word)[0] ?? "").toUpperCase();
+function initial(word: string): string {
+  return (Array.from(word)[0] ?? "").toUpperCase();
+}
 
 /**
  * A group name as a short tag: "Verse 1" becomes V1, "Chorus" C, "Pre-Chorus" PC,
