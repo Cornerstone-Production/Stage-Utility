@@ -498,7 +498,7 @@ export async function run(args: Args, log: (line: string) => void = console.log)
   if (disagreement > 10) {
     problems.push(`the two ways of measuring the video's added delay disagree by up to ${disagreement.toFixed(0)} ms, so read the audio figure as that much less certain`);
   }
-  if (samples.length === 0) problems.push("no window produced a figure: check that both paths carry audio and video, and that the feed is live");
+  if (samples.length === 0) problems.push("no window produced a figure: check that both paths carry audio and video and that the feed is live (a pass-through feed's -listen video is another encode, so its frames cannot be matched)");
   return {
     relay,
     feed: args.feed,

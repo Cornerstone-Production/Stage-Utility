@@ -266,6 +266,39 @@ Nothing is logged per listener. The converter's own start, stop and failure line
 (below) are the record; a listening session the browser could not keep reads
 "Audio stopped, retrying" on the button.
 
+**Measuring.** `scripts/listen-measure.ts` reports what a feed's `-listen` path
+costs on a running server. Run it on the server itself, from its install folder,
+because the relay's RTSP port listens on loopback only; it needs `ffprobe` beside
+`ffmpeg`:
+
+```
+npx tsx scripts/listen-measure.ts 127.0.0.1:8554 <feed id> --minutes 30
+```
+
+The address is the RTSP port from the Advanced card (8554 unless changed). It reads
+`<id>` and `<id>-listen` from the relay, never from the encoder, though opening the
+feed's own path makes an on-demand pull feed dial its device. It prints the time to
+the first audio packet on `-listen` (cold if nobody had listened in the last 10
+seconds, since it includes the converter starting), then one line per `--interval`
+seconds (10) and a summary of three figures, each with its min, max and slope in
+ms per minute:
+
+- **Added audio delay**, `-listen` against the source: how much later a sound
+  arrives on `-listen` than the same sound on `<id>`. The two paths number their
+  timestamps from different origins; the copied video appears on both with an
+  identical checksum, which gives the shift, and the audio is compared through it.
+- **Added video delay**, from the same matched frames, as a cross-check: the tool
+  says so when this and the audio's method disagree by more than 10 ms.
+- **Audio/video offset inside `-listen`**: positive is the sound arriving later than
+  its picture.
+
+Resolution is about 10 to 20 ms. A feed converted from AAC is measurable; a
+pass-through feed's `-listen` carries a different encode of the video from the
+audio source address, so no frames match and the tool says so instead of guessing.
+`--json` prints the whole report, `--warmup` (4 seconds) discards each reader's
+first burst, and `--minutes` sets the length (30 by default, long enough to show
+drift).
+
 **CPU.** Copying the video is close to free. Encoding one stereo Opus stream is a
 few percent of one core on a desktop CPU, more on a Raspberry Pi. It runs per
 listened feed, not per listener, and only while someone listens.
