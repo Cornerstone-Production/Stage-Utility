@@ -21,7 +21,8 @@ import { announceDevices } from "./kiosk-presence.js";
 import { mergeScreen, sameScreen, screenFrom } from "./kiosk-screen-size.js";
 import type { BoundDevice, DeviceOutput, ScreenSize } from "../types/kiosk.js";
 import { DataStore } from "./data-store.js";
-import { asArray, asObject, checked, refuse, required } from "./restore-check.js";
+import { isSafeKey } from "./safe-key.js";
+import { asArray, asObject, checked, refuse } from "./restore-check.js";
 import { toError } from "./errors.js";
 
 /**
@@ -35,7 +36,9 @@ const restoreCheck = checked((raw) =>
   asArray(raw, "the bound devices").map((entry, i) => {
     const d = asObject(entry, `bound device ${i + 1}`);
     if (typeof d.id !== "string" || d.id === "") refuse(`bound device ${i + 1} has no device id`);
-    required(d.outputId, "string", `bound device ${i + 1}'s output`);
+    if (!isSafeKey(d.id)) refuse(`bound device ${i + 1}'s device id is not allowed`);
+    // The claim route refuses a claim that names no screen.
+    if (typeof d.outputId !== "string" || d.outputId === "") refuse(`bound device ${i + 1} names no screen`);
     const { label, ...rest } = d;
     return {
       ...rest,

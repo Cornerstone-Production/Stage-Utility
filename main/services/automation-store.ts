@@ -5,6 +5,7 @@
 
 import type { AutomationSettings, Rule } from "../types/automation.js";
 import { DataStore } from "./data-store.js";
+import { isSafeKey } from "./safe-key.js";
 import { asArray, asObject, checked, optional, refuse, required, uniqueIds } from "./restore-check.js";
 
 /**
@@ -21,6 +22,7 @@ const rulesRestoreCheck = checked(async (raw) => {
     const what = `rule ${i + 1}`;
     const rule = asObject(entry, what);
     required(rule.id, "string", `${what}'s id`);
+    if (!isSafeKey(rule.id as string)) refuse(`${what}'s id is not allowed`);
     required(rule.name, "string", `${what}'s name`);
     for (const step of ["trigger", "action"] as const) {
       required(asObject(rule[step], `${what}'s ${step}`).id, "string", `${what}'s ${step} id`);

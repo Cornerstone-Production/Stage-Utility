@@ -37,6 +37,7 @@ import {
   isHttpBaseUrl,
   isIconKey,
   normalizeBaseUrl,
+  normalizeCaptionColor,
 } from "./settings-rules.js";
 import { plural } from "./plural.js";
 import { randomUUID } from "crypto";
@@ -2989,8 +2990,7 @@ export class StageController {
     if (!key) return this.state;
     const next = { ...this.state.captionChannelColors };
     if (color && CAPTION_COLOR.test(color.trim())) {
-      const c = color.trim();
-      next[key] = c.startsWith("#") ? c : `#${c}`;
+      next[key] = normalizeCaptionColor(color);
     } else {
       delete next[key]; // null/invalid → revert to auto
     }

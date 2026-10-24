@@ -26,25 +26,28 @@ const SCREEN = { id: "1", name: "Main", viewId: null };
 const CASES: Record<string, Case> = {
   accentColor: { bad: "red", says: "#rrggbb" },
   allowedServiceTypeIds: { bad: [123], says: "list of text" },
-  appIcon: { bad: "javascript:alert(1)", says: "image" },
-  appIcon192: { bad: "https://example.org/x.png", says: "image" },
-  appIcon512: { bad: 5, says: "image" },
-  appIconApple: { bad: "data:text/html,x", says: "image" },
+  appIcon: { bad: "javascript:alert(1)", says: "PNG data URL" },
+  appIcon192: { bad: "https://example.org/x.png", says: "PNG data URL" },
+  appIcon512: { bad: 5, says: "PNG data URL" },
+  appIconApple: { bad: "data:text/html,x", says: "PNG data URL" },
   appIconBackground: { bad: "black", says: "#rrggbb" },
   appIconCrop: { in: { scale: "big", x: 0, y: 0 }, out: null },
-  appIconMaskable: { bad: {}, says: "image" },
+  appIconMaskable: { bad: {}, says: "PNG data URL" },
   appIconOriginal: { bad: "/etc/passwd", says: "image" },
   appLogo: { bad: "javascript:alert(1)", says: "image" },
   appLogoCrop: { in: { scale: 1, x: 2, y: 3, extra: true }, out: { scale: 1, x: 2, y: 3 } },
   appLogoMonochrome: { bad: "yes", says: "true or false" },
   appLogoOriginal: { bad: "data:image/png;base64," + "A".repeat(2_000_001), says: "too large" },
   appName: { in: "   ", out: "Stage Utility" },
-  autoUpdate: { bad: { mode: "whenever", hour: 3, dayOfWeek: null }, says: "update mode" },
+  autoUpdate: { in: { mode: "auto-full", hour: 25, dayOfWeek: null, extra: 1 }, out: { mode: "auto-full", hour: 23, dayOfWeek: null } },
   autoUpdateMachines: { bad: 1, says: "true or false" },
-  backupSchedule: { in: { enabled: true, intervalDays: 0.4, keep: 500, destination: " /mnt/x " }, out: { enabled: true, intervalDays: 1, keep: 100, destination: "/mnt/x" } },
-  baptismAutoStart: { in: { enabled: true, testimonyKeyword: "x".repeat(90) }, out: { enabled: true, testimonyKeyword: "x".repeat(80) } },
+  backupSchedule: {
+    in: { enabled: true, intervalDays: 0.4, keep: 500, destination: " /mnt/x ", lastRunAt: null, extra: 1 },
+    out: { enabled: true, intervalDays: 1, keep: 100, destination: "/mnt/x", lastRunAt: null },
+  },
+  baptismAutoStart: { in: { enabled: true, testimonyKeyword: "x".repeat(90), extra: 1 }, out: { enabled: true, testimonyKeyword: "x".repeat(80) } },
   baptismDefaultMode: { bad: "solo", says: "one of" },
-  captionChannelColors: { bad: { Pastor: "red" }, says: "hex colour" },
+  captionChannelColors: { in: { Pastor: " ffcc00 ", Band: "#00ff00" }, out: { Pastor: "#ffcc00", Band: "#00ff00" } },
   cardHairlineRaised: { bad: "yes", says: "true or false" },
   checklistNoteCategories: { bad: "Band", says: "list" },
   checklistNoteTeams: { bad: [1], says: "list of text" },
@@ -76,7 +79,10 @@ const CASES: Record<string, Case> = {
   planSwitcherMode: { bad: "random", says: "one of" },
   planTitle: { bad: 1, says: "text or null" },
   publicUrl: { bad: "javascript:alert(1)//", says: "http or https" },
-  reconnectSchedule: { in: { enabled: true, leadMin: 2000.4, tailMin: -5, dormantMin: 0 }, out: { enabled: true, leadMin: 1440, tailMin: 0, dormantMin: 1 } },
+  reconnectSchedule: {
+    in: { enabled: true, leadMin: 2000.4, tailMin: -5, dormantMin: 0, extra: 1 },
+    out: { enabled: true, leadMin: 1440, tailMin: 0, dormantMin: 1 },
+  },
   screenRolesFromView: { bad: "y", says: "true or false" },
   serverId: { bad: "not-an-id", says: "server id" },
   serviceTypeId: { bad: 123, says: "text or null" },
@@ -85,14 +91,28 @@ const CASES: Record<string, Case> = {
   splTrendMetric: { bad: 1, says: "text or null" },
   splTrendShown: { bad: "y", says: "true or false" },
   splVisibleMetrics: { bad: "laeq", says: "list" },
-  taperWindow: { bad: { preMin: "an hour" }, says: "a number" },
+  taperWindow: { in: { preMin: 30.4, postMin: 400, extra: 1 }, out: { preMin: 30, postMin: 240 } },
   timezone: { bad: "Mars/Olympus_Mons", says: "time zone" },
   wirelessMeterRateMs: { in: 0, out: 100 },
 };
 
-/** Further screen rules, beyond the one case per key above. */
+/** Further rules, beyond the one case per key above: values a setter refuses. */
+const MORE_BAD: { settings: Record<string, unknown>; says: string }[] = [
+  { settings: { autoUpdate: { mode: "whenever", hour: 3, dayOfWeek: null } }, says: "update mode" },
+  { settings: { taperWindow: { preMin: "an hour" } }, says: "a number" },
+  { settings: { captionChannelColors: { Pastor: "red" } }, says: "hex colour" },
+  { settings: { backupSchedule: { lastRunAt: "yesterday" } }, says: "lastRunAt" },
+  // parseAppIcon takes all five images or none.
+  { settings: { appIcon: "/branding-images/0123456789abcdef.png", appIcon192: null }, says: "not all of" },
+];
+
+/** Further screen rules. */
 const SCREEN_CASES: { screens: unknown[]; says: string }[] = [
   { screens: [{ ...SCREEN, slug: "Bad Slug!" }], says: "lowercase" },
+  { screens: [{ ...SCREEN, slug: "preview-<b>/../x" }], says: "lowercase" },
+  { screens: [{ ...SCREEN, slug: "settings" }, { id: "2", name: "Two", slug: "settings" }], says: "built-in page" },
+  { screens: [{ ...SCREEN, id: "" }], says: "id is not allowed" },
+  { screens: [{ ...SCREEN, id: "a/b" }], says: "id is not allowed" },
   { screens: [{ ...SCREEN, slug: "lobby" }, { id: "2", name: "Two", slug: "lobby" }], says: "already used" },
   { screens: [{ ...SCREEN, slug: "2" }, { id: "2", name: "Two" }], says: "already used" },
   { screens: [{ ...SCREEN, id: "__proto__" }], says: "id is not allowed" },
@@ -125,6 +145,19 @@ describe("settings.json restore check", () => {
       assert.ok(!result.ok && result.reason.includes(says), !result.ok ? result.reason : "accepted");
     });
   }
+
+  for (const { settings, says } of MORE_BAD) {
+    test(`refuses ${JSON.stringify(settings).slice(0, 60)}`, async () => {
+      const result = await settingsRestoreCheck(settings);
+      assert.ok(!result.ok && result.reason.includes(says), !result.ok ? result.reason : "accepted");
+    });
+  }
+
+  test("a screen's address is stored as setOutputSlug stores it, and an empty one is removed", async () => {
+    const result = await settingsRestoreCheck({ outputs: [{ ...SCREEN, slug: " Lobby-TV " }, { id: "2", name: "Two", slug: "  " }] });
+    assert.ok(result.ok, !result.ok ? result.reason : "");
+    assert.deepEqual((result.value as { outputs: unknown[] }).outputs, [{ ...SCREEN, slug: "lobby-tv" }, { id: "2", name: "Two" }]);
+  });
 
   test("a screen whose address has since become a built-in page is left for the start-up migration", async () => {
     const result = await settingsRestoreCheck({ outputs: [{ ...SCREEN, slug: "settings" }] });

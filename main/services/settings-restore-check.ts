@@ -19,10 +19,10 @@ import { isRotation, isVideoMode } from "../types/output-format.js";
 import { isUpdateMode } from "../types/state.js";
 import { isStorableTextSize } from "../types/text-size.js";
 import { isDisplayKind } from "../types/views.js";
-import { parseCrop } from "./app-icon.js";
+import { ICON_IMAGE_KEYS, iconPngProblem, parseCrop, type IconImageField } from "./app-icon.js";
 import { isValidTimeZone } from "./app-timezone.js";
-import { brandingImageProblem } from "./branding-image-store.js";
-import { isReservedSlug, validateSlug } from "./reserved-slugs.js";
+import { brandingImageProblem, looksLikeStoredRef } from "./branding-image-store.js";
+import { SLUG_PATTERN, isReservedSlug, validateSlug } from "./reserved-slugs.js";
 import {
   asArray,
   asObject,
@@ -55,9 +55,15 @@ import {
   isHttpBaseUrl,
   isIconKey,
   normalizeBaseUrl,
+  normalizeCaptionColor,
 } from "./settings-rules.js";
 
 type KeyCheck = (value: unknown, key: string) => unknown;
+
+/** Only `fields` of `o`, as the routes copy only the fields they know. */
+function pick(o: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(fields.filter((f) => Object.hasOwn(o, f)).map((f) => [f, o[f]]));
+}
 
 const bool: KeyCheck = (v, k) => {
   required(v, "boolean", k);
@@ -91,6 +97,28 @@ const image: KeyCheck = (v, k) => {
   return v;
 };
 
+/**
+ * One of the icon's images, as parseAppIcon takes it and the settings store
+ * keeps it: a stored image (what a saved icon becomes), or a PNG of the exact
+ * size it is served at. That the five come as a set is checked across keys,
+ * in iconSetProblem.
+ */
+const iconImage =
+  (field: IconImageField): KeyCheck =>
+  (v, k) => {
+    if (v === null || looksLikeStoredRef(v)) return v;
+    const problem = iconPngProblem(field, v, k);
+    if (problem) refuse(problem);
+    return v;
+  };
+
+/** parseAppIcon takes a whole icon or none: all five images, or no image. */
+function iconSetProblem(settings: Record<string, unknown>): string | null {
+  const keys = Object.values(ICON_IMAGE_KEYS);
+  const set = keys.filter((key) => settings[key] !== undefined && settings[key] !== null);
+  return set.length === 0 || set.length === keys.length ? null : `the app icon has ${set.join(", ")} but not all of ${keys.join(", ")}`;
+}
+
 /** POST /api/branding reads a crop with parseCrop, which makes a bad one null. */
 const crop: KeyCheck = (v) => (v === null ? null : parseCrop(v));
 
@@ -110,42 +138,52 @@ const iconMap =
     return v;
   };
 
-/** setCaptionChannelColor: a channel name and CAPTION_COLOR. */
+/** setCaptionChannelColor: a channel name and CAPTION_COLOR, stored with its `#`. */
 const captionColors: KeyCheck = (v, k) => {
   const map = asObject(v, k);
   safeKeys(map, k);
-  for (const [channel, c] of Object.entries(map)) {
-    if (typeof c !== "string" || !CAPTION_COLOR.test(c)) refuse(`${k}.${channel} must be a hex colour`);
-  }
-  return v;
+  return Object.fromEntries(
+    Object.entries(map).map(([channel, c]) => {
+      if (typeof c !== "string" || !CAPTION_COLOR.test(c.trim())) refuse(`${k}.${channel} must be a hex colour`);
+      return [channel, normalizeCaptionColor(c)];
+    }),
+  );
 };
 
 /** Every other screen's id and address: what setOutputSlug's takenSlugs holds. */
 function takenBy(list: readonly Record<string, unknown>[], self: Record<string, unknown>): string[] {
   return list
     .filter((other) => other !== self)
-    .flatMap((other) => [other.id, other.slug])
+    .flatMap((other) => [other.id, typeof other.slug === "string" ? other.slug.trim().toLowerCase() : undefined])
     .filter((s): s is string => typeof s === "string" && s !== "");
 }
 
+/** An output id: what the allocator and every older build gave one. */
+const OUTPUT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
 /**
- * The screens, as the Outputs routes keep them: a unique id that is a safe key,
- * a name, an address validateSlug takes against every other screen's id and
- * address (a reserved one is left to the start-up migration), and each per-screen
- * setting held to its own setter's rule.
+ * The screens, as the Outputs routes keep them: a unique id of the allocator's
+ * shape, a name, an address held to validateSlug against every other screen's
+ * id and address and stored as setOutputSlug stores it (trimmed, lowercased,
+ * absent when empty), and each per-screen setting held to its setter's rule.
+ * An address that is well formed and unique but has since become a built-in
+ * page is the one validateSlug refusal let through: the start-up migration
+ * renames it and logs it.
  */
 const outputs: KeyCheck = (v, k) => {
   const list = asArray(v, k).map((entry, i) => asObject(entry, `screen ${i + 1}`));
-  list.forEach((o, i) => {
+  const out = list.map((o, i) => {
     const what = `screen "${typeof o.name === "string" ? o.name.slice(0, 40) : i + 1}"`;
     required(o.id, "string", `${what}'s id`);
-    if (!isSafeKey(o.id as string)) refuse(`${what}'s id is not allowed`);
+    if (!OUTPUT_ID.test(o.id as string) || !isSafeKey(o.id as string)) refuse(`${what}'s id is not allowed`);
     required(o.name, "string", `${what}'s name`);
     optional(o.slug, "string", `${what}'s address`);
     const slug = typeof o.slug === "string" ? o.slug.trim().toLowerCase() : "";
-    if (slug && !isReservedSlug(slug)) {
-      const verdict = validateSlug(slug, takenBy(list, o));
-      if (!verdict.ok) refuse(`${what}'s address: ${verdict.reason}`);
+    if (slug) {
+      const taken = takenBy(list, o);
+      const builtInOnly = SLUG_PATTERN.test(slug) && isReservedSlug(slug) && !taken.includes(slug);
+      const verdict = validateSlug(slug, taken);
+      if (!verdict.ok && !builtInOnly) refuse(`${what}'s address: ${verdict.reason}`);
     }
     textOrNull(o.viewId, `${what}'s view`);
     for (const f of ["blackout", "locked", "hideTopBar", "allowHls"]) optional(o[f], "boolean", `${what}'s ${f}`);
@@ -153,9 +191,11 @@ const outputs: KeyCheck = (v, k) => {
     if (o.textSize !== undefined && !isStorableTextSize(o.textSize)) refuse(`${what}'s text size is not one a screen takes`);
     if (o.rotation !== undefined && !isRotation(o.rotation)) refuse(`${what}'s rotation is not one a screen takes`);
     if (o.videoMode !== undefined && !isVideoMode(o.videoMode)) refuse(`${what}'s video mode is not one a screen takes`);
+    const { slug: _slug, ...rest } = o;
+    return slug ? { ...rest, slug } : rest;
   });
-  uniqueIds(list, "the screens");
-  return list;
+  uniqueIds(out, "the screens");
+  return out;
 };
 
 /**
@@ -206,7 +246,7 @@ const integrationEnabled: KeyCheck = (v, k) => {
 
 /** setBaptismAutoStart: a boolean, and a keyword cut to MAX_TESTIMONY_KEYWORD. */
 const baptismAutoStart: KeyCheck = (v, k) => {
-  const b = asObject(v, k);
+  const b = pick(asObject(v, k), ["enabled", "testimonyKeyword"]);
   optional(b.enabled, "boolean", `${k}.enabled`);
   optional(b.testimonyKeyword, "string", `${k}.testimonyKeyword`);
   return typeof b.testimonyKeyword === "string" ? { ...b, testimonyKeyword: b.testimonyKeyword.slice(0, MAX_TESTIMONY_KEYWORD) } : b;
@@ -214,7 +254,8 @@ const baptismAutoStart: KeyCheck = (v, k) => {
 
 /** POST /api/update/auto through setAutoUpdate's clamps. */
 const autoUpdate: KeyCheck = (v, k) => {
-  const a = asObject(v, k);
+  // `enabled` is the pre-mode flag, kept so migrateAutoUpdate can read an old backup.
+  const a = pick(asObject(v, k), ["mode", "enabled", "dayOfWeek", "hour"]);
   if (a.mode !== undefined && !isUpdateMode(a.mode)) refuse(`${k}.mode is not an update mode`);
   optional(a.enabled, "boolean", `${k}.enabled`);
   const out: Record<string, unknown> = { ...a };
@@ -227,7 +268,7 @@ const autoUpdate: KeyCheck = (v, k) => {
 const clampedFields =
   (ranges: Record<string, readonly [number, number]>, flags: string[] = []): KeyCheck =>
   (v, k) => {
-    const o = asObject(v, k);
+    const o = pick(asObject(v, k), [...flags, ...Object.keys(ranges)]);
     for (const f of flags) optional(o[f], "boolean", `${k}.${f}`);
     for (const f of Object.keys(ranges)) if (o[f] !== undefined) number(o[f], `${k}.${f}`);
     return clampFields(o, ranges);
@@ -235,10 +276,15 @@ const clampedFields =
 
 /** POST /api/backup/schedule through clampSchedule. */
 const backupSchedule: KeyCheck = (v, k) => {
-  const o = asObject(v, k);
+  const o = pick(asObject(v, k), ["enabled", "includeArchive", "intervalDays", "keep", "destination", "lastRunAt", "lastError"]);
   for (const f of ["enabled", "includeArchive"]) optional(o[f], "boolean", `${k}.${f}`);
   for (const f of ["intervalDays", "keep"]) if (o[f] !== undefined) number(o[f], `${k}.${f}`);
   optional(o.destination, "string", `${k}.destination`);
+  // What runNow writes after a run: an ISO time, and the failure's message.
+  if (o.lastRunAt !== undefined && o.lastRunAt !== null && !(typeof o.lastRunAt === "string" && !Number.isNaN(Date.parse(o.lastRunAt)))) {
+    refuse(`${k}.lastRunAt must be a time or null`);
+  }
+  textOrNull(o.lastError, `${k}.lastError`);
   return clampSchedule(o);
 };
 
@@ -300,13 +346,13 @@ const KEYS: { [K in keyof Required<SettingsData>]: KeyCheck } = {
   defaultAvatar: image,
   defaultAvatarOriginal: image,
   defaultAvatarCrop: crop,
-  appIcon: image,
+  appIcon: iconImage("art"),
   appIconOriginal: image,
   appIconCrop: crop,
-  appIconApple: image,
-  appIcon192: image,
-  appIcon512: image,
-  appIconMaskable: image,
+  appIconApple: iconImage("apple"),
+  appIcon192: iconImage("any192"),
+  appIcon512: iconImage("any512"),
+  appIconMaskable: iconImage("maskable"),
   appIconBackground: hex6,
   // Display settings
   showQr: bool,
@@ -374,6 +420,8 @@ export const settingsRestoreCheck = checked(async (raw) => {
     }
     out[key] = await KEYS[key as keyof SettingsData](value, key);
   }
+  const iconProblem = iconSetProblem(out);
+  if (iconProblem) refuse(iconProblem);
   if (dropped.length > 0) {
     console.warn(`[config-snapshot] settings.json: dropped ${scrub(dropped.length)} key(s) this build does not read: ${scrub(dropped.join(", "), 400)}`);
   }

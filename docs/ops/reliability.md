@@ -320,13 +320,17 @@ Two backups exist in the app, and they cover different things:
 
 A restore is checked the way a save is. Every file in the snapshot goes through
 the rules its settings page applies — a video feed's address, a cue's name, a
-screen's address, a port range, a colour — and a value a save would have trimmed,
-clamped or dropped is trimmed, clamped or dropped the same way. Every uploaded
-image in it must be one the app could have saved: the right file type, within
-12 MB, and named by its own content hash. If any file or image breaks a rule, the
-whole restore is refused with each one and the reason, and nothing on the machine
-changes: nothing is written, no stored credential is cleared, and nothing that
-runs in the background is paused.
+screen's address, a port range, a colour. Where a save trims, lowercases, clamps
+or leaves out a value rather than refusing it, the restore does the same to that
+value; where a save refuses, the restore refuses. A value of a type no settings
+page sends (text where a number belongs, say) is refused. Every uploaded image in it must
+have the name saving it would give it (its own content hash and a known image
+extension) and be within 12 MB; a branding image must also be the type its name
+says, as a branding upload is checked, while a layout image is held to only what
+a layout upload checks, which has never included its contents. If any file or
+image breaks a rule, the whole restore is refused with each one and the reason,
+and nothing on the machine changes: nothing is written, no stored credential is
+cleared, and nothing that runs in the background is paused.
 
 - A restore never writes `secrets.bin` or `encryption.key`. A credential found
   inside a config file (a wireless password, an integration's API key) is dropped
@@ -335,7 +339,10 @@ runs in the background is paused.
 - An automation rule with fields that need attention restores as it was saved,
   showing Needs setup, as it does after an upgrade; a cue name that would clash
   or is not usable refuses the restore.
-- A `settings.json` key no part of the app reads is dropped and logged. A file
+- A `settings.json` key no part of the app reads is dropped and logged. A field
+  inside a setting that its page does not send (in the backup schedule, the
+  update window, the reconnect and capture windows, the baptism auto-start) is
+  dropped, as the page's own save would. A file
   this build does not keep, and an image outside the two image folders, is
   skipped and logged.
 - A snapshot listing more files than there are config stores, or more than 2000

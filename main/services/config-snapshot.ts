@@ -20,7 +20,8 @@ import { APP_ROOT } from "./app-root.js";
 
 import { getUserDataPath } from "./app-paths.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
-import { listImages, readImage, restoreImage, storedImageProblem } from "./image-files.js";
+import { listImages, readImage, restoreImage, storedImageProblem, type ContentRule } from "./image-files.js";
+import { LAYOUT_IMAGE_DIR, LAYOUT_IMAGE_RULE } from "./layout-image-store.js";
 import { configFilenames, renamedStores, restoreCheckFor, storesOfClass } from "./stores.js";
 import { initialFloor, type IdKind } from "./id-allocator.js";
 import { scrub } from "./scrub.js";
@@ -57,7 +58,15 @@ export function runtimeFiles(): string[] {
 
 /** Image directories carried in a snapshot. Allowlisted for the same reason
  *  CONFIG_FILES is: it bounds what an applied bundle can write. */
-const IMAGE_DIRS = [BRANDING_IMAGE_DIR, "layout-images"] as const;
+const IMAGE_DIRS = [BRANDING_IMAGE_DIR, LAYOUT_IMAGE_DIR] as const;
+
+/** What saving an image into each folder checks, which is what a restore holds
+ *  that folder's images to: branding uploads check content, layout uploads never
+ *  have, and a backup of a layout image a build stored must restore. */
+const IMAGE_RULES: Record<(typeof IMAGE_DIRS)[number], ContentRule> = {
+  [BRANDING_IMAGE_DIR]: { checkContent: true },
+  [LAYOUT_IMAGE_DIR]: LAYOUT_IMAGE_RULE,
+};
 
 /**
  * Fields stripped from a snapshot, by file.
@@ -544,7 +553,7 @@ class ConfigSnapshotService {
         failures.push(`${ref}: is not base64`);
         continue;
       }
-      const problem = storedImageProblem(file, bytes);
+      const problem = storedImageProblem(file, bytes, IMAGE_RULES[dir as (typeof IMAGE_DIRS)[number]]);
       if (problem) failures.push(`${ref}: ${problem}`);
       else out.push({ dir, file, bytes });
     }

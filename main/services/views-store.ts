@@ -12,6 +12,7 @@ import { isDisplayKind, isLayoutShape, isSlotsLayoutValue } from "../types/views
 import { DataStore } from "./data-store.js";
 import { asArray, checked, namedEntries, optional, refuse, textOrNull, uniqueIds } from "./restore-check.js";
 import { adoptLegacyViewFields } from "./servicecue-legacy-names.js";
+import { isSafeKey } from "./safe-key.js";
 
 /**
  * A restored views.json, read through the legacy-field adoption a load applies
@@ -26,6 +27,8 @@ const restoreCheck = checked((raw) => {
   const list = namedEntries(views, "the views");
   list.forEach((v, i) => {
     const what = `view "${String(v.name).slice(0, 40) || i + 1}"`;
+    // slots.json, notes and screens key on a view's id.
+    if (!isSafeKey(v.id as string)) refuse(`${what}'s id is not allowed`);
     if (!isDisplayKind(v.kind)) refuse(`${what} has a kind this app does not have`);
     if (v.layout !== undefined && v.layout !== null && !isLayoutShape(v.layout)) refuse(`${what}'s layout is not a layout`);
     if (v.slotsLayout !== undefined && !isSlotsLayoutValue(v.slotsLayout)) refuse(`${what}'s slots layout must be an object or null`);

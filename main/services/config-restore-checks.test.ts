@@ -274,6 +274,20 @@ describe("config restore checks", () => {
     await assert.rejects(() => configSnapshot.apply(bundleOf({ "views.json": [view, view] })), /lists the id "v1" more than once/);
   });
 
+  test("refuses ids that would reach the prototype, and a binding to no screen", async () => {
+    const rule = (GOOD["automation-rules.json"] as object[])[0];
+    const view = (GOOD["views.json"] as object[])[0];
+    const cases: [string, unknown, RegExp][] = [
+      ["automation-rules.json", [{ ...rule, id: "__proto__" }], /rule 1's id is not allowed/],
+      ["views.json", [{ ...view, id: "constructor" }], /id is not allowed/],
+      ["kiosk-devices.json", [{ id: "prototype", token: "", outputId: "1", macs: [] }], /device id is not allowed/],
+      ["kiosk-devices.json", [{ id: "dev-1", token: "", outputId: "", macs: [] }], /names no screen/],
+    ];
+    for (const [name, value, says] of cases) {
+      await assert.rejects(() => configSnapshot.apply(bundleOf({ [name]: value })), says);
+    }
+  });
+
   test("a bound device restored without its MAC list gets an empty one", async () => {
     await configSnapshot.apply(bundleOf({ "kiosk-devices.json": [{ id: "dev-1", token: "x", outputId: "1" }] }));
     assert.deepEqual(await readOnDisk("kiosk-devices.json"), [{ id: "dev-1", outputId: "1", macs: [], token: "" }]);

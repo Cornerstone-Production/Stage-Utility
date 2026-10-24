@@ -1468,12 +1468,6 @@ export interface ResolvedOutput {
  * it: the PATCH path has always checked, and an imported bundle is a file off
  * somebody's laptop.
  */
-/** A view's `slotsLayout` as PATCH /api/views/:id and a restore take it: an
- *  object, or null for the default. An array is neither. */
-export function isSlotsLayoutValue(v: unknown): v is SlotsLayout | null {
-  return v === null || (typeof v === "object" && !Array.isArray(v));
-}
-
 export function isLayoutShape(v: unknown): v is LayoutDTO {
   if (!v || typeof v !== "object") return false;
   const l = v as { objects?: unknown; canvas?: unknown };
@@ -1484,4 +1478,10 @@ export function isLayoutShape(v: unknown): v is LayoutDTO {
     typeof c.width === "number" && Number.isFinite(c.width) &&
     typeof c.height === "number" && Number.isFinite(c.height)
   );
+}
+
+/** A view's `slotsLayout` as PATCH /api/views/:id and a restore take it: an
+ *  object, or null for the default. An array is neither. */
+export function isSlotsLayoutValue(v: unknown): v is SlotsLayout | null {
+  return v === null || (typeof v === "object" && !Array.isArray(v));
 }

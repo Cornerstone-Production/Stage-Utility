@@ -26,6 +26,12 @@ export const ICON_GLYPH = /^[A-Za-z][A-Za-z0-9]{0,63}$/;
 /** A caption channel colour, with or without its `#`. */
 export const CAPTION_COLOR = /^#?[0-9a-f]{3,8}$/i;
 
+/** A caption colour as setCaptionChannelColor stores it: trimmed, with its `#`. */
+export function normalizeCaptionColor(color: string): string {
+  const c = color.trim();
+  return c.startsWith("#") ? c : `#${c}`;
+}
+
 /** The longest keyword that starts the baptism testimonies by itself. */
 export const MAX_TESTIMONY_KEYWORD = 80;
 
