@@ -267,10 +267,15 @@ failure lines (below) are the record. A browser whose listening session keeps
 failing writes its own lines on `[video]`, one per failure streak and worded about
 the sound (`listening to "<feed>" failed (…); retrying`, then
 `listening to "<feed>" failed (…); the picture plays without sound` when it gives
-up after three drops in a row, or at once for a refusal the relay cannot recover
-from), and `listening to "<feed>" works again` on recovery. They never read as the
+up after three drops in a row, or at once when the relay refuses the path with a 400,
+406, 415 or 422), and `listening to "<feed>" works again` on recovery. They never read as the
 feed failing. The button shows "Audio stopped, retrying" while it retries and "Audio
 could not start: <reason>" once it has given up, and the picture plays on without sound.
+A drop is a dropped or refused connection, no picture within 5 seconds of connecting
+(a cold converter can take that long), ICE failing before it connected, or the video
+element erroring; a session that plays for 10 seconds starts the count over. Listening
+keeps its own count and its own log streak, so asking for sound never changes the
+picture's retry delay or its log lines.
 
 **Measuring.** `scripts/listen-measure.ts` reports what a feed's `-listen` path
 costs on a running server. Run it on the server itself, from its install folder,

@@ -2097,3 +2097,228 @@ test("switching the sound off and on starts the failure count and the backoff ov
     g.restore();
   }
 });
+
+// ── listening: adoption, streaks, counts ───────────────────────────────────
+
+/** A relay feed listened to, whose own path answers `own` and whose `-listen` path answers `listen`, both changeable mid-test. */
+function listeningRig(video: FakeVideo, logs: string[], failures: string[], initial: { listenPath: string | null; own?: FetchBehavior; listen?: FetchBehavior }) {
+  const answers: { own: FetchBehavior; listen: FetchBehavior } = { own: initial.own ?? "succeed", listen: initial.listen ?? "succeed" };
+  let g: ReturnType<typeof stubGlobals>;
+  g = stubGlobals(() => (g.calls.at(-1)!.url.includes("-listen/") ? answers.listen : answers.own));
+  const hook = renderHook(
+    ({ listenPath }: { listenPath: string | null }) =>
+      useVideoSession({
+        active: true,
+        feed: RELAY_LIVE,
+        feedDeleted: false,
+        video: video as unknown as HTMLVideoElement,
+        allowHls: true,
+        relayRunning: true,
+        listenPath,
+        onLog: (l) => logs.push(l),
+        onListenFailed: (r) => failures.push(r),
+      }),
+    { initialProps: { listenPath: initial.listenPath } },
+  );
+  const posts = (which: "own" | "listen") =>
+    g.calls.filter((c) => c.method === "POST" && c.url.includes("-listen/") === (which === "listen")).length;
+  return { g, answers, posts, ...hook };
+}
+const tickBy = (ms: number) =>
+  act(async () => {
+    mock.timers.tick(ms);
+    await flush();
+    await flush();
+    await flush();
+  });
+
+test("a direct feed listened to during an HLS fallback never adopts the probe's picture-only session", async () => {
+  const g = stubGlobals(refuseFirstThen("succeed"));
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const undoHls = allowNativeHls();
+  const video = new FakeVideo();
+  const whepPosts = () => g.calls.filter((c) => c.method === "POST" && c.url.endsWith("/whep")).length;
+  try {
+    // A direct feed's listening address IS its own: the same URL the probe opens.
+    const phases: string[] = [];
+    const { rerender } = renderHook(
+      ({ listenPath }: { listenPath: string | null }) => {
+        const r = useVideoSession({ active: true, feed: RELAY_LIVE, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true, listenPath });
+        phases.push(r.phase);
+        return r;
+      },
+      { initialProps: { listenPath: null as string | null } },
+    );
+    await act(async () => {
+      await flush();
+    });
+    act(() => video.fireFrame()); // HLS is up: the first POST was refused
+    rerender({ listenPath: "f" });
+    await act(async () => {
+      await flush();
+    });
+    FakePeerConnection.trackStream = { id: "probe-stream" };
+    await tickBy(WEBRTC_RETRY_AFTER_MS);
+    assert.equal(whepPosts(), 2, "the probe's own POST");
+    const probe = FakePeerConnection.instances.at(-1)!;
+    assert.deepEqual(probe.transceivers, ["video"], "the probe is picture only");
+    probe.framesReceived = 4;
+    const sinceProbe = phases.length;
+    await act(async () => {
+      mock.timers.tick(PROBE_POLL_MS);
+      await flush();
+      await flush();
+    });
+    assert.ok(!phases.slice(sinceProbe).some((p) => p === "live" || p === "delayed"), `the listening attempt read a picture's phase before its first frame: ${phases.slice(sinceProbe).join(",")}`);
+    assert.equal(whepPosts(), 3, "the listening attempt took the probe's session instead of opening its own");
+    assert.deepEqual(FakePeerConnection.instances.at(-1)!.transceivers, ["video", "audio"], "the session playing is not one that asked for audio");
+    assert.equal(probe.closed, true, "the unused probe session was left open");
+  } finally {
+    cleanup();
+    undoHls();
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("listening that fails and gives up leaves the picture's log streak alone", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  const failures: string[] = [];
+  const rig = listeningRig(video, logs, failures, { listenPath: LISTEN_PATH, listen: { status: 503 } });
+  try {
+    await act(async () => {
+      await flush();
+    });
+    await tickBy(RETRY_MAX_MS);
+    await tickBy(RETRY_MAX_MS);
+    assert.equal(failures.length, 1, "the sound was not given up");
+    // The sound is released and the picture plays and holds.
+    rig.rerender({ listenPath: null });
+    await act(async () => {
+      await flush();
+    });
+    act(() => video.fireFrame());
+    await tickBy(RESET_AFTER_PLAYING_MS + 1);
+    assert.ok(!logs.some((l) => l.includes("is playing again")), `the picture's recovery was announced for the sound's failure: ${JSON.stringify(logs)}`);
+  } finally {
+    cleanup();
+    mock.timers.reset();
+    rig.g.restore();
+  }
+});
+
+test("a picture already failing does not hide the first listening failure", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const logs2: string[] = [];
+  const rig2 = listeningRig(new FakeVideo(), logs2, [], { listenPath: null, own: { status: 503 }, listen: { status: 503 } });
+  try {
+    await act(async () => {
+      await flush();
+    });
+    assert.ok(logs2.some((l) => l.startsWith('"F" failed on this screen')), "the picture's own failure was not logged");
+    rig2.rerender({ listenPath: LISTEN_PATH });
+    await act(async () => {
+      await flush();
+    });
+    await tickBy(RETRY_MAX_MS);
+    assert.ok(logs2.some((l) => l.startsWith('listening to "F" failed')), `a failing picture swallowed the listening failure: ${JSON.stringify(logs2)}`);
+  } finally {
+    cleanup();
+    mock.timers.reset();
+    rig2.g.restore();
+  }
+});
+
+test("three drops in a row means in a row: a session that held for RESET_AFTER_PLAYING_MS starts the count over", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const video = new FakeVideo();
+  const failures: string[] = [];
+  const rig = listeningRig(video, [], failures, { listenPath: LISTEN_PATH, listen: { status: 503 } });
+  try {
+    await act(async () => {
+      await flush();
+    }); // drop 1
+    rig.answers.listen = "succeed";
+    await tickBy(RETRY_MIN_MS);
+    act(() => video.fireFrame());
+    await tickBy(RESET_AFTER_PLAYING_MS + 1); // it held: the count is over
+    rig.answers.listen = { status: 503 };
+    act(() => FakePeerConnection.instances.at(-1)!.setConnectionState("failed"));
+    // A drop after the hold, then its retry answering 503: two drops of the new count, three counting the one before the hold.
+    await tickBy(DROP_GRACE_MS + 10);
+    await tickBy(2 * RETRY_MIN_MS + 10);
+    assert.equal(failures.length, 0, `gave up on a count that should have restarted: ${JSON.stringify(failures)}`);
+    const before = rig.posts("listen");
+    await tickBy(2 * RETRY_MIN_MS + 10);
+    assert.equal(rig.posts("listen"), before + 1, "it stopped retrying");
+  } finally {
+    cleanup();
+    mock.timers.reset();
+    rig.g.restore();
+  }
+});
+
+/** A listening session failing by `drive` is a drop: logged as listening's, not given up on, and retried. */
+async function assertListeningDropRetries(name: string, drive: (video: FakeVideo) => Promise<void> | void) {
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  const failures: string[] = [];
+  const rig = listeningRig(video, logs, failures, { listenPath: LISTEN_PATH });
+  try {
+    await act(async () => {
+      await flush();
+    });
+    await drive(video);
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(failures.length, 0, `${name}: gave up at once`);
+    assert.ok(logs.some((l) => l.startsWith('listening to "F" failed') && l.includes("retrying")), `${name}: ${JSON.stringify(logs)}`);
+    await tickBy(RETRY_MIN_MS + 5);
+    assert.equal(rig.posts("listen"), 2, `${name}: no retry`);
+  } finally {
+    cleanup();
+    mock.timers.reset();
+    rig.g.restore();
+  }
+}
+
+test("a listening session that connects but shows no frame is a drop toward the three, not an instant give-up", () =>
+  assertListeningDropRetries("no frame", () => tickBy(CONNECT_TIMEOUT_MS + 10)));
+
+test("a listening session whose ICE fails before connecting is a drop toward the three", () =>
+  assertListeningDropRetries("ICE failed", () => act(() => FakePeerConnection.instances.at(-1)!.setConnectionState("failed"))));
+
+test("a listening session whose element errors before a frame is a drop toward the three", () =>
+  assertListeningDropRetries("element error", (v) => act(() => v.fireError())));
+
+test("a tap on Listen leaves the picture's own backoff where it was", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const rig = listeningRig(new FakeVideo(), [], [], { listenPath: null, own: { status: 503 } });
+  try {
+    await act(async () => {
+      await flush();
+    }); // picture drop 1, retry in 1 s
+    await tickBy(RETRY_MIN_MS); // drop 2, retry in 2 s
+    rig.rerender({ listenPath: LISTEN_PATH }); // a listening session that works
+    await act(async () => {
+      await flush();
+    });
+    rig.rerender({ listenPath: null }); // and back to the picture, which still 503s
+    await act(async () => {
+      await flush();
+    });
+    const posts = rig.posts("own");
+    await tickBy(2 ** 2 * RETRY_MIN_MS - 1);
+    assert.equal(rig.posts("own"), posts, "the picture retried sooner than its third drop's delay: the tap restarted its backoff");
+    await tickBy(1);
+    assert.equal(rig.posts("own"), posts + 1);
+  } finally {
+    cleanup();
+    mock.timers.reset();
+    rig.g.restore();
+  }
+});

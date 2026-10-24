@@ -103,10 +103,9 @@ interface AttemptCallbacks {
    */
   onDropped: (reason: string) => void;
   /**
-   * A listening attempt (`choice.listen`) that WebRTC cannot carry: refused with a
-   * verdict status, or connected without a frame. It has no HLS twin and a retry
-   * would only hide a working picture, so the caller gives the sound up. Falls to
-   * `onDropped` where a caller does not ask.
+   * A listening attempt (`choice.listen`) the relay refused with a verdict status
+   * (400/406/415/422). It has no HLS twin, so the caller gives the sound up at once.
+   * Any other listening failure is `onDropped`, which the caller counts.
    */
   onListenFailed?: (reason: string) => void;
   /**
@@ -209,11 +208,7 @@ export function startPlaybackAttempt(
    *  marking an external feed unusable left it on "can't play" until reload,
    *  even once its endpoint was healthy again. */
   const webrtcUnusable = (reason: string) =>
-    end(() => {
-      if (choice.method === "webrtc" && choice.relayManaged) cb.onWebrtcUnusable(reason);
-      else if (choice.method === "webrtc" && choice.listen && cb.onListenFailed) cb.onListenFailed(reason);
-      else cb.onDropped(reason);
-    });
+    end(() => (choice.method === "webrtc" && choice.relayManaged ? cb.onWebrtcUnusable(reason) : cb.onDropped(reason)));
 
   /**
    * Arms the first-frame watch. Called the moment a source is attached — the
@@ -414,9 +409,11 @@ export function startPlaybackAttempt(
         // endpoint reports its own health however it likes ("Stage Utility
         // cannot report its health", main/types/video.ts) and gets no HLS to
         // fall back to regardless, so every failure there retries instead.
-        if ((choice.relayManaged || choice.listen) && err instanceof WhepError && RELAY_WEBRTC_REFUSAL_STATUSES.has(err.status)) {
-          webrtcUnusable(`the relay refused this feed over WebRTC (${err.message})`);
-          return;
+        if (err instanceof WhepError && RELAY_WEBRTC_REFUSAL_STATUSES.has(err.status)) {
+          const refused = `the relay refused this feed over WebRTC (${err.message})`;
+          if (choice.relayManaged) return webrtcUnusable(refused);
+          // A refusal of the listening path is final: it has no HLS twin and a retry only hides a working picture. Every other listening failure is a drop, counted toward the give-up.
+          if (choice.listen && cb.onListenFailed) return end(() => cb.onListenFailed?.(refused));
         }
         end(() => cb.onDropped(errorMessage(err)));
       });
@@ -840,7 +837,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   const [track, setTrack] = useState<{ key: string | null; epoch: number }>({ key: null, epoch: 0 });
   const epoch = track.key === attemptKey ? track.epoch : track.epoch + 1;
   if (epoch !== track.epoch) setTrack({ key: attemptKey, epoch });
-  const adopting = adoptedUrl !== null && attemptChoice?.method === "webrtc" && attemptChoice.url === adoptedUrl;
+  const adopting = adoptedUrl !== null && attemptChoice?.method === "webrtc" && !attemptChoice.listen && attemptChoice.url === adoptedUrl;
   const attemptPhase = phased.epoch === epoch || adopting ? phased.phase : "connecting";
   const phase = phaseOf(verdict, attemptPhase);
 
@@ -853,7 +850,8 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
     // for and closed by anything else.
     const adopted = adoptedRef.current;
     adoptedRef.current = null;
-    const adopt = adopted && choice.method === "webrtc" && adopted.url === choice.url ? adopted : undefined;
+    // Never into a listening attempt: for a direct feed its address is the probe's, but the probe's session carries no audio.
+    const adopt = adopted && choice.method === "webrtc" && !choice.listen && adopted.url === choice.url ? adopted : undefined;
     if (adopted && !adopt) void adopted.session.stop();
 
     // A new attempt is genuinely starting (real timers, listeners), so its
@@ -863,13 +861,11 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
     setLatency(null);
     setPhased((p) => ({ epoch, phase: adopt ? p.phase : "connecting" }));
     setAdoptedUrl(null);
-    // The backoff and the failure count start over when the sound is switched on or off.
+    // Listening has its own count (its backoff and its three-strikes), so a tap never touches the picture's backoff; each start of listening counts afresh.
     const isListen = choice.method === "webrtc" && choice.listen === true;
-    if (listeningRef.current !== isListen) {
-      listeningRef.current = isListen;
-      attemptCountRef.current = 0;
-      listenFailsRef.current = 0;
-    }
+    if (isListen && !listeningRef.current) listenFailsRef.current = 0;
+    listeningRef.current = isListen;
+    const count = isListen ? listenFailsRef : attemptCountRef;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let heldTimer: ReturnType<typeof setTimeout> | undefined;
     const name = current?.name ?? "this feed";
@@ -890,8 +886,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
           setPhased({ epoch, phase: p });
           if ((p === "live" || p === "delayed") && heldTimer === undefined) {
             heldTimer = setTimeout(() => {
-              attemptCountRef.current = 0;
-              listenFailsRef.current = 0;
+              count.current = 0;
               const d = streak().ok(streakKey, Date.now());
               if (d.log) onLogRef.current?.(isListen ? `listening to "${name}" works again${d.note}` : `"${name}" is playing again on this screen${d.note}`);
               if (p === "live" && !isListen && choice.method === "webrtc" && webrtcOutageRef.current) {
@@ -921,9 +916,9 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
         onDropped: (reason) => {
           clearTimeout(heldTimer);
           setPhased({ epoch, phase: "offline" });
-          const delay = Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** attemptCountRef.current);
-          attemptCountRef.current += 1;
-          if (isListen && ++listenFailsRef.current >= LISTEN_MAX_FAILURES) return failListen(reason);
+          const delay = Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** count.current);
+          count.current += 1;
+          if (isListen && count.current >= LISTEN_MAX_FAILURES) return failListen(reason);
           const d = streak().fail(streakKey, "dropped", Date.now());
           if (d.log) {
             onLogRef.current?.(

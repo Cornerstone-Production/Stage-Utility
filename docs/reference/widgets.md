@@ -728,7 +728,7 @@ time per page: tapping Listen on another card moves the sound there.
 | "Listening", a level meter and a volume slider | The sound is playing. The volume is kept per browser |
 | "Waiting for the source" | Listening was asked for and the feed is not sending yet |
 | "Audio stopped, retrying" | The listening session dropped; the picture shows Connecting meanwhile |
-| "Audio could not start: *reason*" | The listening session failed three times in a row, or the relay refused it outright. The page gives the sound up and plays the picture alone; the next tap tries again |
+| "Audio could not start: *reason*" | The listening session dropped three times in a row (a refused or dropped connection, no picture within 5 seconds of connecting, ICE failing before it connected, or the video element erroring; a session that plays for 10 seconds starts the count over), or the relay refused it outright (400, 406, 415 or 422), which gives up at once. The page gives the sound up and plays the picture alone; the next tap tries again. The caption goes when another control takes the sound or the feed's listen path changes |
 | "The browser would not play sound: *reason*" | The browser refused to start the element with sound after the tap |
 | "This feed has no audio" | The feed's source has no audio track. The button is disabled |
 | "Audio is not known until the feed has been seen" | The relay has not seen the feed yet. The button is disabled |
