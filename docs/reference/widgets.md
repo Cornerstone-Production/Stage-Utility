@@ -726,10 +726,15 @@ time per page: tapping Listen on another card moves the sound there.
 | Speaker, uncaptioned | The feed has audio and nobody is listening to it |
 | "Starting audio…" | A tap, until the sound arrives |
 | "Listening", a level meter and a volume slider | The sound is playing. The volume is kept per browser |
+| "Waiting for the source" | Listening was asked for and the feed is not sending yet |
 | "Audio stopped, retrying" | The listening session dropped; the picture shows Connecting meanwhile |
+| "Audio could not start: *reason*" | The listening session failed three times in a row, or the relay refused it outright. The page gives the sound up and plays the picture alone; the next tap tries again |
+| "The browser would not play sound: *reason*" | The browser refused to start the element with sound after the tap |
 | "This feed has no audio" | The feed's source has no audio track. The button is disabled |
+| "Audio is not known until the feed has been seen" | The relay has not seen the feed yet. The button is disabled |
 | "Audio isn't available on this server: *reason*" | The conversion cannot run (no usable ffmpeg, say). The button is disabled |
 | "Audio needs WebRTC, and this feed is playing over HLS" | The picture is over HLS (B-frames, or WebRTC failed here), which carries no sound |
+| "Audio needs WebRTC, which this browser cannot play for this feed" | This browser has no player for the feed at all |
 
 A feed with no audio report (a YouTube, Resi or external-address feed) has no
 Listen button.
