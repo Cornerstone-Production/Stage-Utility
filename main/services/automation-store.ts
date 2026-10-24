@@ -5,7 +5,7 @@
 
 import type { AutomationSettings, Rule } from "../types/automation.js";
 import { DataStore } from "./data-store.js";
-import { asArray, asObject, checked, optional, refuse, required } from "./restore-check.js";
+import { asArray, asObject, checked, optional, refuse, required, uniqueIds } from "./restore-check.js";
 
 /**
  * A restored rules file: each rule shaped the way POST /api/automation/rules
@@ -17,7 +17,7 @@ import { asArray, asObject, checked, optional, refuse, required } from "./restor
  */
 const rulesRestoreCheck = checked(async (raw) => {
   const list = asArray(raw, "the rules");
-  list.forEach((entry, i) => {
+  const rules = list.map((entry, i) => {
     const what = `rule ${i + 1}`;
     const rule = asObject(entry, what);
     required(rule.id, "string", `${what}'s id`);
@@ -27,7 +27,11 @@ const rulesRestoreCheck = checked(async (raw) => {
     }
     optional(rule.enabled, "boolean", `${what}'s enabled`);
     if (rule.conditions !== undefined) asArray(rule.conditions, `${what}'s conditions`);
+    return rule;
   });
+  // addRule mints a fresh id, so two rules never share one; a cue's buttons and
+  // the Activity log find a rule by it.
+  uniqueIds(rules, "the rules");
   // Lazily: the engine imports this store.
   const { automationEngine } = await import("./automation-engine.js");
   const [first] = automationEngine.cueProblemsIn(list as Rule[]);

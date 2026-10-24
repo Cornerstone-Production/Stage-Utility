@@ -21,7 +21,7 @@ import { announceDevices } from "./kiosk-presence.js";
 import { mergeScreen, sameScreen, screenFrom } from "./kiosk-screen-size.js";
 import type { BoundDevice, DeviceOutput, ScreenSize } from "../types/kiosk.js";
 import { DataStore } from "./data-store.js";
-import { asArray, asObject, checked, optional, refuse, required } from "./restore-check.js";
+import { asArray, asObject, checked, refuse, required } from "./restore-check.js";
 import { toError } from "./errors.js";
 
 /**
@@ -36,11 +36,16 @@ const restoreCheck = checked((raw) =>
     const d = asObject(entry, `bound device ${i + 1}`);
     if (typeof d.id !== "string" || d.id === "") refuse(`bound device ${i + 1} has no device id`);
     required(d.outputId, "string", `bound device ${i + 1}'s output`);
-    optional(d.label, "string", `bound device ${i + 1}'s label`);
-    if (d.macs !== undefined && !(Array.isArray(d.macs) && d.macs.every((m) => typeof m === "string"))) {
-      refuse(`bound device ${i + 1}'s macs must be a list of text`);
-    }
-    return { ...d, token: "" };
+    const { label, ...rest } = d;
+    return {
+      ...rest,
+      // The claim route keeps a label only when it is text.
+      ...(typeof label === "string" ? { label } : {}),
+      // matchByMac and touch() read this list on every probe; a binding without
+      // one is a binding whose hardware hints are unknown, which is an empty list.
+      macs: Array.isArray(d.macs) ? d.macs.filter((m) => typeof m === "string") : [],
+      token: "",
+    };
   }),
 );
 

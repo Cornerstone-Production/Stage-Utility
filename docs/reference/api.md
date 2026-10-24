@@ -488,7 +488,7 @@ same dispatcher.
 | GET | `/api/update/lock` | `{active, reasons}` — why an update would be refused right now |
 | POST | `/api/update/notices/dismiss` \| `/api/update/restart` \| `/api/update/auto` | Dismiss the post-update dialog (`{ok: true}`) / restart (the reply is the update status, plus `relaunchFailure` when this server could not arrange its own relaunch on launchd) / set the automatic-update mode and window (see Settings above) |
 | GET | `/api/config/export` | The config snapshot as a download, `stage-utility-config-<date>.json`, the date in the app time zone. Credentials are excluded |
-| POST | `/api/config/import` | Apply a snapshot (the bundle itself, or `{bundle}`), then **restart**. Every file is checked first with the rules its settings routes apply on a save; if any fails, the reply is `400` with `error` naming each file and the reason, and nothing is written ([Restoring a config snapshot](../ops/reliability.md#restoring-a-config-snapshot)). A snapshot carries no credentials, so before writing anything the restore clears each stored one it would send to a new address (an integration, a wireless connection or a pull feed moved, removed, or turned into another kind), logged on `[config-snapshot]`. The reply is `{ok, applied, restarting}`, plus `relaunchFailure` (a reason) when this server could not arrange its own relaunch on launchd |
+| POST | `/api/config/import` | Apply a snapshot (the bundle itself, or `{bundle}`), then **restart**. Every file and image is checked first, with the rules its settings routes apply on a save; if any fails, the reply is `400` with `error` naming each and the reason, and nothing is written or cleared ([Restoring a config snapshot](../ops/reliability.md#restoring-a-config-snapshot)). A snapshot carries no credentials, so before writing anything the restore clears each stored one it would send to a new address (an integration, a wireless connection or a pull feed moved, removed, or turned into another kind), logged on `[config-snapshot]`. The reply is `{ok, applied, restarting}`, plus `relaunchFailure` (a reason) when this server could not arrange its own relaunch on launchd |
 | GET / POST | `/api/config/snapshots` | List / save a named snapshot on this machine (`{name}`; saving answers `201`) |
 | POST / DELETE | `/api/config/snapshots/:id/recall` \| `/api/config/snapshots/:id` | Apply one (then restart, with the same reply as an import) / delete one |
 | GET / POST | `/api/backup/schedule` | The automatic-backup schedule. `POST` takes any of `{enabled, includeArchive, destination, intervalDays, keep}` |
@@ -530,7 +530,7 @@ the wrong shape is `400` with the reason unless noted.
 | `/api/onboarding-dismissed` | `{dismissed: boolean}` |
 | `/api/ndi-enabled` | `{enabled: boolean}` |
 | `/api/kiosk-discovery` | `{enabled: boolean}` — whether the server answers devices looking for one |
-| `/api/public-url` | `{url: string \| null}` — the address used for the connect QR and display links; blank or `null` clears it |
+| `/api/public-url` | `{url: string \| null}` — the address used for the connect QR and display links; blank or `null` clears it. |
 | `/api/timezone` | `{timezone: string \| null}` — an IANA zone, or `null` (blank) to follow the host clock; an unknown zone is `400` |
 | `/api/hour-cycle` | `{hourCycle: "12h" \| "24h"}` |
 | `/api/reconnect-schedule` | any of `{enabled, leadMin, tailMin, dormantMin}`, the numbers rounded and clamped (lead and tail 0–1440, dormant 1–1440 minutes) |

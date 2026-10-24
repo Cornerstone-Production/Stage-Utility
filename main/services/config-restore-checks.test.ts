@@ -8,6 +8,7 @@
 // this app made must come back unchanged.
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { beforeEach, describe, test } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -19,6 +20,9 @@ process.env.HOME = path.join(TMP, "home");
 
 const { configSnapshot, configFiles, RestoreRefusedError } = await import("./config-snapshot.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../types/video.js");
+const { secretsStore } = await import("./secrets.js");
+const { wirelessSecretSlot } = await import("./wireless-credentials.js");
+const { livePoller } = await import("./live-poller.js");
 
 const LAYOUT = { objects: [], canvas: { width: 1920, height: 1080 } };
 
@@ -73,7 +77,8 @@ const GOOD: Record<string, unknown> = {
     timezone: "America/Chicago",
     hourCycle: "12h",
     autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
-    outputs: [{ id: "1", name: "Main", viewId: "v1", textSize: 100, rotation: 0 }],
+    outputs: [{ id: "1", name: "Main", slug: "main", viewId: "v1", textSize: 100, rotation: 0 }],
+    displays: [{ id: "display-1", name: "Display 1" }],
     integrationConfigs: { propresenter: { host: "192.0.2.30", port: 1025 } },
     integrationEnabled: { propresenter: false },
     iconColors: { "tools/clock": "#ff8800" },
@@ -96,7 +101,7 @@ const BAD: Record<string, { value: unknown; says: string }> = {
     says: "not a usable cue name",
   },
   "automation-settings.json": { value: { simulate: "no" }, says: "simulate" },
-  "baptism-triggers.json": { value: { "plan-1": { testimonyItemId: 5 } }, says: "testimonyItemId" },
+  "baptism-triggers.json": { value: { "plan-1": "item-1" }, says: "plan-1" },
   "bar-config.json": { value: { items: "clock" }, says: "items" },
   "history-milestones.json": { value: [{ id: "m1", date: "soon", label: "Launch" }], says: "date" },
   "host-names.json": { value: { accepted: [{ name: "192.0.2.1", source: "added" }], dismissed: [] }, says: "192.0.2.1" },
@@ -110,7 +115,7 @@ const BAD: Record<string, { value: unknown; says: string }> = {
   "presets.json": { value: [{ id: "p1", name: "   ", slots: [] }], says: "no name" },
   "rosstalk-settings.json": { value: { simulate: 1 }, says: "simulate" },
   "rosstalk-targets.json": { value: [{ id: "rt1", name: 5, enabled: false, config: {} }], says: "name" },
-  "saved-colors.json": { value: Array.from({ length: 25 }, (_, i) => `#0000${String(i).padStart(2, "0")}`), says: "at most" },
+  "saved-colors.json": { value: ["#ff0000", 42], says: "list of text" },
   "scores-favourites.json": { value: { favourites: "nfl" }, says: "favourites" },
   "servicecue-config.json": { value: { serviceTypeIds: "123" }, says: "serviceTypeIds" },
   "servicecue-layouts.json": { value: [{ id: "l1", name: "Default", columnRoles: "role-audio" }], says: "columnRoles" },
@@ -243,5 +248,117 @@ describe("config restore checks", () => {
     assert.equal(failures.length, 1);
     assert.match(failures[0], /^video-feeds\.json: /);
     assert.deepEqual(await readOnDisk("video-feeds.json"), BAD["video-feeds.json"].value);
+  });
+
+  test("refuses a legacy displays list that is not one, which would stop the server starting", async () => {
+    const before = await snapshotDir();
+    await assert.rejects(
+      () => configSnapshot.apply(bundleOf({ "settings.json": { outputs: [], displays: "junk" }, "views.json": [] })),
+      /settings\.json: displays must be a list/,
+    );
+    assert.deepEqual(await snapshotDir(), before);
+  });
+
+  test("refuses a public URL that is not a web address", async () => {
+    const settings = { ...(GOOD["settings.json"] as object), publicUrl: "javascript:alert(1)//" };
+    await assert.rejects(() => configSnapshot.apply(bundleOf({ "settings.json": settings })), /publicUrl must be an http or https address/);
+  });
+
+  test("refuses duplicate rule ids and duplicate view ids", async () => {
+    const rule = (GOOD["automation-rules.json"] as object[])[0];
+    await assert.rejects(
+      () => configSnapshot.apply(bundleOf({ "automation-rules.json": [rule, { ...rule, trigger: { id: "call.by-name", params: { name: "other" } } }] })),
+      /lists the id "r1" more than once/,
+    );
+    const view = (GOOD["views.json"] as object[])[0];
+    await assert.rejects(() => configSnapshot.apply(bundleOf({ "views.json": [view, view] })), /lists the id "v1" more than once/);
+  });
+
+  test("a bound device restored without its MAC list gets an empty one", async () => {
+    await configSnapshot.apply(bundleOf({ "kiosk-devices.json": [{ id: "dev-1", token: "x", outputId: "1" }] }));
+    assert.deepEqual(await readOnDisk("kiosk-devices.json"), [{ id: "dev-1", outputId: "1", macs: [], token: "" }]);
+  });
+
+  describe("images", () => {
+    const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from("not really pixels")]);
+    const nameOf = (bytes: Buffer, ext: string) => `${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}.${ext}`;
+    const LOGO = nameOf(PNG, "png");
+    const logoPath = path.join(TMP, "branding-images", LOGO);
+
+    beforeEach(async () => {
+      await fs.mkdir(path.dirname(logoPath), { recursive: true });
+      await fs.writeFile(logoPath, PNG);
+    });
+
+    test("restores an image saved under its content hash", async () => {
+      await fs.rm(logoPath);
+      const withImage = { ...bundleOf({}), images: { [`branding-images/${LOGO}`]: PNG.toString("base64") } };
+      assert.deepEqual(await configSnapshot.apply(withImage), [`branding-images/${LOGO}`]);
+      assert.deepEqual(await fs.readFile(logoPath), PNG);
+    });
+
+    test("refuses HTML under the live logo's name, and leaves the logo", async () => {
+      const html = Buffer.from("<html><script>alert(1)</script></html>");
+      const before = await snapshotDir();
+      await assert.rejects(
+        () => configSnapshot.apply({ ...bundleOf({}), images: { [`branding-images/${LOGO}`]: html.toString("base64") } }),
+        /branding-images\/[0-9a-f]{16}\.png: is not a valid png image/,
+      );
+      assert.deepEqual(await fs.readFile(logoPath), PNG);
+      assert.deepEqual(await snapshotDir(), before);
+    });
+
+    test("refuses an image whose name is not its content hash", async () => {
+      await assert.rejects(
+        () => configSnapshot.apply({ ...bundleOf({}), images: { ["layout-images/0000000000000000.png"]: PNG.toString("base64") } }),
+        /does not match its contents/,
+      );
+    });
+
+    test("an image that is not text refuses the whole restore before any file is written", async () => {
+      const before = await snapshotDir();
+      await assert.rejects(
+        () =>
+          configSnapshot.apply({
+            ...bundleOf({ "presets.json": [{ id: "p2", name: "Changed", slots: [] }] }),
+            images: { [`branding-images/${LOGO}`]: 42 },
+          }),
+        /is not base64 text/,
+      );
+      assert.deepEqual(await snapshotDir(), before);
+    });
+
+    test("refuses more images than a restore takes", async () => {
+      const images = Object.fromEntries(Array.from({ length: 2001 }, (_, i) => [`layout-images/x${i}.png`, ""]));
+      await assert.rejects(() => configSnapshot.apply({ ...bundleOf({}), images }), /a restore takes at most 2000/);
+    });
+  });
+
+  describe("a refused restore touches nothing", () => {
+    const poller = livePoller as unknown as { running: boolean; timer: ReturnType<typeof setTimeout> | null };
+
+    test("the background writers keep running", async () => {
+      poller.running = true;
+      try {
+        await assert.rejects(() => configSnapshot.apply(bundleOf({ "views.json": BAD["views.json"].value })), RestoreRefusedError);
+        assert.equal(poller.running, true, "a refused restore stopped the live poller");
+      } finally {
+        poller.running = false;
+        if (poller.timer) clearTimeout(poller.timer);
+        poller.timer = null;
+      }
+    });
+
+    test("a stored credential the restore would have cleared is still there", async () => {
+      await secretsStore.setSecrets(wirelessSecretSlot("w1"), { password: "kept" });
+      // Moving w1 to another host is what clears its password; the bad views
+      // file is what refuses the restore.
+      const moved = [{ id: "w1", name: "Rack", providerId: "none", enabled: false, config: { host: "192.0.2.99" } }];
+      await assert.rejects(
+        () => configSnapshot.apply(bundleOf({ "wireless-connections.json": moved, "views.json": BAD["views.json"].value })),
+        RestoreRefusedError,
+      );
+      assert.deepEqual(await secretsStore.getSecrets(wirelessSecretSlot("w1")), { password: "kept" });
+    });
   });
 });

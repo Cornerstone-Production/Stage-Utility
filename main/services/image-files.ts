@@ -94,6 +94,30 @@ function looksLike(mime: string, bytes: Buffer): boolean {
   }
 }
 
+/** The name saveImage gives `bytes`: the first 16 hex of their SHA-256, and the extension. */
+function contentName(bytes: Buffer, ext: string): string {
+  return `${crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16)}.${ext}`;
+}
+
+/** The extensions saveImage writes. */
+const SAVED_EXTS = new Set(Object.values(EXT_BY_MIME));
+
+/**
+ * Why `bytes` under `file` is not an image saveImage could have written, or
+ * null: a name it would give (the content hash and one of its extensions), a
+ * size within the cap, and bytes that look like the type the name says. What a
+ * config restore holds every image in the bundle to before writing any.
+ */
+export function storedImageProblem(file: string, bytes: Buffer): string | null {
+  const ext = /^[0-9a-f]{16}\.([a-z]+)$/.exec(file)?.[1];
+  if (!ext || !SAVED_EXTS.has(ext)) return "is not the name of a stored image";
+  if (bytes.length === 0) return "is empty";
+  if (bytes.length > MAX_IMAGE_BYTES) return "is too large (max 12 MB)";
+  if (!looksLike(MIME_BY_EXT[ext]!, bytes)) return `is not a valid ${ext} image`;
+  if (contentName(bytes, ext) !== file) return "does not match its contents";
+  return null;
+}
+
 export function imageDir(name: string): string {
   return path.join(getUserDataPath(), name);
 }
@@ -117,8 +141,7 @@ export async function saveImage(dirName: string, dataUrl: string): Promise<strin
   if (bytes.length > MAX_IMAGE_BYTES) throw new Error("image too large (max 12 MB)");
   if (!looksLike(m[1].toLowerCase(), bytes)) throw new Error(`not a valid ${m[1]} image`);
 
-  const hash = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
-  const file = `${hash}.${ext}`;
+  const file = contentName(bytes, ext);
   const d = imageDir(dirName);
   await fs.mkdir(d, { recursive: true });
   await atomicWrite(path.join(d, file), bytes);

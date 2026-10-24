@@ -49,6 +49,11 @@ export const RESERVED_SLUG_PREFIX = "preview-";
  *  a URL, and nothing that could be read as a path segment. */
 const SLUG_PATTERN = /^[a-z0-9-]+$/;
 
+/** A slug the app has kept for one of its own pages. */
+export function isReservedSlug(slug: string): boolean {
+  return RESERVED_SLUGS.includes(slug) || slug.startsWith(RESERVED_SLUG_PREFIX);
+}
+
 export type SlugRejection =
   | { ok: true }
   | { ok: false; reason: string };

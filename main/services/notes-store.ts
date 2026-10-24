@@ -14,7 +14,7 @@
 // original.
 
 import { DataStore } from "./data-store.js";
-import { asObject, checked, refuse } from "./restore-check.js";
+import { asObject, checked } from "./restore-check.js";
 
 /** One checklist row. `done` is the operator's tick; text is theirs to edit. */
 export interface ChecklistItem {
@@ -69,9 +69,7 @@ function assertSafeObjectId(objectId: string): void {
 const restoreCheck = checked((raw) => {
   const file = asObject(raw, "the notes");
   for (const [objectId, content] of Object.entries(file)) {
-    if (!SAFE_OBJECT_ID.test(objectId) || FORBIDDEN_IDS.has(objectId)) {
-      refuse(`the notes have an object id that is not allowed ("${objectId.slice(0, 32)}")`);
-    }
+    assertSafeObjectId(objectId);
     asObject(content, `the notes for ${objectId}`);
   }
   return file;

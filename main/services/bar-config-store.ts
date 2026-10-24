@@ -9,7 +9,7 @@
 // two machines should be reading the same strip.
 
 import { DataStore } from "./data-store.js";
-import { asObject, checked, optional, refuse } from "./restore-check.js";
+import { asObject, checked, optional, textList } from "./restore-check.js";
 import { toError } from "./errors.js";
 
 export interface BarConfig {
@@ -65,15 +65,10 @@ const SCHEMA = 1;
  *  write: there is nothing older to rewrite. */
 const DEFAULT: BarConfig = { items: [], mobileItems: [], schema: SCHEMA };
 
-/** POST /api/bar-items: `items` and `mobileItems` each a list of item ids. */
+/** POST /api/bar-items: each list of item ids is a list of text. */
 const restoreCheck = checked((raw) => {
   const file = asObject(raw, "the bar");
-  for (const k of ["items", "mobileItems"] as const) {
-    const v = file[k];
-    if (v !== undefined && !(Array.isArray(v) && v.every((id) => typeof id === "string"))) {
-      refuse(`the bar's ${k} must be a list of item ids`);
-    }
-  }
+  for (const k of ["items", "mobileItems"] as const) if (file[k] !== undefined) textList(file[k], `the bar's ${k}`);
   optional(file.schema, "number", "the bar's schema");
   return file;
 });

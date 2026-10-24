@@ -120,22 +120,27 @@ const store = new DataStore<unknown>("slots.json", {}, "config", { restoreCheck:
  * the backup holds it and migrated on the next load, as any old file is.
  */
 function checkRestoredSlots(raw: unknown): unknown {
+  // A bare list is the first shape this file had (v0: one board's slots), which
+  // normaliseSlotsFile still reads; every later shape is an object.
   if (!Array.isArray(raw)) asObject(raw, "the slots");
   const { file } = normaliseSlotsFile(structuredClone(raw));
+  const refuseKey = (key: string, where: string): void => {
+    if (!isSafeKey(key)) refuse(`${where} have a key that is not allowed ("${key.slice(0, 40)}")`);
+  };
   const slotList = (v: unknown, what: string): void => {
     if (!asArray(v, what).every(isRecord)) refuse(`${what} must be a list of slots`);
   };
   for (const [key, byType] of file.defaults) {
-    if (!isSafeKey(key)) refuse(`the slots have a key that is not allowed ("${key.slice(0, 40)}")`);
+    refuseKey(key, "the slots");
     for (const [typeId, slots] of byType) {
-      if (!isSafeKey(typeId)) refuse(`the slots for ${key} have a key that is not allowed ("${typeId.slice(0, 40)}")`);
+      refuseKey(typeId, `the slots for ${key}`);
       slotList(slots, `the default slots for ${key}/${typeId}`);
     }
   }
   for (const [key, byPlan] of file.overrides) {
-    if (!isSafeKey(key)) refuse(`the slots have a key that is not allowed ("${key.slice(0, 40)}")`);
+    refuseKey(key, "the slots");
     for (const [planId, o] of byPlan) {
-      if (!isSafeKey(planId)) refuse(`the slots for ${key} have a key that is not allowed ("${planId.slice(0, 40)}")`);
+      refuseKey(planId, `the slots for ${key}`);
       const override = asObject(o, `the slots for ${key} on plan ${planId}`);
       required(override.serviceTypeId, "string", `the service type of the slots for ${key} on plan ${planId}`);
       slotList(override.slots, `the slots for ${key} on plan ${planId}`);

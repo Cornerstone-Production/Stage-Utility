@@ -4,16 +4,11 @@
 
 import type { LayoutGroup } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
-import { asArray, asObject, checked, required } from "./restore-check.js";
+import { asObject, checked, namedEntries } from "./restore-check.js";
 
 /** POST /api/layout-groups: a name, and an object. */
 const restoreCheck = checked((raw) => {
-  asArray(raw, "the layout groups").forEach((entry, i) => {
-    const g = asObject(entry, `layout group ${i + 1}`);
-    required(g.id, "string", `layout group ${i + 1}'s id`);
-    required(g.name, "string", `layout group ${i + 1}'s name`);
-    asObject(g.object, `layout group ${i + 1}'s object`);
-  });
+  namedEntries(raw, "the layout groups").forEach((g, i) => asObject(g.object, `layout group ${i + 1}'s object`));
   return raw;
 });
 

@@ -4,14 +4,11 @@
 import type { LayoutTemplate } from "../types/stage.js";
 import { isLayoutShape } from "../types/views.js";
 import { DataStore } from "./data-store.js";
-import { asArray, asObject, checked, refuse, required } from "./restore-check.js";
+import { checked, namedEntries, refuse } from "./restore-check.js";
 
-/** POST /api/layout-templates: a name, and a layout of the shape a view's is. */
+/** POST /api/layout-templates: a name, and isLayoutShape. */
 const restoreCheck = checked((raw) => {
-  asArray(raw, "the layout templates").forEach((entry, i) => {
-    const t = asObject(entry, `layout template ${i + 1}`);
-    required(t.id, "string", `layout template ${i + 1}'s id`);
-    required(t.name, "string", `layout template ${i + 1}'s name`);
+  namedEntries(raw, "the layout templates").forEach((t, i) => {
     if (!isLayoutShape(t.layout)) refuse(`layout template ${i + 1}'s layout is not a layout`);
   });
   return raw;

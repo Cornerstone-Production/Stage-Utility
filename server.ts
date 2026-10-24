@@ -114,6 +114,14 @@ console.log(`[server] data directory: ${DATA_DIR}`);
 
 // ── Init services ─────────────────────────────────────────────────────────────
 
+// Say on [config-snapshot] which config files on disk a save would refuse (a
+// hand edit, or a file an older build wrote), before anything reads them, so a
+// file that then trips a service's start-up is already named in /log. Changes
+// nothing; see checkOnDisk. A failure of the check itself must not stop the
+// server coming up, so it is logged here, the same exception
+// reconcileOpenRecords below makes.
+await configSnapshot.checkOnDisk().catch((err) => console.error("[config-snapshot] the start-up check of the config files failed:", scrubError(err)));
+
 console.log("[server] initialising services...");
 await streamStartStore.init();
 await stageController.init();
@@ -135,11 +143,6 @@ for (const { what, error } of await messagesService.start()) {
 }
 // Unattended backups, if the operator has turned them on.
 backupScheduler.start();
-// Say on [config-snapshot] which config files on disk a save would refuse (a hand edit,
-// or a file an older build wrote). Changes nothing; see checkOnDisk. A failure
-// of the check itself must not stop the server coming up, so it is logged here,
-// the same exception reconcileOpenRecords below makes.
-await configSnapshot.checkOnDisk().catch((err) => console.error("[config-snapshot] the start-up check of the config files failed:", scrubError(err)));
 
 // Close any history record left open by a prior run (crash / restart mid/after a
 // service) before the poller starts — a genuinely-live service reopens on the next tick.

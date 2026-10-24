@@ -10,8 +10,9 @@
 // Either every image is present or none is. Five optional keys would let a request
 // set a 180 icon and leave a stale 512 one behind, which a phone then shows.
 
-import { looksLikeStoredRef } from "./branding-image-store.js";
+import { MAX_BRANDING_DATA_URL_CHARS, looksLikeStoredRef } from "./branding-image-store.js";
 import { isDataUrl } from "./image-files.js";
+import { isHex6 } from "./settings-rules.js";
 import { DEFAULT_ICON_BACKGROUND, ICON_SIZES, type IconField } from "./install-metadata.js";
 
 export interface IconCrop {
@@ -63,7 +64,7 @@ export const NO_APP_ICON: AppIconSettings = {
 };
 
 /** Each data URL is held to the cap the other branding images have. */
-const MAX_DATA_URL_CHARS = 2_000_000;
+const MAX_DATA_URL_CHARS = MAX_BRANDING_DATA_URL_CHARS;
 const PNG_PREFIX = "data:image/png;base64,";
 
 /** The pixel size an icon PNG declares, read from its IHDR; null if it is not a PNG. */
@@ -123,7 +124,7 @@ export function parseAppIcon(v: unknown): IconParse {
   }
 
   const background = body.background;
-  if (typeof background !== "string" || !/^#[0-9a-fA-F]{6}$/.test(background)) {
+  if (!isHex6(background)) {
     return { ok: false, error: "body.icon.background must be a #rrggbb hex" };
   }
 

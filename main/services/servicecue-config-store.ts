@@ -19,7 +19,7 @@ export const serviceCueConfigStore = new DataStore<ServiceCueConfig>(
   "config",
   {
     renamedFrom: { filename: "scriptview-config.json", logTag: SERVICECUE_LOG_TAG },
-    // POST /api/servicecue/config: a list of service type ids, each as text.
+    // POST /api/servicecue/config stores each id as String(id).
     restoreCheck: checked((raw) => {
       const file = asObject(raw, "the ServiceCue config");
       return { ...file, serviceTypeIds: asArray(file.serviceTypeIds, "serviceTypeIds").map(String) };

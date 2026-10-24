@@ -13,6 +13,5 @@ import { checked, targetEntries } from "./restore-check.js";
  * own API grew, and it hid update() and reload() from callers for no reason.
  */
 export const oscStore = new DataStore<OscTargetConfig[]>("osc-targets.json", [], "config", {
-  // PATCH /api/osc/targets/:id: a text name, a boolean enabled, an object config.
   restoreCheck: checked((raw) => targetEntries(raw, "the OSC targets")),
 });

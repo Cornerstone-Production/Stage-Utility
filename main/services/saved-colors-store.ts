@@ -15,7 +15,7 @@
 // having lost the colours rather than as being per-device.
 
 import { DataStore } from "./data-store.js";
-import { asArray, checked, refuse } from "./restore-check.js";
+import { checked, refuse, textList } from "./restore-check.js";
 
 /** CSS colour strings, newest first — a colour just saved is where the eye is. */
 const DEFAULT: string[] = [];
@@ -23,10 +23,10 @@ const DEFAULT: string[] = [];
 /** POST /api/saved-colors: each colour text that is not blank, and at most
  *  MAX_SAVED_COLORS of them. */
 const restoreCheck = checked((raw) => {
-  const list = asArray(raw, "the saved colours");
-  if (list.length > MAX_SAVED_COLORS) refuse(`at most ${MAX_SAVED_COLORS} colours can be saved (this has ${list.length})`);
-  for (const c of list) if (typeof c !== "string" || !c.trim()) refuse("each saved colour must be text");
-  return list;
+  const list = textList(raw, "the saved colours");
+  if (list.some((c) => !c.trim())) refuse("a saved colour is blank");
+  // add() keeps the newest MAX_SAVED_COLORS, newest first, and so does this.
+  return list.slice(0, MAX_SAVED_COLORS);
 });
 
 const store = new DataStore<string[]>("saved-colors.json", DEFAULT, "config", { restoreCheck });

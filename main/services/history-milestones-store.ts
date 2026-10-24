@@ -22,7 +22,7 @@
 import { randomUUID } from "node:crypto";
 
 import { DataStore } from "./data-store.js";
-import { asArray, asObject, checked, refuse, required } from "./restore-check.js";
+import { asArray, asObject, checked, optional, refuse, textOrNull } from "./restore-check.js";
 import { isCalendarDate } from "./calendar-date.js";
 import { scrub } from "./scrub.js";
 
@@ -38,33 +38,27 @@ export interface HistoryMilestone {
 }
 
 /**
+ * A restored file: every row held to milestoneProblem, the rules `save`
+ * applies. The service type is not checked against the recorded history, which
+ * a restore onto another box does not carry.
+ */
+const restoreCheck = checked((raw) => {
+  asArray(raw, "the milestones").forEach((entry, i) => {
+    const row = asObject(entry, `milestone ${i + 1}`);
+    optional(row.id, "string", `milestone ${i + 1}'s id`);
+    textOrNull(row.serviceTypeId, `milestone ${i + 1}'s service type`);
+    const problem = milestoneProblem(row, null);
+    if (problem) refuse(`milestone ${i + 1}: ${problem}`);
+  });
+  return raw;
+});
+
+/**
  * `unknown[]`, not `HistoryMilestone[]`: what goes to disk is every milestone
  * this module understands PLUS every row it does not, carried verbatim. The
  * reading side (`partitionMilestones`) is what narrows it, and it is the only
  * thing that may.
  */
-/**
- * The rules `save` applies, on every row of a restored file: a calendar date,
- * and a label that is not blank and at most MAX_LABEL_LENGTH. The service type
- * is not checked against the recorded history, which a restore onto another box
- * does not carry.
- */
-const restoreCheck = checked((raw) => {
-  asArray(raw, "the milestones").forEach((entry, i) => {
-    const row = asObject(entry, `milestone ${i + 1}`);
-    if (!isCalendarDate(row.date)) refuse(`milestone ${i + 1}'s date is not a date (YYYY-MM-DD)`);
-    const label = typeof row.label === "string" ? row.label.trim() : "";
-    if (!label || label.length > MAX_LABEL_LENGTH) {
-      refuse(`milestone ${i + 1}'s label must be 1 to ${MAX_LABEL_LENGTH} characters`);
-    }
-    if (row.id !== undefined) required(row.id, "string", `milestone ${i + 1}'s id`);
-    if (row.serviceTypeId !== undefined && row.serviceTypeId !== null) {
-      required(row.serviceTypeId, "string", `milestone ${i + 1}'s service type`);
-    }
-  });
-  return raw;
-});
-
 const store = new DataStore<unknown[]>("history-milestones.json", [], "config", { restoreCheck });
 
 /** Re-exported so a reader of this module has the rule to hand — the Trends
@@ -81,6 +75,29 @@ export { isCalendarDate };
  * the field is the wrong place for it.
  */
 export const MAX_LABEL_LENGTH = 60;
+
+/**
+ * Why a milestone cannot be saved, or null: a calendar date, a label that is
+ * not blank and at most MAX_LABEL_LENGTH, and — when `knownTypeIds` is given —
+ * a service type with recorded history. What `save` refuses, and what a restore
+ * refuses a row for.
+ */
+export function milestoneProblem(
+  input: { date?: unknown; label?: unknown; serviceTypeId?: unknown },
+  knownTypeIds: readonly string[] | null,
+): string | null {
+  if (!isCalendarDate(input.date)) return `"${String(input.date)}" is not a date (YYYY-MM-DD)`;
+  const label = String(input.label ?? "").trim();
+  if (!label) return "a milestone needs a label";
+  if (label.length > MAX_LABEL_LENGTH) {
+    return `a milestone label is at most ${MAX_LABEL_LENGTH} characters (this one is ${label.length})`;
+  }
+  const serviceTypeId = typeof input.serviceTypeId === "string" && input.serviceTypeId ? input.serviceTypeId : null;
+  if (serviceTypeId && knownTypeIds && !knownTypeIds.includes(serviceTypeId)) {
+    return `no service type "${serviceTypeId}" has a recorded service to mark`;
+  }
+  return null;
+}
 
 /**
  * The entries that can be drawn, and the labels of the ones that cannot.
@@ -191,18 +208,10 @@ export const historyMilestonesStore = {
      *  invisible, which is the failure the caller is refused for. */
     knownTypeIds: readonly string[] | null = null,
   ): Promise<HistoryMilestone[]> {
-    if (!isCalendarDate(input.date)) {
-      throw new Error(`"${input.date}" is not a date (YYYY-MM-DD)`);
-    }
+    const problem = milestoneProblem(input, knownTypeIds);
+    if (problem) throw new Error(problem);
     const label = String(input.label ?? "").trim();
-    if (!label) throw new Error("a milestone needs a label");
-    if (label.length > MAX_LABEL_LENGTH) {
-      throw new Error(`a milestone label is at most ${MAX_LABEL_LENGTH} characters (this one is ${label.length})`);
-    }
     const serviceTypeId = input.serviceTypeId || null;
-    if (serviceTypeId && knownTypeIds && !knownTypeIds.includes(serviceTypeId)) {
-      throw new Error(`no service type "${serviceTypeId}" has a recorded service to mark`);
-    }
     const entry: HistoryMilestone = {
       id: input.id || randomUUID(),
       date: input.date,

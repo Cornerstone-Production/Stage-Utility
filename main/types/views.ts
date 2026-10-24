@@ -22,6 +22,32 @@ export type ViewKind =
   | "spl-rundown"
   | "calendar";
 
+/**
+ * Every ViewKind, as a record so the TYPE CHECKER refuses a missing one.
+ *
+ * This was a chain of `v === "..."` comparisons, which compiles perfectly well
+ * with a kind left out — and a kind left out here is a kind the API silently
+ * refuses to create, rejecting the request as malformed. A Record<ViewKind, true>
+ * is the same check the compiler already does for the new-view dialog's labels.
+ */
+const VIEW_KINDS: Record<ViewKind, true> = {
+  slots: true,
+  dashboard: true,
+  stage: true,
+  transcription: true,
+  custom: true,
+  script: true,
+  "spl-rundown": true,
+  calendar: true,
+};
+
+/** Narrow an untrusted body value to a ViewKind. */
+export function isDisplayKind(v: unknown): v is ViewKind {
+  // hasOwn rather than `in`: the value is untrusted, and "toString" is `in`
+  // every object.
+  return typeof v === "string" && Object.hasOwn(VIEW_KINDS, v);
+}
+
 /** Empty only when `T` names every ViewKind; otherwise `never`, which nothing
  *  can be assigned to. */
 type Exhaustive<T extends readonly ViewKind[]> = Exclude<ViewKind, T[number]> extends never ? T : never;
@@ -1442,6 +1468,12 @@ export interface ResolvedOutput {
  * it: the PATCH path has always checked, and an imported bundle is a file off
  * somebody's laptop.
  */
+/** A view's `slotsLayout` as PATCH /api/views/:id and a restore take it: an
+ *  object, or null for the default. An array is neither. */
+export function isSlotsLayoutValue(v: unknown): v is SlotsLayout | null {
+  return v === null || (typeof v === "object" && !Array.isArray(v));
+}
+
 export function isLayoutShape(v: unknown): v is LayoutDTO {
   if (!v || typeof v !== "object") return false;
   const l = v as { objects?: unknown; canvas?: unknown };

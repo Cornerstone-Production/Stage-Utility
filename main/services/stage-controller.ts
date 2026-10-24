@@ -21,7 +21,21 @@ import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
 import { screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
-import { clamp } from "./clamp.js";
+import { isSafeKey } from "./safe-key.js";
+import { isUpdateMode } from "../types/state.js";
+import {
+  CAPTION_COLOR,
+  ICON_COLOR,
+  ICON_GLYPH,
+  MAX_TESTIMONY_KEYWORD,
+  RECONNECT_RANGES,
+  TAPER_RANGES,
+  clampAutoUpdateDay,
+  clampAutoUpdateHour,
+  clampFields,
+  isIconKey,
+  normalizeBaseUrl,
+} from "./settings-rules.js";
 import { plural } from "./plural.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
@@ -144,7 +158,7 @@ export function retuneEmbedFontSize(views: View[]): { views: View[]; changed: nu
 function migrateAutoUpdate(saved: unknown): AutoUpdateSettings {
   const o = (saved ?? {}) as Partial<AutoUpdateSettings> & { enabled?: boolean };
   const mode: AutoUpdateSettings["mode"] =
-    o.mode === "auto-install" || o.mode === "auto-full" || o.mode === "manual"
+    isUpdateMode(o.mode)
       ? o.mode
       : o.enabled === true
         ? "auto-full"
@@ -181,15 +195,6 @@ const DEVICE_STATUS_FLUSH_MS = 150;
 export const ROSTER_WINDOW_INTERVAL_MS = 60_000;
 
 /** Deep-clone a layout, minting fresh object ids so copies stay independent. */
-/** Normalize a user-entered base URL: trim, default to http:// if no scheme,
- *  strip a trailing slash. Returns null for blank input. */
-function normalizeBaseUrl(url: string | null): string | null {
-  if (!url) return null;
-  let s = url.trim();
-  if (!s) return null;
-  if (!/^https?:\/\//i.test(s)) s = `http://${s}`;
-  return s.replace(/\/+$/, "");
-}
 
 /**
  * A layout save was built on a revision someone else has already replaced.
@@ -367,20 +372,18 @@ export class LayoutConflictError extends Error {
  * spread back out and gets written to disk again. It can never be a real icon
  * key — the shape check refuses to create one — so it is dropped, loudly.
  */
-const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-
 export function writeIconEntry(
   current: Record<string, string> | undefined,
   key: string,
   value: string,
   label: string,
 ): Record<string, string> {
-  if (!/^[A-Za-z0-9/_-]{1,64}$/.test(key) || FORBIDDEN_KEYS.has(key)) {
+  if (!isIconKey(key)) {
     throw new Error(`${label} — key must be an id or a tool path`);
   }
   const next: Record<string, string> = Object.create(null);
   for (const [k, v] of Object.entries(current ?? {})) {
-    if (FORBIDDEN_KEYS.has(k)) {
+    if (!isSafeKey(k)) {
       // Both interpolations scrubbed. `label` is our own literal today, but this
       // file is request-facing and log-injection.test.ts holds every one of them
       // to scrub() so nobody has to judge that case by case.
@@ -994,7 +997,7 @@ export class StageController {
     const k = key.trim();
     if (!k) throw new Error("icon-color — key required");
     const c = color.trim().toLowerCase();
-    if (c !== "" && !/^#[0-9a-f]{6}$/.test(c)) {
+    if (c !== "" && !ICON_COLOR.test(c)) {
       throw new Error('icon-color — color must be "#rrggbb" or "" to clear');
     }
     const next = writeIconEntry(this.state.iconColors, k, c, "icon-color");
@@ -1020,7 +1023,7 @@ export class StageController {
     const g = glyph.trim();
     // Name-shaped only. Anything else is a caller bug, and storing it would put
     // a value in settings.json that nothing can ever render.
-    if (g !== "" && !/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(g)) {
+    if (g !== "" && !ICON_GLYPH.test(g)) {
       throw new Error('icon-glyph — glyph must be an icon name or "" to clear');
     }
     const next = writeIconEntry(this.state.iconGlyphs, k, g, "icon-glyph");
@@ -2708,9 +2711,8 @@ export class StageController {
   async setAutoUpdate(partial: Partial<AutoUpdateSettings>): Promise<StageState> {
     const next: AutoUpdateSettings = { ...this.state.autoUpdate, ...partial };
     // Clamp hour to 0–23; dayOfWeek to 0–6 or null.
-    next.hour = clamp(Math.round(next.hour), 0, 23);
-    next.dayOfWeek =
-      next.dayOfWeek == null ? null : clamp(Math.round(next.dayOfWeek), 0, 6);
+    next.hour = clampAutoUpdateHour(next.hour);
+    next.dayOfWeek = clampAutoUpdateDay(next.dayOfWeek);
     console.log(`[stage-controller] setAutoUpdate →`, scrub(next));
     this.state = { ...this.state, autoUpdate: next };
     await settingsStore.patch({ autoUpdate: next });
@@ -2721,10 +2723,7 @@ export class StageController {
   // ── Time-aware reconnect scheduling ───────────────────────────────────
 
   async setReconnectSchedule(partial: Partial<ReconnectSchedule>): Promise<StageState> {
-    const next: ReconnectSchedule = { ...this.state.reconnectSchedule, ...partial };
-    next.leadMin = clamp(Math.round(next.leadMin), 0, 1440);
-    next.tailMin = clamp(Math.round(next.tailMin), 0, 1440);
-    next.dormantMin = clamp(Math.round(next.dormantMin), 1, 1440);
+    const next = clampFields<ReconnectSchedule>({ ...this.state.reconnectSchedule, ...partial }, RECONNECT_RANGES);
     console.log(`[stage-controller] setReconnectSchedule → ${scrub(next)}`);
     this.state = { ...this.state, reconnectSchedule: next };
     await settingsStore.patch({ reconnectSchedule: next });
@@ -2737,7 +2736,7 @@ export class StageController {
   /** The keyword that lets a plan item start the testimonies by itself. */
   async setBaptismAutoStart(partial: Partial<BaptismAutoStart>): Promise<StageState> {
     const cur = this.state.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" };
-    const next: BaptismAutoStart = { ...cur, ...partial, testimonyKeyword: (partial.testimonyKeyword ?? cur.testimonyKeyword).slice(0, 80) };
+    const next: BaptismAutoStart = { ...cur, ...partial, testimonyKeyword: (partial.testimonyKeyword ?? cur.testimonyKeyword).slice(0, MAX_TESTIMONY_KEYWORD) };
     this.state = { ...this.state, baptismAutoStart: next };
     await settingsStore.patch({ baptismAutoStart: next });
     this.broadcast();
@@ -2745,9 +2744,7 @@ export class StageController {
   }
 
   async setTaperWindow(partial: Partial<TaperWindow>): Promise<StageState> {
-    const next: TaperWindow = { ...this.state.taperWindow, ...partial };
-    next.preMin = clamp(Math.round(next.preMin), 0, 240);
-    next.postMin = clamp(Math.round(next.postMin), 0, 240);
+    const next = clampFields<TaperWindow>({ ...this.state.taperWindow, ...partial }, TAPER_RANGES);
     console.log(`[stage-controller] setTaperWindow → ${scrub(next)}`);
     this.state = { ...this.state, taperWindow: next };
     await settingsStore.patch({ taperWindow: next });
@@ -2980,7 +2977,7 @@ export class StageController {
     const key = channel.trim();
     if (!key) return this.state;
     const next = { ...this.state.captionChannelColors };
-    if (color && /^#?[0-9a-f]{3,8}$/i.test(color.trim())) {
+    if (color && CAPTION_COLOR.test(color.trim())) {
       const c = color.trim();
       next[key] = c.startsWith("#") ? c : `#${c}`;
     } else {

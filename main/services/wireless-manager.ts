@@ -13,6 +13,7 @@ import { broadcast } from "./broadcaster.js";
 import { deviceManager } from "./device-manager.js";
 import { secretsStore } from "./secrets.js";
 import { settingsStore } from "./settings-store.js";
+import { clampMeterRate } from "./settings-rules.js";
 import {
   allCredentialKeys,
   mergeSecrets,
@@ -28,7 +29,6 @@ import { wirelessStore } from "./wireless-store.js";
 
 /** The fastest metering interval worth allowing. Below this the polling costs
  *  more than the freshness is worth, and 0 is a busy loop. */
-export const MIN_METER_RATE_MS = 100;
 
 class WirelessManager {
   // In-memory list of connections including runtime fields.
@@ -98,7 +98,7 @@ class WirelessManager {
     // Floored, not just made non-negative. The route accepts any number >= 0,
     // and 0 has no meaning here — it becomes setInterval(poll, 0), a busy loop
     // that pegs a core on a Pi and floods the LAN with device polls.
-    const next = Math.max(MIN_METER_RATE_MS, Math.floor(ms));
+    const next = clampMeterRate(ms);
     console.log(`[wireless] setMeterRate → ${scrub(next)}ms`);
     this.meterRateMs = next;
     await settingsStore.patch({ wirelessMeterRateMs: next });

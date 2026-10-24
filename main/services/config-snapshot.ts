@@ -20,7 +20,7 @@ import { APP_ROOT } from "./app-root.js";
 
 import { getUserDataPath } from "./app-paths.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
-import { listImages, readImage, restoreImage } from "./image-files.js";
+import { listImages, readImage, restoreImage, storedImageProblem } from "./image-files.js";
 import { configFilenames, renamedStores, restoreCheckFor, storesOfClass } from "./stores.js";
 import { initialFloor, type IdKind } from "./id-allocator.js";
 import { scrub } from "./scrub.js";
@@ -112,11 +112,8 @@ export function redactForExport(filename: string, value: unknown): unknown {
   );
 }
 
-/**
- * A restore refused because a file in it breaks a rule its settings page
- * applies. `failures` is one `file: reason` per file, for the route to show.
- * Nothing was written.
- */
+/** A restore refused: one `file: reason` per failure, for the route to show.
+ *  Nothing was written. */
 export class RestoreRefusedError extends Error {
   readonly status = 400;
   constructor(readonly failures: string[]) {
@@ -124,6 +121,16 @@ export class RestoreRefusedError extends Error {
     this.name = "RestoreRefusedError";
   }
 }
+
+/** What a restore writes, every part of it checked. */
+interface CheckedBundle {
+  files: Map<string, NonNullable<unknown>>;
+  images: { dir: string; file: string; bytes: Buffer }[];
+}
+
+/** The most images a restore takes. Deliberately a cap no real install meets:
+ *  the bundle's size limit allows thousands of small ones. */
+const MAX_RESTORE_IMAGES = 2000;
 
 const SNAPSHOT_KIND = "stage-utility-config";
 const SNAPSHOT_VERSION = 1;
@@ -404,15 +411,15 @@ class ConfigSnapshotService {
   }
 
   /**
-   * Write a snapshot's config files back to the data dir. Only allowlisted
-   * filenames are written (ignores anything else — prevents path traversal and
-   * stray writes). Returns the filenames applied. Caller restarts to apply.
+   * Write a snapshot's config files and images back to the data dir, once every
+   * one of them has passed its check (see checkBundle). Returns what was
+   * applied. Caller restarts to apply.
    */
   async apply(bundle: unknown): Promise<string[]> {
     this.validate(bundle);
-    // Every file checked before anything is paused or written: a refusal leaves
-    // the box exactly as it was.
-    const toRestore = await this.checkFiles(bundle);
+    // Every file and image checked before anything is paused, cleared or
+    // written: a refusal leaves the box exactly as it was.
+    const checked = await this.checkBundle(bundle);
 
     // Nothing may write config while a restore is landing. The process exits
     // ~1.2s after this returns, and inside that window the live poller ticks
@@ -422,7 +429,7 @@ class ConfigSnapshotService {
     // at its source rather than trying to win it.
     const resumeBackgroundWriters = await pauseBackgroundWriters();
     try {
-      const applied = await this.writeSnapshot(bundle, toRestore);
+      const applied = await this.writeSnapshot(bundle, checked);
       console.log(`[config-snapshot] restore accepted: ${scrub(applied.join(", "), 600)}`);
       return applied;
     } catch (err) {
@@ -436,16 +443,14 @@ class ConfigSnapshotService {
   }
 
   /**
-   * The files a restore will write, by today's names, each as its store's
-   * restore check returned it — or a RestoreRefusedError naming every file that
-   * failed and why, with nothing written.
+   * What a restore will write, every file and image already checked — or a
+   * RestoreRefusedError naming each that failed, with nothing touched.
    *
-   * A restore can come from any device on the LAN, and it writes each store's
-   * file whole. Without this it could put there what the store's own settings
-   * routes refuse (a feed address of `file:/etc/passwd`); with it, a restore can
-   * do nothing the settings pages cannot. See restore-check.ts.
+   * Files go through their store's restore check (restore-check.ts): a restore
+   * can come from any device on the LAN, and must do nothing the settings pages
+   * cannot. Images are held to what saving one writes (storedImageProblem).
    */
-  private async checkFiles(bundle: ConfigSnapshot): Promise<Map<string, NonNullable<unknown>>> {
+  private async checkBundle(bundle: ConfigSnapshot): Promise<CheckedBundle> {
     const known = configFiles();
     // A backup taken before a store was renamed lists it under the file it had
     // then. Mapped to today's name rather than skipped, because the allowlist
@@ -453,12 +458,13 @@ class ConfigSnapshotService {
     // success having put none of that work back.
     const renamedTo = new Map(renamedStores().map((s) => [s.renamedFrom.filename, s.filename]));
     const listed = Object.keys(bundle.files);
-    // No backup this app writes lists more files than there are stores and old
-    // names for them. One that does is not a backup.
+    // Deliberately stricter than any save: no backup this app writes lists more
+    // files than there are stores and old names for them.
     if (listed.length > known.length + renamedTo.size) {
       return this.refuse([`the backup lists ${listed.length} files; a Stage Utility backup has at most ${known.length + renamedTo.size}`]);
     }
     const ignored: string[] = [];
+    const empty: string[] = [];
     const toCheck = new Map<string, NonNullable<unknown>>();
     for (const [listedName, contents] of Object.entries(bundle.files)) {
       const name = renamedTo.get(listedName) ?? listedName;
@@ -468,55 +474,101 @@ class ConfigSnapshotService {
         console.warn(`[config-snapshot] this backup lists both ${scrub(listedName)} and ${scrub(name)}; restored ${scrub(name)} and ignored ${scrub(listedName)}`);
         continue;
       }
-      // Allowlist only. Not a refusal: a backup from a newer build carries
-      // stores this one does not have, and the rest of it still restores.
-      if (!known.includes(name)) {
-        ignored.push(listedName);
-        continue;
-      }
-      if (contents === undefined || contents === null) continue;
-      toCheck.set(name, contents);
+      // Not a refusal: a backup from a newer build carries stores this one does
+      // not have, and the rest of it still restores.
+      if (!known.includes(name)) ignored.push(listedName);
+      else if (contents === undefined || contents === null) empty.push(name);
+      else toCheck.set(name, contents);
     }
     if (ignored.length > 0) {
       console.warn(`[config-snapshot] restore: ignored ${ignored.length} file(s) this build does not keep: ${scrub(ignored.join(", "), 400)}`);
     }
+    if (empty.length > 0) {
+      console.warn(`[config-snapshot] restore: ${scrub(empty.join(", "), 400)} listed with no contents; left as they are`);
+    }
     const failures: string[] = [];
-    const toRestore = new Map<string, NonNullable<unknown>>();
+    const files = new Map<string, NonNullable<unknown>>();
     for (const [name, contents] of toCheck) {
-      const check = restoreCheckFor(name);
-      if (!check) {
-        // Unreachable while every config store must declare one (DataStore's
-        // constructor will not type-check without it). Refused rather than
-        // written unchecked if that ever stops being true.
-        failures.push(`${name}: this build has no check for it`);
+      const result = await this.runCheck(name, contents);
+      if (!result.ok) failures.push(`${name}: ${result.reason}`);
+      else files.set(name, result.value);
+    }
+    const images = this.checkImages(bundle.images, failures);
+    if (failures.length > 0) return this.refuse(failures);
+    return { files, images };
+  }
+
+  /**
+   * A store's restore check, run. Fails closed: a config store with no check
+   * (the type checker does not let one be built), or a check that answers with
+   * nothing to write, is a refusal rather than a file written unchecked.
+   */
+  private async runCheck(name: string, contents: unknown): Promise<{ ok: true; value: NonNullable<unknown> } | { ok: false; reason: string }> {
+    const check = restoreCheckFor(name);
+    if (!check) return { ok: false, reason: "this build has no check for it" };
+    const result = await check(contents);
+    if (!result.ok) return result;
+    if (result.value === undefined || result.value === null) return { ok: false, reason: "its check returned nothing to write" };
+    return { ok: true, value: result.value };
+  }
+
+  /** The bundle's images, each decoded and checked, by directory and file. A
+   *  directory this build does not keep images in is skipped, and said so. */
+  private checkImages(images: unknown, failures: string[]): { dir: string; file: string; bytes: Buffer }[] {
+    if (images === undefined) return [];
+    if (images === null || typeof images !== "object" || Array.isArray(images)) {
+      failures.push("images: must be an object of images");
+      return [];
+    }
+    const entries = Object.entries(images);
+    if (entries.length > MAX_RESTORE_IMAGES) {
+      failures.push(`images: the backup lists ${entries.length}; a restore takes at most ${MAX_RESTORE_IMAGES}`);
+      return [];
+    }
+    const out: { dir: string; file: string; bytes: Buffer }[] = [];
+    const skipped: string[] = [];
+    for (const [ref, b64] of entries) {
+      const slash = ref.indexOf("/");
+      const dir = slash > 0 ? ref.slice(0, slash) : "";
+      const file = slash > 0 ? ref.slice(slash + 1) : "";
+      if (!(IMAGE_DIRS as readonly string[]).includes(dir)) {
+        skipped.push(ref);
         continue;
       }
-      const result = await check(contents);
-      if (!result.ok) failures.push(`${name}: ${result.reason}`);
-      else if (result.value !== undefined && result.value !== null) toRestore.set(name, result.value);
+      if (typeof b64 !== "string") {
+        failures.push(`${ref}: is not base64 text`);
+        continue;
+      }
+      const bytes = Buffer.from(b64, "base64");
+      if (bytes.toString("base64") !== b64) {
+        failures.push(`${ref}: is not base64`);
+        continue;
+      }
+      const problem = storedImageProblem(file, bytes);
+      if (problem) failures.push(`${ref}: ${problem}`);
+      else out.push({ dir, file, bytes });
     }
-    if (failures.length > 0) return this.refuse(failures);
-    return toRestore;
+    if (skipped.length > 0) {
+      console.warn(`[config-snapshot] restore: skipped ${skipped.length} image(s) outside the image folders: ${scrub(skipped.join(", "), 400)}`);
+    }
+    return out;
   }
 
   private refuse(failures: string[]): never {
-    const err = new RestoreRefusedError(failures);
     console.warn(`[config-snapshot] restore refused, nothing written: ${scrub(failures.join("; "), 800)}`);
-    throw err;
+    throw new RestoreRefusedError(failures);
   }
 
   /**
    * Run every config file on disk through the check a restore would apply, and
-   * say on [config-snapshot] which do not pass. Nothing is changed: a file that fails is
-   * served as it is, because it is the operator's and quarantining it would take
-   * their setup out of service for a rule that may be newer than the file. Run
-   * once at boot. Returns what failed, for the caller and the test.
+   * say on [config-snapshot] which do not pass. Nothing is changed: a file that
+   * fails is served as it is, because it is the operator's and quarantining it
+   * would take their setup out of service for a rule that may be newer than the
+   * file. Run at boot, before the stores are read. Returns what failed.
    */
   async checkOnDisk(): Promise<string[]> {
     const failures: string[] = [];
     for (const name of configFiles()) {
-      const check = restoreCheckFor(name);
-      if (!check) continue;
       let value: unknown;
       try {
         value = await this.readFile(name);
@@ -527,7 +579,7 @@ class ConfigSnapshotService {
         continue;
       }
       if (value === undefined || value === null) continue;
-      const result = await check(value);
+      const result = await this.runCheck(name, value);
       if (!result.ok) failures.push(`${name}: ${result.reason}`);
     }
     for (const f of failures) {
@@ -537,8 +589,9 @@ class ConfigSnapshotService {
   }
 
   /** The write half of `apply`, split out so the resume can wrap all of it. */
-  private async writeSnapshot(bundle: ConfigSnapshot, toRestore: Map<string, NonNullable<unknown>>): Promise<string[]> {
+  private async writeSnapshot(bundle: ConfigSnapshot, checked: CheckedBundle): Promise<string[]> {
     const applied: string[] = [];
+    const toRestore = checked.files;
     // A bundle carries addresses and no secrets, so a stored credential would
     // follow whatever address it names. Cleared before anything is written: a
     // write that then fails costs the operator a password typed again, where
@@ -559,15 +612,9 @@ class ConfigSnapshotService {
       await atomicWrite(dest, JSON.stringify(toWrite, null, 2));
       applied.push(name);
     }
-    // Uploaded images, restored under their content-hashed names. The directory is
-    // allowlisted the same way the store filenames are, so a crafted bundle cannot
-    // write outside the image dirs.
-    for (const [ref, b64] of Object.entries(bundle.images ?? {})) {
-      const slash = ref.indexOf("/");
-      const dir = slash > 0 ? ref.slice(0, slash) : "";
-      const file = slash > 0 ? ref.slice(slash + 1) : "";
-      if (!(IMAGE_DIRS as readonly string[]).includes(dir)) continue;
-      if (await restoreImage(dir, file, Buffer.from(b64, "base64"))) applied.push(ref);
+    // Uploaded images, under the content-hashed names checkImages confirmed.
+    for (const { dir, file, bytes } of checked.images) {
+      if (await restoreImage(dir, file, bytes)) applied.push(`${dir}/${file}`);
     }
     return applied;
   }

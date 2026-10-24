@@ -15,19 +15,25 @@ import { leagueById, type ScoreFavourite, type ScoresConfig } from "../types/sco
 
 const DEFAULT: ScoresConfig = { favourites: [] };
 
-/** POST /api/scores/favourites keeps only the entries with a team id and a
- *  league this build knows, and drops the rest without refusing: the same here,
- *  so a backup from a build with a league this one lacks still restores. */
+/** keepKnownFavourites drops what it cannot use rather than refusing it, on a
+ *  save and here alike, so a backup from a build with a league this one lacks
+ *  still restores. */
 const restoreCheck = checked((raw) => {
   const file = asObject(raw, "the followed teams");
-  const favourites = asArray(file.favourites, "the followed teams' favourites").filter(
-    (f) => isFavourite(f) && f.teamId !== "" && leagueById(f.league),
-  );
-  return { ...file, favourites };
+  return { ...file, favourites: keepKnownFavourites(asArray(file.favourites, "the followed teams' favourites")) };
 });
 
-function isFavourite(f: unknown): f is ScoreFavourite {
-  return typeof f === "object" && f !== null && typeof (f as ScoreFavourite).teamId === "string";
+/**
+ * Only the entries naming a team id and a league this build knows. A favourite
+ * for a league that no longer exists would make every poll ask for a path ESPN
+ * does not serve. Used by POST /api/scores/favourites and a restore.
+ */
+export function keepKnownFavourites(list: readonly unknown[]): ScoreFavourite[] {
+  return list.filter(
+    (f): f is ScoreFavourite =>
+      typeof f === "object" && f !== null && typeof (f as ScoreFavourite).teamId === "string" &&
+      (f as ScoreFavourite).teamId !== "" && leagueById((f as ScoreFavourite).league) !== null,
+  );
 }
 
 const store = new DataStore<ScoresConfig>("scores-favourites.json", DEFAULT, "config", { restoreCheck });

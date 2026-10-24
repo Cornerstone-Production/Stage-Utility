@@ -320,23 +320,38 @@ Two backups exist in the app, and they cover different things:
 
 A restore is checked the way a save is. Every file in the snapshot goes through
 the rules its settings page applies — a video feed's address, a cue's name, a
-port range, a colour — and a value a save would have trimmed or clamped is
-trimmed or clamped the same way. If any file breaks a rule, the whole restore is
-refused with the file and the reason, and nothing on the machine changes. A
-restore can never write `secrets.bin` or `encryption.key`, and a credential found
-inside a config file (a wireless password, an integration's API key) is dropped
-rather than stored. A snapshot listing more files than there are config stores is
-refused outright; a file this build does not keep is ignored and logged.
+screen's address, a port range, a colour — and a value a save would have trimmed,
+clamped or dropped is trimmed, clamped or dropped the same way. Every uploaded
+image in it must be one the app could have saved: the right file type, within
+12 MB, and named by its own content hash. If any file or image breaks a rule, the
+whole restore is refused with each one and the reason, and nothing on the machine
+changes: nothing is written, no stored credential is cleared, and nothing that
+runs in the background is paused.
 
-Three things a save checks are not checked on a restore, because the snapshot
+- A restore never writes `secrets.bin` or `encryption.key`. A credential found
+  inside a config file (a wireless password, an integration's API key) is dropped
+  rather than stored, and a screen binding's token is restored empty, so the
+  screen pins a new one when it next connects.
+- An automation rule with fields that need attention restores as it was saved,
+  showing Needs setup, as it does after an upgrade; a cue name that would clash
+  or is not usable refuses the restore.
+- A `settings.json` key no part of the app reads is dropped and logged. A file
+  this build does not keep, and an image outside the two image folders, is
+  skipped and logged.
+- A snapshot listing more files than there are config stores, or more than 2000
+  images, is refused outright. No backup the app writes comes near either.
+
+Four things a save checks are not checked on a restore, because the snapshot
 cannot answer them: whether a service type or plan still exists in Planning
 Center, whether a milestone's service type has recorded history on this machine,
-and whether a screen's address is reserved (the next start renames one that is).
+whether a branding image `settings.json` names is on this machine, and whether a
+screen's message groups exist. A screen whose address has since become a
+built-in page is restored, and the next start renames it and logs the change.
 
-At start-up the server runs the same checks over the config files on disk and
-names any that a save would refuse on `[config-snapshot]`. Nothing is changed: the
-file stays in use as it is, so a hand edit or an older build's file is reported,
-never taken out of service.
+At start-up, before anything reads them, the server runs the same checks over the
+config files on disk and names any that a save would refuse on
+`[config-snapshot]`. Nothing is changed: the file stays in use as it is, so a hand
+edit or an older build's file is reported, never taken out of service.
 
 ## Automatic backups
 
