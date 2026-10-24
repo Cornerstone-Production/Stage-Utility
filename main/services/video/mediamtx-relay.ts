@@ -36,6 +36,7 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { errorMessage } from "../errors.js";
+import { relayPlayback } from "../../types/video.js";
 import { normalizeCodecName } from "./codec-name.js";
 import { planReconcile, relayUsers } from "./reconcile-plan.js";
 import { withoutCredentials } from "./redact-url.js";
@@ -253,8 +254,7 @@ export class MediaMtxRelay implements VideoRelay {
   }
 
   playback(feedId: string): { whep: string; hls: string } {
-    const base = `/video/${feedId}`;
-    return { whep: `${base}/whep`, hls: `${base}/index.m3u8` };
+    return relayPlayback(feedId);
   }
 
   async kickPublisher(feedId: string): Promise<boolean> {

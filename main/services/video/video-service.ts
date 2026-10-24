@@ -56,6 +56,7 @@ import type { SupervisorStatus } from "./supervisor.js";
 import {
   DEFAULT_VIDEO_PORTS,
   PUSH_PROTOCOL_LABEL,
+  relayPlayback,
   type FeedAudioStatus,
   type FeedPlay,
   type FeedState,
@@ -685,8 +686,7 @@ class VideoService {
     const s = feed.source;
     if (s.kind === "embed") return { via: "embed", src: embedSrc(s.player, s.ref) };
     if (s.kind === "external") return { via: "external", url: s.url, protocol: externalProtocol(s.url) };
-    const base = `/video/${feed.id}`;
-    return { via: "relay", whep: `${base}/whep`, hls: `${base}/index.m3u8` };
+    return { via: "relay", ...relayPlayback(feed.id) };
   }
 
   /** The page's list line: what kind of source, then its address, protocol
