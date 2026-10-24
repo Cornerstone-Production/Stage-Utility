@@ -402,6 +402,9 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // One timer for the service clock, a ProPresenter timer and the baptism
   // readouts: it replaces four widgets (see RETIRED) and leads the group's tail.
   { type: "timer", label: "Timer", group: "Text & time", after: "clock" },
+  // The words on the slide with their group's tag. Sits after the two slide-text
+  // widgets it is the richer form of.
+  { type: "lyrics", label: "Lyrics", group: "ProPresenter", after: "next-slide-text" },
 ];
 
 /**

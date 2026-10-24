@@ -61,6 +61,7 @@ import { Loader2Icon, ZapIcon } from "lucide-react";
 import { displayHourCycle, formatClock } from "../lib/clock-format";
 import { externKeyed } from "@main/types/extern-keyed";
 import { VideoObject } from "./video/video-object";
+import { LyricsObject } from "./lyrics-object";
 
 // Render context shared by every object renderer.
 export interface LayoutRenderCtx {
@@ -1096,6 +1097,20 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "current-slide-text": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
       return span(pro?.currentSlideText ?? pro?.currentItem ?? "");
+    }
+    case "lyrics": {
+      // The instance this object reads: the default, or the one it names. A named
+      // instance whose list has not loaded has not answered, which is not "not connected".
+      const named = c.propresenterInstanceId;
+      return (
+        <LyricsObject
+          config={c}
+          pro={named ? ctx.propInstances?.status[named] : ctx.propresenter}
+          known={named ? ctx.propInstances != null : ctx.propresenterKnown}
+          color={o.style?.color}
+          fallbackH={ctx.H}
+        />
+      );
     }
     case "next-slide-text": {
       const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
@@ -3289,6 +3304,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
     "current-service-item",
     "current-slide-notes",
     "current-slide-text",
+    "lyrics",
     "next-service-item",
     "next-slide-text",
     "pp-timer",

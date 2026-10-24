@@ -173,11 +173,16 @@ describe("editing", () => {
     assert.deepEqual(defaultStyleFor("timer", { hostDrawsFrame: true }), {});
   });
 
-  test("only the Timer starts differently on Home, so every other widget's Home add is its registry style", () => {
+  test("only the Timer and Lyrics start differently on Home, so every other widget's Home add is its registry style", () => {
     const differing = Object.entries(LAYOUT_OBJECTS)
       .filter(([, spec]) => spec.homeStyle)
-      .map(([type]) => type);
-    assert.deepEqual(differing, ["timer"]);
+      .map(([type]) => type)
+      .sort();
+    // Sorted, one per line: two branches adding a type each then merge cleanly.
+    assert.deepEqual(differing, [
+      "lyrics",
+      "timer",
+    ]);
   });
 
   test("removing takes exactly one card", () => {
