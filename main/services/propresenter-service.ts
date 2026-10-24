@@ -180,6 +180,9 @@ const OFFLINE: ProPresenterStatusDTO = {
   currentSection: null,
   nextSection: null,
   nextArrangementSection: null,
+  nextGroupText: null,
+  playOrderGroups: [],
+  playOrderGroupIndex: null,
   currentServiceItem: null,
   nextServiceItem: null,
   timers: [],
@@ -336,6 +339,14 @@ function locateSlide(
   return null;
 }
 
+/** One slide of the play order: its group, where that group is played, its words. */
+interface PlaySlide {
+  name: string;
+  colorHex: string;
+  occurrence: number;
+  text: string;
+}
+
 // Expand the presentation into PLAY order — one entry per slide, in the order
 // ProPresenter actually presents them. ProPresenter's slide_index indexes into
 // THIS sequence (it can exceed the library slide count because an arrangement
@@ -343,7 +354,7 @@ function locateSlide(
 // repeats) defining play order. `current_arrangement` is often left blank even
 // when an arrangement is in effect, so fall back to the sole arrangement when
 // there's exactly one, then to library/document order as a last resort.
-function playOrderSections(active: unknown): { name: string; colorHex: string }[] {
+function playOrderSections(active: unknown): PlaySlide[] {
   const groups = pick(active, "presentation", "groups");
   if (!Array.isArray(groups)) return [];
 
@@ -352,12 +363,19 @@ function playOrderSections(active: unknown): { name: string; colorHex: string }[
     const u = asString(pick(g, "uuid"));
     if (u) byUuid.set(u, g);
   }
-  const expand = (g: unknown): { name: string; colorHex: string }[] => {
+  // `occurrence` numbers the places a group is PLAYED, not the groups: a chorus an
+  // arrangement repeats three times is three occurrences, and two choruses in a
+  // row are still two. `text` is the slide's own words ("" for a slide with none).
+  const expand = (g: unknown, occurrence: number): PlaySlide[] => {
     const name = asString(pick(g, "name")) ?? "";
     const colorHex = colorToHex(pick(g, "color"));
     const slides = pick(g, "slides");
-    const n = Array.isArray(slides) ? slides.length : 0;
-    return Array.from({ length: n }, () => ({ name, colorHex }));
+    return (Array.isArray(slides) ? slides : []).map((s) => ({
+      name,
+      colorHex,
+      occurrence,
+      text: asString(pick(s, "text")) ?? "",
+    }));
   };
 
   const arrUuid = asString(pick(active, "presentation", "current_arrangement"));
@@ -370,16 +388,17 @@ function playOrderSections(active: unknown): { name: string; colorHex: string }[
 
   const refs = pick(arr, "groups");
   if (Array.isArray(refs)) {
-    const out: { name: string; colorHex: string }[] = [];
+    const out: PlaySlide[] = [];
+    let occurrence = 0;
     for (const u of refs) {
       const g = byUuid.get(asString(u) ?? "");
-      if (g) out.push(...expand(g));
+      if (g) out.push(...expand(g, occurrence++));
     }
     if (out.length) return out;
   }
 
   // No usable arrangement — present in library/document order.
-  return groups.flatMap(expand);
+  return groups.flatMap((g, i) => expand(g, i));
 }
 
 /**
@@ -1561,8 +1580,22 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     let currentSection: ProSection | null = null;
     let nextSection: ProSection | null = null;
     let nextArrangementSection: ProSection | null = null;
+    let nextGroupText: string | null = null;
+    let playOrderGroupIndex: number | null = null;
+
+    // The groups in the order they are played, one per OCCURRENCE: the whole
+    // arrangement as a strip. Unnamed groups are left out, as they are from the
+    // section names above; `occurrenceAt` maps a play-order slide to its entry.
+    const playOrderGroups: ProSection[] = [];
+    const occurrenceAt = new Map<number, number>();
+    for (const sl of play) {
+      if (!sl.name || occurrenceAt.has(sl.occurrence)) continue;
+      occurrenceAt.set(sl.occurrence, playOrderGroups.length);
+      playOrderGroups.push({ name: sl.name, colorHex: sl.colorHex });
+    }
 
     if (idxZero != null && total > 0) {
+      playOrderGroupIndex = occurrenceAt.get(play[idxZero].occurrence) ?? null;
       const cur = play[idxZero];
       if (cur?.name) currentSection = { name: cur.name, colorHex: cur.colorHex };
       const nxt = play[idxZero + 1];
@@ -1571,6 +1604,9 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       for (let i = idxZero + 1; i < total; i++) {
         if (play[i].name && play[i].name !== currentSection?.name) {
           nextArrangementSection = { name: play[i].name, colorHex: play[i].colorHex };
+          // The words on the first slide of that group: `i` is where the new
+          // group STARTS, being the first slide past the current group's name.
+          nextGroupText = play[i].text;
           break;
         }
       }
@@ -1629,6 +1665,9 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       currentSection,
       nextSection,
       nextArrangementSection,
+      nextGroupText,
+      playOrderGroups,
+      playOrderGroupIndex,
       currentServiceItem: services.current,
       nextServiceItem: services.next,
       timers: runningTimers,
