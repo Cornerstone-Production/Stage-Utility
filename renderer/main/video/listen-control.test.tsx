@@ -315,7 +315,7 @@ test("the control's tap unmutes and starts the element before it hands over the 
       return Promise.resolve();
     },
   } as unknown as HTMLVideoElement;
-  const view = { disabled: false, on: false, playing: false, text: "", warn: false };
+  const view = { disabled: false, on: false, playing: false, text: "", tone: "plain" as const };
   render(
     React.createElement(ListenControl, {
       view,
@@ -543,6 +543,92 @@ test("a play() the claim interrupts is not a refusal, and one the browser refuse
   } finally {
     frames.restore();
     g.restore();
+  }
+});
+
+test("a failure caption goes when another control takes the sound, and when the feed's listen path changes", async () => {
+  const refuse = { path: "/video/a-listen/whep", status: 415 };
+  const { g } = await renderFeeds([makeFeed("a", "Alpha", CONVERTED("a")), makeFeed("b", "Bravo", CONVERTED("b"))], { refuse });
+  try {
+    await press(buttonFor("Alpha"));
+    await settle();
+    assert.match(statusText(), /^Audio could not start/);
+    await press(buttonFor("Bravo"));
+    assert.ok(!/could not start/.test(statusText()), "another control took the sound and Alpha's failure stayed up");
+    await press(buttonFor("Bravo", true));
+    assert.ok(!document.body.textContent!.includes("could not start"), "Alpha's old failure came back when the sound was free");
+
+    await press(buttonFor("Alpha"));
+    await settle();
+    assert.match(statusText(), /^Audio could not start/);
+    const next = makeState([makeFeed("a", "Alpha", { state: "direct", listenPath: "a" }), makeFeed("b", "Bravo", CONVERTED("b"))]);
+    act(() => FakeEventSource.last!.push("video:state", next));
+    await settle();
+    assert.ok(!document.body.textContent!.includes("could not start"), "the failure outlived a change of the feed's listen path");
+  } finally {
+    g.restore();
+  }
+});
+
+// ── the meter ───────────────────────────────────────────────────────────────
+
+class FakeAudioContext {
+  state = "running";
+  static resume: () => Promise<void> = () => Promise.resolve();
+  resume() {
+    return FakeAudioContext.resume();
+  }
+  close() {
+    this.state = "closed";
+    return Promise.resolve();
+  }
+}
+async function listeningWith(audioContext: unknown) {
+  const g0 = globalThis as { AudioContext?: unknown };
+  const real = g0.AudioContext;
+  g0.AudioContext = audioContext;
+  const frames = captureFrames();
+  const { g } = await renderFeeds([makeFeed("a", "Alpha", CONVERTED("a"))]);
+  await press(buttonFor("Alpha"));
+  act(() => frames.fire());
+  await settle();
+  return {
+    done() {
+      g0.AudioContext = real;
+      frames.restore();
+      g.restore();
+    },
+  };
+}
+
+test("the level meter is drawn when the browser gives an audio context", async () => {
+  const run = await listeningWith(FakeAudioContext);
+  try {
+    assert.equal(statusText(), "Listening");
+    assert.ok(document.querySelector("[data-listen-meter]") !== null, "no meter with a working audio context");
+    assert.ok(screen.getByRole("slider", { name: "Volume for Alpha" }));
+  } finally {
+    run.done();
+  }
+});
+
+test("a browser with no audio context, or one that will not start, gets no meter and keeps the sound and the slider", async () => {
+  const none = await listeningWith(undefined);
+  try {
+    assert.equal(statusText(), "Listening");
+    assert.ok(document.querySelector("[data-listen-meter]") === null, "flat bars under Listening with no audio context");
+    assert.ok(screen.getByRole("slider", { name: "Volume for Alpha" }));
+  } finally {
+    none.done();
+  }
+  cleanup();
+  FakeAudioContext.resume = () => Promise.reject(new Error("the user has not interacted"));
+  const refusing = await listeningWith(FakeAudioContext);
+  try {
+    assert.ok(document.querySelector("[data-listen-meter]") === null, "flat bars under Listening with a context that would not start");
+  } finally {
+    FakeAudioContext.resume = () => Promise.resolve();
+    refusing.done();
   }
 });
 

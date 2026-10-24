@@ -2,7 +2,7 @@
 // is playing: a Web Audio AnalyserNode on its MediaStream, read on a timer. The analyser
 // is never connected to the destination, so nothing is played twice.
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Bars the control draws. */
 export const METER_BARS = 8;
@@ -61,12 +61,13 @@ function audioContextCtor(): typeof AudioContext | null {
 /**
  * The one AudioContext the meter reads through. `open()` makes it and must run in
  * the tap, since a context made outside a gesture starts suspended; it is closed
- * when `held` goes false or the control goes. A browser with no Web Audio, or one
- * that refuses the context, leaves `current()` null: no meter, and the sound is
- * untouched.
+ * when `held` goes false or the control goes. `refused` is true when this browser
+ * has no Web Audio or would not give one, so the control can leave the meter out
+ * rather than draw bars that never move. The sound is untouched.
  */
-export function useMeterContext(held: boolean): { open: () => void; current: () => AudioContext | null } {
+export function useMeterContext(held: boolean): { open: () => void; current: () => AudioContext | null; refused: boolean } {
   const ref = useRef<AudioContext | null>(null);
+  const [refused, setRefused] = useState(false);
   const drop = useCallback(() => {
     const ctx = ref.current;
     ref.current = null;
@@ -75,19 +76,25 @@ export function useMeterContext(held: boolean): { open: () => void; current: () 
   useEffect(() => (held ? drop : undefined), [held, drop]);
   const open = useCallback(() => {
     if (ref.current) return;
+    setRefused(false);
     const Ctor = audioContextCtor();
-    if (!Ctor) return;
+    if (!Ctor) {
+      setRefused(true);
+      return;
+    }
     try {
       const ctx = new Ctor();
       ref.current = ctx;
       ctx.resume().catch((err: unknown) => {
         console.debug("[video] the meter's audio context would not start", err);
         if (ref.current === ctx) drop();
+        setRefused(true);
       });
     } catch (err) {
       console.debug("[video] no audio context for the meter", err);
       ref.current = null;
+      setRefused(true);
     }
   }, [drop]);
-  return { open, current: () => ref.current };
+  return { open, current: () => ref.current, refused };
 }

@@ -16,6 +16,8 @@ import { readVolume, setSound, startFromTap, writeVolume, type ListenView } from
 const BAR_REST_PX = 4;
 const BAR_SPAN_PX = 18;
 const BAR_PEAK_PX = 18;
+// Dark-ground tokens (.kiosk-surface), so the caption reads over any frame in either theme.
+const TONE_TEXT = { plain: "text-fg", starting: "text-accent-text", live: "text-ok-11", warn: "" } as const;
 const SIZE = "clamp(36px, 8cqw, 44px)";
 
 export function ListenControl({
@@ -87,7 +89,7 @@ export function ListenControl({
 
   const refused = blocked !== null && view.on;
   const text = refused ? `The browser would not play sound: ${blocked}` : view.text;
-  const warn = view.warn || refused;
+  const tone = refused ? "warn" : view.tone;
 
   return (
     // kiosk-surface for its dark-ground tokens, over a scrim of our own; a press here is the control's, not the card's.
@@ -98,14 +100,14 @@ export function ListenControl({
       style={{ right: "clamp(6px, 1.6cqw, 12px)", bottom: "clamp(6px, 1.6cqw, 12px)", gap: 6, maxWidth: "calc(100% - 12px)", background: "transparent" }}
     >
       {text !== "" && (
-        <div className="rounded-lg bg-black/65">
-          <Callout tone={warn ? "warn" : "neutral"} role="status" data-listen-status="" className={cn("bg-transparent text-right", !warn && "text-fg")}>
+        <div className="rounded-lg bg-black/75">
+          <Callout tone={tone === "warn" ? "warn" : "neutral"} role="status" data-listen-status="" className={cn("bg-transparent text-right", TONE_TEXT[tone])}>
             {text}
           </Callout>
         </div>
       )}
       <div className="flex items-center rounded-xl bg-black/65" style={{ gap: 10, padding: 6 }}>
-        {view.playing && (
+        {view.playing && !meterContext.refused && (
           <div ref={meterRef} data-listen-meter="" data-level="0.000" aria-hidden="true" className="flex items-end" style={{ gap: 3, height: 22, paddingLeft: 6 }}>
             {Array.from({ length: METER_BARS }, (_, i) => (
               <span

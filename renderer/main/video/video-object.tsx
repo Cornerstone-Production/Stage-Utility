@@ -135,14 +135,19 @@ function VideoObjectBody({
   const audio = feed?.audio;
   const feedListenPath = listenPathOf(audio);
   const listenPath = wanted ? feedListenPath : null;
-  // Why the last attempt to listen gave up, until the next tap.
-  const [listenFailure, setListenFailure] = useState<string | null>(null);
+  // Why the last attempt to listen gave up. It stands until the next tap, and goes the
+  // moment it stops being about what is on screen: another control took the sound, or
+  // this feed's listen path or audio state changed.
+  const audioState = audio?.state ?? null;
+  const [failure, setFailure] = useState<{ reason: string; path: string | null; audioState: string | null } | null>(null);
+  const failureStands = failure !== null && listenOwner === null && failure.path === feedListenPath && failure.audioState === audioState;
+  if (failure !== null && !failureStands) setFailure(null);
   const onListenFailed = useCallback(
     (reason: string) => {
       releaseListen(listenId);
-      setListenFailure(reason);
+      setFailure({ reason, path: feedListenPath, audioState });
     },
-    [listenId],
+    [listenId, feedListenPath, audioState],
   );
   // Off screen, hidden, paused, or the feed lost its audio: the page stops listening.
   useEffect(() => {
@@ -163,7 +168,7 @@ function VideoObjectBody({
   });
   // A listening session that dropped is not a feed gone offline: the control says the audio is retrying, and the cover reads Connecting.
   const coverPhase = listenPath !== null && phase === "offline" && feed?.status.state !== "offline" ? "connecting" : phase;
-  const view = offersListen && !previewPaused ? listenView({ audio, wanted, phase, outcome: listenOutcome, failure: listenFailure }) : null;
+  const view = offersListen && !previewPaused ? listenView({ audio, wanted, phase, outcome: listenOutcome, failure: failureStands ? failure.reason : null }) : null;
 
   const name = feed?.name ?? "This feed";
   const isEmbed = embedUrl !== null;
@@ -266,7 +271,7 @@ function VideoObjectBody({
           wanted={wanted}
           onToggle={() => {
             if (wanted) return releaseListen(listenId);
-            setListenFailure(null);
+            setFailure(null);
             claimListen(listenId);
           }}
         />

@@ -87,6 +87,8 @@ export function startFromTap(video: HTMLVideoElement, volume: number): Promise<v
 
 // ── The words ───────────────────────────────────────────────────────────────
 
+export type ListenTone = "plain" | "starting" | "live" | "warn";
+
 export interface ListenView {
   /** Disabled: nothing can be heard from this feed here, and `text` says why. */
   disabled: boolean;
@@ -96,8 +98,8 @@ export interface ListenView {
   playing: boolean;
   /** Empty while muted: a feed nobody is listening to carries no caption. */
   text: string;
-  /** Something is wrong but nothing is broken: drawn as a warning. */
-  warn: boolean;
+  /** How the caption is drawn: a warning when something is wrong but nothing is broken. */
+  tone: ListenTone;
 }
 
 /**
@@ -117,16 +119,16 @@ export function listenView(input: {
   const { audio, wanted, phase, outcome, failure } = input;
   if (!audio) return null;
   const idle = { on: false, playing: false } as const;
-  const note = (text: string, warn = false) => ({ ...idle, disabled: true, text, warn });
+  const note = (text: string, tone: ListenTone = "plain") => ({ ...idle, disabled: true, text, tone });
   if (audio.state === "none") return note("This feed has no audio");
   if (audio.state === "unknown") return note("Audio is not known until the feed has been seen");
-  if (audio.state === "unavailable") return note(`Audio isn't available on this server: ${audio.reason}`, true);
-  if (!wanted) return failure ? { ...idle, disabled: false, text: `Audio could not start: ${failure}`, warn: true } : { ...idle, disabled: false, text: "", warn: false };
+  if (audio.state === "unavailable") return note(`Audio isn't available on this server: ${audio.reason}`, "warn");
+  if (!wanted) return failure ? { ...idle, disabled: false, text: `Audio could not start: ${failure}`, tone: "warn" } : { ...idle, disabled: false, text: "", tone: "plain" };
   const on = { on: true, disabled: false, playing: false } as const;
-  if (outcome === "hls") return { ...on, text: "Audio needs WebRTC, and this feed is playing over HLS", warn: true };
-  if (outcome === "cant-play") return { ...on, text: "Audio needs WebRTC, which this browser cannot play for this feed", warn: true };
-  if (phase === "offline") return { ...on, text: "Audio stopped, retrying", warn: true };
-  if (phase === "waiting") return { ...on, text: "Waiting for the source", warn: false };
-  if (outcome === "on" && (phase === "live" || phase === "delayed")) return { ...on, playing: true, text: "Listening", warn: false };
-  return { ...on, text: "Starting audio…", warn: false };
+  if (outcome === "hls") return { ...on, text: "Audio needs WebRTC, and this feed is playing over HLS", tone: "warn" };
+  if (outcome === "cant-play") return { ...on, text: "Audio needs WebRTC, which this browser cannot play for this feed", tone: "warn" };
+  if (phase === "offline") return { ...on, text: "Audio stopped, retrying", tone: "warn" };
+  if (phase === "waiting") return { ...on, text: "Waiting for the source", tone: "starting" };
+  if (outcome === "on" && (phase === "live" || phase === "delayed")) return { ...on, playing: true, text: "Listening", tone: "live" };
+  return { ...on, text: "Starting audio…", tone: "starting" };
 }
