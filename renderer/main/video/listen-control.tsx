@@ -123,8 +123,8 @@ export function ListenControl({
   const text = blocked !== null && view.on ? `The browser would not play sound: ${blocked}` : view.text;
   const tone: ListenTone = blocked !== null && view.on ? "warn" : view.tone;
   const control: CSSProperties = {
-    width: "clamp(32px, 7cqw, 44px)",
-    height: "clamp(32px, 7cqw, 44px)",
+    width: "clamp(36px, 8cqw, 44px)",
+    height: "clamp(36px, 8cqw, 44px)",
     borderRadius: 10,
     border: 0,
     display: "flex",

@@ -687,7 +687,11 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   // Whether the fallback has been logged and WebRTC has not held since: the
   // line is written once per outage, never once per probe.
   const webrtcOutageRef = useRef(false);
-  const [attemptPhase, setAttemptPhase] = useState<"connecting" | "live" | "delayed" | "offline">("connecting");
+  // The phase of the attempt `key` names. A new attempt (another address, the sound
+  // switched on) reads "connecting" from the render that chooses it, not from the
+  // effect after: until then the old attempt's "live" would stand for one frame
+  // over a session that has not started.
+  const [phased, setPhased] = useState<{ key: string | null; phase: "connecting" | "live" | "delayed" | "offline" }>({ key: null, phase: "connecting" });
   const [latency, setLatency] = useState<number | null>(null);
   // Purely a "try again" SIGNAL for the effect below — bumped only when a
   // backoff timer decides a retry is actually due, so the effect re-runs
@@ -824,6 +828,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
 
   const embedUrl = active && verdict.kind === "embed" ? verdict.url : null;
 
+  const attemptPhase = phased.key === attemptKey ? phased.phase : "connecting";
   const phase = phaseOf(verdict, attemptPhase);
 
   useEffect(() => {
@@ -846,7 +851,9 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
     // cover there would flash over the picture it is about to show.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLatency(null);
-    if (!adopt) setAttemptPhase("connecting");
+    // An adopted session keeps the phase it was showing: its frames are already
+    // flowing, and nothing here is connecting.
+    setPhased((p) => ({ key: attemptKey, phase: adopt ? p.phase : "connecting" }));
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let heldTimer: ReturnType<typeof setTimeout> | undefined;
     const name = current?.name ?? "this feed";
@@ -857,7 +864,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
       choice,
       {
         onPhase: (p) => {
-          setAttemptPhase(p);
+          setPhased({ key: attemptKey, phase: p });
           if ((p === "live" || p === "delayed") && heldTimer === undefined) {
             heldTimer = setTimeout(() => {
               attemptCountRef.current = 0;
@@ -888,7 +895,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
         },
         onDropped: (reason) => {
           clearTimeout(heldTimer);
-          setAttemptPhase("offline");
+          setPhased({ key: attemptKey, phase: "offline" });
           const delay = Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** attemptCountRef.current);
           attemptCountRef.current += 1;
           const d = streak().fail(key, "dropped", Date.now());
@@ -909,7 +916,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
       samplerRef.current?.stop();
       samplerRef.current = null;
     };
-  }, [active, video, retryToken, attemptChoice, feedRef, onLogRef]);
+  }, [active, video, retryToken, attemptChoice, attemptKey, feedRef, onLogRef]);
 
   const listen: ListenOutcome = listenOutcomeOf(listenPath, verdict);
 

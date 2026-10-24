@@ -347,6 +347,35 @@ test("tapping a converted feed plays its -listen path with audio, unmuted, and s
   }
 });
 
+test("a session for new sound reads connecting from the render that chooses it, not live from the one before", async () => {
+  const frames = captureFrames();
+  const g = stubGlobals(makeState([makeFeed("a", "Program", CONVERTED("a"))]));
+  const { useVideoSession } = await import("./use-video-session.js");
+  const phases: { listenPath: string | null; phase: string }[] = [];
+  function Probe({ listenPath }: { listenPath: string | null }) {
+    const [video, setVideo] = React.useState<HTMLVideoElement | null>(null);
+    const { phase } = useVideoSession({ active: true, feed: makeFeed("a", "Program", CONVERTED("a")), feedDeleted: false, video, allowHls: true, relayRunning: true, listenPath });
+    phases.push({ listenPath, phase });
+    return React.createElement("video", { ref: setVideo });
+  }
+  try {
+    const view = render(React.createElement(Probe, { listenPath: null }));
+    await settle();
+    await settle();
+    act(() => frames.fire());
+    await settle();
+    assert.equal(phases.at(-1)?.phase, "live", "the picture-only session never went live, so this proves nothing");
+    phases.length = 0;
+    view.rerender(React.createElement(Probe, { listenPath: "a-listen" }));
+    await settle();
+    const first = phases.find((p) => p.listenPath === "a-listen");
+    assert.equal(first?.phase, "connecting", "the first render of the listening session read as the picture-only session's live");
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
 test("a feed already in Opus or G.711 is listened to on its own path, with audio asked for", async () => {
   const { g } = await renderFeeds([makeFeed("a", "Program", { state: "direct", listenPath: "a" })]);
   try {
