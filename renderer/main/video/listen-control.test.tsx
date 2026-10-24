@@ -485,6 +485,8 @@ test("a listening session the relay refuses reads 'Audio stopped, retrying'", as
     await press(buttonFor("Alpha"));
     await settle();
     assert.equal(statusText(), "Audio stopped, retrying");
+    assert.equal(screen.queryByText("Alpha is offline"), null, "a dropped listening session read as the feed being offline");
+    assert.ok(screen.getByText("Connecting to Alpha"));
   } finally {
     g.restore();
   }
