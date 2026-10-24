@@ -448,12 +448,37 @@ up even on a layer that is playing. See
 |---|---|---|
 | **Current slide** | The words on the slide showing now | ProPresenter |
 | **Next slide** | The words on the slide coming next | ProPresenter |
+| **Lyrics** | The words on the slide, with its group as ProPresenter names it | ProPresenter |
 | **Slide notes** | Speaker notes on the current slide | ProPresenter |
 | **Slide image** | A picture of the slide showing now | ProPresenter thumbnails |
 | **Slide progress** | How far through the presentation | ProPresenter |
 | **Section chip** | The part of the service running now, as a label | ProPresenter |
 
 **Slide progress** reads as a fraction, a count remaining, a percentage or a bar.
+
+**Lyrics** draws the words on the current slide with the group the slide belongs to
+(Verse 1, Chorus, Bridge) as a tag, in ProPresenter's group colour, and what comes
+next underneath. The group names and colours are ProPresenter's own, and the order
+the groups play in follows the presentation's arrangement, so a chorus played three
+times is three places in the strip. It has three layouts:
+
+- **Above**: the tag over the words. The default.
+- **Beside**: the tag in a column to the left of the words, so a run of slides lines
+  up down the screen.
+- **Arrangement**: every group of the song in play order as a strip of short tags
+  (V1, C, B), the current one lit and the ones already played dimmed, with the words
+  under it.
+
+A slide with no words (an Intro, an Outro, a media slide) shows its tag alone, or
+nothing, as set. Nothing is drawn underneath on the last slide. The widget draws
+nothing while ProPresenter has not answered yet, a dim dash when ProPresenter is
+not connected or has no presentation open, and never the words of a slide that has
+gone. **Short** tag text is derived: Verse 1 is V1, Chorus C, Pre-Chorus PC, Bridge
+B, Tag T, Intro and Outro stay whole, and any other name is the initials of its
+words or its first three letters, with a trailing number kept (Interlude 2 is IN2).
+On Home it is a card in the theme's own colours, large and shown during a service
+to start.
+
 A **Timer** on the ProPresenter source finds its timer by name, so renaming it in
 ProPresenter breaks the link. With more than one ProPresenter connected, these
 widgets and the Timer pick which instance they follow. See
@@ -761,6 +786,7 @@ chooses which; with one, it is not shown.
 | **Clock** | **Format** 12h or 24h (follows the app setting until chosen), **Seconds**, **AM/PM** |
 | **Timer** | **Source** (Service, ProPresenter or Baptism). Service: **Show the next item** (on for a new Timer). ProPresenter: **Timer** (a name typed in, with the running timers suggested; empty follows the first running one). Baptism: **Shows** one of nine readouts and its **Label** (auto by default). All: **Caption**, one sub-line switch (**Show the sub-line**, **Show the timer's name** or **Show the label**, on), **Hide when idle** (off). Service and ProPresenter: **Amber near the end** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5) and **Red on overrun** (on) |
 | **Service pacing** | **Ahead color** and **Behind color** (green and red until changed, each with a Reset), **Projected end time** (off), **Show ahead/behind label** (off), **Show dash when idle** (on) |
+| **Lyrics** | **Layout** (Above, Beside or Arrangement; Above to start). **Group tag**: **Style** (Filled, Outline or Text), **Colour** (ProPresenter's, or one colour, the app accent), **Text** (As named, Short or CAPS), **Width** when beside (Column, or Fit). **Lyrics**: **Size** (Fit, S, M or L; L to start. S, M and L are a share of the object's own height and come down when the words would not fit it; Fit is the largest size that does), **Weight** (Regular or Bold; Bold), **Align** when above (Left or Centre; Left), **No words** (Blank or Tag only; Tag only). **Underneath**: **Show what comes next** (on), **Shows** the next slide or the next group (the next group), **Its lyrics** (off), **Dimmed** (a little or more). **Song title** (off), the presentation's name in the corner. Its own Size, Weight and Align replace the Look section's type controls; the text colour still applies |
 | **Section chip** | **Which**: Current, Next, or Next section (skips arrangement breaks) |
 | **Slide progress** | **Display**: fraction (`3 / 12`, the default), left, percent or bar; **Show 'slides' label** (off, not offered for the bar) |
 | **Service order (legacy)** | **Scroll**: Follow live (the default) or Static, **Fit to height** (on), **Highlight live** (on), **Show length** (off), **Notes shown** (every note category, once a plan with notes is loaded) |
