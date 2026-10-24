@@ -2162,9 +2162,9 @@ function PeoplePanel({
     return { text: v == null ? "—" : v.toLocaleString(), color: base };
   };
   // Scaled, not resized: the gaps and fonts are fractions of the canvas, so only the
-  // whole block can shrink with the box. It never grows: the block is as tall and
-  // as wide as its box, so a block that fits is already at scale 1. Its key is
-  // everything that changes its size, the tiles' own text included.
+  // whole block can shrink with the box. It never grows: the block is at least as
+  // tall and as wide as its box, so a block that fits is already at scale 1. Its key
+  // is everything that changes its size, the tiles' own text included.
   const { wrapRef: fitWrapRef, contentRef: fitElRef, value: fitScale } = useBoxFit<HTMLDivElement>({
     floor: FIT_MIN_GROWTH,
     ceiling: 1,
@@ -2173,7 +2173,7 @@ function PeoplePanel({
     apply: (el, v) => {
       el.style.transform = `scale(${v})`;
     },
-    fits: (wrap, el, v) => el.scrollWidth * v <= wrap.clientWidth + 1 && el.scrollHeight * v <= wrap.clientHeight + 1,
+    fits: (wrap, el, v) => el.scrollWidth * v <= wrap.clientWidth + 1 && el.offsetHeight * v <= wrap.clientHeight + 1,
   });
   return (
     // Scaled to fit like every other object: the measured sweep found this one
@@ -2190,7 +2190,10 @@ function PeoplePanel({
         flexWrap: "wrap",
         gap: `${0.04 * H}px ${0.06 * H}px`,
         width: "100%",
-        height: "100%",
+        // At least the box, and its own height when the tiles wrap taller: a fixed
+        // 100% let the extra rows overflow below, and the block, scaled about its
+        // centre, then ran off the bottom of the box.
+        minHeight: "100%",
         justifyContent: "space-evenly",
         alignItems: "center",
         transform: `scale(${fitScale})`,
