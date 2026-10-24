@@ -441,6 +441,13 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       const hasSlotsLayout = "slotsLayout" in body && isSlotsLayoutValue(body.slotsLayout);
+      // Present but malformed is refused before anything is written, as layout
+      // and showInSidebar are: beside a good field it would otherwise be dropped
+      // without a word while the rest saved.
+      if ("slotsLayout" in body && !hasSlotsLayout) {
+        error(res, "body.slotsLayout must be an object or null");
+        return;
+      }
       // `scriptViewLayoutId` is what this field was called before ServiceCue was
       // renamed, and what the API reference told a script to send; it is still
       // read, with the current name winning when both are present.
