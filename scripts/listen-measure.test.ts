@@ -14,6 +14,7 @@ import {
   parseArgs,
   parsePacketLine,
   readPackets,
+  run,
   sampleWindow,
   summarize,
   timeToFirstAudio,
@@ -257,4 +258,41 @@ test("each packet is stamped when its line arrives, a line split across writes i
   } finally {
     await fs.rm(dir, { recursive: true });
   }
+});
+
+test("a missing ffprobe is a reader that ended with the reason, not a crashed process", async () => {
+  const reader = readPackets("/nonexistent/ffprobe", "rtsp://127.0.0.1:1/x", performance.now());
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(reader.ended(), true);
+  assert.match(reader.lastError(), /ENOENT/);
+});
+
+test("run() checks for ffprobe first and says so at once, touching nothing", async () => {
+  const args = parseArgs(["127.0.0.1:9", "cam", "--ffprobe", "/nonexistent/ffprobe"]);
+  assert.ok(!("error" in args));
+  const started = performance.now();
+  const report = await run(args, () => {});
+  assert.ok(performance.now() - started < 2000, "it tried the relay before checking for ffprobe");
+  assert.equal(report.problems.length, 1);
+  assert.match(report.problems[0]!, /ffprobe is not usable.*--ffprobe/);
+  assert.equal(report.samples.length, 0);
+});
+
+test("a reader's first burst does not count toward the video's delay, though its frames still give the shift", () => {
+  // 8 s of video: the first 5 s of the listen path arrive late in one burst, as ffprobe hands over what it buffered while probing.
+  const source: Packet[] = [];
+  const listen: Packet[] = [];
+  for (let n = 0; n < 8 * 25; n++) {
+    const ts = n / 25;
+    const crc = `CRC32:${n}`;
+    source.push({ kind: "video", ts, wall: ts + 0.1, crc });
+    listen.push({ kind: "video", ts: ts + 9, wall: ts < 5 ? 5.5 : ts + 0.14, crc });
+  }
+  const all = matchVideo(source, listen);
+  const settled = matchVideo(source, listen, 10, 5.5);
+  assert.ok(all && settled);
+  assert.ok(all.videoDelay > 0.3, "the sanity case: the burst should have wrecked an unfiltered delay");
+  assert.ok(Math.abs(settled.videoDelay - 0.04) < 1e-9, `delay ${settled.videoDelay}`);
+  assert.equal(settled.shift, 9, "the burst's frames still carry the shift");
+  assert.equal(matchVideo(source, listen, 10, 100), null, "no settled pair is no figure");
 });

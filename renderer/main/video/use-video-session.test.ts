@@ -1988,7 +1988,6 @@ const LISTEN_PATH = "f-listen";
 /** A relay feed asked to listen, whose `-listen` WHEP answers `listenAnswer` while its own path succeeds. */
 function renderListening(video: FakeVideo, listenAnswer: FetchBehavior, logs: string[], failures: string[]) {
   let g: ReturnType<typeof stubGlobals>;
-  // eslint-disable-next-line prefer-const
   g = stubGlobals(() => (g.calls.at(-1)!.url.includes("-listen/") ? listenAnswer : "succeed"));
   const hook = renderHook(
     ({ listenPath }: { listenPath: string | null }) =>

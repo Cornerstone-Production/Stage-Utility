@@ -2,6 +2,9 @@
 // listen-measure.ts — what a feed's `<id>-listen` path costs, measured at the relay.
 //
 //   npx tsx scripts/listen-measure.ts <relay> <feed-id> [--minutes 30] [--interval 10]
+//                                     [--warmup 4] [--ffprobe path] [--json]
+//
+// --json prints the whole report as JSON instead of the text one (and no progress lines).
 //
 // <relay> is the relay's RTSP address: `host:port`, or `rtsp://host:port`. The
 // port is the one on the Video feeds page's Advanced card ("RTSP (audio
@@ -43,9 +46,12 @@
 // A reader's first seconds are thrown away (--warmup, 4): ffprobe hands over what it
 // buffered while probing in one burst, all stamped at the same instant.
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import * as net from "node:net";
 import { pathToFileURL } from "node:url";
+
+import { listenPathName } from "../main/services/video/audio-listen.js";
+import { FEED_ID_PATTERN, isReservedFeedId } from "../main/services/video/feed-id.js";
 
 // ── Pure: arguments ──────────────────────────────────────────────────────────
 
@@ -62,9 +68,6 @@ export interface Args {
 
 export const USAGE = "usage: listen-measure.ts <relay host:port> <feed-id> [--minutes 30] [--interval 10] [--warmup 4] [--ffprobe path] [--json]";
 
-/** A feed id as the app makes them (feed-id.ts). A `-listen` id is refused: the tool adds the suffix itself. */
-const FEED_ID = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
-
 export function parseArgs(argv: readonly string[]): Args | { error: string } {
   const positional: string[] = [];
   const opts: Record<string, string | true> = {};
@@ -79,8 +82,8 @@ export function parseArgs(argv: readonly string[]): Args | { error: string } {
   }
   if (positional.length !== 2) return { error: USAGE };
   const [relay, feed] = positional as [string, string];
-  if (!FEED_ID.test(feed)) return { error: `"${feed}" is not a feed id` };
-  if (feed.endsWith("-listen")) return { error: `give the feed's own id, not "${feed}": the tool reads both` };
+  if (!FEED_ID_PATTERN.test(feed)) return { error: `"${feed}" is not a feed id` };
+  if (isReservedFeedId(feed)) return { error: `give the feed's own id, not "${feed}": the tool reads both` };
   let host: string;
   let port: number;
   try {
@@ -168,8 +171,14 @@ const median = (xs: number[]): number => {
   return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
 };
 
-/** Pairs the video frames both paths carry by checksum. A checksum seen twice on a path (a repeated frame) is ignored; so is anything without one. Null with fewer than `min` pairs. */
-export function matchVideo(source: readonly Packet[], listen: readonly Packet[], min = 10): VideoMatch | null {
+/**
+ * Pairs the video frames both paths carry by checksum. A checksum seen twice on a
+ * path (a repeated frame) is ignored; so is anything without one. Null with fewer
+ * than `min` pairs. The shift uses every pair; the video's delay only pairs that
+ * both arrived at or after `settledFrom`, since a reader's first burst (what ffprobe
+ * buffered while probing, all stamped at one instant) says nothing about delay.
+ */
+export function matchVideo(source: readonly Packet[], listen: readonly Packet[], min = 10, settledFrom = -Infinity): VideoMatch | null {
   const once = (packets: readonly Packet[]): Map<string, Packet> => {
     const seen = new Map<string, Packet>();
     const dup = new Set<string>();
@@ -188,9 +197,9 @@ export function matchVideo(source: readonly Packet[], listen: readonly Packet[],
     const m = s.get(crc);
     if (!m) continue;
     shifts.push(l.ts - m.ts);
-    delays.push(l.wall - m.wall);
+    if (l.wall >= settledFrom && m.wall >= settledFrom) delays.push(l.wall - m.wall);
   }
-  if (shifts.length < min) return null;
+  if (shifts.length < min || delays.length === 0) return null;
   return { pairs: shifts.length, shift: median(shifts), videoDelay: median(delays) };
 }
 
@@ -210,20 +219,22 @@ export interface Sample {
 
 /**
  * One window's figures, or null when a stream has no packets in it or no frames
- * could be matched. `shift` comes from every frame so far, not only this window's:
- * it is a constant of the two paths, and a longer sample is steadier.
+ * could be matched. `shift` comes from the frames passed in, not only this window's:
+ * it is a constant of the two paths, and a longer sample is steadier (run() keeps
+ * about 70 s). `settledFrom` is the end of the warm-up (see matchVideo).
  */
 export function sampleWindow(
   source: readonly Packet[],
   listen: readonly Packet[],
   from: number,
   to: number,
+  settledFrom = from,
 ): Sample | null {
   const lA = wallOffset(listen, "audio", from, to);
   const lV = wallOffset(listen, "video", from, to);
   const sA = wallOffset(source, "audio", from, to);
   const sV = wallOffset(source, "video", from, to);
-  const match = matchVideo(source, listen);
+  const match = matchVideo(source, listen, 10, settledFrom);
   if (lA === null || lV === null || sA === null || sV === null || match === null) return null;
   return {
     at: to,
@@ -263,6 +274,8 @@ export function summarize(points: readonly { at: number; value: number }[]): Ser
   return { n, min: Math.min(...values), max: Math.max(...values), mean, slopePerMin: slope };
 }
 
+const rtspUrl = (host: string, port: number, path: string): string => `rtsp://${host}:${port}/${path}`;
+
 // ── RTSP: time to the first audio packet ────────────────────────────────────
 
 export type FirstAudio = { ok: true; totalMs: number; answeredMs: number } | { ok: false; reason: string };
@@ -281,7 +294,7 @@ interface RtspResponse {
 export function timeToFirstAudio(host: string, port: number, path: string, timeoutMs = 30_000): Promise<FirstAudio> {
   return new Promise((resolve) => {
     const t0 = performance.now();
-    const base = `rtsp://${host}:${port}/${path}`;
+    const base = rtspUrl(host, port, path);
     const sock = net.connect({ host, port });
     let buf: Buffer = Buffer.alloc(0);
     let cseq = 0;
@@ -372,8 +385,10 @@ export function timeToFirstAudio(host: string, port: number, path: string, timeo
 
 export interface Reader {
   packets: Packet[];
-  /** ffprobe's last stderr line, for a reader that ended. */
+  /** ffprobe's last stderr line, or why it would not start, for a reader that ended. */
   lastError: () => string;
+  /** ffprobe has exited or never started (a failed spawn leaves a negative exit code). */
+  ended: () => boolean;
   stop: () => void;
   proc: ChildProcess;
 }
@@ -391,6 +406,11 @@ export function readPackets(ffprobe: string, url: string, startedAt: number): Re
   const packets: Packet[] = [];
   let tail = "";
   let err = "";
+  let spawnFailure: string | null = null;
+  // A missing ffprobe is an 'error' event, not an exit: unhandled it ends the process.
+  proc.on("error", (e) => {
+    spawnFailure = e.message;
+  });
   proc.stdout!.on("data", (b: Buffer) => {
     const wall = (performance.now() - startedAt) / 1000;
     const lines = (tail + b.toString("utf8")).split("\n");
@@ -403,7 +423,7 @@ export function readPackets(ffprobe: string, url: string, startedAt: number): Re
   proc.stderr!.on("data", (b: Buffer) => {
     err = b.toString("utf8").trim().split("\n").at(-1) ?? err;
   });
-  return { packets, lastError: () => err, stop: () => void proc.kill("SIGKILL"), proc };
+  return { packets, lastError: () => spawnFailure ?? err, ended: () => proc.exitCode !== null, stop: () => void proc.kill("SIGKILL"), proc };
 }
 
 // ── The run ─────────────────────────────────────────────────────────────────
@@ -422,9 +442,9 @@ export interface Report {
   problems: string[];
 }
 
-const f = (n: number | null | undefined, d = 1): string => (n === null || n === undefined ? "n/a" : `${n >= 0 ? "+" : ""}${n.toFixed(d)}`);
+const signed = (n: number | null | undefined, d = 1): string => (n === null || n === undefined ? "n/a" : `${n >= 0 ? "+" : ""}${n.toFixed(d)}`);
 const seriesLine = (s: Series | null): string =>
-  s ? `min ${f(s.min)}  max ${f(s.max)}  mean ${f(s.mean)}  slope ${f(s.slopePerMin, 2)} ms/min  (${s.n} windows)` : "no data";
+  s ? `min ${signed(s.min)}  max ${signed(s.max)}  mean ${signed(s.mean)}  slope ${signed(s.slopePerMin, 2)} ms/min  (${s.n} windows)` : "no data";
 
 export function formatReport(r: Report): string {
   const lines = [
@@ -446,10 +466,19 @@ export function formatReport(r: Report): string {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+const NOT_RUN: FirstAudio = { ok: false, reason: "not run" };
+
 export async function run(args: Args, log: (line: string) => void = console.log): Promise<Report> {
   const problems: string[] = [];
-  const relay = `${args.host}:${args.port}`;
-  const listenPath = `${args.feed}-listen`;
+  const listenPath = listenPathName(args.feed);
+
+  // Before anything touches the relay: a missing ffprobe would otherwise show up as a
+  // dead reader half a minute in.
+  const check = spawnSync(args.ffprobe, ["-version"], { encoding: "utf8" });
+  if (check.error || check.status !== 0) {
+    problems.push(`ffprobe is not usable (${check.error?.message ?? `exit ${String(check.status)}`}): install ffmpeg's ffprobe, or pass --ffprobe <path>`);
+    return buildReport(args, NOT_RUN, NOT_RUN, [], problems);
+  }
 
   // The cold read first: the converter starts for it, and the readers below find it warm.
   const first = await timeToFirstAudio(args.host, args.port, listenPath);
@@ -459,8 +488,8 @@ export async function run(args: Args, log: (line: string) => void = console.log)
   log(`first audio packet: ${listenPath} ${first.ok ? `${first.totalMs.toFixed(0)} ms` : first.reason}, ${args.feed} ${firstSource.ok ? `${firstSource.totalMs.toFixed(0)} ms` : firstSource.reason}`);
 
   const startedAt = performance.now();
-  const source = readPackets(args.ffprobe, `rtsp://${relay}/${args.feed}`, startedAt);
-  const listen = readPackets(args.ffprobe, `rtsp://${relay}/${listenPath}`, startedAt);
+  const source = readPackets(args.ffprobe, rtspUrl(args.host, args.port, args.feed), startedAt);
+  const listen = readPackets(args.ffprobe, rtspUrl(args.host, args.port, listenPath), startedAt);
   const samples: Sample[] = [];
   const total = args.minutes * 60;
   const end = startedAt + total * 1000;
@@ -469,16 +498,16 @@ export async function run(args: Args, log: (line: string) => void = console.log)
     while (performance.now() < end) {
       const nextEdge = Math.min(windowStart + args.intervalS, total);
       await sleep(Math.max(0, startedAt + nextEdge * 1000 - performance.now()));
-      if (source.proc.exitCode !== null || listen.proc.exitCode !== null) {
-        problems.push(`ffprobe ended early: ${source.proc.exitCode !== null ? `${args.feed}: ${source.lastError()}` : `${listenPath}: ${listen.lastError()}`}`);
+      if (source.ended() || listen.ended()) {
+        problems.push(`ffprobe ended early: ${source.ended() ? `${args.feed}: ${source.lastError()}` : `${listenPath}: ${listen.lastError()}`}`);
         break;
       }
       const from = Math.max(windowStart, args.warmupS);
       if (nextEdge - from >= Math.min(2, args.intervalS)) {
-        const s = sampleWindow(source.packets, listen.packets, from, nextEdge);
+        const s = sampleWindow(source.packets, listen.packets, from, nextEdge, args.warmupS);
         if (s) {
           samples.push(s);
-          log(`t=${String(Math.round(nextEdge)).padStart(5)}s  A/V ${f(s.avOffsetMs)} ms  audio delay ${f(s.audioDelayMs)} ms  video delay ${f(s.videoDelayMs)} ms  (${s.pairs} frames)`);
+          log(`t=${String(Math.round(nextEdge)).padStart(5)}s  A/V ${signed(s.avOffsetMs)} ms  audio delay ${signed(s.audioDelayMs)} ms  video delay ${signed(s.videoDelayMs)} ms  (${s.pairs} frames)`);
         } else log(`t=${String(Math.round(nextEdge)).padStart(5)}s  no figure: a stream had no packets in the window, or too few frames matched`);
       }
       windowStart = nextEdge;
@@ -494,13 +523,17 @@ export async function run(args: Args, log: (line: string) => void = console.log)
     source.stop();
     listen.stop();
   }
+  return buildReport(args, first, firstSource, samples, problems);
+}
+
+function buildReport(args: Args, first: FirstAudio, firstSource: FirstAudio, samples: Sample[], problems: string[]): Report {
   const disagreement = samples.length ? Math.max(...samples.map((s) => Math.abs(s.videoCheckMs - s.videoDelayMs))) : 0;
   if (disagreement > 10) {
     problems.push(`the two ways of measuring the video's added delay disagree by up to ${disagreement.toFixed(0)} ms, so read the audio figure as that much less certain`);
   }
-  if (samples.length === 0) problems.push("no window produced a figure: check that both paths carry audio and video and that the feed is live (a pass-through feed's -listen video is another encode, so its frames cannot be matched)");
+  if (samples.length === 0 && problems.length === 0) problems.push("no window produced a figure: check that both paths carry audio and video and that the feed is live (a pass-through feed's -listen video is another encode, so its frames cannot be matched)");
   return {
-    relay,
+    relay: `${args.host}:${args.port}`,
     feed: args.feed,
     startedAt: new Date().toISOString(),
     minutes: args.minutes,
