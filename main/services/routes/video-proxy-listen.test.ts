@@ -17,7 +17,8 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-proxy-listen-")
 process.env.STAGE_UTILITY_DATA = TMP;
 
 const { videoService, videoPollDeps } = await import("../video/video-service.js");
-const { videoProxyRoutes } = await import("./video-proxy-routes.js");
+const { videoProxyRoutes, proxyOutage } = await import("./video-proxy-routes.js");
+const { captureConsole } = await import("../fixtures/capture-console.js");
 const { fakeRelay } = await import("../fixtures/fake-relay.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
 const { videoFeedsStore } = await import("../video/feed-store.js");
@@ -29,11 +30,17 @@ let upstream: http.Server;
 let upstreamPort = 0;
 let su: http.Server;
 let suPort = 0;
+/** While set, the relay drops the connection on the converted feed's listening path. */
+let breakListen = false;
 
 before(async () => {
   upstream = http.createServer((req, res) => {
     received.push({ method: req.method ?? "", path: req.url ?? "" });
     req.resume();
+    if (breakListen && req.url === "/aac-listen/whep") {
+      req.socket.destroy();
+      return;
+    }
     const m = /^\/([a-z0-9-]+)\/whep$/.exec(req.url ?? "");
     if (req.method === "POST" && m) {
       res.writeHead(201, { "Content-Type": "application/sdp", Location: `/${m[1]}/whep/abc` });
@@ -216,6 +223,21 @@ describe("with ffmpeg available", () => {
     } finally {
       feed.audio = real;
     }
+  });
+
+  test("a failure reaching a -listen path is logged under its feed, never under the -listen id", async (t) => {
+    proxyOutage.forget();
+    const warns = captureConsole(t, "warn");
+    breakListen = true;
+    try {
+      assert.equal((await post("/video/aac-listen/whep")).status, 502);
+    } finally {
+      breakListen = false;
+      proxyOutage.forget();
+    }
+    assert.equal(warns.length, 1, JSON.stringify(warns));
+    assert.match(warns[0]!, /proxy to relay failed for aac:/);
+    assert.ok(!warns[0]!.includes("aac-listen"), "the outage was keyed by the listen path");
   });
 
   test("a listener's request counts as demand for the feed itself, not for a key of its own", () => {
