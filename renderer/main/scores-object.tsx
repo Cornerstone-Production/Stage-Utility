@@ -350,8 +350,8 @@ function useBoxEffect(
  * frame with no re-render in it, so the observer cannot wake itself on its own
  * write — the loop the previous version needed an epsilon comparison to escape.
  *
- * NOT layout-renderer's useFitScale, deliberately. That hook back-derives the
- * natural size as `el.scrollWidth / currentScale`, which assumes the measured
+ * NOT a scale back-derived from the live size, deliberately. Deriving the
+ * natural size as `el.scrollWidth / currentScale` assumes the measured
  * content REFLOWS as the scale changes. The strip does not: its scroll size is
  * whatever box we gave it, so dividing by the scale reports it as ever smaller
  * and the scale climbs away every pass. The natural height is read the only way

@@ -53,7 +53,7 @@ describe("readouts fit their box through one shared measurement", () => {
   // "OBS: Recording 00:12:34" is simply wider than a narrow tile.
   //
   // This used to name the COMPONENTS that rendered them and grep each one's body
-  // for `useFitScale`. Those components are gone: they were StatusDot,
+  // for the fit hook. Those components are gone: they were StatusDot,
   // RecordingFill and FitBox, and every readout now goes through Readout
   // instead. A source-text guard cannot survive that, and worse, could not tell
   // it apart from the components quietly losing their measurement.

@@ -1596,9 +1596,9 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
 
     if (idxZero != null && total > 0) {
       const cur = play[idxZero];
-      // idxZero is clamped into 0..total-1 above, so `cur` is always there; the
-      // unnamed groups have no entry in the strip, and a slide in one has no place.
-      playOrderGroupIndex = cur ? (occurrenceAt.get(cur.occurrence) ?? null) : null;
+      // idxZero is clamped into 0..total-1 above, so `cur` exists. A slide in an
+      // unnamed group has no entry in the strip, so no place in it.
+      playOrderGroupIndex = occurrenceAt.get(cur.occurrence) ?? null;
       if (cur?.name) currentSection = { name: cur.name, colorHex: cur.colorHex };
       const nxt = play[idxZero + 1];
       if (nxt?.name) nextSection = { name: nxt.name, colorHex: nxt.colorHex };

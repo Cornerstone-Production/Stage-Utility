@@ -62,7 +62,7 @@ import { displayHourCycle, formatClock } from "../lib/clock-format";
 import { externKeyed } from "@main/types/extern-keyed";
 import { VideoObject } from "./video/video-object";
 import { LyricsObject } from "./lyrics-object";
-import { useBoxFit } from "./fit-to-box";
+import { boxFits, useBoxFit } from "./fit-to-box";
 
 // Render context shared by every object renderer.
 export interface LayoutRenderCtx {
@@ -559,20 +559,37 @@ function rfBarsGlyph(bars: number): string {
 // carries the colour, so "PCO / ONLINE" in green reads at a glance and still
 // reads without the green.
 
-// Shrinks the font so `text` fits its box (width + height) instead of clipping —
-// used by single-value text objects (current/next item) where a long title would
-// otherwise overflow. Converges in a pass or two by back-deriving the natural size
-// from the live scroll size (same approach as ServiceOrderObject's auto-fit).
+// Fits `text` to its box: a long title shrinks instead of clipping, and a short one
+// grows into the room it has, by the shared measurement (fit-to-box.ts), which
+// bisects between 0.3x and 3x of the base size.
+//
+// IT GROWS ONLY WHILE IT STAYS ON ONE LINE, and only if it was on one line at its
+// base size. Text that already wraps at its base size does not grow at all, and text
+// that fits on one line never grows onto two: without that, "Welcome and
+// Announcements" in a 600x300 box went from 65px to 111px on two lines, and every
+// wrapped slide filled its box, which is a change nobody has asked a wall to make.
+// Shrinking is never limited, so a long title still shrinks onto more lines if it
+// must.
 function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign?: LayoutVAlign }) {
   const basePx = parseFloat(String(ts.fontSize)) || 16;
-  // The one measurement every fitted object shares (fit-to-box.ts).
+  const lineHeight = parseFloat(String(ts.lineHeight)) || 1.1;
   const { wrapRef, contentRef, value } = useBoxFit<HTMLSpanElement>({
     floor: basePx * FIT_MIN_GROWTH,
     ceiling: basePx * FIT_MAX_GROWTH,
     initial: basePx,
-    contentKey: `${text}|${basePx}|${ts.fontWeight}`,
+    // Everything that changes the text's size or how it wraps.
+    contentKey: [text, basePx, ts.fontWeight, ts.textTransform, ts.letterSpacing, ts.fontStyle, ts.fontFamily].join("|"),
     apply: (el, px) => {
       el.style.fontSize = `${px}px`;
+    },
+    fits: (wrap, el, px) => {
+      if (!boxFits(wrap, el)) return false;
+      if (px <= basePx) return true;
+      const lines = Math.round(el.offsetHeight / (px * lineHeight));
+      el.style.fontSize = `${basePx}px`;
+      const baseLines = Math.round(el.offsetHeight / (basePx * lineHeight));
+      el.style.fontSize = `${px}px`;
+      return baseLines === 1 && lines === 1;
     },
   });
   const justify = vAlign === "top" ? "flex-start" : vAlign === "bottom" ? "flex-end" : "center";
@@ -2118,19 +2135,6 @@ function PeoplePanel({
   const t = people?.total;
   const valuePx = parseFloat(String(ts.fontSize)) || 0.12 * H;
   const labelPx = Math.max(8, valuePx * 0.34);
-  // Scaled, not resized: the gaps and fonts are fractions of the canvas, so only
-  // the whole block can shrink with the box. Its height is the box's (height:
-  // 100%), so a block fits while its scroll size at this scale is within it.
-  const { wrapRef: fitWrapRef, contentRef: fitElRef, value: fitScale } = useBoxFit<HTMLDivElement>({
-    floor: FIT_MIN_GROWTH,
-    ceiling: FIT_MAX_GROWTH,
-    initial: 1,
-    contentKey: [metrics.join(","), showLabels, col, valuePx, H].join("|"),
-    apply: (el, v) => {
-      el.style.transform = `scale(${v})`;
-    },
-    fits: (wrap, el, v) => el.scrollWidth * v <= wrap.clientWidth + 1 && el.scrollHeight * v <= wrap.clientHeight + 1,
-  });
   // Each tile resolves to a display string + optional color override (vs-average
   // goes green/red). "—" when the underlying value isn't available.
   const tile = (k: string): { text: string; color: string } => {
@@ -2157,6 +2161,20 @@ function PeoplePanel({
       : ((t as Record<string, number | null> | undefined)?.[k] ?? null);
     return { text: v == null ? "—" : v.toLocaleString(), color: base };
   };
+  // Scaled, not resized: the gaps and fonts are fractions of the canvas, so only the
+  // whole block can shrink with the box. It never grows: the block is as tall and
+  // as wide as its box, so a block that fits is already at scale 1. Its key is
+  // everything that changes its size, the tiles' own text included.
+  const { wrapRef: fitWrapRef, contentRef: fitElRef, value: fitScale } = useBoxFit<HTMLDivElement>({
+    floor: FIT_MIN_GROWTH,
+    ceiling: 1,
+    initial: 1,
+    contentKey: [metrics.map((k) => tile(k).text).join(","), metrics.join(","), showLabels, col, valuePx, H, ts.fontWeight].join("|"),
+    apply: (el, v) => {
+      el.style.transform = `scale(${v})`;
+    },
+    fits: (wrap, el, v) => el.scrollWidth * v <= wrap.clientWidth + 1 && el.scrollHeight * v <= wrap.clientHeight + 1,
+  });
   return (
     // Scaled to fit like every other object: the measured sweep found this one
     // overflowing its box by 386px at a dashboard tile size, because the metrics

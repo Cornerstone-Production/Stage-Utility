@@ -16,7 +16,8 @@ const teardown = installRenderDom();
 let contentHeightOf: (fontPx: number) => number = (px) => px * 2;
 const proto = HTMLElement.prototype as unknown as Record<string, unknown>;
 Object.defineProperty(proto, "clientWidth", { get: () => 400, configurable: true });
-Object.defineProperty(proto, "clientHeight", { get: () => 100, configurable: true });
+let boxHeight = 100;
+Object.defineProperty(proto, "clientHeight", { get: () => boxHeight, configurable: true });
 Object.defineProperty(proto, "scrollWidth", { get: () => 10, configurable: true });
 Object.defineProperty(proto, "offsetHeight", {
   get(this: HTMLElement) {
@@ -32,6 +33,7 @@ after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => {
   cleanup();
   contentHeightOf = (px) => px * 2;
+  boxHeight = 100;
 });
 
 describe("largestFit", () => {
@@ -123,6 +125,47 @@ describe("useBoxFit", () => {
       assert.ok(seen > 24.9 && seen <= 25, `fitted ${seen}`);
     } finally {
       delete (document as unknown as { fonts?: unknown }).fonts;
+    }
+  });
+});
+
+describe("a resize", () => {
+  test("measures again when the box the observer watches changes size", async () => {
+    // A ResizeObserver that reports only what it was told to observe, and fires on
+    // demand: the stub installDom provides never calls back, so it could not tell a
+    // hook that observes from one that does not.
+    const live: { cb: () => void; targets: Element[] }[] = [];
+    const g = globalThis as unknown as { ResizeObserver: unknown };
+    const real = g.ResizeObserver;
+    g.ResizeObserver = class {
+      targets: Element[] = [];
+      constructor(public cb: () => void) {
+        live.push(this);
+      }
+      observe(el: Element) {
+        this.targets.push(el);
+      }
+      disconnect() {
+        this.targets = [];
+      }
+      unobserve() {}
+    };
+    let seen = 0;
+    try {
+      await act(async () => {
+        render(<Probe keyed="a" onValue={(v) => (seen = v)} />);
+        await settle();
+      });
+      assert.ok(seen > 49.9 && seen <= 50, `fitted ${seen}`);
+      assert.ok(live.some((o) => o.targets.length > 0), "nothing was observed");
+      boxHeight = 60;
+      await act(async () => {
+        for (const o of live) if (o.targets.length) o.cb();
+        await settle();
+      });
+      assert.ok(seen > 29.9 && seen <= 30, `the box shrank and the fit did not follow: ${seen}`);
+    } finally {
+      g.ResizeObserver = real;
     }
   });
 });

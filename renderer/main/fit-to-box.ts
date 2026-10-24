@@ -47,13 +47,15 @@ export interface BoxFit<T extends HTMLElement> {
   contentKey: string;
   /** Puts a value on the content: a font size, or a scale. */
   apply: (content: T, value: number) => void;
-  /** Whether the content, with the value applied, fits the box. Defaults to the
-   *  content's own height and width being no larger than the box's. */
+  /** Whether the content, with the value applied, fits the box. Defaults to
+   *  `boxFits`: the content's own height and width no larger than the box's. */
   fits?: (wrap: HTMLElement, content: T, value: number) => boolean;
 }
 
-const contentFits = (wrap: HTMLElement, content: HTMLElement) =>
-  content.offsetHeight <= wrap.clientHeight && content.scrollWidth <= wrap.clientWidth + 1;
+/** The default test: the content, as it stands, is no taller or wider than its box. */
+export function boxFits(wrap: HTMLElement, content: HTMLElement): boolean {
+  return content.offsetHeight <= wrap.clientHeight && content.scrollWidth <= wrap.clientWidth + 1;
+}
 
 /**
  * The fitted value, and the two elements it is measured against: put `wrapRef` on
@@ -98,7 +100,7 @@ export function useBoxFit<T extends HTMLElement = HTMLElement>(opts: BoxFit<T>) 
     const { apply, fits } = latest.current;
     const best = largestFit(floor, ceiling, (v) => {
       apply(content, v);
-      return fits ? fits(wrap, content, v) : contentFits(wrap, content);
+      return fits ? fits(wrap, content, v) : boxFits(wrap, content);
     });
     apply(content, best);
     setValue(best);

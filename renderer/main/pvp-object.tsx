@@ -67,7 +67,7 @@ export function emptyReason(status: PvpStatusDTO | null, c: Config): string {
  * operator reading five rows has no way to know four are missing, which is worse
  * than a short list, because it is a list that looks complete.
  *
- * Same shape as useFitScale in layout-renderer.tsx: measure after layout, and
+ * Same shape as useBoxFit in fit-to-box.ts: measure after layout, and
  * re-measure on resize. EVERY row is rendered and the box clips them, so this
  * measurement always sees the whole list — slicing the list to what fits would
  * feed the next measurement its own output and settle on whatever it happened to
