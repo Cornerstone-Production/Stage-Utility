@@ -69,7 +69,7 @@ import { updater } from "./updater.js";
 import { announceIfNew } from "./update/announce.js";
 import { validateSlug } from "./reserved-slugs.js";
 import { WriteQueue } from "./write-queue.js";
-import { serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
+import { cleanRoles, serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
 import { clampTextSize, isStorableTextSize, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "../types/text-size.js";
 import { DEFAULT_VIDEO_MODE, isRotation, isVideoMode, ROTATIONS, VIDEO_MODES } from "../types/output-format.js";
@@ -1724,13 +1724,7 @@ export class StageController {
   }
 
   async saveServiceCueRoles(roles: CategoryRole[]): Promise<CategoryRole[]> {
-    const clean = (roles ?? [])
-      .filter((r) => r && typeof r.id === "string" && typeof r.name === "string" && r.name.trim())
-      .map((r) => ({
-        id: r.id,
-        name: r.name.trim(),
-        members: [...new Set((r.members ?? []).map((m) => String(m).trim()).filter(Boolean))],
-      }));
+    const clean = cleanRoles(roles ?? []);
     await serviceCueRolesStore.save(clean);
     this.broadcast();
     return clean;

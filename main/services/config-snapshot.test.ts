@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { configFiles, runtimeFiles } from "./config-snapshot.js";
-import { allStores } from "./stores.js";
+import { allStores, restoreCheckFor } from "./stores.js";
 
 // Every persisted store must be classified as the operator's WORK (restored from
 // a backup) or an OBSERVATION (not restored). Both failure directions are silent:
@@ -166,6 +166,15 @@ describe("store classification", () => {
 
   test("the config half is exactly this set", () => {
     assert.deepEqual(configFiles().slice().sort(), [...EXPECTED_CONFIG].sort());
+  });
+
+  test("every config store declares a restore check", () => {
+    // A restore writes each file whole, from any device on the LAN. A config
+    // store with no check would take whatever a crafted backup put there. The
+    // constructor's type already demands one; this is the same fact from the
+    // registry, which is what config-snapshot actually asks.
+    const checked = configFiles().filter((f) => restoreCheckFor(f) !== undefined);
+    assert.deepEqual(checked.sort(), [...EXPECTED_CONFIG].sort());
   });
 
   test("the runtime half is exactly this set", () => {

@@ -198,8 +198,18 @@ class AutomationEngine {
    * what to tell the operator, and init() is the only caller today.
    */
   private invalidLoadedCues(): { rule: string; problem: string }[] {
+    return this.cueProblemsIn(this.rules);
+  }
+
+  /**
+   * The rules in `rules` the write path would refuse, and why, each checked
+   * against the others in that set rather than against the rules in memory.
+   * What init reports for the file it loaded, and what a config restore
+   * refuses an automation-rules.json for (see automation-store.ts).
+   */
+  cueProblemsIn(rules: readonly Rule[]): { rule: string; problem: string }[] {
     const out: { rule: string; problem: string }[] = [];
-    for (const rule of this.rules) {
+    for (const rule of rules) {
       // A STORED RULE MAY NOT WEAR A BUILT-IN'S ID. `builtin:` is how every
       // reader tells a rule the app synthesised from one the operator saved —
       // the manifest's `builtin` flag, the cue picker's two groups — so a
@@ -220,7 +230,7 @@ class AutomationEngine {
       }
       if (rule.trigger?.id !== CALL_TRIGGER_ID) continue;
       try {
-        this.assertCueValid(rule, rule.id);
+        this.assertCueValid(rule, rule.id, rules);
       } catch (err) {
         out.push({ rule: rule.name || String(rule.trigger.params?.name ?? rule.id), problem: errorMessage(err) });
       }
@@ -277,7 +287,7 @@ class AutomationEngine {
    * refused — a name may not be another rule's former name, and a former name
    * may not be another rule's name.
    */
-  private assertCueValid(rule: Pick<Rule, "trigger">, exceptId: string | null): void {
+  private assertCueValid(rule: Pick<Rule, "trigger">, exceptId: string | null, rules: readonly Rule[] = this.rules): void {
     if (rule.trigger?.id !== CALL_TRIGGER_ID) return;
     const name = calledCueName(rule.trigger);
     if (!name) throw new Error("A called cue needs a name");
@@ -304,7 +314,7 @@ class AutomationEngine {
     // would make a legacy pair impossible to rename out of the way. The
     // built-in with that base is left out instead; see builtinCueRules, which
     // logs which and why.
-    const editing = this.rules.find((r) => r.id === exceptId);
+    const editing = rules.find((r) => r.id === exceptId);
     const alreadyHeld = new Set(
       editing ? [this.cueNameOf(editing), ...this.cueAliasesOf(editing)] : [],
     );
@@ -317,7 +327,7 @@ class AutomationEngine {
     // read the same set. Names are written after the aliases, so a name wins the
     // wording when one rule's name is another's former name.
     const held = new Map<string, { rule: Rule; former: boolean }>();
-    const others = this.rules.filter((r) => r.id !== exceptId);
+    const others = rules.filter((r) => r.id !== exceptId);
     for (const r of others) {
       for (const alias of this.cueAliasesOf(r)) held.set(alias, { rule: r, former: true });
     }

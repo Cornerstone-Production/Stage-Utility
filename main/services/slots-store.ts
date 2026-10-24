@@ -37,6 +37,7 @@ import { scrub } from "./scrub.js";
 import { DataStore } from "./data-store.js";
 import { assertSafeKey, isSafeKey } from "./safe-key.js";
 import { isRecord } from "./is-record.js";
+import { asArray, asObject, checked, refuse, required } from "./restore-check.js";
 
 /** v2 -> v3: a single `teamPositionName` + `notesStartsWith` becomes a `positions`
  *  range. Exported for tests. Total by design — DataStore does not deep-merge on
@@ -108,7 +109,40 @@ export function describeSlotsTarget(target: SlotsTarget): string {
 
 // The file has held four shapes over its life, so what comes back off disk is
 // `unknown` and normalise() is the only thing that decides which one it is.
-const store = new DataStore<unknown>("slots.json", {}, "config");
+const store = new DataStore<unknown>("slots.json", {}, "config", { restoreCheck: checked(checkRestoredSlots) });
+
+/**
+ * A restored slots.json, read the way a load reads it — any of the four shapes,
+ * through normaliseSlotsFile — and held to what the slot routes take: every
+ * view, service type and plan key one assertSafeKey accepts, every slot list a
+ * list of objects, every override naming its service type. Normalised on a
+ * copy, since the link migration edits slots in place; the file is written as
+ * the backup holds it and migrated on the next load, as any old file is.
+ */
+function checkRestoredSlots(raw: unknown): unknown {
+  if (!Array.isArray(raw)) asObject(raw, "the slots");
+  const { file } = normaliseSlotsFile(structuredClone(raw));
+  const slotList = (v: unknown, what: string): void => {
+    if (!asArray(v, what).every(isRecord)) refuse(`${what} must be a list of slots`);
+  };
+  for (const [key, byType] of file.defaults) {
+    if (!isSafeKey(key)) refuse(`the slots have a key that is not allowed ("${key.slice(0, 40)}")`);
+    for (const [typeId, slots] of byType) {
+      if (!isSafeKey(typeId)) refuse(`the slots for ${key} have a key that is not allowed ("${typeId.slice(0, 40)}")`);
+      slotList(slots, `the default slots for ${key}/${typeId}`);
+    }
+  }
+  for (const [key, byPlan] of file.overrides) {
+    if (!isSafeKey(key)) refuse(`the slots have a key that is not allowed ("${key.slice(0, 40)}")`);
+    for (const [planId, o] of byPlan) {
+      if (!isSafeKey(planId)) refuse(`the slots for ${key} have a key that is not allowed ("${planId.slice(0, 40)}")`);
+      const override = asObject(o, `the slots for ${key} on plan ${planId}`);
+      required(override.serviceTypeId, "string", `the service type of the slots for ${key} on plan ${planId}`);
+      slotList(override.slots, `the slots for ${key} on plan ${planId}`);
+    }
+  }
+  return raw;
+}
 
 function emptyFile(): SlotsFile {
   return { version: 3, defaults: new Map(), overrides: new Map() };

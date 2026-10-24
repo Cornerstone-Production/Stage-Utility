@@ -26,31 +26,10 @@ import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
 import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewShownError } from "../stage-controller.js";
-import type { CalendarSelection } from "../../types/calendar.js";
+import { isSelectionList } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
 import { datedExportFilename } from "../export-filename.js";
 import { answerScreenWriteFailure, readCreateScreenBody, refuseMode } from "./screen-write.js";
-
-/**
- * An untrusted body value that is a list of `{ id, name }` strings.
- *
- * A type PREDICATE, so the narrowing it performs is the thing handed on. The
- * first draft returned a bare boolean and needed a second function to rebuild
- * the list past a cast — two passes over the same value where one does, and the
- * cast was the part that asserted rather than proved.
- */
-function isSelectionList(v: unknown): v is CalendarSelection[] {
-  return (
-    Array.isArray(v) &&
-    v.every(
-      (e) =>
-        typeof e === "object" &&
-        e !== null &&
-        typeof (e as { id?: unknown }).id === "string" &&
-        typeof (e as { name?: unknown }).name === "string",
-    )
-  );
-}
 
 /** `stage-utility-view-left-mic-display-2026-08-17.json`. */
 export function exportFilename(name: string, now: Date): string {

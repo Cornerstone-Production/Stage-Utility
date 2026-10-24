@@ -73,6 +73,7 @@ import { baptismTimerService } from "./main/services/baptism-timer-service.js";
 import { messagesService } from "./main/services/messages-service.js";
 import { scrubError } from "./main/services/scrub.js";
 import { backupScheduler } from "./main/services/backup-scheduler.js";
+import { configSnapshot } from "./main/services/config-snapshot.js";
 import { integrationManager } from "./main/services/integration-manager.js";
 import { resiService } from "./main/services/resi-service.js";
 import { youtubeService } from "./main/services/youtube-service.js";
@@ -134,6 +135,11 @@ for (const { what, error } of await messagesService.start()) {
 }
 // Unattended backups, if the operator has turned them on.
 backupScheduler.start();
+// Say on [config-snapshot] which config files on disk a save would refuse (a hand edit,
+// or a file an older build wrote). Changes nothing; see checkOnDisk. A failure
+// of the check itself must not stop the server coming up, so it is logged here,
+// the same exception reconcileOpenRecords below makes.
+await configSnapshot.checkOnDisk().catch((err) => console.error("[config-snapshot] the start-up check of the config files failed:", scrubError(err)));
 
 // Close any history record left open by a prior run (crash / restart mid/after a
 // service) before the poller starts — a genuinely-live service reopens on the next tick.

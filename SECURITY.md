@@ -55,6 +55,13 @@ When reporting, please include:
   client that is not a browser on another origin. Against a peer on the LAN this protects the
   integration and wireless credentials, which nothing reads back.
 
+- **A restore can do no more than the settings pages.** A config snapshot can be posted
+  by anything on the LAN, and it writes each config file whole. So every file in a restore
+  goes through the same checks its settings routes apply on a save, and one failure refuses
+  the whole restore with nothing written. A restore never writes `secrets.bin` or the key,
+  and drops a credential it finds inside a config file. See
+  [Restoring a config snapshot](docs/ops/reliability.md#restoring-a-config-snapshot).
+
 - **OS-level hardening (recommended for appliances).** For a headless install, the defenses
   that actually matter are at the OS layer, not the app: run the service as a dedicated
   unprivileged user; enable full-disk / SD-card encryption (the real protection against a

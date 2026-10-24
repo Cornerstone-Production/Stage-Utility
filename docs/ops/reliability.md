@@ -316,6 +316,28 @@ Two backups exist in the app, and they cover different things:
 - **Settings → Advanced → Data → Data archive** — recorded services and their
   raw samples. See [data archive](../data-archive.md).
 
+### Restoring a config snapshot
+
+A restore is checked the way a save is. Every file in the snapshot goes through
+the rules its settings page applies — a video feed's address, a cue's name, a
+port range, a colour — and a value a save would have trimmed or clamped is
+trimmed or clamped the same way. If any file breaks a rule, the whole restore is
+refused with the file and the reason, and nothing on the machine changes. A
+restore can never write `secrets.bin` or `encryption.key`, and a credential found
+inside a config file (a wireless password, an integration's API key) is dropped
+rather than stored. A snapshot listing more files than there are config stores is
+refused outright; a file this build does not keep is ignored and logged.
+
+Three things a save checks are not checked on a restore, because the snapshot
+cannot answer them: whether a service type or plan still exists in Planning
+Center, whether a milestone's service type has recorded history on this machine,
+and whether a screen's address is reserved (the next start renames one that is).
+
+At start-up the server runs the same checks over the config files on disk and
+names any that a save would refuse on `[config-snapshot]`. Nothing is changed: the
+file stays in use as it is, so a hand edit or an older build's file is reported,
+never taken out of service.
+
 ## Automatic backups
 
 **Settings → Advanced → Data → Automatic backups.** Writes a config snapshot, and

@@ -24,6 +24,8 @@
 // derived from what actually exists rather than from what someone remembered to
 // add. See stores.ts for why registration is not lazy.
 
+import type { RestoreCheck } from "./restore-check.js";
+
 /** Which half of a backup a store belongs to. */
 export type StoreClass =
   /** The operator's work: settings, views, layouts, patch sheets. Restored. */
@@ -58,6 +60,12 @@ export interface RegisteredStore {
    * than producing a backup that is quietly missing most of its content.
    */
   kind: "file" | "directory";
+  /**
+   * What a restore of this file must pass: the rules the store's own save path
+   * applies. Every "config" DataStore declares one (its constructor will not
+   * type-check without it); config-snapshot refuses a restore that fails any.
+   */
+  restoreCheck?: RestoreCheck;
 }
 
 const registry = new Map<string, RegisteredStore>();
@@ -91,4 +99,9 @@ export function configFilenames(): string[] {
 /** Every store that was renamed, with the name it replaced. */
 export function renamedStores(): (RegisteredStore & { renamedFrom: RenamedFrom })[] {
   return allStores().filter((s): s is RegisteredStore & { renamedFrom: RenamedFrom } => s.renamedFrom !== undefined);
+}
+
+/** The restore check a store declared for `filename`, or undefined. */
+export function restoreCheckFor(filename: string): RestoreCheck | undefined {
+  return registry.get(filename)?.restoreCheck;
 }

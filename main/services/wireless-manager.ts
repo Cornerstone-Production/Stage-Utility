@@ -28,7 +28,7 @@ import { wirelessStore } from "./wireless-store.js";
 
 /** The fastest metering interval worth allowing. Below this the polling costs
  *  more than the freshness is worth, and 0 is a busy loop. */
-const MIN_METER_RATE_MS = 100;
+export const MIN_METER_RATE_MS = 100;
 
 class WirelessManager {
   // In-memory list of connections including runtime fields.

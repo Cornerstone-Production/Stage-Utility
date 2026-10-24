@@ -10,11 +10,27 @@
 
 import { broadcast } from "./broadcaster.js";
 import { DataStore } from "./data-store.js";
-import type { ScoreFavourite, ScoresConfig } from "../types/scores.js";
+import { asArray, asObject, checked } from "./restore-check.js";
+import { leagueById, type ScoreFavourite, type ScoresConfig } from "../types/scores.js";
 
 const DEFAULT: ScoresConfig = { favourites: [] };
 
-const store = new DataStore<ScoresConfig>("scores-favourites.json", DEFAULT, "config");
+/** POST /api/scores/favourites keeps only the entries with a team id and a
+ *  league this build knows, and drops the rest without refusing: the same here,
+ *  so a backup from a build with a league this one lacks still restores. */
+const restoreCheck = checked((raw) => {
+  const file = asObject(raw, "the followed teams");
+  const favourites = asArray(file.favourites, "the followed teams' favourites").filter(
+    (f) => isFavourite(f) && f.teamId !== "" && leagueById(f.league),
+  );
+  return { ...file, favourites };
+});
+
+function isFavourite(f: unknown): f is ScoreFavourite {
+  return typeof f === "object" && f !== null && typeof (f as ScoreFavourite).teamId === "string";
+}
+
+const store = new DataStore<ScoresConfig>("scores-favourites.json", DEFAULT, "config", { restoreCheck });
 
 let cache: ScoresConfig = DEFAULT;
 

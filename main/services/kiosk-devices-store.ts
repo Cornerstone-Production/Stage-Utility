@@ -21,9 +21,30 @@ import { announceDevices } from "./kiosk-presence.js";
 import { mergeScreen, sameScreen, screenFrom } from "./kiosk-screen-size.js";
 import type { BoundDevice, DeviceOutput, ScreenSize } from "../types/kiosk.js";
 import { DataStore } from "./data-store.js";
+import { asArray, asObject, checked, optional, refuse, required } from "./restore-check.js";
 import { toError } from "./errors.js";
 
-export const kioskDevicesStore = new DataStore<BoundDevice[]>("kiosk-devices.json", [], "config");
+/**
+ * A restored binding, held to what the claim route takes: a device id that is
+ * not empty, the output it shows, a label that is text. The token is the
+ * server's to issue (pinSecret) and no route accepts one, so a restore cannot
+ * set it either: it lands empty, which is what an export writes anyway and what
+ * authorise() treats as unpinned.
+ */
+const restoreCheck = checked((raw) =>
+  asArray(raw, "the bound devices").map((entry, i) => {
+    const d = asObject(entry, `bound device ${i + 1}`);
+    if (typeof d.id !== "string" || d.id === "") refuse(`bound device ${i + 1} has no device id`);
+    required(d.outputId, "string", `bound device ${i + 1}'s output`);
+    optional(d.label, "string", `bound device ${i + 1}'s label`);
+    if (d.macs !== undefined && !(Array.isArray(d.macs) && d.macs.every((m) => typeof m === "string"))) {
+      refuse(`bound device ${i + 1}'s macs must be a list of text`);
+    }
+    return { ...d, token: "" };
+  }),
+);
+
+export const kioskDevicesStore = new DataStore<BoundDevice[]>("kiosk-devices.json", [], "config", { restoreCheck });
 
 export const findById = (devices: readonly BoundDevice[], id: string): BoundDevice | undefined =>
   devices.find((d) => d.id === id);

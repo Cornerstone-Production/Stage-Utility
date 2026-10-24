@@ -14,12 +14,29 @@
 
 import type { BaptismTriggers } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+import { asObject, checked, refuse, safeKeys } from "./restore-check.js";
 import { assertSafeKey } from "./safe-key.js";
 
 /** planId → which items start each phase. */
 type File = Record<string, BaptismTriggers>;
 
-const store = new DataStore<File>("baptism-triggers.json", {}, "config");
+/** POST /api/baptism/triggers: a plan id that is a safe key, and each item id
+ *  text or null. */
+const restoreCheck = checked((raw) => {
+  const file = asObject(raw, "the baptism triggers");
+  safeKeys(file, "the baptism triggers");
+  for (const [planId, entry] of Object.entries(file)) {
+    const t = asObject(entry, `the triggers for plan ${planId}`);
+    for (const k of ["testimonyItemId", "baptismItemId"] as const) {
+      if (t[k] !== undefined && t[k] !== null && typeof t[k] !== "string") {
+        refuse(`the triggers for plan ${planId}: ${k} must be text or null`);
+      }
+    }
+  }
+  return file;
+});
+
+const store = new DataStore<File>("baptism-triggers.json", {}, "config", { restoreCheck });
 
 export const baptismTriggersStore = {
   async all(): Promise<File> {

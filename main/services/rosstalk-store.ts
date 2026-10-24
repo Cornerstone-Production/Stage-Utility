@@ -6,9 +6,21 @@
 
 import type { RossTalkTargetConfig } from "../types/rosstalk.js";
 import { DataStore } from "./data-store.js";
+import { asObject, checked, optional, targetEntries } from "./restore-check.js";
 
-const targets = new DataStore<RossTalkTargetConfig[]>("rosstalk-targets.json", [], "config");
-const settings = new DataStore<{ simulate: boolean }>("rosstalk-settings.json", { simulate: true }, "config");
+// The RossTalk target route checks no types on a PATCH; a restore holds the
+// targets to the shape the OSC and wireless routes check for the same fields.
+const targets = new DataStore<RossTalkTargetConfig[]>("rosstalk-targets.json", [], "config", {
+  restoreCheck: checked((raw) => targetEntries(raw, "the RossTalk targets")),
+});
+// POST /api/rosstalk/simulate: a boolean.
+const settings = new DataStore<{ simulate: boolean }>("rosstalk-settings.json", { simulate: true }, "config", {
+  restoreCheck: checked((raw) => {
+    const s = asObject(raw, "the RossTalk settings");
+    optional(s.simulate, "boolean", "simulate");
+    return s;
+  }),
+});
 
 export const rosstalkStore = {
   async loadTargets(): Promise<RossTalkTargetConfig[]> {

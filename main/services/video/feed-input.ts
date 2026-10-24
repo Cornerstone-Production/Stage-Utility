@@ -4,6 +4,10 @@ import { PUSH_PROTOCOLS, EMBED_PLAYERS, type VideoSourceKind, type VideoSource }
 import type { CredentialTarget } from "../credential-target.js";
 import { normalizeEmbedRef } from "./embed.js";
 
+/** The source kinds this build offers. One set, so the routes and a config
+ *  restore cannot disagree about which kinds a feed may be. */
+export const OFFERED_KINDS: ReadonlySet<VideoSourceKind> = new Set<VideoSourceKind>(["pull", "push", "embed", "external"]);
+
 /** Longest name a feed may have, after trimming. */
 export const MAX_NAME_LENGTH = 60;
 

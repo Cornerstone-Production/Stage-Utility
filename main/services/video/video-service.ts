@@ -24,7 +24,7 @@ import { viewsStore } from "../views-store.js";
 import { embedSrc } from "./embed.js";
 import { FEED_ID_PATTERN, feedIdFor, feedSecretSlot } from "./feed-id.js";
 import { feedState, type BFramesMark } from "./feed-state.js";
-import { externalProtocol, parseFeedInput, pullCredentialTarget } from "./feed-input.js";
+import { OFFERED_KINDS, externalProtocol, parseFeedInput, pullCredentialTarget } from "./feed-input.js";
 import { credentialTargetMoved, describeTarget, type CredentialTarget } from "../credential-target.js";
 import {
   assertVideoBundle,
@@ -527,7 +527,7 @@ class VideoService {
   private pollTimer: NodeJS.Timeout | null = null;
 
   allowedKinds(): ReadonlySet<VideoSourceKind> {
-    return new Set<VideoSourceKind>(["pull", "push", "embed", "external"]);
+    return OFFERED_KINDS;
   }
 
   /**
