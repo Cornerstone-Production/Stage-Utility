@@ -18,7 +18,6 @@ import * as http from "node:http";
 
 import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
-import { listenOwnerOf } from "../video/feed-id.js";
 import { PULL_START_TIMEOUT_MS } from "../video/reconcile-plan.js";
 import { videoService } from "../video/video-service.js";
 import { type RouteCtx, error, readRawBody } from "./context.js";
@@ -220,14 +219,15 @@ function forwardedHeaders(req: http.IncomingMessage, bodyLength: number | null):
  */
 function forwardToUpstream(
   c: RouteCtx,
-  target: { host: "127.0.0.1"; port: number },
+  target: { host: "127.0.0.1"; port: number; owner: string },
   path: string,
   timeoutMs: number,
   body: Buffer | null,
   feedId: string,
   kind: "whep" | "whip" | "hls",
-  outageId: string,
 ): Promise<void> {
+  // A `-listen` path's failures fold into its feed's own log run, which removeFeed() drops.
+  const outageId = target.owner;
   return new Promise((resolve) => {
     const { req, res, method } = c;
     let clientGone = false;
@@ -344,13 +344,9 @@ export async function videoProxyRoutes(c: RouteCtx): Promise<void> {
   // markRequested() needs no validation of its own — see its own comment.
   const isWhepCreate = parsed.kind === "whep" && parsed.session === null && method === "POST";
   const isPlaylistGet = parsed.kind === "hls" && parsed.file.endsWith(".m3u8") && method === "GET";
-  // `<id>-listen` is the same feed's demand and the same relay's outage: a
-  // listener asking for it keeps the feed from reading offline, and its failures
-  // fold into the feed's own log run, which removeFeed() drops.
-  const ownerId = listenOwnerOf(parsed.feedId) ?? parsed.feedId;
-  if (isWhepCreate || isPlaylistGet) videoService.markRequested(ownerId);
+  if (isWhepCreate || isPlaylistGet) videoService.markRequested(target.owner);
 
   const path = upstreamPath(target, parsed, url.search);
   const timeoutMs = parsed.kind === "hls" ? proxyTimeouts.hls : proxyTimeouts.whepWhip;
-  await forwardToUpstream(c, target, path, timeoutMs, body, parsed.feedId, parsed.kind, ownerId);
+  await forwardToUpstream(c, target, path, timeoutMs, body, parsed.feedId, parsed.kind);
 }

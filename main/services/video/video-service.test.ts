@@ -1128,6 +1128,7 @@ test("relayTarget refuses whip on a pull feed and on a push feed whose own proto
     assert.deepEqual(videoService.relayTarget(whipId, "whip"), {
       host: "127.0.0.1",
       port: 8889,
+      owner: whipId,
       path: `/${whipId}/whip`,
     });
   } finally {
@@ -1162,7 +1163,7 @@ test("relayTarget answers 503 only once the feed and kind both check out, and th
     supervisor.current = { state: "running", since: Date.now() };
     await videoService.reconcileRelay();
     await (videoService as unknown as { publish(): Promise<void> }).publish();
-    assert.deepEqual(videoService.relayTarget(id, "hls"), { host: "127.0.0.1", port: 8888, path: `/${id}` });
+    assert.deepEqual(videoService.relayTarget(id, "hls"), { host: "127.0.0.1", port: 8888, owner: id, path: `/${id}` });
   } finally {
     await videoService.detachRelay();
     await videoService.removeFeed(id);
@@ -1182,7 +1183,7 @@ test("relayTarget answers 503 for a running relay until a reconcile has handed i
   videoPollDeps.inDemand = () => false;
   attach(fakeRelay(), supervisor);
   const publish = () => (videoService as unknown as { publish(): Promise<void> }).publish();
-  const whep = { host: "127.0.0.1", port: 8889, path: `/${id}/whep` };
+  const whep = { host: "127.0.0.1", port: 8889, owner: id, path: `/${id}/whep` };
   try {
     await publish();
     assert.deepEqual(videoService.relayTarget(id, "whep"), NOT_GIVEN, "running, but not reconciled yet");
@@ -1253,7 +1254,7 @@ test("relayTarget keeps answering 503 for a feed the last reconcile failed to ha
   const secondId = (second as { feed: { id: string } }).feed.id;
   try {
     await (videoService as unknown as { publish(): Promise<void> }).publish();
-    assert.deepEqual(videoService.relayTarget(firstId, "hls"), { host: "127.0.0.1", port: 8888, path: `/${firstId}` });
+    assert.deepEqual(videoService.relayTarget(firstId, "hls"), { host: "127.0.0.1", port: 8888, owner: firstId, path: `/${firstId}` });
     assert.deepEqual(videoService.relayTarget(secondId, "hls"), NOT_GIVEN);
   } finally {
     fail = false;
@@ -1288,7 +1289,7 @@ test("a reconcile that rejects one feed's path still hands the relay the others,
   try {
     assert.equal(await videoService.reconcileRelay(), false, "a partial failure is still a failed reconcile, so the readiness poll retries");
     await (videoService as unknown as { publish(): Promise<void> }).publish();
-    assert.deepEqual(videoService.relayTarget(firstId, "hls"), { host: "127.0.0.1", port: 8888, path: `/${firstId}` }, "the feed whose path was set up must play");
+    assert.deepEqual(videoService.relayTarget(firstId, "hls"), { host: "127.0.0.1", port: 8888, owner: firstId, path: `/${firstId}` }, "the feed whose path was set up must play");
     assert.deepEqual(videoService.relayTarget(secondId, "hls"), NOT_GIVEN, "the feed whose path was rejected stays refused");
     assert.ok(
       lines.some((line) => line.includes("[video] could not reconcile the relay") && line.includes(secondId)),
@@ -1327,7 +1328,7 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
     await (videoService as unknown as { publish(): Promise<void> }).publish();
     assert.deepEqual(
       videoService.relayTarget(id, "hls"),
-      { host: "127.0.0.1", port: OLD_PORTS.hls, path: `/${id}` },
+      { host: "127.0.0.1", port: OLD_PORTS.hls, owner: id, path: `/${id}` },
       "sanity: the relay's own attach-time ports before anything changes",
     );
 
@@ -1343,10 +1344,10 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
 
     assert.deepEqual(
       videoService.relayTarget(id, "whep"),
-      { host: "127.0.0.1", port: OLD_PORTS.webrtcHttp, path: `/${id}/whep` },
+      { host: "127.0.0.1", port: OLD_PORTS.webrtcHttp, owner: id, path: `/${id}/whep` },
       "the relay has not restarted — the proxy must still reach it on the port it actually opened",
     );
-    assert.deepEqual(videoService.relayTarget(id, "hls"), { host: "127.0.0.1", port: OLD_PORTS.hls, path: `/${id}` });
+    assert.deepEqual(videoService.relayTarget(id, "hls"), { host: "127.0.0.1", port: OLD_PORTS.hls, owner: id, path: `/${id}` });
   } finally {
     await videoService.detachRelay();
     await videoService.removeFeed(id);

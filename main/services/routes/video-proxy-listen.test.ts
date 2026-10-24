@@ -20,6 +20,7 @@ const { videoService, videoPollDeps } = await import("../video/video-service.js"
 const { videoProxyRoutes } = await import("./video-proxy-routes.js");
 const { fakeRelay } = await import("../fixtures/fake-relay.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
+const { videoFeedsStore } = await import("../video/feed-store.js");
 type RelayPath = import("../video/relay.js").RelayPath;
 type FfmpegFinder = import("../video/ffmpeg-system.js").FfmpegFinder;
 
@@ -183,6 +184,38 @@ describe("with ffmpeg available", () => {
       assert.ok(res.status === 404, `${id} answered ${res.status}`);
     }
     assert.deepEqual(received, []);
+  });
+
+  test("a stored legacy feed whose own id ends in -listen is not answered as another feed's audio", async () => {
+    await videoFeedsStore.update((c) => ({
+      ...c,
+      feeds: [...c.feeds, { id: "aac-listen", name: "Legacy", source: { kind: "pull", url: "rtsp://192.0.2.50/s", username: "" } }],
+    }));
+    await (videoService as unknown as { publish(): Promise<void> }).publish();
+    try {
+      assert.ok((await videoService.state()).feeds.some((f) => f.id === "aac-listen"), "the legacy feed never reached the snapshot, so this proves nothing");
+      received.length = 0;
+      assert.equal((await post("/video/aac-listen/whep")).status, 404);
+      assert.deepEqual(received, []);
+    } finally {
+      await videoFeedsStore.update((c) => ({ ...c, feeds: c.feeds.filter((f) => f.id !== "aac-listen") }));
+      await (videoService as unknown as { publish(): Promise<void> }).publish();
+    }
+    assert.equal((await post("/video/aac-listen/whep")).status, 201, "the converted feed's path stopped answering after the legacy feed went");
+  });
+
+  test("a status that names another path than the one asked for is not served", async () => {
+    const snap = (videoService as unknown as { snapshot: { feeds: { id: string; audio?: unknown }[] } }).snapshot;
+    const feed = snap.feeds.find((f) => f.id === "aac")!;
+    const real = feed.audio;
+    feed.audio = { state: "converted", listenPath: "elsewhere-listen" };
+    try {
+      received.length = 0;
+      assert.equal((await post("/video/aac-listen/whep")).status, 404);
+      assert.deepEqual(received, []);
+    } finally {
+      feed.audio = real;
+    }
   });
 
   test("a listener's request counts as demand for the feed itself, not for a key of its own", () => {

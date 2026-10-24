@@ -1075,6 +1075,7 @@ test("a respawn whose first reconcile succeeds serves its feeds, with no feed ed
   assert.deepEqual(videoService.relayTarget("f0", "whep"), {
     host: "127.0.0.1",
     port: DEFAULT_VIDEO_PORTS.webrtcHttp,
+    owner: "f0",
     path: "/f0/whep",
   });
 });

@@ -584,7 +584,10 @@ the relay's own HTTP listeners are loopback-only: `POST /video/<feedId>/whep`,
 `GET /video/<feedId>/<file>.m3u8|.mp4|.m4s`. A feed whose audio status is
 `converted` or `pass-through` also answers `POST /video/<feedId>-listen/whep`
 and that path's session `PATCH`/`DELETE`: the same video with Opus audio, which
-the Listen button plays. Nothing else under `<feedId>-listen` is served. `404`
+the Listen button plays. Nothing else under `<feedId>-listen` is served, and a
+session made there whose feed's audio status has since changed can no longer be
+`PATCH`ed or `DELETE`d through the proxy (`404`): it ends at the relay's ICE timeout,
+or when the browser tears the connection down. `404`
 for an unknown feed id, a kind the feed's own source cannot serve
 (embed/external have no relay path; WHIP needs a push feed whose own protocol is
 WHIP), a `-listen` path of a feed whose audio is not converted or passed through

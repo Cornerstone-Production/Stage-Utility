@@ -27,7 +27,7 @@ import { planAudio, resolveAudio, type ConverterWhy, type ListenCapability } fro
 import { systemFfmpegFinder, type FfmpegFinder } from "./ffmpeg-system.js";
 import { AudioMemory } from "./audio-memory.js";
 import { embedSrc } from "./embed.js";
-import { FEED_ID_PATTERN, feedIdFor, feedSecretSlot, isReservedFeedId, listenOwnerOf } from "./feed-id.js";
+import { FEED_ID_PATTERN, feedIdFor, feedSecretSlot, isReservedFeedId, feedOwnerOf } from "./feed-id.js";
 import { feedState, type BFramesMark } from "./feed-state.js";
 import { externalProtocol, parseFeedInput, pullCredentialTarget } from "./feed-input.js";
 import { credentialTargetMoved, describeTarget, type CredentialTarget } from "../credential-target.js";
@@ -1539,48 +1539,45 @@ class VideoService {
   /**
    * Where the playback proxy (video-proxy-routes.ts) should forward a
    * `/video/<feedId>/<kind>…` request, or the reason to refuse. Read off
-   * `this.snapshot` — the same synchronous truth writeHelloBurst uses (see
-   * the field comment above) — so this needs no store read of its own: every
-   * mutation that could change the answer (addFeed/updateFeed/removeFeed,
-   * attachRelay/detachRelay, a status poll picking up "running") already ends
-   * in publish(), which is what keeps the snapshot current.
+   * `this.snapshot` — the same synchronous truth writeHelloBurst uses — so this
+   * needs no store read of its own: every mutation that could change the answer
+   * ends in publish(), which keeps the snapshot current.
    *
    * 404 for a pattern-failing or unknown id, for a kind this feed's source
-   * cannot serve (embed/external have no relay path at all; "whip" beyond
-   * that needs a push feed whose OWN protocol is whip — a pull feed, or a
-   * push feed on SRT/RTMP, has nothing listening for a WHIP offer). 503 only
-   * once a feed and kind both check out: an unknown feed is never "the relay
-   * is down" even while it genuinely is. 503 as well while the running
-   * process has not yet been reconciled with this feed (reconciledFeedIds).
+   * cannot serve (embed/external have no relay path at all; "whip" beyond that
+   * needs a push feed whose OWN protocol is whip). 503 only once a feed and kind
+   * both check out: an unknown feed is never "the relay is down" even while it
+   * genuinely is. 503 as well while the running process has not yet been
+   * reconciled with this feed (reconciledFeedIds).
    *
-   * `<id>-listen` is answered too, for WHEP only, and only when the feed's
-   * audio status is converted or pass-through and names exactly that path.
+   * `<id>-listen` is answered for WHEP only, and only while the owning feed's
+   * audio status names exactly that path as converted or pass-through: a direct
+   * feed, a feed with no audio and a feed whose converter cannot run have no
+   * `-listen` path a browser may reach. A stored legacy feed whose own id ends in
+   * `-listen` is never answered as another feed's audio. `owner` is the feed the
+   * request is about, for demand and for the failure log.
    */
   relayTarget(
     feedId: string,
     kind: "whep" | "whip" | "hls",
-  ): { host: "127.0.0.1"; port: number; path: string } | { refuse: 404 } | { refuse: 503; error: string } {
+  ): { host: "127.0.0.1"; port: number; owner: string; path: string } | { refuse: 404 } | { refuse: 503; error: string } {
     if (!FEED_ID_PATTERN.test(feedId)) return { refuse: 404 };
-    // `<id>-listen` is a feed's converted audio path (audio-listen.ts). It is
-    // served to WHEP readers only, and only while that feed's own status says it
-    // is the path to read: a direct feed, a feed with no audio and a feed whose
-    // converter cannot run have no `-listen` path a browser may reach.
-    const listenOwner = listenOwnerOf(feedId);
-    if (listenOwner !== null && kind !== "whep") return { refuse: 404 };
-    const ownerId = listenOwner ?? feedId;
-    const feed = this.snapshot.feeds.find((f) => f.id === ownerId);
+    const owner = feedOwnerOf(feedId);
+    const isListen = owner !== feedId;
+    if (isListen && (kind !== "whep" || this.snapshot.feeds.some((f) => f.id === feedId))) return { refuse: 404 };
+    const feed = this.snapshot.feeds.find((f) => f.id === owner);
     if (!feed || (feed.source.kind !== "pull" && feed.source.kind !== "push")) return { refuse: 404 };
-    if (listenOwner !== null) {
+    if (isListen) {
       const audio = feed.audio;
-      if (!audio || (audio.state !== "converted" && audio.state !== "pass-through")) return { refuse: 404 };
+      if (!audio || (audio.state !== "converted" && audio.state !== "pass-through") || audio.listenPath !== feedId) return { refuse: 404 };
     }
     if (kind === "whip" && !(feed.source.kind === "push" && feed.source.protocol === "whip")) return { refuse: 404 };
     if (this.snapshot.relay.state !== "running") return { refuse: 503, error: RELAY_NOT_RUNNING };
-    if (!this.reconciledFeedIds.has(ownerId)) return { refuse: 503, error: RELAY_NOT_GIVEN_FEED };
+    if (!this.reconciledFeedIds.has(owner)) return { refuse: 503, error: RELAY_NOT_GIVEN_FEED };
     const { ports } = this.snapshot.relay;
     return kind === "hls"
-      ? { host: "127.0.0.1", port: ports.hls, path: `/${feedId}` }
-      : { host: "127.0.0.1", port: ports.webrtcHttp, path: `/${feedId}/${kind}` };
+      ? { host: "127.0.0.1", port: ports.hls, owner, path: `/${feedId}` }
+      : { host: "127.0.0.1", port: ports.webrtcHttp, owner, path: `/${feedId}/${kind}` };
   }
 
   // ── Reconciling the relay on a feed change ───────────────────────────────
