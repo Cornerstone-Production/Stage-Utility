@@ -11,114 +11,100 @@
 // stylesheet. The tests pin what is drawn and which settings change it; the sizes,
 // the Fit measurement and the wrapping were driven in a real browser.
 
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import type { ProPresenterStatusDTO } from "@main/types/live";
+import { useBoxFit } from "./fit-to-box";
 import { LYRICS_SIZE_OF_BOX, lyricsSettings, type LyricsConfig, type LyricsSettings } from "./lyrics-config";
-import { readLyrics, type LyricsChip, type LyricsRow, type LyricsTag } from "./lyrics-reading";
+import { readLyrics, type LyricsChip, type LyricsReading, type LyricsRow, type LyricsTag } from "./lyrics-reading";
 import { INK_DARK, INK_LIGHT, contrastOf } from "./score-ink";
 
-/** One colour for every group, and the ink that reads on it. */
 const ACCENT = "var(--color-accent)";
 const ON_ACCENT = "var(--color-on-accent)";
 
-/**
- * White on a colour, unless the colour is too light for white to be read on it.
- *
- * Not `inkFor`, which picks whichever of white and near-black contrasts better:
- * that turns the mockup's red, blue and amber tags dark-on-colour, which is not
- * what was approved. The approved look is white on every group colour, so white
- * stays until a colour is so light (a yellow, a cream) that it would be nearly
- * invisible, and only then does the ink go dark.
- */
-const MIN_WHITE_CONTRAST = 1.8;
-const inkOn = (hex: string): string => (contrastOf(hex, INK_LIGHT) < MIN_WHITE_CONTRAST ? INK_DARK : INK_LIGHT);
-
-/** The smallest the lyric is allowed to become when Fit shrinks it. */
+/** The smallest the lyric is allowed to become when it has to shrink to fit. */
 const FIT_MIN_PX = 8;
-/** Halvings of the search range: the answer is within a fraction of a pixel. */
-const FIT_STEPS = 12;
+/** Before the box is measured, and wherever it never is (jsdom), the canvas stands
+ *  in for it: a share of its height for the box, and a share of the box for Fit's
+ *  first paint. Both are placeholders, replaced before the first frame in a browser. */
+const UNMEASURED_BOX_OF_CANVAS = 0.4;
+const UNMEASURED_FIT_OF_BOX = 0.1;
+
+/** White on a colour, unless the colour is too light for white to be read on it.
+ *  Not `inkFor`, which turns the approved red, blue and amber tags dark-on-colour. */
+const MIN_WHITE_CONTRAST = 1.8;
+function inkOn(hex: string): string {
+  return contrastOf(hex, INK_LIGHT) < MIN_WHITE_CONTRAST ? INK_DARK : INK_LIGHT;
+}
+
+/** A group's colour under the Colour setting, and the ink that reads on it. */
+function tagColours(s: LyricsSettings, hex: string): { colour: string; ink: string } {
+  return s.tagColor === "propresenter" ? { colour: hex, ink: inkOn(hex) } : { colour: ACCENT, ink: ON_ACCENT };
+}
 
 /**
- * The lyric's font size in px, and the two elements it is measured against.
+ * The lyric's font size in px, from the shared fit (fit-to-box.ts).
  *
- * S, M and L are a fraction of the object's own box height, and Fit's ceiling is
- * the box height itself. Both are CEILINGS, not promises: when the whole block
- * would not fit the box at that size the size comes down until it does, because a
- * widget cannot scroll and a clipped last line is a lyric the room never reads.
- * Where the block fits, S, M and L are exactly their size and Fit is the largest
- * size that fits.
- *
- * Found by bisection, not by scaling: wrapping makes the height jump with the
- * size, so a back-derived scale (exact only for text that does not wrap) lands on
- * a size that overflows. Every probe happens inside one layout effect, mutating
- * the wrapper's style directly, so none is ever painted.
+ * S, M and L are a share of the object's own box height, and Fit's ceiling is the
+ * box height itself. Both are CEILINGS: when the whole block would not fit the box
+ * at that size it comes down until it does, because a widget cannot scroll and a
+ * clipped last line is a lyric the room never reads. Where it fits, S, M and L are
+ * exactly their size and Fit is the largest size that fits.
  */
 function useLyricsSize(size: LyricsSettings["size"], contentKey: string, fallbackBoxH: number) {
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const [box, setBox] = useState({ w: 0, h: 0 });
-  const [fitted, setFitted] = useState<number | null>(null);
+  const ceilingFor = ({ h }: { h: number }) => {
+    const boxH = h > 0 ? h : fallbackBoxH;
+    return Math.max(FIT_MIN_PX, size === "fit" ? boxH : boxH * LYRICS_SIZE_OF_BOX[size]);
+  };
+  const { wrapRef, contentRef, value } = useBoxFit<HTMLDivElement>({
+    floor: FIT_MIN_PX,
+    ceiling: ceilingFor,
+    initial: size === "fit" ? ceilingFor({ h: 0 }) * UNMEASURED_FIT_OF_BOX : ceilingFor({ h: 0 }),
+    contentKey: `${size}|${contentKey}`,
+    apply: (el, px) => {
+      el.style.fontSize = `${px}px`;
+    },
+  });
+  return { wrapRef, contentRef, px: Math.max(FIT_MIN_PX, value) };
+}
 
-  useLayoutEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-    const measure = () => setBox((b) => (b.w === el.clientWidth && b.h === el.clientHeight ? b : { w: el.clientWidth, h: el.clientHeight }));
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  // Before the box is measured (and wherever it never is, as in jsdom) the canvas
-  // stands in for it, so a first paint is a plausible size rather than none.
-  const boxH = box.h > 0 ? box.h : fallbackBoxH;
-  const ceiling = Math.max(FIT_MIN_PX, size === "fit" ? boxH : boxH * LYRICS_SIZE_OF_BOX[size]);
-
-  useLayoutEffect(() => {
-    const wrap = wrapRef.current;
-    const content = contentRef.current;
-    if (!wrap || !content || box.h <= 0) return;
-    const fitsAt = (px: number) => {
-      wrap.style.fontSize = `${px}px`;
-      return content.offsetHeight <= wrap.clientHeight && content.scrollWidth <= wrap.clientWidth + 1;
-    };
-    let best = ceiling;
-    if (!fitsAt(ceiling)) {
-      let lo = FIT_MIN_PX;
-      let hi = ceiling;
-      for (let i = 0; i < FIT_STEPS; i++) {
-        const mid = (lo + hi) / 2;
-        if (fitsAt(mid)) lo = mid;
-        else hi = mid;
-      }
-      best = lo;
-    }
-    wrap.style.fontSize = `${best}px`;
-    setFitted(best);
-  }, [size, ceiling, contentKey, box.w, box.h]);
-
-  return { wrapRef, contentRef, px: fitted ?? (size === "fit" ? ceiling * 0.1 : ceiling) };
+/** How much of its strength the tag underneath keeps. */
+function tagDim(s: LyricsSettings, under: boolean): number {
+  return under ? (s.underDim === "strong" ? 0.45 : 0.75) : 1;
 }
 
 function tagStyle(tag: LyricsTag, s: LyricsSettings, under: boolean): CSSProperties {
-  const pro = s.tagColor === "propresenter";
-  const colour = pro ? tag.colorHex : ACCENT;
+  const { colour, ink } = tagColours(s, tag.colorHex);
   const base: CSSProperties = {
     display: "inline-block",
     fontWeight: 700,
     whiteSpace: "nowrap",
     fontSize: under ? "0.42em" : "0.5em",
     lineHeight: 1.15,
-    opacity: under ? (s.underDim === "strong" ? 0.45 : 0.75) : 1,
   };
   if (s.tagStyle === "filled") {
-    // The ink is chosen against the colour: a yellow group is not white text.
-    return { ...base, padding: "0.19em 0.45em", borderRadius: "0.32em", color: pro ? inkOn(tag.colorHex) : ON_ACCENT, background: colour };
+    // Dimmed by its fill alone: the ink keeps its strength, so the tag reads as the
+    // same tag in a quieter colour on any ground, dark wall or light card.
+    return { ...base, position: "relative", padding: "0.19em 0.45em", borderRadius: "0.32em", color: ink };
   }
-  if (s.tagStyle === "outline") {
-    return { ...base, padding: "0.16em 0.42em", borderRadius: "0.32em", color: colour, border: `0.065em solid ${colour}` };
-  }
-  return { ...base, color: colour };
+  const outlined: CSSProperties = { ...base, opacity: tagDim(s, under), color: colour };
+  if (s.tagStyle === "outline") return { ...outlined, padding: "0.16em 0.42em", borderRadius: "0.32em", border: `0.065em solid ${colour}` };
+  return outlined;
+}
+
+function Tag({ tag, s, under }: { tag: LyricsTag; s: LyricsSettings; under: boolean }) {
+  const filled = s.tagStyle === "filled";
+  return (
+    <span data-lyrics-tag="" style={tagStyle(tag, s, under)}>
+      {filled && (
+        <span
+          aria-hidden="true"
+          data-lyrics-fill=""
+          style={{ position: "absolute", inset: 0, borderRadius: "inherit", background: tagColours(s, tag.colorHex).colour, opacity: tagDim(s, under) }}
+        />
+      )}
+      <span style={{ position: "relative" }}>{tag.text}</span>
+    </span>
+  );
 }
 
 function Row({ row, s }: { row: LyricsRow; s: LyricsSettings }) {
@@ -137,7 +123,7 @@ function Row({ row, s }: { row: LyricsRow; s: LyricsSettings }) {
     <div data-lyrics-row={row.under ? "under" : "current"} style={rowStyle}>
       {row.tag && (
         <div style={cell}>
-          <span data-lyrics-tag="" style={tagStyle(row.tag, s, row.under)}>{row.tag.text}</span>
+          <Tag tag={row.tag} s={s} under={row.under} />
         </div>
       )}
       {row.words != null && (
@@ -162,10 +148,8 @@ function Row({ row, s }: { row: LyricsRow; s: LyricsSettings }) {
 }
 
 function Chip({ chip, s, ring }: { chip: LyricsChip; s: LyricsSettings; ring: string }) {
-  const pro = s.tagColor === "propresenter";
-  const colour = pro ? chip.colorHex : ACCENT;
+  const { colour, ink } = tagColours(s, chip.colorHex);
   const now = chip.state === "now";
-  const done = chip.state === "done";
   const base: CSSProperties = {
     padding: "0.3em 0.6em",
     borderRadius: "0.4em",
@@ -173,18 +157,33 @@ function Chip({ chip, s, ring }: { chip: LyricsChip; s: LyricsSettings; ring: st
     lineHeight: 1.4,
     fontWeight: 700,
   };
+  // The chips that are not lit take the theme's own fill and text, so they are
+  // neutral by construction and read on the wall and on a light Home card alike.
+  const quiet: CSSProperties =
+    chip.state === "done"
+      ? { color: "var(--color-fg-faint)", background: "var(--color-fill)" }
+      : { color: "var(--color-fg)", background: "var(--color-fill-active)" };
   return (
     <div
       data-lyrics-chip={chip.state}
-      style={
-        now
-          ? { ...base, color: pro ? inkOn(chip.colorHex) : ON_ACCENT, background: colour, boxShadow: `0 0 0 0.1em ${ring}` }
-          : { ...base, color: done ? "#4a4a52" : "#c9c9d0", background: done ? "#141414" : "#1e1e1e", borderLeft: `0.2em solid ${colour}` }
-      }
+      style={now ? { ...base, color: ink, background: colour, boxShadow: `0 0 0 0.1em ${ring}` } : { ...base, ...quiet, borderLeft: `0.2em solid ${colour}` }}
     >
       {chip.text}
     </div>
   );
+}
+
+/** What changes the block's size, so the fit measures again: the words and tags
+ *  (the chips' own text, not just how many there are) and the settings that change
+ *  their size, never the colours. */
+export function lyricsFitKey(reading: LyricsReading, s: LyricsSettings): string {
+  if (reading.kind !== "slide") return "";
+  return JSON.stringify([
+    reading.title,
+    reading.strip?.map((c) => c.text),
+    reading.rows.map((r) => [r.under, r.tag?.text, r.words]),
+    s.display, s.tagStyle, s.tagWidth, s.weight, s.under,
+  ]);
 }
 
 export function LyricsObject({
@@ -206,13 +205,7 @@ export function LyricsObject({
 }) {
   const s = lyricsSettings(config);
   const reading = readLyrics(config, { pro, known });
-  // What changes the block's size, so Fit measures again: the words and tags, not
-  // the colours.
-  const contentKey =
-    reading.kind === "slide"
-      ? JSON.stringify([reading.title, reading.strip?.length, reading.rows.map((r) => [r.under, r.tag?.text, r.words]), s.display, s.tagStyle, s.tagWidth, s.weight, s.under])
-      : "";
-  const { wrapRef, contentRef, px } = useLyricsSize(s.size, contentKey, fallbackH * 0.4);
+  const { wrapRef, contentRef, px } = useLyricsSize(s.size, lyricsFitKey(reading, s), fallbackH * UNMEASURED_BOX_OF_CANVAS);
 
   const wrap: CSSProperties = {
     position: "relative",
@@ -222,15 +215,14 @@ export function LyricsObject({
     display: "flex",
     flexDirection: "column",
     justifyContent: "center",
-    fontSize: `${px}px`,
     ...(color ? { color } : null),
   };
 
   if (reading.kind === "loading") return <div ref={wrapRef} data-lyrics="loading" style={wrap} />;
   if (reading.kind === "none") {
     return (
-      <div ref={wrapRef} data-lyrics="none" style={{ ...wrap, alignItems: "center", fontSize: undefined }}>
-        <span style={{ opacity: 0.4, fontSize: "0.5em" }}>{"—"}</span>
+      <div ref={wrapRef} data-lyrics="none" style={{ ...wrap, alignItems: "center" }}>
+        <span style={{ opacity: 0.4, fontSize: `${px * 0.5}px` }}>{"—"}</span>
       </div>
     );
   }
@@ -238,7 +230,7 @@ export function LyricsObject({
   return (
     <div ref={wrapRef} data-lyrics="slide" data-lyrics-display={s.display} style={wrap}>
       {reading.title != null && (
-        <div data-lyrics-title="" style={{ position: "absolute", top: "0.29em", left: "0.58em", right: "0.58em", fontSize: "0.29em", fontWeight: 500, opacity: 0.6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <div data-lyrics-title="" style={{ position: "absolute", top: `${px * 0.29}px`, left: `${px * 0.58}px`, right: `${px * 0.58}px`, fontSize: `${px * 0.29}px`, fontWeight: 500, opacity: 0.6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {reading.title}
         </div>
       )}
@@ -251,14 +243,15 @@ export function LyricsObject({
           display: "flex",
           flexDirection: "column",
           gap: "0.45em",
+          fontSize: `${px}px`,
           // Room above and below for the song title, so a tall block never runs under it.
           padding: reading.title != null ? "0.9em 0.58em" : "0.5em 0.58em",
         }}
       >
         {reading.strip && (
-          <div data-lyrics-strip="" style={{ display: "flex", flexWrap: "wrap", gap: "0.1em" }}>
+          <div data-lyrics-strip="" style={{ display: "flex", flexWrap: "wrap", gap: "0.1em", justifyContent: s.align === "center" ? "center" : "flex-start" }}>
             {reading.strip.map((chip, i) => (
-              <Chip key={i} chip={chip} s={s} ring={color ?? "var(--color-fg, #fff)"} />
+              <Chip key={i} chip={chip} s={s} ring={color ?? "var(--color-fg)"} />
             ))}
           </div>
         )}

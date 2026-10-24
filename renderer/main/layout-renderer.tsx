@@ -62,6 +62,7 @@ import { displayHourCycle, formatClock } from "../lib/clock-format";
 import { externKeyed } from "@main/types/extern-keyed";
 import { VideoObject } from "./video/video-object";
 import { LyricsObject } from "./lyrics-object";
+import { useBoxFit } from "./fit-to-box";
 
 // Render context shared by every object renderer.
 export interface LayoutRenderCtx {
@@ -531,64 +532,10 @@ export function RenderObject({
   );
 }
 
-/**
- * Shrink whatever is inside so it fits the box, instead of spilling out of it.
- *
- * The measured sweep across every object type found eight that overflowed their
- * box at a normal dashboard tile size (259x161) — the status objects by up to
- * 48px, because a dot plus "OBS: Recording 00:12:34" is simply wider than a
- * narrow tile and nothing was shrinking it. Clipping is not the fix either: a
- * status the operator cannot read is the same as no status.
- *
- * Converges in a pass or two by back-deriving the natural size from the live
- * scroll size at the current scale. Floor of 0.3 so it degrades to "small" and
- * never to "invisible".
- */
 /** How far a readout may grow beyond its designed size to fill its box. */
 const FIT_MAX_GROWTH = 3;
-
-function useFitScale<T extends HTMLElement = HTMLSpanElement>(deps: unknown[]): {
-  wrapRef: React.RefObject<HTMLDivElement | null>;
-  elRef: React.RefObject<T | null>;
-  scale: number;
-} {
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const elRef = useRef<T | null>(null);
-  const [scale, setScale] = useState(1);
-  // The observer is subscribed once per dep change, so its callback would
-  // otherwise close over a stale `scale`.
-  const scaleRef = useLatestRef(scale);
-  useLayoutEffect(() => {
-    const wrap = wrapRef.current;
-    const el = elRef.current;
-    if (!wrap || !el) return;
-    const measure = () => {
-      const availW = wrap.clientWidth;
-      const availH = wrap.clientHeight;
-      if (availW <= 1 || availH <= 1) return;
-      const cur = scaleRef.current;
-      const natW = el.scrollWidth / cur;
-      const natH = el.scrollHeight / cur;
-      if (natW <= 0 || natH <= 0) return;
-      // Grows as well as shrinks. The base size is a fraction of the CANVAS, so
-      // capping at 1 meant a widget made twice as tall kept the same text and an
-      // operator reached for the font-size field to fix it — which is precisely
-      // the field this phase removes. Sizing from the widget's own box is what
-      // makes that field unnecessary rather than merely unavailable.
-      //
-      // The ceiling stops a two-character readout in a large tile becoming
-      // absurd, and the floor keeps a long string legible rather than vanishing.
-      const desired = clamp(Math.min(availW / natW, availH / natH), 0.3, FIT_MAX_GROWTH);
-      if (Math.abs(desired - cur) > 0.01) setScale(desired);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(wrap);
-    return () => ro.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, scaleRef]);
-  return { wrapRef, elRef, scale };
-}
+/** How far it may shrink: small, never invisible. */
+const FIT_MIN_GROWTH = 0.3;
 
 /** Render one object's inner content (the positioned box wraps this). */
 // Format a signed pacing delta — over plan reads "+M:SS", under reads "−M:SS".
@@ -618,14 +565,21 @@ function rfBarsGlyph(bars: number): string {
 // from the live scroll size (same approach as ServiceOrderObject's auto-fit).
 function FitText({ text, ts, vAlign }: { text: string; ts: CSSProperties; vAlign?: LayoutVAlign }) {
   const basePx = parseFloat(String(ts.fontSize)) || 16;
-  // Same measurement as the status objects — one implementation, so a fix to how
-  // things fit their box cannot land in one of them and miss the others.
-  const { wrapRef, elRef, scale } = useFitScale([text, basePx, ts.fontWeight]);
+  // The one measurement every fitted object shares (fit-to-box.ts).
+  const { wrapRef, contentRef, value } = useBoxFit<HTMLSpanElement>({
+    floor: basePx * FIT_MIN_GROWTH,
+    ceiling: basePx * FIT_MAX_GROWTH,
+    initial: basePx,
+    contentKey: `${text}|${basePx}|${ts.fontWeight}`,
+    apply: (el, px) => {
+      el.style.fontSize = `${px}px`;
+    },
+  });
   const justify = vAlign === "top" ? "flex-start" : vAlign === "bottom" ? "flex-end" : "center";
   const align = ts.textAlign === "left" ? "flex-start" : ts.textAlign === "right" ? "flex-end" : "center";
   return (
     <div ref={wrapRef} style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: justify, alignItems: align, overflow: "hidden" }}>
-      <span ref={elRef} style={{ ...ts, width: undefined, maxWidth: "100%", display: "inline-block", fontSize: `${basePx * scale}px` }}>{text}</span>
+      <span ref={contentRef} style={{ ...ts, width: undefined, maxWidth: "100%", display: "inline-block", fontSize: `${value}px` }}>{text}</span>
     </div>
   );
 }
@@ -771,6 +725,20 @@ const WALL_TWIN = externKeyed({
  *  and amber, not Home's semantic tokens. */
 function timerWallColor(tone: TimerTone | null): string | null {
   return tone === "over" ? "var(--red-10)" : tone === "warn" ? "var(--yellow-10)" : null;
+}
+
+/**
+ * The ProPresenter status an object reads, and whether it has answered: the
+ * default instance, or the one it names. A named instance whose list has not
+ * loaded has not answered, which is not the same as "not connected".
+ */
+function proFor(
+  ctx: Pick<LayoutRenderCtx, "propresenter" | "propresenterKnown" | "propInstances">,
+  named: string | null | undefined,
+): { pro: ProPresenterStatusDTO | null | undefined; known: boolean } {
+  return named
+    ? { pro: ctx.propInstances?.status[named], known: ctx.propInstances != null }
+    : { pro: ctx.propresenter, known: ctx.propresenterKnown };
 }
 
 function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
@@ -1095,36 +1063,26 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       });
     }
     case "current-slide-text": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       return span(pro?.currentSlideText ?? pro?.currentItem ?? "");
     }
     case "lyrics": {
-      // The instance this object reads: the default, or the one it names. A named
-      // instance whose list has not loaded has not answered, which is not "not connected".
-      const named = c.propresenterInstanceId;
-      return (
-        <LyricsObject
-          config={c}
-          pro={named ? ctx.propInstances?.status[named] : ctx.propresenter}
-          known={named ? ctx.propInstances != null : ctx.propresenterKnown}
-          color={o.style?.color}
-          fallbackH={ctx.H}
-        />
-      );
+      const { pro, known } = proFor(ctx, c.propresenterInstanceId);
+      return <LyricsObject config={c} pro={pro} known={known} color={o.style?.color} fallbackH={ctx.H} />;
     }
     case "next-slide-text": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       return span(pro?.nextSlideText ?? pro?.nextItem ?? "");
     }
     case "current-service-item": {
       // Follow the PCO plan order (authoritative); fall back to ProPresenter's
       // active playlist only when PCO has no current item. Auto-fit so a long title
       // shrinks to the box instead of clipping.
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       return <FitText text={ctx.pcoLive?.currentItemTitle ?? pro?.currentServiceItem ?? ""} ts={ts} vAlign={o.style?.vAlign} />;
     }
     case "next-service-item": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       return <FitText text={ctx.pcoLive?.nextItemTitle ?? pro?.nextServiceItem ?? ""} ts={ts} vAlign={o.style?.vAlign} />;
     }
     case "service-order":
@@ -1134,11 +1092,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
     case "screen-embed":
       return <ScreenEmbedObject o={o} config={c} ctx={ctx} />;
     case "current-slide-notes": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       return span(pro?.currentNotes ?? "");
     }
     case "section-chip": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       const sec =
         c.which === "next"
           ? pro?.nextSection
@@ -1153,7 +1111,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       return readout(sec.name, { fill: sec.colorHex });
     }
     case "slide-progress": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       const idx = pro?.slideIndex ?? null;
       const count = pro?.slideCount ?? null;
       const remaining = pro?.slidesRemaining ?? null;
@@ -1177,7 +1135,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       return readout(text, { sub: (c.showLabel ?? false) && !dim ? "slides" : null });
     }
     case "slide-thumbnail": {
-      const pro = c.propresenterInstanceId ? ctx.propInstances?.status[c.propresenterInstanceId] : ctx.propresenter;
+      const { pro } = proFor(ctx, c.propresenterInstanceId);
       const key = pro?.slidePreviewKey;
       if (!key) return null;
       const inst =
@@ -1354,12 +1312,13 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // names. A named instance that has not loaded is "not answering", not
       // "no timers".
       const named = c.propresenterInstanceId;
+      const { pro, known } = proFor(ctx, named);
       const r = readTimer(c, {
         now: ctx.now,
         pcoLive: ctx.pcoLive,
         pcoLiveKnown: ctx.pcoLiveKnown,
-        propresenter: named ? ctx.propInstances?.status[named] : ctx.propresenter,
-        propresenterKnown: named ? ctx.propInstances != null : ctx.propresenterKnown,
+        propresenter: pro,
+        propresenterKnown: known,
         // Set up: the integration for the default machine, a listed instance for a
         // named one. Only a ProPresenter that is set up can be "not answering".
         propresenterConfigured: named
@@ -2159,11 +2118,19 @@ function PeoplePanel({
   const t = people?.total;
   const valuePx = parseFloat(String(ts.fontSize)) || 0.12 * H;
   const labelPx = Math.max(8, valuePx * 0.34);
-  const {
-    wrapRef: fitWrapRef,
-    elRef: fitElRef,
-    scale: fitScale,
-  } = useFitScale<HTMLDivElement>([metrics.join(","), showLabels, col, valuePx, H]);
+  // Scaled, not resized: the gaps and fonts are fractions of the canvas, so only
+  // the whole block can shrink with the box. Its height is the box's (height:
+  // 100%), so a block fits while its scroll size at this scale is within it.
+  const { wrapRef: fitWrapRef, contentRef: fitElRef, value: fitScale } = useBoxFit<HTMLDivElement>({
+    floor: FIT_MIN_GROWTH,
+    ceiling: FIT_MAX_GROWTH,
+    initial: 1,
+    contentKey: [metrics.join(","), showLabels, col, valuePx, H].join("|"),
+    apply: (el, v) => {
+      el.style.transform = `scale(${v})`;
+    },
+    fits: (wrap, el, v) => el.scrollWidth * v <= wrap.clientWidth + 1 && el.scrollHeight * v <= wrap.clientHeight + 1,
+  });
   // Each tile resolves to a display string + optional color override (vs-average
   // goes green/red). "—" when the underlying value isn't available.
   const tile = (k: string): { text: string; color: string } => {

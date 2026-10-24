@@ -73,12 +73,11 @@ describe("readouts fit their box through one shared measurement", () => {
     });
   }
 
-  test("there is exactly one implementation of the measurement", () => {
-    // Two copies is how a fix lands in one readout and misses four others. The
-    // idiom's own shrink-to-width lives in readout.tsx; useFitScale remains for
-    // the objects that are not readouts (plain text, slide text, service items).
-    const defs = SRC.match(/function useFitScale\b/g) ?? [];
-    assert.equal(defs.length, 1, "useFitScale must be defined once");
+  test("the idiom's shrink-to-width is defined once", () => {
+    // The fit of everything else (plain text, slide text, service items, the
+    // people panel, Lyrics) is fit-to-box.ts, held to one by
+    // fit-one-measurement.test.ts. The idiom's own shrink-to-width lives in
+    // readout.tsx.
     const shrink = READOUT_SRC.match(/function useShrinkToWidth\b/g) ?? [];
     assert.equal(shrink.length, 1, "useShrinkToWidth must be defined once");
   });

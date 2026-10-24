@@ -25,6 +25,9 @@ const { render, cleanup } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx } = await import("./test-render-ctx.js");
+const { lyricsFitKey } = await import("./lyrics-object.js");
+const { readLyrics } = await import("./lyrics-reading.js");
+const { lyricsSettings } = await import("./lyrics-config.js");
 
 after(() => {
   cleanup();
@@ -48,7 +51,10 @@ const all = (root: ParentNode, sel: string) => [...root.querySelectorAll(sel)] a
 const row = (root: ParentNode, which: "current" | "under") => q(root, `[data-lyrics-row="${which}"]`);
 const tagOf = (root: ParentNode, which: "current" | "under") => q(row(root, which) as HTMLElement, "[data-lyrics-tag]");
 const wordsOf = (root: ParentNode, which: "current" | "under") => q(row(root, which) as HTMLElement, "[data-lyrics-words]");
-const px = (el: HTMLElement) => parseFloat(el.style.fontSize);
+/** The lyric's font size: set on the block the fit measures, the parent of the rows. */
+const px = (root: HTMLElement) => parseFloat((q(root, "[data-lyrics-row]")!.parentElement as HTMLElement).style.fontSize);
+/** A filled tag's fill: its own child, so the tag can be dimmed without its ink. */
+const fillOf = (tag: HTMLElement) => q(tag, "[data-lyrics-fill]")!;
 // A failed assert.equal over a DOM node makes Node diff the whole jsdom graph and
 // takes tens of seconds to say so; every "nothing is drawn" claim below is a
 // boolean for that reason.
@@ -74,16 +80,21 @@ describe("the default: the tag above the words", () => {
   test("filled, in ProPresenter's colour, with the lyric left-aligned and bold", () => {
     const { root } = mount({});
     const tag = tagOf(root, "current")!;
-    assert.equal(tag.style.background, "rgb(229, 72, 77)");
+    assert.equal(fillOf(tag).style.background, "rgb(229, 72, 77)");
     assert.equal(wordsOf(root, "current")!.style.textAlign, "left");
     assert.equal(wordsOf(root, "current")!.style.fontWeight, "600");
     assert.equal(row(root, "current")!.style.alignItems, "flex-start");
   });
 
-  test("the underneath row is dimmed a little: its tag at 75%, never its words' tag at full", () => {
+  test("the underneath tag is dimmed by its fill, a little: 75%, and its ink keeps its strength", () => {
     const { root } = mount({});
-    assert.equal(tagOf(root, "under")!.style.opacity, "0.75");
-    assert.equal(tagOf(root, "current")!.style.opacity, "1");
+    const under = tagOf(root, "under")!;
+    assert.equal(fillOf(under).style.opacity, "0.75");
+    assert.equal(fillOf(tagOf(root, "current")!).style.opacity, "1");
+    // Not the whole element: dimming the ink too is what read as washed-out grey
+    // on a dark wall, where the ground the dimmed ink fades toward is black.
+    assert.equal(under.style.opacity, "", "the tag's own opacity would dim its ink");
+    assert.equal(under.style.color, "rgb(255, 255, 255)");
   });
 });
 
@@ -123,8 +134,22 @@ describe("Arrangement", () => {
     const [, , now, next] = all(root, "[data-lyrics-chip]");
     assert.equal(now.style.background, "rgb(229, 72, 77)");
     assert.match(now.style.boxShadow, /0\.1em/);
-    assert.equal(next.style.background, "rgb(30, 30, 30)");
+    // The unlit chips wear the theme's own neutral fill and text (tokens), never a
+    // fixed grey: a fixed dark chip is a black blob on a light Home card.
+    assert.equal(next.style.background, "var(--color-fill-active)");
+    assert.equal(next.style.color, "var(--color-fg)");
+    assert.equal(all(root, "[data-lyrics-chip='done']")[0].style.background, "var(--color-fill)");
+    assert.equal(all(root, "[data-lyrics-chip='done']")[0].style.color, "var(--color-fg-faint)");
     assert.match(next.style.borderLeft, /0\.2em solid/);
+  });
+
+  test("Align: Centre centres the chip strip as well as the words, Left leaves it at the start", () => {
+    const strip = (align: LyricsConfig["align"]) => q(mount({ display: "strip", align }).root, "[data-lyrics-strip]")!;
+    assert.equal(strip("center").style.justifyContent, "center");
+    assert.equal(strip("left").style.justifyContent, "flex-start");
+    const centred = mount({ display: "strip", align: "center" }).root;
+    assert.equal(row(centred, "current")!.style.alignItems, "center");
+    assert.equal(wordsOf(centred, "current")!.style.textAlign, "center");
   });
 
   test("the current row carries the words but no tag, and the next group keeps its tag", () => {
@@ -141,6 +166,12 @@ describe("Arrangement", () => {
 });
 
 describe("each setting changes what is drawn", () => {
+  test("an outline or text tag underneath is dimmed whole, its colour being its ink", () => {
+    for (const tagStyle of ["outline", "text"] as const) {
+      assert.equal(tagOf(mount({ tagStyle }).root, "under")!.style.opacity, "0.75", tagStyle);
+    }
+  });
+
   test("Style", () => {
     const outline = tagOf(mount({ tagStyle: "outline" }).root, "current")!;
     assert.match(outline.style.border, /0\.065em solid/);
@@ -154,8 +185,8 @@ describe("each setting changes what is drawn", () => {
 
   test("Colour: one colour is the app accent for every group", () => {
     const { root } = mount({ tagColor: "one" });
-    assert.equal(tagOf(root, "current")!.style.background, "var(--color-accent)");
-    assert.equal(tagOf(root, "under")!.style.background, "var(--color-accent)");
+    assert.equal(fillOf(tagOf(root, "current")!).style.background, "var(--color-accent)");
+    assert.equal(fillOf(tagOf(root, "under")!).style.background, "var(--color-accent)");
     const strip = mount({ tagColor: "one", display: "strip" }).root;
     assert.equal(all(strip, "[data-lyrics-chip='now']")[0].style.background, "var(--color-accent)");
   });
@@ -227,8 +258,8 @@ describe("each setting changes what is drawn", () => {
   test("Dimmed: more dims the tag and the words further", () => {
     const light = mount({ underWords: true, underDim: "light" }).root;
     const strong = mount({ underWords: true, underDim: "strong" }).root;
-    assert.equal(tagOf(light, "under")!.style.opacity, "0.75");
-    assert.equal(tagOf(strong, "under")!.style.opacity, "0.45");
+    assert.equal(fillOf(tagOf(light, "under")!).style.opacity, "0.75");
+    assert.equal(fillOf(tagOf(strong, "under")!).style.opacity, "0.45");
     assert.ok(Number(wordsOf(strong, "under")!.style.opacity) < Number(wordsOf(light, "under")!.style.opacity));
     assert.equal(wordsOf(light, "current")!.style.opacity, "1", "the current words are never dimmed");
   });
@@ -295,4 +326,23 @@ describe("the states", () => {
 
 test("the colours of the fixture are the ones the mockup draws", () => {
   assert.equal(GROUPS.chorus.colorHex, "#e5484d");
+});
+
+describe("what makes the fit measure again", () => {
+  const key = (pro: ReturnType<typeof lyricsStatus>, over: Partial<LyricsConfig> = {}) => {
+    const config = { type: "lyrics", display: "strip", ...over } as LyricsConfig;
+    return lyricsFitKey(readLyrics(config, { pro, known: true }), lyricsSettings(config));
+  };
+
+  test("the chips' own text, not only how many there are", () => {
+    // A new song with as many groups: same count, other names.
+    const other = lyricsStatus({ playOrderGroups: lyricsStatus().playOrderGroups.map((g, i) => (i === 3 ? { ...g, name: "Interlude" } : g)) });
+    assert.notEqual(key(lyricsStatus()), key(other));
+  });
+
+  test("the words, and the settings that change the block's size, but not a colour", () => {
+    assert.notEqual(key(lyricsStatus()), key(lyricsStatus({ currentSlideText: "Other words" })));
+    assert.notEqual(key(lyricsStatus(), { weight: "regular" }), key(lyricsStatus(), { weight: "bold" }));
+    assert.equal(key(lyricsStatus(), { tagColor: "one" }), key(lyricsStatus(), { tagColor: "propresenter" }));
+  });
 });
