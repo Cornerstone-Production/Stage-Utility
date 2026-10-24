@@ -65,7 +65,12 @@ export class FakePeerConnection extends EventTarget {
     FakePeerConnection.instances.push(this);
   }
 
-  addTransceiver(): void {}
+  /** The kinds asked for, in order: what the offer says this side will receive. */
+  transceivers: string[] = [];
+
+  addTransceiver(kind: string): void {
+    this.transceivers.push(kind);
+  }
 
   async createOffer(): Promise<{ type: "offer"; sdp: string }> {
     return { type: "offer", sdp: FAKE_SDP };

@@ -398,7 +398,7 @@ export function FeedEditor({ feed, isNew, kinds, appLogo, appLogoMonochrome, onS
         {/* This preview is the feed editor, never a real kiosk display, so it
             must never refuse a B-frame feed over some wall's own "Use HLS on
             this screen" switch. */}
-        <VideoObject o={picture.o} config={picture.config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} allowHls />
+        <VideoObject o={picture.o} config={picture.config} appLogo={appLogo} appLogoMonochrome={appLogoMonochrome} allowHls listen />
       </div>
 
       {warning && (

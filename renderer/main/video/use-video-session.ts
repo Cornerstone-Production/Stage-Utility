@@ -26,6 +26,7 @@ import { OutageLog } from "@main/services/repeat-log";
 import { browserCaps, choosePlayback, type PlaybackChoice } from "./choose-playback";
 import { startHls, type HlsSession } from "./hls-player";
 import { createSampler, type PlaybackSampler, type SampleSource } from "./playback-stats";
+import { listenWhepUrl } from "./listen";
 import { startWhep, WhepError, type WhepSession } from "./whep-client";
 
 /**
@@ -123,7 +124,10 @@ function stopActiveSession(session: ActiveSession | null): void {
 }
 
 export type PlaybackAttemptChoice =
-  | { method: "webrtc"; url: string; relayManaged: boolean }
+  /** `listen` asks for the sound too, from the feed's listening path. That path
+   *  has no HLS twin to fall back to, so the choice is never relay-managed: a
+   *  refusal retries like any dropped session. */
+  | { method: "webrtc"; url: string; relayManaged: boolean; listen?: boolean }
   | { method: "hls"; url: string };
 
 /** A WebRTC session a probe already proved is carrying frames, handed to the
@@ -315,7 +319,7 @@ export function startPlaybackAttempt(
           if (!ended) video.srcObject = adopt.stream;
           return whep;
         })
-      : startWhep(choice.url, video, { signal: controller.signal });
+      : startWhep(choice.url, video, { signal: controller.signal, audio: choice.listen });
     answered
       .then((whep) => {
         if (ended) {
@@ -552,6 +556,7 @@ function computeVerdict(
   allowHls: boolean,
   webrtcFailed: boolean,
   relayRunning: boolean,
+  listenPath: string | null,
 ): Verdict {
   if (feedDeleted) return { kind: "deleted" };
   if (!feed) return { kind: "no-feed" };
@@ -578,8 +583,22 @@ function computeVerdict(
   const choice = choosePlayback({ play: feed.play, status: feed.status, caps: browserCaps(), allowHls, webrtcFailed });
   if (choice.method === "embed") return { kind: "embed", url: choice.url };
   if (choice.method === "none") return { kind: "cant-play", reason: choice.reason };
+  if (choice.method === "webrtc" && isRelay && listenPath !== null) {
+    // The picture comes from the listening session too: one stream holds both,
+    // so they stay together. Only WebRTC carries it; an HLS choice stays as is.
+    return { kind: "attempt", choice: { method: "webrtc", url: listenWhepUrl(listenPath), relayManaged: false, listen: true } };
+  }
   if (choice.method === "webrtc") return { kind: "attempt", choice: { method: "webrtc", url: choice.url, relayManaged: isRelay } };
   return { kind: "attempt", choice };
+}
+
+/** Whether the sound is on with the picture. A feed that plays over HLS, or that
+ *  this browser cannot play at all, has no sound to give: HLS carries none. */
+function listenOutcomeOf(listenPath: string | null, verdict: Verdict): ListenOutcome {
+  if (listenPath === null) return "off";
+  if (verdict.kind === "cant-play") return "needs-webrtc";
+  if (verdict.kind !== "attempt") return "off";
+  return verdict.choice.method === "webrtc" && verdict.choice.listen ? "on" : "needs-webrtc";
 }
 
 /** What the widget shows for a verdict: the attempt's own phase only while an
@@ -628,7 +647,15 @@ export interface VideoSessionInput {
    *  fallback, and a failing streak's first failure, its reminders (at most
    *  every STREAK_REMIND_MS) and its recovery. Never once per retry. */
   onLog?: (reason: string) => void;
+  /** The relay path to listen on (the feed's own id, or its `-listen` sibling),
+   *  or null for the picture alone. */
+  listenPath?: string | null;
 }
+
+/** What became of a request to listen: playing the sound with the picture, or
+ *  the picture alone (not asked for, or nothing to attempt yet), or asked for
+ *  but this feed plays over HLS, which carries no sound. */
+export type ListenOutcome = "on" | "off" | "needs-webrtc";
 
 export interface VideoSessionResult {
   phase: SessionPhase;
@@ -643,10 +670,12 @@ export interface VideoSessionResult {
    *  `registerPlayback` callback with no dependency-array churn of its own —
    *  it always reads whichever sampler the LATEST attempt installed. */
   sample: () => Promise<VideoPlaybackReport | null>;
+  listen: ListenOutcome;
 }
 
 export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   const { active, feed, feedDeleted, video, allowHls, relayRunning } = input;
+  const listenPath = input.listenPath ?? null;
   const feedRef = useLatestRef(feed);
   const onLogRef = useLatestRef(input.onLog);
 
@@ -699,9 +728,9 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   // `feed` itself is read inside for its `play`/`status`; the primitives
   // listed are the ones that decide whether the verdict can differ.
   const verdict = useMemo(
-    () => computeVerdict(feedDeleted, feed, allowHls, webrtcFailed, relayRunning),
+    () => computeVerdict(feedDeleted, feed, allowHls, webrtcFailed, relayRunning, listenPath),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [feedDeleted, playKey, statusState, delayedBecause, feedKind, allowHls, webrtcFailed, relayRunning],
+    [feedDeleted, playKey, statusState, delayedBecause, feedKind, allowHls, webrtcFailed, relayRunning, listenPath],
   );
   // The attempt effect is keyed on WHAT it plays — method, URL, and whether
   // the relay manages it — never on the status that led there: a pull feed's
@@ -882,5 +911,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
     };
   }, [active, video, retryToken, attemptChoice, feedRef, onLogRef]);
 
-  return { phase, embedUrl, latency, sample };
+  const listen: ListenOutcome = listenOutcomeOf(listenPath, verdict);
+
+  return { phase, embedUrl, latency, sample, listen };
 }
