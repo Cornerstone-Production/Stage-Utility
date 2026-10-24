@@ -20,13 +20,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
-import type { VideoFeedView, VideoPlaybackReport } from "@main/types/video";
+import { relayPlayback, type VideoFeedView, type VideoPlaybackReport } from "@main/types/video";
 import { errorMessage } from "@main/services/errors";
 import { OutageLog } from "@main/services/repeat-log";
 import { browserCaps, choosePlayback, type PlaybackChoice } from "./choose-playback";
 import { startHls, type HlsSession } from "./hls-player";
 import { createSampler, type PlaybackSampler, type SampleSource } from "./playback-stats";
-import { listenWhepUrl } from "./listen";
 import { startWhep, WhepError, type WhepSession } from "./whep-client";
 
 /**
@@ -72,6 +71,9 @@ export const DROP_GRACE_MS = 3000;
 /** How often the decoded-frame count is read while waiting for a first frame. */
 export const FRAME_POLL_MS = 200;
 
+/** How many times in a row a listening session may drop before the page gives the sound up and plays the picture alone. */
+export const LISTEN_MAX_FAILURES = 3;
+
 export type SessionPhase = "connecting" | "waiting" | "live" | "delayed" | "offline" | "cant-play";
 
 interface AttemptCallbacks {
@@ -101,6 +103,13 @@ interface AttemptCallbacks {
    */
   onDropped: (reason: string) => void;
   /**
+   * A listening attempt (`choice.listen`) that WebRTC cannot carry: refused with a
+   * verdict status, or connected without a frame. It has no HLS twin and a retry
+   * would only hide a working picture, so the caller gives the sound up. Falls to
+   * `onDropped` where a caller does not ask.
+   */
+  onListenFailed?: (reason: string) => void;
+  /**
    * Fired once, the moment THIS attempt's own session exists — the WHEP
    * answer applied, or the HLS session attached — never for probeWebrtc's
    * separate, detached session below, which has no AttemptCallbacks at all
@@ -124,9 +133,7 @@ function stopActiveSession(session: ActiveSession | null): void {
 }
 
 export type PlaybackAttemptChoice =
-  /** `listen` asks for the sound too, from the feed's listening path. That path
-   *  has no HLS twin to fall back to, so the choice is never relay-managed: a
-   *  refusal retries like any dropped session. */
+  /** `listen` asks for the sound too, from the feed's listening path. It has no HLS twin, so it is never relay-managed. */
   | { method: "webrtc"; url: string; relayManaged: boolean; listen?: boolean }
   | { method: "hls"; url: string };
 
@@ -202,7 +209,11 @@ export function startPlaybackAttempt(
    *  marking an external feed unusable left it on "can't play" until reload,
    *  even once its endpoint was healthy again. */
   const webrtcUnusable = (reason: string) =>
-    end(() => (choice.method === "webrtc" && choice.relayManaged ? cb.onWebrtcUnusable(reason) : cb.onDropped(reason)));
+    end(() => {
+      if (choice.method === "webrtc" && choice.relayManaged) cb.onWebrtcUnusable(reason);
+      else if (choice.method === "webrtc" && choice.listen && cb.onListenFailed) cb.onListenFailed(reason);
+      else cb.onDropped(reason);
+    });
 
   /**
    * Arms the first-frame watch. Called the moment a source is attached — the
@@ -403,7 +414,7 @@ export function startPlaybackAttempt(
         // endpoint reports its own health however it likes ("Stage Utility
         // cannot report its health", main/types/video.ts) and gets no HLS to
         // fall back to regardless, so every failure there retries instead.
-        if (choice.relayManaged && err instanceof WhepError && RELAY_WEBRTC_REFUSAL_STATUSES.has(err.status)) {
+        if ((choice.relayManaged || choice.listen) && err instanceof WhepError && RELAY_WEBRTC_REFUSAL_STATUSES.has(err.status)) {
           webrtcUnusable(`the relay refused this feed over WebRTC (${err.message})`);
           return;
         }
@@ -547,8 +558,8 @@ export type Verdict =
   /** `reason` is `choosePlayback`'s own — carried here so a caller can tell
    *  "no player exists in this browser" from "this screen's own switch
    *  refused it" without recomputing the choice a second time. */
-  | { kind: "cant-play"; reason: Extract<PlaybackChoice, { method: "none" }>["reason"] }
-  | { kind: "attempt"; choice: PlaybackAttemptChoice };
+  | { kind: "cant-play"; reason: Extract<PlaybackChoice, { method: "none" }>["reason"]; listen: ListenOutcome }
+  | { kind: "attempt"; choice: PlaybackAttemptChoice; listen: ListenOutcome };
 
 function computeVerdict(
   feedDeleted: boolean,
@@ -582,23 +593,14 @@ function computeVerdict(
 
   const choice = choosePlayback({ play: feed.play, status: feed.status, caps: browserCaps(), allowHls, webrtcFailed });
   if (choice.method === "embed") return { kind: "embed", url: choice.url };
-  if (choice.method === "none") return { kind: "cant-play", reason: choice.reason };
+  if (choice.method === "none") return { kind: "cant-play", reason: choice.reason, listen: listenPath === null ? "off" : "cant-play" };
   if (choice.method === "webrtc" && isRelay && listenPath !== null) {
-    // The picture comes from the listening session too: one stream holds both,
-    // so they stay together. Only WebRTC carries it; an HLS choice stays as is.
-    return { kind: "attempt", choice: { method: "webrtc", url: listenWhepUrl(listenPath), relayManaged: false, listen: true } };
+    // The picture comes from the listening session too, so sound and picture stay together. Only WebRTC carries it.
+    return { kind: "attempt", choice: { method: "webrtc", url: relayPlayback(listenPath).whep, relayManaged: false, listen: true }, listen: "on" };
   }
-  if (choice.method === "webrtc") return { kind: "attempt", choice: { method: "webrtc", url: choice.url, relayManaged: isRelay } };
-  return { kind: "attempt", choice };
-}
-
-/** Whether the sound is on with the picture. A feed that plays over HLS, or that
- *  this browser cannot play at all, has no sound to give: HLS carries none. */
-function listenOutcomeOf(listenPath: string | null, verdict: Verdict): ListenOutcome {
-  if (listenPath === null) return "off";
-  if (verdict.kind === "cant-play") return "needs-webrtc";
-  if (verdict.kind !== "attempt") return "off";
-  return verdict.choice.method === "webrtc" && verdict.choice.listen ? "on" : "needs-webrtc";
+  const listen: ListenOutcome = listenPath === null ? "off" : "hls";
+  if (choice.method === "webrtc") return { kind: "attempt", choice: { method: "webrtc", url: choice.url, relayManaged: isRelay }, listen };
+  return { kind: "attempt", choice, listen };
 }
 
 /** What the widget shows for a verdict: the attempt's own phase only while an
@@ -650,12 +652,12 @@ export interface VideoSessionInput {
   /** The relay path to listen on (the feed's own id, or its `-listen` sibling),
    *  or null for the picture alone. */
   listenPath?: string | null;
+  /** A listening session gave up (see LISTEN_MAX_FAILURES): the caller releases the sound and says why. */
+  onListenFailed?: (reason: string) => void;
 }
 
-/** What became of a request to listen: playing the sound with the picture, or
- *  the picture alone (not asked for, or nothing to attempt yet), or asked for
- *  but this feed plays over HLS, which carries no sound. */
-export type ListenOutcome = "on" | "off" | "needs-webrtc";
+/** What became of a request to listen: the sound plays with the picture, or the picture plays alone (not asked for, or nothing to attempt yet), or it was asked for and this feed plays over HLS ("hls") or not at all here ("cant-play"), neither of which carries sound. */
+export type ListenOutcome = "on" | "off" | "hls" | "cant-play";
 
 export interface VideoSessionResult {
   phase: SessionPhase;
@@ -678,6 +680,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   const listenPath = input.listenPath ?? null;
   const feedRef = useLatestRef(feed);
   const onLogRef = useLatestRef(input.onLog);
+  const onListenFailedRef = useLatestRef(input.onListenFailed);
 
   // Set when WebRTC proved unusable on this screen for this relay feed, so
   // it plays over HLS. Cleared only by a probe that saw WebRTC frames (the
@@ -687,11 +690,12 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   // Whether the fallback has been logged and WebRTC has not held since: the
   // line is written once per outage, never once per probe.
   const webrtcOutageRef = useRef(false);
-  // The phase of the attempt `key` names. A new attempt (another address, the sound
-  // switched on) reads "connecting" from the render that chooses it, not from the
-  // effect after: until then the old attempt's "live" would stand for one frame
-  // over a session that has not started.
-  const [phased, setPhased] = useState<{ key: string | null; phase: "connecting" | "live" | "delayed" | "offline" }>({ key: null, phase: "connecting" });
+  // The phase belongs to one attempt (`epoch`), so a new attempt reads "connecting"
+  // from the render that chooses it and not "live" from the one before.
+  const [phased, setPhased] = useState<{ epoch: number; phase: "connecting" | "live" | "delayed" | "offline" }>({ epoch: 0, phase: "connecting" });
+  // The address of a probe's proven session waiting to be taken: the attempt it
+  // starts keeps the phase it was showing, for its frames are already flowing.
+  const [adoptedUrl, setAdoptedUrl] = useState<string | null>(null);
   const [latency, setLatency] = useState<number | null>(null);
   // Purely a "try again" SIGNAL for the effect below — bumped only when a
   // backoff timer decides a retry is actually due, so the effect re-runs
@@ -704,6 +708,8 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   // alongside `retryToken` would do. Reset only once playback has held for
   // RESET_AFTER_PLAYING_MS, never on a first frame.
   const attemptCountRef = useRef(0);
+  const listenFailsRef = useRef(0);
+  const listeningRef = useRef<boolean | null>(null);
   // The on-screen attempt's own stats sampler — set once its session exists,
   // cleared and stopped when that attempt ends. Never set for `probeWebrtc`'s
   // session (see AttemptCallbacks.onSession), so a probe can never be
@@ -769,6 +775,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
           onUsable: (adopted) => {
             probe = null;
             adoptedRef.current = adopted;
+            setAdoptedUrl(adopted.url);
             setWebrtcFailed(false);
           },
           onUnusable: (reason) => {
@@ -828,7 +835,13 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
 
   const embedUrl = active && verdict.kind === "embed" ? verdict.url : null;
 
-  const attemptPhase = phased.key === attemptKey ? phased.phase : "connecting";
+  // A new epoch for every attempt the verdict calls for: a new choice, or the same
+  // one again after the verdict left "attempt" (a feed waiting, then back).
+  const [track, setTrack] = useState<{ key: string | null; epoch: number }>({ key: null, epoch: 0 });
+  const epoch = track.key === attemptKey ? track.epoch : track.epoch + 1;
+  if (epoch !== track.epoch) setTrack({ key: attemptKey, epoch });
+  const adopting = adoptedUrl !== null && attemptChoice?.method === "webrtc" && attemptChoice.url === adoptedUrl;
+  const attemptPhase = phased.epoch === epoch || adopting ? phased.phase : "connecting";
   const phase = phaseOf(verdict, attemptPhase);
 
   useEffect(() => {
@@ -843,34 +856,45 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
     const adopt = adopted && choice.method === "webrtc" && adopted.url === choice.url ? adopted : undefined;
     if (adopted && !adopt) void adopted.session.stop();
 
-    // Legitimately part of the same side effect as the lines below, not a
-    // "this could have been a derived render value" case the rule exists to
-    // catch: a NEW attempt is genuinely starting (WHEP/HLS, real timers,
-    // real listeners), and its visible state must reset to match — except
-    // for an adopted session, whose frames are already flowing: a Connecting
-    // cover there would flash over the picture it is about to show.
+    // A new attempt is genuinely starting (real timers, listeners), so its
+    // visible state resets with it, except for an adopted session: a Connecting
+    // cover would flash over the picture it is about to show.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLatency(null);
-    // An adopted session keeps the phase it was showing: its frames are already
-    // flowing, and nothing here is connecting.
-    setPhased((p) => ({ key: attemptKey, phase: adopt ? p.phase : "connecting" }));
+    setPhased((p) => ({ epoch, phase: adopt ? p.phase : "connecting" }));
+    setAdoptedUrl(null);
+    // The backoff and the failure count start over when the sound is switched on or off.
+    const isListen = choice.method === "webrtc" && choice.listen === true;
+    if (listeningRef.current !== isListen) {
+      listeningRef.current = isListen;
+      attemptCountRef.current = 0;
+      listenFailsRef.current = 0;
+    }
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let heldTimer: ReturnType<typeof setTimeout> | undefined;
     const name = current?.name ?? "this feed";
     const key = current?.id ?? "";
+    // A listening session's failures are its own streak and its own words: they are
+    // about the sound, not about the feed, whose picture is fine.
+    const streakKey = isListen ? `${key}:listen` : key;
+    const failListen = (reason: string) => {
+      onLogRef.current?.(`listening to "${name}" failed (${reason}); the picture plays without sound`);
+      onListenFailedRef.current?.(reason);
+    };
 
     const attemptHandle = startPlaybackAttempt(
       video,
       choice,
       {
         onPhase: (p) => {
-          setPhased({ key: attemptKey, phase: p });
+          setPhased({ epoch, phase: p });
           if ((p === "live" || p === "delayed") && heldTimer === undefined) {
             heldTimer = setTimeout(() => {
               attemptCountRef.current = 0;
-              const d = streak().ok(key, Date.now());
-              if (d.log) onLogRef.current?.(`"${name}" is playing again on this screen${d.note}`);
-              if (p === "live" && choice.method === "webrtc" && webrtcOutageRef.current) {
+              listenFailsRef.current = 0;
+              const d = streak().ok(streakKey, Date.now());
+              if (d.log) onLogRef.current?.(isListen ? `listening to "${name}" works again${d.note}` : `"${name}" is playing again on this screen${d.note}`);
+              if (p === "live" && !isListen && choice.method === "webrtc" && webrtcOutageRef.current) {
                 webrtcOutageRef.current = false;
                 onLogRef.current?.(`"${name}" plays over WebRTC again on this screen`);
               }
@@ -888,6 +912,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
           const source: SampleSource = activeSession.method === "webrtc" ? { via: "webrtc", pc: activeSession.pc } : { via: "hls" };
           samplerRef.current = createSampler(key, name, source, video, onStatsLog);
         },
+        onListenFailed: failListen,
         onWebrtcUnusable: (reason) => {
           if (!webrtcOutageRef.current) onLogRef.current?.(`WebRTC unusable for "${name}" on this screen: ${reason}`);
           webrtcOutageRef.current = true;
@@ -895,11 +920,16 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
         },
         onDropped: (reason) => {
           clearTimeout(heldTimer);
-          setPhased({ key: attemptKey, phase: "offline" });
+          setPhased({ epoch, phase: "offline" });
           const delay = Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** attemptCountRef.current);
           attemptCountRef.current += 1;
-          const d = streak().fail(key, "dropped", Date.now());
-          if (d.log) onLogRef.current?.(`"${name}" failed on this screen (${reason}); retrying with backoff${d.note}`);
+          if (isListen && ++listenFailsRef.current >= LISTEN_MAX_FAILURES) return failListen(reason);
+          const d = streak().fail(streakKey, "dropped", Date.now());
+          if (d.log) {
+            onLogRef.current?.(
+              isListen ? `listening to "${name}" failed (${reason}); retrying${d.note}` : `"${name}" failed on this screen (${reason}); retrying with backoff${d.note}`,
+            );
+          }
           // The browser console only, never the server log: devtools shows
           // Verbose on request, and a retry is not news on /log.
           console.debug(`[video] "${name}" retrying in ${delay} ms (${reason})`);
@@ -916,9 +946,9 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
       samplerRef.current?.stop();
       samplerRef.current = null;
     };
-  }, [active, video, retryToken, attemptChoice, attemptKey, feedRef, onLogRef]);
+  }, [active, video, retryToken, attemptChoice, epoch, feedRef, onLogRef, onListenFailedRef]);
 
-  const listen: ListenOutcome = listenOutcomeOf(listenPath, verdict);
+  const listen: ListenOutcome = verdict.kind === "attempt" || verdict.kind === "cant-play" ? verdict.listen : "off";
 
   return { phase, embedUrl, latency, sample, listen };
 }

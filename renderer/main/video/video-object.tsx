@@ -127,8 +127,7 @@ function VideoObjectBody({
   const onLog = useCallback((reason: string) => logToServer("video", reason), []);
   const active = onScreen && !previewPaused;
 
-  // Listening: one control per page holds the sound, and only a relay feed has
-  // audio the server can tell us about.
+  // One control per page holds the sound, and only a relay feed has audio the server can describe.
   const listenId = useId();
   const listenOwner = useListenOwner();
   const offersListen = listen && feed?.play.via === "relay";
@@ -136,9 +135,16 @@ function VideoObjectBody({
   const audio = feed?.audio;
   const feedListenPath = listenPathOf(audio);
   const listenPath = wanted ? feedListenPath : null;
-  // Gone from the screen, hidden, paused, deleted, or the feed lost its audio:
-  // the page is no longer listening to it. A newer claim by another control is
-  // never touched.
+  // Why the last attempt to listen gave up, until the next tap.
+  const [listenFailure, setListenFailure] = useState<string | null>(null);
+  const onListenFailed = useCallback(
+    (reason: string) => {
+      releaseListen(listenId);
+      setListenFailure(reason);
+    },
+    [listenId],
+  );
+  // Off screen, hidden, paused, or the feed lost its audio: the page stops listening.
   useEffect(() => {
     if (wanted && (!active || feedListenPath === null)) releaseListen(listenId);
   }, [wanted, active, feedListenPath, listenId]);
@@ -153,11 +159,11 @@ function VideoObjectBody({
     relayRunning: state?.relay.state === "running",
     onLog,
     listenPath,
+    onListenFailed,
   });
-  // A listening session that dropped is not a feed that went offline: the feed is
-  // live, and the control says the audio is retrying. The cover reads Connecting.
-  const listenRetrying = listenPath !== null && phase === "offline" && feed?.status.state !== "offline";
-  const view = offersListen && !previewPaused && !feedDeleted ? listenView({ audio, wanted, phase, outcome: listenOutcome }) : null;
+  // A listening session that dropped is not a feed gone offline: the control says the audio is retrying, and the cover reads Connecting.
+  const coverPhase = listenPath !== null && phase === "offline" && feed?.status.state !== "offline" ? "connecting" : phase;
+  const view = offersListen && !previewPaused ? listenView({ audio, wanted, phase, outcome: listenOutcome, failure: listenFailure }) : null;
 
   const name = feed?.name ?? "This feed";
   const isEmbed = embedUrl !== null;
@@ -229,11 +235,11 @@ function VideoObjectBody({
               entirely for "nothing": the approved design's offline-nothing
               state is transparent over the box, not a covered one with empty
               content. */}
-          {!isEmbed && !showingPicture && !(phase === "offline" && config.whenOffline === "nothing") && (
+          {!isEmbed && !showingPicture && !(coverPhase === "offline" && config.whenOffline === "nothing") && (
             <div className="absolute inset-0" style={{ background: "var(--kiosk-bg)" }}>
               {phase === "waiting" && <StateText {...waitingText(state?.relay.state)} />}
-              {(phase === "connecting" || listenRetrying) && <ConnectingBody name={name} />}
-              {phase === "offline" && !listenRetrying && (
+              {coverPhase === "connecting" && <ConnectingBody name={name} />}
+              {coverPhase === "offline" && (
                 <OfflineBody
                   mode={config.whenOffline ?? "message"}
                   name={name}
@@ -258,7 +264,11 @@ function VideoObjectBody({
           name={name}
           videoEl={videoEl}
           wanted={wanted}
-          onToggle={(next) => (next ? claimListen(listenId) : releaseListen(listenId))}
+          onToggle={() => {
+            if (wanted) return releaseListen(listenId);
+            setListenFailure(null);
+            claimListen(listenId);
+          }}
         />
       )}
       {showTag && (

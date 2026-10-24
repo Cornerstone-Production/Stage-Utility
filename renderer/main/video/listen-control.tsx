@@ -1,36 +1,22 @@
-// renderer/main/video/listen-control.tsx — the Listen button on a feed's picture:
-// a speaker, and once it is on a level meter and a volume slider.
+// renderer/main/video/listen-control.tsx — the Listen button on a feed's picture.
 //
-// It plays nothing itself. The Video widget's session plays the picture and the
-// sound from one WHEP session when this control holds the page's sound
-// (use-video-session.ts's `listenPath`); this draws the state and does the three
-// things a browser only allows from a tap: unmute the element, start it, and make
-// the AudioContext the meter reads through.
-//
-// Only the operator's own views get it (the Video feeds page and a Home card),
-// never a wall or a kiosk: video-object.tsx is told whether to offer it.
+// It plays nothing itself: the Video widget's session plays picture and sound from one
+// WHEP session while this control holds the page's sound. This draws the state and does
+// what a browser only allows from a tap: unmute and start the element, and make the
+// AudioContext the meter reads through. Only the operator's own views get it.
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import { Callout } from "../../components/ui/callout";
+import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
-import { METER_BARS, attachMeter } from "./listen-meter";
-import { mute, readVolume, startFromTap, unmute, writeVolume, type ListenTone, type ListenView } from "./listen";
-
-const TONE_COLOR: Record<ListenTone, string> = {
-  muted: "#9a9aa2",
-  starting: "#6aa6df",
-  live: "#86efac",
-  warn: "#fbbf24",
-  quiet: "#a8a8b0",
-};
+import { METER_BARS, attachMeter, useMeterContext } from "./listen-meter";
+import { readVolume, setSound, startFromTap, writeVolume, type ListenView } from "./listen";
 
 const BAR_REST_PX = 4;
 const BAR_SPAN_PX = 18;
-
-function AudioContextCtor(): typeof AudioContext | null {
-  const g = globalThis as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
-  return g.AudioContext ?? g.webkitAudioContext ?? null;
-}
+const BAR_PEAK_PX = 18;
+const SIZE = "clamp(36px, 8cqw, 44px)";
 
 export function ListenControl({
   view,
@@ -44,36 +30,24 @@ export function ListenControl({
   videoEl: HTMLVideoElement | null;
   /** This control holds the page's sound. */
   wanted: boolean;
-  /** `true` to take the page's sound, `false` to give it up. Called last in the tap. */
-  onToggle: (next: boolean) => void;
+  /** Takes the page's sound, or gives it up. Called last in the tap. */
+  onToggle: () => void;
 }) {
   const [volume, setVolume] = useState(() => readVolume());
-  // The browser refusing to play with sound is the one failure only a tap's
-  // own play() reports; the session cannot see it.
+  // Only the tap's own play() learns the browser refused sound; the session cannot see it.
   const [blocked, setBlocked] = useState<string | null>(null);
-  const ctxRef = useRef<AudioContext | null>(null);
+  const meterContext = useMeterContext(wanted);
   const meterRef = useRef<HTMLDivElement>(null);
   const barRefs = useRef<(HTMLSpanElement | null)[]>([]);
 
-  // The element's sound follows the claim: unmuted at the saved level while this
-  // control holds it, muted again the moment it does not (another feed took it,
-  // the page was left, the feed lost its audio).
+  // The element's sound follows the claim: on at the saved level while this control holds it, muted the moment it does not.
   useEffect(() => {
     if (!wanted || !videoEl) return undefined;
-    unmute(videoEl, volume);
-    return () => mute(videoEl);
+    setSound(videoEl, volume);
+    return () => setSound(videoEl, null);
   }, [wanted, videoEl, volume]);
 
-  // The AudioContext lives exactly as long as the claim.
-  useEffect(() => {
-    if (!wanted) return undefined;
-    return () => {
-      const ctx = ctxRef.current;
-      ctxRef.current = null;
-      if (ctx && ctx.state !== "closed") void ctx.close();
-    };
-  }, [wanted]);
-
+  // Bars are written straight to the DOM: a state update every 80 ms would re-render the control over live video.
   const paintBars = useCallback((levels: number[]) => {
     let peak = 0;
     levels.forEach((level, i) => {
@@ -82,102 +56,65 @@ export function ListenControl({
       if (!bar) return;
       const h = BAR_REST_PX + Math.min(1, level * 1.6) * BAR_SPAN_PX;
       bar.style.height = `${h.toFixed(0)}px`;
-      bar.style.background = h > 18 ? "#fbbf24" : "#86efac";
+      bar.classList.toggle("bg-warn-9", h > BAR_PEAK_PX);
+      bar.classList.toggle("bg-ok-9", h <= BAR_PEAK_PX);
     });
     if (meterRef.current) meterRef.current.dataset.level = peak.toFixed(3);
   }, []);
 
   useEffect(() => {
     if (!view.playing || !videoEl) return undefined;
-    const ctx = ctxRef.current;
+    const ctx = meterContext.current();
     const stream = videoEl.srcObject;
     if (!ctx || !stream || typeof (stream as MediaStream).getAudioTracks !== "function") return undefined;
     return attachMeter(ctx, stream as MediaStream, paintBars) ?? undefined;
-  }, [view.playing, videoEl, paintBars]);
+  }, [view.playing, videoEl, paintBars, meterContext]);
 
   function tap() {
-    if (view.on) {
-      onToggle(false);
-      return;
-    }
-    // Everything a browser's autoplay rules want from a gesture happens here,
-    // in the tap itself and not in an effect after it: unmute the element and
-    // start it, and make the AudioContext. The session then swaps the element's
-    // stream, which a gesture-unmuted element may play with sound.
-    if (videoEl) {
-      setBlocked(null);
-      startFromTap(videoEl, volume).catch((err: unknown) => setBlocked(errorMessage(err)));
-    }
-    const Ctor = AudioContextCtor();
-    if (Ctor && !ctxRef.current) {
-      try {
-        ctxRef.current = new Ctor();
-        void ctxRef.current.resume();
-      } catch {
-        ctxRef.current = null; // no meter; the sound does not need it
+    if (!view.on) {
+      // In the tap itself, not an effect after it: the browser's autoplay rules want the gesture.
+      meterContext.open();
+      if (videoEl) {
+        setBlocked(null);
+        startFromTap(videoEl, volume).catch((err: unknown) => {
+          // The source swapping under a pending play() is the claim doing its job, not a refusal.
+          if ((err as { name?: string } | null)?.name !== "AbortError") setBlocked(errorMessage(err));
+        });
       }
     }
-    onToggle(true);
+    onToggle();
   }
 
-  const text = blocked !== null && view.on ? `The browser would not play sound: ${blocked}` : view.text;
-  const tone: ListenTone = blocked !== null && view.on ? "warn" : view.tone;
-  const control: CSSProperties = {
-    width: "clamp(36px, 8cqw, 44px)",
-    height: "clamp(36px, 8cqw, 44px)",
-    borderRadius: 10,
-    border: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: view.disabled ? "transparent" : view.on ? "#2e6691" : "rgba(255,255,255,0.1)",
-    color: view.disabled ? "#8a8a92" : view.on ? "#fff" : "#ededf0",
-    cursor: view.disabled ? "not-allowed" : "pointer",
-  };
+  const refused = blocked !== null && view.on;
+  const text = refused ? `The browser would not play sound: ${blocked}` : view.text;
+  const warn = view.warn || refused;
 
   return (
+    // kiosk-surface for its dark-ground tokens, over a scrim of our own; a press here is the control's, not the card's.
     <div
       data-listen-control=""
-      // A press here is the control's, not the card's: it must not start a card's
-      // long-press menu or drag.
       onPointerDown={(e) => e.stopPropagation()}
-      className="absolute flex flex-col items-end"
-      style={{ right: "clamp(6px, 1.6cqw, 12px)", bottom: "clamp(6px, 1.6cqw, 12px)", gap: 6, maxWidth: "calc(100% - 12px)" }}
+      className="kiosk-surface absolute flex flex-col items-end"
+      style={{ right: "clamp(6px, 1.6cqw, 12px)", bottom: "clamp(6px, 1.6cqw, 12px)", gap: 6, maxWidth: "calc(100% - 12px)", background: "transparent" }}
     >
       {text !== "" && (
-        <div
-          role="status"
-          data-listen-status=""
-          style={{
-            padding: "3px 8px",
-            borderRadius: 8,
-            background: "rgba(0,0,0,0.66)",
-            color: TONE_COLOR[tone],
-            fontSize: "clamp(10px, 1.7cqw, 13px)",
-            lineHeight: 1.35,
-            textAlign: "right",
-          }}
-        >
-          {text}
+        <div className="rounded-lg bg-black/65">
+          <Callout tone={warn ? "warn" : "neutral"} role="status" data-listen-status="" className={cn("bg-transparent text-right", !warn && "text-fg")}>
+            {text}
+          </Callout>
         </div>
       )}
-      <div className="flex items-center" style={{ gap: 10, padding: 6, borderRadius: 12, background: "rgba(0,0,0,0.66)" }}>
+      <div className="flex items-center rounded-xl bg-black/65" style={{ gap: 10, padding: 6 }}>
         {view.playing && (
-          <div
-            ref={meterRef}
-            data-listen-meter=""
-            data-level="0.000"
-            aria-hidden="true"
-            className="flex items-end"
-            style={{ gap: 3, height: 22, paddingLeft: 6 }}
-          >
+          <div ref={meterRef} data-listen-meter="" data-level="0.000" aria-hidden="true" className="flex items-end" style={{ gap: 3, height: 22, paddingLeft: 6 }}>
             {Array.from({ length: METER_BARS }, (_, i) => (
               <span
                 key={i}
                 ref={(el) => {
                   barRefs.current[i] = el;
                 }}
-                style={{ width: 4, height: BAR_REST_PX, borderRadius: 2, background: "#86efac" }}
+                className="bg-ok-9"
+                style={{ width: 4, height: BAR_REST_PX, borderRadius: 2 }}
               />
             ))}
           </div>
@@ -194,7 +131,7 @@ export function ListenControl({
               setVolume(next);
               writeVolume(next);
             }}
-            style={{ width: "clamp(64px, 14cqw, 110px)", accentColor: "#6aa6df" }}
+            style={{ width: "clamp(64px, 14cqw, 110px)", accentColor: "var(--color-accent)" }}
           />
         )}
         <button
@@ -204,7 +141,10 @@ export function ListenControl({
           disabled={view.disabled}
           title={view.disabled ? view.text : undefined}
           onClick={tap}
-          style={control}
+          className={`flex items-center justify-center rounded-[10px] ${
+            view.disabled ? "cursor-not-allowed bg-transparent text-fg-faint" : view.on ? "bg-accent text-white" : "bg-white/10 text-fg"
+          }`}
+          style={{ width: SIZE, height: SIZE, border: 0 }}
         >
           <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />

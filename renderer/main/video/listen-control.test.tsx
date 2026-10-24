@@ -31,7 +31,7 @@ const { ObjectContent } = await import("../layout-renderer.js");
 const { makeRenderCtx } = await import("../test-render-ctx.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { __resetPlaybackRegistryForTests } = await import("./playback-reports.js");
-const { claimListen, listenOwner, VOLUME_KEY } = await import("./listen.js");
+const { __resetListenForTests, useListenOwner, VOLUME_KEY } = await import("./listen.js");
 
 type VideoState = import("@main/types/video").VideoState;
 type VideoFeedView = import("@main/types/video").VideoFeedView;
@@ -157,7 +157,7 @@ beforeEach(() => {
   __resetPlaybackRegistryForTests();
   StubObserver.instances = [];
   FakePeerConnection.reset();
-  claimListen(null);
+  __resetListenForTests();
   plays.length = 0;
   mediaProto.play = function (this: HTMLMediaElement) {
     plays.push({ muted: this.muted });
@@ -179,6 +179,7 @@ async function renderFeeds(
     React.createElement(
       "div",
       null,
+      React.createElement(OwnerProbe),
       ...feeds.map((f, i) =>
         React.createElement(VideoObject, { key: f.id, ...makeObject(f.id, `obj-${i}`), appLogo: null, appLogoMonochrome: false, allowHls: true, listen: opts.listen ?? true }),
       ),
@@ -191,6 +192,12 @@ async function renderFeeds(
   await settle();
   return { ...utils, g };
 }
+
+/** The page's sound holder, as every control sees it: rendered beside the controls and read as text. */
+function OwnerProbe() {
+  return React.createElement("output", { "data-owner": useListenOwner() ?? "" });
+}
+const listenOwner = (): string | null => document.querySelector("[data-owner]")?.getAttribute("data-owner") || null;
 
 const buttonFor = (name: string, listening = false) =>
   screen.getByRole("button", { name: listening ? `Stop listening to ${name}` : `Listen to ${name}` }) as HTMLButtonElement;
@@ -255,7 +262,7 @@ test("a feed with no audio report (external, embed) offers no Listen at all", as
   });
   const { g } = await renderFeeds([external]);
   try {
-    assert.equal(document.querySelector("[data-listen-control]"), null);
+    assert.ok(document.querySelector("[data-listen-control]") === null, "a Listen control was drawn");
   } finally {
     g.restore();
   }
@@ -266,7 +273,7 @@ test("a feed with no audio report (external, embed) offers no Listen at all", as
 test("a Video widget not told to offer Listen has no control, whatever its feed's audio", async () => {
   const { g } = await renderFeeds([makeFeed("a", "Program", CONVERTED("a"))], { listen: false });
   try {
-    assert.equal(document.querySelector("[data-listen-control]"), null);
+    assert.ok(document.querySelector("[data-listen-control]") === null, "a Listen control was drawn");
   } finally {
     g.restore();
   }
@@ -308,19 +315,19 @@ test("the control's tap unmutes and starts the element before it hands over the 
       return Promise.resolve();
     },
   } as unknown as HTMLVideoElement;
-  const view = { disabled: false, on: false, playing: false, text: "", tone: "muted" as const };
+  const view = { disabled: false, on: false, playing: false, text: "", warn: false };
   render(
     React.createElement(ListenControl, {
       view,
       name: "Program",
       videoEl: el,
       wanted: false,
-      onToggle: (next: boolean) => order.push(`claim(${String(next)})`),
+      onToggle: () => order.push("claim"),
     }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Listen to Program" }));
   // Read at once, with no settle: an effect after the tap would not have run.
-  assert.deepEqual(order, ["play(muted=false, volume=0.8)", "claim(true)"]);
+  assert.deepEqual(order, ["play(muted=false, volume=0.8)", "claim"]);
 });
 
 test("tapping a converted feed plays its -listen path with audio, unmuted, and shows Listening with a slider once a frame arrives", async () => {
@@ -334,7 +341,7 @@ test("tapping a converted feed plays its -listen path with audio, unmuted, and s
     assert.equal(document.querySelector("video")!.muted, false);
     assert.equal(statusText(), "Starting audio…");
     assert.equal(buttonFor("Program", true).getAttribute("aria-pressed"), "true");
-    assert.equal(screen.queryByRole("slider"), null, "the slider waits for the sound");
+    assert.ok(screen.queryByRole("slider") === null, "the slider waits for the sound");
 
     act(() => frames.fire());
     await settle();
@@ -485,9 +492,56 @@ test("a listening session the relay refuses reads 'Audio stopped, retrying'", as
     await press(buttonFor("Alpha"));
     await settle();
     assert.equal(statusText(), "Audio stopped, retrying");
-    assert.equal(screen.queryByText("Alpha is offline"), null, "a dropped listening session read as the feed being offline");
+    assert.ok(screen.queryByText("Alpha is offline") === null, "a dropped listening session read as the feed being offline");
     assert.ok(screen.getByText("Connecting to Alpha"));
   } finally {
+    g.restore();
+  }
+});
+
+test("a listening session the relay cannot serve falls back to the picture and says why on the control, which stays usable", async () => {
+  const refuse = { path: "/video/a-listen/whep", status: 415 };
+  const frames = captureFrames();
+  const { g } = await renderFeeds([makeFeed("a", "Alpha", CONVERTED("a"))], { refuse });
+  try {
+    await press(buttonFor("Alpha"));
+    await settle();
+    assert.equal(listenOwner(), null, "the claim was kept over a session that cannot work");
+    assert.match(statusText(), /^Audio could not start: .*415/);
+    assert.equal(buttonFor("Alpha").disabled, false);
+    assert.equal(document.querySelector("video")!.muted, true);
+    assert.equal(g.posts().filter((p) => p.includes("-listen")).length, 1, "the refusal was retried");
+    assert.equal(g.posts().at(-1), "/video/a/whep", "the picture did not come back on its own session");
+    // The relay recovers; the next tap listens, and stopping it leaves no trace of the old failure.
+    refuse.path = "/never";
+    await press(buttonFor("Alpha"));
+    act(() => frames.fire());
+    await settle();
+    assert.equal(statusText(), "Listening");
+    await press(buttonFor("Alpha", true));
+    assert.equal(statusText(), "", "a failure from before the successful session came back after stopping it");
+  } finally {
+    frames.restore();
+    g.restore();
+  }
+});
+
+test("a play() the claim interrupts is not a refusal, and one the browser refuses is named", async () => {
+  const frames = captureFrames();
+  const { g } = await renderFeeds([makeFeed("a", "Alpha", CONVERTED("a"))]);
+  try {
+    mediaProto.play = () => Promise.reject(Object.assign(new Error("interrupted by a new load request"), { name: "AbortError" }));
+    await press(buttonFor("Alpha"));
+    act(() => frames.fire());
+    await settle();
+    assert.ok(!/would not play/.test(statusText()), `an AbortError read as a refusal: ${statusText()}`);
+    await press(buttonFor("Alpha", true));
+
+    mediaProto.play = () => Promise.reject(Object.assign(new Error("play() failed because the user didn't interact"), { name: "NotAllowedError" }));
+    await press(buttonFor("Alpha"));
+    assert.match(statusText(), /The browser would not play sound: .*didn't interact/);
+  } finally {
+    frames.restore();
     g.restore();
   }
 });

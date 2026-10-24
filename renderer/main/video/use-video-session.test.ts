@@ -25,6 +25,7 @@ import {
   FIRST_FRAME_TIMEOUT_MS,
   FRAME_POLL_MS,
   HLS_FIRST_FRAME_TIMEOUT_MS,
+  LISTEN_MAX_FAILURES,
   PROBE_POLL_MS,
   PROBE_TIMEOUT_MS,
   RESET_AFTER_PLAYING_MS,
@@ -1322,18 +1323,21 @@ function refuseFirstThen(later: FetchBehavior): () => FetchBehavior {
   return () => (++posts === 1 ? { status: 415 } : later);
 }
 
-function renderRelaySession(video: FakeVideo, logs: string[]) {
-  return renderHook(() =>
-    useVideoSession({
+/** `phases`, when given, gets the phase of EVERY render, not only the one a test reads after act: a cover that paints for one render is a flash. */
+function renderRelaySession(video: FakeVideo, logs: string[], phases?: string[]) {
+  return renderHook(() => {
+    const r = useVideoSession({
       active: true,
       feed: RELAY_LIVE,
       feedDeleted: false,
       video: video as unknown as HTMLVideoElement,
       allowHls: true,
       relayRunning: true,
-      onLog: (r) => logs.push(r),
-    }),
-  );
+      onLog: (l) => logs.push(l),
+    });
+    phases?.push(r.phase);
+    return r;
+  });
 }
 
 test("an HLS picture that jumps back to live says so on the screen's log", async () => {
@@ -1418,13 +1422,15 @@ test("a probe whose frames arrive is adopted: the picture moves to that session 
   const video = new FakeVideo();
   const logs: string[] = [];
   const whepPosts = () => g.calls.filter((c) => c.method === "POST" && c.url.endsWith("/whep")).length;
+  const phases: string[] = [];
   try {
-    const { result } = renderRelaySession(video, logs);
+    const { result } = renderRelaySession(video, logs, phases);
     await act(async () => {
       await flush();
     });
     act(() => video.fireFrame());
     assert.equal(result.current.phase, "delayed");
+    const sinceHlsLive = phases.length;
 
     FakePeerConnection.trackStream = probeStream;
     await act(async () => {
@@ -1456,6 +1462,12 @@ test("a probe whose frames arrive is adopted: the picture moves to that session 
 
     act(() => video.fireFrame());
     assert.equal(result.current.phase, "live");
+    // Every render from the live HLS picture on, the adoption's included: none may read Connecting.
+    assert.deepEqual(
+      phases.slice(sinceHlsLive).filter((p) => p === "connecting"),
+      [],
+      `a render read Connecting over a live picture: ${phases.slice(sinceHlsLive).join(",")}`,
+    );
   } finally {
     // Unmounted while the stubs are still in: the teardown's DELETE and its
     // cap timer must land on the stubbed fetch and the fake clock, not leak
@@ -1926,6 +1938,162 @@ test("a probe beside a live HLS picture is never sampled: sample() stays via 'hl
   } finally {
     cleanup();
     undoHls();
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+// ── a new attempt reads connecting from its first render ───────────────────
+
+test("the same attempt starting again after the feed left and came back reads connecting from its first render, not the old live", async () => {
+  const g = stubGlobals("succeed");
+  const video = new FakeVideo();
+  const phases: string[] = [];
+  const feed = (state: "live" | "waiting"): VideoFeedView => ({ ...RELAY_LIVE, status: { state } });
+  try {
+    const { rerender } = renderHook(
+      ({ f }: { f: VideoFeedView }) => {
+        const r = useVideoSession({ active: true, feed: f, feedDeleted: false, video: video as unknown as HTMLVideoElement, allowHls: true, relayRunning: true });
+        phases.push(r.phase);
+        return r;
+      },
+      { initialProps: { f: feed("live") } },
+    );
+    await act(async () => {
+      await flush();
+    });
+    act(() => video.fireFrame());
+    assert.equal(phases.at(-1), "live");
+    rerender({ f: feed("waiting") });
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(phases.at(-1), "waiting");
+    phases.length = 0;
+    rerender({ f: feed("live") });
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(phases[0], "connecting", `the first render back read ${phases[0]}: ${phases.join(",")}`);
+  } finally {
+    cleanup();
+    g.restore();
+  }
+});
+
+// ── a listening session that cannot work gives the sound up ────────────────
+
+const LISTEN_PATH = "f-listen";
+
+/** A relay feed asked to listen, whose `-listen` WHEP answers `listenAnswer` while its own path succeeds. */
+function renderListening(video: FakeVideo, listenAnswer: FetchBehavior, logs: string[], failures: string[]) {
+  let g: ReturnType<typeof stubGlobals>;
+  // eslint-disable-next-line prefer-const
+  g = stubGlobals(() => (g.calls.at(-1)!.url.includes("-listen/") ? listenAnswer : "succeed"));
+  const hook = renderHook(
+    ({ listenPath }: { listenPath: string | null }) =>
+      useVideoSession({
+        active: true,
+        feed: RELAY_LIVE,
+        feedDeleted: false,
+        video: video as unknown as HTMLVideoElement,
+        allowHls: true,
+        relayRunning: true,
+        listenPath,
+        onLog: (l) => logs.push(l),
+        onListenFailed: (r) => failures.push(r),
+      }),
+    { initialProps: { listenPath: LISTEN_PATH as string | null } },
+  );
+  return { g, ...hook };
+}
+const listenPosts = (g: ReturnType<typeof stubGlobals>) => g.calls.filter((c) => c.method === "POST" && c.url.includes("-listen/")).length;
+
+test("a listening session the relay refuses with a verdict status gives the sound up at once, and says so as listening, not as the feed failing", async () => {
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  const failures: string[] = [];
+  const { g } = renderListening(video, { status: 415 }, logs, failures);
+  try {
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(listenPosts(g), 1, "a refusal was retried");
+    assert.equal(failures.length, 1);
+    assert.match(failures[0]!, /415/);
+    assert.deepEqual(logs, [`listening to "F" failed (the relay refused this feed over WebRTC (WHEP 415)); the picture plays without sound`]);
+  } finally {
+    cleanup();
+    g.restore();
+  }
+});
+
+test("a listening session that keeps dropping is retried, then given up after LISTEN_MAX_FAILURES, never logged as the feed failing", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  const failures: string[] = [];
+  const { g } = renderListening(video, { status: 503 }, logs, failures);
+  try {
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(failures.length, 0, "gave up after one 503");
+    for (let i = 1; i < LISTEN_MAX_FAILURES; i++) {
+      await act(async () => {
+        mock.timers.tick(RETRY_MAX_MS);
+        await flush();
+      });
+    }
+    assert.equal(listenPosts(g), LISTEN_MAX_FAILURES);
+    assert.deepEqual(failures, ["WHEP 503"]);
+    await act(async () => {
+      mock.timers.tick(RETRY_MAX_MS * 2);
+      await flush();
+    });
+    assert.equal(listenPosts(g), LISTEN_MAX_FAILURES, "it kept retrying after giving up");
+    assert.ok(logs.every((l) => l.startsWith("listening to ")), `a line blamed the feed: ${JSON.stringify(logs)}`);
+    assert.ok(logs.length >= 1);
+  } finally {
+    cleanup();
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("switching the sound off and on starts the failure count and the backoff over", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  const failures: string[] = [];
+  const { g, rerender } = renderListening(video, { status: 503 }, logs, failures);
+  try {
+    await act(async () => {
+      await flush();
+    });
+    await act(async () => {
+      mock.timers.tick(RETRY_MAX_MS);
+      await flush();
+    });
+    assert.equal(listenPosts(g), 2);
+    rerender({ listenPath: null });
+    await act(async () => {
+      await flush();
+    });
+    rerender({ listenPath: LISTEN_PATH });
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(listenPosts(g), 3);
+    assert.equal(failures.length, 0, "two old failures counted toward the new session's three");
+    // The backoff restarted too: the next retry is RETRY_MIN_MS away, not what two drops had grown to.
+    await act(async () => {
+      mock.timers.tick(RETRY_MIN_MS);
+      await flush();
+    });
+    assert.equal(listenPosts(g), 4, "the delay carried over from the earlier session");
+  } finally {
+    cleanup();
     mock.timers.reset();
     g.restore();
   }
