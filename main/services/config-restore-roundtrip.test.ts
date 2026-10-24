@@ -62,3 +62,7 @@ test("the backup of a fresh install, plus saves through the real setters, restor
     assert.deepEqual(onDisk, contents, `${name} did not come back as it was saved`);
   }
 });
+
+test("the public URL setter refuses what is not a web address, as a restore does", async () => {
+  await assert.rejects(() => stageController.setPublicUrl("javascript:alert(1)//"), /http or https/);
+});

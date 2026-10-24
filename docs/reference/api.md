@@ -530,7 +530,7 @@ the wrong shape is `400` with the reason unless noted.
 | `/api/onboarding-dismissed` | `{dismissed: boolean}` |
 | `/api/ndi-enabled` | `{enabled: boolean}` |
 | `/api/kiosk-discovery` | `{enabled: boolean}` — whether the server answers devices looking for one |
-| `/api/public-url` | `{url: string \| null}` — the address used for the connect QR and display links; blank or `null` clears it. |
+| `/api/public-url` | `{url: string \| null}` — the address used for the connect QR and display links; blank or `null` clears it. Taken as `http://` when it names no scheme; anything that is then not an http or https address is refused |
 | `/api/timezone` | `{timezone: string \| null}` — an IANA zone, or `null` (blank) to follow the host clock; an unknown zone is `400` |
 | `/api/hour-cycle` | `{hourCycle: "12h" \| "24h"}` |
 | `/api/reconnect-schedule` | any of `{enabled, leadMin, tailMin, dormantMin}`, the numbers rounded and clamped (lead and tail 0–1440, dormant 1–1440 minutes) |

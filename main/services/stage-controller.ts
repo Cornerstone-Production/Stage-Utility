@@ -22,6 +22,7 @@ import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
 import { screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
 import { isSafeKey } from "./safe-key.js";
+import { isDisplayKind } from "../types/views.js";
 import { isUpdateMode } from "../types/state.js";
 import {
   CAPTION_COLOR,
@@ -33,6 +34,7 @@ import {
   clampAutoUpdateDay,
   clampAutoUpdateHour,
   clampFields,
+  isHttpBaseUrl,
   isIconKey,
   normalizeBaseUrl,
 } from "./settings-rules.js";
@@ -773,17 +775,24 @@ export class StageController {
     }
 
     // First run: migrate from the legacy `displays` array (or the default).
+    // Only a list of entries with an id is a legacy display list. Anything else
+    // (a hand edit) is read as none, rather than throwing out of init() and
+    // keeping the server from starting on every boot.
+    const listed = Array.isArray(settings.displays)
+      ? settings.displays.filter((d): d is DisplayInfo => typeof d?.id === "string" && typeof d?.name === "string")
+      : [];
+    if (settings.displays !== undefined && listed.length !== (Array.isArray(settings.displays) ? settings.displays.length : -1)) {
+      console.warn("[stage-controller] settings.json's legacy displays list is not a list of displays; ignored");
+    }
     const legacy: DisplayInfo[] =
-      settings.displays && settings.displays.length > 0
-        ? settings.displays
-        : [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots" }];
+      listed.length > 0 ? listed : [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots" }];
 
     const now = new Date().toISOString();
     const views: View[] = legacy.map((d) => ({
       id: d.id,
       name: d.name,
-      kind: (d.kind ?? "slots") as ViewKind,
-      ndiSource: d.ndiSource ?? null,
+      kind: isDisplayKind(d.kind) ? d.kind : "slots",
+      ndiSource: typeof d.ndiSource === "string" ? d.ndiSource : null,
       createdAt: now,
     }));
     const outputs: Output[] = legacy.map((d) => ({
@@ -1036,6 +1045,8 @@ export class StageController {
 
   async setPublicUrl(url: string | null): Promise<StageState> {
     const normalized = normalizeBaseUrl(url);
+    // Opened by the Screens page as a link, so it has to be a web address.
+    if (normalized !== null && !isHttpBaseUrl(normalized)) throw new Error("The public URL must be an http or https address.");
     console.log(`[stage-controller] setPublicUrl → ${scrub(normalized ?? "(cleared)")}`);
     this.publicUrl = normalized;
     this.state = { ...this.state, publicUrl: normalized };

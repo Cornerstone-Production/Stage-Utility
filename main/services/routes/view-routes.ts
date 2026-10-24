@@ -20,7 +20,7 @@ import {
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
-import { isLayoutShape, type ViewSurface } from "../../types/views.js";
+import { isLayoutShape, isSlotsLayoutValue, type ViewSurface } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 import type { ViewKind, LayoutDTO, LayoutObject, Slot, SlotsLayout, SlotsPreviewTarget, SlotsScope } from "../../types/stage.js";
@@ -440,8 +440,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.layout must be an object with an objects array and a canvas of numeric width and height");
         return;
       }
-      const hasSlotsLayout = "slotsLayout" in body
-        && (body.slotsLayout === null || typeof body.slotsLayout === "object");
+      const hasSlotsLayout = "slotsLayout" in body && isSlotsLayoutValue(body.slotsLayout);
       // `scriptViewLayoutId` is what this field was called before ServiceCue was
       // renamed, and what the API reference told a script to send; it is still
       // read, with the current name winning when both are present.
