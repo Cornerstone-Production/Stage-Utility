@@ -27,7 +27,7 @@ import { planAudio, resolveAudio, type ConverterWhy, type ListenCapability } fro
 import { systemFfmpegFinder, type FfmpegFinder } from "./ffmpeg-system.js";
 import { AudioMemory } from "./audio-memory.js";
 import { embedSrc } from "./embed.js";
-import { FEED_ID_PATTERN, feedIdFor, feedSecretSlot, isReservedFeedId } from "./feed-id.js";
+import { FEED_ID_PATTERN, feedIdFor, feedSecretSlot, isReservedFeedId, listenOwnerOf } from "./feed-id.js";
 import { feedState, type BFramesMark } from "./feed-state.js";
 import { externalProtocol, parseFeedInput, pullCredentialTarget } from "./feed-input.js";
 import { credentialTargetMoved, describeTarget, type CredentialTarget } from "../credential-target.js";
@@ -1552,17 +1552,31 @@ class VideoService {
    * once a feed and kind both check out: an unknown feed is never "the relay
    * is down" even while it genuinely is. 503 as well while the running
    * process has not yet been reconciled with this feed (reconciledFeedIds).
+   *
+   * `<id>-listen` is answered too, for WHEP only, and only when the feed's
+   * audio status is converted or pass-through and names exactly that path.
    */
   relayTarget(
     feedId: string,
     kind: "whep" | "whip" | "hls",
   ): { host: "127.0.0.1"; port: number; path: string } | { refuse: 404 } | { refuse: 503; error: string } {
     if (!FEED_ID_PATTERN.test(feedId)) return { refuse: 404 };
-    const feed = this.snapshot.feeds.find((f) => f.id === feedId);
+    // `<id>-listen` is a feed's converted audio path (audio-listen.ts). It is
+    // served to WHEP readers only, and only while that feed's own status says it
+    // is the path to read: a direct feed, a feed with no audio and a feed whose
+    // converter cannot run have no `-listen` path a browser may reach.
+    const listenOwner = listenOwnerOf(feedId);
+    if (listenOwner !== null && kind !== "whep") return { refuse: 404 };
+    const ownerId = listenOwner ?? feedId;
+    const feed = this.snapshot.feeds.find((f) => f.id === ownerId);
     if (!feed || (feed.source.kind !== "pull" && feed.source.kind !== "push")) return { refuse: 404 };
+    if (listenOwner !== null) {
+      const audio = feed.audio;
+      if (!audio || (audio.state !== "converted" && audio.state !== "pass-through")) return { refuse: 404 };
+    }
     if (kind === "whip" && !(feed.source.kind === "push" && feed.source.protocol === "whip")) return { refuse: 404 };
     if (this.snapshot.relay.state !== "running") return { refuse: 503, error: RELAY_NOT_RUNNING };
-    if (!this.reconciledFeedIds.has(feedId)) return { refuse: 503, error: RELAY_NOT_GIVEN_FEED };
+    if (!this.reconciledFeedIds.has(ownerId)) return { refuse: 503, error: RELAY_NOT_GIVEN_FEED };
     const { ports } = this.snapshot.relay;
     return kind === "hls"
       ? { host: "127.0.0.1", port: ports.hls, path: `/${feedId}` }

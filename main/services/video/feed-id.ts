@@ -8,6 +8,9 @@ const MAX_ID_LENGTH = 40;
  *  claim `cam-listen`. */
 export const LISTEN_SUFFIX = "-listen";
 export const isReservedFeedId = (id: string): boolean => id.endsWith(LISTEN_SUFFIX);
+/** The feed a `<id>-listen` relay path belongs to, or null when `path` is not of
+ *  that shape. Whether that feed exists is for the caller to check. */
+export const listenOwnerOf = (path: string): string | null => (isReservedFeedId(path) ? path.slice(0, -LISTEN_SUFFIX.length) : null);
 
 /** The secrets-store slot holding a feed's one password: a pull feed's camera
  *  password or a push feed's publish password. Here rather than in

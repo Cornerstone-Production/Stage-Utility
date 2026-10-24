@@ -18,6 +18,7 @@ import * as http from "node:http";
 
 import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
+import { listenOwnerOf } from "../video/feed-id.js";
 import { PULL_START_TIMEOUT_MS } from "../video/reconcile-plan.js";
 import { videoService } from "../video/video-service.js";
 import { type RouteCtx, error, readRawBody } from "./context.js";
@@ -225,6 +226,7 @@ function forwardToUpstream(
   body: Buffer | null,
   feedId: string,
   kind: "whep" | "whip" | "hls",
+  outageId: string,
 ): Promise<void> {
   return new Promise((resolve) => {
     const { req, res, method } = c;
@@ -239,7 +241,7 @@ function forwardToUpstream(
         timeout: timeoutMs,
       },
       (upstreamRes) => {
-        reportProxyRecovered(feedId);
+        reportProxyRecovered(outageId);
         const outHeaders: http.OutgoingHttpHeaders = {};
         for (const h of ["content-type", "content-length", "etag", "set-cookie"]) {
           const v = upstreamRes.headers[h];
@@ -259,7 +261,7 @@ function forwardToUpstream(
           // this is really the viewer's own departure surfacing here (the
           // close handler below destroyed upstreamReq, which can carry the
           // failure through to the response it already started).
-          if (!clientGone) reportProxyFailure(feedId, err);
+          if (!clientGone) reportProxyFailure(outageId, err);
           res.destroy();
           resolve();
         });
@@ -280,7 +282,7 @@ function forwardToUpstream(
         resolve();
         return;
       }
-      reportProxyFailure(feedId, err);
+      reportProxyFailure(outageId, err);
       if (res.headersSent || res.writableEnded || res.destroyed) res.destroy();
       else error(res, errorMessage(err), 502);
       resolve();
@@ -342,9 +344,13 @@ export async function videoProxyRoutes(c: RouteCtx): Promise<void> {
   // markRequested() needs no validation of its own — see its own comment.
   const isWhepCreate = parsed.kind === "whep" && parsed.session === null && method === "POST";
   const isPlaylistGet = parsed.kind === "hls" && parsed.file.endsWith(".m3u8") && method === "GET";
-  if (isWhepCreate || isPlaylistGet) videoService.markRequested(parsed.feedId);
+  // `<id>-listen` is the same feed's demand and the same relay's outage: a
+  // listener asking for it keeps the feed from reading offline, and its failures
+  // fold into the feed's own log run, which removeFeed() drops.
+  const ownerId = listenOwnerOf(parsed.feedId) ?? parsed.feedId;
+  if (isWhepCreate || isPlaylistGet) videoService.markRequested(ownerId);
 
   const path = upstreamPath(target, parsed, url.search);
   const timeoutMs = parsed.kind === "hls" ? proxyTimeouts.hls : proxyTimeouts.whepWhip;
-  await forwardToUpstream(c, target, path, timeoutMs, body, parsed.feedId, parsed.kind);
+  await forwardToUpstream(c, target, path, timeoutMs, body, parsed.feedId, parsed.kind, ownerId);
 }

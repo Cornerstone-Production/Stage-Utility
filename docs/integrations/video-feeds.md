@@ -264,9 +264,10 @@ path a listener should read:
 | `pass-through` | Read from the audio source address and copied | `<id>-listen` |
 | `unavailable` | Cannot be heard; `reason` says why | nothing |
 
-The status names the path. No page plays `<id>-listen` yet: the playback proxy
-serves only a feed's own path, and the relay serves `<id>-listen` to RTSP and
-WHEP readers on this machine.
+The status names the path. The playback proxy serves a feed's own path, and,
+for a `converted` or `pass-through` feed only, `/video/<id>-listen/whep`: WHEP
+and nothing else, never HLS or WHIP, and never the `-listen` path of a feed
+whose status is anything else.
 
 The editor shows it under the audio source address ("Audio unavailable: ffmpeg is
 not installed on this server."). The codec is learned from the relay's track
