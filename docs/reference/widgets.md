@@ -694,9 +694,9 @@ NDI needs the native client. The web build ignores this widget.
 
 **Video** points at a feed set up once on the [Video feeds](../integrations/video-feeds.md)
 page under Screens — renaming a feed there does not break a widget bound to it,
-since the binding is the feed's id, not its name. Always muted, with no
-controls, and it only opens a connection while it is actually on screen and the
-tab is visible. **Feed** picks which one it plays. **Fit** chooses between
+since the binding is the feed's id, not its name. Muted, with no controls
+(except Listen, below), and it only opens a connection while it is actually on
+screen and the tab is visible. **Feed** picks which one it plays. **Fit** chooses between
 showing the whole picture (letterboxed) and filling the box (cropped). **Show
 feed name** draws the feed's name over the picture. **When the feed is
 offline** picks what shows in its place: a message, your Branding logo, or
@@ -709,6 +709,30 @@ source is live, so a failed attempt retries the same method rather than
 switching to the other, after a delay that starts at 1 second and doubles to
 30; playback that holds for 10 seconds starts the delay over. It never gives
 up on such a feed.
+
+**Listen.** On a Home card, the widget has a speaker button at the bottom right
+of its picture, as the preview on the Video feeds page does. It is never drawn on
+a wall, a kiosk, a console, the layout editor's preview or any other screen:
+those stay silent. It is off whenever a page loads, because a browser only lets
+sound start from a tap. Tapping it plays the feed's sound with its picture from
+one session, so they stay together (see
+[Listening to a feed's audio](../integrations/video-feeds.md#listening-to-a-feeds-audio));
+tapping again, hiding the tab, scrolling the card away or leaving the page
+stops it and returns the card to its picture-only session. One feed plays at a
+time per page: tapping Listen on another card moves the sound there.
+
+| Listen shows | When |
+|---|---|
+| Speaker, uncaptioned | The feed has audio and nobody is listening to it |
+| "Starting audio…" | A tap, until the sound arrives |
+| "Listening", a level meter and a volume slider | The sound is playing. The volume is kept per browser |
+| "Audio stopped, retrying" | The listening session dropped; the picture shows Connecting meanwhile |
+| "This feed has no audio" | The feed's source has no audio track. The button is disabled |
+| "Audio isn't available on this server: *reason*" | The conversion cannot run (no usable ffmpeg, say). The button is disabled |
+| "Audio needs WebRTC, and this feed is playing over HLS" | The picture is over HLS (B-frames, or WebRTC failed here), which carries no sound |
+
+A feed with no audio report (a YouTube, Resi or external-address feed) has no
+Listen button.
 
 | State | Shown as |
 |---|---|

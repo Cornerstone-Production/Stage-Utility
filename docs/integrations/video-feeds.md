@@ -248,6 +248,24 @@ splits it with shell quoting and expands `$NAME` in each word, so every word is
 single-quoted and one holding a quote or `$` is refused, never escaped. A feed
 whose `-listen` path cannot be written says why instead.
 
+**Listening on the page.** The Video feeds page's preview and a Home Video card
+have a speaker button at the bottom right of the picture (see
+[Video](../reference/widgets.md#video) for its states). It is off each time a
+page loads. A tap opens one WebRTC session that asks for audio as well as video,
+on the path the feed's status names: its own for `direct`, `<id>-listen` for
+`converted` and `pass-through`. The picture then comes from that same session, so
+sound and picture stay together; stopping puts the tile back on its picture-only
+session. The tap itself unmutes and starts the element, which is what browsers'
+autoplay rules want from a gesture. A level meter reads the playing stream through
+a Web Audio analyser that is not wired to the speakers, and the volume is kept in
+the browser's local storage. One feed plays per page, and a tile that leaves the
+screen, a hidden tab or a closed page stops. Wall layouts, kiosks, consoles and
+the layout editor's preview never offer it.
+
+Nothing is logged per listener. The converter's own start, stop and failure lines
+(below) are the record; a listening session the browser could not keep reads
+"Audio stopped, retrying" on the button.
+
 **CPU.** Copying the video is close to free. Encoding one stereo Opus stream is a
 few percent of one core on a desktop CPU, more on a Raspberry Pi. It runs per
 listened feed, not per listener, and only while someone listens.
