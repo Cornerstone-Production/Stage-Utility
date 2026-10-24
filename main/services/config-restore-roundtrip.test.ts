@@ -133,3 +133,14 @@ test("the backup of a fresh install, plus saves through the real setters, restor
 test("the public URL setter refuses what is not a web address, as a restore does", async () => {
   await assert.rejects(() => stageController.setPublicUrl("javascript:alert(1)//"), /http or https/);
 });
+
+test("the caption colour setter writes no key a restore would refuse", async () => {
+  for (const channel of ["__proto__", "constructor", "prototype"]) {
+    await stageController.setCaptionChannelColor(channel, "#ffcc00");
+  }
+  const colors = stageController.getState().captionChannelColors;
+  assert.ok(
+    !["__proto__", "constructor", "prototype"].some((k) => Object.hasOwn(colors, k)),
+    `an unsafe channel name was stored: ${JSON.stringify(Object.keys(colors))}`,
+  );
+});

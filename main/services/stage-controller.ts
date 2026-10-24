@@ -2987,13 +2987,15 @@ export class StageController {
    *  channel label. Persisted + broadcast so kiosks recolor live. */
   async setCaptionChannelColor(channel: string, color: string | null): Promise<StageState> {
     const key = channel.trim();
-    if (!key) return this.state;
-    const next = { ...this.state.captionChannelColors };
+    // A restore refuses these keys, so a save must never write one.
+    if (!key || !isSafeKey(key)) return this.state;
+    const colors = new Map(Object.entries(this.state.captionChannelColors));
     if (color && CAPTION_COLOR.test(color.trim())) {
-      next[key] = normalizeCaptionColor(color);
+      colors.set(key, normalizeCaptionColor(color));
     } else {
-      delete next[key]; // null/invalid → revert to auto
+      colors.delete(key); // null/invalid → revert to auto
     }
+    const next = Object.fromEntries(colors);
     this.state = { ...this.state, captionChannelColors: next };
     await settingsStore.patch({ captionChannelColors: next });
     this.broadcast();
