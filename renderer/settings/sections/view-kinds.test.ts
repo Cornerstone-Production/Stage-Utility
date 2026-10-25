@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 // pulls in the whole UI tree for a check about two literal lists.
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SRC = readFileSync(path.join(HERE, "new-view-dialog.tsx"), "utf8");
+const SRC = readFileSync(path.join(HERE, "view-kinds.ts"), "utf8");
 
 function labelledKinds(src: string): string[] {
   // externKeyed(...) wraps the literal — see extern-keyed.ts. Matched exactly
@@ -35,7 +35,7 @@ function orderedKinds(src: string): string[] {
   return [...line[1].matchAll(/"([\w-]+)"/g)].map((m) => m[1]);
 }
 
-describe("the new-view dialog offers every view kind", () => {
+describe("the shared view-kinds list offers every view kind", () => {
   test("the scan finds both lists, so it cannot pass vacuously", () => {
     assert.ok(labelledKinds(SRC).length >= 5, "KIND_LABELS scan found too few entries");
     assert.ok(orderedKinds(SRC).length >= 5, "KIND_ORDER scan found too few entries");
@@ -54,7 +54,7 @@ describe("the new-view dialog offers every view kind", () => {
     // set-equality check alone would stay green if BOTH lists lost them.
     const order = orderedKinds(SRC);
     for (const kind of ["stage", "spl-rundown", "slots", "dashboard", "transcription", "script", "calendar", "custom"]) {
-      assert.ok(order.includes(kind), `"${kind}" is not offered by the new-view dialog`);
+      assert.ok(order.includes(kind), `"${kind}" is not offered by the view kind list`);
     }
   });
 });

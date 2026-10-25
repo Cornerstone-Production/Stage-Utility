@@ -5,6 +5,7 @@
 // that creates a view imports the templates without wanting the editor.
 
 import type { LayoutCanvas, LayoutObject, LayoutObjectConfig, LayoutStyle } from "@main/types/views";
+import type { LayoutDTO } from "@main/types/stage";
 import { CARD_PRESETS, HAIRLINE_COLOR, PILL } from "../main/layout-objects";
 
 export function uid(): string {
@@ -244,13 +245,27 @@ export function ultritouchTemplate(model: UltritouchModel): LayoutObject[] {
   });
   return objects;
 }
+/** What a new custom layout can start from, besides the blank canvas. */
+export type StartFrom = "blank" | "dashboard" | "confidence" | UltritouchModel;
 
+function isUltritouchModel(start: StartFrom): start is UltritouchModel {
+  return start === "ultritouch-2" || start === "ultritouch-2-hr" || start === "ultritouch-4";
+}
 
-
-
-
-
-
-// Recursive visual render for the editor canvas. Mirrors the renderer's
-// RenderObject but DIMS hidden objects (by their own flag only) instead of
-// removing them, so the editor still shows hidden layers faintly.
+/**
+ * The layout a new custom view starts with, or null for the blank canvas (which the
+ * server makes itself). The one place a starting choice becomes a layout: the New
+ * view dialog and the New screen panel both ask here, so the Ultritouch canvas and
+ * the template that goes with it cannot be paired differently in the two.
+ */
+export function startingLayout(start: StartFrom): LayoutDTO | null {
+  if (start === "blank") return null;
+  if (isUltritouchModel(start)) {
+    return { version: 1, canvas: ultritouchCanvas(start), objects: ultritouchTemplate(start) };
+  }
+  return {
+    version: 1,
+    canvas: { width: 1920, height: 1080, background: null },
+    objects: start === "dashboard" ? dashboardTemplate() : confidenceMonitorTemplate(),
+  };
+}

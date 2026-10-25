@@ -11,10 +11,10 @@ import { useState, type ChangeEvent, type ReactNode } from "react";
 
 import { Dialog, Input, Radio, RadioGroup, Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "../../components/ui";
 import { cn } from "../../lib/cn";
-import { dashboardTemplate, confidenceMonitorTemplate, ultritouchTemplate, ultritouchCanvas, type UltritouchModel } from "../../editor/layout-editor";
+import { startingLayout, type StartFrom } from "../../editor/layout-templates";
+import { KIND_LABELS, KIND_ORDER } from "./view-kinds";
 import type { SectionHandlers } from "../types";
-import { everyViewKind, type ViewSurface } from "@main/types/views";
-import { externKeyed } from "@main/types/extern-keyed";
+import type { ViewSurface } from "@main/types/views";
 
 /** What a custom view is FOR, in the operator's words rather than the schema's.
  *  Data rather than two hand-written blocks: they had drifted to differing
@@ -31,37 +31,6 @@ const SURFACE_CHOICES: { value: ViewSurface; title: string; hint: string }[] = [
     hint: "Buttons work. Opens in the app, or pinned to a control surface.",
   },
 ];
-
-// Copied verbatim from the list this replaces. Retyping it from memory dropped
-// "stage" and "spl-rundown" - two view kinds that would then have been
-// uncreatable, with nothing failing to say so.
-const KIND_LABELS: Record<ViewKind, string> = externKeyed({
-  slots: "Mic Slots",
-  dashboard: "Dashboard",
-  stage: "Stage",
-  transcription: "Transcription",
-  custom: "Custom Layout",
-  script: "ServiceCue",
-  "spl-rundown": "SPL Rundown",
-  calendar: "Calendar",
-});
-// KIND_ORDER is the list the dialog actually renders, and it used to be a plain
-// ViewKind[] - a list a kind can drop out of with nothing failing, which is
-// precisely what happened to "stage" and "spl-rundown". everyViewKind refuses to
-// compile if a kind is missing. The source-text scan in new-view-dialog.test.ts
-// stays as a second, independent net.
-const KIND_ORDER = everyViewKind([
-  "slots",
-  "dashboard",
-  "stage",
-  "transcription",
-  "script",
-  "spl-rundown",
-  "calendar",
-  "custom",
-]);
-
-type StartFrom = "blank" | "dashboard" | "confidence" | UltritouchModel;
 
 export function NewViewDialog({
   handlers,
@@ -110,15 +79,8 @@ export function NewViewDialog({
         // (see effectiveKind): any other kind is created as a wall view.
         const made = name.trim();
         const id = await handlers.handleAddView(made, effectiveKind, effectiveKind === "custom" ? surface : "display");
-        if (id && effectiveKind === "custom" && startFrom !== "blank") {
-          const strip = startFrom.startsWith("ultritouch-") ? (startFrom as UltritouchModel) : null;
-          const objects = strip ? ultritouchTemplate(strip) : startFrom === "dashboard" ? dashboardTemplate() : confidenceMonitorTemplate();
-          await handlers.handleSetViewLayout(id, {
-            version: 1,
-            canvas: strip ? ultritouchCanvas(strip) : { width: 1920, height: 1080, background: null },
-            objects,
-          });
-        }
+        const layout = effectiveKind === "custom" ? startingLayout(startFrom) : null;
+        if (id && layout) await handlers.handleSetViewLayout(id, layout);
         setName("");
         setKind("slots");
         setStartFrom("blank");
@@ -203,4 +165,3 @@ export function NewViewDialog({
   );
 }
 
-export { KIND_LABELS, KIND_ORDER };
