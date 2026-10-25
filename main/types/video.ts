@@ -38,10 +38,22 @@ export type VideoSource =
 
 export type VideoSourceKind = VideoSource["kind"];
 
+/** Whether the server converts a feed's audio so a browser can listen to it live.
+ *  "auto" converts only AAC, which WebRTC cannot carry; "off" never runs ffmpeg
+ *  for the feed; "always" converts whatever the audio is. */
+export const AUDIO_CONVERSIONS = ["auto", "off", "always"] as const;
+export type AudioConversion = (typeof AUDIO_CONVERSIONS)[number];
+
 export interface VideoFeed {
   id: string;
   name: string;
   source: VideoSource;
+  /** Only on a pull or push feed, and only when not "auto": absent means "auto". */
+  audioConversion?: AudioConversion;
+  /** An http or https address that carries the feed's audio in a form a browser
+   *  can receive (Opus), for an encoder whose RTSP output does not. No
+   *  username or password in it. Absent means the feed's own audio is used. */
+  audioSourceUrl?: string;
 }
 
 /** LAN inputs (rtmp, srt, webrtcUdp) and loopback-only listeners (the rest). */
@@ -52,6 +64,10 @@ export interface VideoPorts {
   webrtcHttp: number;
   hls: number;
   api: number;
+  /** The relay's RTSP listener, loopback only: where the server's own ffmpeg
+   *  reads a feed and publishes its `-listen` path. Bound only when ffmpeg is
+   *  usable. */
+  rtsp: number;
 }
 
 export const DEFAULT_VIDEO_PORTS: VideoPorts = {
@@ -61,6 +77,7 @@ export const DEFAULT_VIDEO_PORTS: VideoPorts = {
   webrtcHttp: 8889,
   hls: 8888,
   api: 9997,
+  rtsp: 8554,
 };
 
 export interface VideoFeedsFile {
@@ -97,6 +114,23 @@ export type FeedPlay =
   | { via: "external"; url: string; protocol: "whep" | "hls" }
   | { via: "embed"; src: string };
 
+/** What a feed's sound is, and where a listener should read it. `listenPath` is
+ *  the relay path to play: the feed's own id, or its `-listen` sibling that holds
+ *  the same video with Opus audio. */
+export type FeedAudioStatus =
+  /** The source has no audio. */
+  | { state: "none" }
+  /** Not seen yet, so what the audio is has not been learned. */
+  | { state: "unknown" }
+  /** Opus or G.711: a browser plays it as the relay has it. */
+  | { state: "direct"; listenPath: string }
+  /** Re-encoded to Opus by the server's ffmpeg, on demand. */
+  | { state: "converted"; listenPath: string }
+  /** Read from the feed's audio source address and republished unchanged. */
+  | { state: "pass-through"; listenPath: string }
+  /** Cannot be heard, and why, in a sentence the page shows as it is. */
+  | { state: "unavailable"; reason: string };
+
 /** A feed as the wire carries it: no secrets, ever. */
 export interface VideoFeedView {
   id: string;
@@ -112,6 +146,11 @@ export interface VideoFeedView {
    *  it — never the value. The editor uses this to say "a password is
    *  saved" without a blank field implying there is none. */
   hasPassword?: boolean;
+  /** Only for a pull or push feed, the three below. The setting as resolved
+   *  ("auto" when none is stored) and the address ("" when none). */
+  audioConversion?: AudioConversion;
+  audioSourceUrl?: string;
+  audio?: FeedAudioStatus;
 }
 
 /**
@@ -348,7 +387,7 @@ export interface VideoFeedsBundle {
   appVersion: string;
   createdAt: string;
   source: { server: string };
-  feeds: { id: string; name: string; source: VideoSource; password?: string }[];
+  feeds: { id: string; name: string; source: VideoSource; password?: string; audioConversion?: AudioConversion; audioSourceUrl?: string }[];
   ports?: VideoPorts;
 }
 
@@ -357,7 +396,7 @@ export type ImportFeedStatus = "new" | "same" | "differs" | "invalid";
 /** One field that differs between a file's feed and the one here. A password
  *  difference carries no values, ever. */
 export interface FeedDifference {
-  field: "name" | "kind" | "url" | "username" | "protocol" | "player" | "ref" | "password";
+  field: "name" | "kind" | "url" | "username" | "protocol" | "player" | "ref" | "password" | "audioConversion" | "audioSourceUrl";
   here?: string;
   file?: string;
 }

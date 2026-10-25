@@ -71,7 +71,8 @@ describe("busyPorts", () => {
     const spareWebrtcUdp = await openUdp("0.0.0.0");
     const spareWebrtcHttp = await openTcp("127.0.0.1");
     const spareApi = await openTcp("127.0.0.1");
-    await Promise.all([spareRtmp.close(), spareWebrtcUdp.close(), spareWebrtcHttp.close(), spareApi.close()]);
+    const spareRtsp = await openTcp("127.0.0.1");
+    await Promise.all([spareRtmp.close(), spareWebrtcUdp.close(), spareWebrtcHttp.close(), spareApi.close(), spareRtsp.close()]);
 
     const ports: VideoPorts = {
       rtmp: spareRtmp.port,
@@ -80,6 +81,7 @@ describe("busyPorts", () => {
       webrtcHttp: spareWebrtcHttp.port,
       hls: heldTcp.port,
       api: spareApi.port,
+      rtsp: spareRtsp.port,
     };
 
     // try/finally, not a bare sequence: an assertion throwing above would
@@ -115,10 +117,10 @@ describe("busyPorts, checked again and again", () => {
   // closed: one leaked UDP socket, and its file descriptor, per attempt.
   it("closes its probe socket when a held UDP port refuses the bind", async () => {
     const held = await openUdp("0.0.0.0");
-    const spares = await Promise.all([openTcp("0.0.0.0"), openUdp("0.0.0.0"), openTcp("127.0.0.1"), openTcp("127.0.0.1"), openTcp("127.0.0.1")]);
+    const spares = await Promise.all([openTcp("0.0.0.0"), openUdp("0.0.0.0"), openTcp("127.0.0.1"), openTcp("127.0.0.1"), openTcp("127.0.0.1"), openTcp("127.0.0.1")]);
     await Promise.all(spares.map((s) => s.close()));
-    const [rtmp, webrtcUdp, webrtcHttp, hls, api] = spares.map((s) => s.port) as [number, number, number, number, number];
-    const ports: VideoPorts = { rtmp, srt: held.port, webrtcUdp, webrtcHttp, hls, api };
+    const [rtmp, webrtcUdp, webrtcHttp, hls, api, rtsp] = spares.map((s) => s.port) as [number, number, number, number, number, number];
+    const ports: VideoPorts = { rtmp, srt: held.port, webrtcUdp, webrtcHttp, hls, api, rtsp };
     const udpHandles = () => process.getActiveResourcesInfo().filter((r) => r === "UDPWrap").length;
     // A closed socket's handle is released a little after its close
     // callback, so a count is read once it has stopped falling.
@@ -137,6 +139,25 @@ describe("busyPorts, checked again and again", () => {
       assert.equal(await settled(before), before, "every failed UDP probe left its socket open");
     } finally {
       await held.close();
+    }
+  });
+
+  it("checks the RTSP port only when the relay will bind it", async () => {
+    const [rtmp, webrtcUdp, webrtcHttp, hls, api, srt] = await Promise.all(
+      [openTcp("0.0.0.0"), openUdp("0.0.0.0"), openTcp("127.0.0.1"), openTcp("127.0.0.1"), openTcp("127.0.0.1"), openUdp("0.0.0.0")],
+    );
+    const heldRtsp = await openTcp("127.0.0.1");
+    const ports: VideoPorts = {
+      rtmp: rtmp.port, srt: srt.port, webrtcUdp: webrtcUdp.port, webrtcHttp: webrtcHttp.port, hls: hls.port, api: api.port, rtsp: heldRtsp.port,
+    };
+    await Promise.all([rtmp, srt, webrtcUdp, webrtcHttp, hls, api].map((h) => h.close()));
+    try {
+      assert.deepEqual(await busyPorts(ports), [], "a taken RTSP port stopped a relay that will not use it");
+      assert.deepEqual(await busyPorts(ports, false), []);
+      const busy = await busyPorts(ports, true);
+      assert.deepEqual(busy.map((b) => [b.port, b.proto]), [[heldRtsp.port, "tcp"]]);
+    } finally {
+      await heldRtsp.close();
     }
   });
 });

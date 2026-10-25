@@ -25,6 +25,10 @@ test("pull allows rtsp, rtsps, srt, http(s) and refuses userinfo in the address"
   assert.equal(r.ok, false);
   assert.match((r as { error: string }).error, /own fields/);
   assert.equal(parseFeedInput({ name: "P", source: { kind: "pull", url: "udp://h:1", username: "" } }, ALL).ok, false);
+  // A password alone, with no username before the colon, is still a credential.
+  const pwOnly = parseFeedInput({ name: "P", source: { kind: "pull", url: "rtsp://:pw@10.0.0.1/s", username: "" } }, ALL);
+  assert.equal(pwOnly.ok, false);
+  assert.match((pwOnly as { error: string }).error, /own fields/);
 });
 test("an SRT address that carries a passphrase is refused, and says where it goes", () => {
   for (const url of ["srt://h:9000?passphrase=correct-horse-battery", "srt://h:9000?streamid=x&Passphrase=correct-horse-battery", "srt://h:9000?passphrase="]) {
@@ -60,7 +64,7 @@ test("external protocol follows the path", () => {
   assert.equal(externalProtocol("http://h/cam/whep"), "whep");
 });
 test("external refuses a username or password in the address, like pull", () => {
-  for (const url of ["https://user:pw@cdn.example/live/index.m3u8", "http://user@h/cam/whep"]) {
+  for (const url of ["https://user:pw@cdn.example/live/index.m3u8", "http://user@h/cam/whep", "http://:pw@h/cam/whep"]) {
     const r = parseFeedInput({ name: "X", source: { kind: "external", url } }, OFFERED);
     assert.equal(r.ok, false, url);
     assert.match((r as { error: string }).error, /username and password out of the address/, url);

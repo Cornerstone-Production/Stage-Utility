@@ -72,7 +72,7 @@ shows the result under **Advanced, Video relay, ffmpeg**.
 |---|---|
 | Linux | `sudo apt install ffmpeg` (or your distribution's package) |
 | macOS | `brew install ffmpeg`. The Homebrew formula installs it with Stage Utility |
-| Windows | `winget install ffmpeg` |
+| Windows | `winget install --id Gyan.FFmpeg -e` |
 
 **Where it looks,** in this order: the path set in Advanced; every absolute
 directory on `PATH` (a relative or empty entry is skipped); then
@@ -158,12 +158,12 @@ Test button of its own, having no settings to test.
 The relay's ports live on their own card in **Advanced**, reachable from
 this line's "Change ports in Advanced" while running, or failing on a busy
 port specifically — the one failure that page can actually fix — saving
-them restarts the relay if it is running, unless the six values did not
+them restarts the relay if it is running, unless the seven values did not
 actually change.
 
 ## Ports and the firewall
 
-The relay listens on six ports, all editable on that same card in
+The relay listens on seven ports, all editable on that same card in
 **Advanced**:
 
 | Port | Default | Protocol | Reaches | Carries |
@@ -174,9 +174,10 @@ The relay listens on six ports, all editable on that same card in
 | WebRTC signalling | 8889 | TCP | 127.0.0.1 only | Proxied by Stage Utility's own server; never reached directly |
 | HLS | 8888 | TCP | 127.0.0.1 only | Proxied by Stage Utility's own server; never reached directly |
 | Relay API | 9997 | TCP | 127.0.0.1 only | Only this server ever calls it, with a password made fresh at every relay start; nothing else on the machine can read or change the relay's paths, a pull feed's address among them |
+| RTSP (audio conversion) | 8554 | TCP | 127.0.0.1 only | This server's own ffmpeg, reading a feed and publishing its `-listen` path (see [Listening to a feed's audio](#listening-to-a-feeds-audio)). Bound only while ffmpeg is usable, and TCP only, so the relay opens no UDP ports for it. If something else holds the port when the relay starts, the relay starts without RTSP: video is unaffected, audio conversion is off for that run, and every feed that needs it says "the RTSP port 8554 is in use by …: change it in Advanced" (logged once). Saving the ports restarts the relay and tries again |
 
 If the server sits behind a firewall, or the gear it talks to is on another
-VLAN, two directions matter — the loopback-only three never need a rule,
+VLAN, two directions matter — the loopback-only four never need a rule,
 since nothing outside this machine ever reaches them:
 
 - **UDP 8189 must reach the server from the screens' network.** Every screen
@@ -189,10 +190,105 @@ since nothing outside this machine ever reaches them:
 
 ## What a feed is
 
-A feed is a name (up to 60 characters) and a source, `{id, name, source}`. The `id` is a slug of the
+A feed is a name (up to 60 characters) and a source, `{id, name, source}`, and for a pull or push feed two audio settings (see [Listening to a feed's audio](#listening-to-a-feeds-audio)). The `id` is a slug of the
 name it was given when created and never changes, even across a rename — so
 renaming a feed on the Video feeds page does not break any layout or Home card
 already pointed at it.
+
+## Listening to a feed's audio
+
+A browser listening live gets sound over WebRTC, which carries Opus and G.711
+but not AAC, the audio the Magewell Ultra Encodes send. The relay forwards a
+feed's picture over WebRTC without that sound. A feed that needs it gets a
+second relay path, `<feed id>-listen`, holding the same video and Opus audio.
+
+**Audio conversion** is a setting of a pull or push feed, in its editor:
+
+| Setting | What the feed does |
+|---|---|
+| Auto (default) | Converts only AAC. Opus, G.711, G.722 and LPCM are listened to as they are, on the feed's own path. Any other codec (MP3, AC-3) is reported unavailable; Auto does not convert it |
+| Off | Never runs ffmpeg for the feed. AAC then cannot be heard live |
+| Always | Converts whatever the audio is |
+
+**Audio source address** is optional: an `http` or `https` address that already
+carries the feed's audio as Opus, for an encoder that sends only G.711 or AAC on
+the output the relay pulls but Opus on another (a URayTech sends G.711 8 kHz mono
+over RTSP and H.264 plus Opus 48 kHz stereo at `http://<encoder>/0.ts`). While
+someone listens, ffmpeg reads that address and republishes it to `-listen` with
+`-c copy`: no re-encoding, so negligible CPU, and picture and sound stay in sync
+because they come from one stream. It uses the encoder's HTTP output, not a
+second RTSP session. The address takes no username or password, and only letters,
+digits and the punctuation `- . _ ~ : / ? [ ] @ ! & ( ) * + , ; = %`, because it
+becomes an argument of the command the relay runs. Auto and Always use it; Off
+ignores it.
+
+The `-listen` suffix is reserved: a feed is never given an id ending in it (a feed
+named "Cam Listen" becomes `cam-listen-2`), an import refuses such an id, and a stored
+feed that has one is not given to the relay and says so in the log. The address is
+checked again when the command is built, so a restored or hand-edited store cannot
+make ffmpeg read a file or open a socket, and each input is limited to the protocols
+it needs (`-protocol_whitelist`).
+
+Both settings are saved with the feed in `video-feeds.json`, carried by the feeds
+export and import (the import review lists a difference in either), and ignored
+on an embed or external feed.
+
+**How the conversion runs.** MediaMTX defines the `-listen` path with
+`runOnDemand`: it starts one ffmpeg when the first reader asks for the path and
+stops it 10 seconds after the last leaves, restarting it while readers remain.
+Two people listening to one feed share one ffmpeg; no feed has one while nobody
+listens. ffmpeg reads the feed from the relay's own copy over loopback RTSP,
+never from the encoder (the Ultra Encodes refuse a second RTSP reader), copies
+the video untouched and encodes the audio to Opus, 128 kb/s stereo, 20 ms frames,
+`-application lowdelay`. Its input flags (`-fflags nobuffer`, `-flags low_delay`,
+`-probesize 65536`, `-analyzeduration 500000`) skip reading seconds of media to
+learn codecs the stream already describes: on a local relay that took the first
+packet from about 3 s to about 1 s. The command runs without a shell: MediaMTX
+splits it with shell quoting and expands `$NAME` in each word, so every word is
+single-quoted and one holding a quote or `$` is refused, never escaped. A feed
+whose `-listen` path cannot be written says why instead.
+
+**CPU.** Copying the video is close to free. Encoding one stereo Opus stream is a
+few percent of one core on a desktop CPU, more on a Raspberry Pi. It runs per
+listened feed, not per listener, and only while someone listens.
+
+**Status.** Each pull or push feed's view carries an `audio` status and the relay
+path a listener should read:
+
+| `audio.state` | Meaning | Path to read |
+|---|---|---|
+| `none` | The source has no audio track | nothing |
+| `unknown` | The feed has not been seen yet, so its audio is not known | nothing |
+| `direct` | Opus, G.711, G.722 or LPCM: playable as the relay has it | the feed's own path |
+| `converted` | AAC, re-encoded to Opus on demand | `<id>-listen` |
+| `pass-through` | Read from the audio source address and copied | `<id>-listen` |
+| `unavailable` | Cannot be heard; `reason` says why | nothing |
+
+The status names the path. No page plays `<id>-listen` yet: the playback proxy
+serves only a feed's own path, and the relay serves `<id>-listen` to RTSP and
+WHEP readers on this machine.
+
+The editor shows it under the audio source address ("Audio unavailable: ffmpeg is
+not installed on this server."). The codec is learned from the relay's track
+list while the feed is showing and remembered while it is idle; an encoder
+changed from AAC to Opus is noticed on the next poll and its `-listen` path is
+dropped. A feed not yet seen gets a `-listen` path under Auto and Always, which
+costs nothing while idle.
+
+**Needs ffmpeg.** Without a usable ffmpeg (see [ffmpeg](#ffmpeg)) no `-listen`
+path is written and a feed that needs one is `unavailable` with ffmpeg's reason.
+The relay listens for RTSP only while ffmpeg is usable, decided when it starts;
+saving the ffmpeg path in Advanced restarts a running relay when that answer
+changes.
+
+**Installers.** `install.sh` (both the one-line installer and `scripts/install.sh`)
+installs ffmpeg with `apt-get`, `dnf` or `pacman` when it runs as root and finds
+none; `install.ps1` runs `winget install --id Gyan.FFmpeg -e` when `winget`
+exists. Both are best effort: a failure is printed and the install carries on.
+On RHEL, Rocky and Alma without RPM Fusion there is no ffmpeg package, so
+`dnf` fails and the line says so; install ffmpeg another way and save its path in
+Advanced if the server does not find it. On Windows the server runs as SYSTEM, whose `PATH` may not include a per-user
+install; if Advanced says ffmpeg is not found, save its path there.
 
 ## Kinds
 
@@ -409,7 +505,8 @@ and **Save** replaces it with the real feed.
 ![The Video feeds page: pulled cameras, pushed encoders and the feed editor](../images/video-feeds.png)
 
 The editor shows the feed's live picture, its **Name** and **Source**, and the
-fields for that source, each with its label above it. A new feed's **Name**
+fields for that source (for a pulled or pushed feed, **Audio conversion** and
+**Audio source address** too, with the feed's audio status under them), each with its label above it. A new feed's **Name**
 and **Address** start empty, with "New feed" and "rtsp://" as placeholders;
 saving without a name is refused. Under **Save**,
 **Cancel** and **Delete feed** it says which layouts use the feed. Delete asks
@@ -431,7 +528,7 @@ feeds you tick: each one's id, name and source. Feeds keep their ids, so a view
 moved with them (see [Moving a view](../moving-a-view.md)) finds its Video
 widgets' feeds on the other server. Two things are opt-in:
 
-- **Relay ports**: the six ports, as saved.
+- **Relay ports**: the seven ports, as saved.
 - **Passwords**: a pull feed's camera password and a push feed's publish
   password. The file holds them in plain text, and anyone with it can publish
   to those feeds and log in to those cameras; the panel says so when the box is
@@ -656,6 +753,18 @@ from the server:
   each once, not on every retry. `relay could not rewrite its config` when a
   restart cannot write `mediamtx.yml`, retried the same way.
 - `relay stopped`, and why: video switched off, or no pull or push feed left.
+- `<feed>: audio converter started (<why>)` when a feed's ffmpeg starts for its
+  first listener (why: the feed's audio is AAC, Audio conversion is Always, or
+  audio source address copied as it is), once, not again for a restart after a
+  failure; `audio converter stopped (not needed by anyone)` when the last
+  listener has gone; `audio converter failed: <reason> — ffmpeg said: <its last
+  line>` once per failing session, not on each of the relay's retries every 5
+  seconds. Nothing is logged per listener. When two converters run at once their
+  output interleaves, so the line quoted may be the other's.
+- `<feed>: audio unavailable: <reason>`, once per reason, for a feed that needs
+  ffmpeg and cannot have it.
+- `relay restarting to turn on audio conversion (ffmpeg is usable now)`, or `off`,
+  when saving the ffmpeg path changed whether the relay listens for RTSP.
 - Downloading the pinned MediaMTX release, and a checksum that does not
   match — from a fresh download or a hand-placed archive — refused rather
   than run, with where to place the archive by hand.

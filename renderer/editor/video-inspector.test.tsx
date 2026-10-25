@@ -11,6 +11,7 @@ import { after, afterEach, describe, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
+import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
 const teardown = installRenderDom();
 
@@ -38,7 +39,7 @@ const FEEDS_STATE = {
   rev: 1,
   relay: { state: "off" as const },
   kinds: ["pull", "push", "embed", "external"],
-  ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 },
+  ports: DEFAULT_VIDEO_PORTS,
   binaryPresent: true,
   archivePresent: true,
   feeds: [

@@ -247,6 +247,8 @@ const FIELD_LABEL: Record<FeedDifference["field"], string> = {
   player: "player",
   ref: "video or channel",
   password: "password",
+  audioConversion: "audio conversion",
+  audioSourceUrl: "audio source address",
 };
 
 const KIND_WORD: Record<string, string> = { pull: "pulled", push: "pushed", embed: "embed", external: "other address" };

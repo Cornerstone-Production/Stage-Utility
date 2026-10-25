@@ -2,8 +2,9 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import { parsePorts, PORT_KEYS } from "./ports.js";
+import { DEFAULT_VIDEO_PORTS } from "../../types/video.js";
 
-const GOOD = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
+const GOOD = DEFAULT_VIDEO_PORTS;
 
 test("accepts six distinct in-range integers", () => {
   const r = parsePorts(GOOD);
@@ -12,7 +13,7 @@ test("accepts six distinct in-range integers", () => {
 });
 
 test("the boundary values 1024 and 65535 are both accepted", () => {
-  const r = parsePorts({ rtmp: 1024, srt: 1025, webrtcUdp: 1026, webrtcHttp: 1027, hls: 65535, api: 65534 });
+  const r = parsePorts({ rtmp: 1024, srt: 1025, webrtcUdp: 1026, webrtcHttp: 1027, hls: 65535, api: 65534, rtsp: 65533 });
   assert.ok(r.ok);
 });
 
@@ -43,6 +44,22 @@ test("a non-object body refuses every key as missing, not as a crash", () => {
   assert.equal(parsePorts(undefined).ok, false);
 });
 
-test("PORT_KEYS is exactly VideoPorts's six fields — every one this validates", () => {
-  assert.deepEqual([...PORT_KEYS].sort(), ["api", "hls", "rtmp", "srt", "webrtcHttp", "webrtcUdp"]);
+test("PORT_KEYS is exactly VideoPorts's seven fields — every one this validates", () => {
+  assert.deepEqual([...PORT_KEYS].sort(), ["api", "hls", "rtmp", "rtsp", "srt", "webrtcHttp", "webrtcUdp"]);
+});
+
+test("a ports body from before the RTSP port existed keeps the current one", () => {
+  const { rtsp: _omitted, ...six } = GOOD;
+  const kept = parsePorts(six, { ...GOOD, rtsp: 9554 });
+  assert.ok(kept.ok);
+  assert.equal(kept.ports.rtsp, 9554);
+  const dflt = parsePorts(six);
+  assert.ok(dflt.ok);
+  assert.equal(dflt.ports.rtsp, 8554);
+});
+
+test("the RTSP port is held to the same rules as the other six", () => {
+  assert.equal(parsePorts({ ...GOOD, rtsp: GOOD.api }).ok, false, "a port shared with another was accepted");
+  assert.equal(parsePorts({ ...GOOD, rtsp: 80 }).ok, false);
+  assert.equal(parsePorts({ ...GOOD, rtsp: "8554" }).ok, false);
 });

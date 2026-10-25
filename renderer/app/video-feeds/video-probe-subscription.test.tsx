@@ -14,6 +14,7 @@ import { after, test } from "node:test";
 
 import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
+import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
 const teardown = installRenderDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
@@ -37,7 +38,7 @@ const STATE: VideoState = {
   rev: 1,
   relay: { state: "off" },
   kinds: ["pull", "push", "embed", "external"],
-  ports: { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 },
+  ports: DEFAULT_VIDEO_PORTS,
   binaryPresent: true,
   archivePresent: true,
   screens: [],
