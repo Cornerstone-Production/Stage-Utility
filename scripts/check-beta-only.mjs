@@ -26,6 +26,7 @@
 //   node scripts/check-beta-only.mjs <base-ref>
 
 import { execFileSync } from "node:child_process";
+import { isMain } from "./is-main.mjs";
 import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
 
 const TRAILER_PATTERN = /^Beta-only:\s*(true|yes)\s*$/im;
@@ -140,4 +141,4 @@ function main() {
 }
 
 // Only when run directly, so findBetaOnlyCandidates can be imported by a test.
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop())) main();
+if (isMain(import.meta.url, process.argv[1])) main();

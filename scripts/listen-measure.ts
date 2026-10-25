@@ -48,10 +48,10 @@
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import * as net from "node:net";
-import { pathToFileURL } from "node:url";
 
 import { listenPathName } from "../main/services/video/audio-listen.js";
 import { FEED_ID_PATTERN, isReservedFeedId } from "../main/services/video/feed-id.js";
+import { isMain } from "./is-main.mjs";
 
 // ── Pure: arguments ──────────────────────────────────────────────────────────
 
@@ -563,4 +563,4 @@ async function main(): Promise<void> {
   process.exit(report.problems.length ? 1 : 0);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) void main();
+if (isMain(import.meta.url, process.argv[1])) void main();

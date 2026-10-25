@@ -49,11 +49,20 @@ export const FIRST_FRAME_TIMEOUT_MS = 5000;
 export const HLS_FIRST_FRAME_TIMEOUT_MS = 15_000;
 export const RETRY_MIN_MS = 1000;
 export const RETRY_MAX_MS = 30_000;
-/** How long playback must hold, with no drop, before the backoff starts over
- *  and a failing streak counts as recovered. One frame is not recovery:
+/** How long playback must hold, with no drop, before the backoff starts over.
+ *  One frame is not recovery:
  *  Chrome's native HLS player showed one frame of the relay's low-latency
  *  HLS and then failed, every time. */
 export const RESET_AFTER_PLAYING_MS = 10_000;
+/** How long playback must hold before a failing streak is logged as over. Longer
+ *  than RESET_AFTER_PLAYING_MS: a picture that freezes again every 20 s or so
+ *  (a decoder that wedges on every session) is one outage, not a pair of
+ *  lines per cycle. */
+export const RECOVERED_AFTER_PLAYING_MS = 60_000;
+/** After WebRTC has played a relay feed on a screen, how many sessions in a row
+ *  may connect with no frame and be retried over WebRTC as a silent source
+ *  before the usual verdict applies again and the feed falls back to HLS. */
+export const SILENT_SOURCE_RETRIES = 3;
 /** A failing streak's "still failing" reminder, at most this often. */
 export const STREAK_REMIND_MS = 5 * 60 * 1000;
 /** How long a relay feed plays over HLS after WebRTC proved unusable on this
@@ -70,6 +79,18 @@ export const PROBE_POLL_MS = 500;
 export const DROP_GRACE_MS = 3000;
 /** How often the decoded-frame count is read while waiting for a first frame. */
 export const FRAME_POLL_MS = 200;
+/** How long a picture that was playing may go without a new decoded frame
+ *  before the attempt counts as dropped and is retried. The connection can
+ *  read "connected" all the while: a source that stops sending held one for
+ *  about 19 s before the relay gave up on it, and a wedged decoder ("Too many
+ *  frames backed up in the decoder") holds one for ever, the picture frozen on
+ *  its last frame until the feed was routed away and back. */
+export const FRAME_STALL_MS = 5000;
+/** HLS gets longer, as for its first frame: a segmented playlist stalls for a
+ *  segment's length routinely and catches up by itself. */
+export const HLS_FRAME_STALL_MS = 15_000;
+/** How often the decoded-frame count is read while a picture plays. */
+export const STALL_POLL_MS = 1000;
 
 /** How many times in a row a listening session may drop before the page gives the sound up and plays the picture alone. */
 export const LISTEN_MAX_FAILURES = 3;
@@ -100,8 +121,11 @@ interface AttemptCallbacks {
    * an external WHEP feed with no HLS to fall back to needs, since marking
    * it permanently unusable would leave it on "can't play" forever with no
    * path back.
+   *
+   * `silentSource` is true when a WebRTC session connected and showed no frame
+   * where WebRTC has already played this feed (see `webrtcHasPlayed`).
    */
-  onDropped: (reason: string) => void;
+  onDropped: (reason: string, silentSource?: boolean) => void;
   /**
    * A listening attempt (`choice.listen`) the relay refused with a verdict status
    * (400/406/415/422). It has no HLS twin, so the caller gives the sound up at once.
@@ -159,6 +183,12 @@ export function startPlaybackAttempt(
   choice: PlaybackAttemptChoice,
   cb: AttemptCallbacks,
   adopt?: AdoptedWebrtc,
+  /** WebRTC has already shown this feed's picture on this screen. A session
+   *  that then connects and shows no frame says the SOURCE is silent (a
+   *  reconnect after a frozen picture lands on a relay path still open with
+   *  nothing on it), not that WebRTC cannot reach this screen, so it is
+   *  retried rather than sent to HLS. */
+  webrtcHasPlayed = false,
 ): PlaybackAttempt {
   const controller = new AbortController();
   let ended = false;
@@ -170,6 +200,7 @@ export function startPlaybackAttempt(
   let dropTimer: ReturnType<typeof setTimeout> | undefined;
   let latencyInterval: ReturnType<typeof setInterval> | undefined;
   let pollInterval: ReturnType<typeof setInterval> | undefined;
+  let stallInterval: ReturnType<typeof setInterval> | undefined;
   let frameCbHandle: number | undefined;
 
   const clearTimers = () => {
@@ -178,6 +209,7 @@ export function startPlaybackAttempt(
     clearTimeout(dropTimer);
     clearInterval(latencyInterval);
     clearInterval(pollInterval);
+    clearInterval(stallInterval);
     const v = video as HTMLVideoElement & { cancelVideoFrameCallback?: (h: number) => void };
     if (frameCbHandle !== undefined && v.cancelVideoFrameCallback) v.cancelVideoFrameCallback(frameCbHandle);
   };
@@ -238,6 +270,7 @@ export function startPlaybackAttempt(
       clearTimeout(connectTimer);
       clearTimeout(frameTimer);
       clearInterval(pollInterval);
+      watchForStall();
       if (choice.method === "hls" && session?.kind === "hls") {
         cb.onPhase("delayed");
         const hlsSession = session.s;
@@ -262,6 +295,36 @@ export function startPlaybackAttempt(
         seen = decoded;
       }, FRAME_POLL_MS);
     }
+  };
+
+  /**
+   * Once a picture is up, a decoded-frame count that stops moving for
+   * FRAME_STALL_MS (HLS_FRAME_STALL_MS) ends the attempt as dropped, so it is
+   * torn down, retried with backoff, and the widget shows its offline cover
+   * instead of the last frame. Armed only once the count has been SEEN to
+   * move during this picture: a browser whose count never moves for this
+   * source (requestVideoFrameCallback lifted the cover instead) would
+   * otherwise read every picture as frozen and reconnect it every few
+   * seconds. Elapsed time is counted in polls, not read from a clock.
+   */
+  const watchForStall = () => {
+    const v = video as HTMLVideoElement & { getVideoPlaybackQuality?: () => { totalVideoFrames: number } };
+    if (typeof v.getVideoPlaybackQuality !== "function") return;
+    const limitMs = choice.method === "hls" ? HLS_FRAME_STALL_MS : FRAME_STALL_MS;
+    let last = v.getVideoPlaybackQuality().totalVideoFrames;
+    let moving = false;
+    let stillMs = 0;
+    stallInterval = setInterval(() => {
+      const decoded = v.getVideoPlaybackQuality!().totalVideoFrames;
+      if (decoded !== last) {
+        last = decoded;
+        moving = true;
+        stillMs = 0;
+        return;
+      }
+      stillMs += STALL_POLL_MS;
+      if (moving && stillMs >= limitMs) onDroppedAfterFrame(`the picture froze: no new frame for ${Math.round(stillMs / 1000)} s`);
+    }, STALL_POLL_MS);
   };
 
   /** Why the browser refused play(), so the first-frame deadline can name it. */
@@ -299,12 +362,16 @@ export function startPlaybackAttempt(
   };
   const noFrame = (why: string) => (playRefused === null ? why : `${why}; the browser refused to play (${playRefused})`);
 
+  /** A connected WebRTC session with no frame: a verdict on WebRTC here,
+   *  unless WebRTC has already played this feed here (see webrtcHasPlayed). */
+  const connectedNoFrame = (why: string) => (webrtcHasPlayed ? end(() => cb.onDropped(why, true)) : webrtcUnusable(why));
+
   /** The failure half: no frame within `timeoutMs` ends the attempt. */
   const firstFrameDeadline = (timeoutMs: number) => {
     clearTimeout(frameTimer);
     frameTimer = setTimeout(() => {
       if (gotFirstFrame) return;
-      if (choice.method === "webrtc") webrtcUnusable(noFrame("connected, but no frame ever arrived"));
+      if (choice.method === "webrtc") connectedNoFrame(noFrame("connected, but no frame ever arrived"));
       else end(() => cb.onDropped(noFrame("no frame arrived over HLS")));
     }, timeoutMs);
   };
@@ -346,8 +413,8 @@ export function startPlaybackAttempt(
           if (gotFirstFrame) return;
           // A refused play() is named only by the first-frame deadline, the
           // path a session takes once its "connected" event arrives.
-          const why = whep.pc.connectionState === "connected" ? "connected, but no frame ever arrived" : "never connected after a successful handshake";
-          webrtcUnusable(why);
+          if (whep.pc.connectionState === "connected") connectedNoFrame("connected, but no frame ever arrived");
+          else webrtcUnusable("never connected after a successful handshake");
         }, CONNECT_TIMEOUT_MS);
         whep.pc.addEventListener(
           "connectionstatechange",
@@ -687,6 +754,13 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   // Whether the fallback has been logged and WebRTC has not held since: the
   // line is written once per outage, never once per probe.
   const webrtcOutageRef = useRef(false);
+  // The WebRTC address that has shown a picture on this screen, so a later
+  // session to it that connects with no frame is retried, not sent to HLS —
+  // SILENT_SOURCE_RETRIES times in a row, counted here, after which the
+  // address is forgotten and the next one is a verdict on WebRTC again.
+  // Picture sessions only: a listening session keeps its own count instead.
+  const webrtcPlayedUrlRef = useRef<string | null>(null);
+  const silentDropsRef = useRef(0);
   // The phase belongs to one attempt (`epoch`), so a new attempt reads "connecting"
   // from the render that chooses it and not "live" from the one before.
   const [phased, setPhased] = useState<{ epoch: number; phase: "connecting" | "live" | "delayed" | "offline" }>({ epoch: 0, phase: "connecting" });
@@ -717,8 +791,8 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
   // every STREAK_REMIND_MS, and its recovery — never a line per retry, which
   // from one widget had /api/log/client answering 429 within seconds. The
   // server's own once-per-outage rule (main/services/repeat-log.ts), with no
-  // settle window of its own: `ok` is only called once playback has held,
-  // which is this hook's settle window.
+  // settle window of its own: `ok` is only called once playback has held for
+  // RECOVERED_AFTER_PLAYING_MS, which is this hook's settle window.
   const streakRef = useRef<OutageLog | null>(null);
   const streak = () => (streakRef.current ??= new OutageLog(0, STREAK_REMIND_MS));
 
@@ -868,6 +942,7 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
     const count = isListen ? listenFailsRef : attemptCountRef;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let heldTimer: ReturnType<typeof setTimeout> | undefined;
+    let settledTimer: ReturnType<typeof setTimeout> | undefined;
     const name = current?.name ?? "this feed";
     const key = current?.id ?? "";
     // A listening session's failures are its own streak and its own words: they are
@@ -884,11 +959,17 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
       {
         onPhase: (p) => {
           setPhased({ epoch, phase: p });
+          if (p === "live" && !isListen && choice.method === "webrtc") {
+            webrtcPlayedUrlRef.current = choice.url;
+            silentDropsRef.current = 0;
+          }
           if ((p === "live" || p === "delayed") && heldTimer === undefined) {
-            heldTimer = setTimeout(() => {
-              count.current = 0;
+            settledTimer = setTimeout(() => {
               const d = streak().ok(streakKey, Date.now());
               if (d.log) onLogRef.current?.(isListen ? `listening to "${name}" works again${d.note}` : `"${name}" is playing again on this screen${d.note}`);
+            }, RECOVERED_AFTER_PLAYING_MS);
+            heldTimer = setTimeout(() => {
+              count.current = 0;
               if (p === "live" && !isListen && choice.method === "webrtc" && webrtcOutageRef.current) {
                 webrtcOutageRef.current = false;
                 onLogRef.current?.(`"${name}" plays over WebRTC again on this screen`);
@@ -913,8 +994,13 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
           webrtcOutageRef.current = true;
           setWebrtcFailed(true);
         },
-        onDropped: (reason) => {
+        onDropped: (reason, silentSource) => {
           clearTimeout(heldTimer);
+          clearTimeout(settledTimer);
+          if (silentSource && ++silentDropsRef.current >= SILENT_SOURCE_RETRIES) {
+            webrtcPlayedUrlRef.current = null;
+            silentDropsRef.current = 0;
+          }
           setPhased({ epoch, phase: "offline" });
           const delay = Math.min(RETRY_MAX_MS, RETRY_MIN_MS * 2 ** count.current);
           count.current += 1;
@@ -932,11 +1018,15 @@ export function useVideoSession(input: VideoSessionInput): VideoSessionResult {
         },
       },
       adopt,
+      // Picture sessions only: a listening session that connects with no frame
+      // is a drop toward its LISTEN_MAX_FAILURES either way.
+      !isListen && choice.method === "webrtc" && webrtcPlayedUrlRef.current === choice.url,
     );
 
     return () => {
       clearTimeout(retryTimer);
       clearTimeout(heldTimer);
+      clearTimeout(settledTimer);
       attemptHandle.stop();
       samplerRef.current?.stop();
       samplerRef.current = null;
