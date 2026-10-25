@@ -668,8 +668,11 @@ Each screen writes its own `[video]` lines from the browser:
 - A feed failing on a screen, once per failing streak: its first failure and
   the reason, a reminder at most every 5 minutes while it goes on failing
   (with how many attempts and for how long), and a line when it is playing
-  again after holding for 10 seconds. Individual retries are not logged; the
+  again after holding for 60 seconds, so a picture that keeps dropping and
+  coming back is one outage. Individual retries are not logged; the
   browser console shows each one, with its delay, at the Verbose level.
+- A picture that froze is one such failure, with the reason `the picture
+  froze: no new frame for 5 s` (`15 s` over HLS).
 - When a picture never arrived because the browser refused to start it, the
   reason on that line, or on the WebRTC fallback line below, ends with the
   browser's own words.
