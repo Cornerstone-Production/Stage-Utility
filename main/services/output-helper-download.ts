@@ -41,7 +41,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { withoutDataDir } from "./app-paths.js";
-import { commitPart, downloadWatchdog, readCapped, sha256OfFile, streamToPart } from "./capped-download.js";
+import { commitPart, downloadWatchdog, readCapped, sha256OfFile, streamToPart, type WatchdogTimers } from "./capped-download.js";
 import { errorMessage, fetchFailureMessage } from "./errors.js";
 import { GITHUB_API_REPO, GITHUB_RELEASE_DOWNLOAD, rateLimitMessage } from "./github-repo.js";
 import { scrub } from "./scrub.js";
@@ -106,6 +106,9 @@ export interface DownloadDeps {
   maxZipBytes?: number;
   zipIdleMs?: number;
   zipTotalMs?: number;
+  /** Replaces the timers behind the idle limit and the ceiling. Tests only: a
+   *  test moves time itself instead of waiting for it. */
+  watchdogTimers?: WatchdogTimers;
   /** The most the releases API call may take. */
   digestTimeoutMs?: number;
 }
@@ -376,7 +379,7 @@ export class OutputHelperDownloads {
     if (!expected) throw new Refusal(502, `the cached ${sumName} is not a SHA-256 digest`);
 
     // Idle watchdog plus a ceiling, over the connect, the headers and the body.
-    const watchdog = downloadWatchdog({ idleMs: this.zipIdleMs, totalMs: this.zipTotalMs });
+    const watchdog = downloadWatchdog({ idleMs: this.zipIdleMs, totalMs: this.zipTotalMs, timers: this.deps.watchdogTimers });
     let size: number;
     try {
       size = await this.downloadZip(asset, file, version, expected, sumFile, watchdog);

@@ -13,6 +13,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
+import type { WatchdogTimers } from "./capped-download.js";
 import { captureConsole } from "./fixtures/capture-console.js";
 import { assetDigest, OutputHelperDownloads, parseChecksum, parseHelperPath, pruneOutputHelperCache, releaseHosts, type HelperAsset } from "./output-helper-download.js";
 
@@ -538,32 +539,63 @@ describe("fetching the helper from the release", () => {
   });
 
   describe("a transfer that is slow but healthy, and one that is not", () => {
-    /** The zip's reply: `chunks` chunks `gapMs` apart, then the end, or silence for ever when `endless`.
-     *  The stream errors when the request's signal aborts, as a real fetch body does. */
-    const slowZip = (chunks: number, gapMs: number, opts: { endless?: boolean } = {}) => {
+    /** A clock the test moves. The watchdog's timers run on it, so how long a
+     *  transfer takes is a number the test chooses, not a wait a loaded machine can
+     *  stretch: three of these tests failed under full-suite load when they slept
+     *  for real. Nothing here waits. */
+    const fakeClock = () => {
+      let now = 0;
+      let nextId = 0;
+      const live = new Map<number, { at: number; fn: () => void }>();
+      const timers: WatchdogTimers = {
+        setTimeout: (fn, ms) => {
+          const id = nextId++;
+          live.set(id, { at: now + ms, fn });
+          return { id, unref: () => undefined } as unknown as NodeJS.Timeout;
+        },
+        clearTimeout: (timer) => void live.delete((timer as unknown as { id: number }).id),
+      };
+      /** Move time on, firing each timer that falls due, in order. */
+      const advance = (ms: number) => {
+        const end = now + ms;
+        for (;;) {
+          const due = [...live.entries()].filter(([, v]) => v.at <= end).sort((x, y) => x[1].at - y[1].at)[0];
+          if (!due) break;
+          live.delete(due[0]);
+          now = due[1].at;
+          due[1].fn();
+        }
+        now = end;
+      };
+      return { timers, advance };
+    };
+
+    /** The zip's reply: `chunks` chunks `gapMs` apart on the fake clock, then the
+     *  end, or silence for ever when `endless`. The stream errors when the
+     *  request's signal aborts, as a real fetch body does. */
+    const slowZip = (clock: ReturnType<typeof fakeClock>, chunks: number, gapMs: number, opts: { endless?: boolean } = {}) => {
       const real = release.fetch;
       release.fetch = async (input, init) => {
         if (!String(input).endsWith(".zip")) return real(input, init);
         let sent = 0;
-        let timer: NodeJS.Timeout | undefined;
         const stream = new ReadableStream<Uint8Array>({
           start(c) {
-            init?.signal?.addEventListener("abort", () => {
-              clearTimeout(timer);
-              c.error(init.signal!.reason);
-            });
+            init?.signal?.addEventListener("abort", () => c.error(init.signal!.reason));
           },
-          pull: (c) =>
-            new Promise<void>((resolve) => {
-              timer = setTimeout(() => {
-                if (sent >= chunks && !opts.endless) c.close();
-                else if (sent >= chunks) return resolve(); // silence: nothing more, never ends
-                else c.enqueue(new Uint8Array(100).fill(sent++ + 1));
-                resolve();
-              }, gapMs);
-              // A fake that is still running when a test fails must not keep the process alive.
-              timer.unref();
-            }),
+          async pull(c) {
+            if (sent >= chunks && opts.endless) {
+              // Silence: time passes, nothing arrives, until the watchdog aborts.
+              while (!init?.signal?.aborted) {
+                clock.advance(gapMs);
+                await Promise.resolve();
+              }
+              return;
+            }
+            clock.advance(gapMs);
+            if (init?.signal?.aborted) return;
+            if (sent >= chunks) c.close();
+            else c.enqueue(new Uint8Array(100).fill(sent++ + 1));
+          },
         });
         return new Response(stream, { status: 200 });
       };
@@ -576,13 +608,12 @@ describe("fetching the helper from the release", () => {
 
     it("lets a slow transfer finish when it keeps moving, though it takes far longer than the idle limit", { timeout: 5000 }, async (t) => {
       captureConsole(t, "log", "warn");
-      // ~1.2 s in all against a 400 ms idle limit. Each gap is far inside the
-      // limit, so a loaded machine stalling the event loop for a few hundred ms
-      // still cannot make a moving transfer look idle; the total is still three
-      // times the limit, which is what this proves.
+      // 1.2 s of fake time in all against a 400 ms idle limit: each gap is far
+      // inside the limit, the total is three times it, which is what this proves.
       const bytes = publishedFor(16);
-      slowZip(16, 75);
-      const r = await make({ zipIdleMs: 400, zipTotalMs: 10_000 }).resolve(ZIP);
+      const clock = fakeClock();
+      slowZip(clock, 16, 75);
+      const r = await make({ zipIdleMs: 400, zipTotalMs: 10_000, watchdogTimers: clock.timers }).resolve(ZIP);
       assert.ok(r.ok, JSON.stringify(r));
       assert.deepEqual(await fs.readFile(r.file), bytes);
     });
@@ -590,8 +621,9 @@ describe("fetching the helper from the release", () => {
     it("gives up on a transfer that goes quiet part-way, and leaves nothing but the checksum", { timeout: 5000 }, async (t) => {
       captureConsole(t, "warn");
       publishedFor(6);
-      slowZip(2, 20, { endless: true });
-      const r = await make({ zipIdleMs: 100, zipTotalMs: 10_000 }).resolve(ZIP);
+      const clock = fakeClock();
+      slowZip(clock, 2, 20, { endless: true });
+      const r = await make({ zipIdleMs: 100, zipTotalMs: 10_000, watchdogTimers: clock.timers }).resolve(ZIP);
       assert.ok(!r.ok);
       assert.equal(r.status, 502);
       assert.match(r.message, /did not finish downloading: no data for 0\.1 s/);
@@ -601,8 +633,9 @@ describe("fetching the helper from the release", () => {
     it("stops a transfer that trickles for ever at the ceiling", { timeout: 5000 }, async (t) => {
       captureConsole(t, "warn");
       publishedFor(6);
-      slowZip(1_000_000, 20); // never idle for 200 ms, never ends
-      const r = await make({ zipIdleMs: 200, zipTotalMs: 250 }).resolve(ZIP);
+      const clock = fakeClock();
+      slowZip(clock, 1_000_000, 20); // never idle for 200 ms, never ends
+      const r = await make({ zipIdleMs: 200, zipTotalMs: 250, watchdogTimers: clock.timers }).resolve(ZIP);
       assert.ok(!r.ok);
       assert.match(r.message, /did not finish downloading: still going after 0\.25 s/);
       assert.deepEqual(await listCache(), [SUM.name]);
