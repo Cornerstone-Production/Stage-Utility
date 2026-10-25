@@ -196,9 +196,10 @@ connected display.
 ### The settings panel
 
 A panel docks beside the cards, so a card and its preview stay in view while a
-setting changes. **Settings**, at the top right of the page, opens and closes it,
-and the choice is remembered in the browser. It starts open where it fits beside
-the cards; on a narrower window it starts closed and covers the page when opened.
+setting changes. **Settings**, at the top right of the page, opens and closes it. It
+starts closed on every visit and nothing is remembered; it opens when asked: **Settings**,
+**+ Add a screen**, a found device's **Set up**, or **Screen settings…** in a card's
+menu. On a narrower window it covers the page when opened.
 With nothing selected it says *Select a screen or view* and offers **+ Add a
 screen**.
 

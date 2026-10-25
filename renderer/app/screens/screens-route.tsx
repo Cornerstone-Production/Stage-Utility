@@ -40,15 +40,15 @@ import { Button } from "../../components/ui";
 import { usePageActions } from "../page-actions";
 import { useStageSettings } from "../use-stage-settings";
 import { UnclaimedScreens } from "./unclaimed-screens";
-import { usePanelOpen } from "./use-panel-open";
 
 export function ScreensRoute() {
   const s = useStageSettings();
   const router = useRouter();
   // Whether the panel is showing, and what it is on. Held HERE rather than in the
   // cards because things outside the card grid move it: the Add a screen tile, a
-  // waiting device's "Set up as a new screen", and the panel itself.
-  const [open, setOpen] = usePanelOpen();
+  // waiting device's "Set up as a new screen", and the panel itself. Closed on every
+  // visit and never remembered: it opens only when asked.
+  const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState<PanelTarget | null>(null);
   // Counts starts of a new screen, so pressing Add a screen again resets the form.
   const starts = useRef(0);
