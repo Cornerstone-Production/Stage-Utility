@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { test, describe, beforeEach, afterEach } from "node:test";
 
 import { CALENDAR_API_VERSION, CALENDAR_API_VERSIONS } from "./pco-calendar-service.js";
-import { PCO_API_VERSION, SERVICES_API_VERSIONS, pcoService, resolvePcoApiVersion } from "./pco-service.js";
+import { PCO_API_VERSION, PEOPLE_API_VERSION, PEOPLE_API_VERSIONS, SERVICES_API_VERSIONS, pcoService, resolvePcoApiVersion } from "./pco-service.js";
 
 /** The pinned version, restated here so a bump has to be deliberate in two places. */
 const EXPECTED_VERSION = "2018-11-01";
@@ -173,6 +173,7 @@ describe("each product's pin is in that product's own version list", () => {
   const products = [
     { name: "Services", pin: PCO_API_VERSION as string, published: SERVICES_API_VERSIONS as readonly string[] },
     { name: "Calendar", pin: CALENDAR_API_VERSION as string, published: CALENDAR_API_VERSIONS as readonly string[] },
+    { name: "People", pin: PEOPLE_API_VERSION as string, published: PEOPLE_API_VERSIONS as readonly string[] },
   ];
 
   for (const { name, pin, published } of products) {

@@ -85,6 +85,43 @@ export type ServicesApiVersion = (typeof SERVICES_API_VERSIONS)[number];
 export const PCO_API_VERSION: ServicesApiVersion = "2018-11-01";
 
 /**
+ * Every version Planning Center PEOPLE publishes, newest first. People's own
+ * list, never Services' (see CALENDAR_API_VERSIONS in pco-calendar-service.ts for
+ * what a copied date costs). Read from
+ * https://api.planningcenteronline.com/people/v2/documentation on 2026-10-22.
+ */
+export const PEOPLE_API_VERSIONS = [
+  "2026-10-05",
+  "2026-06-04",
+  "2025-11-10",
+  "2025-07-17",
+  "2025-07-02",
+  "2025-03-20",
+  "2024-09-12",
+  "2023-03-21",
+  "2023-02-15",
+  "2022-07-14",
+  "2022-01-28",
+  "2022-01-05",
+  "2021-08-17",
+  "2020-07-22",
+  "2020-04-06",
+  "2019-10-10",
+  "2019-01-14",
+  "2018-08-01",
+] as const;
+export type PeopleApiVersion = (typeof PEOPLE_API_VERSIONS)[number];
+
+/**
+ * The People API version the by-ID person read is written against: People's
+ * newest. Its one change since 2025-11-10 (`resource_permission_flags` became
+ * `selective_access`) is on an attribute getPerson does not read; it reads
+ * `name`, `first_name`, `last_name` and `avatar`, present across the range.
+ */
+export const PEOPLE_API_VERSION: PeopleApiVersion = "2026-10-05";
+const PEOPLE_BASE = "https://api.planningcenteronline.com/people/v2";
+
+/**
  * The version PCO will actually serve for `requested`, given what `published` has.
  *
  * PCO's documented algorithm: the newest published version at or BEFORE the
@@ -1507,23 +1544,50 @@ class PcoService {
     const cacheKey = `person:${appId}:${personId}`;
     const cached = this.cacheGet<PersonCardDTO>(cacheKey);
     if (cached) return cached;
-    let json: PcoResponse;
-    try {
-      json = await this.request(pcoUrl`/people/${pcoId("personId", personId)}`, appId, secret);
-    } catch (err) {
-      if (err instanceof PcoNotFoundError) return null;
-      throw err;
+    // Services only knows people added to Services ("A person added to Planning
+    // Center Services"), so someone who is in the church's People database but has
+    // never been on a Services team is a 404 here. The slot's person ID is the
+    // account-wide one, so ask People next before calling them nobody.
+    let node = await this.readPersonNode(() =>
+      this.request(pcoUrl`/people/${pcoId("personId", personId)}`, appId, secret),
+    );
+    if (!node) {
+      try {
+        node = await this.readPersonNode(() =>
+          this.requestProduct(`${PEOPLE_BASE}/people/${pcoId("personId", personId).value}`, appId, secret, PEOPLE_API_VERSION),
+        );
+      } catch (err) {
+        // Say which of the two reads failed: a People 403 (the credentials have no
+        // People access) must not read as a Services failure on /log. The error
+        // keeps its own class, so a PcoAuthError is still one to its caller.
+        if (err instanceof Error) {
+          err.message = `People API: ${err.message}`;
+          throw err;
+        }
+        throw new Error(`People API: ${errorMessage(err)}`, { cause: err });
+      }
     }
-    const node = Array.isArray(json.data) ? json.data[0] : json.data;
     if (!node) return null;
     const a = node.attributes;
     const joined = [a.first_name, a.last_name].filter((v) => v != null && String(v) !== "").join(" ");
     const card: PersonCardDTO = {
-      name: (a.full_name != null && String(a.full_name)) || joined || "Unknown",
+      name: (a.full_name != null && String(a.full_name)) || (a.name != null && String(a.name)) || joined || "Unknown",
       photoUrl: personPhoto(a),
     };
     this.cacheSet(cacheKey, card, TTL_LONG_MS);
     return card;
+  }
+
+  /** One person record from either product, or null when that product has no such person. */
+  private async readPersonNode(read: () => Promise<PcoResponse>): Promise<PcoNode | null> {
+    let json: PcoResponse;
+    try {
+      json = await read();
+    } catch (err) {
+      if (err instanceof PcoNotFoundError) return null;
+      throw err;
+    }
+    return (Array.isArray(json.data) ? json.data[0] : json.data) ?? null;
   }
 
   async listTeamMembers(
