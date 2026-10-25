@@ -290,6 +290,9 @@ const VIEW_KINDS: Record<ViewKind, true> = {
   calendar: true,
 };
 
+/** Every ViewKind id, derived from the table the type checker keeps complete. */
+export const VIEW_KIND_IDS = Object.keys(VIEW_KINDS) as ViewKind[];
+
 /** Narrow an untrusted body value to a ViewKind. */
 export function isDisplayKind(v: unknown): v is ViewKind {
   // hasOwn rather than `in`: the value is untrusted, and "toString" is `in`

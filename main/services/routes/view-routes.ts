@@ -652,10 +652,12 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    // POST /api/outputs — { name?, viewId?, newView?, slug?, showInSidebar? }.
-    // newView ("wall"|"control") makes a blank view of that kind for the screen
-    // instead of viewId. All of it goes through stageController.createScreen,
-    // which validates before it writes. A `mode` is refused: the view decides.
+    // POST /api/outputs — { name?, viewId?, newView?, viewKind?, layout?, slug?,
+    // showInSidebar? }. newView ("wall"|"control") makes a view for the screen
+    // instead of viewId. viewKind is a wall view's kind (custom when absent; custom
+    // only for a control surface) and layout a custom view's starting layout. All of
+    // it goes through stageController.createScreen, which validates before it
+    // writes. A `mode` is refused: the view decides.
     if (method === "POST" && pathname === "/api/outputs") {
       const body = await readBody(req) as Record<string, unknown>;
       if (refuseMode(res, body)) return;

@@ -8,13 +8,13 @@
 import type * as http from "node:http";
 
 import { ScreenWriteError, ViewSurfaceChangedError } from "../stage-controller.js";
-import type { CreateScreenInput } from "../../types/views.js";
+import { isLayoutShape, type CreateScreenInput } from "../../types/views.js";
 import { errorMessage } from "../errors.js";
-import { error, json } from "./context.js";
+import { error, isDisplayKind, json } from "./context.js";
 
 /** The creation fields a body may carry. A claim that names an existing screen
  *  carries none of them. */
-export const CREATE_SCREEN_FIELDS = ["viewId", "newView", "slug", "showInSidebar", "expectSurface"] as const;
+export const CREATE_SCREEN_FIELDS = ["viewId", "newView", "viewKind", "layout", "slug", "showInSidebar", "expectSurface"] as const;
 
 /**
  * Answer a body that carries a `mode` with a 400, and say whether it did. A
@@ -51,6 +51,14 @@ export function readCreateScreenBody(body: Record<string, unknown>): CreateScree
   if ("newView" in body) {
     if (body.newView !== "wall" && body.newView !== "control") return { error: 'body.newView must be "wall" or "control"' };
     input.newView = body.newView;
+  }
+  if ("viewKind" in body) {
+    if (!isDisplayKind(body.viewKind)) return { error: "body.viewKind must be a view kind" };
+    input.viewKind = body.viewKind;
+  }
+  if ("layout" in body) {
+    if (!isLayoutShape(body.layout)) return { error: "body.layout must be an object with an objects array and a canvas of numeric width and height" };
+    input.layout = body.layout;
   }
   if ("expectSurface" in body) {
     if (body.expectSurface !== "display" && body.expectSurface !== "console") return { error: 'body.expectSurface must be "display" or "console"' };
