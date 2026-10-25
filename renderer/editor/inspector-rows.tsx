@@ -340,7 +340,7 @@ export function Segmented<T extends string>({
   /** Names the group for assistive tech; the visible label is the caller's. */
   label: string;
   value: T;
-  options: { value: T; label: string }[];
+  options: readonly { value: T; label: string }[];
   onChange: (v: T) => void;
   /** Every segment inert, for a moment the choice must not change. Marked with
    *  aria-disabled rather than the disabled attribute, so a segment that holds

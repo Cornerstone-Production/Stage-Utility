@@ -180,7 +180,7 @@ beforeEach(() => {
 
 const state = () => ({ ...DEFAULT_STAGE_STATE, outputs, views });
 
-type CreateBody = { name?: string; viewId?: string; newView?: "wall" | "control" };
+type CreateBody = { name?: string; viewId?: string; newView?: "wall" | "control"; viewKind?: ViewKind };
 /** What POST /api/outputs and a claim of a new screen do to the lists; returns the new id. */
 function makeScreen(body: CreateBody): string {
   const id = `display-${outputs.length + 10}`;
@@ -188,7 +188,7 @@ function makeScreen(body: CreateBody): string {
   let viewId: string | null = body.viewId ?? null;
   if (body.newView) {
     viewId = `view-made-${id}`;
-    views = [...views, { id: viewId, name, kind: "custom", surface: body.newView === "control" ? "console" : "display", createdAt: NOW }];
+    views = [...views, { id: viewId, name, kind: body.viewKind ?? "custom", surface: body.newView === "control" ? "console" : "display", createdAt: NOW }];
   }
   outputs = [...outputs, { id, name, viewId }];
   return id;
@@ -805,6 +805,16 @@ describe("Add a screen", () => {
     await click(addTile());
     assert.ok(panel().getByText("New screen · step 1 of 2"), "the form stayed on its step");
     assert.equal((panel().getByLabelText("Name") as HTMLInputElement).value, "", "the typed name was kept");
+  });
+
+  test("a new Mic Slots wall view POSTs its kind, and the screen it makes shows a slots view", async () => {
+    await mountScreens();
+    await click(addTile());
+    await nextStep();
+    await click(within(panel().getByRole("radiogroup", { name: "Kind of wall view" })).getByRole("radio", { name: "Mic Slots" }));
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { newView: "wall", viewKind: "slots" } }]);
+    assert.equal(views.at(-1)?.kind, "slots");
   });
 
   test("a new control surface POSTs newView: control", async () => {
