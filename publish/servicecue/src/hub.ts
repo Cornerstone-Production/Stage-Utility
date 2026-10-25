@@ -17,7 +17,7 @@ import {
   type AssetContentType,
   type FrameChannel,
   type LastHeartbeat,
-  type PublishStatus,
+  type HubStatus,
 } from "../../../main/types/servicecue-publish.js";
 import { buildOf } from "./build.js";
 import { admit, limitsFrom, type Held } from "./capacity.js";
@@ -141,7 +141,7 @@ export class PublishHub extends DurableObject<Env> implements HubApi {
     return removed;
   }
 
-  async status(): Promise<PublishStatus> {
+  async status(): Promise<HubStatus> {
     return {
       protocol: PUBLISH_PROTOCOL_VERSION,
       docs: this.docKeys(),

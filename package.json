@@ -17,7 +17,8 @@
   "scripts": {
     "dev": "vite",
     "dev:renderer": "vite",
-    "build": "vite build",
+    "build": "vite build && node --import tsx scripts/servicecue-bundle.ts --soft",
+    "servicecue:bundle": "node --import tsx scripts/servicecue-bundle.ts",
     "servicecue:build": "vite build --config vite.servicecue.config.ts",
     "servicecue:dev": "npm run servicecue:build && npm --prefix publish/servicecue run dev",
     "servicecue:deploy": "npm run servicecue:build && npm --prefix publish/servicecue run deploy",

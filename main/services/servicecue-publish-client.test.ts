@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { PUBLISH_MAX_BODY_BYTES } from "../types/servicecue-publish.js";
+import { PUBLISH_MAX_BODY_BYTES, viewerBuildTag } from "../types/servicecue-publish.js";
 import { FakeReceiver, PAGE_STATUS } from "./fixtures/publish-receiver.js";
 import { startSelfSignedPage } from "./fixtures/self-signed-page.js";
 import { within } from "./fixtures/within.js";
@@ -243,7 +243,28 @@ describe("the push client", () => {
   it("reads the lists in the status answer, and nothing else of it", async () => {
     const answer = { ...PAGE_STATUS, docs: ["rundown-100", "state"], assets: ["a.png"], viewers: 2, lastHeartbeat: { at: 1, sentAt: 1, version: "v" }, extra: "ignored" };
     page.respond = () => ({ status: 200, body: JSON.stringify(answer) });
-    assert.deepEqual(await client.status(), { ok: true, page: { docs: ["rundown-100", "state"], assets: ["a.png"] } });
+    assert.deepEqual(await client.status(), { ok: true, page: { docs: ["rundown-100", "state"], assets: ["a.png"], build: null } });
+  });
+
+  it("reads which build of the page the Worker serves, from the Worker's own answer", async () => {
+    page.document = `<!doctype html><title>viewer</title>${viewerBuildTag("0123456789ab")}`;
+    const served = await client.status();
+    assert.ok(served.ok);
+    assert.equal(served.page.build, "0123456789ab");
+    page.document = null;
+    const none = await client.status();
+    assert.ok(none.ok);
+    assert.equal(none.page.build, null, "a deploy with no page says no build");
+  });
+
+  it("reads a Worker from before the field, or one that sends something else, as no build", async () => {
+    const { build: _gone, ...older } = PAGE_STATUS;
+    for (const answer of [older, { ...PAGE_STATUS, build: 7 }, { ...PAGE_STATUS, build: "not an id" }, { ...PAGE_STATUS, build: ["0123456789ab"] }]) {
+      page.respond = () => ({ status: 200, body: JSON.stringify(answer) });
+      const r = await client.status();
+      assert.ok(r.ok, JSON.stringify(answer));
+      assert.equal(r.page.build, null, JSON.stringify(answer));
+    }
   });
 
   it("refuses an answer that is not a page's status, one over the cap, one that stalls, and a page on another protocol", async () => {

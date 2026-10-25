@@ -46,7 +46,17 @@ Failures answer `{"error": "…"}`.
 | `PUT` | `/_publish/v1/asset/<name>` | image bytes, with a `Content-Type` | `204`. `400` for an empty body, `404` for a name that cannot be an asset's, `415` for any type but the five below |
 | `POST` | `/_publish/v1/heartbeat` | `{"at": <ms>, "version": "…"}` | `204`. `400` for anything else |
 | `PUT` | `/_publish/v1/manifest` | `{"docs": […], "assets": […]}` | `200 {"removedDocs": […], "removedAssets": […]}`. `400` if any entry is not a key or a name |
-| `GET` | `/_publish/v1/status` | | `200 {protocol, docs, assets, lastHeartbeat, viewers}` |
+| `GET` | `/_publish/v1/status` | | `200 {protocol, docs, assets, lastHeartbeat, viewers, build}` |
+
+The status answer's fields:
+
+| Field | Meaning |
+|---|---|
+| `protocol` | The protocol version this Worker speaks |
+| `docs`, `assets` | Every stored doc key and asset name, sorted |
+| `lastHeartbeat` | `{at, sentAt, version}` of the latest heartbeat, or `null` before the first |
+| `viewers` | Viewers connected to the live socket now |
+| `build` | The build id of the page this Worker serves (see [Reloading after a deploy](#reloading-after-a-deploy)), or `null` when the deploy has no document or one with no id. A publisher reads a Worker that sends no `build` as `null` too |
 
 A known path with another method is `405` with an `Allow` header; any other path under
 `/_publish/` is `404`. A request body over **2,000,000 bytes** is `413`, counted as it
@@ -283,7 +293,8 @@ document names its script and style by names that carry their own content hash, 
 is a different document whenever either is. (An icon or a manifest that changes alone
 is not a new build.)
 
-The Worker reads the id out of the document it serves and puts it on the heartbeat it
+The Worker reads the id out of the document it serves and gives it to the status answer
+(`build`), and puts it on the heartbeat it
 replays on connect and on every one it sends after. When a page hears an id that is not
 its own it reloads, on the address it is on, so `?plan=`, `?text=` and `?from=` are
 still there. A socket a deploy dropped reconnects, and the replay is the first thing it
