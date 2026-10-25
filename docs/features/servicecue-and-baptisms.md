@@ -252,7 +252,9 @@ updated. Its link is the page's address with `/servicecue` on the end, and
 The server sends; nothing on the internet connects to it. **Public link**, on the
 ServiceCue presets page (`/servicecue/presets`) under **Shown on the landing page**, is
 where it is switched on: the page's address, the publishing token set on it, and the link
-to hand out. The page holds copies of what is sent and nothing else: no Planning Center
+to hand out. Under **Cloudflare connection**, **Keep the page up to date** gives the server a
+Cloudflare account ID and API token so it updates the public page itself after each update
+([how](../ops/servicecue-on-the-web.md#keeping-it-up-to-date)). The page holds copies of what is sent and nothing else: no Planning Center
 access, no settings, no network addresses. The card's **Setup guide** link opens the
 [deploy guide](../ops/servicecue-on-the-web.md); what the server and the page say to each
 other is in the [publishing protocol](../reference/servicecue-publishing.md).

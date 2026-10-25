@@ -156,6 +156,8 @@ export class ServiceCueDeployer implements DeployHook {
 
   // How it is going. `state` and these are what the card draws.
   private state: DeployState = "off";
+  /** Why `state` is "waiting": read only while it is. */
+  private waitingFor: "live" | "unknown" = "live";
   private bundle: { build: string; version: string } | null = null;
   private noBundle: string | null = null;
   private page: DeployStatus["page"] = null;
@@ -266,6 +268,7 @@ export class ServiceCueDeployer implements DeployHook {
       runningVersion: this.deps.version(),
       page: this.page,
       files: this.files,
+      waitingFor: this.state === "waiting" ? this.waitingFor : null,
       error: this.error,
       now: Date.now(),
     };
@@ -366,6 +369,7 @@ export class ServiceCueDeployer implements DeployHook {
     // A live service always waits. Unknown (just after a restart, or while Planning Center cannot be reached) waits on its own account, and goes ahead when somebody asks.
     if (live || (unknown && mode === "auto")) {
       this.state = "waiting";
+      this.waitingFor = live ? "live" : "unknown";
       this.say(
         `waiting:${manifest.build}:${live}`,
         live
