@@ -2555,6 +2555,31 @@ test("three drops in a row means in a row: a session that held for RESET_AFTER_P
   }
 });
 
+test("a listening streak's recovery waits for RECOVERED_AFTER_PLAYING_MS and is logged as listening, under its own streak", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  const rig = listeningRig(video, logs, [], { listenPath: LISTEN_PATH, listen: { status: 503 } });
+  try {
+    await act(async () => {
+      await flush();
+    }); // drop 1
+    assert.ok(logs.some((l) => l.startsWith('listening to "F" failed')), `the drop was not logged as listening's: ${JSON.stringify(logs)}`);
+    rig.answers.listen = "succeed";
+    await tickBy(RETRY_MIN_MS);
+    act(() => video.fireFrame());
+    await tickBy(RESET_AFTER_PLAYING_MS + 1);
+    assert.ok(!logs.some((l) => l.includes("works again")), `recovered before RECOVERED_AFTER_PLAYING_MS: ${JSON.stringify(logs)}`);
+    await tickBy(RECOVERED_AFTER_PLAYING_MS - RESET_AFTER_PLAYING_MS);
+    assert.equal(logs.filter((l) => l.startsWith('listening to "F" works again')).length, 1, `no listening recovery line: ${JSON.stringify(logs)}`);
+    assert.ok(!logs.some((l) => l.includes("is playing again")), `the sound's recovery was logged as the picture's: ${JSON.stringify(logs)}`);
+  } finally {
+    cleanup();
+    mock.timers.reset();
+    rig.g.restore();
+  }
+});
+
 /** A listening session failing by `drive` is a drop: logged as listening's, not given up on, and retried. */
 async function assertListeningDropRetries(name: string, drive: (video: FakeVideo) => Promise<void> | void) {
   mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
