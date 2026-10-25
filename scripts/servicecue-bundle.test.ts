@@ -29,6 +29,7 @@ const bundled = await bundleServiceCue(OUT, true);
 
 const written = JSON.parse(fs.readFileSync(path.join(OUT, "deploy.json"), "utf8")) as Record<string, unknown>;
 const wrangler = (await parseWranglerConfig(WRANGLER_TEXT)) as {
+  name: string;
   compatibility_date: string;
   compatibility_flags?: string[];
   assets: Record<string, unknown> & { directory: string; binding: string };
@@ -76,13 +77,18 @@ describe("deploy.json, as the bundle wrote it", () => {
     assert.equal(written.protocol, PUBLISH_PROTOCOL_VERSION);
   });
 
+  test("names the Worker as wrangler.jsonc does, so a deployer is not told it twice", () => {
+    assert.equal(written.name, wrangler.name);
+    assert.equal(written.name, "servicecue");
+  });
+
   test("names a module that is in the folder and exports the handler and the Durable Object", () => {
     assert.equal(fs.existsSync(path.join(OUT, String(written.mainModule))), true);
     assert.deepEqual(bundled.workerExports, ["PublishHub", "default"]);
   });
 
   test("has exactly these fields", () => {
-    assert.deepEqual(Object.keys(written).sort(), ["assets", "bindings", "build", "compatibilityDate", "compatibilityFlags", "exports", "keep_bindings", "mainModule", "protocol", "version"]);
+    assert.deepEqual(Object.keys(written).sort(), ["assets", "bindings", "build", "compatibilityDate", "compatibilityFlags", "exports", "keep_bindings", "mainModule", "name", "protocol", "version"]);
   });
 });
 

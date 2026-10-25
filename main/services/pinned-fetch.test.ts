@@ -14,7 +14,7 @@
 //      globalThis.fetch stubbed.
 //
 //   3. ONE FETCH PER FILE. The TypeScript parser lists every call to `fetch` in the
-//      four credentialed services and the list is compared with an exact one. A
+//      credentialed services and the list is compared with an exact one. A
 //      second raw fetch in any of them (a second door that skips the pin) changes
 //      the list. Parsed, not grepped: a comment that says `fetch(` is not a call.
 //
@@ -29,6 +29,7 @@ import ts from "typescript";
 
 import { pinToOrigin } from "./pinned-origin.js";
 import { pvpFetch, pvpOrigin, pvpService, pvpUrl, type PvpOrigin, type PvpTarget, type PvpUrl } from "./pvp-service.js";
+import { cloudflareFetch, cloudflareOrigin, cloudflareUrl, type CloudflareOrigin, type CloudflareUrl } from "./servicecue-cloudflare.js";
 import { publishFetch, publishUrl, type PublishUrl } from "./servicecue-publish-client.js";
 import { parsePublishUrl, type PublishOrigin } from "./servicecue-publish-rules.js";
 import { safeSpaceFetch, safeSpaceUrl, type SafeSpaceUrl } from "./safespace-client.js";
@@ -82,6 +83,10 @@ const typeLevel = (): void => {
   void publishFetch("https://page.example" as PublishOrigin, "https://page.example/_publish/v1/status", {});
   // @ts-expect-error a plain string is not a PublishOrigin
   void publishFetch("https://page.example", "https://page.example/_publish/v1/status" as PublishUrl, {});
+  // @ts-expect-error a plain string is not a CloudflareUrl
+  void cloudflareFetch(cloudflareOrigin(), "https://api.cloudflare.com/client/v4/user/tokens/verify", {});
+  // @ts-expect-error a plain string is not a CloudflareOrigin
+  void cloudflareFetch("https://api.cloudflare.com", "https://api.cloudflare.com/client/v4/user/tokens/verify" as CloudflareUrl, {});
   // The two SenSource brands are not interchangeable: the token must not be able
   // to go to the auth host, nor the client secret to the API host.
   // @ts-expect-error an API URL is not an auth URL
@@ -253,6 +258,20 @@ describe("ProVideoPlayer", () => {
     assert.equal(new URL(sent[0].url).origin, "https://page.example");
   });
 
+  it("pins a forged Cloudflare URL to the API's origin, so the API token cannot leave for another host", async () => {
+    const origin: CloudflareOrigin = cloudflareOrigin();
+    await cloudflareFetch(origin, cloudflareUrl(origin, "/user/tokens/verify"), {});
+    assert.equal(sent[0].url, "https://api.cloudflare.com/client/v4/user/tokens/verify");
+    assert.deepEqual(errors, []);
+    sent = [];
+    await cloudflareFetch(origin, "https://evil.example/client/v4/user/tokens/verify?x=1" as unknown as CloudflareUrl, {});
+    assert.equal(sent[0].url, "https://api.cloudflare.com/client/v4/user/tokens/verify?x=1");
+    assert.match(errors[0], /^\[servicecue-deploy\] BUG/);
+    sent = [];
+    await cloudflareFetch(origin, cloudflareUrl(origin, "//evil.example/x"), {});
+    assert.equal(new URL(sent[0].url).origin, "https://api.cloudflare.com");
+  });
+
   it("sends nothing, with the token, when the configured host is not a bare host", async () => {
     // Through the real service entry the Test connection button uses.
     const out = await pvpService.test("evil.example/x#", 8080, false, "tok");
@@ -313,6 +332,7 @@ const CREDENTIALED = [
   "main/services/pvp-service.ts",
   "main/services/safespace-client.ts",
   "main/services/sensource-service.ts",
+  "main/services/servicecue-cloudflare.ts",
   "main/services/servicecue-publish-client.ts",
 ];
 
@@ -324,6 +344,7 @@ main/services/pvp-service.ts:pvpFetch
 main/services/safespace-client.ts:safeSpaceFetch
 main/services/sensource-service.ts:senSourceAuthFetch
 main/services/sensource-service.ts:veaFetch
+main/services/servicecue-cloudflare.ts:cloudflareFetch
 main/services/servicecue-publish-client.ts:publishFetch
 `.trim().split("\n");
 
@@ -334,7 +355,7 @@ describe("the credentialed fetches", () => {
   });
 
   it("the scan sees a call in every shape it claims to", () => {
-    // The scan over the five files proves nothing if it cannot see a call, so it
+    // The scan over these files proves nothing if it cannot see a call, so it
     // is run on source that has each shape and one that only mentions fetch.
     const shapes = `
       export function a() { return fetch("x"); }

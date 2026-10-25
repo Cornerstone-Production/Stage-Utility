@@ -308,6 +308,37 @@ reload. A tab that cannot keep the note (no storage, or storage that throws or f
 is never reloaded, and neither is a page whose document carries no id, as with the dev
 server.
 
+## Deploying the page
+
+The server also puts the page itself on Cloudflare, through Cloudflare's API with an API
+token the operator enters ([how and when](../ops/servicecue-on-the-web.md#keeping-it-up-to-date)).
+What it deploys is `build/servicecue/`, which every build prepares: `worker.js`, the
+built `public/` and `deploy.json`. The status answer's `build` is what it compares with
+`deploy.json`'s, by id and never by version.
+
+The requests are `wrangler deploy`'s, made with `fetch` from `main/services/servicecue-cloudflare.ts`:
+
+1. `GET /user/tokens/verify`, or `GET /accounts/:id/tokens/verify` for a token made under the account.
+2. `POST /accounts/:id/workers/scripts/:name/assets-upload-session` with the manifest: each file by its path and
+   its hash (32 hex digits of the BLAKE3 hash of its base64 text and extension, as wrangler computes it) and size.
+   `_headers` is not a file: its text is in `deploy.json`'s `assets`, and goes in the assets config.
+   The answer lists the hashes Cloudflare does not hold, in buckets.
+3. `POST /accounts/:id/workers/assets/upload?base64=true` once per bucket, with the session's token. The last
+   answer carries the completion token; with nothing to upload, the session's token is it.
+4. `PUT /accounts/:id/workers/scripts/:name?excludeScript=true&bindings_inherit=strict`, multipart, after a
+   `GET .../settings` that confirms the Worker exists (the PUT would create one): `metadata` and
+   the module. The metadata is `main_module`, `bindings`, `compatibility_date` (and `compatibility_flags` when
+   there are some), `code_update_strategy`, `exports`, `keep_bindings`, `annotations` and
+   `assets: {jwt, config}`, all read from `deploy.json` but the strategy and the annotations. `keep_bindings`
+   is what keeps `PUBLISH_TOKEN`. The annotations are `workers/tag` (the build id) and `workers/message`
+   (`Stage Utility <running version>`).
+   `npm run servicecue:deploy` sends the same two (`--message` and `--tag`), so a deploy by hand is read back
+   the same way.
+
+The version recorded in the message is what the next server reads back, from the deployment's
+version annotations, for the no-downgrade rule. The deployer's own status is in
+[the API](api.md) as `deploy` on the publish answer.
+
 ## Storage and limits
 
 One Durable Object, SQLite-backed (the only kind the free plan allows), named `main`,

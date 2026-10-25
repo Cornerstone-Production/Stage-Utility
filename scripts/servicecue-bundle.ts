@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 
 import { errorMessage } from "../main/services/errors.js";
 import { isMain } from "./is-main.mjs";
+import type { DeployBinding, DeployManifest } from "../main/types/servicecue-deploy.js";
 import { PUBLISH_PROTOCOL_VERSION, VIEWER_HTML, viewerBuildFromHtml } from "../main/types/servicecue-publish.js";
 import { STATIC_HEADERS_FILE } from "../publish/servicecue/src/headers.js";
 
@@ -46,37 +47,7 @@ const WRANGLER_CONFIG = path.join(WORKER_DIR, "wrangler.jsonc");
 /** The Worker's file in the bundle, and `mainModule` in the manifest. */
 const MAIN_MODULE = "worker.js";
 
-/** One binding, in the shape Cloudflare's upload metadata takes. */
-export type DeployBinding =
-  | { type: "assets"; name: string }
-  | { type: "durable_object_namespace"; name: string; class_name: string }
-  | { type: "json"; name: string; json: unknown }
-  | { type: "plain_text"; name: string; text: string };
-
-/** What a deployer needs to know about the files beside it. */
-export interface DeployManifest {
-  /** The page's build id: the one stamped into the document, and that the Worker reports. */
-  build: string;
-  /** The app's version, when the bundle was made. */
-  version: string;
-  mainModule: string;
-  compatibilityDate: string;
-  compatibilityFlags: string[];
-  protocol: number;
-  /**
-   * The `config` the upload's assets metadata takes: wrangler.jsonc's `assets` less where the
-   * files are and what the Worker calls them, and `_headers`, the text of the headers file the
-   * asset service reads. wrangler does not upload `_headers` as an asset (it says "Ignoring
-   * asset: _headers" and sends the text in this config), so the bundle does the same: the file
-   * is not in `public/`, and a deployer sends these fields as they are.
-   */
-  assets: Record<string, unknown>;
-  bindings: DeployBinding[];
-  /** Which existing bindings an upload keeps when it names none for them: the secrets `wrangler secret put` set, such as PUBLISH_TOKEN. wrangler sends the same two on every deploy. */
-  keep_bindings: string[];
-  /** wrangler.jsonc's `exports`, as it is: what each Durable Object class is (wrangler 4.150 sends it with the script). */
-  exports: Record<string, unknown>;
-}
+export type { DeployBinding, DeployManifest } from "../main/types/servicecue-deploy.js";
 
 /**
  * Every top-level key of wrangler.jsonc, sorted, by what this does with it. A key in
@@ -88,6 +59,7 @@ export const CARRIED_KEYS = [
   "compatibility_flags",
   "durable_objects",
   "exports",
+  "name",
   "vars",
 ];
 /** What wrangler keeps of a Worker's bindings across a deploy (its `keepSecrets`). */
@@ -96,7 +68,6 @@ export const DEPLOYED_ELSEWHERE_KEYS = [
   "$schema", // editor help
   "dependencies_instrumentation", // what wrangler tells Cloudflare about npm packages
   "main", // the entry point: bundled here
-  "name", // the Worker's name is the deployer's to be told
   "preview_urls", // set once, on the Worker
   "workers_dev", // set once, on the Worker
 ];
@@ -162,6 +133,7 @@ export function deployManifest(input: {
   }
 
   return {
+    name: stringField(wrangler, "name"),
     build: input.build,
     version: input.version,
     mainModule: MAIN_MODULE,
