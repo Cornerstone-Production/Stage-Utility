@@ -17,6 +17,7 @@ import {
   Button,
   Input,
   toast,
+  Callout,
   Dialog} from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
@@ -96,7 +97,11 @@ export function struggleSentences(struggle: Omit<ScreenStruggle, "feedId" | "fee
  * shades of amber. Every warning under a card's preview is drawn with it.
  */
 function WarnBox({ children }: { children: ReactNode }) {
-  return <p className="mx-3 mt-2 rounded-lg bg-warn-9/14 px-2.5 py-2 text-caption1 text-warn-11">{children}</p>;
+  return (
+    <Callout tone="warn" className="mx-3 mt-2">
+      {children}
+    </Callout>
+  );
 }
 
 /** A feed this screen is struggling to play. Its sentences are struggleSentences()'s. */

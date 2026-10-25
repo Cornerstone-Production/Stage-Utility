@@ -750,6 +750,18 @@ up on such a feed.
 | Offline | Your **When the feed is offline** setting |
 | Can't play here | "This screen can't play video" and "\<feed name\> plays on the other screens" |
 
+A picture that stops moving is not left frozen on its last frame. Once a
+playing widget has gone 5 seconds without a new frame (15 over HLS, whose
+segments can pause that long and catch up), it closes the session, shows
+**Offline**, and reconnects on the same delay as any other drop, whatever the
+connection itself reports: a source that stops sending, or a decoder that
+wedges, can leave a WebRTC connection reading "connected" for as long as it
+lasts. A screen whose browser does not count decoded frames for a feed is not
+watched this way. After WebRTC has shown a relay feed on a screen, a later
+session that connects but shows no frame is taken to be a silent source and
+retried over WebRTC rather than sent to HLS, up to 3 sessions in a row; a
+fourth falls back to HLS as below.
+
 A relay feed that falls back to HLS because WebRTC failed on this screen
 tries WebRTC again every 5 minutes, beside the HLS picture rather than in its
 place, and moves over only once WebRTC is carrying frames — the picture never

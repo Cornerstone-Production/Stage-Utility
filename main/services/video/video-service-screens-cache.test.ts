@@ -13,7 +13,6 @@
 // changed.
 
 import { strict as assert } from "node:assert";
-import { EventEmitter } from "node:events";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -22,6 +21,7 @@ import { test, type TestContext } from "node:test";
 import { captureConsole } from "../fixtures/capture-console.js";
 import { fakeRelay } from "../fixtures/fake-relay.js";
 import { addRelayFeed, report, settle, settleUntil } from "../fixtures/video-playback.js";
+import { FakeSupervisor } from "../fixtures/fake-supervisor.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-screens-cache-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -34,19 +34,7 @@ const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
 
 type VideoState = import("../../types/video.js").VideoState;
 type RelayStatus = import("../../types/video.js").RelayStatus;
-type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
-type RelaySupervisorLike = import("./video-service.js").RelaySupervisorLike;
 
-/** The smallest RelaySupervisorLike that reports "running" — enough to let
- *  attachRelay()/pollOnce() run without a real MediaMTX process. */
-class FakeSupervisor extends EventEmitter implements RelaySupervisorLike {
-  status(): SupervisorStatus {
-    return { state: "running", since: 1 };
-  }
-  version(): string | null {
-    return null;
-  }
-}
 
 const OUTPUT_ID = stageController.getOutputs()[0]!.id;
 const OUTPUT_NAME = stageController.getOutputs()[0]!.name;
@@ -70,7 +58,7 @@ test("a healthy screen's own heartbeats, with the relay's status poll running al
   videoService.setRelayStatusListener((s) => statusCalls.push(s));
   t.mock.timers.enable({ apis: ["Date"], now: 0 });
   try {
-    videoService.attachRelay(relay, supervisor, DEFAULT_VIDEO_PORTS);
+    videoService.attachRelay(relay, supervisor, DEFAULT_VIDEO_PORTS, { on: false, why: null });
     await settle();
 
     // Seed the pair once, outside the measured window — a pair APPEARING is

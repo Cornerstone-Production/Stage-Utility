@@ -594,7 +594,11 @@ Tokens never are: every line has the query and fragment cut from any address in 
 
 Chromium did not start, and an output's page that has crashed (with how many times since
 launch), are also said in the helper's window. Chromium writes its own warnings to
-`chromium.log` in the helper's state folder, beside its profile (`Chromium/`).
+`chromium.log` in the helper's state folder, beside its profile (`Chromium/`). It is
+kept under 20 MB: at launch and every 10 minutes, a larger file is cut to its last
+5 MB of lines, in place, since Chromium holds it open. Each cut is logged under
+`cef`, and so is a check that cannot read or write the file (once, and again when
+it can).
 
 ## Layout
 

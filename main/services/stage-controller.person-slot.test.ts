@@ -116,3 +116,36 @@ describe("a by-person slot whose person is not on the plan", () => {
     assert.deepEqual(asked, []);
   });
 });
+
+// The suite above stubs getPerson, so it cannot see what getPerson asks PCO. This
+// one stubs only the network beneath it: Services answers 404 for a person who was
+// never added to Services (the case that left a by-person slot empty in
+// production), People knows them. The real path -- slot, directory, getPerson,
+// request -- must still draw their name and photo.
+describe("a by-person slot for someone only in People, end to end", () => {
+  it("shows their name and photo", async () => {
+    (pcoService as unknown as { getPerson: unknown }).getPerson = realGet;
+    pcoService.clearCache();
+    const svc = pcoService as unknown as { pcoFetch: (url: string) => Promise<Response> };
+    const realFetch = svc.pcoFetch;
+    svc.pcoFetch = async (url: string) =>
+      url.includes("/people/v2/")
+        ? new Response(
+            JSON.stringify({
+              data: { id: "115021752", type: "Person", attributes: { name: "Sam Okoye", avatar: "https://avatars.planningcenteronline.com/uploads/person/9/x.jpg?g=62x62%23" } },
+            }),
+            { status: 200 },
+          )
+        : new Response(JSON.stringify({ errors: [{ status: "404" }] }), { status: 404 });
+    try {
+      const board = [personSlot("s1", "AC115021752")];
+      await stageController.resolveSlotsPreview(board);
+      await new Promise<void>((r) => setTimeout(r, 50));
+      const r = await stageController.resolveSlotsPreview(board);
+      assert.equal(r.slots[0]?.displayName, "Sam Okoye");
+      assert.match(r.slots[0]?.photoUrl ?? "", /^https:\/\/avatars\./);
+    } finally {
+      svc.pcoFetch = realFetch;
+    }
+  });
+});

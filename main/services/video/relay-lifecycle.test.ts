@@ -106,6 +106,8 @@ function makeDeps(overrides: Partial<RelayLifecycleDeps> = {}): {
       order.push("busyPorts");
       return [];
     },
+    // No usable ffmpeg here, so no RTSP listener: the tests that care say so.
+    listenCapable: async () => false,
     stopLeftover: async (): Promise<LeftoverResult> => {
       order.push("stopLeftover");
       return { kind: "none" };
@@ -142,6 +144,7 @@ function activate(lifecycle: InstanceType<typeof RelayLifecycle>): InstanceType<
   active = lifecycle;
   videoService.setFeedsChangedListener(() => lifecycle.feedsChanged());
   videoService.setPortsChangedListener(() => lifecycle.portsChanged());
+  videoService.setListenCapabilityListener(() => lifecycle.listenCapabilityChanged());
   videoService.setRelayStatusListener((relay) => lifecycle.handleRelayStatus(relay));
   videoService.setRelayProcessListener((status) => lifecycle.handleSupervisorStatus(status));
   return lifecycle;
@@ -157,6 +160,7 @@ afterEach(async () => {
   active = null;
   videoService.setFeedsChangedListener(null);
   videoService.setPortsChangedListener(null);
+  videoService.setListenCapabilityListener(null);
   videoService.setRelayStatusListener(null);
   videoService.setRelayProcessListener(null);
   await videoService.detachRelay();
@@ -605,7 +609,7 @@ test("a ports change restarts a running relay, logging its own reason (not the g
   lifecycle.setEnabled(true);
   await waitUntil(() => supervisors.length > 0);
 
-  const r = await videoService.setPorts({ rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997 });
+  const r = await videoService.setPorts({ rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997, rtsp: 28554 });
   assert.ok(r.ok);
   await waitUntil(() => supervisors.length > 1);
 
@@ -624,7 +628,7 @@ test("a ports change while the relay is off does not start it", async () => {
   const lifecycle = activate(new RelayLifecycle(deps));
   await setRelayFeeds(0);
 
-  const r = await videoService.setPorts({ rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997 });
+  const r = await videoService.setPorts({ rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997, rtsp: 28554 });
   assert.ok(r.ok);
   await idle(lifecycle);
   assert.equal(supervisors.length, 0);
@@ -1412,4 +1416,140 @@ test("the two 'starting' messages are one wording — the connection row and the
   lifecycle.setEnabled(true);
   await waitUntil(() => seen.some((s) => s.state === "connecting"));
   assert.equal(seen.find((s) => s.state === "connecting")?.message, "Starting the relay");
+});
+
+// ── Audio conversion: the relay listens for RTSP exactly while ffmpeg is usable ──
+
+async function configOf(supervisor: { startCalls: { configPath: string }[] }): Promise<Record<string, unknown>> {
+  return JSON.parse(await fs.readFile(supervisor.startCalls[0]!.configPath, "utf8")) as Record<string, unknown>;
+}
+
+test("with a usable ffmpeg the relay is started listening for RTSP on loopback, and its port is checked", async () => {
+  const asked: boolean[] = [];
+  const { deps, supervisors } = makeDeps({
+    listenCapable: async () => true,
+    busyPorts: async (_ports, rtsp) => {
+      asked.push(rtsp);
+      return [];
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+  assert.deepEqual(asked, [true]);
+  const config = await configOf(supervisors[0]!);
+  assert.equal(config.rtsp, true);
+  assert.equal(config.rtspAddress, `127.0.0.1:${DEFAULT_VIDEO_PORTS.rtsp}`);
+  assert.deepEqual(config.rtspTransports, ["tcp"]);
+});
+
+test("without one the relay does not listen for RTSP and its port is not checked", async () => {
+  const asked: boolean[] = [];
+  const { deps, supervisors } = makeDeps({
+    busyPorts: async (_ports, rtsp) => {
+      asked.push(rtsp);
+      return [];
+    },
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+  assert.deepEqual(asked, [false]);
+  const config = await configOf(supervisors[0]!);
+  assert.equal(config.rtsp, false);
+  assert.equal("rtspAddress" in config, false);
+});
+
+test("ffmpeg becoming usable restarts a running relay once, to turn RTSP on; asking again changes nothing", async (t) => {
+  const logs = captureConsole(t, "log");
+  let capable = false;
+  const { deps, supervisors } = makeDeps({ listenCapable: async () => capable });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+
+  lifecycle.listenCapabilityChanged();
+  await idle(lifecycle);
+  assert.equal(supervisors.length, 1, "restarted though nothing changed");
+
+  capable = true;
+  lifecycle.listenCapabilityChanged();
+  await waitUntil(() => supervisors.length > 1);
+  assert.equal(supervisors[0]!.stopCalls, 1);
+  assert.equal((await configOf(supervisors[1]!)).rtsp, true);
+  assert.ok(logs.includes("[video] relay restarting to turn on audio conversion (ffmpeg is usable now)"), JSON.stringify(logs));
+
+  lifecycle.listenCapabilityChanged();
+  await idle(lifecycle);
+  assert.equal(supervisors.length, 2, "restarted again though the answer is the same");
+
+  capable = false;
+  lifecycle.listenCapabilityChanged();
+  await waitUntil(() => supervisors.length > 2);
+  assert.equal((await configOf(supervisors[2]!)).rtsp, false);
+});
+
+test("ffmpeg changing while the relay is off starts nothing", async () => {
+  const { deps, supervisors } = makeDeps({ listenCapable: async () => true });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(0);
+  lifecycle.listenCapabilityChanged();
+  await idle(lifecycle);
+  assert.equal(supervisors.length, 0);
+});
+
+test("a busy RTSP port starts the relay without RTSP, says so once, and never stops the video", async (t) => {
+  const warns = captureConsole(t, "warn");
+  const { deps, supervisors } = makeDeps({
+    listenCapable: async () => true,
+    busyPorts: async (ports, rtsp) => (rtsp ? [{ port: ports.rtsp, proto: "tcp" as const, holder: OBS_STUDIO }] : []),
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+  assert.equal((await videoService.state()).relay.state, "running", "the video relay did not start for a busy audio port");
+  const config = await configOf(supervisors[0]!);
+  assert.equal(config.rtsp, false);
+  assert.equal("rtspAddress" in config, false);
+  await videoService.setPorts({ ...DEFAULT_VIDEO_PORTS, rtmp: 21935 }); // restarts: the same block, said again?
+  await waitUntil(() => supervisors.length > 1);
+  assert.equal(warns.filter((l) => l.includes("audio conversion is off")).length, 1, JSON.stringify(warns));
+  assert.match(warns[0] ?? "", /the RTSP port 8554 is in use by/);
+});
+
+test("another port busy beside RTSP still fails the start as before", async () => {
+  const { deps, supervisors } = makeDeps({
+    listenCapable: async () => true,
+    busyPorts: async (ports) => [
+      { port: ports.rtsp, proto: "tcp" as const, holder: OBS_STUDIO },
+      { port: ports.rtmp, proto: "tcp" as const, holder: OBS_STUDIO },
+    ],
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await idle(lifecycle);
+  assert.equal(supervisors.length, 0);
+  assert.equal((await videoService.state()).relay.state, "failing");
+});
+
+test("saving ffmpeg's path while the RTSP port is busy does not restart a relay that is running fine", async (t) => {
+  const logs = captureConsole(t, "log");
+  const { deps, supervisors } = makeDeps({
+    listenCapable: async () => true,
+    busyPorts: async (ports, rtsp) => (rtsp ? [{ port: ports.rtsp, proto: "tcp" as const, holder: OBS_STUDIO }] : []),
+  });
+  const lifecycle = activate(new RelayLifecycle(deps));
+  await setRelayFeeds(1);
+  lifecycle.setEnabled(true);
+  await waitUntil(() => supervisors.length > 0);
+  lifecycle.listenCapabilityChanged();
+  await idle(lifecycle);
+  assert.equal(supervisors.length, 1, "the live relay was restarted for nothing");
+  assert.equal(supervisors[0]!.stopCalls, 0);
+  assert.equal(logs.some((l) => l.includes("restarting to turn")), false, JSON.stringify(logs));
 });

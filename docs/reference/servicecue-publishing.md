@@ -46,7 +46,17 @@ Failures answer `{"error": "…"}`.
 | `PUT` | `/_publish/v1/asset/<name>` | image bytes, with a `Content-Type` | `204`. `400` for an empty body, `404` for a name that cannot be an asset's, `415` for any type but the five below |
 | `POST` | `/_publish/v1/heartbeat` | `{"at": <ms>, "version": "…"}` | `204`. `400` for anything else |
 | `PUT` | `/_publish/v1/manifest` | `{"docs": […], "assets": […]}` | `200 {"removedDocs": […], "removedAssets": […]}`. `400` if any entry is not a key or a name |
-| `GET` | `/_publish/v1/status` | | `200 {protocol, docs, assets, lastHeartbeat, viewers}` |
+| `GET` | `/_publish/v1/status` | | `200 {protocol, docs, assets, lastHeartbeat, viewers, build}` |
+
+The status answer's fields:
+
+| Field | Meaning |
+|---|---|
+| `protocol` | The protocol version this Worker speaks |
+| `docs`, `assets` | Every stored doc key and asset name, sorted |
+| `lastHeartbeat` | `{at, sentAt, version}` of the latest heartbeat, or `null` before the first |
+| `viewers` | Viewers connected to the live socket now |
+| `build` | The build id of the page this Worker serves (see [Reloading after a deploy](#reloading-after-a-deploy)), or `null` when the deploy has no document or one with no id. A publisher reads a Worker that sends no `build` as `null` too |
 
 A known path with another method is `405` with an `Allow` header; any other path under
 `/_publish/` is `404`. A request body over **2,000,000 bytes** is `413`, counted as it
@@ -283,7 +293,8 @@ document names its script and style by names that carry their own content hash, 
 is a different document whenever either is. (An icon or a manifest that changes alone
 is not a new build.)
 
-The Worker reads the id out of the document it serves and puts it on the heartbeat it
+The Worker reads the id out of the document it serves and gives it to the status answer
+(`build`), and puts it on the heartbeat it
 replays on connect and on every one it sends after. When a page hears an id that is not
 its own it reloads, on the address it is on, so `?plan=`, `?text=` and `?from=` are
 still there. A socket a deploy dropped reconnects, and the replay is the first thing it
@@ -296,6 +307,37 @@ is, with a line on its console, and not in a loop. The next different build gets
 reload. A tab that cannot keep the note (no storage, or storage that throws or forgets)
 is never reloaded, and neither is a page whose document carries no id, as with the dev
 server.
+
+## Deploying the page
+
+The server also puts the page itself on Cloudflare, through Cloudflare's API with an API
+token the operator enters ([how and when](../ops/servicecue-on-the-web.md#keeping-it-up-to-date)).
+What it deploys is `build/servicecue/`, which every build prepares: `worker.js`, the
+built `public/` and `deploy.json`. The status answer's `build` is what it compares with
+`deploy.json`'s, by id and never by version.
+
+The requests are `wrangler deploy`'s, made with `fetch` from `main/services/servicecue-cloudflare.ts`:
+
+1. `GET /user/tokens/verify`, or `GET /accounts/:id/tokens/verify` for a token made under the account.
+2. `POST /accounts/:id/workers/scripts/:name/assets-upload-session` with the manifest: each file by its path and
+   its hash (32 hex digits of the BLAKE3 hash of its base64 text and extension, as wrangler computes it) and size.
+   `_headers` is not a file: its text is in `deploy.json`'s `assets`, and goes in the assets config.
+   The answer lists the hashes Cloudflare does not hold, in buckets.
+3. `POST /accounts/:id/workers/assets/upload?base64=true` once per bucket, with the session's token. The last
+   answer carries the completion token; with nothing to upload, the session's token is it.
+4. `PUT /accounts/:id/workers/scripts/:name?excludeScript=true&bindings_inherit=strict`, multipart, after a
+   `GET .../settings` that confirms the Worker exists (the PUT would create one): `metadata` and
+   the module. The metadata is `main_module`, `bindings`, `compatibility_date` (and `compatibility_flags` when
+   there are some), `code_update_strategy`, `exports`, `keep_bindings`, `annotations` and
+   `assets: {jwt, config}`, all read from `deploy.json` but the strategy and the annotations. `keep_bindings`
+   is what keeps `PUBLISH_TOKEN`. The annotations are `workers/tag` (the build id) and `workers/message`
+   (`Stage Utility <running version>`).
+   `npm run servicecue:deploy` sends the same two (`--message` and `--tag`), so a deploy by hand is read back
+   the same way.
+
+The version recorded in the message is what the next server reads back, from the deployment's
+version annotations, for the no-downgrade rule. The deployer's own status is in
+[the API](api.md) as `deploy` on the publish answer.
 
 ## Storage and limits
 

@@ -26,6 +26,7 @@
 // state does the work rather than skipping it.
 
 import { execFileSync } from "node:child_process";
+import { isMain } from "./is-main.mjs";
 
 /** A file at a revision, or null when it isn't there / can't be read. */
 function fileAt(rev, file) {
@@ -88,7 +89,7 @@ export function compareRevs(oldRev, newRev, read = fileAt) {
 }
 
 // Only run when invoked directly, so the test can import the function.
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop() ?? "")) {
+if (isMain(import.meta.url, process.argv[1])) {
   const [, , oldRev, newRev] = process.argv;
   try {
     process.stdout.write(JSON.stringify(compareRevs(oldRev, newRev)));

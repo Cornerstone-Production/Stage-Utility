@@ -8,6 +8,7 @@ import { test, beforeEach } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { DEFAULT_VIDEO_PORTS } from "../../types/video.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-transfer-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -16,12 +17,13 @@ const { videoRoutes } = await import("./video-routes.js");
 const { secretsStore } = await import("../secrets.js");
 const { videoService } = await import("../video/video-service.js");
 const { videoFeedsStore } = await import("../video/feed-store.js");
+const { ffmpegPathStore } = await import("../video/ffmpeg-path-store.js");
 
 const PULL = { name: "BOX", source: { kind: "pull", url: "rtsp://192.0.2.31:554/box", username: "admin" }, password: "cam-pass-1" };
 const PUSH = { name: "OBS Lobby", source: { kind: "push", protocol: "srt" } };
 const EMBED = { name: "Resi", source: { kind: "embed", player: "youtube-video", ref: "dQw4w9WgXcQ" } };
-const DEFAULT_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
-const OTHER_PORTS = { rtmp: 2935, srt: 9890, webrtcUdp: 9189, webrtcHttp: 9889, hls: 9888, api: 10997 };
+const DEFAULT_PORTS = DEFAULT_VIDEO_PORTS;
+const OTHER_PORTS = { rtmp: 2935, srt: 9890, webrtcUdp: 9189, webrtcHttp: 9889, hls: 9888, api: 10997, rtsp: 9554 };
 
 type Json = Record<string, any>;
 
@@ -674,4 +676,26 @@ test("a failed import logs the outcome of the rollback, scrubbed", async () => {
   const line = errors.find((l) => l.startsWith("[video-import]"))!;
   assert.match(line, /^\[video-import\] import failed and could not restore: disk full/);
   assert.match(line, /still full/);
+});
+
+// The ffmpeg path is a fact about one machine and lives in its own store, so the
+// feeds export has no way to name it; an import reads only the fields it knows.
+// This holds both so a later change that merges a file into the stores fails here.
+test("the ffmpeg path never travels: not exported, not imported", async () => {
+  await ffmpegPathStore.save({ path: "/opt/here/ffmpeg" });
+  await add(PUSH);
+  try {
+    const out = await exportFile("?passwords=1&ports=1");
+    assert.equal(JSON.stringify(out).includes("ffmpeg"), false, "the exported file names no ffmpeg path");
+
+    const file = bundleOf([{ id: "lobby-2", name: "Lobby 2", source: { kind: "push", protocol: "srt" } }], { ffmpegPath: "/tmp/evil/ffmpeg", ffmpeg: { path: "/tmp/evil/ffmpeg" } });
+    (file.feeds as Json[])[0].ffmpegPath = "/tmp/evil/ffmpeg";
+    assert.equal((await preview(file)).status, 200);
+    assert.equal((await apply({ bundle: file })).status, 200);
+    assert.deepEqual(await ffmpegPathStore.load(), { path: "/opt/here/ffmpeg" }, "an imported file cannot set the path");
+    const stored = JSON.stringify(await videoFeedsStore.load());
+    assert.equal(stored.includes("evil"), false, "nor does it ride in on a feed or the file");
+  } finally {
+    await ffmpegPathStore.save({ path: "" });
+  }
 });

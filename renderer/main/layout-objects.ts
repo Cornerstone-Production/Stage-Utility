@@ -69,8 +69,8 @@ export interface LayoutObjectSpec {
   /**
    * The style this widget starts with when it is added on HOME, where it has no
    * card of its own and the theme decides the text colour. Absent: the ordinary
-   * `style()`. A wall widget's readout style names a white ink, which on Home's
-   * light card is white on white.
+   * style without its colour (see `defaultStyleFor`). For a widget whose whole
+   * wall style is wrong on Home, not only its ink.
    */
   homeStyle?: () => LayoutStyle;
   /** No per-object options; the inspector shows a "styling only" hint. */
@@ -548,11 +548,9 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     blurb: "The words on the slide, with its group as ProPresenter names it",
     group: "ProPresenter",
     config: () => ({ type: "lyrics", ...LYRICS_DEFAULTS }),
-    // White ink on the wall, and none on Home: Home's card is the app's own surface,
-    // light in a light theme, where a white lyric would be white on white. The type
-    // size is the object's own (Size), so only the colour is a style.
+    // White ink on the wall; Home drops it for the theme's ink, as for every widget.
+    // The type size is the object's own (Size), so only the colour is a style.
     style: () => ({ color: "#ffffff" }),
-    homeStyle: BARE,
     homeSize: "l",
     homeWhen: "live",
     propInstance: true,
@@ -1261,6 +1259,15 @@ export function defaultStyleFor(
   const home = findLayoutObjectSpec(type)?.homeStyle;
   if (opts.hostDrawsFrame && home) return home();
   const base = defaultStyle(type);
-  if (opts.hostDrawsFrame || !HOST_FRAMED_TYPES.has(type)) return base;
+  if (opts.hostDrawsFrame) {
+    // No ink of its own on Home. A wall style names white for a black screen,
+    // and Home's card follows the theme, so on a light page that was white on
+    // white. Without a colour the widget draws Home's ink (DEFAULT_INK in
+    // layout-renderer.tsx). Only the colour goes: the size, weight and
+    // alignment still read right on a card, and Home drops the ground itself.
+    const { color: _forABlackWall, ...rest } = base;
+    return rest;
+  }
+  if (!HOST_FRAMED_TYPES.has(type)) return base;
   return { ...CARD_PRESETS.neutral, ...base };
 }

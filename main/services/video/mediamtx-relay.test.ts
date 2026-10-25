@@ -443,6 +443,7 @@ describe("MediaMtxRelay.status", () => {
         readyTime: "2026-09-28T00:00:00Z",
         source: { type: "rtmpConn", id: "conn-1" },
         video: { codec: "H264", width: 1280, height: 720, profile: "High" },
+        audio: null,
         readers: 2,
       },
       {
@@ -451,9 +452,30 @@ describe("MediaMtxRelay.status", () => {
         readyTime: null,
         source: null,
         video: null,
+        audio: undefined,
         readers: 0,
       },
     ]);
+  });
+
+  // Track names as the real v1.21.1 binary reports them (probed against a relay
+  // fed AAC, Opus and G.711 over RTSP).
+  it("reports the first audio track's codec, null for a ready path without one, undefined when not ready", async () => {
+    const track = (codec: string, codecProps?: object) => ({ codec, codecProps });
+    const h264 = track("H264", { width: 1280, height: 720, profile: "High" });
+    runtimePaths = [
+      { name: "aac", ready: true, readyTime: "t", source: null, tracks2: [h264, track("MPEG-4 Audio", { sampleRate: 48000, channelCount: 2 })], readers: [] },
+      { name: "opus", ready: true, readyTime: "t", source: null, tracks2: [track("Opus", { channelCount: 2 }), h264], readers: [] },
+      { name: "g711", ready: true, readyTime: "t", source: null, tracks2: [h264, track("G711", { sampleRate: 8000, channelCount: 1 })], readers: [] },
+      { name: "silent", ready: true, readyTime: "t", source: null, tracks2: [h264], readers: [] },
+      { name: "idle", ready: false, readyTime: null, source: null, readers: [] },
+      { name: "no-tracks", ready: true, readyTime: "t", source: null, readers: [] },
+    ];
+    const status = await new MediaMtxRelay(port, API_PASSWORD).status();
+    assert.deepEqual(
+      status.map((p) => [p.name, p.audio]),
+      [["aac", "MPEG-4 Audio"], ["opus", "Opus"], ["g711", "G711"], ["silent", null], ["idle", undefined], ["no-tracks", undefined]],
+    );
   });
 });
 

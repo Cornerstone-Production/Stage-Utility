@@ -7,6 +7,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { captureConsole } from "../fixtures/capture-console.js";
 import { within } from "../fixtures/within.js";
+import { FakeSupervisor } from "../fixtures/fake-supervisor.js";
 
 // Before any store is constructed: every import below builds its stores
 // against this directory, never the default data folder.
@@ -27,7 +28,6 @@ const { fakeRelay } = await import("../fixtures/fake-relay.js");
 type RelayPath = import("./relay.js").RelayPath;
 type RelayFeed = import("./relay.js").RelayFeed;
 type VideoRelay = import("./relay.js").VideoRelay;
-type SupervisorStatus = import("./supervisor.js").SupervisorStatus;
 type VideoPorts = import("../../types/video.js").VideoPorts;
 type RelayStatus = import("../../types/video.js").RelayStatus;
 type RelaySupervisorLike = import("./video-service.js").RelaySupervisorLike;
@@ -42,7 +42,7 @@ type RelaySupervisorLike = import("./video-service.js").RelaySupervisorLike;
  * production method itself.
  */
 const attach = (relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts = DEFAULT_VIDEO_PORTS) =>
-  videoService.attachRelay(relay, supervisor, ports);
+  videoService.attachRelay(relay, supervisor, ports, { on: false, why: null });
 
 /** Real wall-clock polling, never affected by a test's own mocked setTimeout
  *  or Date (performance.now() is neither), for a condition the service offers
@@ -151,21 +151,6 @@ test("a pull or push feed reads standby, not offline, while no relay is attached
 // to a single process), a failing poll's behaviour, the seen store's
 // write-failure handling, and the guard against a stale in-flight poll.
 
-class FakeSupervisor extends EventEmitter {
-  // "running" by default — the service never polls while the supervisor
-  // reports "off" (see pollOnce()'s own guard), so every test that expects
-  // pollOnce() to actually call relay.status() would otherwise need its own
-  // explicit override. The handful of tests ABOUT off/starting/failing set
-  // their own.
-  current: SupervisorStatus = { state: "running", since: 1 };
-  ver: string | null = null;
-  status(): SupervisorStatus {
-    return this.current;
-  }
-  version(): string | null {
-    return this.ver;
-  }
-}
 
 /** A fake child process for the tests that drive a REAL RelaySupervisor —
  *  structurally satisfies SupervisedChild (an EventEmitter with
@@ -1332,7 +1317,7 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
   assert.ok(made.ok);
   const id = (made as { feed: { id: string } }).feed.id;
 
-  const OLD_PORTS = { rtmp: 11935, srt: 18890, webrtcUdp: 18189, webrtcHttp: 18889, hls: 18888, api: 19997 };
+  const OLD_PORTS = { rtmp: 11935, srt: 18890, webrtcUdp: 18189, webrtcHttp: 18889, hls: 18888, api: 19997, rtsp: 18554 };
   const relay = fakeRelay({ status: async () => [] });
   const supervisor = new FakeSupervisor();
   videoPollDeps.inDemand = () => false;
@@ -1350,7 +1335,7 @@ test("relayTarget uses the ports the relay was attached with, even after the sto
     // restarted and is still bound to OLD_PORTS.
     await videoFeedsStore.update((current) => ({
       ...current,
-      ports: { rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997 },
+      ports: { rtmp: 21935, srt: 28890, webrtcUdp: 28189, webrtcHttp: 28889, hls: 28888, api: 29997, rtsp: 28554 },
     }));
     // A poll/publish after the store write — the moment a proxy reading the
     // store would point at a port the relay is not listening on yet.
@@ -3245,11 +3230,11 @@ test("setPortsChangedListener fires from setPorts, and only on a body that valid
   const calls: string[] = [];
   videoService.setPortsChangedListener(() => calls.push("changed"));
   try {
-    const bad = await videoService.setPorts({ rtmp: 80, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 });
+    const bad = await videoService.setPorts({ rtmp: 80, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997, rtsp: 8554 });
     assert.equal(bad.ok, false, "a port below 1024 must be refused");
     assert.equal(calls.length, 0, "the hook fired on a body that never saved anything");
 
-    const ok = await videoService.setPorts({ rtmp: 31935, srt: 38890, webrtcUdp: 38189, webrtcHttp: 38889, hls: 38888, api: 39997 });
+    const ok = await videoService.setPorts({ rtmp: 31935, srt: 38890, webrtcUdp: 38189, webrtcHttp: 38889, hls: 38888, api: 39997, rtsp: 38554 });
     assert.ok(ok.ok);
     assert.equal(calls.length, 1, "a valid ports save never fired the hook");
   } finally {
@@ -3260,7 +3245,7 @@ test("setPortsChangedListener fires from setPorts, and only on a body that valid
 });
 
 test("saving the SAME ports never fires the hook — an unchanged save must not restart a running relay and drop every publisher", async () => {
-  const CHANGED = { rtmp: 41935, srt: 48890, webrtcUdp: 48189, webrtcHttp: 48889, hls: 48888, api: 49997 };
+  const CHANGED = { rtmp: 41935, srt: 48890, webrtcUdp: 48189, webrtcHttp: 48889, hls: 48888, api: 49997, rtsp: 48554 };
   const calls: string[] = [];
   try {
     const setup = await videoService.setPorts(CHANGED);
