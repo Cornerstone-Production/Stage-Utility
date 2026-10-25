@@ -146,6 +146,8 @@ const EXPECTED_RUNTIME = [
   "spl-history.json",
   "stream-starts.json",
   "update-notices.json",
+  // Where ffmpeg is on THIS machine: never restored onto another.
+  "video-ffmpeg.json",
   "video-seen.json",
 ];
 

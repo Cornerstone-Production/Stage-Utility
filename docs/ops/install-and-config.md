@@ -27,6 +27,11 @@ download against the published checksums, register an auto-starting service, wai
 for the server to answer, and print the address to open. If any of that fails
 they stop before writing anything.
 
+Neither one installs ffmpeg, which the Video relay's audio conversion needs (see
+[ffmpeg](../integrations/video-feeds.md#ffmpeg)); the Homebrew formula does. On
+the others run `sudo apt install ffmpeg` (or your distribution's package),
+`brew install ffmpeg` or `winget install ffmpeg`. Video works without it.
+
 | Platform | Architectures | Auto-start | Installs to |
 |---|---|---|---|
 | Linux (Pi or server) | x64, arm64 | systemd | `/opt/stage-utility` |
