@@ -1273,7 +1273,7 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         </div>
       );
     case "video":
-      return <VideoObject o={o} config={c} appLogo={ctx.state.appLogo} appLogoMonochrome={ctx.state.appLogoMonochrome} allowHls={ctx.allowHls} />;
+      return <VideoObject o={o} config={c} appLogo={ctx.state.appLogo} appLogoMonochrome={ctx.state.appLogoMonochrome} allowHls={ctx.allowHls} listen={ctx.home && ctx.interactive} />;
     case "slots-grid": {
       // Resolved BY OBJECT wherever the server could do it -- inline grids, and
       // grids embedding a view. Both are free-dragged boxes on a custom layout,

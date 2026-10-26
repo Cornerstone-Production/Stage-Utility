@@ -108,6 +108,13 @@ export interface FeedStatus {
   lastSeenAt?: number | null;
 }
 
+/** The same-origin playback addresses of a relay path (a feed's id, or its `-listen`
+ *  sibling): where the proxy answers WHEP and HLS for it. */
+export function relayPlayback(path: string): { whep: string; hls: string } {
+  const base = `/video/${path}`;
+  return { whep: `${base}/whep`, hls: `${base}/index.m3u8` };
+}
+
 /** How a screen plays a feed. Relay URLs are same-origin paths. */
 export type FeedPlay =
   | { via: "relay"; whep: string; hls: string }
