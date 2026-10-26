@@ -21,9 +21,38 @@ import { announceDevices } from "./kiosk-presence.js";
 import { mergeScreen, sameScreen, screenFrom } from "./kiosk-screen-size.js";
 import type { BoundDevice, DeviceOutput, ScreenSize } from "../types/kiosk.js";
 import { DataStore } from "./data-store.js";
+import { isSafeKey } from "./safe-key.js";
+import { asArray, asObject, checked, refuse } from "./restore-check.js";
 import { toError } from "./errors.js";
 
-export const kioskDevicesStore = new DataStore<BoundDevice[]>("kiosk-devices.json", [], "config");
+/**
+ * A restored binding, held to what the claim route takes: a device id that is
+ * not empty, the output it shows, a label that is text. The token is the
+ * server's to issue (pinSecret) and no route accepts one, so a restore cannot
+ * set it either: it lands empty, which is what an export writes anyway and what
+ * authorise() treats as unpinned.
+ */
+const restoreCheck = checked((raw) =>
+  asArray(raw, "the bound devices").map((entry, i) => {
+    const d = asObject(entry, `bound device ${i + 1}`);
+    if (typeof d.id !== "string" || d.id === "") refuse(`bound device ${i + 1} has no device id`);
+    if (!isSafeKey(d.id)) refuse(`bound device ${i + 1}'s device id is not allowed`);
+    // The claim route refuses a claim that names no screen.
+    if (typeof d.outputId !== "string" || d.outputId === "") refuse(`bound device ${i + 1} names no screen`);
+    const { label, ...rest } = d;
+    return {
+      ...rest,
+      // The claim route keeps a label only when it is text.
+      ...(typeof label === "string" ? { label } : {}),
+      // matchByMac and touch() read this list on every probe; a binding without
+      // one is a binding whose hardware hints are unknown, which is an empty list.
+      macs: Array.isArray(d.macs) ? d.macs.filter((m) => typeof m === "string") : [],
+      token: "",
+    };
+  }),
+);
+
+export const kioskDevicesStore = new DataStore<BoundDevice[]>("kiosk-devices.json", [], "config", { restoreCheck });
 
 export const findById = (devices: readonly BoundDevice[], id: string): BoundDevice | undefined =>
   devices.find((d) => d.id === id);

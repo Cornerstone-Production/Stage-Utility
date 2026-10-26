@@ -6,6 +6,7 @@ import * as path from "path";
 import { getUserDataPath } from "./app-paths.js";
 import { errnoCode, isNotFound } from "./errors.js";
 import { adoptLegacyStoreFile } from "./store-file-adoption.js";
+import type { RestoreCheck } from "./restore-check.js";
 import { registerStore, type RenamedFrom, type StoreClass } from "./store-registry.js";
 import { WriteQueue, atomicWrite } from "./write-queue.js";
 
@@ -30,6 +31,21 @@ export class StoreReadError extends Error {
     this.name = "StoreReadError";
     this.code = code;
   }
+}
+
+interface StoreOptions<T> {
+  renamedFrom?: RenamedFrom;
+  normalize?: (parsed: T) => T;
+}
+
+/**
+ * A config store's options. `restoreCheck` is required: a restore writes this
+ * store's file whole, and without the rules its settings routes apply on a save,
+ * any device on the LAN could post a backup that puts there what those routes
+ * refuse. See restore-check.ts.
+ */
+interface ConfigStoreOptions<T> extends StoreOptions<T> {
+  restoreCheck: RestoreCheck;
 }
 
 export class DataStore<T> {
@@ -68,14 +84,24 @@ export class DataStore<T> {
    *   older build wrote is read as today's. The file keeps the old shape until the
    *   next save, which writes the new one. It must be total: it runs on whatever
    *   the file held.
+   * @param options.restoreCheck Required for a "config" store: the rules a restore
+   *   of this file must pass, the same ones its settings routes apply on a save.
    */
+  constructor(filename: string, defaultValue: T, classification: "config", options: ConfigStoreOptions<T>);
+  constructor(filename: string, defaultValue: T, classification: "runtime", options?: StoreOptions<T>);
   constructor(
     private readonly filename: string,
     private readonly defaultValue: T,
     classification: StoreClass,
-    private readonly options: { renamedFrom?: RenamedFrom; normalize?: (parsed: T) => T } = {},
+    private readonly options: StoreOptions<T> & { restoreCheck?: RestoreCheck } = {},
   ) {
-    registerStore({ filename, classification, kind: "file", renamedFrom: options.renamedFrom });
+    registerStore({
+      filename,
+      classification,
+      kind: "file",
+      renamedFrom: options.renamedFrom,
+      restoreCheck: options.restoreCheck,
+    });
   }
 
   /** Run `fn` after all prior queued writes settle (success or failure). */

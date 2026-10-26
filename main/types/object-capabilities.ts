@@ -70,6 +70,7 @@ export const CAPABILITIES: Record<LayoutObjectType, Capability[]> = externKeyed(
   "current-slide-notes": ["readout"],
   "current-slide-text": ["readout"],
   image: ["readout"],
+  lyrics: ["readout"],
   "ndi-video": ["readout"],
   "next-service-item": ["readout"],
   "next-slide-text": ["readout"],

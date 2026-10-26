@@ -118,6 +118,19 @@ export interface ProPresenterStatusDTO extends RevisionedStatus {
   currentSection: ProSection | null;
   nextSection: ProSection | null;
   nextArrangementSection: ProSection | null;
+  /**
+   * The words on the first slide of `nextArrangementSection`: null when that is
+   * not known (no next group, or no slide position), "" for a group with no words.
+   */
+  nextGroupText: string | null;
+  /**
+   * The named groups in the order the arrangement plays them, repeats included —
+   * a chorus played three times is three entries. Empty when nothing is loaded.
+   */
+  playOrderGroups: ProSection[];
+  /** Which entry of `playOrderGroups` the current slide is in; null when the slide
+   *  position is not known. */
+  playOrderGroupIndex: number | null;
   /** Current + next playlist (service) item names. */
   currentServiceItem: string | null;
   nextServiceItem: string | null;

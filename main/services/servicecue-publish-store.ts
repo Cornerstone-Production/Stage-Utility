@@ -9,8 +9,9 @@
 // by a failed write or a second request reads as no token at all.
 
 import { DataStore } from "./data-store.js";
+import { asObject, checked, optional, refuse } from "./restore-check.js";
 import { secretsStore } from "./secrets.js";
-import type { PublishOrigin } from "./servicecue-publish-rules.js";
+import { parsePublishUrl, type PublishOrigin } from "./servicecue-publish-rules.js";
 
 export interface ServiceCuePublishSettings {
   /** Whether the server pushes ServiceCue's data out. */
@@ -25,6 +26,23 @@ export const servicecuePublishStore = new DataStore<ServiceCuePublishSettings>(
   "servicecue-publish.json",
   DEFAULT_PUBLISH_SETTINGS,
   "config",
+  {
+    // POST /api/servicecue/publish: enabled a boolean, the address empty or one
+    // parsePublishUrl takes (kept as its origin), and no publishing without one.
+    restoreCheck: checked((raw) => {
+      const s = asObject(raw, "the publishing settings");
+      optional(s.enabled, "boolean", "enabled");
+      optional(s.url, "string", "the page address");
+      const url = typeof s.url === "string" ? s.url.trim() : "";
+      if (!url) {
+        if (s.enabled === true) refuse("publishing is on with no page address");
+        return { ...s, url: "" };
+      }
+      const parsed = parsePublishUrl(url);
+      if (!parsed.ok) refuse(`the page address: ${parsed.message}`);
+      return { ...s, url: parsed.origin };
+    }),
+  },
 );
 
 /** The slot in secrets.bin that holds the token, under `token`, and the origin it is for, under `origin`. */

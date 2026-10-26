@@ -204,8 +204,12 @@ describe("editing", () => {
   test("only the Timer has a Home style of its own; every other widget is its wall style less the ink", () => {
     const differing = Object.entries(LAYOUT_OBJECTS)
       .filter(([, spec]) => spec.homeStyle)
-      .map(([type]) => type);
-    assert.deepEqual(differing, ["timer"]);
+      .map(([type]) => type)
+      .sort();
+    // Sorted, one per line: two branches adding a type each then merge cleanly.
+    assert.deepEqual(differing, [
+      "timer",
+    ]);
   });
 
   test("removing takes exactly one card", () => {

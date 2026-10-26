@@ -248,6 +248,68 @@ splits it with shell quoting and expands `$NAME` in each word, so every word is
 single-quoted and one holding a quote or `$` is refused, never escaped. A feed
 whose `-listen` path cannot be written says why instead.
 
+**Listening on the page.** The Video feeds page's preview and a Home Video card
+have a speaker button at the bottom right of the picture (see
+[Video](../reference/widgets.md#video) for its states). It is off each time a
+page loads. A tap opens one WebRTC session that asks for audio as well as video,
+on the path the feed's status names: its own for `direct`, `<id>-listen` for
+`converted` and `pass-through`. The picture then comes from that same session, so
+sound and picture stay together; stopping puts the tile back on its picture-only
+session. The tap itself unmutes and starts the element, which is what browsers'
+autoplay rules want from a gesture. A level meter reads the playing stream through
+a Web Audio analyser that is not wired to the speakers, and the volume is kept in
+the browser's local storage. One feed plays per page, and a tile that leaves the
+screen, a hidden tab or a closed page stops. Wall layouts, kiosks, consoles and
+the layout editor's preview never offer it.
+
+Nothing is logged per listener or per tap. The converter's own start, stop and
+failure lines (below) are the record. A browser whose listening session keeps
+failing writes its own lines on `[video]`, one per failure streak and worded about
+the sound (`listening to "<feed>" failed (…); retrying`, then
+`listening to "<feed>" failed (…); the picture plays without sound` when it gives
+up after three drops in a row, or at once when the relay refuses the path with a 400,
+406, 415 or 422), and `listening to "<feed>" works again` on recovery. They never read as the
+feed failing. The button shows "Audio stopped, retrying" while it retries and "Audio
+could not start: <reason>" once it has given up, and the picture plays on without sound.
+A drop is a dropped or refused connection, no picture within 5 seconds of connecting
+(a cold converter can take that long), ICE failing before it connected, or the video
+element erroring; a session that plays for 10 seconds starts the count over. Listening
+keeps its own count and its own log streak, so asking for sound never changes the
+picture's retry delay or its log lines.
+
+**Measuring.** `scripts/listen-measure.ts` reports what a feed's `-listen` path
+costs on a running server. Run it on the server itself, from its install folder,
+because the relay's RTSP port listens on loopback only; it needs `ffprobe` beside
+`ffmpeg`:
+
+```
+npx tsx scripts/listen-measure.ts 127.0.0.1:8554 <feed id> --minutes 30
+```
+
+The address is the RTSP port from the Advanced card (8554 unless changed). It reads
+`<id>` and `<id>-listen` from the relay, never from the encoder, though opening the
+feed's own path makes an on-demand pull feed dial its device. It prints the time to
+the first audio packet on `-listen` (cold if nobody had listened in the last 10
+seconds, since it includes the converter starting), then one line per `--interval`
+seconds (10) and a summary of three figures, each with its min, max and slope in
+ms per minute:
+
+- **Added audio delay**, `-listen` against the source: how much later a sound
+  arrives on `-listen` than the same sound on `<id>`. The two paths number their
+  timestamps from different origins; the copied video appears on both with an
+  identical checksum, which gives the shift, and the audio is compared through it.
+- **Added video delay**, from the same matched frames, as a cross-check: the tool
+  says so when this and the audio's method disagree by more than 10 ms.
+- **Audio/video offset inside `-listen`**: positive is the sound arriving later than
+  its picture.
+
+Resolution is about 10 to 20 ms. A feed converted from AAC is measurable; a
+pass-through feed's `-listen` carries a different encode of the video from the
+audio source address, so no frames match and the tool says so instead of guessing.
+`--json` prints the whole report, `--warmup` (4 seconds) discards each reader's
+first burst, and `--minutes` sets the length (30 by default, long enough to show
+drift).
+
 **CPU.** Copying the video is close to free. Encoding one stereo Opus stream is a
 few percent of one core on a desktop CPU, more on a Raspberry Pi. It runs per
 listened feed, not per listener, and only while someone listens.
@@ -264,9 +326,10 @@ path a listener should read:
 | `pass-through` | Read from the audio source address and copied | `<id>-listen` |
 | `unavailable` | Cannot be heard; `reason` says why | nothing |
 
-The status names the path. No page plays `<id>-listen` yet: the playback proxy
-serves only a feed's own path, and the relay serves `<id>-listen` to RTSP and
-WHEP readers on this machine.
+The status names the path. The playback proxy serves a feed's own path, and,
+for a `converted` or `pass-through` feed only, `/video/<id>-listen/whep`: WHEP
+and nothing else, never HLS or WHIP, and never the `-listen` path of a feed
+whose status is anything else.
 
 The editor shows it under the audio source address ("Audio unavailable: ffmpeg is
 not installed on this server."). The codec is learned from the relay's track

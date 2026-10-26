@@ -86,9 +86,10 @@ import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import {
   Row, RowSwitch, StackedSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls, Segmented,
-  ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, sizesTypeFromItsBox,
+  ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, setsOwnType, sizesTypeFromItsBox,
 } from "./inspector-rows";
 import { TimerInspector } from "./timer-inspector";
+import { LyricsInspector } from "./lyrics-inspector";
 import { readConfig, timerSource } from "../main/timer-config";
 import { ResponsiveControls } from "./responsive-controls";
 import { MessagesGroupsPicker } from "./messages-groups-picker";
@@ -1541,6 +1542,7 @@ export function Inspector({
         );
       })()}
       {c.type === "timer" && <TimerInspector c={c} onConfig={onConfig} propInstances={propInstances} />}
+      {c.type === "lyrics" && <LyricsInspector c={c} onConfig={onConfig} />}
       {c.type === "rosstalk-button" && <RossTalkButtonConfig c={c} onConfig={onConfig} />}
 
       {c.type === "osc-button" && (() => {
@@ -1831,13 +1833,17 @@ export function Inspector({
               hard-coded guess: a readout with nothing stored aligns left, and
               lighting centre would say it is centred while it sits left — the
               first click would then appear to do nothing. */}
-          <Row label="Align">
-            <AlignPad
-              h={s.textAlign ?? (READOUT_ALIGNED_TYPES.has(c.type) ? DEFAULT_READOUT_ALIGN : "center")}
-              v={s.vAlign ?? "middle"}
-              onChange={onStyle}
-            />
-          </Row>
+          {/* Not for Lyrics, which aligns itself (its Align setting) and always
+              centres vertically: the pad would write two fields it never reads. */}
+          {!setsOwnType(c.type) && (
+            <Row label="Align">
+              <AlignPad
+                h={s.textAlign ?? (READOUT_ALIGNED_TYPES.has(c.type) ? DEFAULT_READOUT_ALIGN : "center")}
+                v={s.vAlign ?? "middle"}
+                onChange={onStyle}
+              />
+            </Row>
+          )}
         </>
       )}
 
@@ -1871,7 +1877,7 @@ export function Inspector({
           and `style.uppercase` reaches nothing there, so this was the third dead
           control in the block. Hiding the whole disclosure, not just its child —
           a "More options" that opens onto nothing is worse than no disclosure. */}
-      {isText && !sizesTypeFromItsBox(c.type) && (
+      {isText && !sizesTypeFromItsBox(c.type) && !setsOwnType(c.type) && (
         <MoreControls>
           <RowSwitch label="Uppercase" checked={s.uppercase ?? false} onChange={(v) => onStyle({ uppercase: v })} />
         </MoreControls>

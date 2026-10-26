@@ -236,6 +236,9 @@ const PRO_LIVE: ProPresenterStatusDTO = {
   currentSection: null,
   nextSection: null,
   nextArrangementSection: null,
+  nextGroupText: null,
+  playOrderGroups: [],
+  playOrderGroupIndex: null,
   currentServiceItem: null,
   nextServiceItem: null,
   // Overrun, which is the only state `warnStates` colours.

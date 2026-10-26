@@ -14,12 +14,32 @@
 
 import type { BaptismTriggers } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+import { asObject, checked, safeKeys } from "./restore-check.js";
 import { assertSafeKey } from "./safe-key.js";
 
 /** planId → which items start each phase. */
 type File = Record<string, BaptismTriggers>;
 
-const store = new DataStore<File>("baptism-triggers.json", {}, "config");
+/** POST /api/baptism/triggers through baptismTriggersStore.set: a plan id that
+ *  is a safe key, and each item id coerced to text or null. */
+const restoreCheck = checked((raw) => {
+  const file = asObject(raw, "the baptism triggers");
+  safeKeys(file, "the baptism triggers");
+  const out: [string, BaptismTriggers][] = [];
+  for (const [planId, entry] of Object.entries(file)) {
+    const t = asObject(entry, `the triggers for plan ${planId}`);
+    // What the route stores: each id when it is text, otherwise null, and no
+    // entry at all for a plan with neither.
+    const triggers = {
+      testimonyItemId: typeof t.testimonyItemId === "string" ? t.testimonyItemId : null,
+      baptismItemId: typeof t.baptismItemId === "string" ? t.baptismItemId : null,
+    };
+    if (triggers.testimonyItemId || triggers.baptismItemId) out.push([planId, triggers]);
+  }
+  return Object.fromEntries(out);
+});
+
+const store = new DataStore<File>("baptism-triggers.json", {}, "config", { restoreCheck });
 
 export const baptismTriggersStore = {
   async all(): Promise<File> {

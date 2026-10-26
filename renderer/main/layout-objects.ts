@@ -19,6 +19,7 @@ import { CARD_HAIRLINE, IDIOM_TYPES } from "@main/types/readout-types";
 import { externKeyed } from "@main/types/extern-keyed";
 import { DEFAULT_WARN_AMBER_SEC, DEFAULT_WARN_RED_SEC } from "./pvp-now-config";
 import { readTimerConfig } from "./timer-config";
+import { LYRICS_DEFAULTS } from "./lyrics-config";
 
 /** Palette sections, in the order the add-object dropdown shows them. */
 export const PALETTE_GROUP_ORDER = [
@@ -540,6 +541,18 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     homeSize: "m",
     homeWhen: "live",
     stylingOnly: true,
+    propInstance: true,
+  },
+  lyrics: {
+    label: "Lyrics",
+    blurb: "The words on the slide, with its group as ProPresenter names it",
+    group: "ProPresenter",
+    config: () => ({ type: "lyrics", ...LYRICS_DEFAULTS }),
+    // White ink on the wall; Home drops it for the theme's ink, as for every widget.
+    // The type size is the object's own (Size), so only the colour is a style.
+    style: () => ({ color: "#ffffff" }),
+    homeSize: "l",
+    homeWhen: "live",
     propInstance: true,
   },
   "current-slide-notes": {

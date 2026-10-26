@@ -61,7 +61,12 @@ async function endSession(pc: RTCPeerConnection, endpoint: URL, location: string
   }
 }
 
-export async function startWhep(url: string, video: HTMLVideoElement, opts?: { signal?: AbortSignal }): Promise<WhepSession> {
+/**
+ * `audio` asks for the sound too: a second receive-only m-line, so a path that
+ * carries Opus or G.711 sends it. Without it the relay answers video only, which
+ * is what every screen wants. The caller owns the element's `muted`.
+ */
+export async function startWhep(url: string, video: HTMLVideoElement, opts?: { signal?: AbortSignal; audio?: boolean }): Promise<WhepSession> {
   const endpoint = new URL(url, window.location.href);
   const pc = new RTCPeerConnection();
   // Guards a superseded attempt's late track: once THIS session has been
@@ -84,6 +89,7 @@ export async function startWhep(url: string, video: HTMLVideoElement, opts?: { s
   let location: string | null = null;
   try {
     pc.addTransceiver("video", { direction: "recvonly" });
+    if (opts?.audio) pc.addTransceiver("audio", { direction: "recvonly" });
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     await iceGatheringComplete(pc, 2000);

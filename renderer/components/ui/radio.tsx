@@ -19,6 +19,10 @@ import { cn } from "../../lib/cn";
  */
 export const RadioGroup = RadioGroupPrimitive.Root;
 
+/** The bare item, for a choice drawn as something other than a dot: it carries the
+ *  radio role, arrow-key movement between items and a single tab stop for the group. */
+export const RadioItem = RadioGroupPrimitive.Item;
+
 export const Radio = React.forwardRef<
   React.ComponentRef<typeof RadioGroupPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof RadioGroupPrimitive.Item>

@@ -3,6 +3,7 @@
 
 import type { ServiceCueConfig } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+import { asArray, asObject, checked } from "./restore-check.js";
 import { SERVICECUE_LOG_TAG } from "./servicecue-legacy-names.js";
 
 /**
@@ -16,5 +17,12 @@ export const serviceCueConfigStore = new DataStore<ServiceCueConfig>(
   "servicecue-config.json",
   { serviceTypeIds: [] },
   "config",
-  { renamedFrom: { filename: "scriptview-config.json", logTag: SERVICECUE_LOG_TAG } },
+  {
+    renamedFrom: { filename: "scriptview-config.json", logTag: SERVICECUE_LOG_TAG },
+    // POST /api/servicecue/config stores each id as String(id).
+    restoreCheck: checked((raw) => {
+      const file = asObject(raw, "the ServiceCue config");
+      return { ...file, serviceTypeIds: asArray(file.serviceTypeIds, "serviceTypeIds").map(String) };
+    }),
+  },
 );

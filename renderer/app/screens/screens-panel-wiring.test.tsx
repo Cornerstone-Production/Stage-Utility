@@ -46,7 +46,9 @@ const { DEFAULT_STAGE_STATE } = await import("../../main/test-render-ctx.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { ScreensRoute } = await import("./screens-route.js");
 const { PageActionsProvider, PageActionsSlot } = await import("../page-actions.js");
-const { PANEL_OPEN_KEY } = await import("./use-panel-open.js");
+// The key an older build kept the panel's open/closed choice under. Nothing reads or
+// writes it now; the test below stores it to prove that.
+const OLD_PANEL_OPEN_KEY = "stage-utility-screens-panel";
 
 type Output = import("@main/types/views").Output;
 type View = import("@main/types/views").View;
@@ -180,7 +182,7 @@ beforeEach(() => {
 
 const state = () => ({ ...DEFAULT_STAGE_STATE, outputs, views });
 
-type CreateBody = { name?: string; viewId?: string; newView?: "wall" | "control" };
+type CreateBody = { name?: string; viewId?: string; newView?: "wall" | "control"; viewKind?: ViewKind };
 /** What POST /api/outputs and a claim of a new screen do to the lists; returns the new id. */
 function makeScreen(body: CreateBody): string {
   const id = `display-${outputs.length + 10}`;
@@ -188,10 +190,16 @@ function makeScreen(body: CreateBody): string {
   let viewId: string | null = body.viewId ?? null;
   if (body.newView) {
     viewId = `view-made-${id}`;
-    views = [...views, { id: viewId, name, kind: "custom", surface: body.newView === "control" ? "console" : "display", createdAt: NOW }];
+    views = [...views, { id: viewId, name, kind: body.viewKind ?? "custom", surface: body.newView === "control" ? "console" : "display", createdAt: NOW }];
   }
   outputs = [...outputs, { id, name, viewId }];
   return id;
+}
+
+/** The panel starts closed on every visit, so a test about what it shows opens it first. */
+async function mountScreensOpen() {
+  await mountScreens();
+  await click(toggle());
 }
 
 async function mountScreens() {
@@ -295,71 +303,34 @@ const answerConfirm = async (label: string) => {
 };
 
 describe("the panel and its Settings button", () => {
-  test("is open on arrival with nothing selected, and says so", async () => {
+  test("is closed on arrival, and Settings opens it with nothing selected", async () => {
     await mountScreens();
+    assert.equal(panelIsOpen(), false, "the panel was open on arrival");
+    assert.equal(toggle().getAttribute("aria-pressed"), "false");
+    await click(toggle());
     assert.ok(panel().getByText("Nothing selected"));
     assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }));
     assert.ok(panel().getByText("Click any card on the left to see its settings here."));
     assert.equal(toggle().getAttribute("aria-pressed"), "true");
   });
 
-  test("Settings closes it and opens it again, and the choice is kept for the next visit", async () => {
+  test("Settings closes it again, and nothing is kept: the next visit is closed too", async () => {
     await mountScreens();
+    await click(toggle());
+    assert.ok(panelIsOpen());
     await click(toggle());
     assert.equal(panelIsOpen(), false, "the panel is still there");
-    assert.equal(toggle().getAttribute("aria-pressed"), "false");
-    assert.equal(localStorage.getItem(PANEL_OPEN_KEY), "0");
-    cleanup();
-    await mountScreens();
-    assert.equal(panelIsOpen(), false, "a closed panel opened on the next visit");
     await click(toggle());
-    assert.equal(localStorage.getItem(PANEL_OPEN_KEY), "1");
     cleanup();
     await mountScreens();
-    assert.ok(panelIsOpen(), "an open panel was closed on the next visit");
+    assert.equal(panelIsOpen(), false, "an open panel was remembered into the next visit");
+    assert.equal(localStorage.length, 0, "the panel wrote its state to the browser");
   });
 
-  test("storage that throws does not stop the page: the panel is open, and still toggles", async () => {
-    // The prototype of the storage the page actually reads (the harness's
-    // jsdom one). A global `Storage` is Node's own class on newer Nodes and
-    // absent on older ones; patching it would test nothing, or throw.
-    const proto = Object.getPrototypeOf(localStorage) as Storage;
-    const real = proto.getItem;
-    const realSet = proto.setItem;
-    proto.getItem = () => { throw new Error("storage is off"); };
-    proto.setItem = () => { throw new Error("storage is off"); };
-    // A throw inside the click handler would not stop the toggle, so it is
-    // caught where the browser reports it: an uncaught error on the window.
-    const uncaught: string[] = [];
-    const onError = (e: ErrorEvent) => { uncaught.push(String(e.error ?? e.message)); };
-    window.addEventListener("error", onError);
-    try {
-      await mountScreens();
-      assert.ok(panelIsOpen());
-      await click(toggle());
-      assert.equal(panelIsOpen(), false);
-      assert.deepEqual(uncaught, [], "a storage failure escaped the toggle");
-    } finally {
-      window.removeEventListener("error", onError);
-      proto.getItem = real;
-      proto.setItem = realSet;
-    }
-  });
-
-  test("on a viewport too narrow to dock it, nothing stored means closed; what the operator chose wins", async () => {
-    const win = window as unknown as { matchMedia?: unknown };
-    const had = win.matchMedia;
-    win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} });
-    try {
-      await mountScreens();
-      assert.equal(panelIsOpen(), false, "an overlay panel covered a phone on arrival");
-      cleanup();
-      localStorage.setItem(PANEL_OPEN_KEY, "1");
-      await mountScreens();
-      assert.ok(panelIsOpen(), "a stored choice to keep it open was ignored");
-    } finally {
-      win.matchMedia = had;
-    }
+  test("an old stored choice to keep it open is ignored: the panel is closed on arrival", async () => {
+    localStorage.setItem(OLD_PANEL_OPEN_KEY, "1");
+    await mountScreens();
+    assert.equal(panelIsOpen(), false, "a stored \"1\" opened the panel");
   });
 
   test("Screen settings… in a card's menu opens THAT screen's settings", async () => {
@@ -410,7 +381,7 @@ describe("the panel follows the click, only while it is open", () => {
   const card = (name: string) => screen.getByLabelText(`More actions for ${name}`).closest("div.flex.flex-col") as HTMLElement;
 
   test("a click on a card moves the panel to that screen", async () => {
-    await mountScreens();
+    await mountScreensOpen();
     await click(card("Lobby TV"));
     assert.ok(panel().getByRole("heading", { name: "Lobby TV" }));
     await click(card("Booth panel"));
@@ -418,7 +389,7 @@ describe("the panel follows the click, only while it is open", () => {
   });
 
   test("a click on the name focuses it for renaming AND moves the panel", async () => {
-    await mountScreens();
+    await mountScreensOpen();
     const name = within(card("Lobby TV")).getByLabelText("Display name");
     await act(async () => { (name as HTMLElement).focus(); fireEvent.click(name); await settle(); });
     assert.ok(panel().getByRole("heading", { name: "Lobby TV" }));
@@ -426,7 +397,7 @@ describe("the panel follows the click, only while it is open", () => {
   });
 
   test("a click on the card's own controls does not: the view picker, Open, the menu", async () => {
-    await mountScreens();
+    await mountScreensOpen();
     const lobby = card("Lobby TV");
     await click(within(lobby).getByRole("link", { name: /Open/ }));
     await click(within(lobby).getByLabelText("View on Lobby TV"));
@@ -435,7 +406,7 @@ describe("the panel follows the click, only while it is open", () => {
   });
 
   test("an item pressed in a card's menu (rendered in a portal) does not move the panel: Refresh is not a click on the card", async () => {
-    await mountScreens();
+    await mountScreensOpen();
     await click(card("Booth panel"));
     assert.ok(panel().getByRole("heading", { name: "Booth panel" }));
     const trigger = screen.getByLabelText("More actions for Lobby TV");
@@ -445,14 +416,13 @@ describe("the panel follows the click, only while it is open", () => {
   });
 
   test("a card's picker change does not move it either", async () => {
-    await mountScreens();
+    await mountScreensOpen();
     await choose(within(card("Lobby TV")).getByLabelText("View on Lobby TV"), "wall-a");
     assert.ok(panel().getByRole("heading", { name: "Select a screen or view" }));
   });
 
   test("with the panel closed a click on a card does nothing: it stays closed and nothing retargets", async () => {
     await mountScreens();
-    await click(toggle());
     await click(card("Lobby TV"));
     assert.equal(panelIsOpen(), false, "a click opened the closed panel");
     // Opening it now shows nothing selected: the click selected nothing.
@@ -462,7 +432,7 @@ describe("the panel follows the click, only while it is open", () => {
 
   test("a view card under Views not on a screen moves the panel to its View settings", async () => {
     views = [...views, { id: "spare", name: "Spare loop", kind: "custom", surface: "display", createdAt: NOW }];
-    await mountScreens();
+    await mountScreensOpen();
     const spare = screen.getByLabelText("More actions for Spare loop").closest("div.flex.flex-col") as HTMLElement;
     await click(spare);
     assert.ok(panel().getByText("View settings"));
@@ -471,7 +441,7 @@ describe("the panel follows the click, only while it is open", () => {
 
   test("a view card's name field still renames, and the click moves the panel too", async () => {
     views = [...views, { id: "spare", name: "Spare loop", kind: "custom", surface: "display", createdAt: NOW }];
-    await mountScreens();
+    await mountScreensOpen();
     const name = screen.getByLabelText("View name") as HTMLInputElement;
     await act(async () => { name.focus(); fireEvent.click(name); await settle(); });
     assert.ok(panel().getByRole("heading", { name: "Spare loop" }));
@@ -481,7 +451,7 @@ describe("the panel follows the click, only while it is open", () => {
   });
 
   test("the selected card says so, and only while the panel is open", async () => {
-    await mountScreens();
+    await mountScreensOpen();
     await click(card("Lobby TV"));
     assert.match(card("Lobby TV").className, /border-accent/);
     assert.doesNotMatch(card("Booth panel").className, /border-accent/);
@@ -503,13 +473,12 @@ describe("the preview", () => {
 
   test("panel closed: the preview goes to the layout editor, as it always did", async () => {
     await mountScreens();
-    await click(toggle());
     await click(await eventually(() => within(previewOf("Lobby TV")).getByRole("button", { name: "Edit what Lobby TV shows" })));
     assert.equal(here(), true, "the preview did not open the editor");
   });
 
   test("panel open: a plain click moves the panel and does not leave the page", async () => {
-    await mountScreens();
+    await mountScreensOpen();
     await click(await eventually(() => within(previewOf("Lobby TV")).getByRole("button", { name: "Show settings for Lobby TV" })));
     assert.ok(panel().getByRole("heading", { name: "Lobby TV" }));
     assert.equal(here(), false, "a plain click on the preview left for the editor");
@@ -529,7 +498,7 @@ describe("the preview", () => {
   ] as const) {
     test(`panel open on ${platform}: a ${mod} click ${opensIt ? "opens the display and does not move the panel" : "is a plain click: it moves the panel and opens nothing"}`, async () => {
       asPlatform(platform);
-      await mountScreens();
+      await mountScreensOpen();
       const preview = await eventually(() => within(previewOf("Lobby TV")).getByRole("button", { name: "Show settings for Lobby TV" }));
       await act(async () => { fireEvent.click(preview, { [mod]: true }); await settle(); });
       if (opensIt) {
@@ -543,7 +512,7 @@ describe("the preview", () => {
   }
 
   test("panel open: a middle click opens the display too", async () => {
-    await mountScreens();
+    await mountScreensOpen();
     const preview = await eventually(() => within(previewOf("Lobby TV")).getByRole("button", { name: "Show settings for Lobby TV" }));
     await act(async () => { fireEvent(preview, new window.MouseEvent("auxclick", { bubbles: true, button: 1 })); await settle(); });
     assert.deepEqual(opened, [[`${window.location.origin}/display-3`, "display-display-3"]]);
@@ -736,7 +705,7 @@ describe("Add a screen", () => {
   });
 
   test("the panel's own + Add a screen starts it too, and opens a closed panel", async () => {
-    await mountScreens();
+    await mountScreensOpen();
     await click(panel().getByRole("button", { name: "+ Add a screen" }));
     assert.ok(panel().getByText("New screen · step 1 of 2"));
     await click(panel().getByRole("button", { name: "Close" }));
@@ -805,6 +774,16 @@ describe("Add a screen", () => {
     await click(addTile());
     assert.ok(panel().getByText("New screen · step 1 of 2"), "the form stayed on its step");
     assert.equal((panel().getByLabelText("Name") as HTMLInputElement).value, "", "the typed name was kept");
+  });
+
+  test("a new Mic Slots wall view POSTs its kind, and the screen it makes shows a slots view", async () => {
+    await mountScreens();
+    await click(addTile());
+    await nextStep();
+    await click(within(panel().getByRole("radiogroup", { name: "Kind of wall view" })).getByRole("radio", { name: "Mic Slots" }));
+    await click(panel().getByRole("button", { name: "Create screen" }));
+    assert.deepEqual(writes, [{ method: "POST", url: "/api/outputs", body: { newView: "wall", viewKind: "slots" } }]);
+    assert.equal(views.at(-1)?.kind, "slots");
   });
 
   test("a new control surface POSTs newView: control", async () => {
@@ -1074,7 +1053,7 @@ describe("View settings", () => {
 
   test("Delete view… on a view no screen shows says nothing about screens", async () => {
     views = [...views, { id: "spare", name: "Spare loop", kind: "custom", surface: "display", createdAt: NOW }];
-    await mountScreens();
+    await mountScreensOpen();
     await click(card("Spare loop"));
     await click(panel().getByRole("button", { name: "Delete view…" }));
     const d = await dialog();

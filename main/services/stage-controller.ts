@@ -21,7 +21,24 @@ import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
 import { screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
-import { clamp } from "./clamp.js";
+import { isSafeKey } from "./safe-key.js";
+import { isDisplayKind } from "../types/views.js";
+import { isUpdateMode } from "../types/state.js";
+import {
+  CAPTION_COLOR,
+  ICON_COLOR,
+  ICON_GLYPH,
+  MAX_TESTIMONY_KEYWORD,
+  RECONNECT_RANGES,
+  TAPER_RANGES,
+  clampAutoUpdateDay,
+  clampAutoUpdateHour,
+  clampFields,
+  isHttpBaseUrl,
+  isIconKey,
+  normalizeBaseUrl,
+  normalizeCaptionColor,
+} from "./settings-rules.js";
 import { plural } from "./plural.js";
 import { randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
@@ -69,7 +86,7 @@ import { updater } from "./updater.js";
 import { announceIfNew } from "./update/announce.js";
 import { validateSlug } from "./reserved-slugs.js";
 import { WriteQueue } from "./write-queue.js";
-import { serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
+import { cleanRoles, serviceCueRolesStore, seedRoles } from "./servicecue-roles-store.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
 import { clampTextSize, isStorableTextSize, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from "../types/text-size.js";
 import { DEFAULT_VIDEO_MODE, isRotation, isVideoMode, ROTATIONS, VIDEO_MODES } from "../types/output-format.js";
@@ -144,7 +161,7 @@ export function retuneEmbedFontSize(views: View[]): { views: View[]; changed: nu
 function migrateAutoUpdate(saved: unknown): AutoUpdateSettings {
   const o = (saved ?? {}) as Partial<AutoUpdateSettings> & { enabled?: boolean };
   const mode: AutoUpdateSettings["mode"] =
-    o.mode === "auto-install" || o.mode === "auto-full" || o.mode === "manual"
+    isUpdateMode(o.mode)
       ? o.mode
       : o.enabled === true
         ? "auto-full"
@@ -181,15 +198,6 @@ const DEVICE_STATUS_FLUSH_MS = 150;
 export const ROSTER_WINDOW_INTERVAL_MS = 60_000;
 
 /** Deep-clone a layout, minting fresh object ids so copies stay independent. */
-/** Normalize a user-entered base URL: trim, default to http:// if no scheme,
- *  strip a trailing slash. Returns null for blank input. */
-function normalizeBaseUrl(url: string | null): string | null {
-  if (!url) return null;
-  let s = url.trim();
-  if (!s) return null;
-  if (!/^https?:\/\//i.test(s)) s = `http://${s}`;
-  return s.replace(/\/+$/, "");
-}
 
 /**
  * A layout save was built on a revision someone else has already replaced.
@@ -367,20 +375,18 @@ export class LayoutConflictError extends Error {
  * spread back out and gets written to disk again. It can never be a real icon
  * key — the shape check refuses to create one — so it is dropped, loudly.
  */
-const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-
 export function writeIconEntry(
   current: Record<string, string> | undefined,
   key: string,
   value: string,
   label: string,
 ): Record<string, string> {
-  if (!/^[A-Za-z0-9/_-]{1,64}$/.test(key) || FORBIDDEN_KEYS.has(key)) {
+  if (!isIconKey(key)) {
     throw new Error(`${label} — key must be an id or a tool path`);
   }
   const next: Record<string, string> = Object.create(null);
   for (const [k, v] of Object.entries(current ?? {})) {
-    if (FORBIDDEN_KEYS.has(k)) {
+    if (!isSafeKey(k)) {
       // Both interpolations scrubbed. `label` is our own literal today, but this
       // file is request-facing and log-injection.test.ts holds every one of them
       // to scrub() so nobody has to judge that case by case.
@@ -770,17 +776,24 @@ export class StageController {
     }
 
     // First run: migrate from the legacy `displays` array (or the default).
+    // Only a list of entries with an id is a legacy display list. Anything else
+    // (a hand edit) is read as none, rather than throwing out of init() and
+    // keeping the server from starting on every boot.
+    const listed = Array.isArray(settings.displays)
+      ? settings.displays.filter((d): d is DisplayInfo => typeof d?.id === "string" && typeof d?.name === "string")
+      : [];
+    if (settings.displays !== undefined && listed.length !== (Array.isArray(settings.displays) ? settings.displays.length : -1)) {
+      console.warn("[stage-controller] settings.json's legacy displays list is not a list of displays; ignored");
+    }
     const legacy: DisplayInfo[] =
-      settings.displays && settings.displays.length > 0
-        ? settings.displays
-        : [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots" }];
+      listed.length > 0 ? listed : [{ id: PRIMARY_DISPLAY_ID, name: "Display 1", kind: "slots" }];
 
     const now = new Date().toISOString();
     const views: View[] = legacy.map((d) => ({
       id: d.id,
       name: d.name,
-      kind: (d.kind ?? "slots") as ViewKind,
-      ndiSource: d.ndiSource ?? null,
+      kind: isDisplayKind(d.kind) ? d.kind : "slots",
+      ndiSource: typeof d.ndiSource === "string" ? d.ndiSource : null,
       createdAt: now,
     }));
     const outputs: Output[] = legacy.map((d) => ({
@@ -994,7 +1007,7 @@ export class StageController {
     const k = key.trim();
     if (!k) throw new Error("icon-color — key required");
     const c = color.trim().toLowerCase();
-    if (c !== "" && !/^#[0-9a-f]{6}$/.test(c)) {
+    if (c !== "" && !ICON_COLOR.test(c)) {
       throw new Error('icon-color — color must be "#rrggbb" or "" to clear');
     }
     const next = writeIconEntry(this.state.iconColors, k, c, "icon-color");
@@ -1020,7 +1033,7 @@ export class StageController {
     const g = glyph.trim();
     // Name-shaped only. Anything else is a caller bug, and storing it would put
     // a value in settings.json that nothing can ever render.
-    if (g !== "" && !/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(g)) {
+    if (g !== "" && !ICON_GLYPH.test(g)) {
       throw new Error('icon-glyph — glyph must be an icon name or "" to clear');
     }
     const next = writeIconEntry(this.state.iconGlyphs, k, g, "icon-glyph");
@@ -1033,6 +1046,8 @@ export class StageController {
 
   async setPublicUrl(url: string | null): Promise<StageState> {
     const normalized = normalizeBaseUrl(url);
+    // Opened by the Screens page as a link, so it has to be a web address.
+    if (normalized !== null && !isHttpBaseUrl(normalized)) throw new Error("The public URL must be an http or https address.");
     console.log(`[stage-controller] setPublicUrl → ${scrub(normalized ?? "(cleared)")}`);
     this.publicUrl = normalized;
     this.state = { ...this.state, publicUrl: normalized };
@@ -1724,13 +1739,7 @@ export class StageController {
   }
 
   async saveServiceCueRoles(roles: CategoryRole[]): Promise<CategoryRole[]> {
-    const clean = (roles ?? [])
-      .filter((r) => r && typeof r.id === "string" && typeof r.name === "string" && r.name.trim())
-      .map((r) => ({
-        id: r.id,
-        name: r.name.trim(),
-        members: [...new Set((r.members ?? []).map((m) => String(m).trim()).filter(Boolean))],
-      }));
+    const clean = cleanRoles(roles ?? []);
     await serviceCueRolesStore.save(clean);
     this.broadcast();
     return clean;
@@ -2714,9 +2723,8 @@ export class StageController {
   async setAutoUpdate(partial: Partial<AutoUpdateSettings>): Promise<StageState> {
     const next: AutoUpdateSettings = { ...this.state.autoUpdate, ...partial };
     // Clamp hour to 0–23; dayOfWeek to 0–6 or null.
-    next.hour = clamp(Math.round(next.hour), 0, 23);
-    next.dayOfWeek =
-      next.dayOfWeek == null ? null : clamp(Math.round(next.dayOfWeek), 0, 6);
+    next.hour = clampAutoUpdateHour(next.hour);
+    next.dayOfWeek = clampAutoUpdateDay(next.dayOfWeek);
     console.log(`[stage-controller] setAutoUpdate →`, scrub(next));
     this.state = { ...this.state, autoUpdate: next };
     await settingsStore.patch({ autoUpdate: next });
@@ -2727,10 +2735,7 @@ export class StageController {
   // ── Time-aware reconnect scheduling ───────────────────────────────────
 
   async setReconnectSchedule(partial: Partial<ReconnectSchedule>): Promise<StageState> {
-    const next: ReconnectSchedule = { ...this.state.reconnectSchedule, ...partial };
-    next.leadMin = clamp(Math.round(next.leadMin), 0, 1440);
-    next.tailMin = clamp(Math.round(next.tailMin), 0, 1440);
-    next.dormantMin = clamp(Math.round(next.dormantMin), 1, 1440);
+    const next = clampFields<ReconnectSchedule>({ ...this.state.reconnectSchedule, ...partial }, RECONNECT_RANGES);
     console.log(`[stage-controller] setReconnectSchedule → ${scrub(next)}`);
     this.state = { ...this.state, reconnectSchedule: next };
     await settingsStore.patch({ reconnectSchedule: next });
@@ -2743,7 +2748,7 @@ export class StageController {
   /** The keyword that lets a plan item start the testimonies by itself. */
   async setBaptismAutoStart(partial: Partial<BaptismAutoStart>): Promise<StageState> {
     const cur = this.state.baptismAutoStart ?? { enabled: false, testimonyKeyword: "baptism stories" };
-    const next: BaptismAutoStart = { ...cur, ...partial, testimonyKeyword: (partial.testimonyKeyword ?? cur.testimonyKeyword).slice(0, 80) };
+    const next: BaptismAutoStart = { ...cur, ...partial, testimonyKeyword: (partial.testimonyKeyword ?? cur.testimonyKeyword).slice(0, MAX_TESTIMONY_KEYWORD) };
     this.state = { ...this.state, baptismAutoStart: next };
     await settingsStore.patch({ baptismAutoStart: next });
     this.broadcast();
@@ -2751,9 +2756,7 @@ export class StageController {
   }
 
   async setTaperWindow(partial: Partial<TaperWindow>): Promise<StageState> {
-    const next: TaperWindow = { ...this.state.taperWindow, ...partial };
-    next.preMin = clamp(Math.round(next.preMin), 0, 240);
-    next.postMin = clamp(Math.round(next.postMin), 0, 240);
+    const next = clampFields<TaperWindow>({ ...this.state.taperWindow, ...partial }, TAPER_RANGES);
     console.log(`[stage-controller] setTaperWindow → ${scrub(next)}`);
     this.state = { ...this.state, taperWindow: next };
     await settingsStore.patch({ taperWindow: next });
@@ -2984,14 +2987,15 @@ export class StageController {
    *  channel label. Persisted + broadcast so kiosks recolor live. */
   async setCaptionChannelColor(channel: string, color: string | null): Promise<StageState> {
     const key = channel.trim();
-    if (!key) return this.state;
-    const next = { ...this.state.captionChannelColors };
-    if (color && /^#?[0-9a-f]{3,8}$/i.test(color.trim())) {
-      const c = color.trim();
-      next[key] = c.startsWith("#") ? c : `#${c}`;
+    // A restore refuses these keys, so a save must never write one.
+    if (!key || !isSafeKey(key)) return this.state;
+    const colors = new Map(Object.entries(this.state.captionChannelColors));
+    if (color && CAPTION_COLOR.test(color.trim())) {
+      colors.set(key, normalizeCaptionColor(color));
     } else {
-      delete next[key]; // null/invalid → revert to auto
+      colors.delete(key); // null/invalid → revert to auto
     }
+    const next = Object.fromEntries(colors);
     this.state = { ...this.state, captionChannelColors: next };
     await settingsStore.patch({ captionChannelColors: next });
     this.broadcast();
@@ -4041,8 +4045,9 @@ export class StageController {
    *
    * The screen is a control surface when the view it shows is a console, so the
    * choice is the view: `viewId` names an existing one of either kind, or `newView`
-   * makes a blank custom one, a "wall" view (read-only) or a "control" surface.
-   * With neither the screen shows nothing yet.
+   * makes one: a "wall" view (read-only) of any `viewKind`, custom by default, or a
+   * "control" surface, which is always a custom layout. A custom view starts from
+   * `layout`, or blank. With neither the screen shows nothing yet.
    *
    * `last` is a caller's own write that belongs to the same screen (a device to
    * bind to it), run as the final step. If it fails, everything before it is put
@@ -4060,6 +4065,19 @@ export class StageController {
     }
     if (typeof input.viewId === "string" && newView !== undefined) {
       throw new Error("outputs:add — viewId and newView are alternatives: name an existing view, or ask for a new one");
+    }
+    if (newView === undefined && (input.viewKind !== undefined || input.layout !== undefined)) {
+      throw new Error("outputs:add — viewKind and layout describe a view being made, so they need newView");
+    }
+    // A control surface is made only as a custom layout, the kind with a layout to
+    // put controls on. Refused rather than made a wall view: a caller asking for a
+    // Mic Slots control surface would otherwise get a screen whose buttons do nothing.
+    const viewKind: ViewKind = input.viewKind ?? "custom";
+    if (newView === "control" && viewKind !== "custom") {
+      throw new Error(`outputs:add — a control surface is made only as a custom layout, not "${viewKind}"`);
+    }
+    if (input.layout !== undefined && viewKind !== "custom") {
+      throw new Error(`outputs:add — layout is the starting layout of a custom view, and this one is "${viewKind}"`);
     }
     const existing = typeof input.viewId === "string" ? this.requireViewToShow(input.viewId) : undefined;
     if (input.expectSurface !== undefined) {
@@ -4090,13 +4108,20 @@ export class StageController {
         ? [{
             label: "make the view",
             run: async () => {
-              // Custom: the guided creation makes a layout, which can be either kind of screen.
-              await this.createViewRecord(name, "custom", newView === "control" ? "console" : "display", (view) => {
+              await this.createViewRecord(name, viewKind, newView === "control" ? "console" : "display", (view) => {
                 createdViewId = view.id;
                 viewId = view.id;
               });
             },
             undo: async () => { if (!createdViewId) return false; await this.dropView(createdViewId); },
+          }]
+        : []),
+      // Its own step, after the view: the layout write also loads the raw slots of an
+      // inline Mic Slots object. The view's undo above drops it whole, layout and all.
+      ...(input.layout
+        ? [{
+            label: "lay out the view",
+            run: async () => { await this.setViewLayout(createdViewId!, input.layout!); },
           }]
         : []),
       {
@@ -4126,9 +4151,10 @@ export class StageController {
         : []),
       ...(last ? [{ label: last.label, run: () => last.run(output!) }] : []),
     ]);
+    const made = createdViewId ? ` (made for it: kind=${viewKind})` : "";
     console.log(
       `[stage-controller] createScreen id=${scrub(output!.id)} name="${scrub(output!.name)}" ` +
-        `view=${scrub(viewId ?? "(none)")}${scrub(createdViewId ? " (made for it)" : "")}${scrub(slug ? ` slug="${slug}"` : "")}`,
+        `view=${scrub(viewId ?? "(none)")}${scrub(made)}${scrub(slug ? ` slug="${slug}"` : "")}`,
     );
     return { state: this.state, output: output!, createdViewId };
   }

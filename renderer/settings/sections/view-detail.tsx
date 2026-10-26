@@ -30,7 +30,7 @@ import { SlotEditor } from "./slots-section";
 import { LayoutEditor } from "../../editor/layout-editor";
 import { ViewPreview } from "./view-preview";
 import { SlotsPreviewNote } from "./slots-preview-target";
-import { KIND_LABELS, KIND_ORDER } from "./new-view-dialog";
+import { KIND_LABELS, KIND_ORDER } from "./view-kinds";
 import { CalendarSources } from "./calendar-sources";
 import { viewSurface } from "@main/types/views";
 import { deleteView } from "./screen-confirms";

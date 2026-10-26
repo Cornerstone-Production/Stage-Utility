@@ -10,8 +10,9 @@
 // Either every image is present or none is. Five optional keys would let a request
 // set a 180 icon and leave a stale 512 one behind, which a phone then shows.
 
-import { looksLikeStoredRef } from "./branding-image-store.js";
+import { MAX_BRANDING_DATA_URL_CHARS, looksLikeStoredRef } from "./branding-image-store.js";
 import { isDataUrl } from "./image-files.js";
+import { isHex6 } from "./settings-rules.js";
 import { DEFAULT_ICON_BACKGROUND, ICON_SIZES, type IconField } from "./install-metadata.js";
 
 export interface IconCrop {
@@ -63,7 +64,7 @@ export const NO_APP_ICON: AppIconSettings = {
 };
 
 /** Each data URL is held to the cap the other branding images have. */
-const MAX_DATA_URL_CHARS = 2_000_000;
+const MAX_DATA_URL_CHARS = MAX_BRANDING_DATA_URL_CHARS;
 const PNG_PREFIX = "data:image/png;base64,";
 
 /** The pixel size an icon PNG declares, read from its IHDR; null if it is not a PNG. */
@@ -92,18 +93,32 @@ export function parseCrop(v: unknown): IconCrop | null {
 /** The sizes the icon images must be, by request field. `art` only has to be square. */
 const IMAGE_SIZES: Record<"art" | IconField, number | null> = { art: null, ...ICON_SIZES };
 
-/** The reason a field is not an acceptable icon PNG, or null when it is. */
-function pngProblem(key: keyof typeof IMAGE_SIZES, value: unknown): string | null {
-  if (typeof value !== "string" || !value.startsWith(PNG_PREFIX)) return `body.icon.${key} must be a PNG data URL`;
-  if (value.length > MAX_DATA_URL_CHARS) return `body.icon.${key} too large (max ~1.5 MB)`;
+/** The reason a field is not an acceptable icon PNG, or null when it is.
+ *  `label` names it in the reason: the request field, or the settings key. */
+export function iconPngProblem(key: IconImageField, value: unknown, label = `body.icon.${key}`): string | null {
+  if (typeof value !== "string" || !value.startsWith(PNG_PREFIX)) return `${label} must be a PNG data URL`;
+  if (value.length > MAX_DATA_URL_CHARS) return `${label} too large (max ~1.5 MB)`;
   const dims = pngSize(value);
-  if (!dims) return `body.icon.${key} is not a valid PNG`;
+  if (!dims) return `${label} is not a valid PNG`;
   const size = IMAGE_SIZES[key];
-  if (size === null) return dims.width === dims.height ? null : `body.icon.${key} must be square`;
+  if (size === null) return dims.width === dims.height ? null : `${label} must be square`;
   return dims.width === size && dims.height === size
     ? null
-    : `body.icon.${key} must be ${size} x ${size}, got ${dims.width} x ${dims.height}`;
+    : `${label} must be ${size} x ${size}, got ${dims.width} x ${dims.height}`;
 }
+
+/** The request fields of the icon's images. */
+export type IconImageField = keyof typeof IMAGE_SIZES;
+
+/** The settings key each icon image is stored under, by its request field: the
+ *  pairing iconToSettings writes. */
+export const ICON_IMAGE_KEYS: Record<IconImageField, keyof AppIconSettings> = {
+  art: "appIcon",
+  apple: "appIconApple",
+  any192: "appIcon192",
+  any512: "appIcon512",
+  maskable: "appIconMaskable",
+};
 
 /**
  * Check the `icon` field of a branding request.
@@ -118,12 +133,12 @@ export function parseAppIcon(v: unknown): IconParse {
   const body = v as Record<string, unknown>;
 
   for (const key of Object.keys(IMAGE_SIZES) as (keyof typeof IMAGE_SIZES)[]) {
-    const problem = pngProblem(key, body[key]);
+    const problem = iconPngProblem(key, body[key]);
     if (problem) return { ok: false, error: problem };
   }
 
   const background = body.background;
-  if (typeof background !== "string" || !/^#[0-9a-fA-F]{6}$/.test(background)) {
+  if (!isHex6(background)) {
     return { ok: false, error: "body.icon.background must be a #rrggbb hex" };
   }
 

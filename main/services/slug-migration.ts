@@ -26,7 +26,7 @@
 // output list. Idempotent — after one pass no slug is reserved, so the next boot
 // finds nothing.
 
-import { RESERVED_SLUGS, RESERVED_SLUG_PREFIX, validateSlug } from "./reserved-slugs.js";
+import { isReservedSlug, validateSlug } from "./reserved-slugs.js";
 import type { Output } from "../types/stage.js";
 import { screenName } from "../types/views.js";
 
@@ -52,11 +52,6 @@ export interface SlugMigrationResult {
  * end is worse than an alias that has to be retyped.
  */
 const MAX_SUFFIXES = 20;
-
-/** Does the app itself now serve this path? */
-function isReserved(slug: string): boolean {
-  return RESERVED_SLUGS.includes(slug) || slug.startsWith(RESERVED_SLUG_PREFIX);
-}
 
 /** `logs` -> `logs-2`, `logs-3`, … — the first that is neither reserved nor taken. */
 function freeAlternative(slug: string, taken: Set<string>): string | null {
@@ -91,7 +86,7 @@ export function migrateReservedSlugs(outputs: readonly Output[]): SlugMigrationR
     // validator let through, is NOT this migration's business: it works or fails
     // on its own terms and nothing changed under it. Only a name the app has
     // since taken over is repaired here.
-    if (!s || !isReserved(s)) return o;
+    if (!s || !isReservedSlug(s)) return o;
 
     // Its own name excluded, or the alternative search would treat it as taken.
     const others = new Set(taken);
