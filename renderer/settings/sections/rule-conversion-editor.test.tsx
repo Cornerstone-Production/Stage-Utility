@@ -121,10 +121,18 @@ async function pickOption(id: string) {
   await press(document.querySelector(`[data-picker-option="${id}"]`), id);
 }
 
-/** Press Save and, when Save asks about Home Assistant, answer. */
+/** The editor closes only once the save has fully landed: the write is on disk, the
+ *  server has answered and the page has handled the answer. The engine changes its
+ *  rules in memory BEFORE the disk write, so a test that reads the engine after
+ *  pressing Save sees the change while the rest of the save is still running, and
+ *  on the file's last test that rest finishes after the DOM is torn down. */
+const saveLanded = () => eventually(() => assert.equal(editorOpen(), false, "Save asked a question, or did not close"));
+
+/** Press Save and, when Save asks about Home Assistant, answer. Returns once the
+ *  save has landed, except on Cancel, which saves nothing. */
 async function save(answer: "confirm" | "cancel" | "none" = "none") {
   await press(button("Save"), "Save");
-  if (answer === "none") return;
+  if (answer === "none") return saveLanded();
   const ask = await eventually(() => {
     const el = [...document.querySelectorAll("[role=alertdialog], [role=dialog]")].find((d) => !d.hasAttribute("data-rule-editor"));
     assert.ok(el, "Save did not ask about Home Assistant");
@@ -133,6 +141,7 @@ async function save(answer: "confirm" | "cancel" | "none" = "none") {
   const labels = answer === "confirm" ? ["Save anyway", "Save"] : ["Cancel"];
   const btn = [...ask.querySelectorAll("button")].find((b) => labels.includes(b.textContent?.trim() ?? ""));
   await press(btn, `the ${answer} button`);
+  if (answer === "confirm") await saveLanded();
 }
 
 before(async () => {
@@ -268,7 +277,6 @@ describe("Make it manual", () => {
     await openRow("Stage reset");
     await press(button("Make it manual"), "Make it manual");
     await save();
-    await eventually(() => assert.equal(editorOpen(), false, "Save asked a question, or did not close"));
     const forHome = (await callRoute(cueRoutes, "/api/cues/manifest", { headers: browser })).json as {
       buttons: { id: string; builtin?: true }[];
     };
@@ -353,6 +361,7 @@ describe("Make it automatic", () => {
     assert.equal(said.includes("Home Assistant removes"), false, "it claimed Home Assistant loses an entity it never had");
     assert.deepEqual(patches(), [], "it saved before the answer");
     await press([...ask.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Save anyway"), "Save anyway");
+    await saveLanded();
     assert.equal(rules()[0].trigger.id, "pco.service-ended");
     assert.equal(rules()[0].enabled, false);
   });
@@ -367,7 +376,7 @@ describe("a conversion never renames a cue", () => {
     await press(button("Make it manual"), "Make it manual");
     assert.equal(manualBox(), true);
     assert.equal(labelled("Cue name")?.value, "stage_reset", "the cue was renamed by going there and back");
-    await press(button("Save"), "Save");
+    await save();
     // Nothing changed, so what is sent (if anything) carries no trigger.
     const sentTriggers = patches().filter((p) => p.body && "trigger" in (JSON.parse(p.body) as object));
     assert.equal(sentTriggers.length, 0, "a round trip wrote the trigger");
