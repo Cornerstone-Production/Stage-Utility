@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { pathConf, planReconcile, publishUsers, pullSource } from "./reconcile-plan.js";
+import { desiredPaths, listenPathConf, pathConf, planReconcile, publishUsers, pullSource } from "./reconcile-plan.js";
 import { READER_USER } from "./mediamtx-config.js";
 import type { RelayFeed } from "./relay.js";
 
@@ -178,5 +178,71 @@ describe("pullSource", () => {
 
   it("leaves an SRT URL unchanged with no password", () => {
     assert.equal(pullSource("srt://h:9000?streamid=x", "ignored", undefined), "srt://h:9000?streamid=x");
+  });
+});
+
+describe("the -listen path", () => {
+  const CMD = "'/usr/bin/ffmpeg' '-i' 'rtsp://127.0.0.1:8554/cam1' 'rtsp://127.0.0.1:8554/cam1-listen'";
+  const LISTENED: RelayFeed = { ...PULL, listenCommand: CMD };
+
+  it("is one more path beside the feed's own, with exactly the on-demand block", () => {
+    assert.deepEqual(desiredPaths([LISTENED, PUSH]), [
+      ["cam1", pathConf(PULL)],
+      [
+        "cam1-listen",
+        {
+          source: "publisher",
+          overridePublisher: false,
+          runOnDemand: CMD,
+          runOnDemandRestart: true,
+          runOnDemandStartTimeout: "15s",
+          runOnDemandCloseAfter: "10s",
+        },
+      ],
+      ["obs1", pathConf(PUSH)],
+    ]);
+  });
+
+  it("is absent for a feed with no command", () => {
+    assert.deepEqual(desiredPaths([PULL, PUSH]).map(([n]) => n), ["cam1", "obs1"]);
+  });
+
+  it("is added, left alone once the relay has it, replaced when the command changes, and removed when the feed stops needing it", () => {
+    const add = planReconcile([LISTENED], [currentPathFor(PULL)]);
+    assert.deepEqual(add.add.map(([n]) => n), ["cam1-listen"]);
+    assert.deepEqual(add.replace, []);
+    assert.deepEqual(add.remove, []);
+
+    const have = [currentPathFor(PULL), { name: "cam1-listen", conf: { ...listenPathConf(CMD), maxReaders: 0 } }];
+    const same = planReconcile([LISTENED], have);
+    assert.deepEqual([same.add, same.replace, same.remove], [[], [], []]);
+
+    const changed = planReconcile([{ ...PULL, listenCommand: CMD + " 'x'" }], have);
+    assert.deepEqual(changed.replace.map(([n]) => n), ["cam1-listen"]);
+
+    const gone = planReconcile([PULL], have);
+    assert.deepEqual(gone.remove, ["cam1-listen"]);
+  });
+
+  it("is removed along with its feed", () => {
+    const have = [currentPathFor(PULL), { name: "cam1-listen", conf: { ...listenPathConf(CMD) } }];
+    assert.deepEqual(planReconcile([], have).remove.sort(), ["cam1", "cam1-listen"]);
+  });
+
+  it("lets loopback publish to exactly the -listen paths that exist, and nowhere else", () => {
+    const users = publishUsers([LISTENED, { ...PULL_2, listenCommand: CMD }, PUSH]);
+    assert.deepEqual(users[0], READER_USER);
+    assert.deepEqual(users[1], {
+      user: "any",
+      pass: "",
+      ips: ["127.0.0.1", "::1"],
+      permissions: [
+        { action: "publish", path: "cam1-listen" },
+        { action: "publish", path: "cam2-listen" },
+      ],
+    });
+    assert.equal(users[2].user, "video");
+    // No -listen path, no such user.
+    assert.deepEqual(publishUsers([PULL, PUSH]).map((u) => u.user), ["any", "video"]);
   });
 });

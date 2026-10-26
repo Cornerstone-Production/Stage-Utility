@@ -380,6 +380,7 @@ class means for backups.
 | `stream-starts.json` | runtime | When each streaming platform was first seen live |
 | `update-notices.json` | runtime | Which release has been announced |
 | `video-feeds.json` | config | [Video feeds](../integrations/video-feeds.md) and the relay's ports |
+| `video-ffmpeg.json` | runtime | The ffmpeg path set in Advanced; machine-specific, so never restored |
 | `video-seen.json` | runtime | When each feed was last confirmed live |
 | `views.json` | config | Views and their layouts |
 | `wireless-connections.json` | config | Receiver and charger connections (not their passwords) |

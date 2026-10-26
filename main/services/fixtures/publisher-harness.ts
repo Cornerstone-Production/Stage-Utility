@@ -10,6 +10,7 @@ import { afterEach, beforeEach, type TestContext } from "node:test";
 import { captureConsole } from "./capture-console.js";
 import { FakeReceiver } from "./publish-receiver.js";
 import { fixtureSource, type FixtureSource } from "./publish-source.js";
+import type { DeployHook } from "../servicecue-deployer.js";
 import { ServiceCuePublisher, type PublisherTimings } from "../servicecue-publisher.js";
 import type { ServiceCuePublishSettings } from "../servicecue-publish-store.js";
 
@@ -45,7 +46,7 @@ export interface Harness {
 
 let live: Harness[] = [];
 
-export async function harness(timings: Partial<PublisherTimings> = {}, opts: { real?: boolean } = {}): Promise<Harness> {
+export async function harness(timings: Partial<PublisherTimings> = {}, opts: { real?: boolean; deploy?: DeployHook } = {}): Promise<Harness> {
   const page = await FakeReceiver.start();
   const source = fixtureSource();
   const settings: ServiceCuePublishSettings = { enabled: true, url: page.origin };
@@ -57,6 +58,7 @@ export async function harness(timings: Partial<PublisherTimings> = {}, opts: { r
     loadToken: async () => token.value,
     version: () => "9.9.9",
     timings: { ...MANUAL, ...timings },
+    ...(opts.deploy ? { deploy: opts.deploy } : {}),
     ...(opts.real ? {} : { listen: (cb) => void (emit = cb) }),
   });
   const h = { page, source, pub, settings, token, emit: (c: string, p?: unknown) => emit(c, p) };

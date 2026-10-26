@@ -12,6 +12,8 @@ import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { plural } from "@main/services/plural";
 import { PublicLinkCard } from "./servicecue-public-link";
+import { appZoneOf } from "./history-trends/trends";
+import { hostTimeZone } from "@main/services/app-timezone";
 
 // crypto.randomUUID is undefined in an insecure (plain-HTTP) context, which prod
 // is served over — fall back so layout creation never throws there.
@@ -275,6 +277,7 @@ export function ServiceCueSection() {
       <PublicLinkCard
         typeNames={shownIds.map((id) => types.find((t) => t.id === id)?.name).filter((n): n is string => !!n)}
         layoutNames={sortedLayouts.map((l) => l.name)}
+        timeZone={appZoneOf(stage.state, hostTimeZone())}
       />
 
       <div className="flex items-center gap-2 mb-4">

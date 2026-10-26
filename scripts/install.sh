@@ -49,6 +49,45 @@ log()  { printf '\033[1;36m[install]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[install]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[install]\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Installs the system's ffmpeg for the Video relay's audio conversion. Best
+# effort: whatever happens here, the install carries on, because video works
+# without it and Advanced says whether the server found one.
+# Kept identical in install.sh and scripts/install.sh (scripts/installer-ffmpeg.test.ts).
+install_ffmpeg() {
+  if command -v ffmpeg >/dev/null 2>&1; then
+    log "ffmpeg is already installed."
+    return 0
+  fi
+  if [ "$(id -u)" -ne 0 ]; then
+    warn "ffmpeg is not installed and this is not running as root, so it was not installed. Audio conversion needs it; video works without it."
+    return 0
+  fi
+  local out="" status=1
+  if command -v apt-get >/dev/null 2>&1; then
+    log "Installing ffmpeg with apt-get..."
+    if out="$(DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg 2>&1)"; then status=0
+    elif apt-get update >/dev/null 2>&1 && out="$(DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg 2>&1)"; then status=0
+    fi
+  elif command -v dnf >/dev/null 2>&1; then
+    log "Installing ffmpeg with dnf..."
+    if out="$(dnf install -y ffmpeg 2>&1)"; then status=0
+    elif out="$(dnf install -y ffmpeg-free 2>&1)"; then status=0
+    fi
+  elif command -v pacman >/dev/null 2>&1; then
+    log "Installing ffmpeg with pacman..."
+    if out="$(pacman -S --noconfirm --needed ffmpeg 2>&1)"; then status=0; fi
+  else
+    warn "No apt-get, dnf or pacman found, so ffmpeg was not installed. Audio conversion needs it; video works without it."
+    return 0
+  fi
+  if [ "$status" -eq 0 ]; then
+    log "ffmpeg installed."
+  else
+    warn "Could not install ffmpeg: $(printf '%s' "$out" | tail -n 1). Audio conversion needs it; video works without it."
+  fi
+  return 0
+}
+
 # ── 1. Check Node ≥ 24 and npm ────────────────────────────────────────────────
 command -v node >/dev/null 2>&1 || die \
   "Node.js not found. Install Node >= ${MIN_NODE_MAJOR} (https://github.com/nodesource/distributions) and re-run."
@@ -95,6 +134,9 @@ if [[ "$(id -u)" -eq 0 ]] && id "${SERVICE_USER}" >/dev/null 2>&1; then
   chown -R "${SERVICE_USER}" "${REPO_ROOT}" 2>/dev/null || \
     warn "Could not chown ${REPO_ROOT} to ${SERVICE_USER}; in-app updates may fail with EACCES."
 fi
+
+# ── 3c. ffmpeg (optional) ─────────────────────────────────────────────────────
+install_ffmpeg
 
 # ── 4. Data directory ─────────────────────────────────────────────────────────
 log "Data directory: ${DATA_DIR} (owner: ${SERVICE_USER})"

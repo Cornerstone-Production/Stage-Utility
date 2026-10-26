@@ -215,12 +215,18 @@ const REQUEST_FACING = [
   // outside data by every measure this file uses, and the same exposure
   // pco-service.ts is scanned for.
   "service-timeline-recorder.ts",
+  // Its lines name a build id and version read out of what Cloudflare holds, and Cloudflare's own
+  // error words, which echo what a request carried. It never names a token.
+  "servicecue-deployer.ts",
   // Its lines name the host of the page address typed into POST /api/servicecue/publish,
   // a document key built from Planning Center ids, and whatever the page or the network
   // said back. It never names the token.
   "servicecue-publisher.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
+  // The ffmpeg path is typed into PATCH /api/video/ffmpeg and reaches its
+  // "not found at" and "found at" log lines.
+  "video/ffmpeg-system.ts",
   // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
   // file's own "is live"/"went offline"/B-frames log lines on a transition.
   "video/video-service.ts",
@@ -339,6 +345,11 @@ const NOT_SCANNED = new Map<string, string>([
       "interpolates nothing. Audited, not just excused.",
   ],
   ["servicecue-layouts-store.ts", UNAUDITED],
+  [
+    "servicecue-publisher-instance.ts",
+    "logs one sentence, when the address STAGE_UTILITY_CLOUDFLARE_API names is not usable, naming only " +
+      "the fixed reason the address parser gives. An environment variable is the operator's, not a request's.",
+  ],
   ["slots-store.ts", UNAUDITED],
   ["smaart-service.ts", DEVICE],
   [
@@ -443,6 +454,9 @@ function requestFacingFiles(): string[] {
     // caller put on the /api/events/poll query string — an attacker's value,
     // verbatim, reaching /log.
     path.join(HERE, "event-poll.ts"),
+    // The ffmpeg path is typed into PATCH /api/video/ffmpeg and reaches its
+    // "not found at" and "found at" log lines.
+    path.join(HERE, "video/ffmpeg-system.ts"),
     // Every rebuild/merge line names a serviceKey, which arrives verbatim in an
     // HTTP body — POST /api/history/rebuild and /api/history/merge both take it
     // from the caller — and the rebuild it drives reaches plan item titles.
@@ -520,6 +534,8 @@ function requestFacingFiles(): string[] {
     // and, for the timeline, on the carried-over-item line. A title is typed
     // into Planning Center and reaches this process in an HTTP response body.
     path.join(HERE, "service-timeline-recorder.ts"),
+    // Its lines name what Cloudflare answered; see REQUEST_FACING.
+    path.join(HERE, "servicecue-deployer.ts"),
     // Its lines name the host of the page address typed into POST /api/servicecue/publish
     // and whatever the page or the network said back; see REQUEST_FACING.
     path.join(HERE, "servicecue-publisher.ts"),

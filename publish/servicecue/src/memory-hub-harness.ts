@@ -6,7 +6,7 @@
 // messages.test.ts. TEST-ONLY: no `.test.` in the name so the runner does not look for
 // tests in it.
 
-import { PUBLISH_PROTOCOL_VERSION, type AssetContentType, type PublishStatus } from "../../../main/types/servicecue-publish.js";
+import { PUBLISH_PROTOCOL_VERSION, type AssetContentType, type HubStatus } from "../../../main/types/servicecue-publish.js";
 import type { HubApi } from "./hub-api.js";
 
 export class MemoryHub implements HubApi {
@@ -57,7 +57,7 @@ export class MemoryHub implements HubApi {
     for (const k of removedAssets) this.assets.delete(k);
     return { removedDocs, removedAssets };
   }
-  async status(): Promise<PublishStatus> {
+  async status(): Promise<HubStatus> {
     return {
       protocol: PUBLISH_PROTOCOL_VERSION,
       docs: [...this.docs.keys()].sort(),

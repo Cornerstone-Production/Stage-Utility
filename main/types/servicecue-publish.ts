@@ -300,7 +300,16 @@ export interface PublishStatus {
   lastHeartbeat: LastHeartbeat | null;
   /** Viewers connected to the live socket right now. */
   viewers: number;
+  /**
+   * The build id of the page this Worker serves (the id in its document, as `viewerBuildTag`
+   * stamps it), or null when the document is missing or carries none. A Worker from before
+   * this field answers without it, and the publisher reads that as null as well.
+   */
+  build: string | null;
 }
+
+/** What the Durable Object knows of the status: the Worker adds `build`, which it reads from the page it serves. */
+export type HubStatus = Omit<PublishStatus, "build">;
 
 // ── Assets ────────────────────────────────────────────────────────────────────
 

@@ -241,7 +241,7 @@ describe("POST /api/servicecue/publish", () => {
     const [first, second] = await Promise.all([post({ url: page.origin, token: TOKEN }), post({ enabled: true })]);
     assert.equal(first.status, 200);
     assert.equal(second.status, 200, JSON.stringify(second.json));
-    assert.deepEqual({ ...(await get()).json as object, status: undefined }, { enabled: true, url: page.origin, token: MASK, status: undefined });
+    assert.deepEqual({ ...(await get()).json as object, status: undefined, deploy: undefined }, { enabled: true, url: page.origin, token: MASK, status: undefined, deploy: undefined });
   });
 
   it("puts the token back when the settings could not be written, and the save fails out loud", async (t) => {

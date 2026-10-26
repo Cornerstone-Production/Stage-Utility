@@ -20,7 +20,7 @@ const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1"]);
 export const PUBLISH_ALLOW_LOCAL_ENV = "STAGE_UTILITY_PUBLISH_ALLOW_LOCAL";
 
 /** Is the development switch set? False wherever there is no process environment, the browser included. */
-function localAllowed(): boolean {
+export function localAllowed(): boolean {
   return (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[PUBLISH_ALLOW_LOCAL_ENV] === "1";
 }
 

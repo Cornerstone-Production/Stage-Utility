@@ -29,7 +29,7 @@ interface PortSpec {
   host: string;
 }
 
-function specsFor(ports: VideoPorts): PortSpec[] {
+function specsFor(ports: VideoPorts, rtsp: boolean): PortSpec[] {
   return [
     { port: ports.rtmp, proto: "tcp", host: "0.0.0.0" },
     { port: ports.srt, proto: "udp", host: "0.0.0.0" },
@@ -37,6 +37,9 @@ function specsFor(ports: VideoPorts): PortSpec[] {
     { port: ports.webrtcHttp, proto: "tcp", host: "127.0.0.1" },
     { port: ports.hls, proto: "tcp", host: "127.0.0.1" },
     { port: ports.api, proto: "tcp", host: "127.0.0.1" },
+    // Bound only when the relay will be started with RTSP (ffmpeg usable), so a
+    // machine whose 8554 is taken by something else loses nothing it had.
+    ...(rtsp ? [{ port: ports.rtsp, proto: "tcp" as const, host: "127.0.0.1" }] : []),
   ];
 }
 
@@ -63,12 +66,13 @@ function udpBusy(port: number, host: string): Promise<boolean> {
 }
 
 /**
- * Every one of the relay's six ports that is already taken, each with who is
- * holding it (port-holder.ts's portHolder). A port nobody is using is left
- * out entirely — the caller only ever wants the ones that are a problem.
+ * Every one of the relay's ports that is already taken (the RTSP one only when
+ * `rtsp`), each with who is holding it (port-holder.ts's portHolder). A port
+ * nobody is using is left out entirely — the caller only ever wants the ones
+ * that are a problem.
  */
-export async function busyPorts(ports: VideoPorts): Promise<BusyPort[]> {
-  const specs = specsFor(ports);
+export async function busyPorts(ports: VideoPorts, rtsp = false): Promise<BusyPort[]> {
+  const specs = specsFor(ports, rtsp);
   const results = await Promise.all(
     specs.map(async (spec): Promise<BusyPort | null> => {
       const busy = spec.proto === "tcp" ? await tcpBusy(spec.port, spec.host) : await udpBusy(spec.port, spec.host);
