@@ -90,8 +90,9 @@ export function nextFitScale(
  * — no inline size at all — whenever the table already fits, so the standalone
  * page with a handful of columns renders exactly as it did before.
  *
- * Back-derives the natural width from the live scroll width, the same approach as
- * FitText and ServiceOrderObject's auto-fit.
+ * Back-derives the natural width from the live scroll width. Its own measurement,
+ * not fit-to-box.ts: this scales a whole table's width to its container, where that
+ * one sizes text by bisection.
  */
 function useFitWidth(wrapRef: React.RefObject<HTMLDivElement | null>, width: number, deps: unknown[], enabled = true): number {
   const [scale, setScale] = useState(1);

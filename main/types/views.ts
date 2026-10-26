@@ -518,6 +518,39 @@ export type LayoutObjectConfig =
   // ProPresenter slide position within the current presentation. `display`: "fraction"
   // ("3 / 12"), "remaining" ("9 left"), "percent", or a progress "bar".
   | { type: "slide-progress"; propresenterInstanceId?: string | null; display?: "fraction" | "remaining" | "percent" | "bar"; showLabel?: boolean }
+  // The words on the ProPresenter slide now, with its group as ProPresenter names
+  // it, and what comes next underneath. Every field is optional and an unset one
+  // reads as the approved default (see lyricsSettings in renderer/main/lyrics-config.ts),
+  // so a saved object never needs rewriting when a setting is added.
+  | {
+      type: "lyrics";
+      propresenterInstanceId?: string | null;
+      /** Where the group tag sits: above the words, beside them in a column, or
+       *  every group of the arrangement as a strip with the current one lit. Not
+       *  named `layout`: Home's card menu reserves that key for the PVP widget. */
+      display?: "above" | "beside" | "strip";
+      tagStyle?: "filled" | "outline" | "text";
+      /** The group's own ProPresenter colour, or the app accent for every group. */
+      tagColor?: "propresenter" | "one";
+      /** The name as ProPresenter has it, a derived short form, or in capitals. */
+      tagText?: "named" | "short" | "caps";
+      /** Beside only: a fixed column the tags right-align in, or each tag's own width. */
+      tagWidth?: "column" | "fit";
+      size?: "fit" | "s" | "m" | "l";
+      weight?: "regular" | "bold";
+      /** Above and strip only; beside is always left. */
+      align?: "left" | "center";
+      /** A slide with no words: nothing at all, or its tag alone. */
+      noWords?: "blank" | "tag";
+      /** Show what comes next under the current slide. */
+      under?: boolean;
+      underShows?: "slide" | "group";
+      /** The next one's own words, and not just its tag. */
+      underWords?: boolean;
+      underDim?: "light" | "strong";
+      /** The presentation's name, small in the corner. */
+      showTitle?: boolean;
+    }
   // Mic-slots grid. `source: "view"` embeds an existing slots-View's grid by
   // `sourceViewId`; `source: "inline"` defines its own slot set, stored per service
   // type keyed by this object's id (resolved into `StageState.slotsByLayoutObject`),

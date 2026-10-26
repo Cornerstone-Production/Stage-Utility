@@ -202,11 +202,11 @@ export function RowSwitch({ label, hint, checked, onChange, disabled }: { label:
 /** The stacked variant of RowSwitch: the label above-left and the switch at the
  *  far end of one line, for the sections drawn with stacked fields (Video, Timer)
  *  whose labels do not fit beside a 96px label column. */
-export function StackedSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+export function StackedSwitch({ label, checked, onChange, disabled }: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-2.5">
       <FieldLabel>{label}</FieldLabel>
-      <Switch aria-label={label} checked={checked} onCheckedChange={onChange} />
+      <Switch aria-label={label} checked={checked} disabled={disabled} onCheckedChange={onChange} />
     </div>
   );
 }
@@ -340,7 +340,7 @@ export function Segmented<T extends string>({
   /** Names the group for assistive tech; the visible label is the caller's. */
   label: string;
   value: T;
-  options: { value: T; label: string }[];
+  options: readonly { value: T; label: string }[];
   onChange: (v: T) => void;
   /** Every segment inert, for a moment the choice must not change. Marked with
    *  aria-disabled rather than the disabled attribute, so a segment that holds
@@ -448,6 +448,19 @@ export function sizesTypeFromItsBox(t: LayoutObjectType): boolean {
 }
 
 /**
+ * Does this type take its size, weight and alignment from settings of its own?
+ *
+ * Lyrics does: Size, Weight and Align are in its own section, and it reads none
+ * of `style.fontSize`, `fontWeight`, `textAlign` or `uppercase`. Offering them
+ * again under Look would be four controls that change nothing. It is not in
+ * IDIOM_TYPES because that set also means "draws through Readout", which Lyrics
+ * does not.
+ */
+export function setsOwnType(t: LayoutObjectType): boolean {
+  return t === "lyrics";
+}
+
+/**
  * Font size and weight — or, for a widget that sizes itself, the reason there
  * are none.
  *
@@ -469,6 +482,13 @@ export function TypeSizeRows({
   canvasHeight: number;
   onStyle: (patch: Partial<LayoutStyle>) => void;
 }) {
+  if (setsOwnType(type)) {
+    return (
+      <p className="text-caption2 text-fg-muted leading-snug">
+        This widget sets its own type: Size, Weight and Align are under Lyrics above. Colour below still applies.
+      </p>
+    );
+  }
   if (sizesTypeFromItsBox(type)) {
     return (
       <p className="text-caption2 text-fg-muted leading-snug">

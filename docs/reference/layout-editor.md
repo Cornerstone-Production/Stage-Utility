@@ -423,7 +423,10 @@ a display at it, and compare `scrollWidth`/`scrollHeight` against
 `clientWidth`/`clientHeight` for each object at several viewport sizes.
 
 Readouts that would otherwise overflow shrink to fit through one shared
-measurement (`useFitScale` in `renderer/main/layout-renderer.tsx`). Add new
+measurement (`useBoxFit` in `renderer/main/fit-to-box.ts`). It bisects the size
+between 0.3x and 3x of the base size and keeps the largest at which the content
+fits; slide text and service items, which wrap, also never take more lines than
+they do at the base size, so a wall does not change how a title breaks. Add new
 readouts to it rather than writing fresh sizing maths, so a fix reaches all of
 them at once.
 

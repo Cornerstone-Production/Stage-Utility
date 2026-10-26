@@ -40,6 +40,7 @@ export const LAYOUT_OBJECT_TYPES = [
   "image",
   "integration-status",
   "live-controls",
+  "lyrics",
   "message-composer",
   "messages",
   "ndi-video",
