@@ -27,6 +27,9 @@ process.env.HOME = path.join(TMP, "home");
 
 const { stageController, ScreenWriteError } = await import("./stage-controller.js");
 const { viewSurface, screenIsControlSurface } = await import("../types/views.js");
+const { VIEW_KIND_IDS } = await import("../types/views.js");
+
+import type { LayoutDTO } from "../types/stage.js";
 
 type Mutable = {
   state: { views: View[]; outputs: Output[]; [k: string]: unknown };
@@ -179,6 +182,84 @@ describe("createScreen — a new view", () => {
     const { output, createdViewId } = await stageController.createScreen({ name: "Atrium", newView: "wall" });
     assert.equal(viewSurface(view(createdViewId!)), "display");
     assert.equal(isControlSurface(output), false);
+  });
+});
+
+describe("createScreen — the kind and the starting layout of a new view", () => {
+  const startingLayout: LayoutDTO = {
+    version: 1 as const,
+    canvas: { width: 1920, height: 1080, background: null },
+    objects: [
+      { id: "t1", x: 0.1, y: 0.1, w: 0.5, h: 0.2, z: 1, config: { type: "text", text: "Starting text" } },
+      { id: "t2", x: 0.1, y: 0.4, w: 0.5, h: 0.2, z: 2, config: { type: "text", text: "Second" } },
+    ],
+  };
+
+  it("makes a view of the kind a wall view was asked for: Mic Slots is a slots view", async () => {
+    const { output, createdViewId } = await stageController.createScreen({ name: "Lobby", newView: "wall", viewKind: "slots" });
+    const made = view(createdViewId!);
+    assert.equal(made.kind, "slots");
+    assert.equal(made.name, "Lobby");
+    assert.equal(viewSurface(made), "display");
+    assert.equal(output.viewId, createdViewId);
+    assert.equal((await viewsOnDisk()).find((v) => v.id === createdViewId)?.kind, "slots", "views.json has another kind");
+  });
+
+  it("makes a view of every kind there is, and a wall view with no kind is a custom layout", async () => {
+    for (const kind of VIEW_KIND_IDS) {
+      const { createdViewId } = await stageController.createScreen({ newView: "wall", viewKind: kind });
+      assert.equal(view(createdViewId!).kind, kind);
+    }
+    const { createdViewId } = await stageController.createScreen({ newView: "wall" });
+    assert.equal(view(createdViewId!).kind, "custom");
+  });
+
+  it("starts a custom view from the layout sent, in the view and on disk", async () => {
+    const { createdViewId } = await stageController.createScreen({ name: "Conf", newView: "wall", layout: startingLayout });
+    assert.deepEqual(view(createdViewId!).layout?.objects.map((o) => o.id), ["t1", "t2"]);
+    assert.equal((await viewsOnDisk()).find((v) => v.id === createdViewId)?.layout?.objects.length, 2);
+  });
+
+  it("starts a control surface from a layout, with its canvas", async () => {
+    const strip = { ...startingLayout, canvas: { width: 1280, height: 400, background: null } };
+    const { createdViewId } = await stageController.createScreen({ name: "Strip", newView: "control", layout: strip });
+    assert.equal(viewSurface(view(createdViewId!)), "console");
+    assert.equal(view(createdViewId!).layout?.canvas.height, 400);
+  });
+
+  it("refuses a control surface of any other kind, writing nothing", async () => {
+    for (const kind of VIEW_KIND_IDS.filter((k) => k !== "custom")) {
+      await assert.rejects(() => stageController.createScreen({ newView: "control", viewKind: kind }), /only as a custom layout/, kind);
+    }
+    assert.equal(outputs().length, 5);
+    assert.equal(views().length, 4);
+  });
+
+  it("refuses a layout for a kind that has none, and either field without newView", async () => {
+    await assert.rejects(() => stageController.createScreen({ newView: "wall", viewKind: "slots", layout: startingLayout }), /layout is the starting layout of a custom view/);
+    await assert.rejects(() => stageController.createScreen({ viewKind: "slots" }), /need newView/);
+    await assert.rejects(() => stageController.createScreen({ layout: startingLayout }), /need newView/);
+    assert.equal(outputs().length, 5);
+    assert.equal(views().length, 4);
+  });
+
+  it("takes back the screen and the view when the layout cannot be written, so no half-made view stays", async () => {
+    const restore = failNext("setViewLayout", "disk full");
+    try {
+      await assert.rejects(
+        () => stageController.createScreen({ name: "Doomed", newView: "wall", layout: startingLayout }),
+        (err: unknown) => {
+          assert.ok(err instanceof ScreenWriteError, String(err));
+          assert.equal(err.failed, "lay out the view");
+          assert.deepEqual(err.rolledBack, ["make the view"]);
+          return true;
+        },
+      );
+    } finally {
+      restore();
+    }
+    assert.equal(outputs().length, 5);
+    assert.equal(views().length, 4, "a view was left behind");
   });
 });
 

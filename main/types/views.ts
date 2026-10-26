@@ -41,6 +41,9 @@ const VIEW_KINDS: Record<ViewKind, true> = {
   calendar: true,
 };
 
+/** Every ViewKind id, derived from the table the type checker keeps complete. */
+export const VIEW_KIND_IDS = Object.keys(VIEW_KINDS) as ViewKind[];
+
 /** Narrow an untrusted body value to a ViewKind. */
 export function isDisplayKind(v: unknown): v is ViewKind {
   // hasOwn rather than `in`: the value is untrusted, and "toString" is `in`
@@ -1308,8 +1311,17 @@ export interface CreateScreenInput {
   name?: string;
   /** An existing view, of either kind. Alternative to `newView`. */
   viewId?: string | null;
-  /** Make a blank custom view of this kind, named after the screen. */
+  /** Make a view for the screen, named after it: a "wall" view (read-only) or a
+   *  "control" surface. */
   newView?: NewViewKind;
+  /** What kind of view `newView: "wall"` makes. Absent is a custom layout. A control
+   *  surface is made only as a custom layout, so any other kind with `"control"` is
+   *  refused. Only with `newView`. */
+  viewKind?: ViewKind;
+  /** The layout a new custom view starts with, in place of the blank canvas. Written
+   *  in the same turn as the view, so a failure leaves neither. Only with `newView`,
+   *  and only for a custom layout. */
+  layout?: LayoutDTO;
   slug?: string;
   /** Written onto the view the screen shows, when that view is a control surface. */
   showInSidebar?: boolean;

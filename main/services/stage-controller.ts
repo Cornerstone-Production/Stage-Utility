@@ -4045,8 +4045,9 @@ export class StageController {
    *
    * The screen is a control surface when the view it shows is a console, so the
    * choice is the view: `viewId` names an existing one of either kind, or `newView`
-   * makes a blank custom one, a "wall" view (read-only) or a "control" surface.
-   * With neither the screen shows nothing yet.
+   * makes one: a "wall" view (read-only) of any `viewKind`, custom by default, or a
+   * "control" surface, which is always a custom layout. A custom view starts from
+   * `layout`, or blank. With neither the screen shows nothing yet.
    *
    * `last` is a caller's own write that belongs to the same screen (a device to
    * bind to it), run as the final step. If it fails, everything before it is put
@@ -4064,6 +4065,19 @@ export class StageController {
     }
     if (typeof input.viewId === "string" && newView !== undefined) {
       throw new Error("outputs:add — viewId and newView are alternatives: name an existing view, or ask for a new one");
+    }
+    if (newView === undefined && (input.viewKind !== undefined || input.layout !== undefined)) {
+      throw new Error("outputs:add — viewKind and layout describe a view being made, so they need newView");
+    }
+    // A control surface is made only as a custom layout, the kind with a layout to
+    // put controls on. Refused rather than made a wall view: a caller asking for a
+    // Mic Slots control surface would otherwise get a screen whose buttons do nothing.
+    const viewKind: ViewKind = input.viewKind ?? "custom";
+    if (newView === "control" && viewKind !== "custom") {
+      throw new Error(`outputs:add — a control surface is made only as a custom layout, not "${viewKind}"`);
+    }
+    if (input.layout !== undefined && viewKind !== "custom") {
+      throw new Error(`outputs:add — layout is the starting layout of a custom view, and this one is "${viewKind}"`);
     }
     const existing = typeof input.viewId === "string" ? this.requireViewToShow(input.viewId) : undefined;
     if (input.expectSurface !== undefined) {
@@ -4094,13 +4108,20 @@ export class StageController {
         ? [{
             label: "make the view",
             run: async () => {
-              // Custom: the guided creation makes a layout, which can be either kind of screen.
-              await this.createViewRecord(name, "custom", newView === "control" ? "console" : "display", (view) => {
+              await this.createViewRecord(name, viewKind, newView === "control" ? "console" : "display", (view) => {
                 createdViewId = view.id;
                 viewId = view.id;
               });
             },
             undo: async () => { if (!createdViewId) return false; await this.dropView(createdViewId); },
+          }]
+        : []),
+      // Its own step, after the view: the layout write also loads the raw slots of an
+      // inline Mic Slots object. The view's undo above drops it whole, layout and all.
+      ...(input.layout
+        ? [{
+            label: "lay out the view",
+            run: async () => { await this.setViewLayout(createdViewId!, input.layout!); },
           }]
         : []),
       {
@@ -4130,9 +4151,10 @@ export class StageController {
         : []),
       ...(last ? [{ label: last.label, run: () => last.run(output!) }] : []),
     ]);
+    const made = createdViewId ? ` (made for it: kind=${viewKind})` : "";
     console.log(
       `[stage-controller] createScreen id=${scrub(output!.id)} name="${scrub(output!.name)}" ` +
-        `view=${scrub(viewId ?? "(none)")}${scrub(createdViewId ? " (made for it)" : "")}${scrub(slug ? ` slug="${slug}"` : "")}`,
+        `view=${scrub(viewId ?? "(none)")}${scrub(made)}${scrub(slug ? ` slug="${slug}"` : "")}`,
     );
     return { state: this.state, output: output!, createdViewId };
   }

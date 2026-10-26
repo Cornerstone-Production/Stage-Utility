@@ -57,6 +57,8 @@ const fetchCalls: { url: string; method: string; body: string }[] = [];
 const { render, screen, cleanup, fireEvent, act, within } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { ScreenSettingsPanel } = await import("./screen-settings-panel.js");
+const { KIND_LABELS } = await import("./view-kinds.js");
+const { confidenceMonitorTemplate, ultritouchTemplate } = await import("../../editor/layout-templates.js");
 const { __resetDevicesForTests, refreshDevices } = await import("../../app/screens/use-devices.js");
 type PanelProps = import("./screen-settings-panel.js").ScreenSettingsPanelProps;
 type Actions = import("./screen-settings-panel.js").ScreenPanelActions;
@@ -868,6 +870,24 @@ describe("after Create screen", () => {
     assert.deepEqual(calls, [["editLayout", "wall-a"]]);
   });
 
+  test("a template-filled custom layout says it started from a template, and still offers Edit layout", async () => {
+    const filled = { id: "t-1", name: "Conf", kind: "custom", surface: "display", createdAt: "2026-01-01T00:00:00.000Z",
+      layout: { version: 1, canvas: { width: 1920, height: 1080 }, objects: [{ id: "o", x: 0, y: 0, w: 1, h: 1, z: 1, config: { type: "text", text: "x" } }] } } as unknown as View;
+    mount({ target: { kind: "edit", outputId: "display-1", created: { viewMade: true } }, views: [filled], outputs: [{ ...MINE, viewId: "t-1" }] });
+    const note = screen.getByRole("status");
+    assert.match(note.textContent ?? "", /Created "Lobby TV" and its view\. Its layout started from a template\./);
+    assert.doesNotMatch(note.textContent ?? "", /blank/);
+    assert.ok(within(note).getByRole("button", { name: "Edit layout" }));
+  });
+
+  test("a Mic Slots view made with the screen is not called blank and has no layout to edit", () => {
+    const slots = { id: "s-1", name: "Lobby", kind: "slots", surface: "display", createdAt: "2026-01-01T00:00:00.000Z", layout: null } as unknown as View;
+    mount({ target: { kind: "edit", outputId: "display-1", created: { viewMade: true } }, views: [slots], outputs: [{ ...MINE, viewId: "s-1" }] });
+    const note = screen.getByRole("status");
+    assert.equal((note.textContent ?? "").trim(), 'Created "Lobby TV" and its view.');
+    assert.equal(within(note).queryByRole("button", { name: "Edit layout" }), null, "a slots view has no layout editor");
+  });
+
   test("without a view made it says only that the screen was created, and has no Edit layout of its own", () => {
     mount({ target: { kind: "edit", outputId: "display-1", created: { viewMade: false } } });
     const note = screen.getByRole("status");
@@ -1025,7 +1045,8 @@ describe("guided creation", () => {
   test("step 2 has four choices, a new wall view marked Usual first and chosen", async () => {
     mount({ target: NEW_TARGET, outputs: [MINE] });
     await next();
-    const titles = [...document.querySelectorAll('[aria-pressed]')].map((b) => b.querySelector("span")?.textContent);
+    // The cards only: the starting-layout segments inside the open one are pressed buttons too.
+    const titles = [...document.querySelectorAll('[aria-pressed]')].map((b) => b.querySelector("span")?.textContent).filter(Boolean);
     assert.deepEqual(titles, [
       "A new wall view named like the screenUsual",
       "A new control surface named like the screen",
@@ -1063,6 +1084,125 @@ describe("guided creation", () => {
     await click(choice(/^A new control surface/));
     await click(create());
     assert.deepEqual(calls, [["create", { name: "Wing", newView: "control", slug: "wing" }, null]]);
+  });
+
+  describe("what the new view is", () => {
+    // "Shows" is a radio group; "Start from" is the editor's segmented control of pressed buttons.
+    const SHOWS = "Kind of wall view";
+    const kinds = () => within(screen.getByRole("radiogroup", { name: SHOWS })).getAllByRole("radio");
+    const kind = (name: string) => within(screen.getByRole("radiogroup", { name: SHOWS })).getByRole("radio", { name });
+    const starts = () => within(screen.getByRole("group", { name: "Starting layout" })).getAllByRole("button");
+    const start = (name: string) => within(screen.getByRole("group", { name: "Starting layout" })).getByRole("button", { name });
+    const open = async () => {
+      const m = mount({ target: NEW_TARGET, outputs: [MINE] });
+      await type(screen.getByLabelText("Name"), "Wing");
+      await next();
+      return m;
+    };
+
+    test("a new wall view offers every view kind, Custom Layout first and chosen", async () => {
+      await open();
+      const offered = kinds();
+      assert.equal(offered[0].textContent, "Custom Layout");
+      assert.equal(offered[0].getAttribute("aria-checked"), "true", "custom is not the default");
+      // The exact list, one per line: a kind left out of the panel, or added to
+      // ViewKind without being offered, changes this and nothing else.
+      assert.deepEqual(
+        offered.map((r) => r.textContent).sort(),
+        [
+          "Calendar",
+          "Custom Layout",
+          "Dashboard",
+          "Mic Slots",
+          "SPL Rundown",
+          "ServiceCue",
+          "Stage",
+          "Transcription",
+        ],
+      );
+    });
+
+    test("arrow keys move the choice in Shows, and Tab enters the group at one stop", async () => {
+      await open();
+      const group = screen.getByRole("radiogroup", { name: SHOWS });
+      // Radix makes the group, or the one active item, the only tab stop; every other kind is -1.
+      const stops = () => [group, ...within(group).getAllByRole("radio")].filter((el) => el.tabIndex >= 0);
+      assert.equal(stops().length, 1, `Tab would stop ${stops().length} times in the group`);
+      const first = kinds()[0];
+      await act(async () => { first.focus(); await settle(); });
+      await act(async () => { fireEvent.keyDown(first, { key: "ArrowRight" }); await settle(); });
+      assert.equal(kinds()[1].getAttribute("aria-checked"), "true", "the right arrow did not move the choice");
+      assert.equal(kinds()[0].getAttribute("aria-checked"), "false");
+      assert.equal(document.activeElement, kinds()[1], "focus did not follow the choice");
+    });
+
+    test("a custom layout offers Blank, Dashboard and Confidence monitor, Blank chosen, and says what it is", async () => {
+      await open();
+      assert.deepEqual(starts().map((r) => r.textContent), ["Blank", "Dashboard", "Confidence monitor"]);
+      assert.equal(start("Blank").getAttribute("aria-pressed"), "true");
+      assert.ok(screen.getByText("A layout you build: any widgets, anywhere."));
+    });
+
+    test("another kind has no starting layout to pick, and says what it is", async () => {
+      await open();
+      await click(kind("Mic Slots"));
+      assert.equal(screen.queryByRole("group", { name: "Starting layout" }), null, "a Mic Slots view was offered a template");
+      assert.ok(screen.getByText("The mic slots for the plan, ready to use."));
+      assert.ok(screen.getByText('Creates the screen and a Mic Slots view, both called "Wing".'));
+    });
+
+    test("Mic Slots sends the kind and nothing else beyond the wall view", async () => {
+      const { calls } = await open();
+      await click(kind("Mic Slots"));
+      await click(create());
+      assert.deepEqual(calls, [["create", { name: "Wing", newView: "wall", viewKind: "slots" }, null]]);
+    });
+
+    test("every kind is sent as its own id", async () => {
+      // Every kind but custom (which sends none): from the label table, so a new ViewKind is covered.
+      for (const [id, label] of Object.entries(KIND_LABELS).filter(([id]) => id !== "custom")) {
+        const { calls } = await open();
+        await click(kind(label));
+        await click(create());
+        assert.equal((calls[0][1] as { viewKind?: string }).viewKind, id, label);
+        cleanup();
+      }
+    });
+
+    test("a template is sent as its layout: Confidence monitor carries that template's objects", async () => {
+      const { calls } = await open();
+      await click(start("Confidence monitor"));
+      await click(create());
+      const body = calls[0][1] as { viewKind?: string; layout?: { canvas: { width: number; height: number }; objects: unknown[] } };
+      assert.equal(body.viewKind, undefined, "a custom layout carries no kind");
+      assert.ok(body.layout, "the template was chosen and not sent");
+      assert.equal(body.layout!.objects.length, confidenceMonitorTemplate().length);
+      assert.deepEqual([body.layout!.canvas.width, body.layout!.canvas.height], [1920, 1080]);
+    });
+
+    test("a control surface offers Blank and the three Ultritouch strips, and Ultritouch-4 sends its canvas and buttons", async () => {
+      const { calls } = await open();
+      await click(choice(/^A new control surface/));
+      assert.deepEqual(starts().map((r) => r.textContent), ["Blank", "Ultritouch-2", "Ultritouch-2-HR", "Ultritouch-4"]);
+      await click(start("Ultritouch-4"));
+      assert.ok(screen.getByText('Creates the screen and a control surface, both called "Wing".'));
+      await click(create());
+      const body = calls[0][1] as { newView: string; viewKind?: string; layout?: { canvas: { width: number; height: number }; objects: unknown[] } };
+      assert.equal(body.newView, "control");
+      assert.equal(body.viewKind, undefined, "a control surface is only ever a custom layout");
+      assert.ok(body.layout, "the Ultritouch-4 choice sent no layout");
+      assert.deepEqual([body.layout.canvas.width, body.layout.canvas.height], [1366, 485]);
+      assert.equal(body.layout.objects.length, ultritouchTemplate("ultritouch-4").length);
+    });
+
+    test("a kind picked on the wall card is not carried to a control surface", async () => {
+      const { calls } = await open();
+      await click(kind("Mic Slots"));
+      await click(choice(/^A new control surface/));
+      assert.ok(screen.getByText('Creates the screen and a control surface, both called "Wing".'));
+      await click(create());
+      assert.deepEqual(calls, [["create", { name: "Wing", newView: "control" }, null]]);
+    });
   });
 
   test("Nothing yet sends neither a view nor a kind", async () => {

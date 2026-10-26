@@ -196,9 +196,10 @@ connected display.
 ### The settings panel
 
 A panel docks beside the cards, so a card and its preview stay in view while a
-setting changes. **Settings**, at the top right of the page, opens and closes it,
-and the choice is remembered in the browser. It starts open where it fits beside
-the cards; on a narrower window it starts closed and covers the page when opened.
+setting changes. **Settings**, at the top right of the page, opens and closes it. It
+starts closed on every visit and nothing is remembered; it opens when asked: **Settings**,
+**+ Add a screen**, a found device's **Set up**, or **Screen settings…** in a card's
+menu. On a narrower window it covers the page when opened.
 With nothing selected it says *Select a screen or view* and offers **+ Add a
 screen**.
 
@@ -283,6 +284,16 @@ banner, and a waiting device's **Set up as a new screen** (see
    **a view you already have** (a picker of both kinds, with a line saying what
    the screen becomes), or **nothing yet**. The screen is whatever its view is.
 
+   **A new wall view** opens to **Shows**, one of every kind of view: Custom
+   Layout (the default), Mic Slots, Dashboard, Stage, Transcription, ServiceCue,
+   SPL Rundown or Calendar, with a line under them saying what the chosen kind
+   is. A Custom Layout also asks **Start from**: Blank, Dashboard or Confidence
+   monitor, which fill the layout with that template. **A new control surface**
+   is always a custom layout, and asks **Start from**: Blank or an Ultritouch-2,
+   Ultritouch-2-HR or Ultritouch-4 strip, which also sets the canvas to that
+   panel's size. The line above the buttons names what is made, for example
+   *Creates the screen and a Mic Slots view, both called "Lobby".*
+
 **Nothing is created until Create screen**, which is on the second step and, for *a
 view you already have*, off until a view is picked. Left unnamed, a screen is named
 **Display** and its number, and so is a view made for it (a device is named for its
@@ -296,8 +307,9 @@ screen is made: the panel stays on this step, says the view changed, and shows t
 view as it is now.
 
 After **Create screen** the panel stays open on the new screen and says what was
-made; when a view was made it adds **Edit layout**, since the view is blank until
-it is laid out.
+made; when a Custom Layout was made it adds **Edit layout**, saying whether the layout
+is blank or started from a template. The other kinds draw themselves, so the note
+offers no layout to start from.
 
 ### Removing a screen
 

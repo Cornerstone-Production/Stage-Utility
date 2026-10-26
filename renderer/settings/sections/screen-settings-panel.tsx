@@ -415,13 +415,17 @@ function DeviceSection({ output, online, actions }: { output: Output; online: bo
   );
 }
 
-/** The note after a screen is made: what happened, and the way into its layout. */
-function CreatedNote({ output, viewMade, onEditLayout }: { output: Output; viewMade: boolean; onEditLayout?: () => void }) {
+/** The note after a screen is made: what happened, and the way into its layout. A custom
+ *  layout is blank until laid out, or already filled from a template; any other kind
+ *  draws itself, so there is no layout to start from. */
+function CreatedNote({ output, viewMade, view, onEditLayout }: { output: Output; viewMade: boolean; view?: View; onEditLayout?: () => void }) {
+  const isCustom = viewMade && view?.kind === "custom";
+  const filled = (view?.layout?.objects.length ?? 0) > 0;
   return (
     <div role="status" className="mt-3 rounded-[9px] border border-ok-9/30 bg-ok-9/6 px-3 py-2.5 text-footnote text-fg">
       <b className="font-semibold">Created "{output.name}"{viewMade && " and its view"}</b>.
-      {viewMade && " The view is blank until you lay it out."}
-      {viewMade && onEditLayout && (
+      {isCustom && (filled ? " Its layout started from a template." : " The view is blank until you lay it out.")}
+      {isCustom && onEditLayout && (
         <div className="mt-2">
           <Button type="button" variant="accent" size="medium" onClick={onEditLayout}>
             Edit layout
@@ -470,7 +474,7 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
   return (
     <>
       <div className="flex-1 overflow-y-auto px-[18px] pb-[18px] pt-1.5">
-        {created && <CreatedNote output={output} viewMade={created.viewMade} onEditLayout={shown ? () => actions.onEditLayout(shown.id) : undefined} />}
+        {created && <CreatedNote output={output} viewMade={created.viewMade} view={shown} onEditLayout={shown ? () => actions.onEditLayout(shown.id) : undefined} />}
         <Section title="What it shows">
           <ViewPicker
             groups={viewGroups(views)}

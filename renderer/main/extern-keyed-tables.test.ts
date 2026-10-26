@@ -9,14 +9,13 @@
 //
 // The tables are the REAL exports, imported and probed — not source text.
 //
-// Four more wrapped tables are module-private and NOT covered here, named so
+// Three more wrapped tables are module-private and NOT covered here, named so
 // the omission is a decision rather than an oversight:
 //
 //   WALL_TWIN, PEOPLE_PANEL_LABELS  (renderer/main/layout-renderer.tsx)
-//   KIND_LABELS                     (renderer/settings/sections/new-view-dialog.tsx)
 //   SECTION_TONE                    (renderer/app/update-notices.tsx)
 //
-// All four live inside component modules that need the jsdom harness, and none
+// All three live inside component modules that need the jsdom harness, and none
 // is exported. WALL_TWIN is the one that mattered — `x.type in WALL_TWIN` is a
 // TYPE GUARD, so a card typed "constructor" narrowed to a wall-twin type and
 // then read `WALL_TWIN[c.type]`, handing a function to streamingReadout as the
@@ -36,6 +35,7 @@ import { SIZES, WHEN_LABELS } from "../app/home/home-cards";
 import { defaultSize, defaultWhen, sizeOf, whenOf } from "../app/home/home-cards";
 import { surfaceOf } from "../editor/object-surface";
 import { pickedValue, togglesFor } from "../app/home/card-toggles";
+import { KIND_LABELS } from "../settings/sections/view-kinds";
 import type { LayoutObject } from "@main/types/views";
 
 /** The names JavaScript hands back for free on any object with a prototype. */
@@ -52,6 +52,7 @@ const INHERITED = [
 
 /** Every wrapped table the renderer EXPORTS, under the name it has in its module. */
 const EXPORTED: Record<string, object> = {
+  KIND_LABELS,
   LAYOUT_OBJECTS,
   SURFACE_PRESETS,
   STREAMER_FOR,
@@ -68,6 +69,7 @@ const EXPORTED: Record<string, object> = {
  */
 const EXPECTED_TABLES = [
   "BAR_ITEMS",
+  "KIND_LABELS",
   "LAYOUT_OBJECTS",
   "RECORDER_FOR",
   "SIZES",

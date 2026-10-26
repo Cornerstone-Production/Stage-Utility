@@ -5,29 +5,61 @@
 // view makes a wall display, a new control surface makes a control surface, and an
 // existing view makes the screen whatever that view is.
 
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 
 import { Button, ErrorNote } from "../../components/ui";
 import { useDevices } from "../../app/screens/use-devices";
 import { viewIsConsole, viewSurface, type CreateScreenInput, type NewViewKind } from "@main/types/views";
-import { ChoiceCard, NameInput, OutlineButton, PanelFooter, RoleLine, Section, SlugInput, ViewPicker, viewGroups } from "./screen-panel-parts";
+import type { ViewKind } from "@main/types/stage";
+import { Segmented } from "../../editor/inspector-rows";
+import { startingLayout, type StartFrom, type UltritouchModel } from "../../editor/layout-templates";
+import { KIND_LABELS, KIND_ORDER } from "./view-kinds";
+import { ChoiceCard, NameInput, OptionGrid, OutlineButton, PanelFooter, RoleLine, Section, SlugInput, ViewPicker, viewGroups } from "./screen-panel-parts";
 import type { PanelTarget, ScreenPanelActions } from "./screen-settings-panel";
 
 export type Step = 1 | 2;
 export const STEP_TITLES = ["Name it", "What should it show?"] as const;
 
-type MadeShow = "newwall" | "newcontrol";
-type Show = MadeShow | "existing" | "none";
+type Show = NewViewKind | "existing" | "none";
 
-/** The two choices that make a view with the screen: what to ask the server for, and
- *  what to call it. */
-const NEW_VIEW: Record<MadeShow, { kind: NewViewKind; noun: string }> = {
-  newwall: { kind: "wall", noun: "wall view" },
-  newcontrol: { kind: "control", noun: "control surface" },
+/** What each view kind is, in one line, for the hint under the kinds. Record over
+ *  every kind, so a kind added to ViewKind has to say what it is here. */
+const KIND_HINTS: Record<ViewKind, string> = {
+  custom: "A layout you build: any widgets, anywhere.",
+  slots: "The mic slots for the plan, ready to use.",
+  dashboard: "The built-in status dashboard.",
+  stage: "The built-in stage display.",
+  transcription: "Live captions, full screen.",
+  script: "The ServiceCue rundown.",
+  "spl-rundown": "Sound level against the rundown.",
+  calendar: "The month calendar.",
 };
 
-function makesView(show: Show): show is MadeShow {
-  return show === "newwall" || show === "newcontrol";
+/** Custom layout first, the default, then the rest in the order every picker offers. */
+const WALL_ORDER: readonly ViewKind[] = ["custom", ...KIND_ORDER.filter((k) => k !== "custom")];
+const WALL_KINDS = WALL_ORDER.map((k) => ({ value: k, label: KIND_LABELS[k] }));
+
+const WALL_STARTS: readonly { value: Extract<StartFrom, "blank" | "dashboard" | "confidence">; label: string }[] = [
+  { value: "blank", label: "Blank" },
+  { value: "dashboard", label: "Dashboard" },
+  { value: "confidence", label: "Confidence monitor" },
+];
+
+const CONTROL_STARTS: readonly { value: "blank" | UltritouchModel; label: string }[] = [
+  { value: "blank", label: "Blank" },
+  { value: "ultritouch-2", label: "Ultritouch-2" },
+  { value: "ultritouch-2-hr", label: "Ultritouch-2-HR" },
+  { value: "ultritouch-4", label: "Ultritouch-4" },
+];
+
+/** A small label over the options it names. */
+function FieldGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-caption1 text-fg-muted">{label}</span>
+      {children}
+    </div>
+  );
 }
 
 export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, actions }: {
@@ -43,7 +75,12 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
   const [name, setName] = useState(target.defaultName);
   const [slug, setSlug] = useState("");
   // A new wall view is what most screens are, so it is the default.
-  const [show, setShow] = useState<Show>("newwall");
+  const [show, setShow] = useState<Show>("wall");
+  // What a new wall view shows, and what a custom one starts from. Custom and blank
+  // are what the panel always made, so they are the defaults.
+  const [wallKind, setWallKind] = useState<ViewKind>("custom");
+  const [wallStart, setWallStart] = useState<(typeof WALL_STARTS)[number]["value"]>("blank");
+  const [controlStart, setControlStart] = useState<(typeof CONTROL_STARTS)[number]["value"]>("blank");
   const [existing, setExisting] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -62,11 +99,20 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
   // page cannot know (an id is never reused), so the copy says so rather than
   // guess a number.
   const called = name.trim() ? `called "${name.trim()}"` : "named like the screen";
-  const madeView = makesView(show) ? NEW_VIEW[show] : undefined;
+  const madeView = show === "wall" || show === "control";
 
-  /** What the screen will show, as the server is asked for it. */
-  function viewChoice(): Pick<CreateScreenInput, "newView" | "viewId" | "expectSurface"> {
-    if (madeView) return { newView: madeView.kind };
+  /** What the screen will show, as the server is asked for it. A custom layout starting
+   *  blank sends nothing beyond `newView`, so the usual request stays the one it always was. */
+  function viewChoice(): Pick<CreateScreenInput, "newView" | "viewKind" | "layout" | "viewId" | "expectSurface"> {
+    if (show === "control") {
+      const layout = startingLayout(controlStart);
+      return layout ? { newView: "control", layout } : { newView: "control" };
+    }
+    if (show === "wall") {
+      if (wallKind !== "custom") return { newView: "wall", viewKind: wallKind };
+      const layout = startingLayout(wallStart);
+      return layout ? { newView: "wall", layout } : { newView: "wall" };
+    }
     // The kind the role line showed: the server refuses if the view is the other
     // kind by the time the screen is made.
     if (show === "existing" && picked) return { viewId: picked.id, expectSurface: viewSurface(picked) };
@@ -96,6 +142,14 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
     }
   }
 
+  /** What the footer calls the view being made: a custom layout is "a wall view", the rest
+   *  are named for what they show. */
+  function madeNoun(): string {
+    if (show === "control") return "control surface";
+    if (wallKind === "custom") return "wall view";
+    return `${KIND_LABELS[wallKind]} view`;
+  }
+
   function footerHint(): string {
     if (step === 1) {
       return target.device
@@ -103,7 +157,7 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
         : "Nothing is created until the last step.";
     }
     if (!madeView) return "Creates the screen.";
-    return `Creates the screen and a ${madeView.noun}, both ${name.trim() ? called : "with the same name"}.`;
+    return `Creates the screen and a ${madeNoun()}, both ${name.trim() ? called : "with the same name"}.`;
   }
 
   return (
@@ -122,18 +176,32 @@ export function NewScreenBody({ target, outputs, views, baseUrl, step, setStep, 
           <Section title="What it shows">
             <div role="group" aria-label="What it shows" className="grid gap-2">
               <ChoiceCard
-                title={`A new ${NEW_VIEW.newwall.noun} ${called}`}
+                title={`A new wall view ${called}`}
                 badge="Usual"
-                hint="Read from across the room. Lay it out after."
-                pressed={show === "newwall"}
-                onChoose={() => setShow("newwall")}
-              />
+                hint="Read from across the room."
+                pressed={show === "wall"}
+                onChoose={() => setShow("wall")}
+              >
+                <FieldGroup label="Shows">
+                  <OptionGrid label="Kind of wall view" options={WALL_KINDS} value={wallKind} onChange={setWallKind} />
+                </FieldGroup>
+                {wallKind === "custom" && (
+                  <FieldGroup label="Start from">
+                    <Segmented label="Starting layout" options={WALL_STARTS} value={wallStart} onChange={setWallStart} />
+                  </FieldGroup>
+                )}
+                <p className="text-caption1 text-fg-subtle">{KIND_HINTS[wallKind]}</p>
+              </ChoiceCard>
               <ChoiceCard
-                title={`A new ${NEW_VIEW.newcontrol.noun} ${called}`}
+                title={`A new control surface ${called}`}
                 hint="A touch screen. Its buttons work for anyone at it."
-                pressed={show === "newcontrol"}
-                onChoose={() => setShow("newcontrol")}
-              />
+                pressed={show === "control"}
+                onChoose={() => setShow("control")}
+              >
+                <FieldGroup label="Start from">
+                  <Segmented label="Starting layout" options={CONTROL_STARTS} value={controlStart} onChange={setControlStart} />
+                </FieldGroup>
+              </ChoiceCard>
               <ChoiceCard
                 title="A view you already have"
                 hint="A wall view or a control surface; the screen takes its kind."
