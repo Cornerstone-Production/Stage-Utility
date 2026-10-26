@@ -73,8 +73,11 @@ jobs:
       - name: Type-check
         run: npm run type-check
 
+      # The interface, then the public ServiceCue page's bundle on its own: `npm run build`
+      # runs that soft, so an update on a server never stops on it, and a PR that breaks it
+      # would pass. Here it fails.
       - name: Build
-        run: npm run build
+        run: npx vite build && npm run servicecue:bundle
 
       # Fails the PR that introduces a known-vulnerable dependency, rather than
       # waiting for a dependabot alert once it has already merged. High and
@@ -128,9 +131,12 @@ jobs:
   # the package's test starts locally with `wrangler dev`. Nothing is sent to
   # Cloudflare, and there is no account or token in this job.
   #
-  # Only the package's dependencies are installed: the type-check includes the
-  # shared contract (main/types/servicecue-publish.ts), which imports nothing, and
-  # the test builds its own stand-in for the page.
+  # The package's dependencies are installed first and the Worker's checks run on
+  # them alone: the type-check includes the shared contract
+  # (main/types/servicecue-publish.ts), which imports nothing, and the test builds its
+  # own stand-in for the page. The root dependencies come after, for the two tests at
+  # the end that need both packages or a PowerShell: the bundle against wrangler, and
+  # the update scripts run whole.
   worker:
     name: worker (install, type-check, audit, test)
     if: ${{ !(github.event_name == 'pull_request' && github.head_ref == 'beta' && github.base_ref == 'main') }}
@@ -149,7 +155,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: publish/servicecue/package-lock.json
+          cache-dependency-path: |
+            publish/servicecue/package-lock.json
+            package-lock.json
 
       - name: Install the Worker's dependencies
         run: npm --prefix publish/servicecue ci
@@ -164,6 +172,24 @@ jobs:
 
       - name: Test
         run: npm --prefix publish/servicecue test
+
+      # The bundle a server uploads (build/servicecue) against what `wrangler deploy
+      # --dry-run` produces. It needs the root package's build tooling as well as the
+      # Worker's wrangler, which no other job has both of; the root shards skip it.
+      - name: Install the root dependencies
+        run: npm ci --include=dev
+
+      - name: The bundle is what wrangler uploads
+        run: node --import tsx --test scripts/servicecue-bundle-wrangler.test.ts
+        env:
+          SERVICECUE_REQUIRE_WRANGLER: "1"
+
+      # update.sh and update.ps1 run whole against a scratch git repository. ubuntu-latest
+      # ships pwsh, so a missing one here is a failure and not a skip.
+      - name: The update scripts rebuild when they should
+        run: node --import tsx --test scripts/update-scripts.test.ts
+        env:
+          UPDATE_REQUIRE_PWSH: "1"
 
   # The one check that says the whole gate passed. It runs whatever the others
   # did, so a failed shard turns it red rather than leaving it skipped; a

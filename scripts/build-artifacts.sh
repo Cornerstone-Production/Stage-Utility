@@ -36,6 +36,11 @@ PLATFORMS=(
 echo "==> building the server bundle and interface"
 node scripts/bundle-server.mjs
 [ -d build/renderer ] || { echo "build/renderer missing — run npm run build first" >&2; exit 1; }
+# The public ServiceCue page, ready to upload. `npm run build` makes it too, but lets a
+# failure pass so an update never stops on it; a release must not ship without it, so
+# one that is missing here is made by the command that fails.
+[ -f build/servicecue/deploy.json ] || node --import tsx scripts/servicecue-bundle.ts
+[ -f build/servicecue/deploy.json ] || { echo "build/servicecue/deploy.json missing" >&2; exit 1; }
 
 # One checksum file from nodejs.org covers every download below, so fetch it once
 # and verify each runtime against it. An unverified runtime is the last thing that
@@ -57,6 +62,7 @@ for entry in "${PLATFORMS[@]}"; do
   cp build/server.mjs "$stage/"
   [ -f build/server.mjs.map ] && cp build/server.mjs.map "$stage/"
   cp -R build/renderer "$stage/build/renderer"
+  cp -R build/servicecue "$stage/build/servicecue"
   cp -R public "$stage/public"
   # The kiosk installers. Served over HTTP by /kiosk/<name>, and the command an
   # operator is told to paste is printed in the app's own Advanced settings -- so

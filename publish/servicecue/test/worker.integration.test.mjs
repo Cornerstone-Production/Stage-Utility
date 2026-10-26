@@ -270,6 +270,7 @@ describe("a viewer", () => {
     assert.equal(read.at, beat.data.at);
     const status = await (await send("GET", "/_publish/v1/status")).json();
     assert.deepEqual(status.lastHeartbeat, { at: beat.data.at, sentAt: 1_000, version: "9.9.9-secret" });
+    assert.equal(status.build, BUILD, "the status names the build of the page the asset service holds");
     v.destroy();
 
     const late = await viewer();

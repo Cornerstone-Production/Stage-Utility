@@ -80,6 +80,14 @@ A filename rule fires on that every time, so the skip never happened. Anything
 unreadable or unparseable is treated as changed, so an unknown state does the work
 rather than skipping it.
 
+Which files count is one list, `scripts/build-inputs.mjs`, used by both update scripts:
+the interface (`renderer/`, `main/`, `public/`, the HTML documents, the Vite, Tailwind,
+PostCSS and TypeScript config) and the public ServiceCue page's Worker source and config.
+A checkout with no `build/servicecue/deploy.json` reinstalls and rebuilds on the next
+update whatever changed, unless `build/servicecue.failed` says the last build failed to
+make it on the commit the update starts from: then only a change to a build input rebuilds
+([the marker](servicecue-on-the-web.md#the-copy-every-build-prepares)).
+
 ### What's new
 
 The panel lists the pending commits, filtered to what an operator could actually
@@ -257,6 +265,7 @@ a path or a credential. If you see one, report it.
 | `[service-timeline]` | The recorded rundown timing: items going live again, and pacing reset by an operator: [What gets recorded](../features/attendance-and-history.md#what-gets-recorded). The timing records' own files, as for `[attendance-history]`: [When a recorded file cannot be read](reliability.md#when-a-recorded-file-cannot-be-read) |
 | `[service-timeline-recorder]` | The service-timeline recorder's debounced save failing to persist, and a closed record that could not be saved, held and retried until it is: [When a recorded service cannot be saved](reliability.md#when-a-recorded-service-cannot-be-saved) |
 | `[servicecue]` | A saved ServiceCue file moved in from its old name on upgrade (`scriptview-*.json` to `servicecue-*.json`), or both names found and the new one kept with the old left untouched; a move that failed; browser-side, ServiceCue's settings, types, note categories, rundown or plan list failing to load, a `?plan=` the service type does not have, or a display's text size the server would not keep |
+| `[servicecue-bundle]` | The build preparing the public ServiceCue page for upload (`build/servicecue/`): its failing, which leaves the update itself to go on and this server with nothing to upload: [The copy every build prepares](servicecue-on-the-web.md#the-copy-every-build-prepares) |
 | `[servicecue-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/servicecue-and-baptisms.md#category-roles) |
 | `[shure:<id>]` | A Shure wireless or charger connection's init and per-channel state: [Wireless](../integrations/wireless.md) |
 | `[slots]` | Plan-to-service-type checks and override pruning: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |

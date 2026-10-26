@@ -95,6 +95,7 @@ machine's history rather than how you set it up:
 | `signals.json` | the values Companion reads |
 | `stream-starts.json` | when each platform was first seen live |
 | `update-notices.json` | which release has been announced |
+| `video-ffmpeg.json` | the ffmpeg path set in Advanced: it names a file on this machine, so a restore onto another one must not carry it |
 | `video-seen.json` | when each video feed was last confirmed live |
 
 **Neither** — never in a backup, and never restored:

@@ -52,7 +52,8 @@ import {
   type PublicLive,
   type PublicSpl,
 } from "./servicecue-publish-docs.js";
-import { createPushClient, FAILURE_LOG_MAX, failureForLog, problemOf, type PageHolds, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
+import { createPushClient, FAILURE_LOG_MAX, failureForLog, problemOf, type PageStatus, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
+import type { DeployHook } from "./servicecue-deployer.js";
 import { checkPublishToken, parsePublishUrl, type PublishOrigin } from "./servicecue-publish-rules.js";
 import type { ServiceCuePublishSettings } from "./servicecue-publish-store.js";
 import type {
@@ -156,6 +157,8 @@ export interface PublisherDeps {
   loadToken(origin: PublishOrigin): Promise<string>;
   /** The app version sent with every heartbeat. */
   version(): string;
+  /** Told what build the page serves each time its status is read, and when publishing stops: it keeps the page itself up to date. */
+  deploy?: DeployHook;
   timings?: Partial<PublisherTimings>;
   /** Registers the callback the app's broadcaster calls for every channel. */
   listen?: (cb: (channel: string, payload: unknown) => void) => void;
@@ -220,7 +223,7 @@ class Run {
   readonly currentKeys = new Set<string>();
   /** The manifest the page last accepted, and what the last status said it holds. */
   manifestKey: string | null = null;
-  pageHolds: PageHolds | null = null;
+  pageHolds: PageStatus | null = null;
   lastReconcileAt = 0;
 
   // What we know about the install.
@@ -363,6 +366,8 @@ export class ServiceCuePublisher {
     const run = this.run;
     this.run = null;
     if (run) this.teardown(run);
+    // Nothing is looking at the page any more: nothing waits to update it.
+    this.deps.deploy?.stop();
   }
 
   /** Stop a run's activity. Whether it is still `this.run` (held, for the card to read) is the caller's. */
@@ -595,7 +600,7 @@ export class ServiceCuePublisher {
   }
 
   /** The page's account of itself, in line with every other request. Null when there is no usable answer, which the failure handling has already dealt with. */
-  private async askPage(run: Run): Promise<PageHolds | null> {
+  private async askPage(run: Run): Promise<PageStatus | null> {
     const r = await this.send(run, "status", (c) => c.status());
     return r.ok && r.page ? r.page : null;
   }
@@ -607,6 +612,7 @@ export class ServiceCuePublisher {
     run.verified = true;
     run.lastReconcileAt = Date.now();
     run.pageHolds = page;
+    this.deps.deploy?.consider(page.build);
     // First contact: the page hears from this server before it is sent a document, so the bar that says the church has not been heard from does not wait out a heartbeat interval.
     await this.beat(run);
     return true;
@@ -622,6 +628,7 @@ export class ServiceCuePublisher {
     const page = await this.askPage(run);
     if (!page) return false;
     run.pageHolds = page;
+    this.deps.deploy?.consider(page.build);
     const heldDocs = new Set(page.docs);
     const heldAssets = new Set(page.assets);
     const lostDocs = [...run.sent.keys()].filter((key) => !heldDocs.has(key));

@@ -24,12 +24,17 @@ import {
   DROP_GRACE_MS,
   FIRST_FRAME_TIMEOUT_MS,
   FRAME_POLL_MS,
+  FRAME_STALL_MS,
   HLS_FIRST_FRAME_TIMEOUT_MS,
+  HLS_FRAME_STALL_MS,
   PROBE_POLL_MS,
   PROBE_TIMEOUT_MS,
+  RECOVERED_AFTER_PLAYING_MS,
   RESET_AFTER_PLAYING_MS,
   RETRY_MAX_MS,
   RETRY_MIN_MS,
+  SILENT_SOURCE_RETRIES,
+  STALL_POLL_MS,
   STREAK_REMIND_MS,
   startPlaybackAttempt,
   useVideoSession,
@@ -319,8 +324,9 @@ test("disconnected then failed, then a full recovery before the grace period: no
   mock.timers.enable({ apis: ["setTimeout"] });
   const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
   const { calls, cb } = makeCallbacks();
+  let attempt: { stop: () => void } | undefined;
   try {
-    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
+    attempt = startPlaybackAttempt(video, { method: "webrtc", url: "/video/p/whep", relayManaged: true }, cb);
     await flush();
     const pc = FakePeerConnection.instances[0]!;
     pc.setConnectionState("connected");
@@ -341,6 +347,8 @@ test("disconnected then failed, then a full recovery before the grace period: no
       "a recovered connection must not report a drop from an orphaned timer",
     );
   } finally {
+    // A live attempt's frame watch is a real interval here, which would hold the runner open.
+    attempt?.stop();
     mock.timers.reset();
     g.restore();
   }
@@ -474,6 +482,293 @@ test("a decoded-frame count left from an earlier source is not a first frame", a
       "a count that does not move is no frame, whatever its value",
     );
   } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+const WHEP_RELAY = { method: "webrtc", url: "/video/p/whep", relayManaged: true } as const;
+const HLS_CHOICE = { method: "hls", url: "/video/p/index.m3u8" } as const;
+
+// A picture that stops decoding while the connection still reads "connected"
+// froze an output on its last frame until the feed was routed away and back:
+// a source that stops sending held "connected" for about 19 s, and a wedged
+// decoder holds it for ever.
+
+/** Decodes a frame per poll for `ms`, ticking the fake clock as it goes. */
+function decodeFor(video: FakeVideo, ms: number): void {
+  for (let t = 0; t < ms; t += STALL_POLL_MS) {
+    video.decodedFrames += 30;
+    mock.timers.tick(STALL_POLL_MS);
+  }
+}
+
+test("a WebRTC picture that stops decoding while still connected is dropped and its session closed", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const raw = new FakeVideo();
+  const video = raw as unknown as HTMLVideoElement & FakeVideo;
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video, WHEP_RELAY, cb);
+    await flush();
+    const pc = FakePeerConnection.instances[0]!;
+    pc.setConnectionState("connected");
+    video.fireFrame();
+    decodeFor(raw, 30_000);
+    assert.deepEqual(calls.filter((c) => c.fn === "onDropped"), [], "a picture that keeps decoding is never dropped");
+
+    // The frames stop; the connection never says so.
+    mock.timers.tick(FRAME_STALL_MS - STALL_POLL_MS);
+    assert.deepEqual(calls.filter((c) => c.fn === "onDropped"), [], "not before FRAME_STALL_MS");
+    mock.timers.tick(STALL_POLL_MS);
+    await flush();
+    assert.equal(pc.connectionState, "connected", "the connection still reads connected: only the frame count can tell");
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [{ fn: "onDropped", arg: "the picture froze: no new frame for 5 s" }]);
+    assert.equal((raw as unknown as { srcObject: unknown }).srcObject, null, "the frozen frame must not stay on screen");
+    assert.equal(g.calls.filter((c) => c.method === "DELETE").length, 1, "the stalled session is closed on the relay");
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("a picture whose decoded-frame count never moves in this browser is never read as frozen", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+  const { calls, cb } = makeCallbacks();
+  try {
+    const attempt = startPlaybackAttempt(video, WHEP_RELAY, cb);
+    await flush();
+    FakePeerConnection.instances[0]!.setConnectionState("connected");
+    video.fireFrame(); // the frame callback lifted the cover; the count stays at 0
+    mock.timers.tick(10 * FRAME_STALL_MS);
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [], "a count this browser does not keep is no evidence of a stall");
+    attempt.stop();
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("an HLS picture gets HLS_FRAME_STALL_MS before it counts as frozen", async () => {
+  const undoHls = installFakeHls();
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const video = new FakeVideo();
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video as unknown as HTMLVideoElement, HLS_CHOICE, cb);
+    await flush();
+    video.fireFrame();
+    decodeFor(video, 5000);
+    mock.timers.tick(HLS_FRAME_STALL_MS - STALL_POLL_MS);
+    assert.deepEqual(calls.filter((c) => c.fn === "onDropped"), [], "a segment's wait is not a stall");
+    mock.timers.tick(STALL_POLL_MS);
+    assert.deepEqual(calls.filter((c) => c.fn === "onDropped"), [{ fn: "onDropped", arg: "the picture froze: no new frame for 15 s" }]);
+    assert.equal(FakeHls.last!.calls.at(-1), "destroy", "the stalled hls.js instance is destroyed");
+  } finally {
+    mock.timers.reset();
+    undoHls();
+  }
+});
+
+test("through the hook: a frozen picture shows the offline cover, reconnects by itself, and a freeze that recurs is one outage with one recovery line", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    const { result } = renderHook(() =>
+      useVideoSession({
+        active: true,
+        feed: EXTERNAL_WHEP,
+        feedDeleted: false,
+        video: video as unknown as HTMLVideoElement,
+        allowHls: true,
+        relayRunning: true,
+        onLog: (l) => logs.push(l),
+      }),
+    );
+    await act(async () => {
+      await flush();
+    });
+    act(() => {
+      FakePeerConnection.instances[0]!.setConnectionState("connected");
+      video.fireFrame();
+      decodeFor(video, RESET_AFTER_PLAYING_MS);
+    });
+    assert.equal(result.current.phase, "live");
+
+    // Frozen: the cover replaces the last frame and the line names why.
+    act(() => {
+      mock.timers.tick(FRAME_STALL_MS);
+    });
+    assert.equal(result.current.phase, "offline");
+    assert.deepEqual(logs, ['"Cam" failed on this screen (the picture froze: no new frame for 5 s); retrying with backoff']);
+
+    // Nobody touches the routing: the retry opens a second session by itself.
+    await act(async () => {
+      mock.timers.tick(RETRY_MIN_MS);
+      await flush();
+    });
+    assert.equal(FakePeerConnection.instances.length, 2, "expected a new session after the backoff");
+    act(() => {
+      FakePeerConnection.instances[1]!.setConnectionState("connected");
+      video.fireFrame();
+      decodeFor(video, RESET_AFTER_PLAYING_MS);
+    });
+    assert.equal(result.current.phase, "live");
+    assert.equal(logs.length, 1, "10 s of picture is not yet the end of the outage");
+
+    // It freezes again: the same outage, no second line.
+    act(() => {
+      mock.timers.tick(FRAME_STALL_MS);
+    });
+    assert.equal(result.current.phase, "offline");
+    await act(async () => {
+      mock.timers.tick(RETRY_MIN_MS);
+      await flush();
+    });
+    act(() => {
+      FakePeerConnection.instances[2]!.setConnectionState("connected");
+      video.fireFrame();
+      decodeFor(video, RECOVERED_AFTER_PLAYING_MS);
+    });
+    assert.equal(logs.length, 2, "one line for the outage, one for its end, none per freeze or retry");
+    assert.match(logs[1]!, /"Cam" is playing again on this screen after 2 failed attempts/);
+  } finally {
+    cleanup();
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("a relay session that connects with no frame, where WebRTC has already played this feed, is retried, not sent to HLS", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video, WHEP_RELAY, cb, undefined, true);
+    await flush();
+    FakePeerConnection.instances[0]!.setConnectionState("connected");
+    mock.timers.tick(FIRST_FRAME_TIMEOUT_MS);
+    await flush();
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [{ fn: "onDropped", arg: "connected, but no frame ever arrived" }]);
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+// The handshake's own window can find the connection "connected" with no event
+// ever seen for it; that is the same evidence as the first-frame deadline's.
+for (const hasPlayed of [false, true]) {
+  test(`a connection found connected with no event and no frame by the connect window: ${hasPlayed ? "retried after WebRTC played here" : "a WebRTC verdict"}`, async () => {
+    const g = stubGlobals("succeed");
+    mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+    const { calls, cb } = makeCallbacks();
+    try {
+      startPlaybackAttempt(video, WHEP_RELAY, cb, undefined, hasPlayed);
+      await flush();
+      FakePeerConnection.instances[0]!.connectionState = "connected"; // no event dispatched
+      mock.timers.tick(CONNECT_TIMEOUT_MS);
+      await flush();
+      assert.deepEqual(calls.filter((c) => c.fn !== "onPhase"), [
+        { fn: hasPlayed ? "onDropped" : "onWebrtcUnusable", arg: "connected, but no frame ever arrived" },
+      ]);
+    } finally {
+      mock.timers.reset();
+      g.restore();
+    }
+  });
+}
+
+const LIVE_RELAY: VideoFeedView = {
+  id: "p",
+  name: "Program",
+  kind: "pull",
+  sourceLine: "",
+  source: { kind: "pull", url: "rtsp://x", username: "" },
+  play: { via: "relay", whep: "/video/p/whep", hls: "/video/p/index.m3u8" },
+  status: { state: "live" },
+};
+
+test("through the hook: a relay feed that froze and reconnects to a silent source stays on WebRTC and keeps retrying", async () => {
+  const g = stubGlobals("succeed");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+  const video = new FakeVideo();
+  const logs: string[] = [];
+  try {
+    const { result } = renderHook(() =>
+      useVideoSession({
+        active: true,
+        feed: LIVE_RELAY,
+        feedDeleted: false,
+        video: video as unknown as HTMLVideoElement,
+        allowHls: true,
+        relayRunning: true,
+        onLog: (l) => logs.push(l),
+      }),
+    );
+    await act(async () => {
+      await flush();
+    });
+    act(() => {
+      FakePeerConnection.instances[0]!.setConnectionState("connected");
+      video.fireFrame();
+      decodeFor(video, 2000);
+      mock.timers.tick(FRAME_STALL_MS);
+    });
+    assert.equal(result.current.phase, "offline", "the frozen picture is dropped");
+
+    // The relay still has the path open, but nothing arrives on it.
+    await act(async () => {
+      mock.timers.tick(RETRY_MIN_MS);
+      await flush();
+    });
+    act(() => {
+      FakePeerConnection.instances[1]!.setConnectionState("connected");
+      mock.timers.tick(FIRST_FRAME_TIMEOUT_MS);
+    });
+    await act(async () => {
+      await flush();
+    });
+    assert.equal(result.current.phase, "offline");
+    assert.equal(video.srcSets, 0, "a silent source is not a reason to play HLS");
+    assert.ok(!logs.some((l) => l.startsWith("WebRTC unusable")), `expected no WebRTC verdict, got ${JSON.stringify(logs)}`);
+    await act(async () => {
+      mock.timers.tick(2 * RETRY_MIN_MS);
+      await flush();
+    });
+    assert.equal(FakePeerConnection.instances.length, 3, "WebRTC is tried again after the backoff");
+
+    // A source silent for SILENT_SOURCE_RETRIES sessions in a row may be a
+    // path that carries no media after all: the next is a verdict again.
+    for (let i = 2; i <= SILENT_SOURCE_RETRIES; i++) {
+      act(() => {
+        FakePeerConnection.instances[i]!.setConnectionState("connected");
+        mock.timers.tick(FIRST_FRAME_TIMEOUT_MS);
+      });
+      await act(async () => {
+        await flush();
+        mock.timers.tick(RETRY_MAX_MS);
+        await flush();
+      });
+    }
+    assert.equal(video.srcSets, 0, `no HLS within ${SILENT_SOURCE_RETRIES} silent sessions`);
+    act(() => {
+      FakePeerConnection.instances.at(-1)!.setConnectionState("connected");
+      mock.timers.tick(FIRST_FRAME_TIMEOUT_MS);
+    });
+    await act(async () => {
+      await flush();
+    });
+    assert.ok(logs.some((l) => l.startsWith('WebRTC unusable for "Program"')), `expected the WebRTC verdict, got ${JSON.stringify(logs)}`);
+  } finally {
+    cleanup();
     mock.timers.reset();
     g.restore();
   }
@@ -844,7 +1139,7 @@ test("a failing streak logs once, reminds at most every 5 minutes, and logs its 
       }
     }
     act(() => {
-      mock.timers.tick(RESET_AFTER_PLAYING_MS);
+      mock.timers.tick(RECOVERED_AFTER_PLAYING_MS);
     });
     assert.equal(logs.length, 3, "expected one recovery line");
     assert.match(logs[2]!, /"Cam" is playing again on this screen after \d+ failed attempts/);

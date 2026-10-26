@@ -143,9 +143,194 @@ A domain whose DNS is on Cloudflare, in the same account, can stand in for the
 
 ## Updating it
 
-A change to ServiceCue reaches the public page when you run `npm run servicecue:deploy`
-again. The docs and rundowns the page shows are not part of the deploy: they come from
+A change to ServiceCue reaches the public page in one of two ways: the server that
+publishes to it updates it once it has a Cloudflare API token
+([Keeping it up to date](#keeping-it-up-to-date)), or you run `npm run servicecue:deploy`
+again. The docs and rundowns the page shows are not part of a deploy: they come from
 what Stage Utility sends.
+
+### Keeping it up to date
+
+The server the page is linked to (the one holding its address and its publishing token)
+can put each new build of the page on Cloudflare itself, from the copy every build
+carries ([below](#the-copy-every-build-prepares)). It does so once it has a Cloudflare
+account ID and an API token for the page's Worker, and stops when the token is cleared.
+There is no other switch. The first Worker and its domain stay a manual, one-time job:
+the server only ever updates a Worker that exists.
+
+**Make the token.** Cloudflare's [Workers roles](https://developers.cloudflare.com/workers/authorization/workers/)
+apply to API tokens as they do to members: "API tokens use the same Workers roles and
+scopes", and "per-Worker roles apply only to the Workers you select". Create a token with
+the **Editor** Workers role on the `servicecue` Worker only. Editor "can read, update,
+deploy, and rename existing Workers" and "cannot create or delete Workers"; scoped to one
+Worker it reaches no other Worker, no DNS, domain or zone setting, and nothing else on the
+account. Creating a Worker needs the **Admin** role, which the server never needs: the
+Worker is made once, by hand, before the token (a role cannot be given on a Worker that
+does not exist yet). Prefer a token owned by the church's account over one owned by a
+person.
+
+**Find the account ID.** It is the 32-character id in the address of any page of the
+Cloudflare dashboard (`dash.cloudflare.com/<account id>/...`), and on the **Workers &
+Pages** overview, on the right.
+
+**Give them to the server.** The credentials are saved for the page's address, so the address has
+to be set first. On the ServiceCue presets page (`/servicecue/presets`), open **Cloudflare
+connection** on the **Public link** card (it shows once the card has been switched on, as in the
+steps above) and find **Keep the page up to date**:
+
+1. Paste the account ID into **Cloudflare account ID**.
+2. Paste the token into **API token**, and leave the field. Both are saved together, and
+   the status line below them says where the page stands. The field shows dots from then
+   on, and the token is never shown again.
+
+There is no switch: pasting a token turns updating on. Emptying the token field, or the
+account ID field, turns it off, after the card asks to be sure (the token is deleted from the
+server, and turning updating on again needs a new token from Cloudflare). A token pasted with
+no account ID (or the reverse) is not saved until the other is filled in. To replace a token, paste the new one over the dots. The same two writes are
+`POST /api/servicecue/publish/deploy-credentials` ([API](../reference/api.md)), which needs
+only the address saved and not publishing on, for a script or `curl`.
+
+The token is stored encrypted beside the publishing token and is never sent back or
+included in a backup. Changing the page's address drops both. Revoking the token in
+Cloudflare is enough to stop it too: the next attempt is refused, the card and the log say
+so, and nothing more is tried until the token is changed.
+
+**What the server does, and when.** Each time it reads the page's status (when
+publishing starts, then every few minutes) it compares the build the page serves with
+the build it carries. When they differ:
+
+| If | The server |
+|---|---|
+| a service is live in Planning Center | waits, looking again every 30 seconds, and deploys when it ends. It never deploys through a live service, as recording never stops for one |
+| the live state is not known: the server has just started and not yet read Planning Center, or Planning Center cannot be reached | waits the same way, counting unknown as live. Only an explicit "Update the page now" goes ahead of it |
+| the page was deployed from a **newer** version than this server runs, or from this server's own version by **another build** | leaves it |
+| otherwise | deploys, and logs the files uploaded and the files Cloudflare already held |
+
+**The no-downgrade rule.** The page records the version of the server that deployed it,
+in the Worker version's message (`Stage Utility 1.28.0`). A server never replaces a page
+deployed from a newer version than the one it is running, so a development machine
+pointed at the same page cannot roll it back. The comparison is semver (a prerelease is
+older than its release) and is against the version the server is **running**, not the
+`version` in `deploy.json`, which is only the version the folder was last made at. A page
+with no recorded version (one deployed with plain `wrangler deploy`, or before this
+existed) is deployed over. The same version from another build is left alone too: two servers at one
+version would otherwise take the page back from each other every few minutes. A page
+deployed with `npm run servicecue:deploy` carries the same record (its version's message is
+`Stage Utility <version>` and its tag the build id), so a hand deploy is not mistaken for
+an old page. The one way to replace a page that is left alone is the explicit request
+below, with a confirmation.
+
+**Update the page now** is the button under the status line, and `POST /api/servicecue/publish/deploy`.
+When the page was left alone because it is newer, or another build of this server's version,
+the card asks first, naming both versions, and **Replace the page** sends the request again
+with `confirmDowngrade`. A request made within a minute of a deploy says "Try again in N s", a page
+already on this build says "Already up to date", and a deploy that went ahead while Planning
+Center had not said whether a service is live says so. The button waits while an update is under way.
+The route deploys when the
+page is older or another build; answers `200` with `already: "current"` and uploads nothing
+when the page is already this build; refuses with `409` and `code: "newer"` or
+`"other-build"` when the page was left alone, unless the body says
+`{"confirmDowngrade": true}`; refuses with `409` and `code: "service-live"` while a
+service is live, always; goes ahead when the live state is merely unknown (just after a
+restart, or with Planning Center unreachable), and then the answer carries
+`serviceState: "unknown"`; and answers `429` with a `Retry-After` when it has deployed in
+the last minute.
+
+**If the page still does not change.** A deploy that goes through while the page keeps
+serving the old build can mean the Worker the token and account name is not the one the
+page address points at. The server gives the page two minutes to catch up. After that, a
+second status read that still shows another build, with Cloudflare holding this server's
+build, is reported in the log and on the card (`deployed build X to Worker 'servicecue',
+but the page still serves Y: is that Worker the page?`), and nothing more is deployed on
+its own. A read with no build says nothing either way, and if Cloudflare holds another
+server's build instead, that is the newer or other-build case, not this. The hold lifts
+when a status read shows the page serving this build, when the credentials change, or on
+a successful "Update the page now".
+
+**If an update fails.** The page keeps what it had: Cloudflare swaps a Worker's version
+all at once. The server records Cloudflare's error code and words, and tries again after
+a minute, then two, doubling to at most once an hour. A `401` or `403` is not tried again
+until the token changes. The status line says what failed, in Cloudflare's own
+words, that the page is unchanged, and when it tries again; for a refused token it says to
+make a new one and paste it. The same status is the `deploy` the `GET
+/api/servicecue/publish` answer carries ([API](../reference/api.md)).
+
+**The status line** on the card says one of (a failed update, or a build with no copy of the page, opens **Cloudflare connection** by itself):
+
+| It says | Meaning |
+|---|---|
+| Up to date: build X (version), deployed *time* | the page is the build this server carries; the time is in the app's time zone |
+| Updating the page… N files to upload, M already on Cloudflare | a deploy is under way |
+| Waiting for the service to end, then updating to build X (version) | a service is live in Planning Center; the page is left alone until it ends |
+| Waiting to hear whether a service is live, then updating | the live state is not known yet (the server has just started, or Planning Center cannot be reached); Update the page now goes ahead when the state is merely unknown, never through a live service |
+| Couldn't update the page: *reason*. The page is unchanged. | the last attempt, or a read of what is deployed, failed |
+| The page runs build X (version), newer than this server's Y | the page is left alone (no-downgrade rule) |
+| The page runs build X of this server's own version, deployed by another server | the page is left alone |
+| This server's build has no copy of the page | the reason is in the log |
+| Updating is on. The page's build has not been read yet. | a token is set, and publishing has not reached the page yet |
+| Not updating: with no API token, the page stays on the build it has… | no token is set |
+
+**Try one by hand.** `npm run servicecue:deploy-try` runs the server's own deployer once,
+printing each step, against a Worker you name. Try it on a scratch Worker first.
+
+1. Make the scratch Worker once, by hand, with an Admin login: `npx wrangler login` in
+   `publish/servicecue`, then a deploy under another name (`npx wrangler deploy --name
+   scratch` after `npm run servicecue:build`), or create one in the dashboard. The
+   script never creates a Worker: a Worker that is not there is an error.
+2. Make a token with the Editor role on **that scratch Worker** (see above), not on
+   `servicecue`.
+3. Run it:
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=<id> CLOUDFLARE_API_TOKEN=<token> \
+  npm run servicecue:deploy-try -- --script scratch --check
+```
+
+`--check` verifies the token and reads what the Worker holds and sends nothing. Without
+it the deploy is made, and the script reads back the version and build it recorded. The
+real Worker's name is refused unless `--production` is added. "The Worker does not exist
+on this account" is a 404. A token scoped to other Workers gets a 403 instead, for a
+missing Worker as well, so "this token has no access to the Worker" means either it does
+not exist or the token is not given Editor on it.
+
+### The copy every build prepares
+
+Every build of Stage Utility, a release archive included, also prepares the public page
+for upload, in `build/servicecue/`:
+
+| File | What it is |
+|---|---|
+| `worker.js` | The Worker as one module, the same one `wrangler deploy` uploads |
+| `public/` | The built page: every file the asset service serves |
+| `deploy.json` | The Worker's name, the build id of the page, the app's version, the Worker's compatibility date and flags, its asset rules, its bindings and variables, its Durable Object `exports`, and `keep_bindings`, each read from `wrangler.jsonc` and the build |
+
+The page's `_headers` file is not in `public/`. Wrangler does not upload it as an asset:
+it reads it as configuration and sends its text in the assets config. `deploy.json` does
+the same, in `assets._headers` beside `run_worker_first`, so `assets` is the config an
+upload sends as it stands and `public/` is the list of files to upload. `keep_bindings`
+(`secret_text`, `secret_key`) is what keeps the publishing token across an upload that
+does not name it, as it does for `wrangler deploy`.
+
+`npm run servicecue:bundle` makes the same folder on its own. It needs nothing but what
+`npm ci --include=dev` installs: not wrangler, not a login. It does not touch
+`publish/servicecue/public/` or change what `npm run servicecue:deploy` does.
+
+A build that cannot make the folder says so in the update log and carries on, so an
+update is never stopped by it:
+
+```
+[servicecue-bundle] FAILED, so this server cannot update the public ServiceCue page from this build (the app is unaffected): <reason>
+```
+
+It removes whatever it had written, so a folder that is there is a finished one, and
+leaves `build/servicecue.failed` beside it: the commit it failed on, then the reason.
+A build that succeeds removes the marker. An update on a checkout with no bundle rebuilds,
+unless the marker names the commit the update starts from and nothing the build reads
+changed, in which case it does not retry; the marker then moves to the new commit. An
+update that changes the Worker, its config, the page's document or the shared contract
+rebuilds, and so does a change to anything the interface is built from. `version` in
+`deploy.json` is the version the folder was made at: a release that changes none of those
+leaves the folder, and its version, as they were.
 
 A page someone left open reloads itself, once, soon after a deploy that changed the
 page, and keeps the address it was on
@@ -168,6 +353,12 @@ page, and keeps the address it was on
   says why the Worker is not being reached: the token was refused, a Cloudflare rule
   blocked the server, the address is not the page, or the Worker has no secret set or one
   under 32 characters.
+- **The page is behind the server's build.** The server's side is the `[servicecue-deploy]`
+  lines in the app's [log](updates-and-logs.md): each decision once (deploying and why,
+  the page already current, skipped as the page is newer, waiting for a live service, no
+  token, no copy of the page in this build), the files uploaded and the files already
+  held, the build deployed, and every failure with Cloudflare's code and words. A refused
+  token reads `HTTP 401` or `403` and `Not trying again until the token changes`.
 - **The card says something on this network is intercepting the connection.** A firewall
   or web filter on the church's network is answering for the Worker with a certificate of
   its own, usually because its filter blocks the address. Ask whoever runs it to allow the
@@ -209,7 +400,14 @@ A leaked token lets someone, from anywhere:
 
 It reaches no part of your network, your Planning Center account or your settings.
 
-To rotate it, set a new one with the two commands in step 4 and update Stage Utility;
+A Cloudflare API token for [keeping the page up to date](#keeping-it-up-to-date) is a
+different secret. Held by someone else, it lets them put their own page on this address
+for as long as it works, which the publishing token cannot do. Delete it in Cloudflare
+when it may have been seen or the person who made it leaves, and clear it from the
+server by clearing the **API token** field under **Keep the page up to date** (or by sending
+`{"token": ""}` to `/api/servicecue/publish/deploy-credentials`).
+
+To rotate the publishing token, set a new one with the two commands in step 4 and update Stage Utility;
 the old one stops working at once, and the **Public link** card shows it as the problem until the new one is entered under **Cloudflare connection**. Do it when someone who had it leaves, and whenever it
 may have been seen.
 

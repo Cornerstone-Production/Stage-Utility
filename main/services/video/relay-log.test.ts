@@ -104,4 +104,45 @@ describe("RelayLogWatcher", () => {
     );
     deepEqual(result2, { kind: "b-frames", path: "stream" });
   });
+
+  it("reads a converter's start, its stop, and its failure with the last thing it printed", () => {
+    const w = new RelayLogWatcher();
+    deepEqual(w.line("2026/10/22 21:00:42 INF [path ma-pgm-listen] runOnDemand command started"), { kind: "listen-started", feedId: "ma-pgm" });
+    strictEqual(w.line("[in#0 @ 0xc72c48000] Error opening input: Server returned 400 Bad Request"), null);
+    strictEqual(w.line("Error opening input files: Server returned 400 Bad Request"), null);
+    deepEqual(w.line("2026/10/22 21:01:10 INF [path ma-pgm-listen] runOnDemand command exited: command exited with code 8"), {
+      kind: "listen-exited",
+      feedId: "ma-pgm",
+      reason: "command exited with code 8",
+      lastOutput: "Error opening input files: Server returned 400 Bad Request",
+    });
+    // The next exit reports its own output, not the previous run's.
+    deepEqual(w.line("2026/10/22 21:01:15 INF [path ma-pgm-listen] runOnDemand command exited: command exited with code 8"), {
+      kind: "listen-exited",
+      feedId: "ma-pgm",
+      reason: "command exited with code 8",
+      lastOutput: null,
+    });
+    deepEqual(w.line("2026/10/22 21:00:51 INF [path ma-pgm-listen] runOnDemand command stopped: not needed by anyone"), {
+      kind: "listen-stopped",
+      feedId: "ma-pgm",
+      reason: "not needed by anyone",
+    });
+  });
+
+  it("takes a credential out of what a converter printed", () => {
+    const w = new RelayLogWatcher();
+    w.line("2026/10/22 21:00:42 INF [path cam-listen] runOnDemand command started");
+    w.line("Error opening input: http://admin:hunter2@192.0.2.28/0.ts: Connection refused");
+    const e = w.line("2026/10/22 21:01:10 INF [path cam-listen] runOnDemand command exited: command exited with code 8");
+    strictEqual(JSON.stringify(e).includes("hunter2"), false);
+  });
+
+  it("does not mistake MediaMTX's own lines for a converter's output", () => {
+    const w = new RelayLogWatcher();
+    w.line("2026/10/22 21:00:42 INF [path cam-listen] runOnDemand command started");
+    w.line("2026/10/22 21:00:42 INF [RTSP] [conn 127.0.0.1:50262] opened");
+    const e = w.line("2026/10/22 21:01:10 INF [path cam-listen] runOnDemand command exited: command exited with code 1");
+    deepEqual(e, { kind: "listen-exited", feedId: "cam", reason: "command exited with code 1", lastOutput: null });
+  });
 });

@@ -102,14 +102,16 @@ Center person ID, copied from their page in Planning Center: the URL ends
 
 When the person is on the plan, the name and photo come from the plan's roster.
 When they are not, the server reads them from Planning Center by ID once and
-keeps them.
+keeps them. It asks Services first, then People for someone who has never been
+added to a Services team, so anyone in the church's People database works. The
+People read uses the same App ID and secret and needs read access to People.
 
 | The ID | Slot shows |
 |---|---|
 | on the plan | the person, from the roster |
 | not on the plan | the person, read by ID |
-| no such person in Planning Center | nothing; logged once as `[pco] no Planning Center person` |
-| Planning Center unreachable | nothing until a retry succeeds, ten minutes apart; each failure logged |
+| no such person in Services or People | nothing; logged once as `[pco] no Planning Center person` |
+| Planning Center unreachable, or the credentials cannot read People | nothing until a retry succeeds, ten minutes apart; each failure logged, naming People when that read failed |
 
 A by-person slot takes no part in position matching or notes: the same person can
 also fill a position slot on the same board.

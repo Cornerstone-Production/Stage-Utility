@@ -9,7 +9,7 @@
 // WebSocket handshake is not here: it is a fetch to the object, and the handler is given
 // it as its own dependency.
 
-import type { AssetContentType, PublishStatus } from "../../../main/types/servicecue-publish.js";
+import type { AssetContentType, HubStatus } from "../../../main/types/servicecue-publish.js";
 
 export interface HubApi {
   /**
@@ -37,5 +37,5 @@ export interface HubApi {
 
   /** Delete every doc and asset not named, and name the docs on `publish:docs`. Resolves to what it deleted. */
   applyManifest(docs: string[], assets: string[]): Promise<{ removedDocs: string[]; removedAssets: string[] }>;
-  status(): Promise<PublishStatus>;
+  status(): Promise<HubStatus>;
 }

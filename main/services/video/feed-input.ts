@@ -2,7 +2,9 @@
 
 import { PUSH_PROTOCOLS, EMBED_PLAYERS, type VideoSourceKind, type VideoSource } from "../../types/video.js";
 import type { CredentialTarget } from "../credential-target.js";
+import { parseAudioFields, type AudioFields } from "./audio-input.js";
 import { normalizeEmbedRef } from "./embed.js";
+import { hasUserinfo } from "./url-userinfo.js";
 
 /** The source kinds this build offers. One set, so the routes and a config
  *  restore cannot disagree about which kinds a feed may be. */
@@ -13,14 +15,6 @@ export const MAX_NAME_LENGTH = 60;
 
 function isOneOf<T extends string>(list: readonly T[], v: unknown): v is T {
   return typeof v === "string" && (list as readonly string[]).includes(v);
-}
-
-/** A username or password inside the address itself. Refused for every kind
- *  that takes an address: stored there it would sit in the config store and
- *  go out on video:state to every screen, and a browser refuses to fetch an
- *  address that carries one, so it could never play either. */
-function hasUserinfo(u: URL): boolean {
-  return u.username !== "" || u.password !== "";
 }
 
 /** Printable ASCII, space to tilde — what an encoder's own settings page
@@ -81,7 +75,7 @@ export function parseFeedInput(
   body: unknown,
   allowKinds: ReadonlySet<VideoSourceKind>,
   keptPassword?: string,
-): { ok: true; name: string; source: VideoSource; password?: string } | { ok: false; error: string } {
+): ({ ok: true; name: string; source: VideoSource; password?: string } & AudioFields) | { ok: false; error: string } {
   if (typeof body !== "object" || body === null) {
     return { ok: false, error: "Invalid input." };
   }
@@ -110,6 +104,13 @@ export function parseFeedInput(
   if (!allowKinds.has(kind)) {
     return { ok: false, error: `This build does not offer ${kind}.` };
   }
+
+  // Only a feed the relay carries has audio to convert: an embed or an external
+  // address ignores both fields, so changing a feed's kind never trips over what
+  // the old kind left behind.
+  const audio = parseAudioFields(obj);
+  if (!audio.ok) return audio;
+  const audioFields = kind === "pull" || kind === "push" ? audio.fields : {};
 
   // Validate per kind
   if (kind === "external") {
@@ -192,7 +193,7 @@ export function parseFeedInput(
       }
     }
 
-    const result: { ok: true; name: string; source: VideoSource; password?: string } = {
+    const result: { ok: true; name: string; source: VideoSource; password?: string } & AudioFields = {
       ok: true,
       name,
       source: {
@@ -200,6 +201,7 @@ export function parseFeedInput(
         url: source.url,
         username,
       },
+      ...audioFields,
     };
     // `!== undefined`, not truthy: `password: ""` is how an update explicitly
     // CLEARS a stored password (video-service.ts's updateFeed), and a truthy
@@ -217,7 +219,7 @@ export function parseFeedInput(
     if (!isOneOf(PUSH_PROTOCOLS, source.protocol)) {
       return { ok: false, error: `Push protocol must be one of: ${PUSH_PROTOCOLS.join(", ")}.` };
     }
-    return { ok: true, name, source: { kind: "push", protocol: source.protocol } };
+    return { ok: true, name, source: { kind: "push", protocol: source.protocol }, ...audioFields };
   }
 
   if (kind === "embed") {

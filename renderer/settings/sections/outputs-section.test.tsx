@@ -21,6 +21,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { eventually, installRenderDom, unmountAndTeardown } from "../../test-dom.js";
+import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
 const teardown = installRenderDom();
 
@@ -43,7 +44,7 @@ afterEach(() => {
 
 const OUTPUT: Output = { id: "display-1", name: "Left Mic Display", viewId: null };
 
-const TEST_PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
+const TEST_PORTS = DEFAULT_VIDEO_PORTS;
 
 /**
  * A minimal but real VideoState, the shape video:state hydrates the

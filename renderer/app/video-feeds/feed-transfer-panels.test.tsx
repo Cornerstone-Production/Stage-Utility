@@ -11,6 +11,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
 const teardown = installRenderDom();
 
@@ -32,7 +33,7 @@ class StubIntersectionObserver {
   unobserve(): void {}
 }
 
-const PORTS = { rtmp: 1935, srt: 8890, webrtcUdp: 8189, webrtcHttp: 8889, hls: 8888, api: 9997 };
+const PORTS = DEFAULT_VIDEO_PORTS;
 
 const FEEDS: VideoFeedView[] = [
   {

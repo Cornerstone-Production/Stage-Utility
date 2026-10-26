@@ -19,7 +19,7 @@ import { fetchFailureMessage, untrustedCertificateCode } from "./errors.js";
 import { pinToOrigin } from "./pinned-origin.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 import type { PublishProblem } from "../types/servicecue-publish-status.js";
-import { PUBLISH_BASE_PATH, PUBLISH_MAX_BODY_BYTES, PUBLISH_MAX_VERSION_LENGTH, PUBLISH_PROTOCOL_VERSION, type PublishStatus } from "../types/servicecue-publish.js";
+import { PUBLISH_BASE_PATH, PUBLISH_MAX_BODY_BYTES, PUBLISH_MAX_VERSION_LENGTH, PUBLISH_PROTOCOL_VERSION, isViewerBuildId, type PublishStatus } from "../types/servicecue-publish.js";
 
 /** How long a request with no body may take. A body adds to it: see ceilingMs. */
 export const PUBLISH_REQUEST_TIMEOUT_MS = 10_000;
@@ -94,13 +94,15 @@ export type PageHolds = Pick<PublishStatus, "docs" | "assets">;
 /** What a request that worked may carry back: the status answer, or the manifest's removals. */
 export interface PushOk {
   ok: true;
-  page?: PageHolds;
+  page?: PageStatus;
   /** From the manifest: what the page deleted because the manifest did not name it. */
   removed?: { docs: string[]; assets: string[] };
 }
 
 export type PushResult = PushOk | PushFailure;
-export type StatusResult = (PushOk & { page: PageHolds }) | PushFailure;
+/** What the page's status answer says about itself: what it holds, and which build of the page it serves (null from a Worker too old to say). */
+export type PageStatus = PageHolds & Pick<PublishStatus, "build">;
+export type StatusResult = (PushOk & { page: PageStatus }) | PushFailure;
 
 export interface PushClient {
   putDoc(key: string, json: string): Promise<PushResult>;
@@ -186,11 +188,12 @@ function failureOfStatus(status: number, scope: "page" | "item"): PushFailure {
 const isStringList = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
 
 /** The status answer, if it has the shape the protocol promises. */
-function parsePageStatus(raw: unknown): (PageHolds & { protocol: number }) | null {
+function parsePageStatus(raw: unknown): (PageStatus & { protocol: number }) | null {
   if (raw === null || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   if (typeof o.protocol !== "number" || !isStringList(o.docs) || !isStringList(o.assets)) return null;
-  return { protocol: o.protocol, docs: o.docs, assets: o.assets };
+  // A Worker from before `build` leaves it out, and one with something else in it has no build to name.
+  return { protocol: o.protocol, docs: o.docs, assets: o.assets, build: isViewerBuildId(o.build) ? o.build : null };
 }
 
 /** The manifest's answer, if it has the shape the protocol promises. */
@@ -291,7 +294,7 @@ export function createPushClient(opts: PushClientOptions): PushClient {
         await res.body?.cancel().catch(() => undefined);
         return failureOfStatus(res.status, "page");
       }
-      let page: (PageHolds & { protocol: number }) | null;
+      let page: (PageStatus & { protocol: number }) | null;
       try {
         page = parsePageStatus(await readJson(res));
       } catch (err) {
@@ -310,7 +313,7 @@ export function createPushClient(opts: PushClientOptions): PushClient {
           message: `The page speaks protocol ${page.protocol} and this server speaks ${PUBLISH_PROTOCOL_VERSION}. Update whichever is older.`,
         };
       }
-      return { ok: true, page: { docs: page.docs, assets: page.assets } };
+      return { ok: true, page: { docs: page.docs, assets: page.assets, build: page.build } };
     },
   };
 }
