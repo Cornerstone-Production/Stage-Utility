@@ -153,7 +153,13 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
     if (method === "POST" && pathname === "/api/public-url") {
       const body = await readBody(req) as Record<string, unknown>;
       const url = typeof body.url === "string" ? body.url : null;
-      const state = await stageController.setPublicUrl(url);
+      let state;
+      try {
+        state = await stageController.setPublicUrl(url);
+      } catch (err) {
+        error(res, errorMessage(err));
+        return;
+      }
       hostNames.publicUrlChanged();
       json(res, state);
       return;

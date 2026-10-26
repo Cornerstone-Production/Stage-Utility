@@ -222,6 +222,9 @@ const REQUEST_FACING = [
   // a document key built from Planning Center ids, and whatever the page or the network
   // said back. It never names the token.
   "servicecue-publisher.ts",
+  // Names the settings.json keys a restore dropped, out of a bundle anyone on the
+  // LAN can post to POST /api/config/import.
+  "settings-restore-check.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
   // The ffmpeg path is typed into PATCH /api/video/ffmpeg and reaches its
@@ -539,6 +542,9 @@ function requestFacingFiles(): string[] {
     // Its lines name the host of the page address typed into POST /api/servicecue/publish
     // and whatever the page or the network said back; see REQUEST_FACING.
     path.join(HERE, "servicecue-publisher.ts"),
+    // Its one line names the settings.json keys it dropped, which arrive in a
+    // bundle POST /api/config/import takes from anyone on the LAN.
+    path.join(HERE, "settings-restore-check.ts"),
     path.join(HERE, "spl-recorder.ts"),
     path.join(HERE, "stage-controller.ts"),
     // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this

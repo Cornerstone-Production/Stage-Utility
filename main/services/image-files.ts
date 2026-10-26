@@ -94,6 +94,43 @@ function looksLike(mime: string, bytes: Buffer): boolean {
   }
 }
 
+/** The name saveImage gives `bytes`: the first 16 hex of their SHA-256, and the extension. */
+function contentName(bytes: Buffer, ext: string): string {
+  return `${crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16)}.${ext}`;
+}
+
+/** The extensions saveImage writes. */
+const SAVED_EXTS = new Set(Object.values(EXT_BY_MIME));
+
+/** Whether saving an image checks its bytes look like its type. Branding
+ *  images do; layout images never have, so files already stored there may not
+ *  pass, and nothing may hold them to it after the fact. */
+export interface ContentRule {
+  checkContent: boolean;
+}
+
+/**
+ * Why `bytes` under `file` is not an image saveImage could have written with
+ * `rule`, or null: a name it would give (the content hash and one of its
+ * extensions), a size within the cap, and — where the rule checks content —
+ * bytes that look like the type the name says. What a config restore and a view
+ * import hold every image in a bundle to before writing any.
+ */
+export function storedImageProblem(file: string, bytes: Buffer, rule: ContentRule): string | null {
+  const ext = /^[0-9a-f]{16}\.([a-z]+)$/.exec(file)?.[1];
+  if (!ext || !SAVED_EXTS.has(ext)) return "is not the name of a stored image";
+  if (bytes.length === 0) return "is empty";
+  if (bytes.length > MAX_IMAGE_BYTES) return "is too large (max 12 MB)";
+  if (rule.checkContent && !looksLike(MIME_BY_EXT[ext]!, bytes)) return `is not a valid ${ext} image`;
+  if (contentName(bytes, ext) !== file) return "does not match its contents";
+  return null;
+}
+
+/** The type a stored image name says, or undefined for a name that is not one. */
+export function mimeOfStoredName(file: string): string | undefined {
+  return /^[0-9a-f]{16}\.[a-z]+$/.test(file) ? MIME_BY_EXT[file.split(".").pop()!] : undefined;
+}
+
 export function imageDir(name: string): string {
   return path.join(getUserDataPath(), name);
 }
@@ -107,7 +144,7 @@ export function isDataUrl(v: unknown): v is string {
  * Persist a base64 data URL into `<data>/<dirName>/` under a content hash.
  * Returns the `/<dirName>/<hash>.<ext>` reference to store in place of the bytes.
  */
-export async function saveImage(dirName: string, dataUrl: string): Promise<string> {
+export async function saveImage(dirName: string, dataUrl: string, rule: ContentRule = { checkContent: true }): Promise<string> {
   const m = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec((dataUrl ?? "").trim());
   if (!m) throw new Error("expected a base64 data:image/… URL");
   const ext = EXT_BY_MIME[m[1].toLowerCase()];
@@ -115,10 +152,9 @@ export async function saveImage(dirName: string, dataUrl: string): Promise<strin
   const bytes = Buffer.from(m[2], "base64");
   if (bytes.length === 0) throw new Error("empty image");
   if (bytes.length > MAX_IMAGE_BYTES) throw new Error("image too large (max 12 MB)");
-  if (!looksLike(m[1].toLowerCase(), bytes)) throw new Error(`not a valid ${m[1]} image`);
+  if (rule.checkContent && !looksLike(m[1].toLowerCase(), bytes)) throw new Error(`not a valid ${m[1]} image`);
 
-  const hash = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
-  const file = `${hash}.${ext}`;
+  const file = contentName(bytes, ext);
   const d = imageDir(dirName);
   await fs.mkdir(d, { recursive: true });
   await atomicWrite(path.join(d, file), bytes);

@@ -3,6 +3,7 @@
 
 import type { OscTargetConfig } from "../types/osc.js";
 import { DataStore } from "./data-store.js";
+import { checked, targetEntries } from "./restore-check.js";
 
 /**
  * This IS the DataStore — there is no wrapper.
@@ -11,4 +12,6 @@ import { DataStore } from "./data-store.js";
  * added nothing else, in seven files. It had to be edited every time the store's
  * own API grew, and it hid update() and reload() from callers for no reason.
  */
-export const oscStore = new DataStore<OscTargetConfig[]>("osc-targets.json", [], "config");
+export const oscStore = new DataStore<OscTargetConfig[]>("osc-targets.json", [], "config", {
+  restoreCheck: checked((raw) => targetEntries(raw, "the OSC targets")),
+});

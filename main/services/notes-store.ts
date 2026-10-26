@@ -14,6 +14,7 @@
 // original.
 
 import { DataStore } from "./data-store.js";
+import { asObject, checked } from "./restore-check.js";
 
 /** One checklist row. `done` is the operator's tick; text is theirs to edit. */
 export interface ChecklistItem {
@@ -63,7 +64,18 @@ function assertSafeObjectId(objectId: string): void {
   }
 }
 
-const store = new DataStore<NotesFile>("notes.json", {}, "config");
+/** POST /api/notes: every key an object id assertSafeObjectId takes, and its
+ *  content an object. */
+const restoreCheck = checked((raw) => {
+  const file = asObject(raw, "the notes");
+  for (const [objectId, content] of Object.entries(file)) {
+    assertSafeObjectId(objectId);
+    asObject(content, `the notes for ${objectId}`);
+  }
+  return file;
+});
+
+const store = new DataStore<NotesFile>("notes.json", {}, "config", { restoreCheck });
 
 /**
  * A MAP, not an object.

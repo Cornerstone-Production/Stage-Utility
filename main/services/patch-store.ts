@@ -5,6 +5,7 @@
 
 import type { PatchFile, PatchSheet, PatchSheetKind } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+import { asArray, asObject, checked } from "./restore-check.js";
 
 const emptyAssignments = () => ({ byServiceType: {}, byPlan: {} });
 function blankSheet(id: string, name: string, kind: PatchSheetKind): PatchSheet {
@@ -48,7 +49,17 @@ function migrate(raw: PatchFile): PatchFile {
 }
 
 class PatchStore {
-  private store = new DataStore<PatchFile>("patch.json", EMPTY, "config");
+  // POST /api/patch: an object with a list of sheets. A file in the shape
+  // before sheets existed restores too, and migrate() reads it on load.
+  private store = new DataStore<PatchFile>("patch.json", EMPTY, "config", {
+    restoreCheck: checked((raw) => {
+      const file = asObject(raw, "the patch");
+      asArray(migrate(file as unknown as PatchFile).sheets, "the patch's sheets").forEach((sheet, i) =>
+        asObject(sheet, `patch sheet ${i + 1}`),
+      );
+      return file;
+    }),
+  });
 
   /** The full patch file (all sheets), migrated to the current shape. */
   async load(): Promise<PatchFile> {

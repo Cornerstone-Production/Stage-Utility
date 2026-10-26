@@ -7,8 +7,8 @@
 // OSC is connectionless UDP, so "connected" here means "configured & active"
 // (ready to send) rather than a live link. Zero deps — Node's built-in dgram.
 
-import { clamp } from "./clamp.js";
 import { errorMessage } from "./errors.js";
+import { clampOscFeedbackPort } from "./settings-rules.js";
 import { randomUUID } from "node:crypto";
 import * as dgram from "node:dgram";
 import * as dns from "node:dns/promises";
@@ -135,7 +135,7 @@ class OscManager {
   }
 
   async setFeedbackPort(port: number): Promise<{ port: number }> {
-    const next = clamp(Math.floor(port), 1, 65535);
+    const next = clampOscFeedbackPort(port);
     this.feedbackPort = next;
     await settingsStore.patch({ oscFeedbackPort: next });
     this.bindFeedback();
