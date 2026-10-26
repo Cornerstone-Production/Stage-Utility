@@ -50,6 +50,24 @@ export function looksLikeStoredRef(v: unknown): v is string {
   return typeof v === "string" && STORED_REF.test(v);
 }
 
+/** The longest data URL a branding image may arrive as (~1.5 MB of image). */
+export const MAX_BRANDING_DATA_URL_CHARS = 2_000_000;
+
+/**
+ * Why `v` is not a branding image value a save takes, or null when it is: null,
+ * an image data URL within the cap, or — where `storedRefAllowed` — the shape of
+ * a stored reference. POST /api/branding allows a reference only for the
+ * `*Original` fields (and then checks the file is here); settings.json holds a
+ * reference for every field once it is saved, so a restore allows it for all.
+ */
+export function brandingImageProblem(v: unknown, storedRefAllowed: boolean): string | null {
+  if (v === null) return null;
+  if (storedRefAllowed && looksLikeStoredRef(v)) return null;
+  if (!isDataUrl(v)) return `must be an image data URL${storedRefAllowed ? ", a stored image" : ""} or null`;
+  if (v.length > MAX_BRANDING_DATA_URL_CHARS) return "is too large (max ~1.5 MB)";
+  return null;
+}
+
 /** Store a data URL and return its reference. A value that is already a reference
  *  (or null) passes through untouched, so this is safe to call on every write. */
 export async function externalizeImage(value: unknown): Promise<unknown> {

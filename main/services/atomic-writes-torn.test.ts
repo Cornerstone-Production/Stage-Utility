@@ -68,14 +68,16 @@ describe("a write that tears partway", () => {
   });
 
   it("configSnapshot.apply leaves the live file as it was", async () => {
-    const target = configFiles()[0];
+    // A store, and a value its restore check accepts (see config-restore-checks.test.ts).
+    const target = "rosstalk-settings.json";
+    assert.ok(configFiles().includes(target));
     const live = JSON.stringify({ live: true });
     await fsp.writeFile(path.join(TMP, target), live);
     await tearing(
       (file) => file.includes(target),
       async () => {
         await assert.rejects(
-          configSnapshot.apply({ kind: "stage-utility-config", version: 1, createdAt: "2026-07-26T00:00:00.000Z", files: { [target]: { restored: true } } }),
+          configSnapshot.apply({ kind: "stage-utility-config", version: 1, createdAt: "2026-07-26T00:00:00.000Z", files: { [target]: { simulate: false } } }),
           /ENOSPC/,
         );
       },

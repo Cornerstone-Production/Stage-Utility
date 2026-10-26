@@ -317,6 +317,50 @@ Two backups exist in the app, and they cover different things:
 - **Settings → Advanced → Data → Data archive** — recorded services and their
   raw samples. See [data archive](../data-archive.md).
 
+### Restoring a config snapshot
+
+A restore is checked the way a save is. Every file in the snapshot goes through
+the rules its settings page applies — a video feed's address, a cue's name, a
+screen's address, a port range, a colour. Where a save trims, lowercases, clamps
+or leaves out a value rather than refusing it, the restore does the same to that
+value; where a save refuses, the restore refuses. A value of a type no settings
+page sends (text where a number belongs, say) is refused. Every uploaded image in it must
+have the name saving it would give it (its own content hash and a known image
+extension) and be within 12 MB; a branding image must also be the type its name
+says, as a branding upload is checked, while a layout image is held to only what
+a layout upload checks, which has never included its contents. If any file or
+image breaks a rule, the whole restore is refused with each one and the reason,
+and nothing on the machine changes: nothing is written, no stored credential is
+cleared, and nothing that runs in the background is paused.
+
+- A restore never writes `secrets.bin` or `encryption.key`. A credential found
+  inside a config file (a wireless password, an integration's API key) is dropped
+  rather than stored, and a screen binding's token is restored empty, so the
+  screen pins a new one when it next connects.
+- An automation rule with fields that need attention restores as it was saved,
+  showing Needs setup, as it does after an upgrade; a cue name that would clash
+  or is not usable refuses the restore.
+- A `settings.json` key no part of the app reads is dropped and logged. A field
+  inside a setting that its page does not send (in the backup schedule, the
+  update window, the reconnect and capture windows, the baptism auto-start) is
+  dropped, as the page's own save would. A file
+  this build does not keep, and an image outside the two image folders, is
+  skipped and logged.
+- A snapshot listing more files than there are config stores, or more than 2000
+  images, is refused outright. No backup the app writes comes near either.
+
+Four things a save checks are not checked on a restore, because the snapshot
+cannot answer them: whether a service type or plan still exists in Planning
+Center, whether a milestone's service type has recorded history on this machine,
+whether a branding image `settings.json` names is on this machine, and whether a
+screen's message groups exist. A screen whose address has since become a
+built-in page is restored, and the next start renames it and logs the change.
+
+At start-up, before anything reads them, the server runs the same checks over the
+config files on disk and names any that a save would refuse on
+`[config-snapshot]`. Nothing is changed: the file stays in use as it is, so a hand
+edit or an older build's file is reported, never taken out of service.
+
 ## Automatic backups
 
 **Settings → Advanced → Data → Automatic backups.** Writes a config snapshot, and

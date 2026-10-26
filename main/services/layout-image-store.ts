@@ -4,62 +4,35 @@
 // display — a base64 image there would bloat every push. The layout only holds
 // "/layout-images/<hash>.<ext>"; the file is served + cached like any static asset.
 
-import * as crypto from "node:crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 
 import type { LayoutObject } from "../types/stage.js";
-import { getUserDataPath } from "./app-paths.js";
 import { viewsStore } from "./views-store.js";
 import { layoutTemplatesStore } from "./layout-templates-store.js";
 import { layoutGroupsStore } from "./layout-groups-store.js";
-import { externKeyed } from "../types/extern-keyed.js";
+import { MAX_IMAGE_BYTES, imageDir, mimeOfStoredName, saveImage, storedImageProblem, type ContentRule } from "./image-files.js";
 import { atomicWrite } from "./write-queue.js";
 import { errorMessage, isNotFound } from "./errors.js";
 
-// NOT externKeyed(), unlike MIME_BY_EXT below: the only lookup into this table
-// is `EXT_BY_MIME[m[1].toLowerCase()]`, and `m[1]` is a capture of
-// `image/[a-zA-Z0-9.+-]+` — every possible key starts "image/", so none of them
-// can be an inherited member name. If that regex ever loosens, wrap this too.
-// See main/types/extern-keyed.ts.
-const EXT_BY_MIME: Record<string, string> = {
-  "image/png": "png",
-  "image/jpeg": "jpg",
-  "image/gif": "gif",
-  "image/webp": "webp",
-  "image/svg+xml": "svg",
-};
-const MIME_BY_EXT: Record<string, string> = externKeyed({
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-});
-/** See image-files.ts — exported for the same reason. */
-export const MAX_LAYOUT_IMAGE_BYTES = 12 * 1024 * 1024;
+/** The folder under the data directory the images live in. */
+export const LAYOUT_IMAGE_DIR = "layout-images";
+
+/** See image-files.ts — exported for the same reason. One cap for both folders. */
+export const MAX_LAYOUT_IMAGE_BYTES = MAX_IMAGE_BYTES;
+
+/** Layout uploads have never had their bytes checked against their type (see
+ *  ContentRule); serving is what keeps one inert (nosniff, the sandbox CSP). */
+export const LAYOUT_IMAGE_RULE: ContentRule = { checkContent: false };
 
 function dir(): string {
-  return path.join(getUserDataPath(), "layout-images");
+  return imageDir(LAYOUT_IMAGE_DIR);
 }
 
 /** Persist a `data:image/…;base64,…` URL as a content-hashed file. Identical images
  *  dedup to the same name. Returns the "/layout-images/<hash>.<ext>" reference. */
 export async function saveLayoutImage(dataUrl: string): Promise<string> {
-  const m = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s.exec((dataUrl ?? "").trim());
-  if (!m) throw new Error("expected a base64 data:image/… URL");
-  const ext = EXT_BY_MIME[m[1].toLowerCase()];
-  if (!ext) throw new Error(`unsupported image type: ${m[1]}`);
-  const bytes = Buffer.from(m[2], "base64");
-  if (bytes.length === 0) throw new Error("empty image");
-  if (bytes.length > MAX_LAYOUT_IMAGE_BYTES) throw new Error("image too large (max 12 MB)");
-  const hash = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
-  const file = `${hash}.${ext}`;
-  const d = dir();
-  await fs.mkdir(d, { recursive: true });
-  await atomicWrite(path.join(d, file), bytes);
-  return `/layout-images/${file}`;
+  return saveImage(LAYOUT_IMAGE_DIR, dataUrl, LAYOUT_IMAGE_RULE);
 }
 
 /**
@@ -73,13 +46,8 @@ export async function saveLayoutImage(dataUrl: string): Promise<string> {
  * file instead of duplicating.
  */
 export async function saveLayoutImageBytes(file: string, bytes: Buffer): Promise<boolean> {
-  const m = /^([0-9a-f]{16})\.([a-z0-9]+)$/.exec(file);
-  if (!m) throw new Error(`not a layout image name: ${file}`);
-  if (!Object.values(EXT_BY_MIME).includes(m[2])) throw new Error(`unsupported image type: ${m[2]}`);
-  if (bytes.length === 0) throw new Error("empty image");
-  if (bytes.length > MAX_LAYOUT_IMAGE_BYTES) throw new Error("image too large (max 12 MB)");
-  const hash = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16);
-  if (hash !== m[1]) throw new Error(`image ${file} does not match its contents`);
+  const problem = storedImageProblem(file, bytes, LAYOUT_IMAGE_RULE);
+  if (problem) throw new Error(`layout image ${file} ${problem}`);
 
   const d = dir();
   await fs.mkdir(d, { recursive: true });
@@ -161,8 +129,7 @@ export async function pruneLayoutImages(): Promise<number> {
 /** Read a stored layout image for serving. Only our hashed names are accepted (no
  *  path traversal). Returns null when missing/invalid. */
 export async function readLayoutImage(file: string): Promise<{ data: Buffer; mime: string } | null> {
-  if (!/^[a-f0-9]{16}\.[a-z]+$/.test(file)) return null;
-  const mime = MIME_BY_EXT[file.split(".").pop() as string];
+  const mime = mimeOfStoredName(file);
   if (!mime) return null;
   try {
     const data = await fs.readFile(path.join(dir(), file));

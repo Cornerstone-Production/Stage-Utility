@@ -19,6 +19,7 @@ const TYPES = Object.keys(LAYOUT_OBJECTS) as (keyof typeof LAYOUT_OBJECTS)[];
  * second row and nothing is cut. An exact list, so it cannot grow quietly.
  */
 const LONGER_BLURBS: Partial<Record<(typeof TYPES)[number], number>> = {
+  lyrics: 63,
   timer: 64,
 };
 

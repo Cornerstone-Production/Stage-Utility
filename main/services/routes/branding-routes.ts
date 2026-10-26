@@ -8,7 +8,8 @@
 import { type RouteCtx, json, error, readBody, MAX_IMAGE_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { parseAppIcon, parseCrop } from "../app-icon.js";
-import { isStoredBrandingImage, looksLikeStoredRef } from "../branding-image-store.js";
+import { brandingImageProblem, isStoredBrandingImage, looksLikeStoredRef } from "../branding-image-store.js";
+import { isHex6 } from "../settings-rules.js";
 
 export async function brandingRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, url, method } = c;
@@ -29,7 +30,7 @@ export async function brandingRoutes(c: RouteCtx): Promise<void> {
       if ("accentColor" in body) {
         const v = body.accentColor;
         if (v === null) partial.accentColor = null;
-        else if (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) partial.accentColor = v;
+        else if (isHex6(v)) partial.accentColor = v;
         else {
           error(res, "body.accentColor must be a #rrggbb hex or null");
           return;
@@ -48,24 +49,14 @@ export async function brandingRoutes(c: RouteCtx): Promise<void> {
       ): Promise<boolean> => {
         if (!(key in body)) return true;
         const v = body[key];
-        if (v === null) {
-          partial[key] = null;
-          return true;
-        }
-        if (key.endsWith("Original") && looksLikeStoredRef(v)) {
-          if (!(await isStoredBrandingImage(v))) {
-            error(res, `body.${key} names an image that is not stored`);
-            return false;
-          }
-          partial[key] = v;
-          return true;
-        }
-        if (typeof v !== "string" || !v.startsWith("data:image/")) {
-          error(res, `body.${key} must be an image data URL${key.endsWith("Original") ? ", a stored image" : ""} or null`);
+        const storedRefAllowed = key.endsWith("Original");
+        const problem = brandingImageProblem(v, storedRefAllowed);
+        if (problem) {
+          error(res, `body.${key} ${problem}`);
           return false;
         }
-        if (v.length > 2_000_000) {
-          error(res, `${key} too large (max ~1.5 MB)`);
+        if (storedRefAllowed && looksLikeStoredRef(v) && !(await isStoredBrandingImage(v))) {
+          error(res, `body.${key} names an image that is not stored`);
           return false;
         }
         partial[key] = v;

@@ -670,6 +670,13 @@
   --color-fill-active:    rgba(255, 255, 255, 0.13);
   --color-warn-11:        #ffca16;
   --color-danger-11:      #ff9592;
+
+  /* The same trap for the OK colour: --green-11 in the light theme (#218358) is a
+     dark green picked for #f7f8fa, and on this ground it is far under the 4.5:1
+     floor. The Listen button's "Listening" caption is drawn on a scrim over live
+     video inside a kiosk surface, in either theme. The dark value is Radix's own
+     green-11, the same literal rule as the others above. */
+  --color-ok-11:          #3dd68c;
 }
 
 /* The accent, on a kiosk surface embedded in the LIGHT app only.

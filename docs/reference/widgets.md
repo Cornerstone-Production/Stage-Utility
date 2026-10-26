@@ -448,12 +448,40 @@ up even on a layer that is playing. See
 |---|---|---|
 | **Current slide** | The words on the slide showing now | ProPresenter |
 | **Next slide** | The words on the slide coming next | ProPresenter |
+| **Lyrics** | The words on the slide, with its group as ProPresenter names it | ProPresenter |
 | **Slide notes** | Speaker notes on the current slide | ProPresenter |
 | **Slide image** | A picture of the slide showing now | ProPresenter thumbnails |
 | **Slide progress** | How far through the presentation | ProPresenter |
 | **Section chip** | The part of the service running now, as a label | ProPresenter |
 
 **Slide progress** reads as a fraction, a count remaining, a percentage or a bar.
+
+**Lyrics** draws the words on the current slide with the group the slide belongs to
+(Verse 1, Chorus, Bridge) as a tag, in ProPresenter's group colour, and what comes
+next underneath. The group names and colours are ProPresenter's own, and the order
+the groups play in follows the presentation's arrangement, so a chorus played three
+times is three places in the strip. It has three layouts:
+
+- **Above**: the tag over the words. The default.
+- **Beside**: the tag in a column to the left of the words, so a run of slides lines
+  up down the screen.
+- **Arrangement**: every group of the song in play order as a strip of short tags
+  (V1, C, B), the current one lit and the ones already played dimmed, with the words
+  under it.
+
+A slide with no words (an Intro or an Outro) shows its tag alone, or nothing, as
+set; a slide that belongs to no named group, such as a media slide, has no tag to
+show. Nothing is drawn underneath on the last slide. **Next group** underneath is
+the next group with a different name, so a chorus played twice in a row is skipped
+to the group after it, while the Arrangement strip shows both. The widget draws
+nothing while ProPresenter has not answered yet, a dim dash when ProPresenter is
+not connected or has no presentation open, and never the words of a slide that has
+gone. **Short** tag text is derived: Verse 1 is V1, Chorus C, Pre-Chorus PC, Bridge
+B, Tag T, Intro and Outro stay whole, and any other name is the initials of its
+words or its first three letters, with a trailing number kept (Interlude 2 is IN2).
+On Home it is a card in the theme's own colours, large and shown during a service
+to start.
+
 A **Timer** on the ProPresenter source finds its timer by name, so renaming it in
 ProPresenter breaks the link. With more than one ProPresenter connected, these
 widgets and the Timer pick which instance they follow. See
@@ -694,9 +722,9 @@ NDI needs the native client. The web build ignores this widget.
 
 **Video** points at a feed set up once on the [Video feeds](../integrations/video-feeds.md)
 page under Screens — renaming a feed there does not break a widget bound to it,
-since the binding is the feed's id, not its name. Always muted, with no
-controls, and it only opens a connection while it is actually on screen and the
-tab is visible. **Feed** picks which one it plays. **Fit** chooses between
+since the binding is the feed's id, not its name. Muted, with no controls
+(except Listen, below), and it only opens a connection while it is actually on
+screen and the tab is visible. **Feed** picks which one it plays. **Fit** chooses between
 showing the whole picture (letterboxed) and filling the box (cropped). **Show
 feed name** draws the feed's name over the picture. **When the feed is
 offline** picks what shows in its place: a message, your Branding logo, or
@@ -709,6 +737,35 @@ source is live, so a failed attempt retries the same method rather than
 switching to the other, after a delay that starts at 1 second and doubles to
 30; playback that holds for 10 seconds starts the delay over. It never gives
 up on such a feed.
+
+**Listen.** On a Home card, the widget has a speaker button at the bottom right
+of its picture, as the preview on the Video feeds page does. It is never drawn on
+a wall, a kiosk, a console, the layout editor's preview or any other screen:
+those stay silent. It is off whenever a page loads, because a browser only lets
+sound start from a tap. Tapping it plays the feed's sound with its picture from
+one session, so they stay together (see
+[Listening to a feed's audio](../integrations/video-feeds.md#listening-to-a-feeds-audio));
+tapping again, hiding the tab, scrolling the card away or leaving the page
+stops it and returns the card to its picture-only session. One feed plays at a
+time per page: tapping Listen on another card moves the sound there.
+
+| Listen shows | When |
+|---|---|
+| Speaker, uncaptioned | The feed has audio and nobody is listening to it |
+| "Starting audio…" | A tap, until the sound arrives |
+| "Listening", a level meter and a volume slider | The sound is playing. The volume is kept per browser |
+| "Waiting for the source" | Listening was asked for and the feed is not sending yet |
+| "Audio stopped, retrying" | The listening session dropped; the picture shows Connecting meanwhile |
+| "Audio could not start: *reason*" | The listening session dropped three times in a row (a refused or dropped connection, no picture within 5 seconds of connecting, ICE failing before it connected, or the video element erroring; a session that plays for 10 seconds starts the count over), or the relay refused it outright (400, 406, 415 or 422), which gives up at once. The page gives the sound up and plays the picture alone; the next tap tries again. The caption goes when another control takes the sound or the feed's listen path changes |
+| "The browser would not play sound: *reason*" | The browser refused to start the element with sound after the tap |
+| "This feed has no audio" | The feed's source has no audio track. The button is disabled |
+| "Audio is not known until the feed has been seen" | The relay has not seen the feed yet. The button is disabled |
+| "Audio isn't available on this server: *reason*" | The conversion cannot run (no usable ffmpeg, say). The button is disabled |
+| "Audio needs WebRTC, and this feed is playing over HLS" | The picture is over HLS (B-frames, or WebRTC failed here), which carries no sound |
+| "Audio needs WebRTC, which this browser cannot play for this feed" | This browser has no player for the feed at all |
+
+A feed with no audio report (a YouTube, Resi or external-address feed) has no
+Listen button.
 
 | State | Shown as |
 |---|---|
@@ -773,6 +830,7 @@ chooses which; with one, it is not shown.
 | **Clock** | **Format** 12h or 24h (follows the app setting until chosen), **Seconds**, **AM/PM** |
 | **Timer** | **Source** (Service, ProPresenter or Baptism). Service: **Show the next item** (on for a new Timer). ProPresenter: **Timer** (a name typed in, with the running timers suggested; empty follows the first running one). Baptism: **Shows** one of nine readouts and its **Label** (auto by default). All: **Caption**, one sub-line switch (**Show the sub-line**, **Show the timer's name** or **Show the label**, on), **Hide when idle** (off). Service and ProPresenter: **Amber near the end** (off; when on, **Warn at** 60 s by default, 0 to 3600 in steps of 5) and **Red on overrun** (on) |
 | **Service pacing** | **Ahead color** and **Behind color** (green and red until changed, each with a Reset), **Projected end time** (off), **Show ahead/behind label** (off), **Show dash when idle** (on) |
+| **Lyrics** | **Layout** (Above, Beside or Arrangement; Above to start). **Group tag**: **Style** (Filled, Outline or Text), **Colour** (ProPresenter's, or one colour, the app accent), **Text** (As named, Short or CAPS), **Width** when beside (Column, or Fit). **Lyrics**: **Size** (Fit, S, M or L; L to start. S, M and L are a share of the object's own height and come down when the words would not fit it; Fit is the largest size that does), **Weight** (Regular or Bold; Bold), **Align** (Left or Centre; Left; greyed Beside, which is always left; Centre also centres the Arrangement's strip), **No words** (Blank or Tag only; Tag only). **Underneath**: **Show what comes next** (on), **Shows** the next slide or the next group (the next group), **Its lyrics** (off), **Dimmed** (a little or more). **Song title** (off), the presentation's name in the corner. Its own Size, Weight and Align replace the Look section's type controls; the text colour still applies |
 | **Section chip** | **Which**: Current, Next, or Next section (skips arrangement breaks) |
 | **Slide progress** | **Display**: fraction (`3 / 12`, the default), left, percent or bar; **Show 'slides' label** (off, not offered for the bar) |
 | **Service order (legacy)** | **Scroll**: Follow live (the default) or Static, **Fit to height** (on), **Highlight live** (on), **Show length** (off), **Notes shown** (every note category, once a plan with notes is loaded) |

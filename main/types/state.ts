@@ -177,7 +177,12 @@ export interface ChargerBayDTO {
  *                  to restart (the new build sits ready; nothing interrupts)
  *   auto-full    — apply and restart in the window (the original behavior)
  */
-export type UpdateMode = "manual" | "auto-install" | "auto-full";
+export const UPDATE_MODES = ["manual", "auto-install", "auto-full"] as const;
+export type UpdateMode = (typeof UPDATE_MODES)[number];
+
+export function isUpdateMode(v: unknown): v is UpdateMode {
+  return typeof v === "string" && (UPDATE_MODES as readonly string[]).includes(v);
+}
 
 export interface AutoUpdateSettings {
   mode: UpdateMode;

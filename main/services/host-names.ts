@@ -26,6 +26,7 @@ import * as os from "node:os";
 
 import { broadcast } from "./broadcaster.js";
 import { DataStore } from "./data-store.js";
+import { asArray, asObject, checked, optional, refuse } from "./restore-check.js";
 import { HOST_NAMES_CHANNEL, alwaysAnswered, listableName } from "./host-name-rules.js";
 import { hostnameOf } from "./http-origin.js";
 import { scrub } from "./scrub.js";
@@ -474,7 +475,37 @@ export class HostNames {
   }
 }
 
-export const hostNamesConfigStore = new DataStore<HostNamesConfig>("host-names.json", { accepted: [], dismissed: [] }, "config");
+/**
+ * A restored host-name list, held to what `add` and `dismiss` take: every
+ * listed name one listableName accepts (and stored as it returns it), at most
+ * MAX_LISTED of each. This list decides which names the server answers to, so
+ * a restore must not be a way onto it that the card is not.
+ */
+const restoreCheck = checked((raw) => {
+  const cfg = asObject(raw, "the host names");
+  optional(cfg.enforce, "boolean", "enforce");
+  optional(cfg.seededAt, "string", "seededAt");
+  const accepted = asArray(cfg.accepted ?? [], "the accepted host names");
+  const dismissed = asArray(cfg.dismissed ?? [], "the dismissed host names");
+  for (const [list, what] of [[accepted, "accepted"], [dismissed, "dismissed"]] as const) {
+    if (list.length > MAX_LISTED) refuse(`at most ${MAX_LISTED} ${what} host names (this has ${list.length})`);
+  }
+  const listable = (name: unknown, what: string): string => {
+    const parsed = typeof name === "string" ? listableName(name) : null;
+    if (!parsed?.ok) refuse(`the ${what} host name "${String(name).slice(0, 60)}" is not one the list takes`);
+    return parsed.name;
+  };
+  return {
+    ...cfg,
+    accepted: accepted.map((a, i) => {
+      const entry = asObject(a, `accepted host name ${i + 1}`);
+      return { ...entry, name: listable(entry.name, "accepted") };
+    }),
+    dismissed: dismissed.map((d) => listable(d, "dismissed")),
+  };
+});
+
+export const hostNamesConfigStore = new DataStore<HostNamesConfig>("host-names.json", { accepted: [], dismissed: [] }, "config", { restoreCheck });
 export const hostNamesSeenStore = new DataStore<{ names: SeenName[] }>("host-names-seen.json", { names: [] }, "runtime");
 
 export const hostNames = new HostNames(hostNamesConfigStore, hostNamesSeenStore);

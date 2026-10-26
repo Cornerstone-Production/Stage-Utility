@@ -276,3 +276,13 @@ test("a DELETE that never answers still closes the peer connection after the cap
     mock.timers.reset();
   }
 });
+
+test("sound is asked for only when the caller wants it", async () => {
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (async () =>
+    ({ status: 201, ok: true, headers: { get: () => null }, text: async () => FAKE_SDP }) as unknown as Response) as typeof fetch;
+
+  await startWhep("/video/p/whep", video);
+  assert.deepEqual(FakePeerConnection.instances.at(-1)?.transceivers, ["video"], "a picture-only session asked for audio");
+  await startWhep("/video/p-listen/whep", video, { audio: true });
+  assert.deepEqual(FakePeerConnection.instances.at(-1)?.transceivers, ["video", "audio"], "a listening session did not ask for audio");
+});

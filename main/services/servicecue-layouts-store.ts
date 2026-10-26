@@ -5,6 +5,7 @@
 
 import type { ServiceCueLayout } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
+import { asArray, checked, namedEntries } from "./restore-check.js";
 import { SERVICECUE_LOG_TAG } from "./servicecue-legacy-names.js";
 import { serviceCueRolesStore } from "./servicecue-roles-store.js";
 import { migrateLayouts } from "./servicecue-layout-migration.js";
@@ -15,6 +16,16 @@ import { migrateLayouts } from "./servicecue-layout-migration.js";
 // is cheap to add; a wrong one that looks broken is not.
 const store = new DataStore<ServiceCueLayout[]>("servicecue-layouts.json", [], "config", {
   renamedFrom: { filename: "scriptview-layouts.json", logTag: SERVICECUE_LOG_TAG },
+  // POST /api/servicecue/layouts takes a list; each layout an id, a name and
+  // its columns, the shape migrateLayouts reads on load.
+  restoreCheck: checked((raw) => {
+    namedEntries(raw, "the ServiceCue layouts").forEach((l, i) => {
+      for (const k of ["columns", "columnRoles"] as const) {
+        if (l[k] !== undefined) asArray(l[k], `ServiceCue layout ${i + 1}'s ${k}`);
+      }
+    });
+    return raw;
+  }),
 });
 
 export const serviceCueLayoutsStore = {

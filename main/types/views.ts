@@ -22,6 +22,35 @@ export type ViewKind =
   | "spl-rundown"
   | "calendar";
 
+/**
+ * Every ViewKind, as a record so the TYPE CHECKER refuses a missing one.
+ *
+ * This was a chain of `v === "..."` comparisons, which compiles perfectly well
+ * with a kind left out — and a kind left out here is a kind the API silently
+ * refuses to create, rejecting the request as malformed. A Record<ViewKind, true>
+ * is the same check the compiler already does for the new-view dialog's labels.
+ */
+const VIEW_KINDS: Record<ViewKind, true> = {
+  slots: true,
+  dashboard: true,
+  stage: true,
+  transcription: true,
+  custom: true,
+  script: true,
+  "spl-rundown": true,
+  calendar: true,
+};
+
+/** Every ViewKind id, derived from the table the type checker keeps complete. */
+export const VIEW_KIND_IDS = Object.keys(VIEW_KINDS) as ViewKind[];
+
+/** Narrow an untrusted body value to a ViewKind. */
+export function isDisplayKind(v: unknown): v is ViewKind {
+  // hasOwn rather than `in`: the value is untrusted, and "toString" is `in`
+  // every object.
+  return typeof v === "string" && Object.hasOwn(VIEW_KINDS, v);
+}
+
 /** Empty only when `T` names every ViewKind; otherwise `never`, which nothing
  *  can be assigned to. */
 type Exhaustive<T extends readonly ViewKind[]> = Exclude<ViewKind, T[number]> extends never ? T : never;
@@ -518,6 +547,39 @@ export type LayoutObjectConfig =
   // ProPresenter slide position within the current presentation. `display`: "fraction"
   // ("3 / 12"), "remaining" ("9 left"), "percent", or a progress "bar".
   | { type: "slide-progress"; propresenterInstanceId?: string | null; display?: "fraction" | "remaining" | "percent" | "bar"; showLabel?: boolean }
+  // The words on the ProPresenter slide now, with its group as ProPresenter names
+  // it, and what comes next underneath. Every field is optional and an unset one
+  // reads as the approved default (see lyricsSettings in renderer/main/lyrics-config.ts),
+  // so a saved object never needs rewriting when a setting is added.
+  | {
+      type: "lyrics";
+      propresenterInstanceId?: string | null;
+      /** Where the group tag sits: above the words, beside them in a column, or
+       *  every group of the arrangement as a strip with the current one lit. Not
+       *  named `layout`: Home's card menu reserves that key for the PVP widget. */
+      display?: "above" | "beside" | "strip";
+      tagStyle?: "filled" | "outline" | "text";
+      /** The group's own ProPresenter colour, or the app accent for every group. */
+      tagColor?: "propresenter" | "one";
+      /** The name as ProPresenter has it, a derived short form, or in capitals. */
+      tagText?: "named" | "short" | "caps";
+      /** Beside only: a fixed column the tags right-align in, or each tag's own width. */
+      tagWidth?: "column" | "fit";
+      size?: "fit" | "s" | "m" | "l";
+      weight?: "regular" | "bold";
+      /** Above and strip only; beside is always left. */
+      align?: "left" | "center";
+      /** A slide with no words: nothing at all, or its tag alone. */
+      noWords?: "blank" | "tag";
+      /** Show what comes next under the current slide. */
+      under?: boolean;
+      underShows?: "slide" | "group";
+      /** The next one's own words, and not just its tag. */
+      underWords?: boolean;
+      underDim?: "light" | "strong";
+      /** The presentation's name, small in the corner. */
+      showTitle?: boolean;
+    }
   // Mic-slots grid. `source: "view"` embeds an existing slots-View's grid by
   // `sourceViewId`; `source: "inline"` defines its own slot set, stored per service
   // type keyed by this object's id (resolved into `StageState.slotsByLayoutObject`),
@@ -1461,4 +1523,10 @@ export function isLayoutShape(v: unknown): v is LayoutDTO {
     typeof c.width === "number" && Number.isFinite(c.width) &&
     typeof c.height === "number" && Number.isFinite(c.height)
   );
+}
+
+/** A view's `slotsLayout` as PATCH /api/views/:id and a restore take it: an
+ *  object, or null for the default. An array is neither. */
+export function isSlotsLayoutValue(v: unknown): v is SlotsLayout | null {
+  return v === null || (typeof v === "object" && !Array.isArray(v));
 }

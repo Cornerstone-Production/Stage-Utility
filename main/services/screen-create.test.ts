@@ -27,7 +27,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { stageController, ScreenWriteError } = await import("./stage-controller.js");
 const { viewSurface, screenIsControlSurface } = await import("../types/views.js");
-const { VIEW_KIND_IDS } = await import("./routes/context.js");
+const { VIEW_KIND_IDS } = await import("../types/views.js");
 
 import type { LayoutDTO } from "../types/stage.js";
 

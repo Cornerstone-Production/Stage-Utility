@@ -90,7 +90,7 @@ than being read into memory. The cap depends on what the route carries: 16 KB fo
 |--------|------|---------|
 | GET | `/api/views` | List views |
 | POST | `/api/views` | Create a view (`{name, kind, surface?}`) — `201`, answering the state. A missing or unrecognised `kind` makes a slots view. `surface: "console"` is honoured for a custom view or a calendar; any other kind is created as a display |
-| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout`, `serviceCueLayoutId` (also read as `scriptViewLayoutId`), `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), `showInSidebar` (boolean — `false` keeps a console out of the operator app's sidebar list; it still opens at `/consoles/:id`; absent means listed; a non-boolean is `400`), or `calendarSources` + `calendarTags` (both together, each an array of `{id, name}` strings, else `400`). Converting a bound view with `surface` here is refused, naming the screens; `POST /api/views/:id/surface` is the call that changes the view and its screens together. A console's `kind` may change only to one that can be a control surface (a custom layout or a calendar); another is `400` with the reason. The body is judged as it will be once all of it is applied: `surface: "display"` beside a `kind` takes any kind, and `surface: "console"` beside a `kind` needs one that can be a control surface. Every `kind` and `surface` refusal is decided before the first write, so a refused body writes nothing, a `name` beside it included. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit. Every refusal is decided before the first write, so a refused body (a stale `layoutRev`, an unknown `serviceCueLayoutId`, a kind or surface refused as above) writes nothing, a `name` beside it included |
+| PATCH | `/api/views/:id` | Update `name`, `kind`, `ndiSource`, `layout`, `surface`, `slotsLayout` (an object, or `null` for the default; anything else is `400`), `serviceCueLayoutId` (also read as `scriptViewLayoutId`), `hideChrome` (boolean — hide the operator app's top bar and context bar while this view is open as a console), `showInSidebar` (boolean — `false` keeps a console out of the operator app's sidebar list; it still opens at `/consoles/:id`; absent means listed; a non-boolean is `400`), or `calendarSources` + `calendarTags` (both together, each an array of `{id, name}` strings, else `400`). Converting a bound view with `surface` here is refused, naming the screens; `POST /api/views/:id/surface` is the call that changes the view and its screens together. A console's `kind` may change only to one that can be a control surface (a custom layout or a calendar); another is `400` with the reason. The body is judged as it will be once all of it is applied: `surface: "display"` beside a `kind` takes any kind, and `surface: "console"` beside a `kind` needs one that can be a control surface. Every `kind` and `surface` refusal is decided before the first write, so a refused body writes nothing, a `name` beside it included. Pass `layoutRev` with a layout to get `409 {error, code, currentRev}` instead of overwriting somebody else's edit. Every refusal is decided before the first write, so a refused body (a stale `layoutRev`, an unknown `serviceCueLayoutId`, a kind or surface refused as above) writes nothing, a `name` beside it included |
 | POST | `/api/views/:id/slots` | Save a slots-view's slots (`{slots, target?}`) |
 | POST | `/api/views/resolve-slots` | Resolve a slot set without saving it — what the editor previews with. Body `{ slots, target? }`, where `target` is `{ serviceTypeId, planId }` and `planId: null` names the type's default board. Answers `{ slots, roster, reason? }`; `roster` is `live`, `plan`, `none` (a default board, resolved against nobody) or `unavailable` (Planning Center could not be read, and `reason` says why) |
 | POST | `/api/layout-objects/:objectId/slots` | Save the slots an inline slots-grid object defines (`{slots, target?}`) |
@@ -490,7 +490,7 @@ same dispatcher.
 | GET | `/api/update/lock` | `{active, reasons}` — why an update would be refused right now |
 | POST | `/api/update/notices/dismiss` \| `/api/update/restart` \| `/api/update/auto` | Dismiss the post-update dialog (`{ok: true}`) / restart (the reply is the update status, plus `relaunchFailure` when this server could not arrange its own relaunch on launchd) / set the automatic-update mode and window (see Settings above) |
 | GET | `/api/config/export` | The config snapshot as a download, `stage-utility-config-<date>.json`, the date in the app time zone. Credentials are excluded |
-| POST | `/api/config/import` | Apply a snapshot (the bundle itself, or `{bundle}`), then **restart**. A snapshot carries no credentials, so before writing anything the restore clears each stored one it would send to a new address (an integration, a wireless connection or a pull feed moved, removed, or turned into another kind), logged on `[config-snapshot]`. The reply is `{ok, applied, restarting}`, plus `relaunchFailure` (a reason) when this server could not arrange its own relaunch on launchd |
+| POST | `/api/config/import` | Apply a snapshot (the bundle itself, or `{bundle}`), then **restart**. Every file and image is checked first, with the rules its settings routes apply on a save; if any fails, the reply is `400` with `error` naming each and the reason, and nothing is written or cleared ([Restoring a config snapshot](../ops/reliability.md#restoring-a-config-snapshot)). A snapshot carries no credentials, so before writing anything the restore clears each stored one it would send to a new address (an integration, a wireless connection or a pull feed moved, removed, or turned into another kind), logged on `[config-snapshot]`. The reply is `{ok, applied, restarting}`, plus `relaunchFailure` (a reason) when this server could not arrange its own relaunch on launchd |
 | GET / POST | `/api/config/snapshots` | List / save a named snapshot on this machine (`{name}`; saving answers `201`) |
 | POST / DELETE | `/api/config/snapshots/:id/recall` \| `/api/config/snapshots/:id` | Apply one (then restart, with the same reply as an import) / delete one |
 | GET / POST | `/api/backup/schedule` | The automatic-backup schedule. `POST` takes any of `{enabled, includeArchive, destination, intervalDays, keep}` |
@@ -532,7 +532,7 @@ the wrong shape is `400` with the reason unless noted.
 | `/api/onboarding-dismissed` | `{dismissed: boolean}` |
 | `/api/ndi-enabled` | `{enabled: boolean}` |
 | `/api/kiosk-discovery` | `{enabled: boolean}` — whether the server answers devices looking for one |
-| `/api/public-url` | `{url: string \| null}` — the address used for the connect QR and display links; blank or `null` clears it |
+| `/api/public-url` | `{url: string \| null}` — the address used for the connect QR and display links; blank or `null` clears it. Taken as `http://` when it names no scheme; anything that is then not an http or https address is refused |
 | `/api/timezone` | `{timezone: string \| null}` — an IANA zone, or `null` (blank) to follow the host clock; an unknown zone is `400` |
 | `/api/hour-cycle` | `{hourCycle: "12h" \| "24h"}` |
 | `/api/reconnect-schedule` | any of `{enabled, leadMin, tailMin, dormantMin}`, the numbers rounded and clamped (lead and tail 0–1440, dormant 1–1440 minutes) |
@@ -583,10 +583,18 @@ the relay's own HTTP listeners are loopback-only: `POST /video/<feedId>/whep`,
 `PATCH`/`DELETE /video/<feedId>/whep/<session>`, `POST /video/<feedId>/whip`
 (OBS's Authorization Bearer token forwarded through),
 `PATCH`/`DELETE /video/<feedId>/whip/<session>`, and
-`GET /video/<feedId>/<file>.m3u8|.mp4|.m4s`. `404` for an unknown feed id, a
-kind the feed's own source cannot serve (embed/external have no relay path;
-WHIP needs a push feed whose own protocol is WHIP), or a file name outside
-the HLS pattern; `413` for a WHEP/WHIP body over 64 KB; `502` if the relay
+`GET /video/<feedId>/<file>.m3u8|.mp4|.m4s`. A feed whose audio status is
+`converted` or `pass-through` also answers `POST /video/<feedId>-listen/whep`
+and that path's session `PATCH`/`DELETE`: the same video with Opus audio, which
+the Listen button plays. Nothing else under `<feedId>-listen` is served, and a
+session made there whose feed's audio status has since changed can no longer be
+`PATCH`ed or `DELETE`d through the proxy (`404`): it ends at the relay's ICE timeout,
+or when the browser tears the connection down. `404`
+for an unknown feed id, a kind the feed's own source cannot serve
+(embed/external have no relay path; WHIP needs a push feed whose own protocol is
+WHIP), a `-listen` path of a feed whose audio is not converted or passed through
+(a direct feed reads its own path), WHIP or HLS on a `-listen` path, or a file
+name outside the HLS pattern; `413` for a WHEP/WHIP body over 64 KB; `502` if the relay
 refuses the connection or the exchange times out (15 s for WHEP/WHIP, past the
 relay's own 10-second dial of a pull feed's device so its reason comes
 through, 30 s for HLS — an LL-HLS blocking playlist reload can legitimately hold that

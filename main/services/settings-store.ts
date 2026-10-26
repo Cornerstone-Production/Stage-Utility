@@ -7,6 +7,7 @@ import { setAppTimeZone } from "./app-timezone.js";
 import { externalizeBrandingImages } from "./branding-image-store.js";
 import { DataStore } from "./data-store.js";
 import { ID_KINDS, initialFloor, nextId, type IdKind } from "./id-allocator.js";
+import { settingsRestoreCheck } from "./settings-restore-check.js";
 
 /**
  * `AppIconSettings` is the custom tab and home-screen icon: all null until one is
@@ -255,7 +256,10 @@ export const DEFAULT_SETTINGS: SettingsData = {
  *  when unset) and the stage state the Advanced tab reads. */
 export const DEFAULT_TAPER_WINDOW = { preMin: 60, postMin: 60 };
 
-const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS, "config");
+const store = new DataStore<SettingsData>("settings.json", DEFAULT_SETTINGS, "config", {
+  // Key by key, each with what its settings route applies: see the table there.
+  restoreCheck: settingsRestoreCheck,
+});
 
 /** Keep the process-wide zone in step with what was just read or written. Every
  *  path in and out of settings funnels through here so no caller can forget, and

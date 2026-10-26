@@ -17,8 +17,8 @@ import { youtubeService } from "../youtube-service.js";
 import { pvpService } from "../pvp-service.js";
 import { reaperService } from "../reaper-service.js";
 import { scoresService } from "../scores-service.js";
-import { scoresStore } from "../scores-store.js";
-import { leagueById, type ScoreFavourite } from "../../types/scores.js";
+import { keepKnownFavourites, scoresStore } from "../scores-store.js";
+import { leagueById } from "../../types/scores.js";
 import { oscManager } from "../osc-manager.js";
 import { sensourceService } from "../sensource-service.js";
 import { smaartService } from "../smaart-service.js";
@@ -84,12 +84,7 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.favourites (array) required");
         return;
       }
-      // Only entries naming a league this build knows and a team id survive. A
-      // favourite for a league that no longer exists would make every poll ask
-      // for a path ESPN does not serve.
-      const favourites = (body.favourites as ScoreFavourite[]).filter(
-        (f) => f && typeof f.teamId === "string" && f.teamId !== "" && leagueById(f.league),
-      );
+      const favourites = keepKnownFavourites(body.favourites);
       // No explicit re-apply here. setFavourites announces on
       // "scores:favourites-changed", and integration-manager answers that
       // channel by re-applying and re-sending the states frame — see

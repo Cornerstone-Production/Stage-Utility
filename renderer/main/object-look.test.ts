@@ -24,6 +24,8 @@ const BARE = [
   // nobody asked for, and the operator's own layouts leave all of these bare.
   "text", "current-service-item", "next-service-item",
   "current-slide-text", "next-slide-text", "current-slide-notes", "transcript-strip",
+  // Lyrics: the same full-bleed words, with a tag it paints itself.
+  "lyrics",
   // Draws its own grid of tiles; a card around a grid of cards is noise.
   "slots-grid",
   // The score strip paints its own opaque ground edge to edge, so a card behind
