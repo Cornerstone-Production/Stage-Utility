@@ -11,7 +11,7 @@
 // operand on failure, and inspecting a live jsdom element does not terminate.
 
 import assert from "node:assert/strict";
-import { after, afterEach, describe, test } from "node:test";
+import { after, afterEach, before, describe, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
@@ -20,6 +20,7 @@ const { render, screen, cleanup, fireEvent, act, within } = await import("@testi
 const React = (await import("react")).default;
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
 const { BrandingSection } = await import("./branding-section.js");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 after(() => {
@@ -165,6 +166,77 @@ describe("the accent", () => {
       .filter((b) => b.getAttribute("aria-pressed") === "true")
       .map((b) => b.getAttribute("aria-label"));
     assert.deepEqual(pressed, ["Set accent #6e56cf"]);
+  });
+
+  describe("the custom accent's debounced save", () => {
+    // The colour panel's saved-colour row reads the shared stage state: answer
+    // its request and stream with nothing. Restored after the group.
+    const g = globalThis as unknown as Record<string, unknown>;
+    const realFetch = g.fetch;
+    const realEventSource = g.EventSource;
+    before(() => {
+      g.fetch = async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => "{}" });
+      g.EventSource = class {
+        static readonly CLOSED = 2;
+        readyState = 1;
+        addEventListener() {}
+        removeEventListener() {}
+        close() {}
+      };
+    });
+    after(() => {
+      g.fetch = realFetch;
+      g.EventSource = realEventSource;
+    });
+    const wait = (ms: number) => act(async () => void (await new Promise((r) => setTimeout(r, ms))));
+
+    /** Mount, open the colour panel and type a hex into it; `next()` re-renders over fresh handlers. */
+    async function drag(value: string) {
+      const writes: Partial_[] = [];
+      const makeHandlers = () => ({
+        handleSetBranding: async (p: Partial_) => {
+          writes.push(p);
+          return true;
+        },
+        handleShowQrChange: () => {},
+      });
+      const client = new QueryClient();
+      const tree = (handlers: ReturnType<typeof makeHandlers>) =>
+        React.createElement(
+          QueryClientProvider,
+          { client },
+          React.createElement(
+            TooltipProvider,
+            null,
+            React.createElement(BrandingSection, { stageState: { ...BASE }, handlers } as never),
+          ),
+        );
+      const view = render(tree(makeHandlers()));
+      await press(screen.getByRole("button", { name: "Custom accent color" }));
+      await act(async () => {
+        fireEvent.change(screen.getByLabelText("Custom accent color value"), { target: { value } });
+      });
+      return { writes, view, rerenderWithNewHandlers: () => view.rerender(tree(makeHandlers())) };
+    }
+
+    test("a re-render with new handlers does not save early, and the change saves once", async () => {
+      const { writes, rerenderWithNewHandlers } = await drag("#123456");
+      assert.deepEqual(writes, [], "saved before the debounce");
+      rerenderWithNewHandlers();
+      await wait(0);
+      assert.deepEqual(writes, [], "a new handlers identity flushed the pending save early");
+      await wait(400);
+      assert.deepEqual(writes, [{ accentColor: "#123456" }]);
+    });
+
+    test("new handlers, then closing the page with a change pending, saves it once, not twice", async () => {
+      const { writes, view, rerenderWithNewHandlers } = await drag("#123456");
+      rerenderWithNewHandlers();
+      await wait(0);
+      view.unmount();
+      await wait(400);
+      assert.deepEqual(writes, [{ accentColor: "#123456" }]);
+    });
   });
 
   test("Default clears it", async () => {
