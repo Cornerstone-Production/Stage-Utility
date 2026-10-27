@@ -26,7 +26,7 @@ const text = (v: unknown): string | null => (typeof v === "string" ? v : null);
  */
 export function refuseUnansweredHost(req: http.IncomingMessage, res: http.ServerResponse): boolean {
   if (hostNames.answersTo(req.headers.host)) return false;
-  error(res, "Change the host names from the server's IP address, or a name already on the list.", 403);
+  error(res, "This changes which names the server answers to: make it from the server's IP address, or a name already on the list.", 403);
   return true;
 }
 
