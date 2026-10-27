@@ -148,6 +148,11 @@ interface CheckedBundle {
  *  the bundle's size limit allows thousands of small ones. */
 const MAX_RESTORE_IMAGES = 2000;
 
+/** The most files a restore's bundle may list. Bounds a crafted bundle only:
+ *  a backup from a newer build lists stores this one lacks, which are ignored,
+ *  so the cap is not tied to how many stores this build keeps. */
+const MAX_RESTORE_FILES = 500;
+
 const SNAPSHOT_KIND = "stage-utility-config";
 const SNAPSHOT_VERSION = 1;
 
@@ -474,10 +479,8 @@ class ConfigSnapshotService {
     // success having put none of that work back.
     const renamedTo = new Map(renamedStores().map((s) => [s.renamedFrom.filename, s.filename]));
     const listed = Object.keys(bundle.files);
-    // Deliberately stricter than any save: no backup this app writes lists more
-    // files than there are stores and old names for them.
-    if (listed.length > known.length + renamedTo.size) {
-      return this.refuse([`the backup lists ${listed.length} files; a Stage Utility backup has at most ${known.length + renamedTo.size}`]);
+    if (listed.length > MAX_RESTORE_FILES) {
+      return this.refuse([`the backup lists ${listed.length} files; a restore takes at most ${MAX_RESTORE_FILES}`]);
     }
     const ignored: string[] = [];
     const empty: string[] = [];

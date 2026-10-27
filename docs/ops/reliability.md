@@ -346,8 +346,8 @@ cleared, and nothing that runs in the background is paused.
   dropped, as the page's own save would. A file
   this build does not keep, and an image outside the two image folders, is
   skipped and logged.
-- A snapshot listing more files than there are config stores, or more than 2000
-  images, is refused outright. No backup the app writes comes near either.
+- A snapshot listing more than 500 files, or more than 2000 images, is refused
+  outright. No backup the app writes comes near either.
 
 Four things a save checks are not checked on a restore, because the snapshot
 cannot answer them: whether a service type or plan still exists in Planning

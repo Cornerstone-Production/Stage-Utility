@@ -237,9 +237,20 @@ describe("config restore checks", () => {
     assert.equal(settings.integrationConfigs["planning-center"].appId, "x");
   });
 
-  test("refuses a backup listing more files than a backup can hold", async () => {
-    const files = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`extra-${i}.json`, {}]));
-    await assert.rejects(() => configSnapshot.apply(bundleOf(files)), /lists 200 files/);
+  test("refuses a backup listing more files than a restore takes", async () => {
+    const files = Object.fromEntries(Array.from({ length: 501 }, (_, i) => [`extra-${i}.json`, {}]));
+    await assert.rejects(() => configSnapshot.apply(bundleOf(files)), /lists 501 files; a restore takes at most 500/);
+  });
+
+  test("restores a newer build's backup, ignoring the stores this build does not keep", async () => {
+    // More unknown stores than this build has old names for: a cap tied to
+    // this build's store count refused the whole restore.
+    const newer = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`newer-store-${i}.json`, {}]));
+    const presets = [{ id: "p2", name: "From the newer build", slots: [] }];
+    const applied = await configSnapshot.apply(bundleOf({ ...GOOD, "presets.json": presets, ...newer }));
+    assert.deepEqual(applied.slice().sort(), configFiles().slice().sort());
+    assert.deepEqual(await readOnDisk("presets.json"), presets);
+    await assert.rejects(() => fs.stat(path.join(TMP, "newer-store-0.json")), { code: "ENOENT" });
   });
 
   test("the start-up check names a file on disk a save would refuse, and leaves it", async () => {
