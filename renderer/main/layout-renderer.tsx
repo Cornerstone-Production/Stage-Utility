@@ -1359,7 +1359,9 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // On Home a Timer that shows the next item is a Stat in Home's own colours.
       // Every other Timer is the wall readout at Home's uniform size, aligned as
       // the object says.
-      if (ctx.home && timerSource(c) === "service" && (c.nextItem ?? false)) {
+      // A stored `home-live-status` is that Stat on a wall too: it drew Home's card
+      // wherever it was placed, and keeps its look off Home.
+      if ((ctx.home || o.config?.type === "home-live-status") && timerSource(c) === "service" && (c.nextItem ?? false)) {
         return <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone ? TIMER_STAT_TONE[r.tone] : undefined} />;
       }
       // The baptism readout never sized itself to Home's uniform tile, and still
