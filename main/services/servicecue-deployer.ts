@@ -8,9 +8,13 @@
 //   no token                   nothing: updating is on while an API token is stored for the page
 //   no copy of the page        nothing to deploy
 //   the page is this build     nothing; what Cloudflare holds about it is read once
-//   a service is live, or      wait, and look again each half minute. Never a deploy during a live
-//   not known to be over       service, and after a restart the live state is unknown until the
-//                              first Planning Center read
+//   a service is live, the     wait, and look again each half minute. The app updater's own test
+//   service window is open,    (stageController.isServiceLive(): Planning Center in any live mode,
+//   or neither is known        the preservice countdown and a service parked between items
+//                              included), and the window around a service the Mac helpers wait
+//                              out (serviceWindow.activeUntil()). After a restart, and while
+//                              Planning Center cannot be reached, the times are unknown. Update the
+//                              page now goes ahead of the window and of unknown, never of live
 //   the page was deployed      leave it: from a NEWER version, or from the same version by another
 //   by someone else's build    build (two servers at one version would otherwise undo each other).
 //                              Only "Update the page now", confirmed, replaces it
@@ -27,8 +31,8 @@
 //
 // Log lines are `[servicecue-deploy]`, each decision once. Never a token.
 
+import { clockOf } from "./app-timezone.js";
 import { errorMessage } from "./errors.js";
-import { shouldRecordLive } from "./live-service-gate.js";
 import { MASK } from "./mask.js";
 import { plural } from "./plural.js";
 import { parseTag, compareTags } from "./release-tags.js";
@@ -46,7 +50,6 @@ import {
 import type { DeployCredentials } from "./servicecue-deploy-store.js";
 import { backoffMs } from "./servicecue-publisher.js";
 import type { DeployError, DeployState, DeployStatus } from "../types/servicecue-publish-status.js";
-import type { PcoLiveDTO } from "../types/stage.js";
 
 /** What the publisher asks of this. */
 export interface DeployHook {
@@ -54,6 +57,8 @@ export interface DeployHook {
   consider(pageBuild: string | null): void;
   /** Publishing stopped or moved: stop looking, and stop waiting. A deploy already under way finishes. */
   stop(): void;
+  /** Called after every deploy that went through, on the server's own account or asked for: publishing held by the old Worker starts again. */
+  onDeployed(listener: () => void): void;
 }
 
 export interface DeployTimings {
@@ -82,8 +87,10 @@ export interface DeployerDeps {
   bundleDir: string;
   /** The version this server runs, as package.json says it. */
   version(): string;
-  /** What Planning Center says is live. */
-  live(): PcoLiveDTO | null;
+  /** Is Planning Center reporting a service live? The app updater's test: stageController.isServiceLive(). */
+  serviceLive(): boolean;
+  /** When the service window open now closes, or null outside one: serviceWindow.activeUntil(). */
+  windowCloses(): number | null;
   /** Are the service times and the live state known well enough to say nothing is live? False just after a restart. */
   serviceTimesKnown(): boolean;
   /** The credentials saved for the page's current address, or null. */
@@ -94,7 +101,7 @@ export interface DeployerDeps {
 }
 
 /** What an attempt made on the server's own account came to, and nothing a request can be answered with. */
-type AutoOnly = { kind: "unchecked" } | { kind: "held" } | { kind: "backoff" } | { kind: "waiting-unknown" };
+type AutoOnly = { kind: "unchecked" } | { kind: "held" } | { kind: "backoff" } | { kind: "waiting-auto" };
 
 /** What "Update the page now" is answered with. */
 export type DeployNowOutcome =
@@ -110,7 +117,7 @@ export type DeployNowOutcome =
 
 type DeployOutcome = DeployNowOutcome | AutoOnly;
 
-const isNowOutcome = (o: DeployOutcome): o is DeployNowOutcome => o.kind !== "unchecked" && o.kind !== "held" && o.kind !== "backoff" && o.kind !== "waiting-unknown";
+const isNowOutcome = (o: DeployOutcome): o is DeployNowOutcome => o.kind !== "unchecked" && o.kind !== "held" && o.kind !== "backoff" && o.kind !== "waiting-auto";
 
 /** What the last decision was made for, so the same question is not put to Cloudflare at every status read. Reset when the credentials change. */
 interface Memo {
@@ -124,11 +131,6 @@ interface Memo {
   at: number;
   /** What a repeated question is answered with, for the two refusals. */
   answer?: DeployNowOutcome;
-}
-
-/** Is Planning Center reporting a service live? The recorders' own test with a record open: an item is current, and the plan's SERVICE END has not been passed. */
-export function serviceIsLive(live: PcoLiveDTO | null): boolean {
-  return live !== null && shouldRecordLive(live, true) && live.serviceEnded !== true;
 }
 
 /** Is `running` older than `deployed`, by semver precedence? A version that cannot be read is older: nothing is deployed over a page on a guess. */
@@ -157,7 +159,9 @@ export class ServiceCueDeployer implements DeployHook {
   // How it is going. `state` and these are what the card draws.
   private state: DeployState = "off";
   /** Why `state` is "waiting": read only while it is. */
-  private waitingFor: "live" | "unknown" = "live";
+  private waitingFor: "live" | "unknown" | "window" = "live";
+  /** When the service window closes, while waiting for it. */
+  private waitingUntil: number | null = null;
   private bundle: { build: string; version: string } | null = null;
   private noBundle: string | null = null;
   private page: DeployStatus["page"] = null;
@@ -169,6 +173,7 @@ export class ServiceCueDeployer implements DeployHook {
   private lastNowDeployAt = 0;
   /** The last decision logged, so a status read that changes nothing says nothing. */
   private said = "";
+  private readonly deployedListeners: (() => void)[] = [];
 
   constructor(private readonly deps: DeployerDeps) {
     this.timings = { ...DEFAULT_DEPLOY_TIMINGS, ...deps.timings };
@@ -180,6 +185,10 @@ export class ServiceCueDeployer implements DeployHook {
   consider(pageBuild: string | null): void {
     this.read = { build: pageBuild };
     void this.begin("auto", false);
+  }
+
+  onDeployed(listener: () => void): void {
+    this.deployedListeners.push(listener);
   }
 
   stop(): void {
@@ -269,6 +278,7 @@ export class ServiceCueDeployer implements DeployHook {
       page: this.page,
       files: this.files,
       waitingFor: this.state === "waiting" ? this.waitingFor : null,
+      waitingUntil: this.state === "waiting" && this.waitingFor === "window" ? this.waitingUntil : null,
       error: this.error,
       now: Date.now(),
     };
@@ -364,20 +374,12 @@ export class ServiceCueDeployer implements DeployHook {
       return { kind: "current" };
     }
 
-    const live = serviceIsLive(this.deps.live());
+    const live = this.deps.serviceLive();
     const unknown = !this.deps.serviceTimesKnown();
-    // A live service always waits. Unknown (just after a restart, or while Planning Center cannot be reached) waits on its own account, and goes ahead when somebody asks.
-    if (live || (unknown && mode === "auto")) {
-      this.state = "waiting";
-      this.waitingFor = live ? "live" : "unknown";
-      this.say(
-        `waiting:${manifest.build}:${live}`,
-        live
-          ? `a service is live, so the page is not updated now (build ${pageBuild ?? "unknown"} to ${manifest.build}); it will be when the service ends`
-          : `the service times are not known (the server has just started, or Planning Center cannot be reached), so the page is not updated now; it will be once they are (build ${pageBuild ?? "unknown"} to ${manifest.build})`,
-      );
-      if (mode === "auto") this.arm(this.timings.liveRecheckMs);
-      return live ? { kind: "waiting" } : { kind: "waiting-unknown" };
+    const windowCloses = this.deps.windowCloses();
+    // A live service always waits. Unknown (just after a restart, or while Planning Center cannot be reached), and the window around a service, wait on its own account, and go ahead when somebody asks.
+    if (live || (mode === "auto" && (unknown || windowCloses !== null))) {
+      return this.wait(mode, live ? "live" : unknown ? "unknown" : "window", windowCloses, `build ${pageBuild ?? "unknown"} to ${manifest.build}`);
     }
 
     try {
@@ -425,6 +427,14 @@ export class ServiceCueDeployer implements DeployHook {
         const wait = this.lastNowDeployAt + this.timings.nowEveryMs - Date.now();
         if (wait > 0) return { kind: "limited", retryAfterSec: Math.ceil(wait / 1000) };
       }
+      // The checks above can take a minute: a service that went live meanwhile is still waited out.
+      if (mode === "auto") {
+        const nowLive = this.deps.serviceLive();
+        const nowWindow = this.deps.windowCloses();
+        if (nowLive || nowWindow !== null || !this.deps.serviceTimesKnown()) {
+          return this.wait(mode, nowLive ? "live" : nowWindow !== null ? "window" : "unknown", nowWindow, `build ${pageBuild ?? "unknown"} to ${manifest.build}`);
+        }
+      }
       this.state = "updating";
       this.files = null;
       this.say(
@@ -440,6 +450,23 @@ export class ServiceCueDeployer implements DeployHook {
     } catch (err) {
       return this.failedWith(err, generation);
     }
+  }
+
+  /** Not now: a service is live, its window is open, or neither is known. Looked at again each half minute on its own account. */
+  private wait(mode: "auto" | "now", why: "live" | "unknown" | "window", windowCloses: number | null, change: string): DeployOutcome {
+    this.state = "waiting";
+    this.waitingFor = why;
+    this.waitingUntil = why === "window" ? windowCloses : null;
+    this.say(
+      `waiting:${change}:${why}`,
+      why === "live"
+        ? `a service is live, so the page is not updated now (${change}); it will be when the service ends`
+        : why === "window"
+          ? `the service window is open until ${clockOf(windowCloses ?? Date.now())}, so the page is not updated now (${change}); it will be when the window closes`
+          : `the service times are not known (the server has just started, or Planning Center cannot be reached), so the page is not updated now; it will be once they are (${change})`,
+    );
+    if (mode === "auto") this.arm(this.timings.liveRecheckMs);
+    return why === "live" ? { kind: "waiting" } : { kind: "waiting-auto" };
   }
 
   /** The build the page serves, as far as is known: undefined when nothing says. */
@@ -494,6 +521,7 @@ export class ServiceCueDeployer implements DeployHook {
     if (this.read !== undefined) this.read = { build, assumed: true };
     this.log("info", `deployed build ${build} as ${version}: ${plural(files.uploaded, "file")} uploaded, ${files.held} already on Cloudflare`);
     this.said = `current:${build}`;
+    for (const listener of this.deployedListeners) listener();
     return { kind: "deployed", ...files, ...(serviceStateUnknown ? { serviceStateUnknown: true as const } : {}) };
   }
 

@@ -357,9 +357,12 @@ connected and a church that is quiet costs nothing while it waits.
 | Publishing token | at least 32 characters |
 | `plans-upcoming` | 60 days |
 
-`MAX_VIEWERS`, `MAX_VIEWERS_PER_ADDRESS` and `VIEWER_IDLE_MS` can be set as `vars` in
-`wrangler.jsonc` to change the first two limits and the 90 seconds. A deploy behind one
-address with more than 25 devices raises the second.
+`MAX_VIEWERS`, `MAX_VIEWERS_PER_ADDRESS` and `VIEWER_IDLE_MS` change the first two limits
+and the 90 seconds. Set them as variables on the Worker in the Cloudflare dashboard, or as
+`vars` in `wrangler.jsonc` for a deploy made by hand. `wrangler.jsonc` sets `keep_vars`, so
+a variable on the Worker survives every deploy, the server's own included, unless
+`wrangler.jsonc` names the same one. A deploy behind one address with more than 25 devices
+raises the second.
 
 A publisher should send a frame when something changed and a heartbeat every 30
 seconds. Stage Utility's own does, and how it paces the rest, retries and what it logs

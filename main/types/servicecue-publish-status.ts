@@ -121,8 +121,10 @@ export interface DeployStatus {
   page: { build: string | null; version: string | null; at: number | null } | null;
   /** The last deploy's files: how many were uploaded (the number to upload, while `state` is "updating") and how many Cloudflare already held. */
   files: { uploaded: number; held: number } | null;
-  /** Why it is waiting, while `state` is "waiting": a service is live ("live"), or the live state is not known yet after a restart or with Planning Center unreachable ("unknown"). Null in every other state. */
-  waitingFor: "live" | "unknown" | null;
+  /** Why it is waiting, while `state` is "waiting": a service is live ("live"), the service window around one is open ("window"), or the live state is not known yet after a restart or with Planning Center unreachable ("unknown"). Null in every other state. */
+  waitingFor: "live" | "unknown" | "window" | null;
+  /** When the service window closes, while `waitingFor` is "window"; null otherwise. */
+  waitingUntil: number | null;
   /** The last failure, until a deploy or a read works again. */
   error: DeployError | null;
   /** The server's clock when this was built. */
@@ -145,6 +147,8 @@ export interface PublishSettingsDTO {
    * that page may still show the last rundown it was sent.
    */
   dropped?: { ok: true } | { ok: false; message: string };
+  /** On the answer to a change of address that removed the Cloudflare account ID and API token saved for the old one. */
+  deployRemoved?: true;
 }
 
 /** What POST /api/servicecue/publish/test answers (always a 200). */

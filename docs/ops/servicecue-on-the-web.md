@@ -191,7 +191,9 @@ no account ID (or the reverse) is not saved until the other is filled in. To rep
 only the address saved and not publishing on, for a script or `curl`.
 
 The token is stored encrypted beside the publishing token and is never sent back or
-included in a backup. Changing the page's address drops both. Revoking the token in
+included in a backup. Changing the page's address drops both: the card asks first, naming
+what goes, says afterwards that it went, and the log has a `[servicecue-deploy]` line saying
+the address changed and the credentials were removed. Revoking the token in
 Cloudflare is enough to stop it too: the next attempt is refused, the card and the log say
 so, and nothing more is tried until the token is changed.
 
@@ -201,10 +203,23 @@ the build it carries. When they differ:
 
 | If | The server |
 |---|---|
-| a service is live in Planning Center | waits, looking again every 30 seconds, and deploys when it ends. It never deploys through a live service, as recording never stops for one |
+| Planning Center reports a service live: any live mode, the countdown before the first item and a service parked between items included (the test the app's own updates use) | waits, looking again every 30 seconds, and deploys when it ends. Nothing goes ahead of it, "Update the page now" included: a deploy reloads every open page and can drop viewers' connections |
+| the window around a rehearsal or service is open (the window integration reconnects use, [Winding down between services](reliability.md#winding-down-between-services), which the Mac helpers' updates also wait out) | waits the same way until the window closes. "Update the page now" goes ahead of it |
 | the live state is not known: the server has just started and not yet read Planning Center, or Planning Center cannot be reached | waits the same way, counting unknown as live. Only an explicit "Update the page now" goes ahead of it |
+
+The check is made again just before the upload, so a service that goes live while the
+server is asking Cloudflare what the page holds (up to a minute) is waited out too.
 | the page was deployed from a **newer** version than this server runs, or from this server's own version by **another build** | leaves it |
 | otherwise | deploys, and logs the files uploaded and the files Cloudflare already held |
+
+**A page of another protocol.** A release that changes the [publishing protocol](../reference/servicecue-publishing.md)
+finds the page still running the old Worker, which does not answer the new status path
+(a `404`) or answers it with another `protocol`. When the page's own document
+(`/servicecue`, read without the token) carries a build id, the server treats it as the
+page at another protocol: publishing is held, and the build goes to the rules above, so
+an older page is deployed over. Any deploy from this server, on its own or by "Update the
+page now", starts publishing again; for two minutes after one, the old Worker still
+answering is retried on the backoff rather than held.
 
 **The no-downgrade rule.** The page records the version of the server that deployed it,
 in the Worker version's message (`Stage Utility 1.28.0`). A server never replaces a page
@@ -225,7 +240,9 @@ When the page was left alone because it is newer, or another build of this serve
 the card asks first, naming both versions, and **Replace the page** sends the request again
 with `confirmDowngrade`. A request made within a minute of a deploy says "Try again in N s", a page
 already on this build says "Already up to date", and a deploy that went ahead while Planning
-Center had not said whether a service is live says so. The button waits while an update is under way.
+Center had not said whether a service is live says so. The button waits while an update is under way,
+for up to six minutes; past that the card says the update is still going, and the status line
+says how it ends.
 The route deploys when the
 page is older or another build; answers `200` with `already: "current"` and uploads nothing
 when the page is already this build; refuses with `409` and `code: "newer"` or
@@ -261,7 +278,8 @@ make a new one and paste it. The same status is the `deploy` the `GET
 |---|---|
 | Up to date: build X (version), deployed *time* | the page is the build this server carries; the time is in the app's time zone |
 | Updating the page… N files to upload, M already on Cloudflare | a deploy is under way |
-| Waiting for the service to end, then updating to build X (version) | a service is live in Planning Center; the page is left alone until it ends |
+| Waiting for the service to end, then updating to build X (version) | a service is live in Planning Center (its countdown included); the page is left alone until it ends |
+| Waiting for the service window to close at *time*, then updating to build X (version) | the window around a service is open; the time is in the app's time zone, and Update the page now goes ahead |
 | Waiting to hear whether a service is live, then updating | the live state is not known yet (the server has just started, or Planning Center cannot be reached); Update the page now goes ahead when the state is merely unknown, never through a live service |
 | Couldn't update the page: *reason*. The page is unchanged. | the last attempt, or a read of what is deployed, failed |
 | The page runs build X (version), newer than this server's Y | the page is left alone (no-downgrade rule) |
@@ -302,7 +320,7 @@ for upload, in `build/servicecue/`:
 |---|---|
 | `worker.js` | The Worker as one module, the same one `wrangler deploy` uploads |
 | `public/` | The built page: every file the asset service serves |
-| `deploy.json` | The Worker's name, the build id of the page, the app's version, the Worker's compatibility date and flags, its asset rules, its bindings and variables, its Durable Object `exports`, and `keep_bindings`, each read from `wrangler.jsonc` and the build |
+| `deploy.json` | The Worker's name, the build id of the page, the app's version, the Worker's compatibility date and flags, its asset rules, its bindings and variables, its Durable Object `exports`, and `keep_bindings` (the secrets, and with `keep_vars` the variables set on the Worker), each read from `wrangler.jsonc` and the build |
 
 The page's `_headers` file is not in `public/`. Wrangler does not upload it as an asset:
 it reads it as configuration and sends its text in the assets config. `deploy.json` does
@@ -355,7 +373,8 @@ page, and keeps the address it was on
   under 32 characters.
 - **The page is behind the server's build.** The server's side is the `[servicecue-deploy]`
   lines in the app's [log](updates-and-logs.md): each decision once (deploying and why,
-  the page already current, skipped as the page is newer, waiting for a live service, no
+  the page already current, skipped as the page is newer, waiting for a live service, for
+  the service window to close, or for the service times to be known, no
   token, no copy of the page in this build), the files uploaded and the files already
   held, the build deployed, and every failure with Cloudflare's code and words. A refused
   token reads `HTTP 401` or `403` and `Not trying again until the token changes`.
@@ -482,8 +501,12 @@ and nothing else: your server never depends on it.
 The Worker holds at most 500 sockets, 25 to an address, closes ones that have stopped
 pinging when it needs the room, accepts bodies up to 2 MB, and closes a socket that
 sends anything but a keep-alive. `MAX_VIEWERS`, `MAX_VIEWERS_PER_ADDRESS` and
-`VIEWER_IDLE_MS` (milliseconds) can be set under `vars` in `publish/servicecue/wrangler.jsonc`
-to change those; the defaults are 500, 25 and 90000.
+`VIEWER_IDLE_MS` (milliseconds) change those; the defaults are 500, 25 and 90000. Set
+them as variables on the Worker (dashboard: **Workers & Pages** > `servicecue` >
+**Settings** > **Variables and Secrets**, type Text). `wrangler.jsonc` sets `keep_vars`, so
+they survive every deploy, by hand and from the server. A value under `vars` in
+`publish/servicecue/wrangler.jsonc` is set on the Worker by a deploy made by hand, over the
+dashboard's, and is kept from then on the same way.
 
 ## What the deploy tells Cloudflare
 

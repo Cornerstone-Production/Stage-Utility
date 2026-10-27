@@ -10,9 +10,11 @@
 //     the one fetch in this file, which re-pins every URL onto the origin it was built for;
 //   - a redirect is an ERROR, not a hop: following one would send the token wherever the
 //     answer pointed;
-//   - a response is read for its STATUS, except two answers worth reading, the status
-//     request's lists and the manifest's removal lists, each capped and checked field by
-//     field. Any other body is cancelled unread so the socket is released.
+//   - a response is read for its STATUS, except three answers worth reading, the status
+//     request's lists, the manifest's removal lists and, when the status path is not
+//     there, the page's own document for its build id, each capped and checked. Any
+//     other body is cancelled unread so the socket is released. The document is public
+//     and is asked for without the token.
 
 import { readCapped } from "./capped-download.js";
 import { fetchFailureMessage, untrustedCertificateCode } from "./errors.js";
@@ -20,7 +22,15 @@ import { isStringList } from "./is-record.js";
 import { pinToOrigin } from "./pinned-origin.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 import type { PublishProblem } from "../types/servicecue-publish-status.js";
-import { PUBLISH_BASE_PATH, PUBLISH_MAX_BODY_BYTES, PUBLISH_MAX_VERSION_LENGTH, PUBLISH_PROTOCOL_VERSION, isViewerBuildId, type PublishStatus } from "../types/servicecue-publish.js";
+import {
+  PUBLISH_BASE_PATH,
+  PUBLISH_MAX_BODY_BYTES,
+  PUBLISH_MAX_VERSION_LENGTH,
+  PUBLISH_PROTOCOL_VERSION,
+  isViewerBuildId,
+  viewerBuildFromHtml,
+  type PublishStatus,
+} from "../types/servicecue-publish.js";
 
 /** How long a request with no body may take. A body adds to it: see ceilingMs. */
 export const PUBLISH_REQUEST_TIMEOUT_MS = 10_000;
@@ -28,6 +38,9 @@ export const PUBLISH_REQUEST_TIMEOUT_MS = 10_000;
 const MAX_REQUEST_MS = 60_000;
 /** A body earns another second for each this many bytes: a 1.5 MB logo on a busy uplink is not a failure. */
 const BYTES_PER_EXTRA_SECOND = 100_000;
+
+/** The page's public document, which carries the build id of the page it is. */
+const VIEWER_PATH = "/servicecue";
 
 /** The most a status answer is read for (5,000 documents and images). */
 const MAX_ANSWER_BYTES = 1024 * 1024;
@@ -81,6 +94,8 @@ export interface PushFailure {
   message: string;
   /** What Node said, for the log when `message` is the operator's words for it. */
   detail?: string;
+  /** For `protocol`: the build the page serves (null from a Worker too old to say), so the server that keeps the page up to date can replace a Worker of another release. */
+  pageBuild?: string | null;
 }
 
 /** A failure as the problem the card shows. `refused` and `aborted` are never one; they read as the address not being the page. */
@@ -258,6 +273,22 @@ export function createPushClient(opts: PushClientOptions): PushClient {
 
   const json = (data: string) => ({ data, contentType: "application/json" });
 
+  /** The build id in the page's public document, without the token; null for anything else, a failure included (the 404 it follows is what is reported). */
+  async function documentBuild(): Promise<string | null> {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    try {
+      const res = await publishFetch(origin, publishUrl(origin, VIEWER_PATH), { method: "GET", redirect: "error", signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+      if (!res.ok) {
+        await res.body?.cancel().catch(() => undefined);
+        return null;
+      }
+      const bytes = await readCapped(res, MAX_ANSWER_BYTES);
+      return bytes ? viewerBuildFromHtml(bytes.toString("utf8")) : null;
+    } catch {
+      return null;
+    }
+  }
+
   return {
     async putDoc(key, text) {
       return statusOnly(await request("PUT", `/doc/${encodeURIComponent(key)}`, json(text)), "item");
@@ -292,6 +323,19 @@ export function createPushClient(opts: PushClientOptions): PushClient {
       if (!(res instanceof Response)) return res;
       if (!res.ok) {
         await res.body?.cancel().catch(() => undefined);
+        // A Worker of another release has no status at this protocol's path: the page's own document tells that apart from an address that is not the page.
+        if (res.status === 404) {
+          const pageBuild = await documentBuild();
+          if (pageBuild !== null) {
+            return {
+              ok: false,
+              kind: "protocol",
+              status: 404,
+              message: `The page does not speak protocol ${PUBLISH_PROTOCOL_VERSION}, which this server speaks: its Worker is from another release. Update whichever is older.`,
+              pageBuild,
+            };
+          }
+        }
         return failureOfStatus(res.status, "page");
       }
       let page: (PageStatus & { protocol: number }) | null;
@@ -311,6 +355,7 @@ export function createPushClient(opts: PushClientOptions): PushClient {
           ok: false,
           kind: "protocol",
           message: `The page speaks protocol ${page.protocol} and this server speaks ${PUBLISH_PROTOCOL_VERSION}. Update whichever is older.`,
+          pageBuild: page.build,
         };
       }
       return { ok: true, page: { docs: page.docs, assets: page.assets, build: page.build } };

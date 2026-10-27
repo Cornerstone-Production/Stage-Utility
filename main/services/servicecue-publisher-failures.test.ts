@@ -134,7 +134,8 @@ describe("what the page answers to the first request", () => {
       await h.pub.start();
       await waitFor(() => h.pub.status().state === "problem", `a problem for ${status}`, 3000);
       assert.deepEqual([h.pub.status().lastError?.kind, h.pub.status().lastError?.status], [kind, status], `status ${status}`);
-      assert.equal(h.page.requests.every((r) => r.path === "/_publish/v1/status" || r.path === "/_publish/v1/heartbeat"), true, "a document went to a page that had not been verified");
+      // A 404 to the status also reads the page's public document, to tell a Worker of another protocol from an address that is not the page.
+      assert.equal(h.page.requests.every((r) => r.path === "/_publish/v1/status" || r.path === "/_publish/v1/heartbeat" || (status === 404 && r.method === "GET" && r.path === "/servicecue")), true, "a document went to a page that had not been verified");
       const made = h.page.requests.length;
       await sleep(150);
       if (held) assert.equal(h.page.requests.length, made, `${status}: a page that cannot be waited out was asked again`);

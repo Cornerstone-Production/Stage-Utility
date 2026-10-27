@@ -38,6 +38,7 @@ const { readDeployCredentials, saveDeployCredentials } = await import("../servic
 const { readPublishToken, servicecuePublishStore } = await import("../servicecue-publish-store.js");
 const { secretsStore } = await import("../secrets.js");
 const { deployApiOrigin, deployerDeps } = await import("../servicecue-publisher-instance.js");
+const { serviceWindow } = await import("../service-window.js");
 const { stageController } = await import("../stage-controller.js");
 const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
 const { pkgVersion } = await import("../updater.js");
@@ -54,7 +55,7 @@ const credentials = (body: unknown) => post("/api/servicecue/publish/deploy-cred
 const deploy = (body: unknown = {}) => post("/api/servicecue/publish/deploy", body);
 const get = () => callRoute(serviceCuePublishRoutes, "/api/servicecue/publish");
 
-type Dto = { deploy: { state: string; accountId: string; token: string }; token: string; url: string };
+type Dto = { deploy: { state: string; accountId: string; token: string }; token: string; url: string; deployRemoved?: true };
 
 let page: FakeReceiver;
 let other: FakeReceiver;
@@ -179,12 +180,16 @@ describe("POST /api/servicecue/publish/deploy-credentials", () => {
 });
 
 describe("a changed page address", () => {
-  it("takes the Cloudflare credentials with it, even in a save that brings a publishing token for the new address", async () => {
+  it("takes the Cloudflare credentials with it, even in a save that brings a publishing token for the new address, and says so", async (t) => {
+    const lines = captureConsole(t, "log", "warn");
     await linked();
     await credentials({ accountId: ACCOUNT, token: CF_TOKEN });
     assert.ok(await readDeployCredentials(page.origin));
     const moved = await settings({ url: other.origin, token: "tok-for-the-other-".padEnd(40, "0") });
     assert.equal(moved.status, 200);
+    assert.equal((moved.json as Dto).deployRemoved, true, "the answer does not say the credentials were removed");
+    assert.ok(lines.some((l) => /^\[servicecue-deploy\] the page address changed from .* to .*, so the Cloudflare account ID and API token saved for the old address were removed/.test(l)), lines.join("\n"));
+    assert.ok(!lines.some((l) => l.includes(CF_TOKEN)), "the token reached the log");
     assert.equal(await readDeployCredentials(page.origin), null);
     assert.equal(await readDeployCredentials(other.origin), null);
     assert.equal((moved.json as Dto).deploy.token, "", "the card still shows a token stored");
@@ -196,7 +201,9 @@ describe("a changed page address", () => {
     await linked();
     await credentials({ accountId: ACCOUNT, token: CF_TOKEN });
     assert.equal((await settings({ enabled: false })).status, 200);
-    assert.equal((await settings({ url: `${page.origin}/servicecue` })).status, 200, "the same address, written another way");
+    const same = await settings({ url: `${page.origin}/servicecue` });
+    assert.equal(same.status, 200, "the same address, written another way");
+    assert.equal((same.json as Dto).deployRemoved, undefined, "an unchanged address said the credentials were removed");
     assert.deepEqual(await readDeployCredentials(page.origin), { accountId: ACCOUNT, token: CF_TOKEN });
     assert.equal((await settings({ url: "" })).status, 200);
     assert.equal(await readDeployCredentials(page.origin), null);
@@ -351,16 +358,37 @@ describe("where the server looks for Cloudflare", () => {
 });
 
 describe("what the deployer reads from the app", () => {
-  it("is the stage controller's live state and its service times, the app's version and the app's own page copy", (t) => {
-    const live = { mode: "item", currentItemId: "item-1" } as never;
-    t.mock.method(stageController, "getLastLive", () => live);
+  it("is the app updater's live test, the service window, the service times, the app's version and the app's own page copy", (t) => {
+    // The stage controller's own isServiceLive(), driven by the snapshot it keeps: the countdown before a service, and a service parked between items, are live.
+    const ctl = stageController as unknown as { lastLive: unknown };
+    const was = ctl.lastLive;
+    t.after(() => {
+      ctl.lastLive = was;
+      serviceWindow.setWindows([]);
+    });
+    for (const live of [
+      { mode: "preservice", currentItemId: null },
+      { mode: "item", currentItemId: "item-1", serviceEnded: true },
+      { mode: "item", currentItemId: "item-1" },
+    ]) {
+      ctl.lastLive = live;
+      assert.equal(deployerDeps.serviceLive(), true, `${JSON.stringify(live)} did not count as live`);
+    }
+    ctl.lastLive = { mode: "none", currentItemId: null };
+    assert.equal(deployerDeps.serviceLive(), false);
+    ctl.lastLive = null;
+    assert.equal(deployerDeps.serviceLive(), false);
+
+    const now = Date.now();
+    serviceWindow.setWindows([{ open: now - 60_000, close: now + 600_000 }]);
+    assert.equal(deployerDeps.windowCloses(), now + 600_000, "the deployer does not see the service window");
+    serviceWindow.setWindows([]);
+    assert.equal(deployerDeps.windowCloses(), null);
+
     t.mock.method(stageController, "serviceTimesKnown", () => false);
-    assert.equal(deployerDeps.live(), live, "the deployer does not see what Planning Center says is live");
     assert.equal(deployerDeps.serviceTimesKnown(), false, "the deployer does not see that the service times are unknown");
     t.mock.method(stageController, "serviceTimesKnown", () => true);
     assert.equal(deployerDeps.serviceTimesKnown(), true);
-    t.mock.method(stageController, "getLastLive", () => null);
-    assert.equal(deployerDeps.live(), null);
     assert.equal(deployerDeps.version(), pkgVersion());
     assert.equal(deployerDeps.bundleDir, BUNDLE);
   });

@@ -19,12 +19,12 @@ import { FORM_MASK, isMask } from "@main/services/mask";
 import { plural } from "@main/services/plural";
 import { parsePublishUrl } from "@main/services/servicecue-publish-rules";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
 
 import { AppLink } from "../../app/app-link";
 import { useUpdateStatus } from "../../app/queries";
 import { QrHint } from "../../components/qr-hint";
-import { Button, ErrorNote, Input, Switch } from "../../components/ui";
+import { Button, ErrorNote, Input, Switch, confirm } from "../../components/ui";
 import { SkeletonRows } from "../../components/ui/skeleton";
 import { invoke } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
@@ -214,6 +214,8 @@ export function PublicLinkCard({
   const [notice, setNotice] = useState<ReactNode>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [dropped, setDropped] = useState<string | null>(null);
+  /** The last write moved the page and took the Cloudflare credentials with it. */
+  const [deployRemoved, setDeployRemoved] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   // null follows the problem: open when the fix is in these fields, shut otherwise.
   const [connOpen, setConnOpen] = useState<boolean | null>(null);
@@ -270,6 +272,26 @@ export function PublicLinkCard({
     setAddrDraft(null);
     setTokDraft(null);
     setDropped(next.dropped && !next.dropped.ok ? next.dropped.message : null);
+    setDeployRemoved(next.deployRemoved === true);
+  }
+
+  /**
+   * The Cloudflare credentials are saved for the page's address and go when it changes, and only Cloudflare can make
+   * the token again: asked first. False leaves the address as it was.
+   */
+  async function movingIsOk(url: string): Promise<boolean> {
+    if (!dto || !isMask(dto.deploy?.token) || originOf(url) === originOf(dto.url)) return true;
+    setWorking(true);
+    const yes = await confirm({
+      title: "Remove the Cloudflare connection?",
+      message: `The Cloudflare account ID and API token are saved for ${dto.url}, and are removed from this server when the address changes. To keep the new page up to date from here you will need a new token from Cloudflare.`,
+      confirmLabel: "Change the address",
+      cancelLabel: "Keep the address",
+      destructive: true,
+    });
+    setWorking(false);
+    if (!yes) setAddrDraft(null);
+    return yes;
   }
 
   async function write(action: () => Promise<void>) {
@@ -277,6 +299,7 @@ export function PublicLinkCard({
     setHint(null);
     setNotice(null);
     setDropped(null);
+    setDeployRemoved(false);
     // A poll that lands in the middle of a write would put back what the write is changing.
     await queryClient.cancelQueries({ queryKey: QUERY_KEY });
     try {
@@ -290,7 +313,8 @@ export function PublicLinkCard({
     }
   }
 
-  function turnOn() {
+  async function turnOn() {
+    if (!(await movingIsOk(addr.trim()))) return;
     return write(async () => {
       const url = addr.trim();
       const credentials = { url, ...(typedToken !== null ? { token: typedToken } : {}) };
@@ -319,6 +343,7 @@ export function PublicLinkCard({
       setHint("A different address needs its token: paste it again.");
       return;
     }
+    if (changed && !(await movingIsOk(addr))) return;
     await write(async () =>
       adopt(await invoke<PublishSettingsDTO>("servicecue:setPublish", { ...(changed ? { url: addr.trim() } : {}), token: typedToken })),
     );
@@ -333,6 +358,8 @@ export function PublicLinkCard({
       hint={hint}
       onAddr={setAddrDraft}
       onTok={setTokDraft}
+      // Emptied and left: the stored token is still there, so the field shows it again. Clearing the address is what removes it.
+      onTokBlank={() => setTokDraft(null)}
       onLeave={() => void saveConnection()}
     />
   );
@@ -428,6 +455,13 @@ export function PublicLinkCard({
           <AppLink to={INTEGRATIONS_ROUTE} className="font-semibold underline underline-offset-2">
             Open Integrations
           </AppLink>
+        </Note>
+      )}
+
+      {dto && deployRemoved && (
+        <Note>
+          The Cloudflare account ID and API token went with the old address, so the page is no longer kept up to date from here. To
+          turn that on again, make a new token in Cloudflare and enter it under Keep the page up to date.
         </Note>
       )}
 
@@ -530,6 +564,7 @@ function ConnectionFields({
   hint,
   onAddr,
   onTok,
+  onTokBlank,
   onLeave,
 }: {
   setup: boolean;
@@ -539,9 +574,19 @@ function ConnectionFields({
   hint: string | null;
   onAddr: (v: string) => void;
   onTok: (v: string) => void;
+  /** The token field was left empty. */
+  onTokBlank: () => void;
   onLeave: () => void;
 }) {
-  const leave = setup ? undefined : onLeave;
+  // Moving from one field to the other is not leaving them: a save would disable both before focus lands, and a new
+  // address would be told it needs its token on the way to the token field.
+  const leave = setup
+    ? undefined
+    : (e: FocusEvent<HTMLInputElement>) => {
+        const next = e.relatedTarget;
+        if (next instanceof HTMLElement && (next.id === "pl-addr2" || next.id === "pl-tok2")) return;
+        onLeave();
+      };
   return (
     <div className="flex flex-col gap-2.5">
       <ConnectionField label="Page address" hint={setup ? "Your Cloudflare Worker" : undefined} id={setup ? "pl-addr" : "pl-addr2"}>
@@ -568,7 +613,10 @@ function ConnectionFields({
           autoComplete="off"
           onFocus={(e) => selectMask(e, tok)}
           onChange={(e) => onTok(e.target.value)}
-          onBlur={leave}
+          onBlur={(e) => {
+            if (tok.trim() === "") onTokBlank();
+            leave?.(e);
+          }}
         />
       </ConnectionField>
       {hint && !setup && <p className="text-caption2 text-warn-11">{hint}</p>}
