@@ -12,7 +12,7 @@ import * as fs from "node:fs/promises";
 import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
-import { after, before, test } from "node:test";
+import { after, before, mock, test } from "node:test";
 
 import { serveOnSocket, type SocketServer } from "./fixtures/socket-server.js";
 
@@ -22,7 +22,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { RemoteServer, channelReports } = await import("./remote-server.js");
 const { channelNamedByClient } = await import("./broadcaster.js");
-const { MAX_CHANNELS, MAX_CID_LENGTH, MAX_SUBSCRIBE_BODY_BYTES, MAX_UNCLAIMED } = await import("./channel-reports.js");
+const { MAX_CHANNELS, MAX_CID_LENGTH, MAX_SUBSCRIBE_BODY_BYTES, MAX_UNCLAIMED, UNCLAIMED_TTL_MS } = await import("./channel-reports.js");
 
 let server: SocketServer;
 
@@ -144,4 +144,36 @@ test("a reconnect whose new stream opens before the old one's close keeps its re
     await second.close();
   }
   await waitFor(() => channelReports.get("reconnecting") === undefined, "the report outlived its last stream");
+});
+
+test("a poll client holds its report past the wait an unclaimed one gets", async () => {
+  // The report reached the server before the first poll, as the shared worker
+  // sends them. Polling is what claims it: without that, the next report from
+  // anyone ages it out after UNCLAIMED_TTL_MS and the client is sent everything.
+  await subscribe("poller", ["pco:live"]);
+  assert.equal((await server.send("GET", "/api/events/poll?cid=poller")).status, 200);
+  channelReports.expire(Date.now() + UNCLAIMED_TTL_MS + 1);
+  assert.ok(channelReports.get("poller"), "a polling client's report aged out as if no connection held it");
+
+  // Control: the same report with no poll behind it does age out, so the
+  // assertion above is about the claim and not about expire() doing nothing.
+  await subscribe("never-polled", ["pco:live"]);
+  channelReports.expire(Date.now() + UNCLAIMED_TTL_MS + 1);
+  assert.equal(channelReports.get("never-polled"), undefined);
+});
+
+test("a stream claims its cid only when it is one a client could have minted", async () => {
+  const claim = mock.method(channelReports, "claim");
+  try {
+    const oversized = await openStream(`?cid=${"x".repeat(MAX_CID_LENGTH + 1)}`);
+    await oversized.close();
+    assert.equal(claim.mock.callCount(), 0, "a stream claimed an oversized cid");
+
+    const ok = await openStream("?cid=sane-cid");
+    await ok.close();
+    assert.equal(claim.mock.callCount(), 1, "a stream with a usable cid did not claim it");
+    assert.equal(claim.mock.calls[0].arguments[0], "sane-cid");
+  } finally {
+    claim.mock.restore();
+  }
 });

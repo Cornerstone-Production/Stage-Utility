@@ -24,6 +24,7 @@ process.env.HOME = path.join(TMP, "home");
 const { RemoteServer } = await import("./remote-server.js");
 
 const FOREIGN = "http://attacker.example";
+const PNG_1X1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 let server: SocketServer;
 
 const ACCESS_CONTROL = (h: http.IncomingHttpHeaders) => Object.keys(h).filter((k) => k.startsWith("access-control-")).sort();
@@ -43,10 +44,27 @@ describe("reads", () => {
   // of the dispatcher, the page from the static or control-page arm, and the
   // event stream with headers of its own. A header added at any one of them
   // shows up here; one added at a writeHead not listed would not.
-  for (const pathname of ["/api/log", "/api/version", "/api/no-such-route", "/"]) {
+  // The poll transport and the two image folders answer through writeHeads of
+  // their own, none of which the paths above reach. An image that is not stored
+  // answers 404 through one more.
+  for (const pathname of [
+    "/api/log", "/api/version", "/api/no-such-route", "/",
+    "/api/events/poll?cid=x", "/layout-images/x", "/branding-images/x",
+  ]) {
     test(`GET ${pathname} from another origin carries no Access-Control header`, async () => {
       const r = await server.send("GET", pathname, { headers: { Origin: FOREIGN } });
       assert.deepEqual(ACCESS_CONTROL(r.headers), [], `${pathname} told the browser another origin may read it`);
+    });
+  }
+
+  // The 200 arm builds its headers apart from the 404 above, so it is read too.
+  for (const dir of ["layout-images", "branding-images"] as const) {
+    test(`a stored image in /${dir} carries no Access-Control header`, async () => {
+      const { saveImage } = await import("./image-files.js");
+      const ref = await saveImage(dir, `data:image/png;base64,${PNG_1X1}`, { checkContent: false });
+      const r = await server.send("GET", ref.startsWith("/") ? ref : `/${ref}`, { headers: { Origin: FOREIGN } });
+      assert.equal(r.status, 200, `${ref} was not served`);
+      assert.deepEqual(ACCESS_CONTROL(r.headers), []);
     });
   }
 
