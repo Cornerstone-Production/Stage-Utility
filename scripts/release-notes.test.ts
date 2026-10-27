@@ -488,6 +488,7 @@ describe("the overrides in docs/release-notes/overrides", () => {
   const VERSIONS_WITH_OVERRIDES = [
     "1.18.0",
     "1.19.0",
+    "1.27.0",
   ];
 
   interface Override { commit: string; betaOnly: boolean; reason: string }
