@@ -64,6 +64,12 @@ const secrets = new Map<string, string>();
  */
 const mismatched = new Set<string>();
 
+/** Devices already told this server no longer claims them, so the line is logged
+ *  once per release and not once per probe from an agent that cannot act on it.
+ *  Cleared by forgetSeen, which a claim and a probe from a device bound here both
+ *  call. Bounded at the seen list's size, oldest dropped. */
+const toldReleased = new Set<string>();
+
 /**
  * The last health each output helper device reported. RUNTIME, like everything
  * here: a reading of how an output is doing now, gone on restart and aged out
@@ -286,12 +292,6 @@ export function forgetSeen(id: string): void {
   toldReleased.delete(id);
   if (seen.delete(id)) announce();
 }
-
-/** Devices already told this server no longer claims them, so the line is logged
- *  once per release and not once per probe from an agent that cannot act on it.
- *  Cleared by forgetSeen, which a claim and a probe from a device bound here both
- *  call. Bounded at the seen list's size, oldest dropped. */
-const toldReleased = new Set<string>();
 
 /**
  * A device that still names this server, but is not set up here, is being told so.

@@ -36,7 +36,7 @@ export function normalizeCaptionColor(color: string): string {
 export const MAX_TESTIMONY_KEYWORD = 80;
 
 /** The shortest wireless metering interval: 0 would be a busy loop. */
-export const MIN_METER_RATE_MS = 100;
+const MIN_METER_RATE_MS = 100;
 
 /**
  * A user-entered base URL: trimmed, `http://` when it names no scheme, no

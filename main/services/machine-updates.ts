@@ -267,6 +267,9 @@ export class MachineUpdates {
    *  asked yet: Screens does not call it a machine without an updater before then. */
   readonly listeningSince: number;
 
+  /** Whether the machine-limit warning has been said since the list last had room. */
+  private fullWarned = false;
+
   constructor(private readonly onChange: () => void = () => {}, now = Date.now()) {
     this.listeningSince = now;
   }
@@ -334,8 +337,6 @@ export class MachineUpdates {
     }
     return true;
   }
-
-  private fullWarned = false;
 
   list(now = Date.now()): MachineUpdate[] {
     this.prune(now);

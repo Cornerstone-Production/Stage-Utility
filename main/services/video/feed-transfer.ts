@@ -35,7 +35,6 @@ export const VIDEO_FEEDS_BUNDLE_KIND = "stage-utility-video-feeds";
  *  stream id, an RTMP query and the relay's config. */
 const PUSH_PASSWORD_FORMAT = /^[A-Za-z0-9]{16,64}$/;
 
-
 // ── The file ────────────────────────────────────────────────────────────────
 
 /**

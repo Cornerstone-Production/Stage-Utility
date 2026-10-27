@@ -25,7 +25,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { errorMessage } from "../main/services/errors.js";
-import { BundleUnavailable, CLOUDFLARE_API_ORIGIN, CloudflareError, cloudflareOrigin, createCloudflare, readBundle, type DeployedPage } from "../main/services/servicecue-cloudflare.js";
+import { CLOUDFLARE_API_ORIGIN, CloudflareError, cloudflareOrigin, createCloudflare, readBundle, type DeployedPage } from "../main/services/servicecue-cloudflare.js";
 import { isMain } from "./is-main.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -85,13 +85,7 @@ export async function run(args: string[], env: Record<string, string | undefined
     if (after.version !== version) say(`WARNING    Cloudflare reports version ${after.version ?? "none"}, not ${version}: the no-downgrade rule has nothing to read`);
     return 0;
   } catch (err) {
-    if (err instanceof CloudflareError) {
-      say(`FAILED     ${err.describe()}`);
-    } else if (err instanceof BundleUnavailable) {
-      say(`FAILED     ${err.message}`);
-    } else {
-      say(`FAILED     ${errorMessage(err)}`);
-    }
+    say(`FAILED     ${err instanceof CloudflareError ? err.describe() : errorMessage(err)}`);
     return 1;
   }
 }

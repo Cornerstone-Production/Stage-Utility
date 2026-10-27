@@ -77,6 +77,25 @@ async function restoreSlot(slot: string, previous: Record<string, string>, what:
   await put.catch((e: unknown) => console.error(`[publish] could not put the saved ${scrub(what)} back: ${scrub(errorMessage(e))}`));
 }
 
+/** The message for the first of `fields` that `body` carries as the wrong type, or null. */
+function wrongType(body: Record<string, unknown>, fields: readonly (readonly [string, "string" | "boolean"])[]): string | null {
+  for (const [name, type] of fields) {
+    if (body[name] !== undefined && typeof body[name] !== type) return `${name} ${type === "string" ? "must be a string" : "must be true or false"}`;
+  }
+  return null;
+}
+
+/** What a request says to do with a saved token: leave it (no token, or the mask), clear it, replace it, or it cannot be used. */
+type TokenEdit = { kind: "keep" } | { kind: "clear" } | { kind: "set"; text: string } | { kind: "invalid"; message: string };
+
+function tokenEdit(raw: string | undefined, check: (text: string) => string | null): TokenEdit {
+  if (raw === undefined || isMask(raw)) return { kind: "keep" };
+  const text = raw.trim();
+  if (text === "") return { kind: "clear" };
+  const message = check(text);
+  return message ? { kind: "invalid", message } : { kind: "set", text };
+}
+
 /** Two requests that change the settings at once would each read the settings before either wrote them. */
 let writing: Promise<unknown> = Promise.resolve();
 function serialized<T>(work: () => Promise<T>): Promise<T> {
@@ -95,16 +114,9 @@ export async function serviceCuePublishRoutes(c: RouteCtx): Promise<void> {
 
   if (method === "POST" && pathname === "/api/servicecue/publish") {
     const body = (await readBody(req)) as Record<string, unknown>;
-    if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
-      error(res, "enabled must be true or false");
-      return;
-    }
-    if (body.url !== undefined && typeof body.url !== "string") {
-      error(res, "url must be a string");
-      return;
-    }
-    if (body.token !== undefined && typeof body.token !== "string") {
-      error(res, "token must be a string");
+    const wrong = wrongType(body, [["enabled", "boolean"], ["url", "string"], ["token", "string"]]);
+    if (wrong) {
+      error(res, wrong);
       return;
     }
     await serialized(() => saveSettings(c, body as SaveBody));
@@ -113,12 +125,9 @@ export async function serviceCuePublishRoutes(c: RouteCtx): Promise<void> {
 
   if (method === "POST" && pathname === "/api/servicecue/publish/deploy-credentials") {
     const body = (await readBody(req)) as Record<string, unknown>;
-    if (body.accountId !== undefined && typeof body.accountId !== "string") {
-      error(res, "accountId must be a string");
-      return;
-    }
-    if (body.token !== undefined && typeof body.token !== "string") {
-      error(res, "token must be a string");
+    const wrong = wrongType(body, [["accountId", "string"], ["token", "string"]]);
+    if (wrong) {
+      error(res, wrong);
       return;
     }
     await serialized(() => saveDeployCredentialsFrom(c, body as DeployCredentialsBody));
@@ -127,8 +136,9 @@ export async function serviceCuePublishRoutes(c: RouteCtx): Promise<void> {
 
   if (method === "POST" && pathname === "/api/servicecue/publish/deploy") {
     const body = (await readBody(req)) as Record<string, unknown>;
-    if (body.confirmDowngrade !== undefined && typeof body.confirmDowngrade !== "boolean") {
-      error(res, "confirmDowngrade must be true or false");
+    const wrong = wrongType(body, [["confirmDowngrade", "boolean"]]);
+    if (wrong) {
+      error(res, wrong);
       return;
     }
     await deployNow(c, body.confirmDowngrade === true);
@@ -206,16 +216,13 @@ async function saveDeployCredentialsFrom(c: RouteCtx, body: DeployCredentialsBod
   }
   let token = before?.token ?? "";
   let clear = typeof body.accountId === "string" && accountId === "";
-  if (typeof body.token === "string" && !isMask(body.token)) {
-    const text = body.token.trim();
-    const why = text === "" ? null : checkDeployToken(text);
-    if (why) {
-      error(res, why);
-      return;
-    }
-    if (text === "") clear = true;
-    else token = text;
+  const edit = tokenEdit(body.token, checkDeployToken);
+  if (edit.kind === "invalid") {
+    error(res, edit.message);
+    return;
   }
+  if (edit.kind === "clear") clear = true;
+  else if (edit.kind === "set") token = edit.text;
   if (!clear && (token === "" || accountId === "")) {
     error(res, "Enter the Cloudflare account ID and the API token together.");
     return;
@@ -307,18 +314,13 @@ async function saveSettings(c: RouteCtx, body: SaveBody): Promise<void> {
   }
   const target = parsePublishUrl(url);
 
-  let newToken: string | null = null;
-  let clearToken = false;
-  if (typeof body.token === "string" && !isMask(body.token)) {
-    const text = body.token.trim();
-    const why = text === "" ? null : checkPublishToken(text);
-    if (why) {
-      error(res, why);
-      return;
-    }
-    if (text === "") clearToken = true;
-    else newToken = text;
+  const edit = tokenEdit(body.token, checkPublishToken);
+  if (edit.kind === "invalid") {
+    error(res, edit.message);
+    return;
   }
+  const newToken = edit.kind === "set" ? edit.text : null;
+  let clearToken = edit.kind === "clear";
   // The token belongs to the address it was saved for. Another address with no token in the same request leaves with none.
   const sameAddress = beforeParsed.ok && target.ok && target.origin === beforeParsed.origin;
   if (!sameAddress && newToken === null) clearToken = true;

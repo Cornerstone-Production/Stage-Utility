@@ -63,8 +63,6 @@ export const NO_APP_ICON: AppIconSettings = {
   appIconMaskable: null,
 };
 
-/** Each data URL is held to the cap the other branding images have. */
-const MAX_DATA_URL_CHARS = MAX_BRANDING_DATA_URL_CHARS;
 const PNG_PREFIX = "data:image/png;base64,";
 
 /** The pixel size an icon PNG declares, read from its IHDR; null if it is not a PNG. */
@@ -97,7 +95,7 @@ const IMAGE_SIZES: Record<"art" | IconField, number | null> = { art: null, ...IC
  *  `label` names it in the reason: the request field, or the settings key. */
 export function iconPngProblem(key: IconImageField, value: unknown, label = `body.icon.${key}`): string | null {
   if (typeof value !== "string" || !value.startsWith(PNG_PREFIX)) return `${label} must be a PNG data URL`;
-  if (value.length > MAX_DATA_URL_CHARS) return `${label} too large (max ~1.5 MB)`;
+  if (value.length > MAX_BRANDING_DATA_URL_CHARS) return `${label} too large (max ~1.5 MB)`;
   const dims = pngSize(value);
   if (!dims) return `${label} is not a valid PNG`;
   const size = IMAGE_SIZES[key];
@@ -132,7 +130,7 @@ export function parseAppIcon(v: unknown): IconParse {
   if (typeof v !== "object" || Array.isArray(v)) return { ok: false, error: "body.icon must be an object or null" };
   const body = v as Record<string, unknown>;
 
-  for (const key of Object.keys(IMAGE_SIZES) as (keyof typeof IMAGE_SIZES)[]) {
+  for (const key of Object.keys(IMAGE_SIZES) as IconImageField[]) {
     const problem = iconPngProblem(key, body[key]);
     if (problem) return { ok: false, error: problem };
   }
@@ -149,7 +147,7 @@ export function parseAppIcon(v: unknown): IconParse {
     if (!isDataUrl(body.original) && !looksLikeStoredRef(body.original)) {
       return { ok: false, error: "body.icon.original must be an image data URL, a stored image or null" };
     }
-    if (body.original.length > MAX_DATA_URL_CHARS) {
+    if (body.original.length > MAX_BRANDING_DATA_URL_CHARS) {
       return { ok: false, error: "body.icon.original too large (max ~1.5 MB)" };
     }
     original = body.original;

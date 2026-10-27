@@ -149,7 +149,7 @@ class AutomationEngine {
     // a restored archive is a server that will not boot. The line is the point:
     // "this cue would not save today" is a question somebody can answer, and
     // nothing said it before.
-    for (const bad of this.invalidLoadedCues()) {
+    for (const bad of this.cueProblemsIn(this.rules)) {
       console.warn(`[cues] rule "${scrub(bad.rule)}" would be refused if you saved it: ${scrub(bad.problem)}`);
     }
     // What the app itself offers, said once at boot. The count line is
@@ -190,22 +190,15 @@ class AutomationEngine {
   }
 
   /**
-   * The loaded rules the write path would refuse, and why.
-   *
-   * The SAME check the routes run — assertCueValid, with the rule excepted from
-   * its own clash search — rather than a second copy of the grammar that would
-   * drift from it. Returned rather than logged in place: the caller decides
-   * what to tell the operator, and init() is the only caller today.
-   */
-  private invalidLoadedCues(): { rule: string; problem: string }[] {
-    return this.cueProblemsIn(this.rules);
-  }
-
-  /**
    * The rules in `rules` the write path would refuse, and why, each checked
    * against the others in that set rather than against the rules in memory.
    * What init reports for the file it loaded, and what a config restore
    * refuses an automation-rules.json for (see automation-store.ts).
+   *
+   * The SAME check the routes run — assertCueValid, with the rule excepted from
+   * its own clash search — rather than a second copy of the grammar that would
+   * drift from it. Returned rather than logged in place: the caller decides
+   * what to tell the operator.
    */
   cueProblemsIn(rules: readonly Rule[]): { rule: string; problem: string }[] {
     const out: { rule: string; problem: string }[] = [];
@@ -438,9 +431,9 @@ class AutomationEngine {
   }
 
   async removeRule(id: string): Promise<Rule[]> {
+    this.assertRulesRead();
     // The name has to be read before the filter — afterwards the rule is gone and
     // the log line that says which 300 rules went is the only record left.
-    this.assertRulesRead();
     const gone = this.rules.find((r) => r.id === id);
     this.rules = this.rules.filter((r) => r.id !== id);
     await automationStore.saveRules(this.rules);
