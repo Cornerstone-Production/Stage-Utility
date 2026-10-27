@@ -38,7 +38,11 @@ type VideoFeedView = import("@main/types/video").VideoFeedView;
 type FeedAudioStatus = import("@main/types/video").FeedAudioStatus;
 type VideoConfig = Extract<LayoutObjectConfig, { type: "video" }>;
 
-after(() => unmountAndTeardown(cleanup, teardown));
+after(() => {
+  globalThis.setInterval = realSetInterval;
+  globalThis.clearInterval = realClearInterval;
+  return unmountAndTeardown(cleanup, teardown);
+});
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -151,6 +155,20 @@ function captureFrames(): { fire: () => void; restore: () => void } {
   };
 }
 
+/** Every setInterval not yet cleared. afterEach clears the leftovers so a leak cannot keep the process alive. */
+const liveTimers = new Set<unknown>();
+const realSetInterval = globalThis.setInterval;
+const realClearInterval = globalThis.clearInterval;
+globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
+  const h = realSetInterval(...args);
+  liveTimers.add(h);
+  return h;
+}) as typeof setInterval;
+globalThis.clearInterval = ((h: Parameters<typeof clearInterval>[0]) => {
+  liveTimers.delete(h);
+  realClearInterval(h);
+}) as typeof clearInterval;
+
 beforeEach(() => {
   cleanup();
   __resetReplayCacheForTests();
@@ -167,6 +185,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  for (const h of liveTimers) realClearInterval(h as Parameters<typeof clearInterval>[0]);
+  liveTimers.clear();
   mediaProto.play = realPlay;
 });
 
@@ -571,10 +591,16 @@ test("a failure caption goes when another control takes the sound, and when the 
 class FakeAudioContext {
   state = "running";
   static resume: () => Promise<void> = () => Promise.resolve();
+  static made: FakeAudioContext[] = [];
+  closes = 0;
+  constructor() {
+    FakeAudioContext.made.push(this);
+  }
   resume() {
     return FakeAudioContext.resume();
   }
   close() {
+    this.closes++;
     this.state = "closed";
     return Promise.resolve();
   }
@@ -608,6 +634,41 @@ test("the level meter is drawn when the browser gives an audio context", async (
   }
 });
 
+// Safari allows a handful of AudioContexts a page: each Listen tap must close its one.
+test("the meter's audio context is closed after Stop, when another control takes the sound, and when the control goes", { timeout: 30000 }, async () => {
+  const g0 = globalThis as { AudioContext?: unknown };
+  const real = g0.AudioContext;
+  g0.AudioContext = FakeAudioContext;
+  const frames = captureFrames();
+  const { g, unmount } = await renderFeeds([makeFeed("a", "Alpha", CONVERTED("a")), makeFeed("b", "Bravo", CONVERTED("b"))]);
+  try {
+    FakeAudioContext.made = [];
+    const closed = () => FakeAudioContext.made.map((c) => c.closes);
+
+    await press(buttonFor("Alpha"));
+    assert.deepEqual(closed(), [0], "a tap opens one context");
+    await press(buttonFor("Alpha", true));
+    assert.deepEqual(closed(), [1], "Stop left the context open");
+
+    await press(buttonFor("Alpha"));
+    await press(buttonFor("Bravo"));
+    assert.deepEqual(closed().slice(0, 2), [1, 1], "Alpha's context stayed open when Bravo took the sound");
+    assert.equal(FakeAudioContext.made.length, 3, "one context per tap");
+
+    unmount();
+    assert.deepEqual(
+      closed().filter((n) => n === 0),
+      [],
+      "a context stayed open after its control went",
+    );
+    assert.ok(closed().every((n) => n === 1), `a context was closed more or less than once: ${closed()}`);
+  } finally {
+    g0.AudioContext = real;
+    frames.restore();
+    g.restore();
+  }
+});
+
 test("the meter keeps its one analyser across re-renders of the control", async () => {
   let sources = 0;
   class MeteringContext extends FakeAudioContext {
@@ -627,6 +688,27 @@ test("the meter keeps its one analyser across re-renders of the control", async 
     act(() => void fireEvent.change(slider, { target: { value: "35" } }));
     await settle();
     assert.equal(sources, 1, "a re-render tore the meter down and attached another");
+  } finally {
+    run.done();
+  }
+});
+
+// A meter timer that outlives its control does not fail an assertion, it keeps the test process alive for ever; the file counts live timers (see `liveTimers`) so the leak fails fast.
+test("the meter's timer stops when the control goes", { timeout: 30000 }, async () => {
+  class MeteringContext extends FakeAudioContext {
+    createMediaStreamSource() {
+      return { connect() {}, disconnect() {} };
+    }
+    createAnalyser() {
+      return { fftSize: 0, smoothingTimeConstant: 0, frequencyBinCount: 16, connect() {}, disconnect() {}, getByteFrequencyData() {} };
+    }
+  }
+  FakePeerConnection.trackStream = { getAudioTracks: () => [{}] };
+  const run = await listeningWith(MeteringContext);
+  try {
+    assert.ok(liveTimers.size > 0, "the meter never started its timer, so this test proves nothing");
+    cleanup();
+    assert.equal(liveTimers.size, 0, "the meter's timer was still running after its control went");
   } finally {
     run.done();
   }
