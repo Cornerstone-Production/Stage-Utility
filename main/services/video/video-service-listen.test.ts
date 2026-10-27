@@ -371,6 +371,25 @@ test("a stored feed whose id ends in -listen is not given to the relay, and the 
   assert.equal(warns.filter((l) => l.includes("ends in -listen")).length, 1);
 });
 
+test("a reserved-id feed removed and put back is reported again", async (t) => {
+  useFfmpeg(FFMPEG_OK);
+  const warns = captureConsole(t, "warn");
+  const { videoFeedsStore } = await import("./feed-store.js");
+  const real = await addFeed({ name: "Real again" });
+  const squatter = { id: `${real}-listen`, name: "Squatter", source: { kind: "push" as const, protocol: "rtmp" as const } };
+  const putBack = () => videoFeedsStore.update((c) => ({ ...c, feeds: [...c.feeds.filter((f) => f.id !== squatter.id), squatter] }));
+  await putBack();
+  cleanup.push(async () => void (await videoFeedsStore.update((c) => ({ ...c, feeds: c.feeds.filter((f) => f.id !== squatter.id) }))));
+  await attachWith(() => [], []);
+  await videoService.reconcileRelay();
+  assert.equal(warns.filter((l) => l.includes("ends in -listen")).length, 1);
+
+  assert.equal(await videoService.removeFeed(squatter.id), true);
+  await putBack();
+  await videoService.reconcileRelay();
+  assert.equal(warns.filter((l) => l.includes("ends in -listen")).length, 2, "the id stayed remembered as reported after its feed was removed");
+});
+
 // ── What is remembered is forgotten with its feed and with its relay ────────
 
 test("removing a feed, or making another under its id, starts its audio memory afresh", async (t) => {
