@@ -5,6 +5,7 @@ import { toast } from "../components/ui/toast";
 import { errorMessage } from "@main/services/errors";
 import { logToServer } from "../lib/client-log";
 import { UnsavedChangesDialog } from "./unsaved-changes-dialog";
+import { useLatestRef } from "../lib/use-latest-ref";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
 import {
   UndoIcon,
@@ -1653,10 +1654,14 @@ export function LayoutEditor({
     if (parent) forEachWithRect(objects, (n) => { if (n.o.id === parent.id) selParentAbs = n.abs; });
   }
 
+  // The snapshot is read when pushHistory is CALLED, not when the callback was made: an
+  // async caller (Make it a cue, an image upload, Fit box to file) holds the pushHistory
+  // of the click and would otherwise push the layout as it was then, over edits made since.
+  const objectsNow = useLatestRef(objects);
   const pushHistory = useCallback(() => {
-    setHistory((h) => [...h.slice(-49), objects]);
+    setHistory((h) => [...h.slice(-49), objectsNow.current]);
     setDirty(true);
-  }, [objects]);
+  }, [objectsNow]);
 
   function update(id: string, patch: Partial<LayoutObject>) {
     setObjects((prev) => mapById(prev, id, (o) => ({ ...o, ...patch })));
