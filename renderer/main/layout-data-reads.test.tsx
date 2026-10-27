@@ -301,6 +301,14 @@ describe("a Timer pays only for the source it reads", () => {
     assert.deepEqual((await unwanted()).filter((x) => !x.startsWith("prop") && !x.startsWith("integrations")), [], "a ProPresenter Timer paid for another source");
   });
 
+  test("a saved pp-timer opens what the ProPresenter Timer it reads as opens, the integration list included", async () => {
+    // The integration list is how a Timer tells "not set up" from "not answering",
+    // so a layout saved before the Timer existed needs it as much as a new one.
+    await mount(useViewData, layoutOf("pp-timer"));
+    assert.equal(count("/api/propresenter/status"), 1, "the saved pp-timer never read ProPresenter");
+    assert.equal(count("/api/integrations"), 1, "the saved pp-timer never read the integration list");
+  });
+
   test("a baptism Timer reads and subscribes the baptism timer", async () => {
     await mount(useViewData, timerLayout("baptism"));
     assert.equal(count("/api/baptism"), 1, "the baptism Timer never read the session");

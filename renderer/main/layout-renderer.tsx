@@ -750,9 +750,10 @@ const WALL_TWIN = externKeyed({
 
 /** The wall's colour for a time that has earned one: the display palette's red
  *  and amber, not Home's semantic tokens. */
-function timerWallColor(tone: TimerTone | null): string | null {
-  return tone === "over" ? "var(--red-10)" : tone === "warn" ? "var(--yellow-10)" : null;
-}
+const TIMER_WALL_COLOR: Record<TimerTone, string> = { over: "var(--red-10)", warn: "var(--yellow-10)" };
+
+/** Home's Stat names the same two tones by its own words. */
+const TIMER_STAT_TONE = { over: "danger", warn: "warn" } as const satisfies Record<TimerTone, string>;
 
 /**
  * The ProPresenter status an object reads, and whether it has answered: the
@@ -1359,11 +1360,11 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
       // Every other Timer is the wall readout at Home's uniform size, aligned as
       // the object says.
       if (ctx.home && timerSource(c) === "service" && (c.nextItem ?? false)) {
-        return <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone === "over" ? "danger" : r.tone === "warn" ? "warn" : undefined} />;
+        return <Stat label={r.caption ?? ""} value={r.value} sub={r.sub ?? undefined} tone={r.tone ? TIMER_STAT_TONE[r.tone] : undefined} />;
       }
       // The baptism readout never sized itself to Home's uniform tile, and still
       // does not: its value fills the box as it did.
-      return readout(r.value, { caption: r.caption, sub: r.sub, valueColor: timerWallColor(r.tone), ...(timerSource(c) === "baptism" ? { uniform: false } : null) });
+      return readout(r.value, { caption: r.caption, sub: r.sub, valueColor: r.tone ? TIMER_WALL_COLOR[r.tone] : null, ...(timerSource(c) === "baptism" ? { uniform: false } : null) });
     }
     case "record-status": {
       // "Is anything recording?" — one indicator regardless of which recorder the
@@ -3157,7 +3158,9 @@ function collectLayoutTypes(
   };
 
   for (const o of objects ?? []) {
-    const config = o.config;
+    // Read as the renderer reads it: an object saved as one of the four retired
+    // timers is a Timer here too, so it opens the channels its source needs.
+    const config = readConfig(o.config);
     // A Timer reads ProPresenter or the baptism timer only for those sources, so
     // it is named by SOURCE: `timer:propresenter` opens the ProPresenter channels,
     // `timer:baptism` the baptism one, and a service Timer opens neither. A bare
@@ -3306,7 +3309,6 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
     "lyrics",
     "next-service-item",
     "next-slide-text",
-    "pp-timer",
     "section-chip",
     "slide-progress",
     "slide-thumbnail",
@@ -3314,7 +3316,7 @@ export function useLayoutData(layout?: LayoutDTO, viewId?: string | null) {
   ]);
   const propresenterStatus = useProPresenterStatus(proWanted);
   const propInstances = usePropInstances(proWanted);
-  const baptismStatus = useBaptismStatus(want(["baptism-timer", "timer:baptism"]));
+  const baptismStatus = useBaptismStatus(want(["timer:baptism"]));
   // service-pacing reads the rundown only for its projected-end mode, and is
   // named whatever its config says: a gate that followed config would open the
   // read one render after the operator flipped the switch, and the projection
