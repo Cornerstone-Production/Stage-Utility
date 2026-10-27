@@ -28,6 +28,7 @@ const React = (await import("react")).default;
 const { createRootRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { Rail } = await import("./rail.js");
+const { __resetHostNamesForTests: resetHostNamesLog } = await import("./host-names-query.js");
 const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
@@ -36,13 +37,19 @@ const APP = "Rail host names test app";
 const waitingName = (name: string) => ({ name, firstSeen: "", lastSeen: "", count: 1, lastFrom: "192.0.2.10", client: "Chrome" });
 
 let waiting: ReturnType<typeof waitingName>[];
+/** What the server answers the host names read with; null is the well-formed answer. */
+let malformed: unknown;
 let fetchStub: ReturnType<typeof stubFetchWithLog>;
 
 beforeEach(() => {
   waiting = [];
+  malformed = null;
+  resetHostNamesLog();
   fetchStub = stubFetchWithLog((url) => {
     if (url.includes("/api/state")) return ok({ views: [], outputs: [], appName: APP });
-    if (url.startsWith("/api/security/host-names")) return ok({ enforce: false, automatic: [], accepted: [], waiting, dismissed: [] });
+    if (url.startsWith("/api/security/host-names")) {
+      return ok(malformed ?? { enforce: false, automatic: [], accepted: [], waiting, dismissed: [] });
+    }
     return ok({});
   });
 });
@@ -107,5 +114,32 @@ describe("the Advanced row's count of host names", () => {
       await settle();
     });
     await eventually(() => assert.equal(countOn(c), null, "the count outlived the name"));
+  });
+
+  const readFailures = () => fetchStub.logs.filter((l) => l.tag === "security" && /could not read the host names/.test(l.message));
+
+  test("an answer with no lists is a failed read on /log, not an empty count", async () => {
+    malformed = { enforce: false };
+    const c = await renderRail();
+    await eventually(() => assert.equal(readFailures().length, 1, JSON.stringify(fetchStub.logs)));
+    assert.equal(countOn(c), null);
+  });
+
+  test("a read that fails after names were waiting keeps the count, and is logged once per run", async () => {
+    waiting = [waitingName("stage.example.org"), waitingName("panel-2.example.org")];
+    const c = await renderRail();
+    await eventually(() => assert.equal(countOn(c), "2"));
+    const es = FakeEventSource.last;
+    assert.ok(es, "the rail never opened the event stream");
+
+    malformed = { enforce: false, waiting: "none" };
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        es.push("security:host-names", { waiting: 0, enforce: false });
+        await settle();
+      });
+    }
+    await eventually(() => assert.equal(readFailures().length, 1, "a run of failures was not one line"));
+    assert.equal(countOn(c), "2", "a failed read took the count away");
   });
 });
