@@ -17,6 +17,7 @@ import { stageController } from "../stage-controller.js";
 import type { CreateScreenInput } from "../../types/views.js";
 import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, readCreateScreenBody, refuseMode } from "./screen-write.js";
 import { errorMessage } from "../errors.js";
+import { StoreReadError } from "../data-store.js";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import * as crypto from "node:crypto";
@@ -487,6 +488,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       stageController.refreshDisplays("all");
       json(res, { ok: true });
     } catch (err) {
+      if (err instanceof StoreReadError) throw err;
       error(res, errorMessage(err));
     }
     return;

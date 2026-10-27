@@ -9,6 +9,7 @@ import type * as http from "node:http";
 
 import { ScreenWriteError, ViewSurfaceChangedError } from "../stage-controller.js";
 import { isLayoutShape, type CreateScreenInput } from "../../types/views.js";
+import { StoreReadError } from "../data-store.js";
 import { errorMessage } from "../errors.js";
 import { error, isDisplayKind, json } from "./context.js";
 
@@ -85,8 +86,12 @@ export function readCreateScreenBody(body: Record<string, unknown>): CreateScree
  * through, so it is a 500 that says which step and what was and was not put back;
  * a view that is not the kind the caller expected is a 409; anything else a screen
  * write throws is a refusal made before anything was written, a 400 with the reason.
+ * A StoreReadError is rethrown, to be answered 503.
  */
 export function answerScreenWriteFailure(res: http.ServerResponse, err: unknown): void {
+  // A store the server cannot read is not the caller's mistake: it travels up to
+  // the dispatcher, which answers it 503 like every other route does.
+  if (err instanceof StoreReadError) throw err;
   // The view changed kind while the operator was deciding: nothing was made, and
   // `surface` is what the view is now to ask again with (as PATCH answers).
   if (err instanceof ViewSurfaceChangedError) {

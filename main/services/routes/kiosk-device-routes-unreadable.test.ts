@@ -34,4 +34,16 @@ describe("device routes with unreadable bindings", () => {
       await assert.rejects(callRoute(kioskDeviceRoutes, route), { name: "StoreReadError" });
     });
   }
+
+  // A refusal the operator can act on is a 400; a store the server cannot read is
+  // a 503 (the dispatcher answers a thrown StoreReadError so), not a 400 that
+  // reads as a mistake in the request.
+  for (const [route, body] of [
+    ["/api/devices/release", { deviceId: "pi-1" }],
+    ["/api/devices/claim", { deviceId: "pi-1", outputId: "wall" }],
+  ] as const) {
+    it(`POST ${route} fails with the read error rather than answering 400`, async () => {
+      await assert.rejects(callRoute(kioskDeviceRoutes, route, { method: "POST", body }), { name: "StoreReadError" });
+    });
+  }
 });
