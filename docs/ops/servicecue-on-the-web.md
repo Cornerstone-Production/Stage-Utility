@@ -238,7 +238,9 @@ When the page was left alone because it is newer, or another build of this serve
 the card asks first, naming both versions, and **Replace the page** sends the request again
 with `confirmDowngrade`. A request made within a minute of a deploy says "Try again in N s", a page
 already on this build says "Already up to date", and a deploy that went ahead while Planning
-Center had not said whether a service is live says so. The button waits while an update is under way.
+Center had not said whether a service is live says so. The button waits while an update is under way,
+for up to six minutes; past that the card says the update is still going, and the status line
+says how it ends.
 The route deploys when the
 page is older or another build; answers `200` with `already: "current"` and uploads nothing
 when the page is already this build; refuses with `409` and `code: "newer"` or

@@ -34,7 +34,7 @@ import { isRecord, isStringList } from "./is-record.js";
 import { pinToOrigin } from "./pinned-origin.js";
 import { parseTag } from "./release-tags.js";
 import { isViewerBuildId } from "../types/servicecue-publish.js";
-import type { DeployBinding, DeployManifest } from "../types/servicecue-deploy.js";
+import { CLOUDFLARE_REQUEST_TIMEOUT_MS as REQUEST_TIMEOUT_MS, type DeployBinding, type DeployManifest } from "../types/servicecue-deploy.js";
 
 // ── Where Cloudflare is ──────────────────────────────────────────────────────
 
@@ -104,8 +104,6 @@ export class CloudflareError extends Error {
   }
 }
 
-/** How long one request may take. */
-const REQUEST_TIMEOUT_MS = 60_000;
 /** Longest part of Cloudflare's words that is kept: they reach the log and the card. */
 const MAX_MESSAGE = 400;
 /** The largest answer read: every one is a small JSON document. */

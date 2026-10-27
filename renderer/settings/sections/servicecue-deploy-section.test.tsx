@@ -15,6 +15,7 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { reply, stubFetchWithLog, ok } from "../../test-fixtures/fetch-log.js";
+import { DEPLOY_NOW_TIMEOUT_MS } from "../../../main/types/servicecue-deploy.js";
 import type { DeployStatus, PublishSettingsDTO } from "../../../main/types/servicecue-publish-status.js";
 
 const teardown = installRenderDom();
@@ -82,8 +83,10 @@ interface Server {
   dto: PublishSettingsDTO;
   /** Every POST, as [path, body]. */
   posts: [string, Record<string, unknown>][];
-  /** What the next "Update the page now" answers, in order; the last is kept. */
+  /** What the next "Update the page now" answers, in order; the last is kept. A status of 0 is the request running out of time. */
   deployAnswers: { status: number; json: unknown }[];
+  /** The signal each "Update the page now" went with. */
+  deploySignals: (AbortSignal | null | undefined)[];
   /** What a credentials write answers: the new status, from the body. */
   credentials: (body: Record<string, unknown>) => DeployStatus;
 }
@@ -98,6 +101,7 @@ beforeEach(() => {
     dto: dtoOf(deployOf()),
     posts: [],
     deployAnswers: [],
+    deploySignals: [],
     credentials: (body) => {
       if (body.token === "") return NO_TOKEN();
       return deployOf({ accountId: typeof body.accountId === "string" ? body.accountId : ACCOUNT });
@@ -113,7 +117,9 @@ beforeEach(() => {
       }
       if (url === "/api/servicecue/publish/deploy") {
         server.posts.push(["deploy", body]);
+        server.deploySignals.push(init.signal);
         const answer = server.deployAnswers.length > 1 ? server.deployAnswers.shift()! : (server.deployAnswers[0] ?? { status: 200, json: server.dto });
+        if (answer.status === 0) throw new DOMException("signal timed out", "TimeoutError");
         return reply(answer.status, answer.json);
       }
     }
@@ -586,6 +592,34 @@ describe("Update the page now", () => {
       deploy: deployOf({ state: "newer", page: { build: "9c41e07", version: "1.29.0-beta.2", at: DEPLOYED_AT } }),
     },
   };
+
+  test("waits as long as a deploy may take, not the 15 s every other request gets", async () => {
+    // Each timeout signal made, with its length; none is live, so nothing outlives the test.
+    const made = new Map<AbortSignal, number>();
+    const real = AbortSignal.timeout;
+    AbortSignal.timeout = (ms: number) => {
+      const signal = new AbortController().signal;
+      made.set(signal, ms);
+      return signal;
+    };
+    try {
+      await with_(deployOf({ page: { build: "0ldbuild", version: "1.27.0", at: DEPLOYED_AT }, state: "failed", error: null }));
+      await click();
+      const signal = server.deploySignals[0];
+      assert.ok(signal, "the request went with no signal");
+      assert.equal(made.get(signal), DEPLOY_NOW_TIMEOUT_MS);
+    } finally {
+      AbortSignal.timeout = real;
+    }
+  });
+
+  test("a deploy that outlasts the request is still going, not a failure: the status line carries the outcome", async () => {
+    await with_(deployOf({ page: { build: "0ldbuild", version: "1.27.0", at: DEPLOYED_AT }, state: "failed", error: null }));
+    server.deployAnswers = [{ status: 0, json: null }];
+    await click();
+    await eventually(() => assert.ok(sectionText().includes("Still updating. The status above says when it is done."), sectionText()));
+    assert.ok(!/timed out/.test(sectionText()), "a deploy still under way was reported as timed out");
+  });
 
   test("posts with no body when nothing needs confirming, and takes the answer as the new status", async () => {
     await with_(deployOf({ page: { build: "0ldbuild", version: "1.27.0", at: DEPLOYED_AT }, state: "failed", error: null }));

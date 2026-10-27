@@ -22,7 +22,7 @@ import { useState, type ReactNode } from "react";
 import { Button, ErrorNote, Input, confirm } from "../../components/ui";
 import { ConnectionField } from "./connection-field";
 import { selectMask, typedTokenOf } from "./servicecue-token";
-import { invoke, type ApiError } from "../../lib/api";
+import { invoke, isTimeoutError, type ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { formatClock } from "../../lib/clock-format";
 import type { DeployStatus, PublishSettingsDTO } from "../../../main/types/servicecue-publish-status.js";
@@ -346,6 +346,11 @@ export function KeepPageUpToDate({
             setSaid("Updated the page. Planning Center had not said whether a service is live, so this went ahead without knowing.");
           return;
         } catch (err) {
+          // The deploy outlasted the request, not failed: what it comes to is the status line's, which the card polls.
+          if (isTimeoutError(err)) {
+            setSaid("Still updating. The status above says when it is done.");
+            return;
+          }
           const { status, code, body } = refusal(err);
           const refused = body.deploy as DeployStatus | undefined;
           if (refused) onDeploy(refused);
