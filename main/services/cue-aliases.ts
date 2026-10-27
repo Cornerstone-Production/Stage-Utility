@@ -68,10 +68,12 @@ export function takenCueNames(
   return taken;
 }
 
-/** The former names in a cue's trigger params, in order, oldest first. */
-export function parseAliases(params: Record<string, string | number>): string[] {
+/** The former names in a cue's trigger params, in order, oldest first. Params a
+ *  hand-edited rules file left out are none, so one bad cue cannot throw inside
+ *  every other cue's name check. */
+export function parseAliases(params: Record<string, string | number> | undefined): string[] {
   const seen = new Set<string>();
-  for (const part of String(params.aliases ?? "").split(",")) {
+  for (const part of String(params?.aliases ?? "").split(",")) {
     const name = part.trim().toLowerCase();
     if (name) seen.add(name);
   }
