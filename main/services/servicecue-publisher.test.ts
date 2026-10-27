@@ -473,6 +473,20 @@ describe("the images", () => {
     assert.equal(JSON.parse(h.page.docs.get("state")!).appLogo, "/branding-images/0123456789abcdef.png");
   });
 
+  it("sends the logo once when a cycle and a state frame both find the page without it", async () => {
+    const h = await harness();
+    h.source.data.images.set("0123456789abcdef.png", PNG);
+    const was = h.source.brandingImage;
+    h.source.brandingImage = async (name) => {
+      await sleep(40);
+      return was(name);
+    };
+    await h.pub.start();
+    h.emit("stage:state-changed");
+    await Promise.all([h.pub.runCycle(), h.pub.flush()]);
+    assert.equal(h.page.assets().length, 1, "both looked, both saw the page without the logo, and both sent it");
+  });
+
   it("has nothing to send for a logo that is not a stored file", async () => {
     const h = await harness();
     h.source.data.state = fixtureState({ appLogo: "data:image/png;base64,AAAA" });
