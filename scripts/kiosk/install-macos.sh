@@ -1110,13 +1110,28 @@ record_update_failure() {
 # One install or update at a time. A manual install while an update waits for its
 # new helper would otherwise have that update's roll back undo the install. A lock
 # left by a process that is gone is taken over.
+# Two processes can both find the same dead holder. Renaming the lock away is
+# atomic, so only one of them gets it; the other's rename finds nothing. A rename
+# that instead caught a live process's brand new lock (it took over first, between
+# this one's look and its rename) puts that lock back rather than deleting it.
+take_over_stale_lock() {
+  moved="$UPDATE_LOCK.stale.$$"
+  rm -rf "$moved"
+  mv "$UPDATE_LOCK" "$moved" 2>/dev/null || return 0
+  taken="$(cat "$moved/pid" 2>/dev/null || true)"
+  if [ -n "$taken" ] && kill -0 "$taken" 2>/dev/null; then
+    if mkdir "$UPDATE_LOCK" 2>/dev/null; then printf '%s\n' "$taken" >"$UPDATE_LOCK/pid"; fi
+  fi
+  rm -rf "$moved"
+}
+
 take_lock() { # seconds to wait for it
   waited=0
   while ! mkdir "$UPDATE_LOCK" 2>/dev/null; do
     holder="$(cat "$UPDATE_LOCK/pid" 2>/dev/null || true)"
     # No pid yet is a lock being taken this moment, unless it stays that way.
     if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } || { [ -z "$holder" ] && [ "$waited" -ge 10 ]; }; then
-      rm -rf "$UPDATE_LOCK"
+      take_over_stale_lock
       continue
     fi
     [ "$waited" -lt "$1" ] || return 1

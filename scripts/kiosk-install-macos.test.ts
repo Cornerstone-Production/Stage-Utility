@@ -1375,6 +1375,54 @@ describe("--check-update", { skip: !(has("zip") && has("unzip") && has("uuidgen"
     });
   });
 
+  describe("take_lock", () => {
+    const lock = () => path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "lock");
+    const stale = async () => (await sh("sh -c 'echo $$'")).out.trim();
+    // A shell that finds the dead holder, and in the moment between looking and
+    // taking over has another process do the same and start a live lock.
+    const raced = async (livePid: string, deadPid: string) => {
+      fs.mkdirSync(lock());
+      fs.writeFileSync(path.join(lock(), "pid"), `${deadPid}\n`);
+      return sh(
+        `. "${SCRIPT}"
+         UPDATE_LOCK="${lock()}"; LOCKED=0
+         swapped=0
+         kill() {
+           if [ "$swapped" = 0 ] && [ "$2" = "${deadPid}" ]; then
+             swapped=1
+             rm -rf "$UPDATE_LOCK"; mkdir "$UPDATE_LOCK"; printf '%s\\n' "${livePid}" >"$UPDATE_LOCK/pid"
+           fi
+           command kill "$@"
+         }
+         if take_lock 0; then echo TOOK; else echo REFUSED; fi
+         cat "$UPDATE_LOCK/pid"`,
+        { STAGE_INSTALL_SOURCED: "1", STAGE_INSTALL_TEST_ROOT: scratch },
+      );
+    };
+
+    it("takes over a lock whose holder is gone, leaving nothing renamed beside it", async () => {
+      fs.mkdirSync(lock());
+      fs.writeFileSync(path.join(lock(), "pid"), `${await stale()}\n`);
+      const r = await sh(`. "${SCRIPT}"; UPDATE_LOCK="${lock()}"; LOCKED=0; take_lock 0 && echo TOOK; cat "$UPDATE_LOCK/pid"`, {
+        STAGE_INSTALL_SOURCED: "1",
+        STAGE_INSTALL_TEST_ROOT: scratch,
+      });
+      assert.match(r.out, /^TOOK$/m, r.out + r.err);
+      assert.deepEqual(fs.readdirSync(path.dirname(lock())).filter((n) => n.startsWith("lock.")), []);
+    });
+
+    it("does not delete a live process's lock that was started while it was taking over a stale one", async () => {
+      const live = spawn("sleep", ["30"]);
+      try {
+        const r = await raced(String(live.pid), await stale());
+        assert.match(r.out, /^REFUSED$/m, "the second contender must not also hold the lock: " + r.out + r.err);
+        assert.equal(fs.readFileSync(path.join(lock(), "pid"), "utf8").trim(), String(live.pid), "the live holder's lock is intact");
+      } finally {
+        live.kill();
+      }
+    });
+  });
+
   it("is skipped while an install or another check holds the lock", async () => {
     const lock = path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "lock");
     fs.mkdirSync(lock);
