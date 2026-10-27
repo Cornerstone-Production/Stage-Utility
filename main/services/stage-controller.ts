@@ -3781,7 +3781,13 @@ export class StageController {
       const allocated = await settingsStore.allocateIds(
         "output",
         (next): { output: Output; outputs: Output[] } => {
-          const id = next(this.state.outputs.map((o) => o.id));
+          // Not another screen's address either: `/<id>` and `/<address>` are
+          // one namespace, so an id equal to one would answer for two screens.
+          // A taken number is skipped, and the floor moves past it.
+          const ids = this.state.outputs.map((o) => o.id);
+          const addresses = new Set(this.state.outputs.flatMap((o) => (o.slug ? [o.slug.toLowerCase()] : [])));
+          let id = next(ids);
+          while (addresses.has(id)) id = next(ids);
           const num = parseInt(id.replace("display-", ""), 10);
           // Thrown before `this.state` is touched, so nothing has been assigned
           // or written when it fires.
