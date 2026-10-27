@@ -148,7 +148,7 @@ async function publish(request: Request, url: URL, deps: HandlerDeps): Promise<R
     case "postHeartbeat": {
       const body = await readValidated(request, heartbeatBody);
       if (!body.ok) return body.response;
-      await deps.hub.heartbeat(body.value.sentAt, body.value.version, await viewerBuild(deps.assets, url));
+      await deps.hub.heartbeat(body.value.sentAt, body.value.version, await servedBuild(deps.assets, url, "the heartbeat"));
       return noContent();
     }
 
@@ -159,21 +159,22 @@ async function publish(request: Request, url: URL, deps: HandlerDeps): Promise<R
     }
 
     case "getStatus":
-      return forMethod(request, json({ ...(await deps.hub.status()), build: await statusBuild(deps.assets, url) }));
+      return forMethod(request, json({ ...(await deps.hub.status()), build: await servedBuild(deps.assets, url, "the status") }));
   }
 }
 
 /**
- * The build id for the status answer, which is worth having and not worth failing for: the
- * publisher asks the status to learn what is stored and whether the token works, and an
- * asset service that threw must not turn that into a 500. The answer says no build, and the
- * Worker's log says why.
+ * The build id for an answer that carries one, which is worth having and not worth failing
+ * for: the publisher's status and heartbeat and a viewer's handshake each ask for it on the
+ * way to something that matters more (what is stored and whether the token works, a recorded
+ * heartbeat, a connected viewer), and an asset service that threw must not turn any of them
+ * into a 500. The answer says no build, and the Worker's log says which one and why.
  */
-async function statusBuild(assets: HandlerDeps["assets"], url: URL): Promise<string | null> {
+async function servedBuild(assets: HandlerDeps["assets"], url: URL, forWhat: string): Promise<string | null> {
   try {
     return await viewerBuild(assets, url);
   } catch (err) {
-    console.error("[servicecue-worker] the status could not read the page's build id, and says none:", err);
+    console.error(`[servicecue-worker] ${forWhat} could not read the page's build id, and says none:`, err);
     return null;
   }
 }
@@ -230,7 +231,7 @@ async function serve(request: Request, url: URL, deps: HandlerDeps): Promise<Res
       }
       const origin = request.headers.get("Origin");
       if (origin !== null && !sameOrigin(origin, url)) return json({ error: "Another site's page cannot open this socket" }, 403);
-      return deps.upgrade(request, await viewerBuild(deps.assets, url));
+      return deps.upgrade(request, await servedBuild(deps.assets, url, "the viewer handshake"));
     }
 
     case "viewer": {

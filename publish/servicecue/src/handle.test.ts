@@ -615,6 +615,36 @@ describe("telling a page which build is being served", () => {
     assert.match(String(logged[0]![0]), /^\[servicecue-worker\] the status could not read/);
   });
 
+  test("a heartbeat is still recorded, and answered, when the asset service throws", async () => {
+    const logged: unknown[][] = [];
+    mock.method(console, "error", (...args: unknown[]) => void logged.push(args));
+    const s = setup({
+      assets: async () => {
+        throw new Error("the asset service is down");
+      },
+    });
+    const res = await s.run("POST", "/_publish/v1/heartbeat", { headers: AUTH, body: json({ at: 1_000, version: "1.27.0" }) });
+    assert.equal(res.status, 204);
+    assert.notEqual(s.hub.heartbeatAt, null, "the heartbeat was not recorded");
+    assert.equal(s.hub.heartbeatSentAt, 1_000);
+    assert.equal(logged.length, 1);
+    assert.match(String(logged[0]![0]), /^\[servicecue-worker\] the heartbeat could not read/);
+  });
+
+  test("a viewer's handshake is still served, with no build, when the asset service throws", async () => {
+    const logged: unknown[][] = [];
+    mock.method(console, "error", (...args: unknown[]) => void logged.push(args));
+    const s = setup({
+      assets: async () => {
+        throw new Error("the asset service is down");
+      },
+    });
+    const res = await s.run("GET", "/api/live", { headers: { Upgrade: "websocket" } });
+    assert.equal(res.status, 200);
+    assert.deepEqual(s.upgrades, [null]);
+    assert.match(String(logged[0]![0]), /^\[servicecue-worker\] the viewer handshake could not read/);
+  });
+
   test("an id a visitor puts on the handshake is not the one passed on", async () => {
     const s = setup();
     await s.run("GET", "/api/live", { headers: { Upgrade: "websocket", "X-Servicecue-Build": "ffffffffffff" } });
