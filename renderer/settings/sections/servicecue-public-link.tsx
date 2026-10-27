@@ -19,7 +19,7 @@ import { FORM_MASK, isMask } from "@main/services/mask";
 import { plural } from "@main/services/plural";
 import { parsePublishUrl } from "@main/services/servicecue-publish-rules";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
 
 import { AppLink } from "../../app/app-link";
 import { useUpdateStatus } from "../../app/queries";
@@ -578,7 +578,15 @@ function ConnectionFields({
   onTokBlank: () => void;
   onLeave: () => void;
 }) {
-  const leave = setup ? undefined : onLeave;
+  // Moving from one field to the other is not leaving them: a save would disable both before focus lands, and a new
+  // address would be told it needs its token on the way to the token field.
+  const leave = setup
+    ? undefined
+    : (e: FocusEvent<HTMLInputElement>) => {
+        const next = e.relatedTarget;
+        if (next instanceof HTMLElement && (next.id === "pl-addr2" || next.id === "pl-tok2")) return;
+        onLeave();
+      };
   return (
     <div className="flex flex-col gap-2.5">
       <ConnectionField label="Page address" hint={setup ? "Your Cloudflare Worker" : undefined} id={setup ? "pl-addr" : "pl-addr2"}>
@@ -605,9 +613,9 @@ function ConnectionFields({
           autoComplete="off"
           onFocus={(e) => selectMask(e, tok)}
           onChange={(e) => onTok(e.target.value)}
-          onBlur={() => {
+          onBlur={(e) => {
             if (tok.trim() === "") onTokBlank();
-            leave?.();
+            leave?.(e);
           }}
         />
       </ConnectionField>

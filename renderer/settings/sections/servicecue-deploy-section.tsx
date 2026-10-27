@@ -17,7 +17,7 @@ import { errorMessage } from "@main/services/errors";
 import { isValidTimeZone } from "@main/services/app-timezone";
 import { FORM_MASK, isMask } from "@main/services/mask";
 import { plural } from "@main/services/plural";
-import { useState, type ReactNode } from "react";
+import { useState, type FocusEvent, type ReactNode } from "react";
 
 import { Button, ErrorNote, Input, confirm } from "../../components/ui";
 import { ConnectionField } from "./connection-field";
@@ -28,6 +28,10 @@ import { formatClock } from "../../lib/clock-format";
 import type { DeployStatus, PublishSettingsDTO } from "../../../main/types/servicecue-publish-status.js";
 
 type Tone = "ok" | "busy" | "warn" | "bad" | "quiet";
+
+/** The two credential fields, which are saved together. */
+const ACCOUNT_FIELD = "pl-cf-acct";
+const TOKEN_FIELD = "pl-cf-tok";
 
 const TONE: Record<Tone, { text: string; dot: string }> = {
   ok: { text: "text-ok-11", dot: "bg-ok-9" },
@@ -297,6 +301,16 @@ export function KeepPageUpToDate({
     return yes;
   }
 
+  /**
+   * Leaving one credential field for the other saves nothing: the save would disable both before focus lands, and Tab
+   * from the account ID would never reach the token. The pair is saved when focus leaves them both.
+   */
+  function leaveCredentials(e: FocusEvent<HTMLInputElement>) {
+    const next = e.relatedTarget;
+    if (next instanceof HTMLElement && (next.id === ACCOUNT_FIELD || next.id === TOKEN_FIELD)) return;
+    void saveCredentials();
+  }
+
   /** Saved when the operator leaves a field. A token with no account (or the reverse) waits for the other; the route needs both. */
   async function saveCredentials() {
     if (busy) return;
@@ -383,22 +397,22 @@ export function KeepPageUpToDate({
       </div>
 
       <div className="flex flex-col gap-2.5">
-        <ConnectionField label="Cloudflare account ID" id="pl-cf-acct">
+        <ConnectionField label="Cloudflare account ID" id={ACCOUNT_FIELD}>
           <Input
-            id="pl-cf-acct"
+            id={ACCOUNT_FIELD}
             className="font-mono"
             value={acct}
             disabled={busy}
             autoComplete="off"
             spellCheck={false}
             onChange={(e) => setAcctDraft(e.target.value)}
-            onBlur={() => void saveCredentials()}
+            onBlur={leaveCredentials}
           />
         </ConnectionField>
-        <ConnectionField label="API token" id="pl-cf-tok">
+        <ConnectionField label="API token" id={TOKEN_FIELD}>
           <div className="flex min-w-0 flex-col gap-1">
             <Input
-              id="pl-cf-tok"
+              id={TOKEN_FIELD}
               className="font-mono"
               type="password"
               placeholder="Paste a token to turn updating on"
@@ -407,7 +421,7 @@ export function KeepPageUpToDate({
               autoComplete="off"
               onFocus={(e) => selectMask(e, tok)}
               onChange={(e) => setTokDraft(e.target.value)}
-              onBlur={() => void saveCredentials()}
+              onBlur={leaveCredentials}
             />
             <p className="text-caption2 text-fg-muted">
               A token with the Workers <b className="font-semibold">Editor</b> role on the servicecue Worker only. It cannot touch DNS, domains or

@@ -518,6 +518,20 @@ describe("Publishing", () => {
     assert.deepEqual(server.posts[0], ["save", { url: "https://another.example-account.example", token: "tok-for-it" }]);
   });
 
+  test("Tab from a new address to the token field saves nothing and says nothing until the pair is left", async () => {
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    fireEvent.change(input("Page address"), { target: { value: "https://another.example-account.example" } });
+    fireEvent.blur(input("Page address"), { relatedTarget: input("Publishing token") });
+    await settle();
+    assert.ok(!text().includes("A different address needs its token"), "told it needs a token on the way to typing one");
+    assert.equal(input("Publishing token").disabled, false);
+    fireEvent.change(input("Publishing token"), { target: { value: "tok-for-it" } });
+    fireEvent.blur(input("Publishing token"));
+    await eventually(() => assert.equal(server.posts.length, 1));
+    assert.deepEqual(server.posts[0], ["save", { url: "https://another.example-account.example", token: "tok-for-it" }]);
+  });
+
   test("switches off with the switch, and goes back to the setup fields with what is stored in them", async () => {
     await mount();
     fireEvent.click(sw());

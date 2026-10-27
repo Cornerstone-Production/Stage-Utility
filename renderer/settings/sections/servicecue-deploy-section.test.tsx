@@ -553,6 +553,24 @@ describe("the API token", () => {
     assert.deepEqual(server.posts, [["credentials", { accountId: "fedcba9876543210fedcba9876543210" }]]);
   });
 
+  test("Tab from an edited account ID reaches the token field: nothing is saved, or disabled, until focus leaves both", async () => {
+    await with_(deployOf());
+    type(acctField(), "fedcba9876543210fedcba9876543210");
+    await act(async () => {
+      fireEvent.blur(acctField(), { relatedTarget: tokField() });
+      await settle();
+    });
+    assert.deepEqual(server.posts, [], "a save started on the way to the token field");
+    assert.equal(tokField().disabled, false, "the token field was disabled as Tab moved to it");
+    await act(async () => {
+      fireEvent.blur(tokField(), { relatedTarget: acctField() });
+      await settle();
+    });
+    assert.deepEqual(server.posts, [], "a save started on the way back");
+    await leave(tokField());
+    assert.deepEqual(server.posts, [["credentials", { accountId: "fedcba9876543210fedcba9876543210" }]]);
+  });
+
   test("a refusal from the route is shown where the operator is looking, not swallowed", async () => {
     server.credentials = () => {
       throw new Error("never reached");
