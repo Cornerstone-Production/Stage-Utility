@@ -427,6 +427,14 @@ export class ServiceCueDeployer implements DeployHook {
         const wait = this.lastNowDeployAt + this.timings.nowEveryMs - Date.now();
         if (wait > 0) return { kind: "limited", retryAfterSec: Math.ceil(wait / 1000) };
       }
+      // The checks above can take a minute: a service that went live meanwhile is still waited out.
+      if (mode === "auto") {
+        const nowLive = this.deps.serviceLive();
+        const nowWindow = this.deps.windowCloses();
+        if (nowLive || nowWindow !== null || !this.deps.serviceTimesKnown()) {
+          return this.wait(mode, nowLive ? "live" : nowWindow !== null ? "window" : "unknown", nowWindow, `build ${pageBuild ?? "unknown"} to ${manifest.build}`);
+        }
+      }
       this.state = "updating";
       this.files = null;
       this.say(

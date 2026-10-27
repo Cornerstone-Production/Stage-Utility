@@ -312,6 +312,38 @@ describe("a service being live", () => {
     assert.equal(puts(), 1);
   });
 
+  it("is checked again just before the upload: a service that went live during the checks is waited out", async (t) => {
+    captureConsole(t, "log");
+    // The service goes live while the token is being checked, a request that can take up to a minute.
+    fake.respond = (r) => {
+      if (/\/tokens\/verify$/.test(r.path)) world.live = true;
+      return undefined;
+    };
+    const d = makeDeployer();
+    d.consider(BUILD_A);
+    await d.settled();
+    assert.equal(puts(), 0, "the page was deployed into a service that went live during the checks");
+    assert.equal(d.status().state, "waiting");
+    assert.equal(d.status().waitingFor, "live");
+    fake.respond = () => undefined;
+    world.live = false;
+    await reaches(d, "current");
+    assert.equal(puts(), 1);
+  });
+
+  it("is checked again just before the upload for the window too", async (t) => {
+    captureConsole(t, "log");
+    fake.respond = (r) => {
+      if (/\/tokens\/verify$/.test(r.path)) world.windowCloses = Date.now() + 3_600_000;
+      return undefined;
+    };
+    const d = makeDeployer();
+    d.consider(BUILD_A);
+    await d.settled();
+    assert.equal(puts(), 0);
+    assert.equal(d.status().waitingFor, "window");
+  });
+
   it("stops waiting when the publisher stops", async (t) => {
     captureConsole(t, "log");
     world.live = true;

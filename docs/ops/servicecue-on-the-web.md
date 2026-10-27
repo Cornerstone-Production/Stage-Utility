@@ -204,6 +204,9 @@ the build it carries. When they differ:
 | Planning Center reports a service live: any live mode, the countdown before the first item and a service parked between items included (the test the app's own updates use) | waits, looking again every 30 seconds, and deploys when it ends. Nothing goes ahead of it, "Update the page now" included: a deploy reloads every open page and can drop viewers' connections |
 | the window around a rehearsal or service is open (the window integration reconnects use, [Winding down between services](reliability.md#winding-down-between-services), which the Mac helpers' updates also wait out) | waits the same way until the window closes. "Update the page now" goes ahead of it |
 | the live state is not known: the server has just started and not yet read Planning Center, or Planning Center cannot be reached | waits the same way, counting unknown as live. Only an explicit "Update the page now" goes ahead of it |
+
+The check is made again just before the upload, so a service that goes live while the
+server is asking Cloudflare what the page holds (up to a minute) is waited out too.
 | the page was deployed from a **newer** version than this server runs, or from this server's own version by **another build** | leaves it |
 | otherwise | deploys, and logs the files uploaded and the files Cloudflare already held |
 
