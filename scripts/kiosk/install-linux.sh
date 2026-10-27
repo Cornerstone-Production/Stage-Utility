@@ -169,14 +169,14 @@ pick() {
 # other server ignores a screen that names somebody else, so remembering one that
 # merely answered would keep a released screen away from them for good. An
 # answer that does not say either way, from a server older than the field, is
-# not remembered. Returns 1 when it has just forgotten its server.
+# remembered. Returns 1 when it has just forgotten its server.
 remember() {
   srv="\$(printf '%s' "\$1" | sed -n 's/.*"serverId":"\\([^"]*\\)".*/\\1/p')"
   [ -n "\$srv" ] || return 0
   claimed="\$(printf '%s' "\$1" | sed -nE 's/.*"claimed":(true|false).*/\\1/p')"
-  if [ "\$claimed" = "true" ]; then
+  if [ "\$claimed" != "false" ]; then
     printf '%s' "\$srv" > "\$BOUND_FILE"
-  elif [ "\$claimed" = "false" ] && [ "\$srv" = "\$(cat "\$BOUND_FILE" 2>/dev/null)" ] && rm -f "\$BOUND_FILE"; then
+  elif [ "\$srv" = "\$(cat "\$BOUND_FILE" 2>/dev/null)" ] && rm -f "\$BOUND_FILE"; then
     echo "[kiosk] server \$srv no longer has this screen set up; forgot it, so any server can set it up" >&2
     return 1
   fi
