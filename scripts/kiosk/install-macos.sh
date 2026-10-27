@@ -1132,6 +1132,27 @@ release_lock() {
   LOCKED=0
 }
 
+# An update killed between its two renames (a power cut, SIGKILL) leaves the app
+# missing and the previous copy, and any staging folder, under a name with the dead
+# pid in it that nothing else would ever sweep. Under the lock, so no live update
+# owns them: put the newest previous copy back if the app is gone, then delete the rest.
+sweep_leftovers() {
+  newest=""
+  if [ ! -d "$APPS_DIR/$APP_NAME" ]; then
+    # The names are this script's own (a pid), and mtime is what "newest" means.
+    # shellcheck disable=SC2012
+    newest="$(ls -dt "$APPS_DIR/.$APP_NAME".old.* 2>/dev/null | head -n 1 || true)"
+    if [ -n "$newest" ] && [ -d "$newest" ] && [ ! -L "$newest" ] && mv "$newest" "$APPS_DIR/$APP_NAME"; then
+      say "an earlier update was cut off and left $APPS_DIR/$APP_NAME missing; put back the previous copy from $newest"
+    fi
+  fi
+  for leftover in "$APPS_DIR/.$APP_NAME".old.* "$APPS_DIR/.$APP_NAME".new.*; do
+    [ -e "$leftover" ] || [ -L "$leftover" ] || continue
+    rm -rf "$leftover"
+    say "removed $leftover, left by an update that did not finish"
+  done
+}
+
 check_update() {
   find_console_user
   detect_arch
@@ -1139,6 +1160,7 @@ check_update() {
   # An install by hand, or another check, has the Mac: this one is skipped.
   [ ! -L "$UPDATER_DIR" ] || die "$UPDATER_DIR is a symbolic link; run the installer by hand."
   take_lock 0 || return 0
+  sweep_leftovers
   MACHINE="$(tr -d '\r\n' <"$UPDATER_DIR/device-id" 2>/dev/null || true)"
   printf '%s\n' "$MACHINE" | grep -Eq '^[A-Za-z0-9._-]{1,128}$' ||
     die "no usable device id in $UPDATER_DIR/device-id; run the installer by hand."

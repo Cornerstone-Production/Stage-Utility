@@ -1331,6 +1331,50 @@ describe("--check-update", { skip: !(has("zip") && has("unzip") && has("uuidgen"
     assert.equal(which(), "build-old");
   });
 
+  describe("an update that was cut off", () => {
+    const apps = () => path.join(scratch, "Applications");
+    const aside = (name: string, mtime: number) => {
+      const dir = path.join(apps(), name);
+      fs.cpSync(app(), dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "Contents", "MacOS", "StageUtilityOutput"), `#!/bin/sh\n# ${name}\n`);
+      fs.utimesSync(dir, mtime, mtime);
+    };
+
+    it("puts the newest previous copy back when the app is missing, and sweeps the rest", async () => {
+      answer({});
+      aside(".StageUtilityOutput.app.old.111", 1_000_000);
+      aside(".StageUtilityOutput.app.old.222", 2_000_000);
+      fs.rmSync(app(), { recursive: true });
+      fs.mkdirSync(path.join(apps(), ".StageUtilityOutput.app.new.333"));
+      const r = await run();
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.match(fs.readFileSync(path.join(app(), "Contents", "MacOS", "StageUtilityOutput"), "utf8"), /old\.222/, "the newest copy");
+      assert.deepEqual(leftovers(), []);
+      assert.match(r.out, /left .*StageUtilityOutput\.app missing; put back the previous copy from .*old\.222/);
+      assert.equal(checks().length, 1, "and the check went on as for an installed Mac");
+    });
+
+    it("deletes leftovers beside an app that is there, and says so", async () => {
+      answer({});
+      aside(".StageUtilityOutput.app.old.111", 1_000_000);
+      fs.mkdirSync(path.join(apps(), ".StageUtilityOutput.app.new.333"));
+      const r = await run();
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.equal(which(), "build-old", "the installed app is untouched");
+      assert.deepEqual(leftovers(), []);
+      assert.match(r.out, /removed .*StageUtilityOutput\.app\.old\.111, left by an update that did not finish/);
+      assert.match(r.out, /removed .*StageUtilityOutput\.app\.new\.333, left by an update that did not finish/);
+    });
+
+    it("still does not put back an app removed by hand, when nothing was left aside", async () => {
+      fs.rmSync(app(), { recursive: true });
+      const r = await run();
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.ok(!fs.existsSync(app()));
+      assert.match(updaterStatus(), /^answer=not-installed$/m);
+    });
+  });
+
   it("is skipped while an install or another check holds the lock", async () => {
     const lock = path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "lock");
     fs.mkdirSync(lock);
