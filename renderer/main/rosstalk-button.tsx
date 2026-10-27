@@ -4,7 +4,7 @@ import { Loader2Icon, RadioTowerIcon } from "lucide-react";
 
 import { invoke } from "../lib/api";
 import { toast } from "../components/ui";
-import { ButtonLabel } from "./button-label";
+import { BUTTON_BASE_STYLE, ButtonLabel } from "./button-label";
 
 interface RossTalkButtonConfig {
   targetId?: string | null;
@@ -70,15 +70,8 @@ export function RossTalkButton({
       aria-label={config.label || config.commandId || "RossTalk"}
       style={{
         ...ts,
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        ...BUTTON_BASE_STYLE,
         gap: "0.4em",
-        border: "none",
-        borderRadius: "inherit",
-        overflow: "hidden",
         cursor: interactive ? "pointer" : "default",
       }}
     >

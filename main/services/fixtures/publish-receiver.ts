@@ -116,18 +116,18 @@ export class FakeReceiver {
           if (!res.writableEnded) self.dropped++;
         });
         void Promise.resolve(self.respond(got)).then((answer) => {
-        if (answer === "hang") return;
-        const reply = () => {
-          if (res.destroyed) return;
-          res.writeHead(answer.status, answer.headers ?? {});
-          if (answer.open) {
-            res.write(answer.body ?? "x");
-            return;
-          }
-          res.end(answer.body ?? "");
-        };
-        if (answer.delayMs) setTimeout(reply, answer.delayMs);
-        else reply();
+          if (answer === "hang") return;
+          const reply = () => {
+            if (res.destroyed) return;
+            res.writeHead(answer.status, answer.headers ?? {});
+            if (answer.open) {
+              res.write(answer.body ?? "x");
+              return;
+            }
+            res.end(answer.body ?? "");
+          };
+          if (answer.delayMs) setTimeout(reply, answer.delayMs);
+          else reply();
         });
       });
     });
@@ -150,10 +150,6 @@ export class FakeReceiver {
   /** The keys PUT, sorted: what a cycle sent. */
   putKeys(): string[] {
     return this.puts().map((p) => p.key).sort();
-  }
-
-  deletes(): string[] {
-    return this.requests.filter((r) => r.method === "DELETE" && DOC.test(r.path)).map((r) => decodeURIComponent(DOC.exec(r.path)![1]!));
   }
 
   frames(): { channel: string; data: unknown }[] {

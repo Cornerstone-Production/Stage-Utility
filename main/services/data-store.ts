@@ -4,7 +4,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
-import { errnoCode, isNotFound } from "./errors.js";
+import { errnoCode, errorMessage, isNotFound } from "./errors.js";
 import { adoptLegacyStoreFile } from "./store-file-adoption.js";
 import type { RestoreCheck } from "./restore-check.js";
 import { registerStore, type RenamedFrom, type StoreClass } from "./store-registry.js";
@@ -250,7 +250,7 @@ export class DataStore<T> {
     const failure = new StoreReadError(this.filename, err);
     if (!this.readFailure) {
       console.error(
-        `[data-store] ${failure.message}: ${(err as Error | null)?.message ?? String(err)}. ` +
+        `[data-store] ${failure.message}: ${errorMessage(err)}. ` +
           "Running on its defaults without saving them, and refusing saves to it until the server restarts. Fix the permissions or the disk, then restart.",
       );
     }

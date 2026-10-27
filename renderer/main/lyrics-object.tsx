@@ -69,7 +69,8 @@ function useLyricsSize(size: LyricsSettings["size"], contentKey: string, fallbac
 
 /** How much of its strength the tag underneath keeps. */
 function tagDim(s: LyricsSettings, under: boolean): number {
-  return under ? (s.underDim === "strong" ? 0.45 : 0.75) : 1;
+  if (!under) return 1;
+  return s.underDim === "strong" ? 0.45 : 0.75;
 }
 
 function tagStyle(tag: LyricsTag, s: LyricsSettings, under: boolean): CSSProperties {

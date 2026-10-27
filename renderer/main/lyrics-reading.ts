@@ -64,6 +64,12 @@ function hasWords(text: string | null): text is string {
   return text != null && text.trim() !== "";
 }
 
+/** Where chip `i` of the arrangement stands when group `at` is playing; none is playing when `at` is null. */
+function chipState(i: number, at: number | null): LyricsChip["state"] {
+  if (at == null || i > at) return "next";
+  return i < at ? "done" : "now";
+}
+
 export function readLyrics(config: LyricsConfig, { pro, known }: LyricsInput): LyricsReading {
   if (!known) return { kind: "loading" };
   if (!pro?.connected) return { kind: "none" };
@@ -105,7 +111,7 @@ export function readLyrics(config: LyricsConfig, { pro, known }: LyricsInput): L
     chips = pro.playOrderGroups.map((g, i) => ({
       text: shortGroupName(g.name),
       colorHex: g.colorHex,
-      state: at == null ? "next" : i < at ? "done" : i === at ? "now" : "next",
+      state: chipState(i, at),
     }));
   }
 

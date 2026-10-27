@@ -19,7 +19,7 @@ import * as readline from "node:readline";
 import type { Readable } from "node:stream";
 import { promisify } from "node:util";
 
-import { errorMessage } from "../errors.js";
+import { errorMessage, isNotFound } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
 import { cleared } from "../timers.js";
@@ -355,7 +355,7 @@ export class RelaySupervisor extends EventEmitter {
     try {
       text = await fsp.readFile(path.join(relayDir(), PID_FILE_NAME), "utf8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      if (isNotFound(err)) {
         this.pidfileWorks("read"); // No pid file — nothing left over.
         return { kind: "none" };
       }
@@ -421,7 +421,7 @@ export class RelaySupervisor extends EventEmitter {
       // finished writing it) — nothing stale is left, so it counts as
       // working. Anything else leaves a stale pid file that will misfire
       // stopLeftover()'s command check on the next run.
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (!isNotFound(err)) {
         this.reportPidfileTrouble("remove", err);
         return;
       }

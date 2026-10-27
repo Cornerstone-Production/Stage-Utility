@@ -24,7 +24,7 @@ import { integrationDialogClass } from "./integration-dialog-size";
 import { initialConfig, numberFieldValue } from "./integration-number-fields";
 import { useUpdateStatus } from "../app/queries";
 import { docsUrl } from "../lib/docs-url";
-import { droppedCredentialFields, droppedCredentialMessage } from "../lib/dropped-credentials";
+import { droppedCredentialNotice } from "../lib/dropped-credentials";
 import { UnsavedChangesDialog } from "../editor/unsaved-changes-dialog";
 import { UnsavedWorkProvider, useUnsavedWork } from "./unsaved-work";
 import {
@@ -524,8 +524,8 @@ export function IntegrationDialog({
       setLocalConfig(initialConfig(descriptor, next));
       // A password left unchanged that comes back empty was cleared by the
       // server because the address moved: see dropped-credentials.ts.
-      const dropped = droppedCredentialFields(descriptor.configSchema, pristine, config, next.config);
-      if (dropped.length > 0) toast.info(droppedCredentialMessage(`${descriptor.label} settings saved`, dropped.map((f) => f.label)));
+      const dropped = droppedCredentialNotice(`${descriptor.label} settings saved`, descriptor.configSchema, pristine, config, next.config);
+      if (dropped) toast.info(dropped);
       else toast.success(`${descriptor.label} settings saved.`);
       return true;
     } catch (err) {

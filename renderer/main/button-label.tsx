@@ -40,3 +40,22 @@ const BUTTON_LABEL_STYLE: CSSProperties = {
 export function ButtonLabel({ children, style }: { children: ReactNode; style?: CSSProperties }) {
   return <span style={{ ...BUTTON_LABEL_STYLE, ...style }}>{children}</span>;
 }
+
+/**
+ * What every console button widget's own <button> is: the widget's whole box, its
+ * content centred on both axes, no border of its own, the widget's corners, and
+ * anything that still does not fit clipped (a label wraps inside ButtonLabel; the
+ * rest is cut here, not drawn over the neighbouring widget). A widget spreads this
+ * after its text style and adds what is its own: the direction of its content, the
+ * gap, the cursor, its state.
+ */
+export const BUTTON_BASE_STYLE: CSSProperties = {
+  width: "100%",
+  height: "100%",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  border: "none",
+  borderRadius: "inherit",
+  overflow: "hidden",
+};

@@ -8,3 +8,8 @@
 export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
+
+/** An array whose every entry is a string: a list of ids or names from JSON. */
+export function isStringList(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string");
+}

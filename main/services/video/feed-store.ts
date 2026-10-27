@@ -3,6 +3,7 @@
 import { DataStore } from "../data-store.js";
 import { asArray, asObject, checked, refuse } from "../restore-check.js";
 import { DEFAULT_VIDEO_PORTS, type VideoFeedsFile } from "../../types/video.js";
+import { audioFieldsOf } from "./audio-input.js";
 import { FEED_ID_PATTERN } from "./feed-id.js";
 import { OFFERED_KINDS, parseFeedInput } from "./feed-input.js";
 import { parsePorts } from "./ports.js";
@@ -27,7 +28,10 @@ const restoreCheck = checked((raw) => {
     const { password: _password, ...stored } = feed;
     const parsed = parseFeedInput(stored, OFFERED_KINDS);
     if (!parsed.ok) refuse(`video feed "${id}": ${parsed.error}`);
-    return { ...stored, name: parsed.name, source: parsed.source };
+    // The audio fields as parseFeedInput normalised them (trimmed, defaults and a
+    // kind that takes none left out): the address becomes part of a command line.
+    const { audioConversion: _conversion, audioSourceUrl: _audioUrl, ...rest } = stored;
+    return { ...rest, name: parsed.name, source: parsed.source, ...audioFieldsOf(parsed) };
   });
   if (file.ports === undefined) return { ...file, feeds };
   const ports = parsePorts({ ...DEFAULT_VIDEO_PORTS, ...asObject(file.ports, "the relay ports") });

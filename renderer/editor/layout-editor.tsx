@@ -2541,7 +2541,7 @@ export function LayoutEditor({
                   />
                 )}
                 <span className="text-caption1 text-fg flex-1 min-w-0 truncate">
-                  {o.config.type === "container" ? `${typeLabel(displayType(o.config))} (${o.children?.length ?? 0})` : typeLabel(displayType(o.config))}
+                  {typeLabel(displayType(o.config)) + (o.config.type === "container" ? ` (${o.children?.length ?? 0})` : "")}
                 </span>
                 {depth > 0 && (
                   <Tooltip label="Move out of container">

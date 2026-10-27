@@ -34,9 +34,10 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { errorMessage } from "../main/services/errors.js";
+import { isStringList } from "../main/services/is-record.js";
 import { isMain } from "./is-main.mjs";
 import type { DeployBinding, DeployManifest } from "../main/types/servicecue-deploy.js";
-import { PUBLISH_PROTOCOL_VERSION, VIEWER_HTML, viewerBuildFromHtml } from "../main/types/servicecue-publish.js";
+import { PUBLISH_PROTOCOL_VERSION, VIEWER_HTML, isRecord, viewerBuildFromHtml } from "../main/types/servicecue-publish.js";
 import { STATIC_HEADERS_FILE } from "../publish/servicecue/src/headers.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -84,8 +85,6 @@ export async function parseWranglerConfig(text: string): Promise<Record<string, 
   return config as Record<string, unknown>;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-
 function stringField(config: Record<string, unknown>, key: string): string {
   const value = config[key];
   if (typeof value !== "string" || value === "") throw new Error(`wrangler.jsonc has no "${key}"`);
@@ -114,7 +113,7 @@ export function deployManifest(input: {
   const { directory: _directory, binding, ...assetConfig } = assets;
 
   const flags = wrangler.compatibility_flags ?? [];
-  if (!Array.isArray(flags) || !flags.every((f) => typeof f === "string")) throw new Error('wrangler.jsonc "compatibility_flags" is not a list of names');
+  if (!isStringList(flags)) throw new Error('wrangler.jsonc "compatibility_flags" is not a list of names');
 
   const objects = isRecord(durable) && Array.isArray(durable.bindings) ? durable.bindings : [];
   const bindings: DeployBinding[] = [{ type: "assets", name: binding }];

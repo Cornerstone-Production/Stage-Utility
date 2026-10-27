@@ -21,10 +21,11 @@ import { useState, type ReactNode } from "react";
 
 import { Button, ErrorNote, Input, confirm } from "../../components/ui";
 import { ConnectionField } from "./connection-field";
+import { selectMask, typedTokenOf } from "./servicecue-token";
 import { invoke, type ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { formatClock } from "../../lib/clock-format";
-import type { DeployState, DeployStatus, PublishSettingsDTO } from "../../../main/types/servicecue-publish-status.js";
+import type { DeployStatus, PublishSettingsDTO } from "../../../main/types/servicecue-publish-status.js";
 
 type Tone = "ok" | "busy" | "warn" | "bad" | "quiet";
 
@@ -64,6 +65,11 @@ function bare(text: string): string {
   return text.trim().replace(/[.!?]+$/, "");
 }
 
+/** The cards' one note: a problem, a refusal, a write that failed. */
+export function Note({ children }: { children: ReactNode }) {
+  return <ErrorNote className="rounded-[9px] border-transparent bg-warn-9/12 px-3 py-[9px] text-caption1 text-warn-11">{children}</ErrorNote>;
+}
+
 const Code = ({ children }: { children: ReactNode }) => <code className="font-mono text-caption2">{children}</code>;
 
 interface DeployLine {
@@ -78,8 +84,7 @@ interface DeployLine {
  */
 function deployLine(d: DeployStatus, zone: string | undefined, elapsedMs: number): DeployLine {
   const build = d.page?.build ?? d.bundle?.build ?? "unknown";
-  const state: DeployState = d.state;
-  switch (state) {
+  switch (d.state) {
     case "off":
       return {
         tone: "quiet",
@@ -250,7 +255,7 @@ export function KeepPageUpToDate({
   const stored = isMask(deploy.token);
   const acct = acctDraft ?? deploy.accountId;
   const tok = tokDraft ?? (stored ? FORM_MASK : "");
-  const typedToken = tokDraft !== null && tokDraft.trim() !== "" && !isMask(tokDraft) ? tokDraft.trim() : null;
+  const typedToken = typedTokenOf(tokDraft);
   const line = deployLine(deploy, zone, elapsedMs);
   const updating = deploy.state === "updating";
   // The tick can be up to a second old, so it never reads more than the server said.
@@ -387,10 +392,7 @@ export function KeepPageUpToDate({
               value={tok}
               disabled={busy}
               autoComplete="off"
-              onFocus={(e) => {
-                // The mask is not a value to edit: typing into it would append to bullets.
-                if (isMask(tok)) e.currentTarget.select();
-              }}
+              onFocus={(e) => selectMask(e, tok)}
               onChange={(e) => setTokDraft(e.target.value)}
               onBlur={() => void saveCredentials()}
             />
@@ -405,7 +407,7 @@ export function KeepPageUpToDate({
         </ConnectionField>
       </div>
 
-      {notice && <ErrorNote className="rounded-[9px] border-transparent bg-warn-9/12 px-3 py-[9px] text-caption1 text-warn-11">{notice}</ErrorNote>}
+      {notice && <Note>{notice}</Note>}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5 pt-0.5">
         <div role="status" className={cn("inline-flex items-start gap-2 text-footnote", TONE[line.tone].text)}>

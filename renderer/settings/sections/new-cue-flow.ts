@@ -56,7 +56,14 @@ export const AUTO_STEPS: readonly Step[] = [
 
 /** The steps for a kind; just the first until one is chosen. */
 export function stepsFor(kind: CueKind | null): readonly Step[] {
-  return kind === "manual" ? MANUAL_STEPS : kind === "auto" ? AUTO_STEPS : [KIND];
+  switch (kind) {
+    case "manual":
+      return MANUAL_STEPS;
+    case "auto":
+      return AUTO_STEPS;
+    case null:
+      return [KIND];
+  }
 }
 
 /** A manual cue is followed by a person pressing a button; two seconds stops a
@@ -154,9 +161,12 @@ function draftIssues(d: CueDraft, registry: Registry): RuleIssue[] {
   );
 }
 
+/** The rule step each flow step edits; the others edit none. */
+const STEP_KIND: Partial<Record<StepId, RuleIssue["step"]>> = { trig: "trigger", if: "condition", act: "action" };
+
 /** Fields that still need filling on one step, by their labels. */
 export function stepIssues(id: StepId, d: CueDraft, registry: Registry): RuleIssue[] {
-  const want = id === "trig" ? "trigger" : id === "if" ? "condition" : id === "act" ? "action" : null;
+  const want = STEP_KIND[id];
   return want ? draftIssues(d, registry).filter((i) => i.step === want) : [];
 }
 

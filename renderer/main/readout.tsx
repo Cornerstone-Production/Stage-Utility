@@ -116,7 +116,14 @@ function useShrinkToWidth(deps: unknown[]): {
 /** A horizontal alignment as the flex cross-axis value that sets it. Shared with
  *  the Countdown only layout, which aligns its number the same way. */
 export function readoutAlignItems(side: LayoutHAlign): "flex-start" | "center" | "flex-end" {
-  return side === "right" ? "flex-end" : side === "center" ? "center" : "flex-start";
+  switch (side) {
+    case "right":
+      return "flex-end";
+    case "center":
+      return "center";
+    default:
+      return "flex-start";
+  }
 }
 
 /**

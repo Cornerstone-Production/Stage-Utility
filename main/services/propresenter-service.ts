@@ -1599,7 +1599,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       // idxZero is clamped into 0..total-1 above, so `cur` exists. A slide in an
       // unnamed group has no entry in the strip, so no place in it.
       playOrderGroupIndex = occurrenceAt.get(cur.occurrence) ?? null;
-      if (cur?.name) currentSection = { name: cur.name, colorHex: cur.colorHex };
+      if (cur.name) currentSection = { name: cur.name, colorHex: cur.colorHex };
       const nxt = play[idxZero + 1];
       if (nxt?.name) nextSection = { name: nxt.name, colorHex: nxt.colorHex };
       // "Then": next differently-named group later in the play order.

@@ -7,6 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
+import { isStringList } from "../is-record.js";
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import { hostNames } from "../host-names.js";
 import { stageController } from "../stage-controller.js";
@@ -24,12 +25,11 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
     // rejected now that its absence is legal.
     if (method === "POST" && pathname === "/api/bar-items") {
       const body = await readBody(req) as Record<string, unknown>;
-      const ids = (v: unknown) => Array.isArray(v) && v.every((i) => typeof i === "string");
-      if (body.items !== undefined && !ids(body.items)) {
+      if (body.items !== undefined && !isStringList(body.items)) {
         error(res, "body.items must be a string[]");
         return;
       }
-      if (body.mobileItems !== undefined && !ids(body.mobileItems)) {
+      if (body.mobileItems !== undefined && !isStringList(body.mobileItems)) {
         error(res, "body.mobileItems must be a string[]");
         return;
       }

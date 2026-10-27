@@ -30,6 +30,7 @@ import { asArray, asObject, checked, optional, refuse } from "./restore-check.js
 import { HOST_NAMES_CHANNEL, alwaysAnswered, listableName } from "./host-name-rules.js";
 import { hostnameOf } from "./http-origin.js";
 import { scrub } from "./scrub.js";
+import { WriteQueue } from "./write-queue.js";
 
 /** Where an accepted name came from, for the card. */
 export type AcceptedSource = "added" | "accepted" | "seen";
@@ -147,6 +148,9 @@ export class HostNames {
   private readonly machineName: () => string;
   private readonly changeDelayMs: number;
   private publicUrl: () => string | null = () => null;
+  /** Changes to the list, one at a time: each builds the next config from the
+   *  last one saved, so two overlapping would drop the first one's change. */
+  private readonly changes = new WriteQueue();
 
   constructor(
     private readonly configStore: DataStore<HostNamesConfig>,
@@ -396,7 +400,11 @@ export class HostNames {
    * Turn refusal on or off. The first time it turns on it accepts the names in
    * use (see the top of this file), each one logged.
    */
-  async setEnforce(on: boolean): Promise<void> {
+  setEnforce(on: boolean): Promise<void> {
+    return this.changes.enqueue(() => this.applyEnforce(on));
+  }
+
+  private async applyEnforce(on: boolean): Promise<void> {
     if (on === this.enforcing) return;
     const at = new Date(this.now()).toISOString();
     const seeding = on && !this.config.seededAt;
@@ -427,7 +435,11 @@ export class HostNames {
   }
 
   /** Put a name on the list: typed (`added`) or picked from the waiting list (`accepted`). */
-  async add(raw: string, source: "added" | "accepted"): Promise<HostNamesResult> {
+  add(raw: string, source: "added" | "accepted"): Promise<HostNamesResult> {
+    return this.changes.enqueue(() => this.applyAdd(raw, source));
+  }
+
+  private async applyAdd(raw: string, source: "added" | "accepted"): Promise<HostNamesResult> {
     const parsed = listableName(raw);
     if (!parsed.ok) return parsed;
     const { name } = parsed;
@@ -442,14 +454,22 @@ export class HostNames {
     return { ok: true };
   }
 
-  async remove(name: string): Promise<void> {
+  remove(name: string): Promise<void> {
+    return this.changes.enqueue(() => this.applyRemove(name));
+  }
+
+  private async applyRemove(name: string): Promise<void> {
     if (!this.config.accepted.some((a) => a.name === name)) return;
     await this.commit({ ...this.config, accepted: this.config.accepted.filter((a) => a.name !== name) });
     console.log(`[security] host name "${scrub(name)}" removed from the list by the operator`);
   }
 
   /** Mark a waiting name as not the operator's. Only a name that is waiting. */
-  async dismiss(name: string): Promise<HostNamesResult> {
+  dismiss(name: string): Promise<HostNamesResult> {
+    return this.changes.enqueue(() => this.applyDismiss(name));
+  }
+
+  private async applyDismiss(name: string): Promise<HostNamesResult> {
     if (this.config.dismissed.includes(name)) return { ok: true };
     if (!this.waitingNames().some((s) => s.name === name)) return { ok: false, error: "That name is not waiting for a decision." };
     if (this.config.dismissed.length >= MAX_LISTED) {
@@ -460,7 +480,11 @@ export class HostNames {
     return { ok: true };
   }
 
-  async undismiss(name: string): Promise<void> {
+  undismiss(name: string): Promise<void> {
+    return this.changes.enqueue(() => this.applyUndismiss(name));
+  }
+
+  private async applyUndismiss(name: string): Promise<void> {
     if (!this.config.dismissed.includes(name)) return;
     await this.commit({ ...this.config, dismissed: this.config.dismissed.filter((d) => d !== name) });
   }
@@ -490,18 +514,25 @@ const restoreCheck = checked((raw) => {
   for (const [list, what] of [[accepted, "accepted"], [dismissed, "dismissed"]] as const) {
     if (list.length > MAX_LISTED) refuse(`at most ${MAX_LISTED} ${what} host names (this has ${list.length})`);
   }
-  const listable = (name: unknown, what: string): string => {
+  // A name listed twice spends two of the MAX_LISTED places on one name, and the
+  // card would show it twice. Compared as listed (lower-cased, host only), so
+  // "Ha.Example.org" and "ha.example.org" are the same name.
+  const listable = (name: unknown, what: string, seen: Set<string>): string => {
     const parsed = typeof name === "string" ? listableName(name) : null;
     if (!parsed?.ok) refuse(`the ${what} host name "${String(name).slice(0, 60)}" is not one the list takes`);
+    if (seen.has(parsed.name)) refuse(`the ${what} host name "${parsed.name.slice(0, 60)}" is listed twice`);
+    seen.add(parsed.name);
     return parsed.name;
   };
+  const seenAccepted = new Set<string>();
+  const seenDismissed = new Set<string>();
   return {
     ...cfg,
     accepted: accepted.map((a, i) => {
       const entry = asObject(a, `accepted host name ${i + 1}`);
-      return { ...entry, name: listable(entry.name, "accepted") };
+      return { ...entry, name: listable(entry.name, "accepted", seenAccepted) };
     }),
-    dismissed: dismissed.map((d) => listable(d, "dismissed")),
+    dismissed: dismissed.map((d) => listable(d, "dismissed", seenDismissed)),
   };
 });
 

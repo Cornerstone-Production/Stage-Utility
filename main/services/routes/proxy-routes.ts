@@ -6,7 +6,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { errorMessage } from "../errors.js";
+import { errorMessage, isNotFound } from "../errors.js";
 import * as fs from "fs/promises";
 import * as http from "http";
 
@@ -102,7 +102,7 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
           try {
             data = await fs.readFile(file.path);
           } catch (err) {
-            if (pass === 1 && (err as NodeJS.ErrnoException).code === "ENOENT") {
+            if (pass === 1 && isNotFound(err)) {
               const fresh = await stageController.findPlanAttachment(match);
               if (fresh) {
                 att = fresh;

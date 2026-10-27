@@ -42,7 +42,7 @@ import * as path from "node:path";
 
 import { withoutDataDir } from "./app-paths.js";
 import { commitPart, downloadWatchdog, readCapped, sha256OfFile, streamToPart, type WatchdogTimers } from "./capped-download.js";
-import { errorMessage, fetchFailureMessage } from "./errors.js";
+import { errorMessage, fetchFailureMessage, isNotFound } from "./errors.js";
 import { GITHUB_API_REPO, GITHUB_RELEASE_DOWNLOAD, rateLimitMessage } from "./github-repo.js";
 import { scrub } from "./scrub.js";
 import { atomicWrite } from "./write-queue.js";
@@ -160,7 +160,6 @@ class Refusal extends Error {
     super(message);
   }
 }
-
 
 /**
  * The hex SHA-256 in the `digest` of the asset named exactly `assetName` in a
@@ -465,7 +464,7 @@ export async function pruneOutputHelperCache(dataDir: string, keepVersion: strin
   try {
     entries = await fs.readdir(root);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") failed.push(errorMessage(err));
+    if (!isNotFound(err)) failed.push(errorMessage(err));
   }
   for (const entry of entries) {
     if (entry === keepVersion) continue;
@@ -496,7 +495,7 @@ async function statFile(file: string): Promise<FileStamp | null> {
     const st = await fs.stat(file);
     return st.isFile() && st.size > 0 ? { size: st.size, mtimeMs: st.mtimeMs } : null;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (isNotFound(err)) return null;
     throw err;
   }
 }

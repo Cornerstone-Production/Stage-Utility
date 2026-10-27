@@ -53,20 +53,6 @@ export function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(errorMessage(err));
 }
 
-/**
- * A caught FETCH failure, said usefully.
- *
- * Node's own message for every network failure is the word "fetch failed", with
- * the real reason — ECONNREFUSED, EHOSTUNREACH, the address and the port — one
- * level down on `cause`. Driving Companion's button picker against a dead port
- * put "Could not read Companion's configuration: fetch failed" on screen, which
- * tells an operator nothing at all; the REAPER transport action would have said
- * the same for a booth machine that is off.
- *
- * `target` is what was being dialled, for the case where there is no cause to
- * read — it goes in only when the message does not already name the address,
- * because the cause usually does and two copies read as two failures.
- */
 /** Node's codes for a certificate it would not trust: what a firewall that intercepts TLS, swapping in its own, causes. */
 const UNTRUSTED_CERTIFICATE_CODES: ReadonlySet<string> = new Set([
   "CERT_HAS_EXPIRED",
@@ -88,6 +74,20 @@ export function untrustedCertificateCode(err: unknown): string | null {
   return null;
 }
 
+/**
+ * A caught FETCH failure, said usefully.
+ *
+ * Node's own message for every network failure is the word "fetch failed", with
+ * the real reason — ECONNREFUSED, EHOSTUNREACH, the address and the port — one
+ * level down on `cause`. Driving Companion's button picker against a dead port
+ * put "Could not read Companion's configuration: fetch failed" on screen, which
+ * tells an operator nothing at all; the REAPER transport action would have said
+ * the same for a booth machine that is off.
+ *
+ * `target` is what was being dialled, for the case where there is no cause to
+ * read — it goes in only when the message does not already name the address,
+ * because the cause usually does and two copies read as two failures.
+ */
 export function fetchFailureMessage(err: unknown, target: string): string {
   const top = errorMessage(err);
   const cause = err instanceof Error && err.cause !== undefined ? errorMessage(err.cause) : "";

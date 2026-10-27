@@ -32,7 +32,8 @@ import { docsPageUrl } from "../../lib/docs-url";
 import { cn } from "../../lib/cn";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { ConnectionField } from "./connection-field";
-import { KeepPageUpToDate } from "./servicecue-deploy-section";
+import { selectMask, typedTokenOf } from "./servicecue-token";
+import { KeepPageUpToDate, Note } from "./servicecue-deploy-section";
 import type {
   PublishProblem,
   PublishSettingsDTO,
@@ -253,7 +254,7 @@ export function PublicLinkCard({
   const tokenStored = isMask(dto?.token);
   const addr = addrDraft ?? dto?.url ?? "";
   const tok = tokDraft ?? (tokenStored ? FORM_MASK : "");
-  const typedToken = tokDraft !== null && tokDraft.trim() !== "" && !isMask(tokDraft) ? tokDraft.trim() : null;
+  const typedToken = typedTokenOf(tokDraft);
   const canEnable = addr.trim() !== "" && (typedToken !== null || (tokDraft === null && tokenStored));
   const link = dto?.url ? `${dto.url}/servicecue` : "";
   // `now` and `lastSentAt` are the server's; what has passed since the answer came is the browser's own.
@@ -503,11 +504,6 @@ export function PublicLinkCard({
   );
 }
 
-/** The card's one note: a problem, a refusal, a write that failed. */
-function Note({ children }: { children: ReactNode }) {
-  return <ErrorNote className="rounded-[9px] border-transparent bg-warn-9/12 px-3 py-[9px] text-caption1 text-warn-11">{children}</ErrorNote>;
-}
-
 /** A count with its unit as the facts line says it: the number in bold, `after` as plain text. */
 function Count({ n, one, after = "" }: { n: number; one: string; after?: string }) {
   return (
@@ -570,10 +566,7 @@ function ConnectionFields({
           value={tok}
           disabled={disabled}
           autoComplete="off"
-          onFocus={(e) => {
-            // The mask is not a value to edit: typing into it would append to bullets.
-            if (isMask(tok)) e.currentTarget.select();
-          }}
+          onFocus={(e) => selectMask(e, tok)}
           onChange={(e) => onTok(e.target.value)}
           onBlur={leave}
         />

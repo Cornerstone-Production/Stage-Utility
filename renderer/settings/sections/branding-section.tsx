@@ -60,27 +60,34 @@ export function BrandingSection({
   // Flushed on unmount, or closing the panel mid-drag would drop the last write.
   const accentSave = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accentPending = useRef<string | null>(null);
-  const commitAccent = useCallback(
-    (v: string) => {
-      accentPending.current = v;
-      if (accentSave.current) clearTimeout(accentSave.current);
-      accentSave.current = setTimeout(() => {
-        accentSave.current = null;
-        const next = accentPending.current;
-        accentPending.current = null;
-        if (next != null) handlers.handleSetBranding({ accentColor: next });
-      }, 250);
-    },
-    [handlers],
-  );
+  // The latest handlers, read when the save fires. The save and the unmount flush
+  // depend on `handlers` through this ref, not through their dependency lists: a
+  // page that hands down a new `handlers` on a render would otherwise run the
+  // effect's cleanup, flushing the pending save early and defeating the debounce.
+  const handlersRef = useRef(handlers);
+  useEffect(() => {
+    handlersRef.current = handlers;
+  }, [handlers]);
+  const commitAccent = useCallback((v: string) => {
+    accentPending.current = v;
+    if (accentSave.current) clearTimeout(accentSave.current);
+    accentSave.current = setTimeout(() => {
+      accentSave.current = null;
+      const next = accentPending.current;
+      accentPending.current = null;
+      if (next != null) handlersRef.current.handleSetBranding({ accentColor: next });
+    }, 250);
+  }, []);
   useEffect(
     () => () => {
       if (!accentSave.current) return;
       clearTimeout(accentSave.current);
+      accentSave.current = null;
       const next = accentPending.current;
-      if (next != null) handlers.handleSetBranding({ accentColor: next });
+      accentPending.current = null;
+      if (next != null) handlersRef.current.handleSetBranding({ accentColor: next });
     },
-    [handlers],
+    [],
   );
 
   useResyncOn([stageState.accentColor], () => {

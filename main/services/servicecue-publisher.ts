@@ -331,29 +331,29 @@ export class ServiceCuePublisher {
     }
 
     const parsed = parsePublishUrl(this.settings.url);
-    let token = "";
-    if (parsed.ok) {
-      try {
-        token = (await this.deps.loadToken(parsed.origin)).trim();
-      } catch (err) {
-        this.configProblem = { kind: "config", message: `The publishing token could not be read: ${errorMessage(err)}` };
-        console.error(`[publish] could not read the publishing token: ${scrub(errorMessage(err))}`);
-        return {};
-      }
-    }
-    // Whatever the card should say about why nothing can be sent yet, or null when the address and token are fine.
-    let why = parsed.ok ? checkPublishToken(token) : parsed.message;
-    if (parsed.ok && token === "") why = "No publishing token is set.";
-    if (!parsed.ok || why !== null) {
-      this.configProblem = { kind: "config", message: why ?? "" };
-      console.warn(`[publish] publishing is held — ${scrub(why)} Change the address or the token to try again.`);
+    if (!parsed.ok) return this.holdForConfig(parsed.message);
+    let token: string;
+    try {
+      token = (await this.deps.loadToken(parsed.origin)).trim();
+    } catch (err) {
+      this.configProblem = { kind: "config", message: `The publishing token could not be read: ${errorMessage(err)}` };
+      console.error(`[publish] could not read the publishing token: ${scrub(errorMessage(err))}`);
       return {};
     }
+    const why = token === "" ? "No publishing token is set." : checkPublishToken(token);
+    if (why !== null) return this.holdForConfig(why);
 
     // Moving to another page leaves the old one holding its last rundown, and only this process knows the token that can clear it.
     const dropped = was && was.origin !== parsed.origin ? await this.dropOldCopy(was) : undefined;
     this.begin({ origin: parsed.origin, token });
     return dropped ? { dropped } : {};
+  }
+
+  /** The address or the token cannot be used: nothing is sent, and the card says why. */
+  private holdForConfig(why: string): Record<string, never> {
+    this.configProblem = { kind: "config", message: why };
+    console.warn(`[publish] publishing is held — ${scrub(why)} Change the address or the token to try again.`);
+    return {};
   }
 
   /** Shutdown: stop cleanly. The page keeps what it holds; a restart is not a reason to blank it. */
@@ -887,7 +887,7 @@ export class ServiceCuePublisher {
         console.warn(`[publish] the logo ${scrub(name)} is ${scrub(image.mime)}, a type the page does not take; it is left off the page`);
         continue;
       }
-      const r = await this.send(run, `asset:${name}`, (c) => c.putAsset(name, image.data, image.mime));
+      const r = await this.send(run, `asset:${name}`, (c) => c.putAsset(name, image.data, image.mime), () => run.assets.sent.has(name));
       if (r.ok) {
         run.assets.sent.add(name);
       } else if (r.kind === "refused") {

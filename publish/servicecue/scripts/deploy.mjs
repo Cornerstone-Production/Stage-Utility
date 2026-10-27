@@ -78,5 +78,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } finally {
     if (config !== null) cleanUp();
   }
+  // No status means wrangler never ran (npx missing, say): that is the reason, not a silent exit 1.
+  if (r.error) console.error(`[servicecue-deploy] could not run wrangler: ${r.error.message}`);
   process.exit(r.status ?? 1);
 }

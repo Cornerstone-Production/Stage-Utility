@@ -218,7 +218,7 @@ function inputProtocols(output: string): string[] {
   return out;
 }
 
-/** What `candidate` cannot do; an empty list is a capable ffmpeg. */
+/** Runs the five probes against `runPath` and says what `candidate` cannot do, or its version when it can do it all. */
 async function check(candidate: string, runPath: string, timeoutMs: number): Promise<{ ok: true; version: string } | ({ ok: false } & Why)> {
   const [version, decoders, encoders, protocols, muxers] = await Promise.all([
     run(runPath, ["-hide_banner", "-version"], timeoutMs),

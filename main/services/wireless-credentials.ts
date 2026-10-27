@@ -58,7 +58,6 @@ export function allCredentialKeys(): string[] {
   return [...keys];
 }
 
-
 /**
  * Where a connection's credential is sent: its provider, and the host and port
  * that provider's driver dials. A provider change counts as a move, since the

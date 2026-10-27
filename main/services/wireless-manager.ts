@@ -27,9 +27,6 @@ import { credentialTargetMoved, describeTarget } from "./credential-target.js";
 import { hasSecretValue, isTypedSecret } from "./mask.js";
 import { wirelessStore } from "./wireless-store.js";
 
-/** The fastest metering interval worth allowing. Below this the polling costs
- *  more than the freshness is worth, and 0 is a busy loop. */
-
 class WirelessManager {
   // In-memory list of connections including runtime fields.
   private connections: WirelessConnection[] = [];
@@ -267,7 +264,6 @@ class WirelessManager {
     // Clear transient error message once the connection recovers.
     if (state === "connected" || state === "disconnected") conn.message = null;
   }
-
 
   private async persist(): Promise<void> {
     // Credentials never reach wireless-connections.json — that file is in

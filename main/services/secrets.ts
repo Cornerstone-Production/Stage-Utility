@@ -8,7 +8,7 @@ import * as path from "path";
 import { getEncryptionBackend } from "./encryption.js";
 import { getUserDataPath } from "./app-paths.js";
 import { externKeyed } from "../types/extern-keyed.js";
-import { errorMessage } from "./errors.js";
+import { errorMessage, isNotFound } from "./errors.js";
 import { WriteQueue, atomicWrite } from "./write-queue.js";
 
 type SecretsBlob = Record<string, Record<string, string>>;
@@ -68,7 +68,7 @@ class SecretsStore {
       raw = await fs.readFile(filePath);
     } catch (err) {
       // No file yet is the ordinary first run — nothing is at risk, so no flag.
-      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+      if (isNotFound(err)) {
         this.cache = emptyBlob();
         return this.cache;
       }

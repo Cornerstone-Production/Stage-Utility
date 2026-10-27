@@ -34,7 +34,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { getUserDataPath } from "./app-paths.js";
-import { errorMessage } from "./errors.js";
+import { errorMessage, isNotFound } from "./errors.js";
 import { renamedStores, type RenamedFrom } from "./store-registry.js";
 
 export type AdoptOutcome = "moved" | "kept-current" | "none";
@@ -67,7 +67,7 @@ async function exists(file: string): Promise<boolean> {
     await fs.access(file);
     return true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if (isNotFound(err)) return false;
     throw err;
   }
 }

@@ -76,6 +76,8 @@ import {
   type StepId,
 } from "./new-cue-flow";
 
+const KIND_NAMES: Record<CueKind, string> = { manual: "Manual cue", auto: "Automatic rule" };
+
 /** What the dialog says after Create when a console was refused. */
 interface Outcome {
   ruleName: string;
@@ -200,7 +202,7 @@ export function NewCueDialog({
   const sub = (id: StepId): string => {
     switch (id) {
       case "kind":
-        return draft.kind === "manual" ? "Manual cue" : draft.kind === "auto" ? "Automatic rule" : "";
+        return draft.kind ? KIND_NAMES[draft.kind] : "";
       case "trig":
         return labelOf(registry.triggers, draft.trigger.id);
       case "if":
@@ -430,7 +432,7 @@ export function NewCueDialog({
         const rows: [string, string, StepId][] =
           draft.kind === "manual"
             ? [
-                ["Kind", "Manual cue", "kind"],
+                ["Kind", KIND_NAMES.manual, "kind"],
                 ["Does", labelOf(registry.actions, draft.action.id) || "—", "act"],
                 ["Name", displayName(draft, registry) || "—", "name"],
                 ["Cue name", cueName, "name"],
@@ -439,7 +441,7 @@ export function NewCueDialog({
                 ["On consoles", consoleNames.join(", ") || "None", "console"],
               ]
             : [
-                ["Kind", "Automatic rule", "kind"],
+                ["Kind", KIND_NAMES.auto, "kind"],
                 ["When", labelOf(registry.triggers, draft.trigger.id) || "—", "trig"],
                 ["If", draft.conditions.map((c) => labelOf(registry.conditions, c.id) || c.id).join(", ") || "Always", "if"],
                 ["Then", labelOf(registry.actions, draft.action.id) || "—", "act"],
@@ -544,7 +546,8 @@ export function NewCueDialog({
                 <span
                   className={cn(
                     "mt-px grid size-5 shrink-0 place-items-center rounded-full border font-mono text-caption2",
-                    current ? "border-accent bg-accent text-white" : done ? "border-line-strong bg-fill-hover text-fg" : "border-line-strong",
+                    current ? "border-accent bg-accent text-white" : "border-line-strong",
+                    done && "bg-fill-hover text-fg",
                   )}
                 >
                   {done ? "✓" : i + 1}

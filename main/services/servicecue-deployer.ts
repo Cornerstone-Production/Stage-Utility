@@ -348,7 +348,7 @@ export class ServiceCueDeployer implements DeployHook {
 
     const running = this.deps.version();
     // What the page serves: the publisher's last read, or, with none, what is known to be there.
-    const pageBuild = this.read ? this.read.build : memo?.kind === "deployed" || memo?.kind === "current" ? memo.build : undefined;
+    const pageBuild = this.servedBuild(memo);
     // The page's own word that it is this build lifts anything held against the Worker, before any hold is asked.
     if (pageBuild === manifest.build) return this.current(creds, manifest.name, manifest.build, generation);
 
@@ -442,6 +442,12 @@ export class ServiceCueDeployer implements DeployHook {
     }
   }
 
+  /** The build the page serves, as far as is known: undefined when nothing says. */
+  private servedBuild(memo: Memo | null): string | null | undefined {
+    if (this.read) return this.read.build;
+    return memo?.kind === "deployed" || memo?.kind === "current" ? memo.build : undefined;
+  }
+
   private noCopy(err: unknown): DeployNowOutcome {
     const message = errorMessage(err);
     this.state = "no-bundle";
@@ -454,21 +460,20 @@ export class ServiceCueDeployer implements DeployHook {
   /** The page serves this server's build. What Cloudflare holds about it is read once, for the card's "deployed at". */
   private async current(creds: DeployCredentials, name: string, build: string, generation: number): Promise<DeployOutcome> {
     const key = `${creds.accountId}|${build}`;
-    const pageBuild = build;
     if (this.memo?.kind === "deployed" && this.memo.build === build) {
       // This process put it there, and what it was told is what it assumed: only the page's own word that it is this build ends the watch for a Worker that is not the page.
       if (this.read && !this.read.assumed) this.memo = { kind: "current", key, build, at: Date.now() };
     } else if (!(this.memo?.kind === "current" && this.memo.key === key)) {
       try {
         const deployed = await createCloudflare({ origin: this.apiOrigin, accountId: creds.accountId, token: creds.token, script: name }).deployedPage();
-        this.page = { build: pageBuild, version: deployed.version, at: deployed.at };
+        this.page = { build, version: deployed.version, at: deployed.at };
         this.memo = { kind: "current", key, build, at: Date.now() };
         this.error = null;
         this.failures = 0;
       } catch (err) {
         // The page is current whatever this read says; the failure is on the card, and a refused token is held.
         const outcome = this.failedWith(err, generation, true);
-        this.page = { build: pageBuild, version: null, at: null };
+        this.page = { build, version: null, at: null };
         if (this.generation === generation) this.state = this.error?.refused ? "failed" : "current";
         return outcome;
       }

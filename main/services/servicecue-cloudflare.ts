@@ -28,9 +28,9 @@ import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { errorMessage, fetchFailureMessage } from "./errors.js";
+import { errorMessage, fetchFailureMessage, isNotFound } from "./errors.js";
 import { readCapped } from "./capped-download.js";
-import { isRecord } from "./is-record.js";
+import { isRecord, isStringList } from "./is-record.js";
 import { pinToOrigin } from "./pinned-origin.js";
 import { parseTag } from "./release-tags.js";
 import { isViewerBuildId } from "../types/servicecue-publish.js";
@@ -202,7 +202,6 @@ const BINDING_TYPES: Readonly<Record<string, readonly string[]>> = {
   plain_text: ["name", "text"],
 };
 
-const isStringList = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
 
 /** deploy.json, checked field by field: what is in it goes to Cloudflare as it stands. */
 export function parseManifest(raw: unknown): DeployManifest {
@@ -238,7 +237,7 @@ export function readManifest(dir: string): DeployManifest {
   try {
     text = fs.readFileSync(path.join(dir, "deploy.json"), "utf8");
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw new BundleUnavailable(`deploy.json could not be read: ${errorMessage(err)}`);
+    if (!isNotFound(err)) throw new BundleUnavailable(`deploy.json could not be read: ${errorMessage(err)}`);
     let marker: string | null = null;
     try {
       marker = fs.readFileSync(failureMarkerOf(dir), "utf8");

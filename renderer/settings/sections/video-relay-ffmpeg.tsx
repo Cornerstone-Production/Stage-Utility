@@ -24,7 +24,7 @@ export function ffmpegStatusLine(status: FfmpegStatus): string {
 }
 
 export function VideoRelayFfmpegPanel() {
-  const [stored, setStored] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [path, setPath] = useState("");
   const [status, setStatus] = useState<FfmpegStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -39,7 +39,7 @@ export function VideoRelayFfmpegPanel() {
       .then((r) => {
         if (!live) return;
         setLoadError(null);
-        setStored(r.path);
+        setLoaded(true);
         setPath(r.path);
         setStatus(r.status);
       })
@@ -57,7 +57,7 @@ export function VideoRelayFfmpegPanel() {
     try {
       const r = await invoke<{ status: FfmpegStatus }>("video:setFfmpegPath", { path });
       setStatus(r.status);
-      setStored(path.trim());
+      setLoaded(true);
     } catch (err) {
       setSaveError(errorMessage(err));
     } finally {
@@ -72,7 +72,9 @@ export function VideoRelayFfmpegPanel() {
 
   // Disabled only while the first read is in flight; a failed read leaves the
   // path editable, since saving does not need what the read would have said.
-  const loading = stored === null && loadError === null;
+  const loading = !loaded && loadError === null;
+
+  const checkingText = loading ? "Checking…" : "";
 
   return (
     <Field orientation="vertical">
@@ -82,7 +84,7 @@ export function VideoRelayFfmpegPanel() {
           The Video relay&apos;s audio conversion needs the system&apos;s ffmpeg. It is found automatically; set a path
           only if it is installed somewhere unusual.
         </FieldDescription>
-        <FieldDescription role="status" className="mt-1 break-words">{status ? ffmpegStatusLine(status) : loading ? "Checking…" : ""}</FieldDescription>
+        <FieldDescription role="status" className="mt-1 break-words">{status ? ffmpegStatusLine(status) : checkingText}</FieldDescription>
       </FieldContent>
       <Input
         value={path}

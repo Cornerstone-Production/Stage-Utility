@@ -82,7 +82,7 @@ export const MAX_LABEL_LENGTH = 60;
  * a service type with recorded history. What `save` refuses, and what a restore
  * refuses a row for.
  */
-export function milestoneProblem(
+function milestoneProblem(
   input: { date?: unknown; label?: unknown; serviceTypeId?: unknown },
   knownTypeIds: readonly string[] | null,
 ): string | null {

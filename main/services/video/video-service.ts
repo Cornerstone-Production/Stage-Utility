@@ -101,6 +101,13 @@ const FFMPEG_RECHECK_MS = 60_000;
 export type RelayRtsp = { on: true } | { on: false; why: string | null };
 export const RTSP_OFF: RelayRtsp = { on: false, why: null };
 
+/** A feed's audio as one reconcile settled it, for reportAudio. */
+interface SettledAudio {
+  name: string;
+  status: FeedAudioStatus;
+  why?: ConverterWhy;
+}
+
 async function fileExists(p: string): Promise<boolean> {
   return fs.access(p).then(() => true, () => false);
 }
@@ -1640,10 +1647,10 @@ class VideoService {
 
   /** relayFeeds(), and each feed's audio as it was settled for it, so the one
    *  caller that reports on it (reconcileOnce) does not decide it a second time. */
-  private async relayFeedsWithAudio(): Promise<{ feeds: RelayFeed[]; audio: Map<string, { name: string; status: FeedAudioStatus; why?: ConverterWhy }> }> {
+  private async relayFeedsWithAudio(): Promise<{ feeds: RelayFeed[]; audio: Map<string, SettledAudio> }> {
     const { feeds } = await loadFeedsFile();
     const out: RelayFeed[] = [];
-    const audio = new Map<string, { name: string; status: FeedAudioStatus; why?: ConverterWhy }>();
+    const audio = new Map<string, SettledAudio>();
     for (const feed of feeds) {
       const s = feed.source;
       if (s.kind !== "pull" && s.kind !== "push") continue;
@@ -1699,7 +1706,7 @@ class VideoService {
 
   /** The log lines for what reconcile just settled: a converter now wanted for a
    *  reason, and a feed whose audio cannot be heard, each said once. */
-  private reportAudio(audio: Map<string, { name: string; status: FeedAudioStatus; why?: ConverterWhy }>): void {
+  private reportAudio(audio: Map<string, SettledAudio>): void {
     for (const [id, { name, status, why }] of audio) {
       const state = this.audio.get(id);
       state.why = why;
@@ -2187,6 +2194,8 @@ class VideoService {
     await videoFeedsStore.update((current) => ({ ...current, feeds: feedsOf(current).filter((f) => f.id !== id) }));
     await this.clearFeedSecret(id);
     await this.forgetFeedRuntime(id);
+    // A feed put back under a reserved id is the same warning again, not a repeat.
+    this.reservedIdLogged.delete(id);
     await this.publish();
     await this.notifyFeedsChanged(id);
     return true;

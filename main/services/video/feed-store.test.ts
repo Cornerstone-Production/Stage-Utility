@@ -21,3 +21,17 @@ test("a partial ports object keeps what it has", async () => {
   assert.equal((await loadFeedsFile()).ports.rtmp, 1936);
   assert.equal((await loadFeedsFile()).ports.srt, 8890);
 });
+
+test("a restore keeps a feed's audio fields as a save would store them", async () => {
+  const { restoreCheckFor } = await import("../stores.js");
+  const check = restoreCheckFor("video-feeds.json");
+  assert.ok(check);
+  const feed = (extra: Record<string, unknown>) => ({
+    feeds: [{ id: "cam", name: "Cam", source: { kind: "pull", url: "rtsp://192.0.2.5/live" }, ...extra }],
+  });
+  const result = await check(feed({ audioConversion: "auto", audioSourceUrl: " http://192.0.2.5/0.ts " }));
+  assert.ok(result.ok);
+  const [stored] = (result.value as { feeds: Record<string, unknown>[] }).feeds;
+  assert.equal(stored.audioSourceUrl, "http://192.0.2.5/0.ts", "the address is stored trimmed, as a save stores it");
+  assert.equal("audioConversion" in stored, false, "the default conversion is left out");
+});

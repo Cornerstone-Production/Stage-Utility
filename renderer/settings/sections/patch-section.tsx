@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { UploadIcon, PlusIcon, Trash2Icon, PrinterIcon } from "lucide-react";
 
+import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { Button, ErrorNote, Input, SkeletonRows, toast, confirm , UnsavedBanner, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
@@ -97,8 +98,8 @@ export function PatchSection() {
       setSaved(result);
       setDraft(result);
       toast.success("Patch saved");
-    } catch {
-      toast.error("Couldn't save the patch");
+    } catch (e) {
+      toast.error(`Couldn't save the patch: ${errorMessage(e)}`);
     } finally {
       setSaving(false);
     }

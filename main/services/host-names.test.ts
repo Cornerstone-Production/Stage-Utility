@@ -121,6 +121,22 @@ describe("a name not on the list", () => {
     assert.equal(names.check("ha.example.org", req()).answer, false);
   });
 
+  test("keeps every name when several are added or dismissed at once", async () => {
+    names.check("seen.example.org", req());
+    await Promise.all([
+      names.add("a.example.org", "added"),
+      names.add("b.example.org", "added"),
+      names.dismiss("seen.example.org"),
+      names.setEnforce(true),
+    ]);
+    const held = (await hostNamesConfigStore.load()) as { accepted: { name: string }[]; dismissed: string[]; enforce?: boolean };
+    for (const view of [names.view(), { accepted: held.accepted, dismissed: held.dismissed.map((name) => ({ name })), enforce: held.enforce === true }]) {
+      assert.deepEqual(view.accepted.map((a) => a.name).sort(), ["a.example.org", "b.example.org"]);
+      assert.deepEqual(view.dismissed.map((d) => d.name), ["seen.example.org"]);
+      assert.equal(view.enforce, true);
+    }
+  });
+
   test("tells the card, once per new name, not once per request", async () => {
     names.check("ha.example.org", req());
     await settle();
@@ -274,5 +290,30 @@ describe("what may go on the list", () => {
     await names.add("ha.example.org", "added");
     assert.equal((await names.dismiss("ha.example.org")).ok, false);
     assert.deepEqual(names.view().dismissed, []);
+  });
+});
+
+describe("a restored list", () => {
+  const check = async (raw: unknown) => {
+    const { restoreCheckFor } = await import("./stores.js");
+    const run = restoreCheckFor("host-names.json");
+    assert.ok(run, "the host names file has no restore check");
+    return run(raw);
+  };
+  const entry = (name: string) => ({ name, source: "added", at: "2026-10-20T12:00:00.000Z" });
+
+  test("with the same accepted name twice is refused, however it is cased", async () => {
+    const result = await check({ accepted: [entry("ha.example.org"), entry("HA.example.org")], dismissed: [] });
+    assert.equal(result.ok, false);
+    assert.match(String((result as { reason?: string }).reason), /accepted host name "ha.example.org" is listed twice/);
+  });
+  test("with the same dismissed name twice is refused", async () => {
+    const result = await check({ accepted: [], dismissed: ["a.example.org", "a.example.org"] });
+    assert.equal(result.ok, false);
+    assert.match(String((result as { reason?: string }).reason), /dismissed host name "a.example.org" is listed twice/);
+  });
+  test("keeps distinct names, and a name on both lists is each list's own", async () => {
+    const result = await check({ accepted: [entry("a.example.org"), entry("b.example.org")], dismissed: ["a.example.org"] });
+    assert.equal(result.ok, true);
   });
 });

@@ -14,13 +14,14 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
-import { alerts, ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
+import { alerts, ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
-const { render, screen, cleanup } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { PatchSection } = await import("./patch-section.js");
+const { ConfirmHost, Toaster, TooltipProvider } = await import("../../components/ui/index.js");
 const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 
@@ -114,6 +115,61 @@ test("control: both reads load, This week is offered and nothing alerts", async 
     await eventually(() => assert.equal(!!screen.queryByRole("option", { name: /This week/ }), true, "a loaded plan offers This week"));
     assert.equal(alerts(), "");
     assert.deepEqual(f.logs, []);
+  } finally {
+    f.restore();
+  }
+});
+
+// ---- saving -----------------------------------------------------------------
+
+/** Serve `file`; a POST to /api/patch is recorded and answered with `saveAs`. */
+function stubEditable(file: PatchFile, saveAs: { status: number; json: unknown }) {
+  const posts: { file: PatchFile }[] = [];
+  const f = stubFetchWithLog((url, init) => {
+    if (url.endsWith("/api/patch")) {
+      if (init?.method === "POST") {
+        posts.push(JSON.parse(String(init.body)) as { file: PatchFile });
+        return reply(saveAs.status, saveAs.json);
+      }
+      return ok(file);
+    }
+    if (url.includes("/api/state")) return ok({ ...PLAN, allowedServiceTypeIds: [], pcoConfigured: true });
+    if (url.includes("/api/service-types")) return ok([{ id: "st1", name: "Weekend" }]);
+    return ok({});
+  });
+  return { ...f, posts };
+}
+
+async function mountEditable(): Promise<void> {
+  render(
+    React.createElement(
+      TooltipProvider,
+      null,
+      React.createElement(PatchSection),
+      React.createElement(ConfirmHost),
+      React.createElement(Toaster),
+    ),
+  );
+  await settle();
+  await settle();
+  await eventually(() => assert.equal(!!screen.queryByRole("tab", { name: "Stage left" }), true));
+}
+
+const press = async (el: HTMLElement) => {
+  await act(async () => {
+    fireEvent.click(el);
+  });
+  await settle();
+};
+
+test("a refused save toasts the server's reason, not a bare failure", async () => {
+  const f = stubEditable(FILE, { status: 400, json: { error: "That sheet name is taken" } });
+  try {
+    await mountEditable();
+    await press(screen.getByRole("button", { name: /New variant/ }));
+    await press(screen.getByRole("button", { name: "Save" }));
+    await eventually(() => assert.match(document.body.textContent ?? "", /Couldn't save the patch: .*That sheet name is taken/));
+    assert.equal(f.posts.length, 1);
   } finally {
     f.restore();
   }

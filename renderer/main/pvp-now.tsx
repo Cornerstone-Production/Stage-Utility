@@ -317,9 +317,12 @@ export function PvpNowObject({
   // a full bar, the way a counted still holds once its hold runs out.
   if (layout === "countdown") {
     const ended = !progress && badge === "ended";
+    let remainingSec: number | null = null;
+    if (progress) remainingSec = progress.remainingSec;
+    else if (ended) remainingSec = 0;
     return (
       <PvpCountdownOnly
-        time={progress ? fmtDuration(progress.remainingSec) : ended ? fmtDuration(0) : null}
+        time={remainingSec != null ? fmtDuration(remainingSec) : null}
         color={ended ? pvpWarnColor(pvpWarnTone(0, config)) : warnColor}
         meter={ended && (config.showProgress ?? true) ? 1 : meter}
         meterKey={pvpMeterKey(layer)}

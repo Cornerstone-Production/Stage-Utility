@@ -131,10 +131,17 @@ export class RestoreRefusedError extends Error {
   }
 }
 
+/** An image a restore writes, already checked. */
+interface RestoredImage {
+  dir: string;
+  file: string;
+  bytes: Buffer;
+}
+
 /** What a restore writes, every part of it checked. */
 interface CheckedBundle {
   files: Map<string, NonNullable<unknown>>;
-  images: { dir: string; file: string; bytes: Buffer }[];
+  images: RestoredImage[];
 }
 
 /** The most images a restore takes. Deliberately a cap no real install meets:
@@ -205,7 +212,7 @@ async function liveIdFloors(dest: string): Promise<Record<string, unknown> | nul
     // No live settings.json at all — a restore onto a fresh install. Not a
     // failure: there are simply no spent ids to carry forward. Anything else is
     // rethrown rather than treated as "nothing there".
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (isNotFound(err)) return null;
     throw err;
   }
   try {
@@ -523,7 +530,7 @@ class ConfigSnapshotService {
 
   /** The bundle's images, each decoded and checked, by directory and file. A
    *  directory this build does not keep images in is skipped, and said so. */
-  private checkImages(images: unknown, failures: string[]): { dir: string; file: string; bytes: Buffer }[] {
+  private checkImages(images: unknown, failures: string[]): RestoredImage[] {
     if (images === undefined) return [];
     if (images === null || typeof images !== "object" || Array.isArray(images)) {
       failures.push("images: must be an object of images");
@@ -534,7 +541,7 @@ class ConfigSnapshotService {
       failures.push(`images: the backup lists ${entries.length}; a restore takes at most ${MAX_RESTORE_IMAGES}`);
       return [];
     }
-    const out: { dir: string; file: string; bytes: Buffer }[] = [];
+    const out: RestoredImage[] = [];
     const skipped: string[] = [];
     for (const [ref, b64] of entries) {
       const slash = ref.indexOf("/");

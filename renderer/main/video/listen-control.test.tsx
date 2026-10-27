@@ -612,6 +612,30 @@ test("the level meter is drawn when the browser gives an audio context", async (
   }
 });
 
+test("the meter keeps its one analyser across re-renders of the control", async () => {
+  let sources = 0;
+  class MeteringContext extends FakeAudioContext {
+    createMediaStreamSource() {
+      sources++;
+      return { connect() {}, disconnect() {} };
+    }
+    createAnalyser() {
+      return { fftSize: 0, smoothingTimeConstant: 0, frequencyBinCount: 16, connect() {}, disconnect() {}, getByteFrequencyData() {} };
+    }
+  }
+  FakePeerConnection.trackStream = { getAudioTracks: () => [{}] };
+  const run = await listeningWith(MeteringContext);
+  try {
+    assert.equal(sources, 1, "no meter was attached to the stream");
+    const slider = screen.getByRole("slider", { name: "Volume for Alpha" }) as HTMLInputElement;
+    act(() => void fireEvent.change(slider, { target: { value: "35" } }));
+    await settle();
+    assert.equal(sources, 1, "a re-render tore the meter down and attached another");
+  } finally {
+    run.done();
+  }
+});
+
 test("a browser with no audio context, or one that will not start, gets no meter and keeps the sound and the slider", async () => {
   const none = await listeningWith(undefined);
   try {

@@ -20,9 +20,8 @@ import {
 import { barConfigStore } from "./bar-config-store.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
-import { screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
+import { isDisplayKind, screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
 import { isSafeKey } from "./safe-key.js";
-import { isDisplayKind } from "../types/views.js";
 import { isUpdateMode } from "../types/state.js";
 import {
   CAPTION_COLOR,
@@ -45,6 +44,7 @@ import { scrub, scrubError } from "./scrub.js";
 import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
+import { isStringList } from "./is-record.js";
 import { OutageLog } from "./repeat-log.js";
 import {
   incompleteOf,
@@ -196,8 +196,6 @@ const DEVICE_STATUS_FLUSH_MS = 150;
  * number and does not become an accident of whatever TTL a later release picks.
  */
 export const ROSTER_WINDOW_INTERVAL_MS = 60_000;
-
-/** Deep-clone a layout, minting fresh object ids so copies stay independent. */
 
 /**
  * A layout save was built on a revision someone else has already replaced.
@@ -779,10 +777,9 @@ export class StageController {
     // Only a list of entries with an id is a legacy display list. Anything else
     // (a hand edit) is read as none, rather than throwing out of init() and
     // keeping the server from starting on every boot.
-    const listed = Array.isArray(settings.displays)
-      ? settings.displays.filter((d): d is DisplayInfo => typeof d?.id === "string" && typeof d?.name === "string")
-      : [];
-    if (settings.displays !== undefined && listed.length !== (Array.isArray(settings.displays) ? settings.displays.length : -1)) {
+    const entries: DisplayInfo[] = Array.isArray(settings.displays) ? settings.displays : [];
+    const listed = entries.filter((d) => typeof d?.id === "string" && typeof d?.name === "string");
+    if (settings.displays !== undefined && (!Array.isArray(settings.displays) || listed.length < entries.length)) {
       console.warn("[stage-controller] settings.json's legacy displays list is not a list of displays; ignored");
     }
     const legacy: DisplayInfo[] =
@@ -4361,7 +4358,7 @@ export class StageController {
    */
   async setOutputGroups(id: string, groups: unknown): Promise<StageState> {
     this.requireOutput(id, "outputs:setGroups");
-    if (!Array.isArray(groups) || !groups.every((g) => typeof g === "string")) {
+    if (!isStringList(groups)) {
       throw new Error("outputs:setGroups — groups must be an array of group ids");
     }
     await messagingStore.init();
