@@ -13,6 +13,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, mock, test } from "node:test";
 
 import type { VideoFeedView } from "@main/types/video";
+import { LISTEN_START_TIMEOUT_MS } from "@main/types/video";
 import { installRenderDom, unmountAndTeardown } from "../../test-dom.js";
 import { FAKE_SDP, FakePeerConnection, installFakePeerConnection, NodeEvent } from "../../test-fixtures/fake-peer-connection.js";
 import { FakeHls, installFakeHls } from "../../test-fixtures/fake-hls.js";
@@ -21,6 +22,7 @@ const teardown = installRenderDom();
 
 import {
   CONNECT_TIMEOUT_MS,
+  LISTEN_CONNECT_TIMEOUT_MS,
   DROP_GRACE_MS,
   FIRST_FRAME_TIMEOUT_MS,
   FRAME_POLL_MS,
@@ -288,6 +290,30 @@ test("a POST that never gets a reply is dropped (retried), never marked webrtc-u
       ["onDropped"],
       "a network hang must retry the same method, never fall back permanently — an external WHEP feed has no HLS to fall back to",
     );
+  } finally {
+    mock.timers.reset();
+    g.restore();
+  }
+});
+
+test("a listening POST held while the relay starts its converter is not dropped before the relay gives up on it", async () => {
+  const g = stubGlobals("hang");
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const video = new FakeVideo() as unknown as HTMLVideoElement & FakeVideo;
+  const { calls, cb } = makeCallbacks();
+  try {
+    startPlaybackAttempt(video, { method: "webrtc", url: "/video/p-listen/whep", relayManaged: false, listen: true }, cb);
+    await flush();
+
+    // Past the picture's window, inside the relay's start timeout (a cold ffmpeg plus the encoder dial).
+    assert.ok(LISTEN_CONNECT_TIMEOUT_MS > LISTEN_START_TIMEOUT_MS, "the browser gives up before the relay does");
+    mock.timers.tick(LISTEN_START_TIMEOUT_MS);
+    await flush();
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase").map((c) => c.fn), [], "a cold converter start counted as a failed attempt");
+
+    mock.timers.tick(LISTEN_CONNECT_TIMEOUT_MS - LISTEN_START_TIMEOUT_MS);
+    await flush();
+    assert.deepEqual(calls.filter((c) => c.fn !== "onPhase").map((c) => c.fn), ["onDropped"]);
   } finally {
     mock.timers.reset();
     g.restore();

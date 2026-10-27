@@ -20,7 +20,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
-import { relayPlayback, type VideoFeedView, type VideoPlaybackReport } from "@main/types/video";
+import { LISTEN_START_TIMEOUT_MS, relayPlayback, type VideoFeedView, type VideoPlaybackReport } from "@main/types/video";
 import { errorMessage } from "@main/services/errors";
 import { OutageLog } from "@main/services/repeat-log";
 import { browserCaps, choosePlayback, type PlaybackChoice } from "./choose-playback";
@@ -41,6 +41,8 @@ import { startWhep, WhepError, type WhepSession } from "./whep-client";
 const RELAY_WEBRTC_REFUSAL_STATUSES = new Set([400, 406, 415, 422]);
 
 export const CONNECT_TIMEOUT_MS = 10_000;
+/** The handshake window of a listening session: the relay holds the WHEP POST while it starts the feed's ffmpeg (up to LISTEN_START_TIMEOUT_MS, and the encoder dial is inside that), so a cold start of 10 to 15 s must not read as "no response" and count toward LISTEN_MAX_FAILURES. */
+export const LISTEN_CONNECT_TIMEOUT_MS = LISTEN_START_TIMEOUT_MS + 5000;
 export const FIRST_FRAME_TIMEOUT_MS = 5000;
 /** HLS gets longer: a segmented playlist's first fetch-and-buffer routinely
  *  takes longer than a WebRTC track's first frame, and unlike WebRTC there is
@@ -386,7 +388,7 @@ export function startPlaybackAttempt(
     // WebRTC, so it retries rather than falling back permanently.
     connectTimer = setTimeout(() => {
       end(() => cb.onDropped("no response to the connection offer"));
-    }, CONNECT_TIMEOUT_MS);
+    }, choice.listen ? LISTEN_CONNECT_TIMEOUT_MS : CONNECT_TIMEOUT_MS);
     const answered = adopt
       ? Promise.resolve(adopt.session).then((whep) => {
           if (!ended) video.srcObject = adopt.stream;

@@ -237,7 +237,9 @@ on an embed or external feed.
 `runOnDemand`: it starts one ffmpeg when the first reader asks for the path and
 stops it 10 seconds after the last leaves, restarting it while readers remain.
 Two people listening to one feed share one ffmpeg; no feed has one while nobody
-listens. ffmpeg reads the feed from the relay's own copy over loopback RTSP,
+listens. The relay holds the first listener's request for up to 15 seconds while
+ffmpeg starts, and the browser waits 20 seconds for it, so a cold start is not
+counted as a failed attempt. ffmpeg reads the feed from the relay's own copy over loopback RTSP,
 never from the encoder (the Ultra Encodes refuse a second RTSP reader), copies
 the video untouched and encodes the audio to Opus, 128 kb/s stereo, 20 ms frames,
 `-application lowdelay`. Its input flags (`-fflags nobuffer`, `-flags low_delay`,

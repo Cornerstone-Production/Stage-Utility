@@ -7,6 +7,7 @@
 
 import { listenPathName } from "./audio-listen.js";
 import { apiUser, listenPublisherUser, READER_USER, type RelayUser } from "./mediamtx-config.js";
+import { LISTEN_START_TIMEOUT_MS } from "../../types/video.js";
 import type { RelayFeed } from "./relay.js";
 
 /** The subset of a MediaMTX path's config this app ever sets. `GET
@@ -102,9 +103,6 @@ export function pathConf(feed: RelayFeed): PathConf {
   return { source: "publisher", overridePublisher: false };
 }
 
-/** How long a reader of a `-listen` path waits for ffmpeg to start publishing
- *  before it is told no. */
-export const LISTEN_START_TIMEOUT_MS = 15_000;
 /** How long after the last reader leaves the converter keeps running: long enough
  *  that switching Listen off and on reuses it, short enough to cost little CPU. */
 export const LISTEN_CLOSE_AFTER_MS = 10_000;
