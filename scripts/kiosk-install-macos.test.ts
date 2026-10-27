@@ -1278,6 +1278,19 @@ describe("--check-update", { skip: !(has("zip") && has("unzip") && has("uuidgen"
       assert.equal(checks()[0].get("machine"), MACHINE, "with root's copy of the id, not the state folder's");
     });
 
+    it("without root's own copy of the server, asks nobody: the state folder's file is not a fallback", async () => {
+      fs.rmSync(path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "server"));
+      // A valid server the logged-in user could write, and which is listening.
+      fs.writeFileSync(path.join(state(), "server"), `${server.base}\n`);
+      answer({ update: true });
+      const r = await run();
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.equal(checks().length, 0, "no request went to the planted server");
+      assert.ok(!server.hits.some((h) => h.includes(".zip")));
+      assert.match(updaterStatus(), /^answer=unreachable$/m);
+      assert.match(r.out, /no server answered the update check \(none is recorded/);
+    });
+
     it("sends nothing it would read through a link the user left, nor anything at all without its own id", async () => {
       fs.rmSync(path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "device-id"));
       fs.writeFileSync(path.join(scratch, "secret"), "ROOT-ONLY\n");
