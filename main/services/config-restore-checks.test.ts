@@ -237,9 +237,20 @@ describe("config restore checks", () => {
     assert.equal(settings.integrationConfigs["planning-center"].appId, "x");
   });
 
-  test("refuses a backup listing more files than a backup can hold", async () => {
-    const files = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`extra-${i}.json`, {}]));
-    await assert.rejects(() => configSnapshot.apply(bundleOf(files)), /lists 200 files/);
+  test("refuses a backup listing more files than a restore takes", async () => {
+    const files = Object.fromEntries(Array.from({ length: 501 }, (_, i) => [`extra-${i}.json`, {}]));
+    await assert.rejects(() => configSnapshot.apply(bundleOf(files)), /lists 501 files; a restore takes at most 500/);
+  });
+
+  test("restores a newer build's backup, ignoring the stores this build does not keep", async () => {
+    // More unknown stores than this build has old names for: a cap tied to
+    // this build's store count refused the whole restore.
+    const newer = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`newer-store-${i}.json`, {}]));
+    const presets = [{ id: "p2", name: "From the newer build", slots: [] }];
+    const applied = await configSnapshot.apply(bundleOf({ ...GOOD, "presets.json": presets, ...newer }));
+    assert.deepEqual(applied.slice().sort(), configFiles().slice().sort());
+    assert.deepEqual(await readOnDisk("presets.json"), presets);
+    await assert.rejects(() => fs.stat(path.join(TMP, "newer-store-0.json")), { code: "ENOENT" });
   });
 
   test("the start-up check names a file on disk a save would refuse, and leaves it", async () => {
@@ -259,9 +270,10 @@ describe("config restore checks", () => {
     assert.deepEqual(await snapshotDir(), before);
   });
 
-  test("refuses a public URL that is not a web address", async () => {
-    const settings = { ...(GOOD["settings.json"] as object), publicUrl: "javascript:alert(1)//" };
-    await assert.rejects(() => configSnapshot.apply(bundleOf({ "settings.json": settings })), /publicUrl must be an http or https address/);
+  test("restores a public URL that is not a web address as none", async () => {
+    const settings = { ...(GOOD["settings.json"] as object), publicUrl: "http://stage box" };
+    await configSnapshot.apply(bundleOf({ "settings.json": settings }));
+    assert.equal((await readOnDisk("settings.json") as { publicUrl: unknown }).publicUrl, null);
   });
 
   test("refuses duplicate rule ids and duplicate view ids", async () => {
@@ -272,6 +284,29 @@ describe("config restore checks", () => {
     );
     const view = (GOOD["views.json"] as object[])[0];
     await assert.rejects(() => configSnapshot.apply(bundleOf({ "views.json": [view, view] })), /lists the id "v1" more than once/);
+  });
+
+  test("refuses a called cue with no params, naming it, and keeps a non-cue rule without them", async () => {
+    const rule = (GOOD["automation-rules.json"] as Record<string, unknown>[])[0];
+    // Two cues, so the other one's name check reads this one's aliases: that
+    // read once threw "Cannot read properties of undefined (reading 'aliases')".
+    const other = { ...rule, id: "r2", name: "Other", trigger: { id: "call.by-name", params: { name: "other" } } };
+    const bare = { ...rule, name: "Bare cue", trigger: { id: "call.by-name" } };
+    await assert.rejects(
+      () => configSnapshot.apply(bundleOf({ "automation-rules.json": [other, bare] })),
+      (err: Error) => {
+        assert.ok(err instanceof RestoreRefusedError, String(err));
+        assert.deepEqual(err.failures, ['automation-rules.json: rule "Bare cue" is a called cue with no trigger params']);
+        return true;
+      },
+    );
+    await assert.rejects(
+      () => configSnapshot.apply(bundleOf({ "automation-rules.json": [{ ...other, action: { id: "rosstalk.command", params: "x" } }] })),
+      /rule "Other"'s action params must be an object/,
+    );
+    const noParams = { ...rule, id: "r3", trigger: { id: "osc.value" }, action: { id: "rosstalk.command" } };
+    await configSnapshot.apply(bundleOf({ "automation-rules.json": [noParams] }));
+    assert.deepEqual(await readOnDisk("automation-rules.json"), [noParams]);
   });
 
   test("refuses ids that would reach the prototype, and a binding to no screen", async () => {

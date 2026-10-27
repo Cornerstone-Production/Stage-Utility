@@ -150,12 +150,12 @@ const captionColors: KeyCheck = (v, k) => {
   );
 };
 
-/** Every other screen's id and address: what setOutputSlug's takenSlugs holds. */
-function takenBy(list: readonly Record<string, unknown>[], self: Record<string, unknown>): string[] {
+/** Every other screen's address. */
+function addressesBesides(list: readonly Record<string, unknown>[], self: Record<string, unknown>): string[] {
   return list
     .filter((other) => other !== self)
-    .flatMap((other) => [other.id, typeof other.slug === "string" ? other.slug.trim().toLowerCase() : undefined])
-    .filter((s): s is string => typeof s === "string" && s !== "");
+    .map((other) => (typeof other.slug === "string" ? other.slug.trim().toLowerCase() : ""))
+    .filter((s) => s !== "");
 }
 
 /** An output id: what the allocator and every older build gave one. */
@@ -166,9 +166,11 @@ const OUTPUT_ID = /^[A-Za-z0-9_-]{1,64}$/;
  * shape, a name, an address held to validateSlug against every other screen's
  * id and address and stored as setOutputSlug stores it (trimmed, lowercased,
  * absent when empty), and each per-screen setting held to its setter's rule.
- * An address that is well formed and unique but has since become a built-in
- * page is the one validateSlug refusal let through: the start-up migration
- * renames it and logs it.
+ * Two validateSlug refusals are let through. An address that has since become
+ * a built-in page: the start-up migration renames it and logs it. An address
+ * equal only to another screen's id: addOutput once minted ids without looking
+ * at addresses, so a real install can hold one, and the start-up migration
+ * leaves it as it is. It is logged here, at start-up and on a restore.
  */
 const outputs: KeyCheck = (v, k) => {
   const list = asArray(v, k).map((entry, i) => asObject(entry, `screen ${i + 1}`));
@@ -180,10 +182,18 @@ const outputs: KeyCheck = (v, k) => {
     optional(o.slug, "string", `${what}'s address`);
     const slug = typeof o.slug === "string" ? o.slug.trim().toLowerCase() : "";
     if (slug) {
-      const taken = takenBy(list, o);
-      const builtInOnly = SLUG_PATTERN.test(slug) && isReservedSlug(slug) && !taken.includes(slug);
-      const verdict = validateSlug(slug, taken);
+      const addresses = addressesBesides(list, o);
+      const idOf = list.find((other) => other !== o && typeof other.id === "string" && other.id.toLowerCase() === slug);
+      const builtInOnly = SLUG_PATTERN.test(slug) && isReservedSlug(slug) && !addresses.includes(slug);
+      // Held to the other addresses alone: the ids are checked below, with the
+      // collision logged rather than refused.
+      const verdict = validateSlug(slug, addresses);
       if (!verdict.ok && !builtInOnly) refuse(`${what}'s address: ${verdict.reason}`);
+      if (idOf) {
+        console.warn(
+          `[config-snapshot] settings.json: ${scrub(what)}'s address /${scrub(slug)} is also the id of screen "${scrub(String(idOf.name ?? idOf.id))}"; kept as it is. Change one screen's address in Screens.`,
+        );
+      }
     }
     textOrNull(o.viewId, `${what}'s view`);
     for (const f of ["blackout", "locked", "hideTopBar", "allowHls"]) optional(o[f], "boolean", `${what}'s ${f}`);
@@ -288,11 +298,19 @@ const backupSchedule: KeyCheck = (v, k) => {
   return clampSchedule(o);
 };
 
-/** setPublicUrl: normalizeBaseUrl, and only an http or https address. */
+/**
+ * setPublicUrl: normalizeBaseUrl, and only an http or https address. One that
+ * does not parse is restored as null and logged rather than refused: builds
+ * before 1.27.0 saved whatever normalizeBaseUrl returned, so a real backup can
+ * hold "http://stage box", and refusing it refused the whole restore.
+ */
 const publicUrl: KeyCheck = (v, k) => {
   textOrNull(v, k);
   const normalized = normalizeBaseUrl((v ?? null) as string | null);
-  if (normalized !== null && !isHttpBaseUrl(normalized)) refuse(`${k} must be an http or https address`);
+  if (normalized !== null && !isHttpBaseUrl(normalized)) {
+    console.warn(`[config-snapshot] settings.json: ${k} "${scrub(normalized)}" is not an http or https address; restored as none`);
+    return null;
+  }
   return normalized;
 };
 

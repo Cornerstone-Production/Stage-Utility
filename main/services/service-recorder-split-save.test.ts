@@ -40,7 +40,7 @@ const { archiveRoutes } = await import("./routes/archive-routes.js");
 const { callRoute } = await import("./routes/route-harness.js");
 const { handlerErrorStatus, handlerErrorCode } = await import("./remote-server.js");
 
-type Rec = { serviceKey: string; endedAt: string | null };
+type Rec = { serviceKey: string; endedAt: string | null; startedAt?: string };
 type Held = {
   current: Rec | null;
   currentKey: string | null;
@@ -358,23 +358,113 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
     }
   });
 
-  it("starts afresh when a held copy is forgotten while it is being resumed", async () => {
+  /** Run `during` once, inside the timeline recorder's next resumeRecord: the
+   *  await between taking a record and adopting it. Once only, so the tick
+   *  after reads the store for real. */
+  function duringNextResume(t: TestContext, during: () => Promise<void> | void): void {
+    const rec = serviceTimelineRecorder as unknown as { resumeRecord(r: unknown): Promise<unknown> };
+    const real = rec.resumeRecord.bind(rec);
+    let fired = false;
+    t.mock.method(rec, "resumeRecord", async (r: unknown) => {
+      if (!fired) {
+        fired = true;
+        await during();
+      }
+      return real(r);
+    });
+  }
+
+  it("reads the store again when a held copy is forgotten while it is being resumed", async (t) => {
     const key1 = `75953:${planId}:occ-a`;
     await tick("2026-10-18T14:00:00.000Z", "occ-a", "doors");
     await setWritable(false);
     await tick("2026-10-18T16:05:00.000Z", "occ-b", "welcome");
     await setWritable(true);
 
-    // resumeRecord is the await between taking the held copy and adopting it.
+    duringNextResume(t, () => void serviceTimelineRecorder.forget(key1));
+    await tick("2026-10-18T18:10:00.000Z", "occ-a", "doors");
+    assert.equal(serviceTimelineRecorder.getCurrent(), null, "adopted a record forgotten mid-resume");
+    // The held copy never reached disk, so the next tick starts afresh.
+    await tick("2026-10-18T18:10:01.000Z", "occ-a", "doors");
+    const current = serviceTimelineRecorder.getCurrent();
+    assert.equal(current?.serviceKey, key1);
+    assert.equal(current?.startedAt, "2026-10-18T18:10:01.000Z", "resumed a held copy that was forgotten");
+  });
+
+  it("starts afresh when a saved record is deleted while it is being resumed", async (t) => {
+    const key1 = `75953:${planId}:occ-a`;
+    await tick("2026-10-18T14:00:00.000Z", "occ-a", "doors");
+    await tick("2026-10-18T16:05:00.000Z", "occ-b", "welcome"); // occ-a saved, not held
+    assert.equal(serviceTimelineRecorder.isHolding(key1), false);
+    assert.ok((await readRecord("service-timeline", key1))?.endedAt, "occ-a never reached disk");
+
+    // What deleteServiceRecords does to this recorder (forget, then the store
+    // delete). Called directly because the other two recorders, ticking
+    // alongside, may already have re-established occ-a, and the real delete
+    // then refuses a live service.
+    duringNextResume(t, async () => {
+      serviceTimelineRecorder.forget(key1);
+      await serviceTimelineStore.delete(key1);
+    });
+    await tick("2026-10-18T18:10:00.000Z", "occ-a", "doors");
+    await tick("2026-10-18T18:10:01.000Z", "occ-a", "doors");
+    const current = serviceTimelineRecorder.getCurrent();
+    assert.equal(current?.serviceKey, key1);
+    assert.equal(current?.startedAt, "2026-10-18T18:10:01.000Z", "resumed a record deleted in History meanwhile");
+  });
+
+  it("resumes the edited record when an edit lands while it is being resumed", async (t) => {
+    const key1 = `75953:${planId}:occ-a`;
+    await tick("2026-10-18T14:00:00.000Z", "occ-a", "doors");
+    await tick("2026-10-18T16:05:00.000Z", "occ-b", "welcome"); // occ-a saved, not held
+    const saved = (await serviceTimelineStore.get(key1))!;
+
+    // What editServiceWindow does to this recorder (forget, then the store
+    // write), directly for the reason the delete test gives.
+    const edited = { ...saved, startedAt: "2026-10-18T14:05:00.000Z" };
+    duringNextResume(t, async () => {
+      serviceTimelineRecorder.forget(key1);
+      await serviceTimelineStore.upsert(edited);
+    });
+    await tick("2026-10-18T18:10:00.000Z", "occ-a", "doors");
+    await tick("2026-10-18T18:10:01.000Z", "occ-a", "doors");
+    assert.equal(
+      serviceTimelineRecorder.getCurrent()?.startedAt,
+      "2026-10-18T14:05:00.000Z",
+      "did not resume the record as History edited it",
+    );
+    // And no persist writes anything but the edited record back.
+    mock.timers.tick(PAST_EVERY_RETRY_MS);
+    await drainStores();
+    assert.equal((await readRecord("service-timeline", key1))?.startedAt, "2026-10-18T14:05:00.000Z");
+  });
+
+  it("resumes a held copy whose retried save lands while it is being resumed", async () => {
+    const key1 = `75953:${planId}:occ-a`;
+    await tick("2026-10-18T14:00:00.000Z", "occ-a", "doors");
+    await setWritable(false);
+    await tick("2026-10-18T16:05:00.000Z", "occ-b", "welcome");
+    await setWritable(true);
+
+    // The retry timer fires during resumeRecord (SPL's reads the whole raw
+    // archive) and its save succeeds, which takes the copy out of `unsaved`
+    // just as a forget would.
     const rec = serviceTimelineRecorder as unknown as { resumeRecord(r: unknown): Promise<unknown> };
     mock.method(rec, "resumeRecord", async (r: unknown) => {
-      serviceTimelineRecorder.forget(key1);
+      await runRetries(async () => !serviceTimelineRecorder.isHolding(key1));
       return r;
     });
     await tick("2026-10-18T18:10:00.000Z", "occ-a", "doors");
-    const current = serviceTimelineRecorder.getCurrent();
-    assert.equal(current?.serviceKey, key1);
-    assert.equal(current?.startedAt, "2026-10-18T18:10:00.000Z", "resumed a held copy that was forgotten");
+    assert.equal(
+      serviceTimelineRecorder.getCurrent()?.startedAt,
+      "2026-10-18T14:00:00.000Z",
+      "read a successful retry as a forget and opened a fresh record",
+    );
+
+    // And the debounced persist does not write a fresh record over the saved one.
+    mock.timers.tick(PAST_EVERY_RETRY_MS);
+    await drainStores();
+    assert.equal((await readRecord("service-timeline", key1))?.startedAt, "2026-10-18T14:00:00.000Z");
   });
 
   it("does not hold a record forgotten while its failing save was out", async (t) => {

@@ -208,6 +208,14 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   private inheritedAiring: Airing | null = null;
   /** Closed records whose save failed, by key — see saveClosed. */
   private unsaved = new Map<string, T>();
+  /** Keys forget() was called for since ensureRecord last began establishing
+   *  a record. ensureRecord clears it before its awaits and checks its key
+   *  after: forget() of anything but `current` does not bump the generation, so
+   *  a delete landing while a held copy or a stored record is being resumed is
+   *  caught here, and so is not mistaken for a retry that saved a held copy
+   *  (both take it out of `unsaved`). Cleared on every establish, so it holds
+   *  only what was forgotten since the last one. */
+  private forgotten = new Set<string>();
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   /** When retryUnsaved last said the saves are still failing. */
   private stillFailingLoggedAt = 0;
@@ -321,10 +329,11 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * Only dropping `current` bumps the generation. A tick mid-split still holds
    * the outgoing record as `current`, and a bump for a held copy alone made it
    * abandon the split there, so the next service's items went into the closed
-   * one. ensureRecord guards its resume of a held copy itself.
+   * one. ensureRecord guards its resume of a held copy or stored record itself.
    */
   forget(serviceKey: string): boolean {
     const wasUnsaved = this.unsaved.delete(serviceKey);
+    this.forgotten.add(serviceKey);
     if (this.currentKey !== serviceKey && this.current?.serviceKey !== serviceKey) return wasUnsaved;
     this.cancelPersist();
     this.current = null;
@@ -603,6 +612,10 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
       return;
     }
 
+    // Only one establish runs at a time (each recorder's busy latch), so what
+    // was forgotten before this one began cannot matter to it.
+    this.forgotten.clear();
+
     // Key changed → finalize + persist the outgoing record, then publish it on
     // this recorder's own channel — see publishClosed's doc above.
     if (this.current) {
@@ -623,9 +636,24 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // produces, which is exactly what forget() exists to prevent.
     const resumed = existing ? await this.resumeRecord(existing) : null;
     if (gen !== this.generation) return;
-    // A held copy forgotten meanwhile does not bump the generation (see
-    // forget), so it is checked here, and the service starts afresh.
-    if (resumed && !(held && this.unsaved.get(key) !== held)) {
+    // A held copy or stored record forgotten meanwhile does not bump the
+    // generation (see forget), so it is checked here. This tick is dropped and
+    // the next one reads the store again: a delete then starts afresh, and an
+    // edit resumes the edited record. Starting afresh here instead wrote an
+    // empty record over an edit. The outgoing record is already closed, saved
+    // and published, so dropping `current` loses nothing, and the airing is put
+    // back so the next tick does not take this one's opener as inherited.
+    // Asked of `forgotten`, not of `unsaved`: a retry that saves a held copy
+    // meanwhile takes it out of `unsaved` too.
+    if (this.forgotten.has(key)) {
+      console.log(`[${this.label}] ${scrub(key)} was changed in History while it was being resumed; read again on the next tick`);
+      this.cancelPersist();
+      this.current = null;
+      this.currentKey = null;
+      this.lastAiring = priorAiring;
+      return;
+    }
+    if (resumed) {
       this.unsaved.delete(key); // open again: saved by the debounced persist from here
       this.current = resumed;
       this.current.endedAt = null; // reopened
