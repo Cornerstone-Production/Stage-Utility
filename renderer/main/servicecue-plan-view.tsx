@@ -16,9 +16,6 @@ import { useBackHref } from "../lib/back-target";
 import { refreshWhileMounted } from "../lib/live-refresh";
 import { rundownKey } from "@main/types/servicecue-publish";
 import { RUNDOWN_NOT_SENT, SERVICES_NOT_SENT, notPublishedYet } from "../lib/public-mode";
-
-/** The pages that open a rundown, which its back arrow may return to. */
-const SERVICECUE_LAUNCHERS = ["/servicecue", "/servicecue/manage"] as const;
 import { useDashboardState } from "./use-dashboard-state";
 import { pcoConnected } from "./use-stage-state";
 import { invoke } from "../lib/api";
@@ -26,6 +23,9 @@ import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import { ALL_COLUMNS_LAYOUT_ID, ALL_COLUMNS_SLUG, slugify, serviceCueUrl } from "./servicecue-index-view";
 import type { CategoryRole } from "../../main/types/servicecue-roles.js";
+
+/** The pages that open a rundown, which its back arrow may return to. */
+const SERVICECUE_LAUNCHERS = ["/servicecue", "/servicecue/manage"] as const;
 
 // A standalone ServiceCue rundown page: /servicecue/{type}/{layout}. Both path
 // parts are name slugs (e.g. /servicecue/weekend/audio) resolved to ids here, with

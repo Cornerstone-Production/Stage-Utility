@@ -38,7 +38,7 @@ import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 import { ConnectionBadge } from "./connection-badge";
 import { IpListField } from "./ip-list-field";
 import { numberFieldValue } from "./integration-number-fields";
-import { droppedCredentialFields, droppedCredentialMessage } from "../lib/dropped-credentials";
+import { droppedCredentialNotice } from "../lib/dropped-credentials";
 
 // ---- single connection card -------------------------------------------------
 
@@ -133,8 +133,8 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       // The password was entered for the old device, so the server clears it:
       // see dropped-credentials.ts. Read off the OLD provider's fields, which
       // the new one may not have.
-      const dropped = droppedCredentialFields(provider?.configSchema ?? [], conn.config, {}, next.find((c) => c.id === conn.id)?.config);
-      if (dropped.length > 0) toast.info(droppedCredentialMessage(conn.name, dropped.map((f) => f.label)));
+      const dropped = droppedCredentialNotice(conn.name, provider?.configSchema ?? [], conn.config, {}, next.find((c) => c.id === conn.id)?.config);
+      if (dropped) toast.info(dropped);
     } catch (err) {
       console.error("[WirelessConnectionsPanel:updateProvider]", err);
       toast.error(`Failed to change provider: ${errorMessage(err)}`);
@@ -159,8 +159,8 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       onUpdate(next);
       // A password left unchanged that comes back empty was cleared by the
       // server because the address moved: see dropped-credentials.ts.
-      const dropped = droppedCredentialFields(provider.configSchema, conn.config, sent, next.find((c) => c.id === conn.id)?.config);
-      if (dropped.length > 0) toast.info(droppedCredentialMessage(conn.name, dropped.map((f) => f.label)));
+      const dropped = droppedCredentialNotice(conn.name, provider.configSchema, conn.config, sent, next.find((c) => c.id === conn.id)?.config);
+      if (dropped) toast.info(dropped);
     } catch (err) {
       console.error("[WirelessConnectionsPanel:updateConfig]", err);
       toast.error(`Failed to save: ${errorMessage(err)}`);

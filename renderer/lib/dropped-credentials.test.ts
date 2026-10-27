@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { FORM_MASK, MASK } from "@main/services/mask";
 import type { ConfigField } from "@main/types/integrations";
 
-import { droppedCredentialFields, droppedCredentialMessage } from "./dropped-credentials";
+import { droppedCredentialFields, droppedCredentialMessage, droppedCredentialNotice } from "./dropped-credentials";
 
 const SCHEMA: ConfigField[] = [
   { key: "host", label: "Host", type: "text" },
@@ -47,5 +47,13 @@ test("the notice names what was cleared", () => {
   assert.equal(
     droppedCredentialMessage("Base A", ["Password", "Key"]),
     "Base A: the saved Password and Key were cleared because they were entered for a different address or device. Enter them again if they are still needed.",
+  );
+});
+
+test("the combined notice is null when nothing was cleared, and the message when something was", () => {
+  assert.equal(droppedCredentialNotice("OBS", SCHEMA, { password: FORM_MASK }, { host: "a" }, { password: MASK }), null);
+  assert.equal(
+    droppedCredentialNotice("OBS", SCHEMA, { password: FORM_MASK }, { host: "b" }, { password: "" }),
+    droppedCredentialMessage("OBS", ["Password"]),
   );
 });

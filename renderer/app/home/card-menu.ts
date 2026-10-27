@@ -6,7 +6,7 @@
 // the `deps` below, so a test passes plain functions and reads back exactly what
 // the operator would see and what a click would save.
 
-import type { LayoutObject } from "@main/types/views";
+import type { HomeCardSize, HomeVisibility, LayoutObject } from "@main/types/views";
 import type { ContextMenuItem } from "../../components/ui/context-menu";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
 import { gameOptions } from "../../main/scores-object";
@@ -16,7 +16,6 @@ import { metricOptions, meterOptions, sourceOptions, type SplMeters } from "../r
 import { PICK_OPTIONS, pickedValue, togglesFor, withToggle } from "./card-toggles";
 import { pvpNowMenuItems } from "./pvp-now-menu";
 import { SIZES, SIZE_ORDER, WHEN_LABELS, removeCard, replaceCard, setSize, setWhen, sizeOf, whenOf } from "./home-cards";
-import type { HomeCardSize, HomeVisibility } from "@main/types/views";
 
 /** What the menu reads from, and writes through, the page that opened it. */
 export interface CardMenuDeps {
@@ -48,6 +47,11 @@ export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMe
   const label = LAYOUT_OBJECTS[displayType(card.config) as keyof typeof LAYOUT_OBJECTS]?.label ?? type;
   const toggles = togglesFor(card);
   const items: ContextMenuItem[] = [];
+  // A choice writes one setting of the card and closes the menu.
+  const choose = (key: Parameters<typeof withToggle>[1], value: Parameters<typeof withToggle>[2]) => () => {
+    save((objs) => replaceCard(objs, withToggle(card, key, value)));
+    close();
+  };
 
   for (const t of toggles) {
     items.push({
@@ -71,10 +75,7 @@ export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMe
       items: gameOptions(scoresFavourites).map((o) => ({
         label: o.label,
         checked: pinned === o.value,
-        onSelect: () => {
-          save((objs) => replaceCard(objs, withToggle(card, "game", o.value)));
-          close();
-        },
+        onSelect: choose("game", o.value),
       })),
     });
   }
@@ -94,10 +95,7 @@ export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMe
       items: sourceOptions(map, anyLabel).map((o) => ({
         label: o.label,
         checked: current === o.value,
-        onSelect: () => {
-          save((objs) => replaceCard(objs, withToggle(card, key, o.value)));
-          close();
-        },
+        onSelect: choose(key, o.value),
       })),
     });
   }
@@ -122,10 +120,7 @@ export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMe
         items: keys.map((k) => ({
           label: k,
           checked: chosen === k,
-          onSelect: () => {
-            save((objs) => replaceCard(objs, withToggle(card, "splMetric", k)));
-            close();
-          },
+          onSelect: choose("splMetric", k),
         })),
       });
     }
@@ -141,10 +136,7 @@ export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMe
       items: meterOptions(spl, meter).map((o) => ({
         label: o.label,
         checked: meter === o.value,
-        onSelect: () => {
-          save((objs) => replaceCard(objs, withToggle(card, "meterId", o.value)));
-          close();
-        },
+        onSelect: choose("meterId", o.value),
       })),
     });
     // Which Smaart metric the SPL card reads, right under which meter. The
@@ -156,10 +148,7 @@ export function buildCardMenu(card: LayoutObject, deps: CardMenuDeps): ContextMe
     const metric = pickedValue(card, "metricKey");
     if (metric != null && type === "home-spl") {
       const model = metricOptions(spl, meter, metric);
-      const pick = (next: string) => () => {
-        save((objs) => replaceCard(objs, withToggle(card, "metricKey", next)));
-        close();
-      };
+      const pick = (next: string) => choose("metricKey", next);
       const rows: ContextMenuItem[] = [
         { label: "Automatic", checked: metric === "", meta: model.automatic ?? undefined, onSelect: pick("") },
       ];

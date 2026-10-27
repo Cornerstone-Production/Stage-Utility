@@ -6,6 +6,7 @@ import { useResyncOn } from "../../lib/use-resync-on";
 import { pcoConnected, useStageState } from "../../main/use-stage-state";
 import { ErrorNote, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { plural } from "@main/services/plural";
+import { EYEBROW } from "./patch-device-manager";
 
 const WA_ROW = "flex items-center justify-between gap-2 border-t border-line py-1.5 text-caption1";
 const WA_SELECT = "h-6 max-w-[9.5rem] shrink-0 px-2";
@@ -90,7 +91,7 @@ export function PatchWeekly({
   const planEntry = plan?.planId ? assignments.byPlan[plan.planId] : undefined;
   return (
     <section aria-label="Weekly assignment" className="rounded-xl border border-line bg-surface px-3.5 py-3">
-      <div className="mb-1.5 text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">Weekly assignment</div>
+      <div className={`mb-1.5 ${EYEBROW}`}>Weekly assignment</div>
       {failed.has("allowed") && types && types.length > 0 && (
         // The unfiltered list is still the useful thing to show: every
         // assignment in it is real, there are just more rows than the Plan

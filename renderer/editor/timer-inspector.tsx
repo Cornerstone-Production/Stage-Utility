@@ -35,8 +35,7 @@ export function TimerInspector({
   const set = (patch: Partial<TimerConfig>) => onConfig({ ...c, ...patch });
   // The timers ProPresenter is running right now, from the instance this one
   // reads, offered as suggestions: ProPresenter reports only running timers.
-  const instances = propInstances;
-  const running = instances?.status?.[c.propresenterInstanceId ?? "default"]?.timers ?? [];
+  const running = propInstances?.status?.[c.propresenterInstanceId ?? "default"]?.timers ?? [];
   const names = running.map((t) => t.name);
   if (c.timerName && !names.includes(c.timerName)) names.push(c.timerName);
 

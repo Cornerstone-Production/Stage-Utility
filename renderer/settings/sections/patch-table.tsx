@@ -235,26 +235,24 @@ export function PatchTable({
     </table>
   );
 
-  const renderRow = (rackId: string, idx: number, rackLabel: string | null) => {
-    return (
-      <Row
-        key={`${rackId}:${idx}`}
-        rackId={rackId}
-        idx={idx}
-        rackLabel={rackLabel}
-        dir={dir}
-        endpoint={byKey.get(keyOf(rackId, dir, idx))}
-        stageDevices={stageDevices}
-        showOwner={showOwner}
-        reach={isInFocusRun(rackId, idx, channelsOf(rackId))}
-        editing={editingHop?.row === `${rackId}:${idx}` ? editingHop.hop : null}
-        onEditing={(hop) => setEditingHop(hop ? { row: `${rackId}:${idx}`, hop } : null)}
-        edit={edit}
-        onFocusRow={onFocusRow}
-        onBlurRow={onBlurRow}
-      />
-    );
-  };
+  const renderRow = (rackId: string, idx: number, rackLabel: string | null) => (
+    <Row
+      key={`${rackId}:${idx}`}
+      rackId={rackId}
+      idx={idx}
+      rackLabel={rackLabel}
+      dir={dir}
+      endpoint={byKey.get(keyOf(rackId, dir, idx))}
+      stageDevices={stageDevices}
+      showOwner={showOwner}
+      reach={isInFocusRun(rackId, idx, channelsOf(rackId))}
+      editing={editingHop?.row === `${rackId}:${idx}` ? editingHop.hop : null}
+      onEditing={(hop) => setEditingHop(hop ? { row: `${rackId}:${idx}`, hop } : null)}
+      edit={edit}
+      onFocusRow={onFocusRow}
+      onBlurRow={onBlurRow}
+    />
+  );
 
   const noun = dir === "in" ? "input" : "output";
   if (racks.length === 0) {

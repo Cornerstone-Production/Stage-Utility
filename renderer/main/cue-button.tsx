@@ -12,7 +12,7 @@ import { useState, type CSSProperties } from "react";
 import { Loader2Icon } from "lucide-react";
 
 import { invoke } from "../lib/api";
-import { ButtonLabel } from "./button-label";
+import { BUTTON_BASE_STYLE, ButtonLabel } from "./button-label";
 import { cueEntry, type CuesLive } from "./use-cue-live";
 
 export interface CallAnswer {
@@ -147,18 +147,9 @@ export function CueButton({
       aria-label={label}
       style={{
         ...ts,
-        width: "100%",
-        height: "100%",
-        display: "flex",
+        ...BUTTON_BASE_STYLE,
         flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
         gap: "0.15em",
-        border: "none",
-        borderRadius: "inherit",
-        // A long label wraps inside the button (ButtonLabel); what still does
-        // not fit is clipped here rather than drawn over the neighbouring widget.
-        overflow: "hidden",
         cursor: canFire ? "pointer" : "default",
         pointerEvents: interactive ? "auto" : "none",
         opacity: state === "unavailable" ? 0.4 : 1,

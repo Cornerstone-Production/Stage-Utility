@@ -14,7 +14,7 @@ import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
 import { validateParams } from "@main/services/automation-param-validation";
 import { toast } from "../components/ui";
-import { ButtonLabel } from "./button-label";
+import { BUTTON_BASE_STYLE, ButtonLabel } from "./button-label";
 import { useAutomationActions } from "./use-automation-actions";
 
 export function ActionButton({
@@ -80,16 +80,9 @@ export function ActionButton({
         aria-label={label}
         style={{
           ...ts,
-          width: "100%",
-          height: "100%",
-          display: "flex",
+          ...BUTTON_BASE_STYLE,
           flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
           gap: "0.15em",
-          border: "none",
-          borderRadius: "inherit",
-          overflow: "hidden",
           cursor: interactive ? "pointer" : "default",
           pointerEvents: interactive ? "auto" : "none",
           opacity: unknown || registryError ? 0.6 : 1,

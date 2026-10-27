@@ -74,9 +74,14 @@ const ORDER: Record<PickerKind, readonly string[]> = {
 /** The heading a definition sits under, for this kind of picker. Other when
  *  nothing claims it — never null, so nothing is ever left out of the list. */
 export function pickerGroupOf(kind: PickerKind, def: PickerDef): string {
-  const group =
-    kind === "trigger" ? triggerGroup(def.channel ?? "") : kind === "action" ? actionGroup(def.id) : conditionGroup(def.id);
-  return group ?? OTHER_GROUP;
+  switch (kind) {
+    case "trigger":
+      return triggerGroup(def.channel ?? "") ?? OTHER_GROUP;
+    case "action":
+      return actionGroup(def.id) ?? OTHER_GROUP;
+    case "condition":
+      return conditionGroup(def.id) ?? OTHER_GROUP;
+  }
 }
 
 /** The definitions as entries, in heading order and then registry order, with
@@ -260,8 +265,11 @@ export function PickerField({
   // A stored id the registry no longer lists reads as the id and says so (NOT_OFFERED).
   // While the registry has not answered it is just the id: nothing is known to be
   // missing.
-  const found = defs?.find((d) => d.id === value);
-  const current = !value ? "" : found ? found.label : defs ? `${value} ${NOT_OFFERED}` : value;
+  let current = value;
+  if (value && defs) {
+    const found = defs.find((d) => d.id === value);
+    current = found ? found.label : `${value} ${NOT_OFFERED}`;
+  }
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <button

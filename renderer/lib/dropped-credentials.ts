@@ -42,3 +42,15 @@ export function droppedCredentialMessage(what: string, labels: readonly string[]
     `Enter ${it === "it" ? "it" : "them"} again if ${it} ${is} still needed.`
   );
 }
+
+/** The notice for a save, or null when it cleared nothing: `droppedCredentialFields` and `droppedCredentialMessage` in one. */
+export function droppedCredentialNotice(
+  what: string,
+  schema: readonly ConfigField[],
+  before: Record<string, unknown>,
+  sent: Record<string, unknown>,
+  after: Record<string, unknown> | undefined,
+): string | null {
+  const dropped = droppedCredentialFields(schema, before, sent, after);
+  return dropped.length > 0 ? droppedCredentialMessage(what, dropped.map((f) => f.label)) : null;
+}
