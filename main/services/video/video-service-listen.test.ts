@@ -339,6 +339,28 @@ test("two failing sessions in a row each log their failure; a restart inside one
   assert.equal(warns.filter((l) => l.includes("audio converter failed")).length, 2);
 });
 
+test("a relay that crashes and respawns on the same attachment announces its converter start again", async (t) => {
+  useFfmpeg(FFMPEG_OK);
+  const logs = captureConsole(t, "log");
+  const id = await addFeed({ name: "Respawn" });
+  const sup = new FakeSupervisor();
+  videoPollDeps.inDemand = () => false;
+  videoService.attachRelay(fakeRelay({ status: async () => [ready(id, MPEG4)] }), sup as never, DEFAULT_VIDEO_PORTS, { on: true });
+  await videoService.reconcileRelay();
+  const started = async () => {
+    sup.emit("line", `2026/10/22 21:00:00 INF [path ${id}-listen] runOnDemand command started`);
+    await videoService.whenBackgroundIdle();
+  };
+  await started();
+  sup.current = { state: "failing", reason: "exit 1", retryAt: 0, neverStarted: false };
+  sup.emit("status", sup.current);
+  sup.current = { state: "running", since: 2 };
+  sup.emit("status", sup.current);
+  await videoService.whenBackgroundIdle();
+  await started();
+  assert.equal(logs.filter((l) => l.includes("audio converter started")).length, 2);
+});
+
 // ── The reserved -listen suffix ─────────────────────────────────────────────
 
 test("a feed made under a name that would claim another feed's -listen path gets another id", async () => {
