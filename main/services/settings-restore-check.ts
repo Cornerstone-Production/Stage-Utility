@@ -298,11 +298,19 @@ const backupSchedule: KeyCheck = (v, k) => {
   return clampSchedule(o);
 };
 
-/** setPublicUrl: normalizeBaseUrl, and only an http or https address. */
+/**
+ * setPublicUrl: normalizeBaseUrl, and only an http or https address. One that
+ * does not parse is restored as null and logged rather than refused: builds
+ * before 1.27.0 saved whatever normalizeBaseUrl returned, so a real backup can
+ * hold "http://stage box", and refusing it refused the whole restore.
+ */
 const publicUrl: KeyCheck = (v, k) => {
   textOrNull(v, k);
   const normalized = normalizeBaseUrl((v ?? null) as string | null);
-  if (normalized !== null && !isHttpBaseUrl(normalized)) refuse(`${k} must be an http or https address`);
+  if (normalized !== null && !isHttpBaseUrl(normalized)) {
+    console.warn(`[config-snapshot] settings.json: ${k} "${scrub(normalized)}" is not an http or https address; restored as none`);
+    return null;
+  }
   return normalized;
 };
 

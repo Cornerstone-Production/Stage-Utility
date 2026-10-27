@@ -346,6 +346,8 @@ cleared, and nothing that runs in the background is paused.
   dropped, as the page's own save would. A file
   this build does not keep, and an image outside the two image folders, is
   skipped and logged.
+- A public URL that is not an http or https address, which builds before 1.27.0
+  saved without checking, is restored as none and logged rather than refused.
 - A snapshot listing more than 500 files, or more than 2000 images, is refused
   outright. No backup the app writes comes near either.
 

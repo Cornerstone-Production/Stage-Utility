@@ -79,7 +79,7 @@ const CASES: Record<string, Case> = {
   planSeriesTitle: { bad: [], says: "text or null" },
   planSwitcherMode: { bad: "random", says: "one of" },
   planTitle: { bad: 1, says: "text or null" },
-  publicUrl: { bad: "javascript:alert(1)//", says: "http or https" },
+  publicUrl: { in: "http://stage box", out: null },
   reconnectSchedule: {
     in: { enabled: true, leadMin: 2000.4, tailMin: -5, dormantMin: 0, extra: 1 },
     out: { enabled: true, leadMin: 1440, tailMin: 0, dormantMin: 1 },
@@ -176,6 +176,16 @@ describe("settings.json restore check", () => {
       warnings.some((w) => w.includes("[config-snapshot]") && w.includes('/display-2 is also the id of screen "B"')),
       warnings.join("\n"),
     );
+  });
+
+  test("a public URL that is not a web address is restored as none, and logged", async (t) => {
+    const warnings = captureConsole(t as TestContext, "warn");
+    for (const bad of ["http://stage box", "javascript:alert(1)//"]) {
+      const result = await settingsRestoreCheck({ publicUrl: bad });
+      assert.ok(result.ok, !result.ok ? result.reason : "");
+      assert.equal((result.value as { publicUrl: unknown }).publicUrl, null, bad);
+    }
+    assert.equal(warnings.filter((w) => w.includes("[config-snapshot]") && w.includes("publicUrl")).length, 2, warnings.join("\n"));
   });
 
   test("a key no code reads is dropped", async () => {

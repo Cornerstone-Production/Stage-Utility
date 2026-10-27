@@ -270,9 +270,10 @@ describe("config restore checks", () => {
     assert.deepEqual(await snapshotDir(), before);
   });
 
-  test("refuses a public URL that is not a web address", async () => {
-    const settings = { ...(GOOD["settings.json"] as object), publicUrl: "javascript:alert(1)//" };
-    await assert.rejects(() => configSnapshot.apply(bundleOf({ "settings.json": settings })), /publicUrl must be an http or https address/);
+  test("restores a public URL that is not a web address as none", async () => {
+    const settings = { ...(GOOD["settings.json"] as object), publicUrl: "http://stage box" };
+    await configSnapshot.apply(bundleOf({ "settings.json": settings }));
+    assert.equal((await readOnDisk("settings.json") as { publicUrl: unknown }).publicUrl, null);
   });
 
   test("refuses duplicate rule ids and duplicate view ids", async () => {
