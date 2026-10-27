@@ -2,7 +2,7 @@
 // is playing: a Web Audio AnalyserNode on its MediaStream, read on a timer. The analyser
 // is never connected to the destination, so nothing is played twice.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /** Bars the control draws. */
 export const METER_BARS = 8;
@@ -63,7 +63,8 @@ function audioContextCtor(): typeof AudioContext | null {
  * the tap, since a context made outside a gesture starts suspended; it is closed
  * when `held` goes false or the control goes. `refused` is true when this browser
  * has no Web Audio or would not give one, so the control can leave the meter out
- * rather than draw bars that never move. The sound is untouched.
+ * rather than draw bars that never move. The sound is untouched. The returned
+ * object changes only with `refused`.
  */
 export function useMeterContext(held: boolean): { open: () => void; current: () => AudioContext | null; refused: boolean } {
   const ref = useRef<AudioContext | null>(null);
@@ -96,5 +97,6 @@ export function useMeterContext(held: boolean): { open: () => void; current: () 
       setRefused(true);
     }
   }, [drop]);
-  return { open, current: () => ref.current, refused };
+  // Stable while `refused` holds: a caller keys its meter effect on this object.
+  return useMemo(() => ({ open, current: () => ref.current, refused }), [open, refused]);
 }
