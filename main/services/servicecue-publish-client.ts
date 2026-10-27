@@ -16,6 +16,7 @@
 
 import { readCapped } from "./capped-download.js";
 import { fetchFailureMessage, untrustedCertificateCode } from "./errors.js";
+import { isStringList } from "./is-record.js";
 import { pinToOrigin } from "./pinned-origin.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 import type { PublishProblem } from "../types/servicecue-publish-status.js";
@@ -185,7 +186,6 @@ function failureOfStatus(status: number, scope: "page" | "item"): PushFailure {
   return said("refused", status === 413 ? "The page refused it as too large (413)." : `The page refused it (${status}).`);
 }
 
-const isStringList = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
 
 /** The status answer, if it has the shape the protocol promises. */
 function parsePageStatus(raw: unknown): (PageStatus & { protocol: number }) | null {

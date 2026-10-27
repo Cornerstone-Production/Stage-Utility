@@ -23,6 +23,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
+import { isNotFound } from "./errors.js";
 
 export interface EncryptionBackend {
   /** Returns true if encryption is supported in this environment. */
@@ -61,7 +62,7 @@ async function loadOrCreateKey(): Promise<Buffer> {
     void fs.chmod(keyFile, 0o600).catch(() => {});
     return key;
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    if (!isNotFound(err)) throw err;
     // Key file doesn't exist yet — generate and save.
     const key = crypto.randomBytes(32);
     await fs.writeFile(keyFile, key, { mode: 0o600 });

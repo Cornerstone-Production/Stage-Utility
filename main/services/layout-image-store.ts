@@ -60,7 +60,7 @@ export async function saveLayoutImageBytes(file: string, bytes: Buffer): Promise
     await fs.access(full);
     return false;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    if (!isNotFound(err)) throw err;
   }
   await atomicWrite(full, bytes);
   return true;

@@ -19,6 +19,7 @@ import {
 } from "../layout-library.js";
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
+import { isStringList } from "../is-record.js";
 import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { isLayoutShape, isSlotsLayoutValue, type ViewSurface } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
@@ -408,7 +409,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       const { screens } = body;
-      if (screens !== undefined && !(Array.isArray(screens) && screens.every((s) => typeof s === "string"))) {
+      if (screens !== undefined && !isStringList(screens)) {
         error(res, "body.screens must be an array of screen ids");
         return;
       }

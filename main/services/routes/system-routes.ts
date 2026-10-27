@@ -6,6 +6,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
+import { isStringList } from "../is-record.js";
 import { type RouteCtx, json, error, readBody, readBodyOrEmpty, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
@@ -176,12 +177,11 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     // operator's choices and answered 200.
     if (method === "POST" && pathname === "/api/checklist-sources") {
       const body = await readBody(req) as Record<string, unknown>;
-      const names = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === "string");
-      if (body.categories !== undefined && !names(body.categories)) {
+      if (body.categories !== undefined && !isStringList(body.categories)) {
         error(res, "body.categories must be a string[]");
         return;
       }
-      if (body.teams !== undefined && !names(body.teams)) {
+      if (body.teams !== undefined && !isStringList(body.teams)) {
         error(res, "body.teams must be a string[]");
         return;
       }
