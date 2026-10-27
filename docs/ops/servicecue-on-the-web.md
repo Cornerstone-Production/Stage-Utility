@@ -206,6 +206,15 @@ the build it carries. When they differ:
 | the page was deployed from a **newer** version than this server runs, or from this server's own version by **another build** | leaves it |
 | otherwise | deploys, and logs the files uploaded and the files Cloudflare already held |
 
+**A page of another protocol.** A release that changes the [publishing protocol](../reference/servicecue-publishing.md)
+finds the page still running the old Worker, which does not answer the new status path
+(a `404`) or answers it with another `protocol`. When the page's own document
+(`/servicecue`, read without the token) carries a build id, the server treats it as the
+page at another protocol: publishing is held, and the build goes to the rules above, so
+an older page is deployed over. Any deploy from this server, on its own or by "Update the
+page now", starts publishing again; for two minutes after one, the old Worker still
+answering is retried on the backoff rather than held.
+
 **The no-downgrade rule.** The page records the version of the server that deployed it,
 in the Worker version's message (`Stage Utility 1.28.0`). A server never replaces a page
 deployed from a newer version than the one it is running, so a development machine

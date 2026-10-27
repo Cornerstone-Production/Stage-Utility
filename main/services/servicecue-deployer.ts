@@ -54,6 +54,8 @@ export interface DeployHook {
   consider(pageBuild: string | null): void;
   /** Publishing stopped or moved: stop looking, and stop waiting. A deploy already under way finishes. */
   stop(): void;
+  /** Called after every deploy that went through, on the server's own account or asked for: publishing held by the old Worker starts again. */
+  onDeployed(listener: () => void): void;
 }
 
 export interface DeployTimings {
@@ -169,6 +171,7 @@ export class ServiceCueDeployer implements DeployHook {
   private lastNowDeployAt = 0;
   /** The last decision logged, so a status read that changes nothing says nothing. */
   private said = "";
+  private readonly deployedListeners: (() => void)[] = [];
 
   constructor(private readonly deps: DeployerDeps) {
     this.timings = { ...DEFAULT_DEPLOY_TIMINGS, ...deps.timings };
@@ -180,6 +183,10 @@ export class ServiceCueDeployer implements DeployHook {
   consider(pageBuild: string | null): void {
     this.read = { build: pageBuild };
     void this.begin("auto", false);
+  }
+
+  onDeployed(listener: () => void): void {
+    this.deployedListeners.push(listener);
   }
 
   stop(): void {
@@ -494,6 +501,7 @@ export class ServiceCueDeployer implements DeployHook {
     if (this.read !== undefined) this.read = { build, assumed: true };
     this.log("info", `deployed build ${build} as ${version}: ${plural(files.uploaded, "file")} uploaded, ${files.held} already on Cloudflare`);
     this.said = `current:${build}`;
+    for (const listener of this.deployedListeners) listener();
     return { kind: "deployed", ...files, ...(serviceStateUnknown ? { serviceStateUnknown: true as const } : {}) };
   }
 

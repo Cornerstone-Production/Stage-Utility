@@ -516,6 +516,31 @@ describe("Update the page now", () => {
   });
 });
 
+describe("telling the publisher", () => {
+  it("says so after every deploy that went through, on its own account and asked for, and never after one that did not", async (t) => {
+    captureConsole(t, "log", "warn");
+    const d = makeDeployer();
+    let told = 0;
+    d.onDeployed(() => (told += 1));
+    d.consider(BUILD_A);
+    await d.settled();
+    assert.equal(told, 1, "an automatic deploy was not reported");
+    fake.respond = (r) => (r.method === "PUT" ? failure(400, 10021, "bad module") : undefined);
+    const failed = makeDeployer();
+    let toldFailed = 0;
+    failed.onDeployed(() => (toldFailed += 1));
+    assert.equal((await failed.deployNow()).kind, "failed");
+    assert.equal(toldFailed, 0, "a failed deploy was reported as one that went through");
+    fake.respond = () => undefined;
+    fake.deployed = { tag: BUILD_A, message: "Stage Utility 1.20.0", at: new Date().toISOString() };
+    const asked = makeDeployer();
+    let toldAsked = 0;
+    asked.onDeployed(() => (toldAsked += 1));
+    assert.equal((await asked.deployNow()).kind, "deployed");
+    assert.equal(toldAsked, 1, "Update the page now was not reported");
+  });
+});
+
 describe("one deploy at a time", () => {
   it("shares a deploy between every request that arrives during it", async (t) => {
     captureConsole(t, "log");

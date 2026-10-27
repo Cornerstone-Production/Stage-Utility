@@ -27,7 +27,10 @@
 // probe only says the page is there: the backoff and the problem clear when the request that failed
 // succeeds, so a request the page keeps refusing does not loop at the shortest wait. A failure that
 // waiting cannot fix (a rejected token, a Cloudflare rule, another protocol, an address that is not
-// the page) stops publishing until the settings change.
+// the page) stops publishing until the settings change, or until the page is deployed from this
+// server: a page of another protocol is handed to the deployer with the build it serves, and a
+// deploy starts publishing again. For a few minutes after one, the old Worker still answering is
+// waited out on the backoff instead.
 
 import { addBroadcastListener } from "./broadcaster.js";
 import { errorMessage } from "./errors.js";
@@ -99,6 +102,8 @@ export interface PublisherTimings {
   reconcileMs: number;
   /** How long a success must hold before an outage is over: a page that flaps is one outage, not one per flap. */
   outageSettleMs: number;
+  /** How long after this server deployed the page another protocol is the old Worker still answering, retried rather than held. */
+  deploySettleMs: number;
 }
 
 export const DEFAULT_TIMINGS: PublisherTimings = {
@@ -116,6 +121,7 @@ export const DEFAULT_TIMINGS: PublisherTimings = {
   nudgeMs: 1_000,
   reconcileMs: 5 * 60_000,
   outageSettleMs: DEFAULT_SETTLE_MS,
+  deploySettleMs: 2 * 60_000,
 };
 
 /** How long to wait after `failures` failures in a row: 5 s, 10 s, 20 s … up to the ceiling. */
@@ -269,9 +275,25 @@ export class ServiceCuePublisher {
   private everSent = false;
   private applying: Promise<unknown> = Promise.resolve();
 
+  /** When this server last deployed the page. */
+  private deployedAt = 0;
+
   constructor(deps: PublisherDeps) {
     this.deps = deps;
     this.timings = { ...DEFAULT_TIMINGS, ...deps.timings };
+    deps.deploy?.onDeployed(() => this.pageDeployed());
+  }
+
+  /**
+   * The page was deployed from this server, on its own account or by "Update the page now". A run held
+   * by the page (another protocol, most often) starts again: the Worker that held it has been replaced.
+   */
+  pageDeployed(): void {
+    this.deployedAt = Date.now();
+    if (!this.run?.held) return;
+    console.log("[publish] the page was deployed from this server, so publishing starts again");
+    // start() is apply() that puts a failure on the card and the log: there is no caller here to hand it to.
+    void this.start();
   }
 
   /** Replace some timings. For a test that must not wait out a real minute. */
@@ -488,11 +510,18 @@ export class ServiceCuePublisher {
       case "refused":
         // Not about the page: this side stopped, or the page would not take that one thing. Its caller reports it.
         return;
+      case "protocol":
+        // Just after a deploy from here, the old Worker may still be answering: wait that out.
+        if (Date.now() - this.deployedAt < this.timings.deploySettleMs) {
+          this.failed(run, item, problemOf(r), r.detail);
+          return;
+        }
+        this.hold(run, problemOf(r), r.detail);
+        return;
       case "auth":
       case "blocked":
       case "rejected":
-      case "protocol":
-        // Waiting does not fix a token, a firewall rule, an address that is not the page, or another protocol.
+        // Waiting does not fix a token, a firewall rule, or an address that is not the page.
         this.hold(run, problemOf(r), r.detail);
         return;
       default:
@@ -602,6 +631,8 @@ export class ServiceCuePublisher {
   /** The page's account of itself, in line with every other request. Null when there is no usable answer, which the failure handling has already dealt with. */
   private async askPage(run: Run): Promise<PageStatus | null> {
     const r = await this.send(run, "status", (c) => c.status());
+    // Another protocol is a page this server's own Worker would fix: the deployer decides whether to put it there.
+    if (!r.ok && r.kind === "protocol" && r.pageBuild !== undefined && this.run === run) this.deps.deploy?.consider(r.pageBuild);
     return r.ok && r.page ? r.page : null;
   }
 
