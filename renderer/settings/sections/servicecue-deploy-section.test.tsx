@@ -783,6 +783,28 @@ describe("a change of the page's address", () => {
     await eventually(() => assert.match(alerts(), /The Cloudflare account ID and API token went with the old address/));
   });
 
+  test("asks at the switch too, when publishing is off and a new address is switched on", async () => {
+    server.dto = { ...dtoOf(deployOf()), enabled: false, status: { ...dtoOf(deployOf()).status, enabled: false, state: "off" } };
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const router = routerAt("/servicecue/manage", "/servicecue/manage", "/settings/integrations");
+    render(
+      React.createElement(RouterContextProvider, {
+        router,
+        children: React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, React.createElement(PublicLinkCard, { ...NAMES }), React.createElement(ConfirmHost))),
+      } as never),
+    );
+    await eventually(() => assert.ok(screen.getByRole("switch", { name: "Publish ServiceCue to the web" })));
+    await settle();
+    type(addrField(), MOVED);
+    type(pubTokField(), "tok-for-the-other-page-0123456789abcdef");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("switch", { name: "Publish ServiceCue to the web" }));
+      await settle();
+    });
+    await answer("Keep the address");
+    assert.deepEqual(server.posts, [], "the switch sent a new address before the operator said yes");
+  });
+
   test("does not ask when no Cloudflare credentials are stored", async () => {
     await with_(NO_TOKEN());
     await move();
