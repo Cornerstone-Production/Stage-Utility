@@ -14,7 +14,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
-import { reply, stubFetchWithLog, ok } from "../../test-fixtures/fetch-log.js";
+import { alerts, reply, stubFetchWithLog, ok } from "../../test-fixtures/fetch-log.js";
 import { DEPLOY_NOW_TIMEOUT_MS } from "../../../main/types/servicecue-deploy.js";
 import type { DeployStatus, PublishSettingsDTO } from "../../../main/types/servicecue-publish-status.js";
 
@@ -89,6 +89,8 @@ interface Server {
   deploySignals: (AbortSignal | null | undefined)[];
   /** What a credentials write answers: the new status, from the body. */
   credentials: (body: Record<string, unknown>) => DeployStatus;
+  /** What a settings write answers, from the body. */
+  save: (body: Record<string, unknown>) => PublishSettingsDTO;
 }
 
 let server: Server;
@@ -106,6 +108,7 @@ beforeEach(() => {
       if (body.token === "") return NO_TOKEN();
       return deployOf({ accountId: typeof body.accountId === "string" ? body.accountId : ACCOUNT });
     },
+    save: (body) => ({ ...server.dto, ...(typeof body.url === "string" ? { url: body.url } : {}) }),
   };
   const f = stubFetchWithLog((url, init) => {
     if (init?.method === "POST") {
@@ -113,6 +116,11 @@ beforeEach(() => {
       if (url === "/api/servicecue/publish/deploy-credentials") {
         server.posts.push(["credentials", body]);
         server.dto = { ...server.dto, deploy: server.credentials(body) };
+        return ok(server.dto);
+      }
+      if (url === "/api/servicecue/publish") {
+        server.posts.push(["save", body]);
+        server.dto = server.save(body);
         return ok(server.dto);
       }
       if (url === "/api/servicecue/publish/deploy") {
@@ -737,6 +745,49 @@ describe("Update the page now", () => {
     await click();
     await eventually(() => assert.ok(status().startsWith("Couldn't update the page: Service unavailable")));
     assert.ok(sectionText().includes("The page could not be updated: Service unavailable. It is unchanged."));
+  });
+});
+
+describe("a change of the page's address", () => {
+  const MOVED = "https://another.example-account.example";
+  const addrField = () => screen.getByLabelText(/^Page address/) as HTMLInputElement;
+  const pubTokField = () => screen.getByLabelText(/^Publishing token/) as HTMLInputElement;
+  const move = async () => {
+    type(addrField(), MOVED);
+    type(pubTokField(), "tok-for-the-other-page-0123456789abcdef");
+    await leave(pubTokField());
+  };
+  const answer = async (name: string) => {
+    const d = await screen.findByRole("alertdialog");
+    assert.match(d.textContent ?? "", /Cloudflare account ID and API token are saved for/);
+    await act(async () => {
+      fireEvent.click(within(d).getByRole("button", { name }));
+      await settle();
+    });
+  };
+
+  test("asks first when Cloudflare credentials are stored, and kept, sends nothing and puts the address back", async () => {
+    await with_(deployOf());
+    await move();
+    await answer("Keep the address");
+    assert.deepEqual(server.posts, [], "the address went before the operator said yes");
+    assert.equal(addrField().value, ORIGIN);
+  });
+
+  test("on yes, sends it, and says the credentials went with the old address", async () => {
+    await with_(deployOf());
+    server.save = (body) => ({ ...server.dto, url: String(body.url), deploy: NO_TOKEN(), deployRemoved: true });
+    await move();
+    await answer("Change the address");
+    await eventually(() => assert.deepEqual(server.posts.map(([what]) => what), ["save"]));
+    await eventually(() => assert.match(alerts(), /The Cloudflare account ID and API token went with the old address/));
+  });
+
+  test("does not ask when no Cloudflare credentials are stored", async () => {
+    await with_(NO_TOKEN());
+    await move();
+    await eventually(() => assert.deepEqual(server.posts.map(([what]) => what), ["save"]));
+    assert.equal(screen.queryByRole("alertdialog"), null);
   });
 });
 

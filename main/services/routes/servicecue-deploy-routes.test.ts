@@ -55,7 +55,7 @@ const credentials = (body: unknown) => post("/api/servicecue/publish/deploy-cred
 const deploy = (body: unknown = {}) => post("/api/servicecue/publish/deploy", body);
 const get = () => callRoute(serviceCuePublishRoutes, "/api/servicecue/publish");
 
-type Dto = { deploy: { state: string; accountId: string; token: string }; token: string; url: string };
+type Dto = { deploy: { state: string; accountId: string; token: string }; token: string; url: string; deployRemoved?: true };
 
 let page: FakeReceiver;
 let other: FakeReceiver;
@@ -180,12 +180,16 @@ describe("POST /api/servicecue/publish/deploy-credentials", () => {
 });
 
 describe("a changed page address", () => {
-  it("takes the Cloudflare credentials with it, even in a save that brings a publishing token for the new address", async () => {
+  it("takes the Cloudflare credentials with it, even in a save that brings a publishing token for the new address, and says so", async (t) => {
+    const lines = captureConsole(t, "log", "warn");
     await linked();
     await credentials({ accountId: ACCOUNT, token: CF_TOKEN });
     assert.ok(await readDeployCredentials(page.origin));
     const moved = await settings({ url: other.origin, token: "tok-for-the-other-".padEnd(40, "0") });
     assert.equal(moved.status, 200);
+    assert.equal((moved.json as Dto).deployRemoved, true, "the answer does not say the credentials were removed");
+    assert.ok(lines.some((l) => /^\[servicecue-deploy\] the page address changed from .* to .*, so the Cloudflare account ID and API token saved for the old address were removed/.test(l)), lines.join("\n"));
+    assert.ok(!lines.some((l) => l.includes(CF_TOKEN)), "the token reached the log");
     assert.equal(await readDeployCredentials(page.origin), null);
     assert.equal(await readDeployCredentials(other.origin), null);
     assert.equal((moved.json as Dto).deploy.token, "", "the card still shows a token stored");
@@ -197,7 +201,9 @@ describe("a changed page address", () => {
     await linked();
     await credentials({ accountId: ACCOUNT, token: CF_TOKEN });
     assert.equal((await settings({ enabled: false })).status, 200);
-    assert.equal((await settings({ url: `${page.origin}/servicecue` })).status, 200, "the same address, written another way");
+    const same = await settings({ url: `${page.origin}/servicecue` });
+    assert.equal(same.status, 200, "the same address, written another way");
+    assert.equal((same.json as Dto).deployRemoved, undefined, "an unchanged address said the credentials were removed");
     assert.deepEqual(await readDeployCredentials(page.origin), { accountId: ACCOUNT, token: CF_TOKEN });
     assert.equal((await settings({ url: "" })).status, 200);
     assert.equal(await readDeployCredentials(page.origin), null);

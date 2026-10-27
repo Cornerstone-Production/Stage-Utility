@@ -24,7 +24,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AppLink } from "../../app/app-link";
 import { useUpdateStatus } from "../../app/queries";
 import { QrHint } from "../../components/qr-hint";
-import { Button, ErrorNote, Input, Switch } from "../../components/ui";
+import { Button, ErrorNote, Input, Switch, confirm } from "../../components/ui";
 import { SkeletonRows } from "../../components/ui/skeleton";
 import { invoke } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
@@ -214,6 +214,8 @@ export function PublicLinkCard({
   const [notice, setNotice] = useState<ReactNode>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [dropped, setDropped] = useState<string | null>(null);
+  /** The last write moved the page and took the Cloudflare credentials with it. */
+  const [deployRemoved, setDeployRemoved] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   // null follows the problem: open when the fix is in these fields, shut otherwise.
   const [connOpen, setConnOpen] = useState<boolean | null>(null);
@@ -270,6 +272,26 @@ export function PublicLinkCard({
     setAddrDraft(null);
     setTokDraft(null);
     setDropped(next.dropped && !next.dropped.ok ? next.dropped.message : null);
+    setDeployRemoved(next.deployRemoved === true);
+  }
+
+  /**
+   * The Cloudflare credentials are saved for the page's address and go when it changes, and only Cloudflare can make
+   * the token again: asked first. False leaves the address as it was.
+   */
+  async function movingIsOk(url: string): Promise<boolean> {
+    if (!dto || !isMask(dto.deploy?.token) || originOf(url) === originOf(dto.url)) return true;
+    setWorking(true);
+    const yes = await confirm({
+      title: "Remove the Cloudflare connection?",
+      message: `The Cloudflare account ID and API token are saved for ${dto.url}, and are removed from this server when the address changes. To keep the new page up to date from here you will need a new token from Cloudflare.`,
+      confirmLabel: "Change the address",
+      cancelLabel: "Keep the address",
+      destructive: true,
+    });
+    setWorking(false);
+    if (!yes) setAddrDraft(null);
+    return yes;
   }
 
   async function write(action: () => Promise<void>) {
@@ -277,6 +299,7 @@ export function PublicLinkCard({
     setHint(null);
     setNotice(null);
     setDropped(null);
+    setDeployRemoved(false);
     // A poll that lands in the middle of a write would put back what the write is changing.
     await queryClient.cancelQueries({ queryKey: QUERY_KEY });
     try {
@@ -290,7 +313,8 @@ export function PublicLinkCard({
     }
   }
 
-  function turnOn() {
+  async function turnOn() {
+    if (!(await movingIsOk(addr.trim()))) return;
     return write(async () => {
       const url = addr.trim();
       const credentials = { url, ...(typedToken !== null ? { token: typedToken } : {}) };
@@ -319,6 +343,7 @@ export function PublicLinkCard({
       setHint("A different address needs its token: paste it again.");
       return;
     }
+    if (changed && !(await movingIsOk(addr))) return;
     await write(async () =>
       adopt(await invoke<PublishSettingsDTO>("servicecue:setPublish", { ...(changed ? { url: addr.trim() } : {}), token: typedToken })),
     );
@@ -428,6 +453,13 @@ export function PublicLinkCard({
           <AppLink to={INTEGRATIONS_ROUTE} className="font-semibold underline underline-offset-2">
             Open Integrations
           </AppLink>
+        </Note>
+      )}
+
+      {dto && deployRemoved && (
+        <Note>
+          The Cloudflare account ID and API token went with the old address, so the page is no longer kept up to date from here. To
+          turn that on again, make a new token in Cloudflare and enter it under Keep the page up to date.
         </Note>
       )}
 

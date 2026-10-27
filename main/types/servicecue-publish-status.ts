@@ -147,6 +147,8 @@ export interface PublishSettingsDTO {
    * that page may still show the last rundown it was sent.
    */
   dropped?: { ok: true } | { ok: false; message: string };
+  /** On the answer to a change of address that removed the Cloudflare account ID and API token saved for the old one. */
+  deployRemoved?: true;
 }
 
 /** What POST /api/servicecue/publish/test answers (always a 200). */

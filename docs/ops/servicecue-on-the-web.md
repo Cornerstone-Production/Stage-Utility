@@ -191,7 +191,9 @@ no account ID (or the reverse) is not saved until the other is filled in. To rep
 only the address saved and not publishing on, for a script or `curl`.
 
 The token is stored encrypted beside the publishing token and is never sent back or
-included in a backup. Changing the page's address drops both. Revoking the token in
+included in a backup. Changing the page's address drops both: the card asks first, naming
+what goes, says afterwards that it went, and the log has a `[servicecue-deploy]` line saying
+the address changed and the credentials were removed. Revoking the token in
 Cloudflare is enough to stop it too: the next attempt is refused, the card and the log say
 so, and nothing more is tried until the token is changed.
 
