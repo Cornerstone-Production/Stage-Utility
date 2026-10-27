@@ -112,6 +112,13 @@ describe("refusal on", () => {
     assert.equal(r.status, 403);
     assert.match(r.headers["content-type"] ?? "", /text\/html/);
     assert.match(r.body, /Settings, Advanced, Host names/);
+    // A screen left on this page must come back once the operator lists its name.
+    assert.match(r.body, /<meta http-equiv="refresh" content="30">/);
+  });
+
+  test("the JSON refusal does not carry a reload", async () => {
+    const r = await server.send("GET", "/api/version", asRebind());
+    assert.doesNotMatch(r.body, /refresh/);
   });
 
   test("a rebinding write cannot turn refusal off, nor put its own name on the list", async () => {
