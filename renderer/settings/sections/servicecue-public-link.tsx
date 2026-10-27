@@ -358,6 +358,8 @@ export function PublicLinkCard({
       hint={hint}
       onAddr={setAddrDraft}
       onTok={setTokDraft}
+      // Emptied and left: the stored token is still there, so the field shows it again. Clearing the address is what removes it.
+      onTokBlank={() => setTokDraft(null)}
       onLeave={() => void saveConnection()}
     />
   );
@@ -562,6 +564,7 @@ function ConnectionFields({
   hint,
   onAddr,
   onTok,
+  onTokBlank,
   onLeave,
 }: {
   setup: boolean;
@@ -571,6 +574,8 @@ function ConnectionFields({
   hint: string | null;
   onAddr: (v: string) => void;
   onTok: (v: string) => void;
+  /** The token field was left empty. */
+  onTokBlank: () => void;
   onLeave: () => void;
 }) {
   const leave = setup ? undefined : onLeave;
@@ -600,7 +605,10 @@ function ConnectionFields({
           autoComplete="off"
           onFocus={(e) => selectMask(e, tok)}
           onChange={(e) => onTok(e.target.value)}
-          onBlur={leave}
+          onBlur={() => {
+            if (tok.trim() === "") onTokBlank();
+            leave?.();
+          }}
         />
       </ConnectionField>
       {hint && !setup && <p className="text-caption2 text-warn-11">{hint}</p>}
