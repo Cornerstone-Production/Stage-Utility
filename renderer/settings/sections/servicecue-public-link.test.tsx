@@ -68,6 +68,7 @@ const NO_DEPLOY: DeployStatus = {
   page: null,
   files: null,
   waitingFor: null,
+  waitingUntil: null,
   error: null,
   now: NOW,
 };

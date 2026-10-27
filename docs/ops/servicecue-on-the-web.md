@@ -201,7 +201,8 @@ the build it carries. When they differ:
 
 | If | The server |
 |---|---|
-| a service is live in Planning Center | waits, looking again every 30 seconds, and deploys when it ends. It never deploys through a live service, as recording never stops for one |
+| Planning Center reports a service live: any live mode, the countdown before the first item and a service parked between items included (the test the app's own updates use) | waits, looking again every 30 seconds, and deploys when it ends. Nothing goes ahead of it, "Update the page now" included: a deploy reloads every open page and can drop viewers' connections |
+| the window around a rehearsal or service is open (the window integration reconnects use, [Winding down between services](reliability.md#winding-down-between-services), which the Mac helpers' updates also wait out) | waits the same way until the window closes. "Update the page now" goes ahead of it |
 | the live state is not known: the server has just started and not yet read Planning Center, or Planning Center cannot be reached | waits the same way, counting unknown as live. Only an explicit "Update the page now" goes ahead of it |
 | the page was deployed from a **newer** version than this server runs, or from this server's own version by **another build** | leaves it |
 | otherwise | deploys, and logs the files uploaded and the files Cloudflare already held |
@@ -270,7 +271,8 @@ make a new one and paste it. The same status is the `deploy` the `GET
 |---|---|
 | Up to date: build X (version), deployed *time* | the page is the build this server carries; the time is in the app's time zone |
 | Updating the page… N files to upload, M already on Cloudflare | a deploy is under way |
-| Waiting for the service to end, then updating to build X (version) | a service is live in Planning Center; the page is left alone until it ends |
+| Waiting for the service to end, then updating to build X (version) | a service is live in Planning Center (its countdown included); the page is left alone until it ends |
+| Waiting for the service window to close at *time*, then updating to build X (version) | the window around a service is open; the time is in the app's time zone, and Update the page now goes ahead |
 | Waiting to hear whether a service is live, then updating | the live state is not known yet (the server has just started, or Planning Center cannot be reached); Update the page now goes ahead when the state is merely unknown, never through a live service |
 | Couldn't update the page: *reason*. The page is unchanged. | the last attempt, or a read of what is deployed, failed |
 | The page runs build X (version), newer than this server's Y | the page is left alone (no-downgrade rule) |
@@ -364,7 +366,8 @@ page, and keeps the address it was on
   under 32 characters.
 - **The page is behind the server's build.** The server's side is the `[servicecue-deploy]`
   lines in the app's [log](updates-and-logs.md): each decision once (deploying and why,
-  the page already current, skipped as the page is newer, waiting for a live service, no
+  the page already current, skipped as the page is newer, waiting for a live service, for
+  the service window to close, or for the service times to be known, no
   token, no copy of the page in this build), the files uploaded and the files already
   held, the build deployed, and every failure with Cloudflare's code and words. A refused
   token reads `HTTP 401` or `403` and `Not trying again until the token changes`.

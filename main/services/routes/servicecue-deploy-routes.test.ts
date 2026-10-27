@@ -38,6 +38,7 @@ const { readDeployCredentials, saveDeployCredentials } = await import("../servic
 const { readPublishToken, servicecuePublishStore } = await import("../servicecue-publish-store.js");
 const { secretsStore } = await import("../secrets.js");
 const { deployApiOrigin, deployerDeps } = await import("../servicecue-publisher-instance.js");
+const { serviceWindow } = await import("../service-window.js");
 const { stageController } = await import("../stage-controller.js");
 const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
 const { pkgVersion } = await import("../updater.js");
@@ -351,16 +352,37 @@ describe("where the server looks for Cloudflare", () => {
 });
 
 describe("what the deployer reads from the app", () => {
-  it("is the stage controller's live state and its service times, the app's version and the app's own page copy", (t) => {
-    const live = { mode: "item", currentItemId: "item-1" } as never;
-    t.mock.method(stageController, "getLastLive", () => live);
+  it("is the app updater's live test, the service window, the service times, the app's version and the app's own page copy", (t) => {
+    // The stage controller's own isServiceLive(), driven by the snapshot it keeps: the countdown before a service, and a service parked between items, are live.
+    const ctl = stageController as unknown as { lastLive: unknown };
+    const was = ctl.lastLive;
+    t.after(() => {
+      ctl.lastLive = was;
+      serviceWindow.setWindows([]);
+    });
+    for (const live of [
+      { mode: "preservice", currentItemId: null },
+      { mode: "item", currentItemId: "item-1", serviceEnded: true },
+      { mode: "item", currentItemId: "item-1" },
+    ]) {
+      ctl.lastLive = live;
+      assert.equal(deployerDeps.serviceLive(), true, `${JSON.stringify(live)} did not count as live`);
+    }
+    ctl.lastLive = { mode: "none", currentItemId: null };
+    assert.equal(deployerDeps.serviceLive(), false);
+    ctl.lastLive = null;
+    assert.equal(deployerDeps.serviceLive(), false);
+
+    const now = Date.now();
+    serviceWindow.setWindows([{ open: now - 60_000, close: now + 600_000 }]);
+    assert.equal(deployerDeps.windowCloses(), now + 600_000, "the deployer does not see the service window");
+    serviceWindow.setWindows([]);
+    assert.equal(deployerDeps.windowCloses(), null);
+
     t.mock.method(stageController, "serviceTimesKnown", () => false);
-    assert.equal(deployerDeps.live(), live, "the deployer does not see what Planning Center says is live");
     assert.equal(deployerDeps.serviceTimesKnown(), false, "the deployer does not see that the service times are unknown");
     t.mock.method(stageController, "serviceTimesKnown", () => true);
     assert.equal(deployerDeps.serviceTimesKnown(), true);
-    t.mock.method(stageController, "getLastLive", () => null);
-    assert.equal(deployerDeps.live(), null);
     assert.equal(deployerDeps.version(), pkgVersion());
     assert.equal(deployerDeps.bundleDir, BUNDLE);
   });

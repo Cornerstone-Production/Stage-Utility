@@ -54,6 +54,7 @@ const deployOf = (over: Partial<DeployStatus> = {}): DeployStatus => ({
   page: { build: "3f2a91c", version: "1.28.0", at: DEPLOYED_AT },
   files: { uploaded: 2, held: 21 },
   waitingFor: null,
+  waitingUntil: null,
   error: null,
   now: NOW,
   ...over,
@@ -232,16 +233,23 @@ describe("the status line, by state", () => {
   test("waiting for a live service: says so, and what the build is", async () => {
     await with_(deployOf({ state: "waiting", waitingFor: "live", page: { build: "9c41e07", version: "1.27.0", at: DEPLOYED_AT } }));
     assert.equal(status(), "Waiting for the service to end, then updating to build 3f2a91c (1.28.0)");
-    assert.ok(sectionText().includes("A service is live in Planning Center, so the page is left alone until it ends."));
+    assert.ok(sectionText().includes("Planning Center has a service live (the countdown before it included), so the page is left alone until it ends."));
     // A request now could only be refused: the status line says why.
     assert.equal(updateButton()?.disabled, true);
+  });
+
+  test("waiting for the service window: says when it closes, in the app's zone, and Update the page now can be pressed", async () => {
+    await with_(deployOf({ state: "waiting", waitingFor: "window", waitingUntil: DEPLOYED_AT }));
+    assert.equal(status(), "Waiting for the service window to close at 8:14 AM, then updating to build 3f2a91c (1.28.0)");
+    assert.ok(sectionText().includes("it waits out the time around a service, as the app's own updates do"));
+    assert.equal(updateButton()?.disabled, false);
   });
 
   test("waiting to hear whether one is live: says that, and that Update the page now goes ahead when it is merely unknown", async () => {
     await with_(deployOf({ state: "waiting", waitingFor: "unknown" }));
     assert.equal(status(), "Waiting to hear whether a service is live, then updating");
     assert.ok(sectionText().includes("Update the page now goes ahead when the state is merely unknown, never through a live service."));
-    assert.ok(!sectionText().includes("A service is live in Planning Center"));
+    assert.ok(!sectionText().includes("Planning Center has a service live"));
     // Allowed when the state is merely unknown, so it can be pressed.
     assert.equal(updateButton()?.disabled, false);
   });

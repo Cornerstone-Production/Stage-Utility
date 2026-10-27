@@ -123,7 +123,15 @@ function deployLine(d: DeployStatus, zone: string | undefined, elapsedMs: number
         detail: null,
       };
     case "waiting":
-      // The status says which: a live service is waited out, and a live state not yet known is waited on its own account.
+      // The status says which: a live service is waited out, and the window around one, and a live state not yet known, are waited on its own account.
+      if (d.waitingFor === "window") {
+        const timeZone = zone && isValidTimeZone(zone) ? zone : undefined;
+        return {
+          tone: "warn",
+          text: `Waiting for the service window to close${d.waitingUntil != null ? ` at ${formatClock(d.waitingUntil, { timeZone })}` : ""}, then updating${d.bundle ? ` to build ${d.bundle.build} (${d.bundle.version})` : ""}`,
+          detail: "Updating reloads every open page, so it waits out the time around a service, as the app's own updates do. Update the page now goes ahead, never through a live service.",
+        };
+      }
       return d.waitingFor === "unknown"
         ? {
             tone: "warn",
@@ -134,7 +142,7 @@ function deployLine(d: DeployStatus, zone: string | undefined, elapsedMs: number
         : {
             tone: "warn",
             text: `Waiting for the service to end, then updating${d.bundle ? ` to build ${d.bundle.build} (${d.bundle.version})` : ""}`,
-            detail: "A service is live in Planning Center, so the page is left alone until it ends.",
+            detail: "Planning Center has a service live (the countdown before it included), so the page is left alone until it ends.",
           };
     case "failed": {
       const e = d.error;

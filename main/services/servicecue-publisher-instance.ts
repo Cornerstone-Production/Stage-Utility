@@ -68,7 +68,9 @@ const apiOrigin = deployApiOrigin();
 export const deployerDeps: DeployerDeps = {
   bundleDir: path.join(APP_ROOT, "build", "servicecue"),
   version: () => runningVersion,
-  live: () => stageController.getLastLive(),
+  // The app updater's and the Mac helpers' own tests: never through a live service, nor inside the window around one.
+  serviceLive: () => stageController.isServiceLive(),
+  windowCloses: () => serviceWindow.activeUntil(),
   serviceTimesKnown: () => stageController.serviceTimesKnown(),
   // Read back only for the address they were saved with: the page's current one. None, with no usable API address.
   credentials: async () => {

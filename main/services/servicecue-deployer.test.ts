@@ -13,9 +13,8 @@ import { ACCOUNT_ID, API_TOKEN, FakeCloudflare, failure } from "./fixtures/fake-
 import { BUILD_A, BUILD_B, writeBundle, type WrittenBundle } from "./fixtures/deploy-bundle.js";
 import { cloudflareOrigin } from "./servicecue-cloudflare.js";
 import { backoffMs } from "./servicecue-publisher.js";
-import { DEFAULT_DEPLOY_TIMINGS, ServiceCueDeployer, isOlderVersion, serviceIsLive, type DeployTimings } from "./servicecue-deployer.js";
+import { DEFAULT_DEPLOY_TIMINGS, ServiceCueDeployer, isOlderVersion, type DeployTimings } from "./servicecue-deployer.js";
 import type { DeployCredentials } from "./servicecue-deploy-store.js";
-import type { PcoLiveDTO } from "../types/stage.js";
 
 let fake: FakeCloudflare;
 let bundle: WrittenBundle;
@@ -26,13 +25,14 @@ before(async () => {
 after(() => fake.close());
 
 const CREDS: DeployCredentials = { accountId: ACCOUNT_ID, token: API_TOKEN };
-/** A live tick: an item is current. */
-const LIVE = { mode: "item", currentItemId: "item-1", serviceEnded: false } as unknown as PcoLiveDTO;
 const FAST: Partial<DeployTimings> = { backoffMinMs: 30, backoffMaxMs: 60, liveRecheckMs: 15, justDeployedMs: 120_000 };
 
 interface World {
   creds: DeployCredentials | null;
-  live: PcoLiveDTO | null;
+  /** Is a service live, as stageController.isServiceLive() says? */
+  live: boolean;
+  /** When the service window open now closes, as serviceWindow.activeUntil() says. */
+  windowCloses: number | null;
   /** Have the service times been read since the server started? */
   known: boolean;
   version: string;
@@ -60,7 +60,8 @@ function makeDeployer(timings: Partial<DeployTimings> = FAST): ServiceCueDeploye
   const d = new ServiceCueDeployer({
     bundleDir: bundle.dir,
     version: () => world.version,
-    live: () => world.live,
+    serviceLive: () => world.live,
+    windowCloses: () => world.windowCloses,
     serviceTimesKnown: () => world.known,
     credentials: async () => world.creds,
     apiOrigin: cloudflareOrigin(fake.origin),
@@ -73,7 +74,7 @@ function makeDeployer(timings: Partial<DeployTimings> = FAST): ServiceCueDeploye
 beforeEach(() => {
   fake.reset();
   bundle = writeBundle();
-  world = { creds: CREDS, live: null, known: true, version: "1.28.0" };
+  world = { creds: CREDS, live: false, windowCloses: null, known: true, version: "1.28.0" };
 });
 afterEach(() => {
   for (const d of deployers.splice(0)) d.stop();
@@ -268,7 +269,7 @@ describe("the no-downgrade rule", () => {
 describe("a service being live", () => {
   it("is never deployed through: waits, says so once, and goes when the service ends", async (t) => {
     const lines = captureConsole(t, "log");
-    world.live = LIVE;
+    world.live = true;
     const d = makeDeployer();
     d.consider(BUILD_A);
     await d.settled();
@@ -278,35 +279,47 @@ describe("a service being live", () => {
     assert.equal(apiCalls(), 0, "Cloudflare was called during a live service");
     assert.equal(lines.filter((l) => /a service is live/.test(l)).length, 1, "said once, however long the wait");
 
-    world.live = null;
+    world.live = false;
     await reaches(d, "current");
     assert.equal(d.status().waitingFor, null, "a reason for waiting outlived the wait");
     assert.equal(puts(), 1);
   });
 
-  it("is not live before an item is current, nor after the plan's SERVICE END", async (t) => {
-    captureConsole(t, "log");
-    assert.equal(serviceIsLive(null), false);
-    assert.equal(serviceIsLive(LIVE), true);
-    assert.equal(serviceIsLive({ ...LIVE, serviceEnded: true } as PcoLiveDTO), false);
-    assert.equal(serviceIsLive({ mode: "preservice", currentItemId: null } as unknown as PcoLiveDTO), false);
-    assert.equal(serviceIsLive({ mode: "none", currentItemId: null } as unknown as PcoLiveDTO), false);
-    assert.equal(serviceIsLive({ mode: "item", currentItemId: null } as unknown as PcoLiveDTO), false);
-    world.live = { ...LIVE, serviceEnded: true } as PcoLiveDTO;
+  it("waits out the service window on its own account, says until when, and goes when it closes", async (t) => {
+    const lines = captureConsole(t, "log");
+    world.windowCloses = Date.now() + 3_600_000;
     const d = makeDeployer();
     d.consider(BUILD_A);
     await d.settled();
-    assert.equal(puts(), 1, "a service past its end is over");
+    assert.equal(d.status().state, "waiting");
+    assert.equal(d.status().waitingFor, "window");
+    assert.equal(d.status().waitingUntil, world.windowCloses);
+    await sleep(100);
+    assert.equal(apiCalls(), 0, "Cloudflare was called inside the service window");
+    assert.equal(lines.filter((l) => /the service window is open until \d\d:\d\d:\d\d, so the page is not updated now/.test(l)).length, 1, lines.join("\n"));
+
+    world.windowCloses = null;
+    await reaches(d, "current");
+    assert.equal(d.status().waitingUntil, null);
+    assert.equal(puts(), 1);
+  });
+
+  it("is gone ahead of by an explicit Update the page now, inside the window", async (t) => {
+    captureConsole(t, "log");
+    world.windowCloses = Date.now() + 3_600_000;
+    const d = makeDeployer();
+    assert.equal((await d.deployNow()).kind, "deployed");
+    assert.equal(puts(), 1);
   });
 
   it("stops waiting when the publisher stops", async (t) => {
     captureConsole(t, "log");
-    world.live = LIVE;
+    world.live = true;
     const d = makeDeployer();
     d.consider(BUILD_A);
     await d.settled();
     d.stop();
-    world.live = null;
+    world.live = false;
     await sleep(100);
     assert.equal(apiCalls(), 0, "a stopped publisher still deployed");
     assert.equal(d.status().state, "unchecked");
@@ -468,7 +481,7 @@ describe("Update the page now", () => {
 
   it("is not made during a live service, and says so", async (t) => {
     captureConsole(t, "log");
-    world.live = LIVE;
+    world.live = true;
     const d = makeDeployer();
     assert.deepEqual(await d.deployNow({ confirmDowngrade: true }), { kind: "waiting" });
     assert.equal(apiCalls(), 0);
@@ -609,7 +622,7 @@ describe("another server at the same version", () => {
       first.consider("cccccccccccc");
       await first.settled();
       assert.equal(puts(), 1, "the first server deploys over an older page");
-      const other = new ServiceCueDeployer({ bundleDir: second.dir, version: () => "1.28.0", live: () => null, serviceTimesKnown: () => true, credentials: async () => CREDS, apiOrigin: cloudflareOrigin(fake.origin), timings: FAST });
+      const other = new ServiceCueDeployer({ bundleDir: second.dir, version: () => "1.28.0", serviceLive: () => false, windowCloses: () => null, serviceTimesKnown: () => true, credentials: async () => CREDS, apiOrigin: cloudflareOrigin(fake.origin), timings: FAST });
       deployers.push(other);
       // The first server's page is what the other reads: another build, the same version.
       other.consider(BUILD_B);
@@ -654,7 +667,7 @@ describe("another server at the same version", () => {
 describe("a live state that is not known", () => {
   it("counts as live on the server's own account: after a restart, or a Planning Center outage, nothing is deployed until the service times are known", async (t) => {
     const lines = captureConsole(t, "log");
-    world.live = null; // as getLastLive() is, after a restart, until the first Planning Center read
+    world.live = false; // as isServiceLive() is, after a restart, until the first Planning Center read
     world.known = false;
     const d = makeDeployer();
     d.consider(BUILD_A);
@@ -681,13 +694,13 @@ describe("a live state that is not known", () => {
 
     // A live service, known, wins over unknown.
     fake.reset();
-    world.live = LIVE;
+    world.live = true;
     const e = makeDeployer({ ...FAST, nowEveryMs: 0 });
     assert.deepEqual(await e.deployNow({ confirmDowngrade: true }), { kind: "waiting" });
     assert.equal(apiCalls(), 0);
 
     // And known, it carries no such word.
-    world.live = null;
+    world.live = false;
     world.known = true;
     const known = await e.deployNow();
     assert.equal(known.kind === "deployed" && "serviceStateUnknown" in known, false);
@@ -837,11 +850,11 @@ describe("the state after a decision that deploys nothing", () => {
     d.consider(BUILD_A);
     await d.settled();
     assert.equal(d.status().state, "newer");
-    world.live = LIVE;
+    world.live = true;
     d.consider(BUILD_A);
     await d.settled();
     assert.equal(d.status().state, "waiting");
-    world.live = null;
+    world.live = false;
     await reaches(d, "newer");
     // Publishing stops and starts: still what it was, never "unchecked" for a page that is known.
     d.stop();
