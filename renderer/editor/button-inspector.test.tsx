@@ -26,7 +26,7 @@
 // checked by driving the real editor.
 
 import { strict as assert } from "node:assert";
-import { after, afterEach, beforeEach, describe, test } from "node:test";
+import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 
 import type { LayoutObjectConfig } from "@main/types/views.js";
 import type { ParamDef } from "@main/types/automation.js";
@@ -38,6 +38,7 @@ const teardown = installDom();
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { toast } = await import("../components/ui/toast.js");
 const { ButtonInspector, NEW_MANUAL_CUE_HREF } = await import("./button-inspector.js");
 type ButtonConfig = import("./button-inspector.js").ButtonConfig;
 type CuesLive = import("../main/use-cue-live.js").CuesLive;
@@ -253,6 +254,60 @@ describe("Make it a cue", () => {
     ]);
     assert.deepEqual(configs, [{ type: "cue-button", cue: "walk_now", label: "Walk now", showDevice: true }]);
     assert.equal(pressed(container, "Fire a cue"), "true", "the panel must now show the cue half");
+  });
+
+  test("the success toast says the layout still needs saving: the cue is written now, the Button's rebind is not", async () => {
+    const said: string[] = [];
+    mock.method(toast, "success", (m: string) => void said.push(m));
+    try {
+      serve();
+      const { container, configs } = mount(ACTION);
+      await makeIt(container);
+      await eventually(() => assert.equal(configs.length, 1));
+      assert.equal(said.length, 1);
+      assert.match(said[0], /Made the cue "walk_now"/);
+      assert.match(said[0], /not saved yet/);
+    } finally {
+      mock.restoreAll();
+    }
+  });
+
+  test("pressing it again for a cue an earlier press made offers that cue, writes nothing and mints no name_2", async () => {
+    const said: string[] = [];
+    mock.method(toast, "success", (m: string) => void said.push(m));
+    try {
+      const s = serve({
+        existingRules: [
+          {
+            id: "r1", name: "Walk now", enabled: true,
+            trigger: { id: "call.by-name", params: { name: "walk_now", says: "Walk now", homeAssistant: "hidden" } },
+            conditions: [], action: { id: "osc.send", params: { argument: 3 } }, cooldownSec: 2, oncePerService: false,
+          },
+        ],
+      });
+      const { container, configs } = mount(ACTION);
+      await makeIt(container);
+      await eventually(() => assert.equal(configs.length, 1));
+      assert.deepEqual(s.posted, [], "a second rule was written");
+      assert.deepEqual(configs, [{ type: "cue-button", cue: "walk_now", label: "Walk now", showDevice: true }]);
+      assert.match(said[0], /already runs this action/);
+      assert.match(said[0], /not saved yet/);
+    } finally {
+      mock.restoreAll();
+    }
+  });
+
+  test("a rule of the same name that runs a DIFFERENT action is not reused: a new cue is made", async () => {
+    const s = serve({
+      existingRules: [
+        { id: "r1", name: "Walk now", enabled: true, trigger: { id: "call.by-name", params: { name: "walk_now" } }, action: { id: "osc.send", params: { argument: 4 } } },
+      ],
+    });
+    const { container, configs } = mount(ACTION);
+    await makeIt(container);
+    await eventually(() => assert.equal(configs.length, 1));
+    assert.equal(s.posted.length, 1);
+    assert.equal((configs[0] as { cue: string }).cue, "walk_now_2");
   });
 
   test("a label typed while the write is in flight is the one the button keeps", async () => {
