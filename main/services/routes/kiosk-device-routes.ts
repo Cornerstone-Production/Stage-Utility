@@ -255,7 +255,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       health: healthList(),
       // Each Mac helper and Windows kiosk that has checked for updates lately.
       updates: machineUpdates.list(),
-      updatesListeningSince: machineUpdates.listeningSince,
+      updatesListeningFor: machineUpdates.listeningFor(),
       // For each unclaimed device, which bound devices share a MAC — the
       // "this looks like Left Mic Display" hint. A suggestion, never a binding.
       matches: Object.fromEntries(
