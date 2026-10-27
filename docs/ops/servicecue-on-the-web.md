@@ -316,7 +316,7 @@ for upload, in `build/servicecue/`:
 |---|---|
 | `worker.js` | The Worker as one module, the same one `wrangler deploy` uploads |
 | `public/` | The built page: every file the asset service serves |
-| `deploy.json` | The Worker's name, the build id of the page, the app's version, the Worker's compatibility date and flags, its asset rules, its bindings and variables, its Durable Object `exports`, and `keep_bindings`, each read from `wrangler.jsonc` and the build |
+| `deploy.json` | The Worker's name, the build id of the page, the app's version, the Worker's compatibility date and flags, its asset rules, its bindings and variables, its Durable Object `exports`, and `keep_bindings` (the secrets, and with `keep_vars` the variables set on the Worker), each read from `wrangler.jsonc` and the build |
 
 The page's `_headers` file is not in `public/`. Wrangler does not upload it as an asset:
 it reads it as configuration and sends its text in the assets config. `deploy.json` does
@@ -497,8 +497,12 @@ and nothing else: your server never depends on it.
 The Worker holds at most 500 sockets, 25 to an address, closes ones that have stopped
 pinging when it needs the room, accepts bodies up to 2 MB, and closes a socket that
 sends anything but a keep-alive. `MAX_VIEWERS`, `MAX_VIEWERS_PER_ADDRESS` and
-`VIEWER_IDLE_MS` (milliseconds) can be set under `vars` in `publish/servicecue/wrangler.jsonc`
-to change those; the defaults are 500, 25 and 90000.
+`VIEWER_IDLE_MS` (milliseconds) change those; the defaults are 500, 25 and 90000. Set
+them as variables on the Worker (dashboard: **Workers & Pages** > `servicecue` >
+**Settings** > **Variables and Secrets**, type Text). `wrangler.jsonc` sets `keep_vars`, so
+they survive every deploy, by hand and from the server. A value under `vars` in
+`publish/servicecue/wrangler.jsonc` is set on the Worker by a deploy made by hand, over the
+dashboard's, and is kept from then on the same way.
 
 ## What the deploy tells Cloudflare
 

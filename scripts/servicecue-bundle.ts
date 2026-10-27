@@ -60,11 +60,14 @@ export const CARRIED_KEYS = [
   "compatibility_flags",
   "durable_objects",
   "exports",
+  "keep_vars",
   "name",
   "vars",
 ];
-/** What wrangler keeps of a Worker's bindings across a deploy (its `keepSecrets`). */
-export const KEEP_BINDINGS = ["secret_text", "secret_key"];
+/** What wrangler keeps of a Worker's bindings across a deploy (its `keepSecrets`): the publishing token. */
+export const KEEP_SECRETS = ["secret_text", "secret_key"];
+/** What wrangler also keeps with `keep_vars`: variables set on the Worker in the dashboard, a raised MAX_VIEWERS_PER_ADDRESS say. */
+export const KEEP_VARS = ["plain_text", "json"];
 export const DEPLOYED_ELSEWHERE_KEYS = [
   "$schema", // editor help
   "dependencies_instrumentation", // what wrangler tells Cloudflare about npm packages
@@ -112,6 +115,9 @@ export function deployManifest(input: {
   if (!isRecord(assets) || typeof assets.binding !== "string") throw new Error('wrangler.jsonc has no "assets" with a "binding"');
   const { directory: _directory, binding, ...assetConfig } = assets;
 
+  const keepVars = wrangler.keep_vars ?? false;
+  if (typeof keepVars !== "boolean") throw new Error('wrangler.jsonc "keep_vars" is not true or false');
+
   const flags = wrangler.compatibility_flags ?? [];
   if (!isStringList(flags)) throw new Error('wrangler.jsonc "compatibility_flags" is not a list of names');
 
@@ -141,7 +147,8 @@ export function deployManifest(input: {
     protocol: PUBLISH_PROTOCOL_VERSION,
     assets: { ...assetConfig, [STATIC_HEADERS_FILE]: input.headers },
     bindings,
-    keep_bindings: KEEP_BINDINGS,
+    // In wrangler's order: the variables, then the secrets.
+    keep_bindings: keepVars ? [...KEEP_VARS, ...KEEP_SECRETS] : [...KEEP_SECRETS],
     exports: isRecord(wrangler.exports) ? wrangler.exports : {},
   };
 }
