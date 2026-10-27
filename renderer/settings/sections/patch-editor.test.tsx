@@ -364,6 +364,39 @@ describe("sheet tab menu", () => {
     }
   });
 
+  test("leaving the field commits the rename too", async () => {
+    const f = stubServer();
+    try {
+      await mount();
+      await openMenu(menuTrigger());
+      await act(async () => { fireEvent.click(screen.getByRole("menuitem", { name: "Rename" })); });
+      const input = await eventually(() => screen.getByLabelText("Sheet name") as HTMLInputElement);
+      await type(input, "Stage");
+      await blur(input);
+      assert.equal(!!screen.queryByRole("tab", { name: "Stage" }), true);
+      assert.equal(hasText("Unsaved changes"), true);
+    } finally {
+      f.restore();
+    }
+  });
+
+  test("a blank name is refused: the old name stays and nothing is edited", async () => {
+    const f = stubServer();
+    try {
+      await mount();
+      await openMenu(menuTrigger());
+      await act(async () => { fireEvent.click(screen.getByRole("menuitem", { name: "Rename" })); });
+      const input = await eventually(() => screen.getByLabelText("Sheet name") as HTMLInputElement);
+      await type(input, "   ");
+      await act(async () => { fireEvent.keyDown(input, { key: "Enter" }); });
+      assert.equal(!!screen.queryByRole("tab", { name: "Analog" }), true);
+      assert.equal(screen.queryAllByLabelText("Sheet name").length, 0, "the input is gone");
+      assert.equal(hasText("Unsaved changes"), false, "a blank rename is not an edit");
+    } finally {
+      f.restore();
+    }
+  });
+
   test("Delete asks by name, and removes the sheet only on confirm", async () => {
     const f = stubServer();
     try {
