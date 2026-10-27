@@ -14,6 +14,7 @@ import { updateNoticesStore } from "../update-notices-store.js";
 import { exitForRestart, type RelaunchPrep } from "../update/relaunch.js";
 import { backupScheduler } from "../backup-scheduler.js";
 import { configSnapshot } from "../config-snapshot.js";
+import { refuseUnansweredHost } from "./host-name-routes.js";
 import { splRecorder } from "../spl-recorder.js";
 import { attendanceRecorder } from "../attendance-recorder.js";
 import { serviceTimelineRecorder } from "../service-timeline-recorder.js";
@@ -231,6 +232,8 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     }
     // Restore an uploaded config bundle, then restart to apply.
     if (method === "POST" && pathname === "/api/config/import") {
+      // A bundle restores host-names.json and the Public address, both answered names.
+      if (refuseUnansweredHost(req, res)) return;
       // A snapshot carries every config file and every uploaded image, base64'd,
       // so the ordinary JSON ceiling would refuse a bundle this app exported.
       const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown>;
@@ -279,6 +282,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     // Recall a saved snapshot (apply + restart).
     const snapRecallMatch = pathname.match(/^\/api\/config\/snapshots\/([^/]+)\/recall$/);
     if (method === "POST" && snapRecallMatch) {
+      if (refuseUnansweredHost(req, res)) return;
       try {
         const applied = await configSnapshot.recall(snapRecallMatch[1]);
         json(res, restartResponse(applied, scheduleRestart()));

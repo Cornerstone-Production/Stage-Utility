@@ -19,6 +19,8 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { RemoteServer } = await import("./remote-server.js");
+const { configSnapshot } = await import("./config-snapshot.js");
+const { stageController } = await import("./stage-controller.js");
 const { hostNames, hostNamesConfigStore, hostNamesSeenStore } = await import("./host-names.js");
 
 const REBIND = "rebind-7f3a.attacker.example";
@@ -110,6 +112,13 @@ describe("refusal on", () => {
     assert.equal(r.status, 403);
     assert.match(r.headers["content-type"] ?? "", /text\/html/);
     assert.match(r.body, /Settings, Advanced, Host names/);
+    // A screen left on this page must come back once the operator lists its name.
+    assert.match(r.body, /<meta http-equiv="refresh" content="30">/);
+  });
+
+  test("the JSON refusal does not carry a reload", async () => {
+    const r = await server.send("GET", "/api/version", asRebind());
+    assert.doesNotMatch(r.body, /refresh/);
   });
 
   test("a rebinding write cannot turn refusal off, nor put its own name on the list", async () => {
@@ -161,4 +170,59 @@ describe("the route", () => {
     });
     assert.equal(r.status, 400);
   });
+});
+
+// The list also grows through anything that sets a name the server answers: the
+// Public address, and a restored config bundle (host-names.json and settings.json).
+// Each starts with the same gate as the card's own route.
+describe("the other routes that can put a name on the answered list", () => {
+  const json = { "Content-Type": "application/json" };
+
+  test("the Public address cannot be set under a name that is not answered", async () => {
+    const before = stageController.getState().publicUrl ?? null;
+    const r = await server.send("POST", "/api/public-url", {
+      ...asRebind({ Origin: `http://${REBIND}:${server.port}`, ...json }),
+      body: JSON.stringify({ url: `https://${REBIND}` }),
+    });
+    assert.equal(r.status, 403);
+    assert.equal(stageController.getState().publicUrl ?? null, before);
+    assert.equal(hostNames.answersTo(REBIND), false, "the name became an answered name");
+  });
+
+  test("the Public address can be set by the server's IP", async () => {
+    const r = await server.send("POST", "/api/public-url", {
+      headers: json,
+      body: JSON.stringify({ url: "https://stage.example.org" }),
+    });
+    assert.equal(r.status, 200);
+    await server.send("POST", "/api/public-url", { headers: json, body: JSON.stringify({ url: null }) });
+  });
+
+  for (const [label, path, patch] of [
+    ["a config import", "/api/config/import", "apply"],
+    ["a snapshot recall", "/api/config/snapshots/some-id/recall", "recall"],
+  ] as const) {
+    test(`${label} is refused under a name that is not answered, and applies nothing`, async () => {
+      const real = configSnapshot[patch];
+      let reached = 0;
+      (configSnapshot as unknown as Record<string, unknown>)[patch] = async () => {
+        reached++;
+        throw new Error("stubbed");
+      };
+      try {
+        const r = await server.send("POST", path, {
+          ...asRebind({ Origin: `http://${REBIND}:${server.port}`, ...json }),
+          body: JSON.stringify({ bundle: { "host-names.json": { accepted: [REBIND] } } }),
+        });
+        assert.equal(r.status, 403);
+        assert.equal(reached, 0, "the bundle reached configSnapshot");
+
+        const own = await server.send("POST", path, { headers: json, body: JSON.stringify({ bundle: {} }) });
+        assert.equal(own.status, 400, "the IP request was refused by the gate");
+        assert.equal(reached, 1, "a request by IP did not reach configSnapshot");
+      } finally {
+        (configSnapshot as unknown as Record<string, unknown>)[patch] = real;
+      }
+    });
+  }
 });

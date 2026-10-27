@@ -12,8 +12,33 @@ import { HOST_NAMES_CHANNEL } from "@main/services/host-name-rules";
 import type { HostNamesView } from "@main/services/host-names";
 
 import { invoke as ipc, onNotification } from "../lib/api";
+import { logReadFailure } from "../lib/client-log";
 
 const KEY = ["security:host-names"] as const;
+
+/** Whether the last read failed, so a run of failures (the query retries) is one
+ *  line on /log, and a recovery followed by a new failure is another. */
+let failing = false;
+
+/** Tests only. */
+export function __resetHostNamesForTests(): void {
+  failing = false;
+}
+
+async function read(): Promise<HostNamesView> {
+  try {
+    const view = complete(await ipc<Partial<HostNamesView>>("security:hostNames"));
+    failing = false;
+    return view;
+  } catch (err) {
+    // The rail's count has nowhere to show an error, and a read that failed is not
+    // "nothing waiting": the query keeps the last good list and the card shows the
+    // error, and this is what an operator finds on /log.
+    if (!failing) logReadFailure("security", "the host names", err);
+    failing = true;
+    throw err;
+  }
+}
 
 export function useHostNames() {
   const queryClient = useQueryClient();
@@ -21,20 +46,25 @@ export function useHostNames() {
     () => onNotification(HOST_NAMES_CHANNEL, () => void queryClient.invalidateQueries({ queryKey: KEY })),
     [queryClient],
   );
-  return useQuery({ queryKey: KEY, queryFn: async () => complete(await ipc<Partial<HostNamesView>>("security:hostNames")) });
+  return useQuery({ queryKey: KEY, queryFn: read });
 }
 
-/** An answer missing a list reads as that list empty, so a server that answers
- *  something else never takes the rail down with it. */
+/** The answer, checked. One that is not a host names view is a failed read: an
+ *  answer missing its lists must not read as every list empty, which would take
+ *  the rail's count away while names wait. */
 function complete(view: Partial<HostNamesView> | null | undefined): HostNamesView {
-  const list = <T,>(v: T[] | undefined): T[] => (Array.isArray(v) ? v : []);
+  if (!view || typeof view !== "object") throw new Error("the server's answer was not a host names view");
+  const list = <T,>(name: string, v: T[] | undefined): T[] => {
+    if (!Array.isArray(v)) throw new Error(`the server's host names answer has no ${name} list`);
+    return v;
+  };
   return {
-    enforce: view?.enforce === true,
-    seeded: view?.seeded === true,
-    automatic: list(view?.automatic),
-    accepted: list(view?.accepted),
-    waiting: list(view?.waiting),
-    dismissed: list(view?.dismissed),
+    enforce: view.enforce === true,
+    seeded: view.seeded === true,
+    automatic: list("automatic", view.automatic),
+    accepted: list("accepted", view.accepted),
+    waiting: list("waiting", view.waiting),
+    dismissed: list("dismissed", view.dismissed),
   };
 }
 

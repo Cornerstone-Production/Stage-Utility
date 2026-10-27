@@ -17,7 +17,8 @@ const teardown = installDom();
 const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
-const { __resetDevicesForTests, refreshDevices, useDevices, useNotSetUpCount } = await import("./use-devices.js");
+const { __resetDevicesForTests, refreshDevices, useDevices, useNotSetUpCount, LISTENING_GRACE_MS } = await import("./use-devices.js");
+const { readUpdate } = await import("./machine-update.js");
 
 type SeenDevice = import("@main/types/kiosk").SeenDevice;
 
@@ -31,12 +32,15 @@ let fetchStub: ReturnType<typeof stubFetchWithLog>;
 /** When set, each read waits on this before answering, with the list it saw when asked. */
 let hold: Promise<void> | null;
 let failReads: boolean;
+/** What the server says it has listened for, when asked. */
+let listenedFor: number;
 
 beforeEach(() => {
   server = [];
   reads = 0;
   hold = null;
   failReads = false;
+  listenedFor = 0;
   fetchStub = stubFetchWithLog(async (url) => {
     if (!url.startsWith("/api/devices")) return ok({});
     reads += 1;
@@ -44,7 +48,7 @@ beforeEach(() => {
     const asked = [...server];
     if (hold) await hold;
     if (failReads) throw new TypeError("fetch failed");
-    return ok({ scanning: false, seen: asked, matches: {}, bound: [], health: [] });
+    return ok({ scanning: false, seen: asked, matches: {}, bound: [], health: [], updates: [], updatesListeningFor: listenedFor });
   });
 });
 afterEach(() => {
@@ -161,5 +165,25 @@ describe("a read that fails", () => {
     failReads = true;
     await push();
     await eventually(() => assert.equal(lines().length, 2, "a second run of failures was not reported"));
+  });
+});
+
+describe("the notice that a helper's version is unknown", () => {
+  const MAC = "5f1c09ab-7e22-4c1d-9b04-e6c1aa000001";
+  const helperOutput = { id: `${MAC}.sdi-1`, output: { kind: "decklink" as const, name: "SDI 1", port: "SDI 1" } };
+
+  function Notice() {
+    const data = useDevices();
+    const reading = readUpdate(helperOutput, { ...data, health: [{ deviceId: helperOutput.id } as never] });
+    return React.createElement("p", { "data-testid": "notice" }, reading?.text ?? "");
+  }
+
+  test("appears by itself when the grace period passes, with nothing else re-rendering the page", async () => {
+    // The server has listened almost the whole grace: it ends in 60 ms of this browser's time.
+    listenedFor = LISTENING_GRACE_MS - 60;
+    const { container } = render(React.createElement(Notice));
+    await act(async () => { await settle(); });
+    assert.equal(text(container, "notice"), "", "shown before the grace period was over");
+    await eventually(() => assert.match(text(container, "notice") ?? "", /Run the macOS installer once/), 2000);
   });
 });

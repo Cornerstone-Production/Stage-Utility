@@ -17,6 +17,7 @@ import { stageController } from "../stage-controller.js";
 import type { CreateScreenInput } from "../../types/views.js";
 import { answerScreenWriteFailure, CREATE_SCREEN_FIELDS, readCreateScreenBody, refuseMode } from "./screen-write.js";
 import { errorMessage } from "../errors.js";
+import { StoreReadError } from "../data-store.js";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import * as crypto from "node:crypto";
@@ -68,6 +69,10 @@ const helperDownloads = new OutputHelperDownloads({ dataDir: getUserDataPath, ve
 const clean = (v: string | null): string | undefined =>
   v && v.length > 0 && v.length <= 128 ? v : undefined;
 
+/** True once an unreadable screen list has been logged, until it reads again: one
+ *  line per failure run, not one per kiosk reload. */
+let enrollUnreadableLogged = false;
+
 export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, url, method } = c;
 
@@ -85,7 +90,23 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     }
     // Strict here and below: while the bindings cannot be read, an empty list
     // would show a bound screen the unclaimed holding screen. A failure says so.
-    const devices = await kioskDevicesStore.loadStrict();
+    let devices;
+    try {
+      devices = await kioskDevicesStore.loadStrict();
+    } catch (err) {
+      // A kiosk browser shows whatever it is given and reloads nothing of its own,
+      // so a JSON 503 would sit on the wall until somebody restarted it. A page
+      // that reloads itself recovers once the file can be read again.
+      if (!(err instanceof StoreReadError)) throw err;
+      if (!enrollUnreadableLogged) {
+        enrollUnreadableLogged = true;
+        console.warn(`[kiosk] screens cannot be shown while the screen list is unreadable; they get a page that retries: ${scrub(err.message)}`);
+      }
+      res.writeHead(503, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      res.end(holdingScreen({ id, reason: "unreadable" }));
+      return;
+    }
+    enrollUnreadableLogged = false;
     // Remember it even when unclaimed: this is what claim() pins, and it is the
     // only channel a shell-script-and-a-browser agent has to tell us its secret.
     if (token) rememberSecret(id, token);
@@ -234,7 +255,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       health: healthList(),
       // Each Mac helper and Windows kiosk that has checked for updates lately.
       updates: machineUpdates.list(),
-      updatesListeningSince: machineUpdates.listeningSince,
+      updatesListeningFor: machineUpdates.listeningFor(),
       // For each unclaimed device, which bound devices share a MAC — the
       // "this looks like Left Mic Display" hint. A suggestion, never a binding.
       matches: Object.fromEntries(
@@ -487,6 +508,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       stageController.refreshDisplays("all");
       json(res, { ok: true });
     } catch (err) {
+      if (err instanceof StoreReadError) throw err;
       error(res, errorMessage(err));
     }
     return;
