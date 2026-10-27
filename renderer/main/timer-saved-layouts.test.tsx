@@ -88,9 +88,10 @@ const pcoLive = {
 } as unknown as PcoLiveDTO;
 
 /** What an object draws, as the markup it produces under live data for all four. */
-function drawn(config: unknown): string {
+function drawn(config: unknown, home = false): string {
   cleanup();
   const ctx = makeRenderCtx({
+    home,
     now: NOW,
     pcoLive,
     propresenter: { connected: true, timers: [{ name: "Sermon", time: "-00:00:02", state: "overran" }] } as unknown as ProPresenterStatusDTO,
@@ -115,7 +116,9 @@ function assertSavedDrawsAsTimer(stored: { config: unknown }[], where: string): 
     assert.equal(config.type, s.old.type, `${where}: ${s.name} was rewritten on the way through`);
     const html = drawn(config);
     assert.notEqual(html, "", `${where}: ${s.name} drew nothing`);
-    assert.equal(html, drawn(s.timer), `${where}: ${s.name} does not draw as the Timer it reads as`);
+    // The Service timer was Home's Stat card wherever it was placed, a wall included.
+    const surface = s.old.type === "home-live-status";
+    assert.equal(html, drawn(s.timer, surface), `${where}: ${s.name} does not draw as the Timer it reads as`);
   });
 }
 
@@ -161,6 +164,14 @@ describe("a layout saved with the old timers", () => {
       assertSavedDrawsAsTimer(await store.roundTrip(), store.name);
     });
   }
+});
+
+describe("the Service timer on a wall", () => {
+  test("keeps Home's Stat look, not the wall readout a new Timer draws there", () => {
+    const stored = drawn({ type: "home-live-status" });
+    assert.equal(stored, drawn(SAVED[1].timer, true), "not the Stat Home draws");
+    assert.notEqual(stored, drawn(SAVED[1].timer), "drew the wall readout");
+  });
 });
 
 describe("the harness itself", () => {

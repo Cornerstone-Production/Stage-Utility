@@ -96,3 +96,41 @@ describe("the approved defaults", () => {
     }
   });
 });
+
+describe("a stored value this build does not know", () => {
+  const CHOICE_KEYS = Object.keys(LYRICS_OPTIONS).sort();
+
+  test("the choice keys are exactly these, so a new one is checked here too", () => {
+    assert.deepEqual(CHOICE_KEYS, [
+      "align",
+      "display",
+      "noWords",
+      "size",
+      "tagColor",
+      "tagStyle",
+      "tagText",
+      "tagWidth",
+      "underDim",
+      "underShows",
+      "weight",
+    ]);
+  });
+
+  for (const key of CHOICE_KEYS) {
+    test(`${key}: a string outside its options reads as the default, and each option is kept`, () => {
+      const bogus = lyricsSettings({ type: "lyrics", [key]: "xl" } as never);
+      assert.equal(bogus[key as keyof typeof bogus], LYRICS_DEFAULTS[key as keyof typeof LYRICS_DEFAULTS]);
+      for (const { value } of LYRICS_OPTIONS[key as keyof typeof LYRICS_OPTIONS]) {
+        const kept = lyricsSettings({ type: "lyrics", [key]: value } as never);
+        assert.equal(kept[key as keyof typeof kept], value);
+      }
+    });
+  }
+
+  test("a switch holding a string reads as the default", () => {
+    const s = lyricsSettings({ type: "lyrics", under: "yes", underWords: "no", showTitle: 1 } as never);
+    assert.equal(s.under, LYRICS_DEFAULTS.under);
+    assert.equal(s.underWords, LYRICS_DEFAULTS.underWords);
+    assert.equal(s.showTitle, LYRICS_DEFAULTS.showTitle);
+  });
+});

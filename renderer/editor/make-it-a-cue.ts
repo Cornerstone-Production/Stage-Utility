@@ -128,13 +128,27 @@ function manualCueRule(opts: {
 type MakeCueResult =
   | {
       ok: true;
-      /** The new cue's name, which is what a cue-button's `cue` holds. */
+      /** The cue's name, which is what a cue-button's `cue` holds. */
       cue: string;
+      /** The cue already existed (a rule of this name and action, made by an earlier press), so nothing was written. */
+      reused: boolean;
     }
   | { ok: false; error: string };
 
+/** The name of an enabled Called-by-name rule that is this very cue: the same name, action and parameters. */
+function existingCue(rules: readonly Rule[], name: string, actionId: string, params: Record<string, string | number>): string | null {
+  const same = (a: Record<string, string | number>, b: Record<string, string | number>) =>
+    JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+  for (const r of rules) {
+    if (r.trigger.id !== CALL_TRIGGER_ID || !r.enabled || r.name !== name || r.action?.id !== actionId) continue;
+    const cue = String(r.trigger.params.name ?? "").trim();
+    if (cue && same(ruleParams(r.action.params), params)) return cue;
+  }
+  return null;
+}
+
 /**
- * Create the manual cue for a Button's action. Resolves with the new cue's name,
+ * Create the manual cue for a Button's action. Resolves with the cue's name (an existing one when it is already this action),
  * or with the reason it could not — the rule list or manifest could not be read,
  * or the server refused the rule.
  */
@@ -152,12 +166,16 @@ export async function makeCueFromAction(opts: {
       invoke<{ rules: Rule[] }>("automation:rules"),
       invoke<CueManifest>("cues:manifest"),
     ]);
+    // Leaving the editor without saving strands the cue this wrote, and pressing again would
+    // mint name_2 beside it: the cue that is already this Button's action is offered instead.
+    const earlier = existingCue(rules, ruleName, opts.actionId, ruleParams(opts.params));
+    if (earlier) return { ok: true, cue: earlier, reused: true };
     const taken = takenCueNames(rules, manifest);
     // The label first, the action's name when the label has no letters in it.
     const cueName = cueNameFor(cueSlug(ruleName) ? ruleName : opts.actionLabel, taken);
     const rule = manualCueRule({ name: ruleName, cueName, actionId: opts.actionId, params: opts.params });
     await invoke<Rule>("automation:addRule", rule);
-    return { ok: true, cue: cueName };
+    return { ok: true, cue: cueName, reused: false };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };
   }

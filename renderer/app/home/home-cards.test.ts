@@ -8,6 +8,7 @@ import {
   SIZE_ORDER,
   addCard,
   defaultSize,
+  defaultWhen,
   removeCard,
   setSize,
   setWhen,
@@ -70,6 +71,13 @@ describe("defaults", () => {
   test("a card with nothing set falls back to its type's size", () => {
     assert.equal(sizeOf(card("a", "clock")), defaultSize("clock"));
     assert.equal(sizeOf(card("a", "clock", "xl")), "xl");
+  });
+
+  test("a Timer added from the Home picker is the Service card again: extra large, shown while live", () => {
+    assert.equal(defaultSize("timer"), "xl");
+    assert.equal(defaultWhen("timer"), "live");
+    assert.equal(defaultSize("timer"), defaultSize("home-live-status"));
+    assert.equal(defaultWhen("timer"), defaultWhen("home-live-status"));
   });
 
   test("every registry type has a size that exists", () => {
