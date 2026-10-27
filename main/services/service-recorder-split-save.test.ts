@@ -40,7 +40,7 @@ const { archiveRoutes } = await import("./routes/archive-routes.js");
 const { callRoute } = await import("./routes/route-harness.js");
 const { handlerErrorStatus, handlerErrorCode } = await import("./remote-server.js");
 
-type Rec = { serviceKey: string; endedAt: string | null };
+type Rec = { serviceKey: string; endedAt: string | null; startedAt?: string };
 type Held = {
   current: Rec | null;
   currentKey: string | null;
@@ -375,6 +375,34 @@ describe("a failed save at the service split", { skip: asRoot && "chmod does not
     const current = serviceTimelineRecorder.getCurrent();
     assert.equal(current?.serviceKey, key1);
     assert.equal(current?.startedAt, "2026-10-18T18:10:00.000Z", "resumed a held copy that was forgotten");
+  });
+
+  it("resumes a held copy whose retried save lands while it is being resumed", async () => {
+    const key1 = `75953:${planId}:occ-a`;
+    await tick("2026-10-18T14:00:00.000Z", "occ-a", "doors");
+    await setWritable(false);
+    await tick("2026-10-18T16:05:00.000Z", "occ-b", "welcome");
+    await setWritable(true);
+
+    // The retry timer fires during resumeRecord (SPL's reads the whole raw
+    // archive) and its save succeeds, which takes the copy out of `unsaved`
+    // just as a forget would.
+    const rec = serviceTimelineRecorder as unknown as { resumeRecord(r: unknown): Promise<unknown> };
+    mock.method(rec, "resumeRecord", async (r: unknown) => {
+      await runRetries(async () => !serviceTimelineRecorder.isHolding(key1));
+      return r;
+    });
+    await tick("2026-10-18T18:10:00.000Z", "occ-a", "doors");
+    assert.equal(
+      serviceTimelineRecorder.getCurrent()?.startedAt,
+      "2026-10-18T14:00:00.000Z",
+      "read a successful retry as a forget and opened a fresh record",
+    );
+
+    // And the debounced persist does not write a fresh record over the saved one.
+    mock.timers.tick(PAST_EVERY_RETRY_MS);
+    await drainStores();
+    assert.equal((await readRecord("service-timeline", key1))?.startedAt, "2026-10-18T14:00:00.000Z");
   });
 
   it("does not hold a record forgotten while its failing save was out", async (t) => {

@@ -208,6 +208,11 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   private inheritedAiring: Airing | null = null;
   /** Closed records whose save failed, by key — see saveClosed. */
   private unsaved = new Map<string, T>();
+  /** Held copies dropped by forget(), so ensureRecord can tell a forget during
+   *  its resume from a retry that saved the copy (both take it out of
+   *  `unsaved`). ensureRecord clears its key before its awaits, so this only
+   *  ever holds keys forgotten since their last resume. */
+  private forgottenHeld = new Set<string>();
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   /** When retryUnsaved last said the saves are still failing. */
   private stillFailingLoggedAt = 0;
@@ -325,6 +330,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    */
   forget(serviceKey: string): boolean {
     const wasUnsaved = this.unsaved.delete(serviceKey);
+    if (wasUnsaved) this.forgottenHeld.add(serviceKey);
     if (this.currentKey !== serviceKey && this.current?.serviceKey !== serviceKey) return wasUnsaved;
     this.cancelPersist();
     this.current = null;
@@ -615,6 +621,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
 
     // A copy whose save failed is newer than anything the store has for it.
     const held = this.unsaved.get(key);
+    this.forgottenHeld.delete(key);
     const existing = held ?? (await this.store.get(key));
     if (gen !== this.generation) return; // forgotten while we waited
     // Checked again after: resumeRecord awaits too, and for SPL it is the
@@ -624,8 +631,11 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     const resumed = existing ? await this.resumeRecord(existing) : null;
     if (gen !== this.generation) return;
     // A held copy forgotten meanwhile does not bump the generation (see
-    // forget), so it is checked here, and the service starts afresh.
-    if (resumed && !(held && this.unsaved.get(key) !== held)) {
+    // forget), so it is checked here, and the service starts afresh. It is
+    // asked of forgottenHeld, not of `unsaved`: a retry that saves the copy
+    // meanwhile takes it out of `unsaved` too, and starting afresh then wrote
+    // an empty record over the one the retry had just saved.
+    if (resumed && !(held && this.forgottenHeld.delete(key))) {
       this.unsaved.delete(key); // open again: saved by the debounced persist from here
       this.current = resumed;
       this.current.endedAt = null; // reopened
