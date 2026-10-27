@@ -354,7 +354,9 @@ cannot answer them: whether a service type or plan still exists in Planning
 Center, whether a milestone's service type has recorded history on this machine,
 whether a branding image `settings.json` names is on this machine, and whether a
 screen's message groups exist. A screen whose address has since become a
-built-in page is restored, and the next start renames it and logs the change.
+built-in page is restored, and the next start renames it and logs the change. A
+screen whose address is another screen's id, which builds before 1.27.0 could
+create, is restored as it is and logged on `[config-snapshot]`.
 
 At start-up, before anything reads them, the server runs the same checks over the
 config files on disk and names any that a save would refuse on

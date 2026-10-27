@@ -11,13 +11,14 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, test } from "node:test";
+import { describe, test, type TestContext } from "node:test";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-settings-restore-check-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { CHECKED_SETTINGS_KEYS, settingsRestoreCheck } = await import("./settings-restore-check.js");
+const { captureConsole } = await import("./fixtures/capture-console.js");
 
 type Case = { bad: unknown; says: string } | { in: unknown; out: unknown };
 
@@ -114,7 +115,6 @@ const SCREEN_CASES: { screens: unknown[]; says: string }[] = [
   { screens: [{ ...SCREEN, id: "" }], says: "id is not allowed" },
   { screens: [{ ...SCREEN, id: "a/b" }], says: "id is not allowed" },
   { screens: [{ ...SCREEN, slug: "lobby" }, { id: "2", name: "Two", slug: "lobby" }], says: "already used" },
-  { screens: [{ ...SCREEN, slug: "2" }, { id: "2", name: "Two" }], says: "already used" },
   { screens: [{ ...SCREEN, id: "__proto__" }], says: "id is not allowed" },
   { screens: [{ ...SCREEN, textSize: "huge" }], says: "text size" },
 ];
@@ -162,6 +162,20 @@ describe("settings.json restore check", () => {
   test("a screen whose address has since become a built-in page is left for the start-up migration", async () => {
     const result = await settingsRestoreCheck({ outputs: [{ ...SCREEN, slug: "settings" }] });
     assert.ok(result.ok, !result.ok ? result.reason : "");
+  });
+
+  test("an address equal only to another screen's id is kept, and logged", async (t) => {
+    // addOutput minted display-2 without looking at display-1's address, so a
+    // v1.26.0 install can hold exactly this.
+    const warnings = captureConsole(t as TestContext, "warn");
+    const screens = [{ id: "display-1", name: "A", slug: "display-2" }, { id: "display-2", name: "B" }];
+    const result = await settingsRestoreCheck({ outputs: screens });
+    assert.ok(result.ok, !result.ok ? result.reason : "");
+    assert.deepEqual((result.value as { outputs: unknown[] }).outputs, screens);
+    assert.ok(
+      warnings.some((w) => w.includes("[config-snapshot]") && w.includes('/display-2 is also the id of screen "B"')),
+      warnings.join("\n"),
+    );
   });
 
   test("a key no code reads is dropped", async () => {
