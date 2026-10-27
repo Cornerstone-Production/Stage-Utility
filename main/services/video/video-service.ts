@@ -1055,7 +1055,12 @@ class VideoService {
     // this one could dial the source.
     this.requestedAt.clear();
     this.unansweredSince.clear();
-    if (status.state !== "running") this.lastPaths = new Map();
+    if (status.state !== "running") {
+      this.lastPaths = new Map();
+      // The converters and codecs were the dead process's; the next one's first
+      // listen-started is a new session, not a repeat.
+      this.audio.relayGone();
+    }
     void this.background.track(this.settleFeeds());
     // Last: a reconcile the readiness poll starts from here captures the
     // generation just bumped, so its success counts for this process.

@@ -3,7 +3,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { DEFAULT_VOLUME, VOLUME_KEY, listenPathOf, listenView, readVolume, writeVolume } from "./listen.js";
+import { DEFAULT_VOLUME, VOLUME_KEY, __listenOwnerForTests, __resetListenForTests, claimListen, listenPathOf, releaseListen, listenView, readVolume, writeVolume } from "./listen.js";
 
 const memory = (initial: Record<string, string> = {}) => {
   const map = new Map(Object.entries(initial));
@@ -73,4 +73,16 @@ test("each state of the control reads as the design words it", () => {
   assert.equal(disabled(converted), false);
   assert.equal(listenView({ audio: converted, wanted: true, phase: "live", outcome: "on" })?.playing, true);
   assert.equal(listenView({ audio: converted, wanted: true, phase: "connecting", outcome: "on" })?.playing, false, "the meter and slider wait for the sound");
+});
+
+test("a control that lost the sound does not take it from the one that has it", () => {
+  __resetListenForTests();
+  claimListen("a");
+  claimListen("b");
+  assert.equal(__listenOwnerForTests(), "b");
+  releaseListen("a");
+  assert.equal(__listenOwnerForTests(), "b", "A's release took the sound from B");
+  releaseListen("b");
+  assert.equal(__listenOwnerForTests(), null);
+  __resetListenForTests();
 });
