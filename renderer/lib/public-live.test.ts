@@ -519,17 +519,37 @@ describe("reconnecting", () => {
     assert.deepEqual(waits, [1000, 2000, 4000, 8000, 16_000, 30_000, 30_000, 30_000]);
   });
 
-  test("a connection that opens resets the backoff", () => {
+  test("a connection that stays open resets the backoff", () => {
     live.startPublicLive(deps().d);
     for (let i = 0; i < 4; i++) {
       FakeSocket.last.drop();
       mock.timers.tick(30_000);
     }
     FakeSocket.last.open();
+    mock.timers.tick(live.STABLE_AFTER_MS);
     FakeSocket.last.drop();
     const before = FakeSocket.instances.length;
     mock.timers.tick(live.RECONNECT_MIN_MS);
     assert.equal(FakeSocket.instances.length, before + 1, "the next wait was not back at the minimum");
+  });
+
+  test("a socket that opens and is closed at once does not reset the backoff: the delay still doubles", () => {
+    live.startPublicLive(deps().d);
+    const waits: number[] = [];
+    for (let i = 0; i < 7; i++) {
+      FakeSocket.last.open();
+      mock.timers.tick(100); // closed within a moment of opening
+      FakeSocket.last.drop();
+      const before = FakeSocket.instances.length;
+      let waited = 0;
+      while (FakeSocket.instances.length === before) {
+        mock.timers.tick(1000);
+        waited += 1000;
+        assert.ok(waited <= 31_000, "never reconnected");
+      }
+      waits.push(waited);
+    }
+    assert.deepEqual(waits, [1000, 2000, 4000, 8000, 16_000, 30_000, 30_000]);
   });
 
   test("a streak of failures is said once, and the recovery is said", () => {
@@ -540,6 +560,8 @@ describe("reconnecting", () => {
     }
     assert.equal(warnings.filter((w) => w.includes("was lost")).length, 1);
     FakeSocket.last.open();
+    assert.equal(logs.filter((l) => l.includes("restored")).length, 0, "said before the socket proved itself");
+    mock.timers.tick(live.STABLE_AFTER_MS);
     assert.equal(logs.filter((l) => l.includes("restored after 4")).length, 1);
   });
 
