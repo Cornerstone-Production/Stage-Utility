@@ -333,11 +333,13 @@ describe("heartbeats", () => {
 
   test("the public read gives the last heartbeat and the edge's clock now, and null before the first", async () => {
     const s = setup();
-    assert.deepEqual(await (await s.run("GET", "/api/publish/heartbeat")).json(), { at: null, now: 5_000_000 });
+    assert.deepEqual(await (await s.run("GET", "/api/publish/heartbeat")).json(), { at: null, now: 5_000_000, build: BUILD });
     s.hub.clock = 4_990_000;
     await s.run("POST", "/_publish/v1/heartbeat", { headers: AUTH, body: json({ at: 1, version: "v" }) });
     const read = await s.run("GET", "/api/publish/heartbeat");
-    assert.deepEqual(await read.json(), { at: 4_990_000, now: 5_000_000 });
+    // The build too, so a page living on this read (its network breaks the socket)
+    // still reloads after a deploy.
+    assert.deepEqual(await read.json(), { at: 4_990_000, now: 5_000_000, build: BUILD });
     assert.equal(read.headers.get("cache-control"), "no-store", "a clock sample must be fresh");
   });
 

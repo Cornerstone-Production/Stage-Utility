@@ -82,7 +82,7 @@ To stop sharing, delete the Worker (see [Taking it down](#rotating-the-token-and
 
    ```bash
    curl https://servicecue.<your-subdomain>.workers.dev/api/publish/heartbeat
-   # {"at":null,"now":1790000000000}
+   # {"at":null,"now":1790000000000,"build":"0123456789ab"}
 
    curl -H "Authorization: Bearer <the token>" \
      https://servicecue.<your-subdomain>.workers.dev/_publish/v1/status

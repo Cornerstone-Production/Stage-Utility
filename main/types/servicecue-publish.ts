@@ -276,10 +276,13 @@ export interface DocsFrameData {
   all?: true;
 }
 
-/** The answer of `GET /api/publish/heartbeat`. `now` is the edge's clock, for the page to set its own by. */
+/** The answer of `GET /api/publish/heartbeat`. `now` is the edge's clock, for the page to set its own by.
+ *  `build` is the page the Worker serves, as the socket's heartbeat names it, so a page
+ *  whose network breaks the socket still reloads after a deploy; null when it has none. */
 export interface HeartbeatAnswer {
   at: number | null;
   now: number;
+  build: string | null;
 }
 
 /** The latest heartbeat the Worker holds. `at` is the edge's clock when it arrived, `sentAt` the publisher's own. */

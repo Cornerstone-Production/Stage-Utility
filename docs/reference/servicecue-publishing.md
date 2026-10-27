@@ -160,7 +160,7 @@ Everything below is open: no token, `GET` and `HEAD` only except the socket, whi
 | `/servicecue`, `/servicecue/<service type>/<layout>` | the page. Each segment is a slug or an id (letters, digits, `_`, `-`), as the app's own links are; one trailing slash is allowed |
 | the doc paths above | the doc, `404 {"error": …}` if it was never sent |
 | `/branding-images/<name>` | the asset, with its type and `X-Content-Type-Options: nosniff` |
-| `/api/publish/heartbeat` | `{"at": <ms or null>, "now": <ms>}`: when the church was last heard from, and the edge's clock |
+| `/api/publish/heartbeat` | `{"at": <ms or null>, "now": <ms>, "build": <id or null>}`: when the church was last heard from, the edge's clock, and the build of the page this Worker serves |
 | `/api/live` | the WebSocket below |
 
 The files the build writes beside the page (`/assets/*.js`, `*.css`, `*.woff` and
@@ -294,8 +294,9 @@ is a different document whenever either is. (An icon or a manifest that changes 
 is not a new build.)
 
 The Worker reads the id out of the document it serves and gives it to the status answer
-(`build`), and puts it on the heartbeat it
-replays on connect and on every one it sends after. When a page hears an id that is not
+(`build`), puts it on the heartbeat it
+replays on connect and on every one it sends after, and on the answer of
+`/api/publish/heartbeat`, so a page whose network breaks the socket hears it too. When a page hears an id that is not
 its own it reloads, on the address it is on, so `?plan=`, `?text=` and `?from=` are
 still there. A socket a deploy dropped reconnects, and the replay is the first thing it
 hears; a socket that survived hears it in the next heartbeat.

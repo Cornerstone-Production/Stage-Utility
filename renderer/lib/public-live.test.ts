@@ -491,6 +491,18 @@ describe("the build the Worker says it is serving", () => {
     assert.notEqual(live.getPublicFreshness().heardAtMono, null);
   });
 
+  test("the edge's HTTP read offers its build too, for a page whose network breaks the socket", async () => {
+    answer = async () => ({ ok: true, text: async () => JSON.stringify({ at: null, now: 5_000_000, build: PAGE }) });
+    await connected();
+    assert.equal(reloads, 0, "the page's own build was reloaded for");
+    answer = async () => ({ ok: true, text: async () => JSON.stringify({ at: null, now: 5_000_000, build: NEXT }) });
+    FakeSocket.last.drop();
+    mock.timers.tick(1_000);
+    FakeSocket.last.open();
+    await settle();
+    assert.equal(reloads, 1, "a new build named only by the HTTP read was never reloaded for");
+  });
+
   test("only a heartbeat can offer one: a build field on another channel's data is just data", async () => {
     await connected();
     for (const channel of ["pco:live", "spl:history", "stage:state-changed", "publish:docs"]) {

@@ -361,6 +361,9 @@ async function readEdge(): Promise<void> {
     const when = arrived - rttMs / 2; // the edge read its clock about halfway
     anchor(body.now, when);
     if (finite(body.at)) hear(when - Math.max(0, body.now - body.at));
+    // The socket's heartbeat offers the build too; this is the road for a page whose
+    // network breaks the socket, which would otherwise never reload after a deploy.
+    if (typeof body.build === "string") reloadForNewBuild(body.build);
   } catch (err) {
     console.warn("[public-live] could not read the edge's clock and heartbeat; the page keeps what it has", err);
   }
