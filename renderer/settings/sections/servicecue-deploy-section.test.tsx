@@ -91,6 +91,9 @@ interface Server {
   credentials: (body: Record<string, unknown>) => DeployStatus;
   /** What a settings write answers, from the body. */
   save: (body: Record<string, unknown>) => PublishSettingsDTO;
+  /** How many reads of the settings have been made, and how long each takes to answer. */
+  reads: number;
+  slowRead: number;
 }
 
 let server: Server;
@@ -109,6 +112,8 @@ beforeEach(() => {
       return deployOf({ accountId: typeof body.accountId === "string" ? body.accountId : ACCOUNT });
     },
     save: (body) => ({ ...server.dto, ...(typeof body.url === "string" ? { url: body.url } : {}) }),
+    reads: 0,
+    slowRead: 0,
   };
   const f = stubFetchWithLog((url, init) => {
     if (init?.method === "POST") {
@@ -131,7 +136,13 @@ beforeEach(() => {
         return reply(answer.status, answer.json);
       }
     }
-    if (url === "/api/servicecue/publish") return ok(server.dto);
+    if (url === "/api/servicecue/publish") {
+      server.reads += 1;
+      // What the server held when the read was made, delivered later: a read in flight across a write.
+      const held = server.dto;
+      if (server.slowRead > 0) return new Promise((resolve) => setTimeout(() => resolve(ok(held)), server.slowRead));
+      return ok(held);
+    }
     if (url === "/api/update/status") return ok({ branch: "beta" });
     return ok({});
   });
@@ -569,6 +580,37 @@ describe("the API token", () => {
     assert.deepEqual(server.posts, [], "a save started on the way back");
     await leave(tokField());
     assert.deepEqual(server.posts, [["credentials", { accountId: "fedcba9876543210fedcba9876543210" }]]);
+  });
+
+  test("a token that reads as the mask is not a token: put back over the mask, it is not sent", async () => {
+    await with_(deployOf());
+    type(tokField(), "x");
+    // The operator undoes the keystroke: the field holds the bullets again, now as a draft.
+    type(tokField(), FORM_MASK);
+    await leave(tokField());
+    assert.deepEqual(server.posts, [], "the mask was sent as a token");
+  });
+
+  test("drops a read that was in flight when a save began, instead of putting back what the save changed", async () => {
+    await with_(NO_TOKEN(), { pollMs: 30 });
+    server.slowRead = 150;
+    // A poll is on its way, carrying what the server holds now: no token.
+    const before = server.reads;
+    await eventually(() => assert.ok(server.reads >= before + 1, `reads: ${server.reads}`));
+    type(acctField(), ACCOUNT);
+    type(tokField(), TOKEN);
+    await leave(tokField());
+    await eventually(() => assert.ok(status().startsWith("Up to date:"), status()));
+    // Watch for the stale answer landing: it would put "Not updating" back until the next poll corrects it.
+    const seen: string[] = [];
+    const deadline = Date.now() + 500;
+    while (Date.now() < deadline) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+      seen.push(status().slice(0, 12));
+    }
+    assert.equal(seen.some((s) => s.startsWith("Not updating")), false, `the card went back to no token: ${seen.join(",")}`);
   });
 
   test("a refusal from the route is shown where the operator is looking, not swallowed", async () => {
