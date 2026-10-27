@@ -31,7 +31,7 @@ const { ObjectContent } = await import("../layout-renderer.js");
 const { makeRenderCtx } = await import("../test-render-ctx.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { __resetPlaybackRegistryForTests } = await import("./playback-reports.js");
-const { __resetListenForTests, useListenOwner, VOLUME_KEY } = await import("./listen.js");
+const { __listenOwnerForTests, __resetListenForTests, VOLUME_KEY } = await import("./listen.js");
 
 type VideoState = import("@main/types/video").VideoState;
 type VideoFeedView = import("@main/types/video").VideoFeedView;
@@ -179,7 +179,6 @@ async function renderFeeds(
     React.createElement(
       "div",
       null,
-      React.createElement(OwnerProbe),
       ...feeds.map((f, i) =>
         React.createElement(VideoObject, { key: f.id, ...makeObject(f.id, `obj-${i}`), appLogo: null, appLogoMonochrome: false, allowHls: true, listen: opts.listen ?? true }),
       ),
@@ -193,11 +192,8 @@ async function renderFeeds(
   return { ...utils, g };
 }
 
-/** The page's sound holder, as every control sees it: rendered beside the controls and read as text. */
-function OwnerProbe() {
-  return React.createElement("output", { "data-owner": useListenOwner() ?? "" });
-}
-const listenOwner = (): string | null => document.querySelector("[data-owner]")?.getAttribute("data-owner") || null;
+/** The page's sound holder, read from the module and not from the DOM: a probe rendered in the tree under test goes with it. */
+const listenOwner = (): string | null => __listenOwnerForTests();
 
 const buttonFor = (name: string, listening = false) =>
   screen.getByRole("button", { name: listening ? `Stop listening to ${name}` : `Listen to ${name}` }) as HTMLButtonElement;

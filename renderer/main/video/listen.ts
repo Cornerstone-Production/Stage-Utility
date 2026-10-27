@@ -40,6 +40,11 @@ export function __resetListenForTests(): void {
   setOwner(null);
 }
 
+/** Who holds the sound, read outside any React tree (a test's). */
+export function __listenOwnerForTests(): string | null {
+  return owner;
+}
+
 function subscribe(cb: () => void): () => void {
   listeners.add(cb);
   return () => void listeners.delete(cb);
