@@ -40,7 +40,13 @@ export function lyricsSettings(c: LyricsConfig): LyricsSettings {
   const out = { ...LYRICS_DEFAULTS };
   function take<K extends keyof LyricsSettings>(key: K): void {
     const v = c[key];
-    if (v != null) out[key] = v as LyricsSettings[K];
+    if (v == null) return;
+    // A value this build does not know (a newer build's backup, a hand-edited file) reads as
+    // the default: a choice must be one of its key's options, a switch must be a boolean.
+    if (typeof v !== typeof LYRICS_DEFAULTS[key]) return;
+    const options: readonly { value: unknown }[] | undefined = (LYRICS_OPTIONS as Record<string, readonly { value: unknown }[]>)[key];
+    if (options && !options.some((o) => o.value === v)) return;
+    out[key] = v as LyricsSettings[K];
   }
   for (const key of Object.keys(LYRICS_DEFAULTS) as (keyof LyricsSettings)[]) take(key);
   return out;
