@@ -1388,7 +1388,7 @@ export class StageController {
       // The poller keeps showing the last reading, but a service may have gone
       // live since it: whatever waits for one to end treats this as unknown.
       if (!this.liveStale) {
-        console.warn(`[pco] live state unknown until Planning Center answers again (${scrubError(err)}); machine and page updates wait`);
+        console.warn("[pco] live state unknown until Planning Center answers again; machine and page updates wait:", scrubError(err));
       }
       this.liveStale = true;
       throw err;

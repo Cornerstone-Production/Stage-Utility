@@ -308,7 +308,7 @@ const publicUrl: KeyCheck = (v, k) => {
   textOrNull(v, k);
   const normalized = normalizeBaseUrl((v ?? null) as string | null);
   if (normalized !== null && !isHttpBaseUrl(normalized)) {
-    console.warn(`[config-snapshot] settings.json: ${k} "${scrub(normalized)}" is not an http or https address; restored as none`);
+    console.warn(`[config-snapshot] settings.json: ${scrub(k)} "${scrub(normalized)}" is not an http or https address; restored as none`);
     return null;
   }
   return normalized;
