@@ -44,27 +44,32 @@ jobs:
       - name: Coverage (routes and services)
         run: |
           set -uo pipefail
+          # /tmp on the ubuntu-26.04 image is a size-capped filesystem. The V8 coverage
+          # data and this log together outgrew it, writes failed with "Disk quota
+          # exceeded", and the suite exited with no report. RUNNER_TEMP is real disk.
+          export TMPDIR="$RUNNER_TEMP"
+          df -h /tmp "$TMPDIR"; findmnt -T /tmp
           # The same file set as npm test (scripts/run-tests.mjs), not a copy of it.
           # A failing test does not stop the report; no report at all does.
-          node scripts/run-tests.mjs --experimental-test-coverage > /tmp/cov.txt 2>&1 || true
-          if ! grep -q "all files" /tmp/cov.txt; then
+          node scripts/run-tests.mjs --experimental-test-coverage > "$TMPDIR/cov.txt" 2>&1 || true
+          if ! grep -q "all files" "$TMPDIR/cov.txt"; then
             echo "::error::the suite produced no coverage report"
-            tail -50 /tmp/cov.txt
+            tail -50 "$TMPDIR/cov.txt"
             exit 1
           fi
 
           echo "### Coverage" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          grep "all files" /tmp/cov.txt >> "$GITHUB_STEP_SUMMARY" || true
+          grep "all files" "$TMPDIR/cov.txt" >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Least-covered server modules — the LAN-facing surface:" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          awk '/start of coverage report/,/end of coverage report/' /tmp/cov.txt \
+          awk '/start of coverage report/,/end of coverage report/' "$TMPDIR/cov.txt" \
             | grep -oE "[a-z0-9-]+\.tsx? +\| +[0-9.]+" \
             | awk '{gsub(/\|/,""); print $2, $1}' | sort -n | head -10 \
             >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-          grep "all files" /tmp/cov.txt || true
+          grep "all files" "$TMPDIR/cov.txt" || true
