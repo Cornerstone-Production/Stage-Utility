@@ -12,10 +12,10 @@ import { invoke } from "../../lib/api";
 import { toast } from "../../components/ui";
 import { Button } from "../../components/ui/button";
 import { errorMessage } from "@main/services/errors";
-import { CHECK_INTERVAL_MS, type MachineUpdate } from "@main/services/machine-updates";
+import type { MachineUpdate } from "@main/services/machine-updates";
 import type { PublicDevice } from "@main/services/kiosk-devices-store";
 import type { OutputHealth } from "@main/types/output-health";
-import { refreshDevices } from "./use-devices";
+import { LISTENING_GRACE_MS, listeningFor, refreshDevices, type DevicesPayload } from "./use-devices";
 
 /** The machine a device id belongs to. A helper output is `<mac id>.<output key>`
  *  and the output that took over a Chrome kiosk is the bare `<mac id>`; a Windows
@@ -50,15 +50,17 @@ export interface UpdateReading {
  */
 export function readUpdate(
   device: Pick<PublicDevice, "id" | "output">,
-  data: { updates: MachineUpdate[]; health: OutputHealth[]; updatesListeningSince: number | null },
+  data: Pick<DevicesPayload, "updatesListeningFor" | "readAt"> & { updates: MachineUpdate[]; health: OutputHealth[] },
   now = Date.now(),
 ): UpdateReading | null {
   const machine = machineOf(device.id);
   const m = data.updates.find((u) => u.machine === machine);
   if (!m) {
     if (!device.output || !data.health.some((h) => machineOf(h.deviceId) === machine)) return null;
-    // A minute of slack over the interval, for a check that was mid-flight.
-    if (data.updatesListeningSince === null || now - data.updatesListeningSince < CHECK_INTERVAL_MS + 60_000) return null;
+    // The server's own duration, carried forward by this browser's own clock: the
+    // two clocks are never compared. useDevices wakes the page when this passes.
+    const heard = listeningFor(data, now);
+    if (heard === null || heard < LISTENING_GRACE_MS) return null;
     return { text: "Helper version unknown. Run the macOS installer once, at the Mac, to turn on its updates", tone: "muted", badge: "Not updating" };
   }
   if (m.state === "local-network") return { text: m.reason, tone: "warn", badge: "Updated", machine };

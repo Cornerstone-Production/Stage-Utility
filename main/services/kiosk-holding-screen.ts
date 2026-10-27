@@ -18,7 +18,7 @@ export interface HoldingScreenInfo {
   mac?: string;
   /** Already formatted for reading — "1920 × 1080". */
   screen?: string;
-  reason: "unclaimed" | "no-device";
+  reason: "unclaimed" | "no-device" | "unreadable";
 }
 
 const field = (label: string, value: string | undefined): string =>
@@ -28,11 +28,15 @@ export function holdingScreen(info: HoldingScreenInfo): string {
   const headline =
     info.reason === "no-device"
       ? "No device id"
-      : "Waiting to be assigned";
+      : info.reason === "unreadable"
+        ? "Cannot read the screen list"
+        : "Waiting to be assigned";
   const sub =
     info.reason === "no-device"
       ? "This page is opened by an installed kiosk device, which supplies its own id."
-      : "Open Devices in Stage Utility and give this screen an output.";
+      : info.reason === "unreadable"
+        ? "The server cannot read its list of screens right now. This page tries again on its own."
+        : "Open Devices in Stage Utility and give this screen an output.";
 
   return `<!doctype html>
 <html lang="en"><head>

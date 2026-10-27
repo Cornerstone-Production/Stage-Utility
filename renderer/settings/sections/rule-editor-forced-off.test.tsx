@@ -323,6 +323,26 @@ describe("a pair whose OFF half was forced off over its own issue", () => {
   });
 });
 
+describe("a pair whose OFF half was forced off, switch left ON", () => {
+  test("the OFF half's own re-enable: field fixed, Save, the OFF rule turns back on", async () => {
+    RULES = { on1: pairHalf("on1", "Doors"), off1: pairHalf("off1", "") };
+    await mountPair();
+    await save();
+    assert.equal(RULES.off1.enabled, false, "the off half with an issue should have been forced off");
+
+    await click(button("Turn off · Doors off"));
+    await eventually(() => assert.equal(enabledSwitch().getAttribute("aria-checked"), "true", "the off half's switch still reads ON"));
+    await act(async () => {
+      fireEvent.change(titleInput(), { target: { value: "Doors" } });
+    });
+    await settle();
+    await eventually(() => assert.equal((document.body.textContent ?? "").includes("Save to turn it back on"), true));
+    await save();
+
+    assert.equal(RULES.off1.enabled, true, "a switch left ON, once its field is fixed, must turn the OFF half back on");
+  });
+});
+
 describe("the fields outside the rule's steps", () => {
   // The Cooldown row is a <label> whose first control is its hint button, so
   // the label names the hint and the number field beside it is left unnamed.

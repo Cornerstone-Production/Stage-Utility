@@ -48,6 +48,11 @@
 
   // Only the address wrangler prints. A preview URL is another public hostname for
   // every version ever uploaded.
+  // A variable set on the Worker in the Cloudflare dashboard (MAX_VIEWERS_PER_ADDRESS
+  // raised for a building behind one address, say) survives a deploy, this one and the
+  // server's own: a variable named under "vars" here still replaces it.
+  "keep_vars": true,
+
   "workers_dev": true,
   "preview_urls": false,
 

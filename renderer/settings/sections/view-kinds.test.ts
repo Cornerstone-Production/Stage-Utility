@@ -1,60 +1,44 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+
+import { KIND_LABELS, KIND_ORDER } from "./view-kinds.js";
 
 // KIND_LABELS is Record<ViewKind, string>, so the type checker already refuses a
-// missing label. KIND_ORDER used to be a plain array and got no such help - and
-// it is the list the dialog actually renders. Retyping this list from memory
-// while extracting the dialog silently dropped "stage" and "spl-rundown": both
-// kinds became uncreatable and nothing failed.
+// missing label, and KIND_ORDER goes through everyViewKind(), so it refuses a
+// kind left out of the order. This file is the SECOND, independent net, and it
+// runs the real module: it compares the two lists to each other, so it still
+// catches a label with no slot in the order, and it survives everyViewKind itself
+// being weakened. Retyping KIND_ORDER from memory once dropped "stage" and
+// "spl-rundown" and both kinds became uncreatable with nothing failing.
 //
-// KIND_ORDER now goes through everyViewKind(), so the compiler names a kind left
-// out of it. This file stays as a SECOND, independent net: it checks the two
-// lists against each other rather than each against ViewKind, so it still catches
-// a label with no slot in the order, and it survives everyViewKind itself being
-// weakened. Read as source text rather than imported, because importing the .tsx
-// pulls in the whole UI tree for a check about two literal lists.
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SRC = readFileSync(path.join(HERE, "view-kinds.ts"), "utf8");
-
-function labelledKinds(src: string): string[] {
-  // externKeyed(...) wraps the literal — see extern-keyed.ts. Matched exactly
-  // rather than loosely, so this stays a scan of the real table; the assert
-  // below is what stops a shape change passing as "no kinds labelled".
-  const block = /const KIND_LABELS: Record<ViewKind, string> = externKeyed\(\{([\s\S]*?)\n\}\);/.exec(src);
-  assert.ok(block, "could not find KIND_LABELS — this scan is broken, not passing");
-  return [...block[1].matchAll(/^\s*"?([\w-]+)"?\s*:/gm)].map((m) => m[1]);
-}
-
-function orderedKinds(src: string): string[] {
-  const line = /const KIND_ORDER = everyViewKind\(\[([^\]]*)\]\);/.exec(src);
-  assert.ok(line, "could not find KIND_ORDER — this scan is broken, not passing");
-  return [...line[1].matchAll(/"([\w-]+)"/g)].map((m) => m[1]);
-}
+// It imports the values rather than reading the file as text: a commented-out
+// entry (`// "stage",`) satisfied the old regex scan.
 
 describe("the shared view-kinds list offers every view kind", () => {
-  test("the scan finds both lists, so it cannot pass vacuously", () => {
-    assert.ok(labelledKinds(SRC).length >= 5, "KIND_LABELS scan found too few entries");
-    assert.ok(orderedKinds(SRC).length >= 5, "KIND_ORDER scan found too few entries");
-  });
-
   test("every labelled kind is offered, and nothing extra is", () => {
     assert.deepEqual(
-      [...orderedKinds(SRC)].sort(),
-      [...labelledKinds(SRC)].sort(),
-      "KIND_ORDER and KIND_LABELS disagree — a kind is either uncreatable or unlabelled",
+      [...KIND_ORDER].sort(),
+      Object.keys(KIND_LABELS).sort(),
+      "KIND_ORDER and KIND_LABELS disagree: a kind is either uncreatable or unlabelled",
     );
   });
 
-  test("the two kinds that were dropped are present", () => {
-    // Named explicitly: these are the ones that actually went missing, and a
-    // set-equality check alone would stay green if BOTH lists lost them.
-    const order = orderedKinds(SRC);
-    for (const kind of ["stage", "spl-rundown", "slots", "dashboard", "transcription", "script", "calendar", "custom"]) {
-      assert.ok(order.includes(kind), `"${kind}" is not offered by the view kind list`);
-    }
+  test("KIND_ORDER lists no kind twice", () => {
+    assert.equal(new Set(KIND_ORDER).size, KIND_ORDER.length);
+  });
+
+  test("the offered kinds are exactly this list", () => {
+    // One per line, sorted: two branches that each add a kind merge without
+    // conflict, and an add plus a remove cannot pass as no change.
+    assert.deepEqual([...KIND_ORDER].sort(), [
+      "calendar",
+      "custom",
+      "dashboard",
+      "script",
+      "slots",
+      "spl-rundown",
+      "stage",
+      "transcription",
+    ]);
   });
 });

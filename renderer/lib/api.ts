@@ -7,6 +7,7 @@
 // (port 8788), so all paths here are relative.
 
 import { errorMessage } from "@main/services/errors";
+import { DEPLOY_NOW_TIMEOUT_MS } from "@main/types/servicecue-deploy";
 import { isPublicMode } from "./public-mode";
 import { startPublicLive, type PublicLiveDeps } from "./public-live";
 import { readStored } from "./safe-storage";
@@ -46,6 +47,11 @@ async function errorBody(res: Response): Promise<ErrorBody | null> {
 /** The Error a read that ran past REQUEST_TIMEOUT_MS becomes. */
 function timeoutError(path: string, cause: unknown): Error {
   return new Error(`Request to ${path} timed out`, { cause });
+}
+
+/** Did this request fail by running out of time, as opposed to being answered or refused? */
+export function isTimeoutError(err: unknown): boolean {
+  return err instanceof Error && err.cause instanceof DOMException && err.cause.name === "TimeoutError";
 }
 
 /** The Error a non-2xx answer becomes, from its status and parsed body. */
@@ -701,7 +707,12 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/servicecue/publish/deploy-credentials", p);
 
     case "servicecue:deployNow":
-      return post<T>("/api/servicecue/publish/deploy", p);
+      // The answer waits for the whole deploy, which runs well past the usual 15 s.
+      return apiFetch<T>("/api/servicecue/publish/deploy", {
+        method: "POST",
+        body: JSON.stringify(p),
+        signal: AbortSignal.timeout(DEPLOY_NOW_TIMEOUT_MS),
+      });
 
     case "servicecue:listRoles":
       return apiFetch<T>("/api/servicecue/roles");

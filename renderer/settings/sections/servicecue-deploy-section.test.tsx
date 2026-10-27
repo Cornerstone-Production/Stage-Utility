@@ -14,7 +14,8 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
-import { reply, stubFetchWithLog, ok } from "../../test-fixtures/fetch-log.js";
+import { alerts, reply, stubFetchWithLog, ok } from "../../test-fixtures/fetch-log.js";
+import { DEPLOY_NOW_TIMEOUT_MS } from "../../../main/types/servicecue-deploy.js";
 import type { DeployStatus, PublishSettingsDTO } from "../../../main/types/servicecue-publish-status.js";
 
 const teardown = installRenderDom();
@@ -54,6 +55,7 @@ const deployOf = (over: Partial<DeployStatus> = {}): DeployStatus => ({
   page: { build: "3f2a91c", version: "1.28.0", at: DEPLOYED_AT },
   files: { uploaded: 2, held: 21 },
   waitingFor: null,
+  waitingUntil: null,
   error: null,
   now: NOW,
   ...over,
@@ -81,10 +83,17 @@ interface Server {
   dto: PublishSettingsDTO;
   /** Every POST, as [path, body]. */
   posts: [string, Record<string, unknown>][];
-  /** What the next "Update the page now" answers, in order; the last is kept. */
+  /** What the next "Update the page now" answers, in order; the last is kept. A status of 0 is the request running out of time. */
   deployAnswers: { status: number; json: unknown }[];
+  /** The signal each "Update the page now" went with. */
+  deploySignals: (AbortSignal | null | undefined)[];
   /** What a credentials write answers: the new status, from the body. */
   credentials: (body: Record<string, unknown>) => DeployStatus;
+  /** What a settings write answers, from the body. */
+  save: (body: Record<string, unknown>) => PublishSettingsDTO;
+  /** How many reads of the settings have been made, and how long each takes to answer. */
+  reads: number;
+  slowRead: number;
 }
 
 let server: Server;
@@ -97,10 +106,14 @@ beforeEach(() => {
     dto: dtoOf(deployOf()),
     posts: [],
     deployAnswers: [],
+    deploySignals: [],
     credentials: (body) => {
       if (body.token === "") return NO_TOKEN();
       return deployOf({ accountId: typeof body.accountId === "string" ? body.accountId : ACCOUNT });
     },
+    save: (body) => ({ ...server.dto, ...(typeof body.url === "string" ? { url: body.url } : {}) }),
+    reads: 0,
+    slowRead: 0,
   };
   const f = stubFetchWithLog((url, init) => {
     if (init?.method === "POST") {
@@ -110,13 +123,26 @@ beforeEach(() => {
         server.dto = { ...server.dto, deploy: server.credentials(body) };
         return ok(server.dto);
       }
+      if (url === "/api/servicecue/publish") {
+        server.posts.push(["save", body]);
+        server.dto = server.save(body);
+        return ok(server.dto);
+      }
       if (url === "/api/servicecue/publish/deploy") {
         server.posts.push(["deploy", body]);
+        server.deploySignals.push(init.signal);
         const answer = server.deployAnswers.length > 1 ? server.deployAnswers.shift()! : (server.deployAnswers[0] ?? { status: 200, json: server.dto });
+        if (answer.status === 0) throw new DOMException("signal timed out", "TimeoutError");
         return reply(answer.status, answer.json);
       }
     }
-    if (url === "/api/servicecue/publish") return ok(server.dto);
+    if (url === "/api/servicecue/publish") {
+      server.reads += 1;
+      // What the server held when the read was made, delivered later: a read in flight across a write.
+      const held = server.dto;
+      if (server.slowRead > 0) return new Promise((resolve) => setTimeout(() => resolve(ok(held)), server.slowRead));
+      return ok(held);
+    }
     if (url === "/api/update/status") return ok({ branch: "beta" });
     return ok({});
   });
@@ -232,16 +258,23 @@ describe("the status line, by state", () => {
   test("waiting for a live service: says so, and what the build is", async () => {
     await with_(deployOf({ state: "waiting", waitingFor: "live", page: { build: "9c41e07", version: "1.27.0", at: DEPLOYED_AT } }));
     assert.equal(status(), "Waiting for the service to end, then updating to build 3f2a91c (1.28.0)");
-    assert.ok(sectionText().includes("A service is live in Planning Center, so the page is left alone until it ends."));
+    assert.ok(sectionText().includes("Planning Center has a service live (the countdown before it included), so the page is left alone until it ends."));
     // A request now could only be refused: the status line says why.
     assert.equal(updateButton()?.disabled, true);
+  });
+
+  test("waiting for the service window: says when it closes, in the app's zone, and Update the page now can be pressed", async () => {
+    await with_(deployOf({ state: "waiting", waitingFor: "window", waitingUntil: DEPLOYED_AT }));
+    assert.equal(status(), "Waiting for the service window to close at 8:14 AM, then updating to build 3f2a91c (1.28.0)");
+    assert.ok(sectionText().includes("it waits out the time around a service, as the app's own updates do"));
+    assert.equal(updateButton()?.disabled, false);
   });
 
   test("waiting to hear whether one is live: says that, and that Update the page now goes ahead when it is merely unknown", async () => {
     await with_(deployOf({ state: "waiting", waitingFor: "unknown" }));
     assert.equal(status(), "Waiting to hear whether a service is live, then updating");
     assert.ok(sectionText().includes("Update the page now goes ahead when the state is merely unknown, never through a live service."));
-    assert.ok(!sectionText().includes("A service is live in Planning Center"));
+    assert.ok(!sectionText().includes("Planning Center has a service live"));
     // Allowed when the state is merely unknown, so it can be pressed.
     assert.equal(updateButton()?.disabled, false);
   });
@@ -531,6 +564,55 @@ describe("the API token", () => {
     assert.deepEqual(server.posts, [["credentials", { accountId: "fedcba9876543210fedcba9876543210" }]]);
   });
 
+  test("Tab from an edited account ID reaches the token field: nothing is saved, or disabled, until focus leaves both", async () => {
+    await with_(deployOf());
+    type(acctField(), "fedcba9876543210fedcba9876543210");
+    await act(async () => {
+      fireEvent.blur(acctField(), { relatedTarget: tokField() });
+      await settle();
+    });
+    assert.deepEqual(server.posts, [], "a save started on the way to the token field");
+    assert.equal(tokField().disabled, false, "the token field was disabled as Tab moved to it");
+    await act(async () => {
+      fireEvent.blur(tokField(), { relatedTarget: acctField() });
+      await settle();
+    });
+    assert.deepEqual(server.posts, [], "a save started on the way back");
+    await leave(tokField());
+    assert.deepEqual(server.posts, [["credentials", { accountId: "fedcba9876543210fedcba9876543210" }]]);
+  });
+
+  test("a token that reads as the mask is not a token: put back over the mask, it is not sent", async () => {
+    await with_(deployOf());
+    type(tokField(), "x");
+    // The operator undoes the keystroke: the field holds the bullets again, now as a draft.
+    type(tokField(), FORM_MASK);
+    await leave(tokField());
+    assert.deepEqual(server.posts, [], "the mask was sent as a token");
+  });
+
+  test("drops a read that was in flight when a save began, instead of putting back what the save changed", async () => {
+    await with_(NO_TOKEN(), { pollMs: 30 });
+    server.slowRead = 150;
+    // A poll is on its way, carrying what the server holds now: no token.
+    const before = server.reads;
+    await eventually(() => assert.ok(server.reads >= before + 1, `reads: ${server.reads}`));
+    type(acctField(), ACCOUNT);
+    type(tokField(), TOKEN);
+    await leave(tokField());
+    await eventually(() => assert.ok(status().startsWith("Up to date:"), status()));
+    // Watch for the stale answer landing: it would put "Not updating" back until the next poll corrects it.
+    const seen: string[] = [];
+    const deadline = Date.now() + 500;
+    while (Date.now() < deadline) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10));
+      });
+      seen.push(status().slice(0, 12));
+    }
+    assert.equal(seen.some((s) => s.startsWith("Not updating")), false, `the card went back to no token: ${seen.join(",")}`);
+  });
+
   test("a refusal from the route is shown where the operator is looking, not swallowed", async () => {
     server.credentials = () => {
       throw new Error("never reached");
@@ -578,6 +660,34 @@ describe("Update the page now", () => {
       deploy: deployOf({ state: "newer", page: { build: "9c41e07", version: "1.29.0-beta.2", at: DEPLOYED_AT } }),
     },
   };
+
+  test("waits as long as a deploy may take, not the 15 s every other request gets", async () => {
+    // Each timeout signal made, with its length; none is live, so nothing outlives the test.
+    const made = new Map<AbortSignal, number>();
+    const real = AbortSignal.timeout;
+    AbortSignal.timeout = (ms: number) => {
+      const signal = new AbortController().signal;
+      made.set(signal, ms);
+      return signal;
+    };
+    try {
+      await with_(deployOf({ page: { build: "0ldbuild", version: "1.27.0", at: DEPLOYED_AT }, state: "failed", error: null }));
+      await click();
+      const signal = server.deploySignals[0];
+      assert.ok(signal, "the request went with no signal");
+      assert.equal(made.get(signal), DEPLOY_NOW_TIMEOUT_MS);
+    } finally {
+      AbortSignal.timeout = real;
+    }
+  });
+
+  test("a deploy that outlasts the request is still going, not a failure: the status line carries the outcome", async () => {
+    await with_(deployOf({ page: { build: "0ldbuild", version: "1.27.0", at: DEPLOYED_AT }, state: "failed", error: null }));
+    server.deployAnswers = [{ status: 0, json: null }];
+    await click();
+    await eventually(() => assert.ok(sectionText().includes("Still updating. The status above says when it is done."), sectionText()));
+    assert.ok(!/timed out/.test(sectionText()), "a deploy still under way was reported as timed out");
+  });
 
   test("posts with no body when nothing needs confirming, and takes the answer as the new status", async () => {
     await with_(deployOf({ page: { build: "0ldbuild", version: "1.27.0", at: DEPLOYED_AT }, state: "failed", error: null }));
@@ -695,6 +805,71 @@ describe("Update the page now", () => {
     await click();
     await eventually(() => assert.ok(status().startsWith("Couldn't update the page: Service unavailable")));
     assert.ok(sectionText().includes("The page could not be updated: Service unavailable. It is unchanged."));
+  });
+});
+
+describe("a change of the page's address", () => {
+  const MOVED = "https://another.example-account.example";
+  const addrField = () => screen.getByLabelText(/^Page address/) as HTMLInputElement;
+  const pubTokField = () => screen.getByLabelText(/^Publishing token/) as HTMLInputElement;
+  const move = async () => {
+    type(addrField(), MOVED);
+    type(pubTokField(), "tok-for-the-other-page-0123456789abcdef");
+    await leave(pubTokField());
+  };
+  const answer = async (name: string) => {
+    const d = await screen.findByRole("alertdialog");
+    assert.match(d.textContent ?? "", /Cloudflare account ID and API token are saved for/);
+    await act(async () => {
+      fireEvent.click(within(d).getByRole("button", { name }));
+      await settle();
+    });
+  };
+
+  test("asks first when Cloudflare credentials are stored, and kept, sends nothing and puts the address back", async () => {
+    await with_(deployOf());
+    await move();
+    await answer("Keep the address");
+    assert.deepEqual(server.posts, [], "the address went before the operator said yes");
+    assert.equal(addrField().value, ORIGIN);
+  });
+
+  test("on yes, sends it, and says the credentials went with the old address", async () => {
+    await with_(deployOf());
+    server.save = (body) => ({ ...server.dto, url: String(body.url), deploy: NO_TOKEN(), deployRemoved: true });
+    await move();
+    await answer("Change the address");
+    await eventually(() => assert.deepEqual(server.posts.map(([what]) => what), ["save"]));
+    await eventually(() => assert.match(alerts(), /The Cloudflare account ID and API token went with the old address/));
+  });
+
+  test("asks at the switch too, when publishing is off and a new address is switched on", async () => {
+    server.dto = { ...dtoOf(deployOf()), enabled: false, status: { ...dtoOf(deployOf()).status, enabled: false, state: "off" } };
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const router = routerAt("/servicecue/manage", "/servicecue/manage", "/settings/integrations");
+    render(
+      React.createElement(RouterContextProvider, {
+        router,
+        children: React.createElement(QueryClientProvider, { client }, React.createElement(TooltipProvider, null, React.createElement(PublicLinkCard, { ...NAMES }), React.createElement(ConfirmHost))),
+      } as never),
+    );
+    await eventually(() => assert.ok(screen.getByRole("switch", { name: "Publish ServiceCue to the web" })));
+    await settle();
+    type(addrField(), MOVED);
+    type(pubTokField(), "tok-for-the-other-page-0123456789abcdef");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("switch", { name: "Publish ServiceCue to the web" }));
+      await settle();
+    });
+    await answer("Keep the address");
+    assert.deepEqual(server.posts, [], "the switch sent a new address before the operator said yes");
+  });
+
+  test("does not ask when no Cloudflare credentials are stored", async () => {
+    await with_(NO_TOKEN());
+    await move();
+    await eventually(() => assert.deepEqual(server.posts.map(([what]) => what), ["save"]));
+    assert.equal(screen.queryByRole("alertdialog"), null);
   });
 });
 

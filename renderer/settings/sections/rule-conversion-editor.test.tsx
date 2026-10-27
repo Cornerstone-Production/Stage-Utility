@@ -367,6 +367,35 @@ describe("Make it automatic", () => {
   });
 });
 
+describe("Make it automatic, saved over an issue", () => {
+  const askOpen = () =>
+    [...document.querySelectorAll("[role=alertdialog], [role=dialog]")].some((d) => !d.hasAttribute("data-rule-editor"));
+
+  test("the cue is gone after the first save, so the second save does not say it goes away again", async () => {
+    await automationEngine.addRule(cueRule({ homeAssistant: "hidden" }, { enabled: true }));
+    await mount();
+    await openRow("Stage reset");
+    await press(button("Make it automatic"), "Make it automatic");
+    await press(pickerField("Trigger"), "Trigger");
+    // Its one field is required and left blank, so the server saves the rule forced off.
+    await pickOption("pco.item-reached");
+    await press(button("Save"), "Save");
+    await eventually(() => assert.equal(askOpen(), true, "the first save did not ask"));
+    const yes = [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Save anyway");
+    await press(yes, "Save anyway");
+    await eventually(() => assert.equal(rules()[0].trigger.id, "pco.item-reached", "the first save did not land"));
+    await eventually(() => assert.equal(askOpen(), false));
+    assert.equal(editorOpen(), true, "an unfinished rule closed the editor");
+    assert.equal(rules()[0].enabled, false, "the server should have saved it turned off");
+
+    const before = patches().length;
+    await press(button("Save"), "Save again");
+    await settle();
+    assert.equal(askOpen(), false, "the second save asked again whether the cue goes away, though it already has");
+    assert.ok(patches().length > before, "the second save sent nothing");
+  });
+});
+
 describe("a conversion never renames a cue", () => {
   test("manual, automatic, manual again in one session saves no change to the trigger at all", async () => {
     await automationEngine.addRule(cueRule({ says: "reset the stage", aliases: "old_reset", room: "Booth" }));

@@ -42,6 +42,12 @@ export interface PublicLiveDeps {
 /** The first retry waits this long, and each failure doubles it up to the cap. */
 export const RECONNECT_MIN_MS = 1_000;
 export const RECONNECT_MAX_MS = 30_000;
+/**
+ * How long a socket must stay open before the backoff is forgiven. A Worker that accepts the
+ * upgrade and closes at once (a limit hit after it) must not be retried every second by every
+ * viewer, so opening proves nothing.
+ */
+export const STABLE_AFTER_MS = 10_000;
 /** How often an open socket is asked whether anyone is there. */
 export const PING_EVERY_MS = 30_000;
 /**
@@ -119,6 +125,7 @@ let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectDelayMs = RECONNECT_MIN_MS;
 let pingTimer: ReturnType<typeof setInterval> | null = null;
+let stableTimer: ReturnType<typeof setTimeout> | null = null;
 let readTimer: ReturnType<typeof setInterval> | null = null;
 let firstReadTimer: ReturnType<typeof setTimeout> | null = null;
 /** The monotonic time anything last arrived on the open socket. */
@@ -171,9 +178,15 @@ function connect(): void {
   socket = ws;
   ws.onopen = () => {
     if (socket !== ws) return;
-    if (failures > 0) console.log(`[public-live] live connection restored after ${failures} failed attempt(s)`);
-    failures = 0;
-    reconnectDelayMs = RECONNECT_MIN_MS;
+    // Opening proves nothing: the backoff is forgiven only once the socket has stayed open.
+    if (stableTimer) clearTimeout(stableTimer);
+    stableTimer = setTimeout(() => {
+      stableTimer = null;
+      if (socket !== ws || ws.readyState !== OPEN) return;
+      if (failures > 0) console.log(`[public-live] live connection restored after ${failures} failed attempt(s)`);
+      failures = 0;
+      reconnectDelayMs = RECONNECT_MIN_MS;
+    }, STABLE_AFTER_MS);
     lastMessageAt = monotonicNow();
     if (pingTimer) clearInterval(pingTimer);
     pingTimer = setInterval(checkAlive, PING_EVERY_MS);
@@ -196,6 +209,10 @@ function lose(ws: WebSocket, why: string): void {
   ws.onopen = ws.onmessage = ws.onclose = null;
   if (ws.readyState === OPEN || ws.readyState === 0) ws.close();
   socket = null;
+  if (stableTimer) {
+    clearTimeout(stableTimer);
+    stableTimer = null;
+  }
   if (pingTimer) {
     clearInterval(pingTimer);
     pingTimer = null;
@@ -344,6 +361,9 @@ async function readEdge(): Promise<void> {
     const when = arrived - rttMs / 2; // the edge read its clock about halfway
     anchor(body.now, when);
     if (finite(body.at)) hear(when - Math.max(0, body.now - body.at));
+    // The socket's heartbeat offers the build too; this is the road for a page whose
+    // network breaks the socket, which would otherwise never reload after a deploy.
+    if (typeof body.build === "string") reloadForNewBuild(body.build);
   } catch (err) {
     console.warn("[public-live] could not read the edge's clock and heartbeat; the page keeps what it has", err);
   }
@@ -351,9 +371,9 @@ async function readEdge(): Promise<void> {
 
 /** Test seam: close the socket, stop every timer and forget everything, so a case starts from a page that has just loaded. */
 export function __resetPublicLiveForTests(): void {
-  for (const t of [reconnectTimer, firstReadTimer]) if (t) clearTimeout(t);
+  for (const t of [reconnectTimer, firstReadTimer, stableTimer]) if (t) clearTimeout(t);
   for (const t of [pingTimer, readTimer]) if (t) clearInterval(t);
-  reconnectTimer = pingTimer = readTimer = firstReadTimer = null;
+  reconnectTimer = pingTimer = readTimer = firstReadTimer = stableTimer = null;
   const ws = socket;
   socket = null;
   if (ws) {

@@ -193,7 +193,12 @@ function MakeItACue({
     // the cue's own name rather than keeping a label the operator never chose.
     if (root.current?.contains(document.activeElement)) onMadeFromFocus();
     onConfig(toCueButton({ ...latest.current, label: chosenLabel(latest.current.label) }, made.cue));
-    toast.success(`Made the cue "${made.cue}"`);
+    // The rule is written already; the Button's rebind is only an edit until the layout is saved.
+    toast.success(
+      made.reused
+        ? `The cue "${made.cue}" already runs this action, so the Button now fires it. The layout is not saved yet.`
+        : `Made the cue "${made.cue}". The Button's change is not saved yet — save the layout to keep it.`,
+    );
   }
 
   return (

@@ -223,7 +223,10 @@ async function serve(request: Request, url: URL, deps: HandlerDeps): Promise<Res
     }
 
     case "heartbeat":
-      return forMethod(request, json({ at: await deps.hub.getHeartbeat(), now: deps.now() }));
+      return forMethod(
+        request,
+        json({ at: await deps.hub.getHeartbeat(), now: deps.now(), build: await servedBuild(deps.assets, url, "the heartbeat read") }),
+      );
 
     case "live": {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {

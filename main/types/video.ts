@@ -108,6 +108,12 @@ export interface FeedStatus {
   lastSeenAt?: number | null;
 }
 
+/** How long the relay holds a reader of a `-listen` path while its ffmpeg starts
+ *  publishing (runOnDemandStartTimeout). Shared because the browser's handshake
+ *  timeout for a listening session (use-video-session.ts) must outlast it: the
+ *  WHEP POST is held that long on a cold start. */
+export const LISTEN_START_TIMEOUT_MS = 15_000;
+
 /** The same-origin playback addresses of a relay path (a feed's id, or its `-listen`
  *  sibling): where the proxy answers WHEP and HLS for it. */
 export function relayPlayback(path: string): { whep: string; hls: string } {

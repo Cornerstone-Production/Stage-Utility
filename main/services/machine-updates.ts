@@ -265,13 +265,21 @@ export class MachineUpdates {
   /** When this server began answering checks. A machine checks every five minutes,
    *  so until one interval has passed, a machine not heard from may simply not have
    *  asked yet: Screens does not call it a machine without an updater before then. */
-  readonly listeningSince: number;
+  private readonly listeningSince: number;
 
   /** Whether the machine-limit warning has been said since the list last had room. */
   private fullWarned = false;
 
   constructor(private readonly onChange: () => void = () => {}, now = Date.now()) {
     this.listeningSince = now;
+  }
+
+  /** How long this server has been answering checks, in its own clock. What the
+   *  device listing carries, rather than the moment it began: a browser compares a
+   *  duration with its own elapsed time, so a clock that is wrong there changes
+   *  nothing. */
+  listeningFor(now = Date.now()): number {
+    return Math.max(0, now - this.listeningSince);
   }
 
   /** Answer one check, remember what the machine said, and log what changed. */

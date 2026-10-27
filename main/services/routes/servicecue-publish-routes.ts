@@ -47,7 +47,7 @@ async function maskedToken(url: string): Promise<string> {
   return parsed.ok && hasSecretValue(await readPublishToken(parsed.origin)) ? MASK : "";
 }
 
-async function settingsDto(dropped?: PublishSettingsDTO["dropped"]): Promise<PublishSettingsDTO> {
+async function settingsDto(dropped?: PublishSettingsDTO["dropped"], deployRemoved = false): Promise<PublishSettingsDTO> {
   const settings = await servicecuePublishStore.load();
   await servicecueDeployer.refresh();
   return {
@@ -57,6 +57,7 @@ async function settingsDto(dropped?: PublishSettingsDTO["dropped"]): Promise<Pub
     status: servicecuePublisher.status(),
     deploy: servicecueDeployer.status(),
     ...(dropped ? { dropped } : {}),
+    ...(deployRemoved ? { deployRemoved: true as const } : {}),
   };
 }
 
@@ -355,8 +356,14 @@ async function saveSettings(c: RouteCtx, body: SaveBody): Promise<void> {
     if (dropDeploy) await restoreSlot(DEPLOY_SECRET_SLOT, previousDeploy, "Cloudflare credentials");
     throw err;
   }
-  if (dropDeploy) await servicecueDeployer.credentialsChanged();
+  if (dropDeploy) {
+    // The operator's work, removed: said on the log and in the answer, which the card shows.
+    console.warn(
+      `[servicecue-deploy] the page address changed${beforeParsed.ok ? ` from ${scrub(new URL(beforeParsed.origin).host)}` : ""}${target.ok ? ` to ${scrub(new URL(target.origin).host)}` : " to none"}, so the Cloudflare account ID and API token saved for the old address were removed; the page is no longer updated from this server until new ones are entered`,
+    );
+    await servicecueDeployer.credentialsChanged();
+  }
 
   const { dropped } = await servicecuePublisher.apply({ dropCopy: before.enabled && !enabled });
-  json(res, await settingsDto(dropped));
+  json(res, await settingsDto(dropped, dropDeploy));
 }

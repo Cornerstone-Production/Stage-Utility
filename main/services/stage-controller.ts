@@ -539,6 +539,10 @@ export class StageController {
 
   // Latest PCO live state (set by fetchLive) — used by the auto-update guard.
   private lastLive: PcoLiveDTO | null = null;
+  /** A live read has failed since the last one that succeeded. lastLive is
+   *  kept for the displays, but no longer says whether a service is live now:
+   *  serviceTimesKnown() answers false until a read succeeds. */
+  private liveStale = false;
   // Hourly self-update availability check (+ scheduled auto-apply).
   private updateCheckTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -1363,19 +1367,34 @@ export class StageController {
   async fetchLive(): Promise<PcoLiveDTO | null> {
     if (!this.pcoAppId || !this.pcoSecret) {
       this.lastLive = null;
+      this.liveStale = false;
       return null;
     }
     if (!this.state.serviceTypeId || !this.state.planId) {
       this.lastLive = null;
+      this.liveStale = false;
       return null;
     }
-    const live = await pcoService.getLive(
-      this.pcoAppId,
-      this.pcoSecret,
-      this.state.serviceTypeId,
-      this.state.planId,
-      this.pcoCountdownTarget,
-    );
+    let live: PcoLiveDTO;
+    try {
+      live = await pcoService.getLive(
+        this.pcoAppId,
+        this.pcoSecret,
+        this.state.serviceTypeId,
+        this.state.planId,
+        this.pcoCountdownTarget,
+      );
+    } catch (err) {
+      // The poller keeps showing the last reading, but a service may have gone
+      // live since it: whatever waits for one to end treats this as unknown.
+      if (!this.liveStale) {
+        console.warn("[pco] live state unknown until Planning Center answers again; machine and page updates wait:", scrubError(err));
+      }
+      this.liveStale = true;
+      throw err;
+    }
+    if (this.liveStale) console.log("[pco] live state known again");
+    this.liveStale = false;
     // Remembered for the auto-update guard (don't update mid-service).
     this.lastLive = live;
     return live;
@@ -1389,13 +1408,14 @@ export class StageController {
   /**
    * Whether the service times and the live state are known well enough to restart
    * a Mac's outputs on: always without Planning Center; with it, once the windows
-   * have been computed and, when a plan is followed, its live state read. Just
-   * after a restart, and while Planning Center cannot be reached, they are not.
+   * have been computed and, when a plan is followed, its live state read and
+   * not failed since. Just after a restart, and while Planning Center cannot be
+   * reached, they are not.
    */
   serviceTimesKnown(): boolean {
     if (!this.pcoAppId || !this.pcoSecret) return true;
     if (!serviceWindow.isKnown()) return false;
-    return !this.state.serviceTypeId || !this.state.planId || this.lastLive !== null;
+    return !this.state.serviceTypeId || !this.state.planId || (this.lastLive !== null && !this.liveStale);
   }
 
   /** Latest PCO live snapshot (null if none fetched yet) — for the update-lock guard. */
@@ -3781,7 +3801,13 @@ export class StageController {
       const allocated = await settingsStore.allocateIds(
         "output",
         (next): { output: Output; outputs: Output[] } => {
-          const id = next(this.state.outputs.map((o) => o.id));
+          // Not another screen's address either: `/<id>` and `/<address>` are
+          // one namespace, so an id equal to one would answer for two screens.
+          // A taken number is skipped, and the floor moves past it.
+          const ids = this.state.outputs.map((o) => o.id);
+          const addresses = new Set(this.state.outputs.flatMap((o) => (o.slug ? [o.slug.toLowerCase()] : [])));
+          let id = next(ids);
+          while (addresses.has(id)) id = next(ids);
           const num = parseInt(id.replace("display-", ""), 10);
           // Thrown before `this.state` is touched, so nothing has been assigned
           // or written when it fires.

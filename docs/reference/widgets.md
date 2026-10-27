@@ -658,7 +658,10 @@ set to Run an action does not: Simulate mode (the button then says it sent nothi
 Disarm, the cooldown, and the service guard if it is switched back on. While the
 rule is being written, **Does** and **Make it a cue** are inert. If the server
 refuses the rule, the button is left as it was and the reason is shown under the
-button.
+button. The rule is written at once, but pointing the button at it is an edit like
+any other, so the layout still needs saving; if it is left unsaved, pressing
+**Make it a cue** again offers the enabled rule of that name, action and
+parameters that already exists instead of making a second.
 
 **Label** is blank by default, which draws the cue's name (or, for an action, the
 action's own name).

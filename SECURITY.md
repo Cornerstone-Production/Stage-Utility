@@ -119,7 +119,9 @@ When reporting, please include:
   the last 30 days, over at least a day, and not dismissed. A page can make a browser send any
   name once, so a name seen in one burst is left waiting, and so is every name refused later:
   turning refusal off and on again accepts nothing. The list itself changes only by a request
-  whose name is already answered, so a page cannot list its own name for later. Until refusal
+  whose name is already answered, so a page cannot list its own name for later. The same holds for
+  the other routes that can set an answered name: the **Public address**, a config import and a
+  snapshot recall. Until refusal
   is on, treat a browser on the app's network that visits untrusted sites as able to reach the
   app.
 

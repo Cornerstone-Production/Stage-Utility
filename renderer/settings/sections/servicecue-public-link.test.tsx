@@ -68,6 +68,7 @@ const NO_DEPLOY: DeployStatus = {
   page: null,
   files: null,
   waitingFor: null,
+  waitingUntil: null,
   error: null,
   now: NOW,
 };
@@ -248,6 +249,19 @@ describe("Not set up", () => {
     });
     assert.equal(a.target, "_blank");
     assert.match(a.rel, /noreferrer/);
+  });
+
+  test("puts a stored token back when its field is emptied and left, so the switch can still turn on", async () => {
+    server.dto = { ...off(), url: ORIGIN, token: MASK };
+    await mount();
+    assert.equal(sw().disabled, false);
+    fireEvent.change(input("Publishing token"), { target: { value: "" } });
+    assert.equal(sw().disabled, true, "an emptied field is not the stored token while it is being edited");
+    fireEvent.blur(input("Publishing token"));
+    await settle();
+    assert.equal(input("Publishing token").value, FORM_MASK, "the field stayed blank with the token still stored");
+    assert.equal(sw().disabled, false, "the switch stayed off with a token stored");
+    assert.deepEqual(server.posts, []);
   });
 
   test("turns on once both fields are filled, and not before", async () => {
@@ -469,6 +483,16 @@ describe("Publishing", () => {
     assert.equal(server.dto.token, MASK, "the stored token was touched by a write the server refused");
   });
 
+  test("puts the stored token back when its field is emptied and left, and sends nothing", async () => {
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    fireEvent.change(input("Publishing token"), { target: { value: "" } });
+    fireEvent.blur(input("Publishing token"));
+    await settle();
+    assert.equal(input("Publishing token").value, FORM_MASK, "the field stayed blank while the server still holds the token");
+    assert.deepEqual(server.posts, []);
+  });
+
   test("does not save the mask back as a token", async () => {
     await mount();
     fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
@@ -491,6 +515,20 @@ describe("Publishing", () => {
     fireEvent.blur(input("Publishing token"));
     await eventually(() => assert.equal(server.posts.length, 1));
     await settle();
+    assert.deepEqual(server.posts[0], ["save", { url: "https://another.example-account.example", token: "tok-for-it" }]);
+  });
+
+  test("Tab from a new address to the token field saves nothing and says nothing until the pair is left", async () => {
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    fireEvent.change(input("Page address"), { target: { value: "https://another.example-account.example" } });
+    fireEvent.blur(input("Page address"), { relatedTarget: input("Publishing token") });
+    await settle();
+    assert.ok(!text().includes("A different address needs its token"), "told it needs a token on the way to typing one");
+    assert.equal(input("Publishing token").disabled, false);
+    fireEvent.change(input("Publishing token"), { target: { value: "tok-for-it" } });
+    fireEvent.blur(input("Publishing token"));
+    await eventually(() => assert.equal(server.posts.length, 1));
     assert.deepEqual(server.posts[0], ["save", { url: "https://another.example-account.example", token: "tok-for-it" }]);
   });
 

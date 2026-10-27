@@ -9,12 +9,26 @@
 // the server by its own name while refusal is off could list that name, and be
 // answered once refusal is on.
 
+import type * as http from "http";
+
 import { hostNames } from "../host-names.js";
 import { type RouteCtx, error, json, readBodyOrEmpty } from "./context.js";
 
 const PATH = "/api/security/host-names";
 
 const text = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
+/**
+ * Answers 403 and returns true when the request arrived by a name the server does
+ * not already answer. Every route that can change what the server answers to (the
+ * list itself, the Public address, a restored config bundle) starts with this, so
+ * a page reaching the server by its own name cannot list that name for later.
+ */
+export function refuseUnansweredHost(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  if (hostNames.answersTo(req.headers.host)) return false;
+  error(res, "This changes which names the server answers to: make it from the server's IP address, or a name already on the list.", 403);
+  return true;
+}
 
 export async function hostNameRoutes({ req, res, pathname, method }: RouteCtx): Promise<void> {
   if (pathname !== PATH) return;
@@ -24,10 +38,7 @@ export async function hostNameRoutes({ req, res, pathname, method }: RouteCtx): 
   }
   if (method !== "POST") return;
 
-  if (!hostNames.answersTo(req.headers.host)) {
-    error(res, "Change the host names from the server's IP address, or a name already on the list.", 403);
-    return;
-  }
+  if (refuseUnansweredHost(req, res)) return;
   const body = await readBodyOrEmpty(req);
   const add = text(body.add);
   const accept = text(body.accept);

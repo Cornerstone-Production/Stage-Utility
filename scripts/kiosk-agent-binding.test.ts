@@ -142,16 +142,16 @@ function pwshAgent(): Agent {
   });
 }
 
-const LAUNCHERS: { name: string; make: () => Agent; skip?: string | false; olderServerRemembered: boolean }[] = [
-  { name: "install-linux.sh", make: () => bashAgent("install-linux.sh"), olderServerRemembered: false },
-  { name: "install-macos.sh", make: () => bashAgent("install-macos.sh"), olderServerRemembered: true },
+const LAUNCHERS: { name: string; make: () => Agent; skip?: string | false }[] = [
+  { name: "install-linux.sh", make: () => bashAgent("install-linux.sh") },
+  { name: "install-macos.sh", make: () => bashAgent("install-macos.sh") },
   {
-    name: "kiosk-windows.ps1", make: pwshAgent, olderServerRemembered: true,
+    name: "kiosk-windows.ps1", make: pwshAgent,
     skip: !has("pwsh") && "pwsh is not installed",
   },
 ];
 
-for (const { name, make, skip, olderServerRemembered } of LAUNCHERS) {
+for (const { name, make, skip } of LAUNCHERS) {
   describe(`the ${name} launcher`, { skip }, () => {
     const agent: Agent = skip ? () => ({ url: "", probes: [], bound: null, log: "" }) : make();
 
@@ -187,10 +187,8 @@ for (const { name, make, skip, olderServerRemembered } of LAUNCHERS) {
       });
     });
 
-    it(`${olderServerRemembered ? "remembers" : "does not remember"} a server that sends no claimed`, () => {
-      assert.deepEqual(agent(null, [[OLD]]), {
-        url: A, probes: ["-"], bound: olderServerRemembered ? "srv-a" : null, log: "",
-      });
+    it("remembers a server that sends no claimed, the same in all three launchers", () => {
+      assert.deepEqual(agent(null, [[OLD]]), { url: A, probes: ["-"], bound: "srv-a", log: "" });
     });
   });
 }

@@ -1626,6 +1626,12 @@ export function RuleEditorDialog({
     on: isPair ? target.pair.on : target.rule,
     off: isPair ? target.pair.off : null,
   }));
+  // The ON rule as the server holds it for the purpose of "what does this save do
+  // to the cue": the seed until a save lands with the dialog still open (a rule saved
+  // turned off over an issue), the draft that save wrote after. `seed` stays frozen
+  // for the diff; this one moves, so a cue the first save already removed is not
+  // announced as going away again, nor the banner kept saying it will.
+  const [savedOn, setSavedOn] = useState<Rule>(seed.on);
   // The trigger the last conversion took out of the draft, so converting back
   // restores it as it was, edits and all. See rule-conversion.ts.
   const leftBehind = useRef<SetAside | null>(null);
@@ -1782,7 +1788,7 @@ export function RuleEditorDialog({
     // Not asked for anything else — the editor has always saved a rename without
     // a word, and this is only the conversions' question.
     if (!isPair) {
-      const impact = homeImpact(seed.on, onHalfPatch());
+      const impact = homeImpact(savedOn, onHalfPatch());
       if (impact && !(await confirm(impactQuestion(impact)))) return;
     }
     setBusy(true);
@@ -1837,6 +1843,7 @@ export function RuleEditorDialog({
       // open, turned off, waiting to be fixed.
       if (anyIssues) {
         setForcedOff(true);
+        if (!isPair) setSavedOn(onHalfPatch());
       } else {
         onClose();
       }
@@ -2051,8 +2058,8 @@ export function RuleEditorDialog({
             onMakeAutomatic={isPair ? undefined : () => convert(makeAutomatic)}
             onMakeManual={isPair ? undefined : () => convert((d, s, aside) => makeManual(d, s, cueNamesTaken, aside))}
             leavingCue={
-              !isPair && seed.on.trigger.id === CALL_TRIGGER_ID && onDraft.trigger.id !== CALL_TRIGGER_ID
-                ? String(seed.on.trigger.params.name ?? "")
+              !isPair && savedOn.trigger.id === CALL_TRIGGER_ID && onDraft.trigger.id !== CALL_TRIGGER_ID
+                ? String(savedOn.trigger.params.name ?? "")
                 : null
             }
           />

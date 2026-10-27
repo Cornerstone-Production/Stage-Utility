@@ -3,6 +3,17 @@
 // Written by scripts/servicecue-bundle.ts and read by main/services/servicecue-cloudflare.ts, so the
 // shape lives here, where neither depends on the other.
 
+/** How long one request to Cloudflare's API may take. */
+export const CLOUDFLARE_REQUEST_TIMEOUT_MS = 60_000;
+
+/**
+ * How long the card waits on "Update the page now": six of Cloudflare's requests at their ceiling
+ * (the token, two reads of what is deployed, the Worker, the upload session, the script). The file
+ * uploads come on top, so an answer later than this is not a failure: the card says the update is
+ * still going, and the status it polls carries the outcome.
+ */
+export const DEPLOY_NOW_TIMEOUT_MS = 6 * CLOUDFLARE_REQUEST_TIMEOUT_MS;
+
 /** One binding, in the shape Cloudflare's upload metadata takes. */
 export type DeployBinding =
   | { type: "assets"; name: string }

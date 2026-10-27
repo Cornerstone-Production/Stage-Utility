@@ -213,3 +213,13 @@ describe("the sentence Screens shows", () => {
     assert.equal(sentence({ platform: "windows", have: "a".repeat(64), state: "idle", target: undefined, detail: undefined }, "b".repeat(64), { update: false, why: "off" }), "Kiosk launcher out of date. Automatic updates are off");
   });
 });
+
+describe("listeningFor", () => {
+  it("is how long the server has been answering, and never negative", () => {
+    const u = new MachineUpdates(() => {}, 10_000);
+    assert.equal(u.listeningFor(10_000), 0);
+    assert.equal(u.listeningFor(310_000), 300_000);
+    assert.equal(u.listeningFor(5_000), 0, "a clock stepped back read as a negative duration");
+  });
+});
+

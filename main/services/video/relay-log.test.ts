@@ -138,6 +138,17 @@ describe("RelayLogWatcher", () => {
     strictEqual(JSON.stringify(e).includes("hunter2"), false);
   });
 
+  it("takes a credential out of a converter's exit and stop reasons", () => {
+    const w = new RelayLogWatcher();
+    for (const what of ["exited", "stopped"]) {
+      const e = w.line(`2026/10/22 21:01:10 INF [path cam-listen] runOnDemand command ${what}: failed rtsp://u:p@192.0.2.28/s?passphrase=x`);
+      const text = JSON.stringify(e);
+      strictEqual(text.includes("u:p@"), false, `${what}: the userinfo is still there: ${text}`);
+      strictEqual(text.includes("passphrase=x"), false, `${what}: the passphrase is still there: ${text}`);
+      strictEqual(text.includes("192.0.2.28"), true, `${what}: the line lost its host with its credentials: ${text}`);
+    }
+  });
+
   it("does not mistake MediaMTX's own lines for a converter's output", () => {
     const w = new RelayLogWatcher();
     w.line("2026/10/22 21:00:42 INF [path cam-listen] runOnDemand command started");

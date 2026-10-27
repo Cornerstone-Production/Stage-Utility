@@ -61,3 +61,13 @@ describe("the same-MAC hint", () => {
     assert.deepEqual(m, { "pi-new": ["mac.sdi-1"] });
   });
 });
+
+describe("how long the server has listened for update checks", () => {
+  it("is a duration of the server's own clock, not a moment a browser would have to compare with its own", async () => {
+    const r = (await callRoute(kioskDeviceRoutes, "/api/devices")).json as Record<string, unknown>;
+    assert.equal(typeof r.updatesListeningFor, "number");
+    assert.ok((r.updatesListeningFor as number) >= 0 && (r.updatesListeningFor as number) < 3_600_000, `got ${String(r.updatesListeningFor)}`);
+    assert.equal("updatesListeningSince" in r, false);
+  });
+});
+

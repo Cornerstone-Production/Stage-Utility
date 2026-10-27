@@ -346,15 +346,19 @@ cleared, and nothing that runs in the background is paused.
   dropped, as the page's own save would. A file
   this build does not keep, and an image outside the two image folders, is
   skipped and logged.
-- A snapshot listing more files than there are config stores, or more than 2000
-  images, is refused outright. No backup the app writes comes near either.
+- A public URL that is not an http or https address, which builds before 1.27.0
+  saved without checking, is restored as none and logged rather than refused.
+- A snapshot listing more than 500 files, or more than 2000 images, is refused
+  outright. No backup the app writes comes near either.
 
 Four things a save checks are not checked on a restore, because the snapshot
 cannot answer them: whether a service type or plan still exists in Planning
 Center, whether a milestone's service type has recorded history on this machine,
 whether a branding image `settings.json` names is on this machine, and whether a
 screen's message groups exist. A screen whose address has since become a
-built-in page is restored, and the next start renames it and logs the change.
+built-in page is restored, and the next start renames it and logs the change. A
+screen whose address is another screen's id, which builds before 1.27.0 could
+create, is restored as it is and logged on `[config-snapshot]`.
 
 At start-up, before anything reads them, the server runs the same checks over the
 config files on disk and names any that a save would refuse on

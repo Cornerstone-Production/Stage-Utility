@@ -83,6 +83,10 @@ describe("the encoding", () => {
     assert.equal(encodeAliases([]), "");
   });
 
+  test("a cue whose params are missing (a hand-edited rules file) has no former names, rather than throwing", () => {
+    assert.deepEqual(parseAliases(undefined), []);
+  });
+
   test("a rename appends the old name, oldest first, capped", () => {
     assert.deepEqual(nextAliases([], "a", "b"), ["a"]);
     assert.deepEqual(nextAliases(["a"], "b", "c"), ["a", "b"]);

@@ -206,6 +206,21 @@ console.log("CREATED:" + state.views[state.views.length - 1].id);`,
   });
 });
 
+describe("a new display's id", () => {
+  it("is never another screen's address", async () => {
+    // The id the floor would issue next is already display-1's address: an id
+    // equal to it would make that URL name two screens.
+    const floor = (await idFloorsOnDisk()).output ?? 2;
+    ctl.state = {
+      ...ctl.state,
+      outputs: [{ id: "display-1", name: "Primary", viewId: null, slug: `display-${floor}` }],
+    };
+    const { output } = await stageController.addOutput({ name: "Foyer" });
+    assert.equal(output.id, `display-${floor + 1}`, "minted an id equal to another screen's address");
+    assert.equal((await idFloorsOnDisk()).output, floor + 2);
+  });
+});
+
 // An install that UPGRADES into id floors has ids and no floor. Nothing writes a
 // floor until an id is issued, so without seeding at boot the very first
 // delete-then-create after the update falls back to `max(existing) + 1` and

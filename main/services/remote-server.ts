@@ -186,7 +186,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /** The answer to a request by a name not on the list: what is wrong and how to
- *  fix it, as a page for a browser and as JSON for anything else. */
+ *  fix it, as a page for a browser and as JSON for anything else. The page
+ *  reloads itself, so a screen opened by a name not yet listed picks up the
+ *  name once the operator adds it. */
 function refuseHostName(req: http.IncomingMessage, res: http.ServerResponse, name: string): void {
   const sentence =
     `This server does not answer to the name ${name}. If that name is yours, open the server by its ` +
@@ -194,7 +196,7 @@ function refuseHostName(req: http.IncomingMessage, res: http.ServerResponse, nam
   res.setHeader("X-Content-Type-Options", "nosniff");
   if (String(req.headers.accept ?? "").includes("text/html")) {
     res.writeHead(403, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(`<!doctype html><meta charset="utf-8"><title>Not this server's name</title><body style="font-family:system-ui;background:#0a0a0a;color:#eee;padding:2rem"><p>${escapeHtml(sentence)}</p>`);
+    res.end(`<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="30"><title>Not this server's name</title><body style="font-family:system-ui;background:#0a0a0a;color:#eee;padding:2rem"><p>${escapeHtml(sentence)}</p>`);
     return;
   }
   error(res, sentence, 403);

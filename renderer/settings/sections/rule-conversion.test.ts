@@ -123,6 +123,15 @@ describe("homeImpact", () => {
     assert.equal(homeImpact(seed, hidden), null);
   });
 
+  test("a called rule with a blank name that gains one is not a conversion, so nothing is asked", () => {
+    // A cue saved forced off over its missing name stays a called rule; naming it
+    // later changes no trigger kind. Without the early return this reads as a rule
+    // that was no cue becoming one, and asks the Home Assistant question.
+    const seed = cue({ name: "" });
+    assert.equal(homeEntity(seed), null, "a blank name has no entity");
+    assert.equal(homeImpact(seed, cue({ name: "projectors" })), null);
+  });
+
   test("a round trip is no impact at all", () => {
     const seed = cue();
     assert.equal(homeImpact(seed, makeManual(makeAutomatic(seed, seed), seed, none)), null);

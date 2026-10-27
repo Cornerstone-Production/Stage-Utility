@@ -1278,6 +1278,19 @@ describe("--check-update", { skip: !(has("zip") && has("unzip") && has("uuidgen"
       assert.equal(checks()[0].get("machine"), MACHINE, "with root's copy of the id, not the state folder's");
     });
 
+    it("without root's own copy of the server, asks nobody: the state folder's file is not a fallback", async () => {
+      fs.rmSync(path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "server"));
+      // A valid server the logged-in user could write, and which is listening.
+      fs.writeFileSync(path.join(state(), "server"), `${server.base}\n`);
+      answer({ update: true });
+      const r = await run();
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.equal(checks().length, 0, "no request went to the planted server");
+      assert.ok(!server.hits.some((h) => h.includes(".zip")));
+      assert.match(updaterStatus(), /^answer=unreachable$/m);
+      assert.match(r.out, /no server answered the update check \(none is recorded/);
+    });
+
     it("sends nothing it would read through a link the user left, nor anything at all without its own id", async () => {
       fs.rmSync(path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "device-id"));
       fs.writeFileSync(path.join(scratch, "secret"), "ROOT-ONLY\n");
@@ -1316,6 +1329,98 @@ describe("--check-update", { skip: !(has("zip") && has("unzip") && has("uuidgen"
     const r = await run({ STAGE_INSTALL_TEST_CONSOLE_USER: "nobody" });
     assert.equal(r.status, 1, r.out + r.err);
     assert.equal(which(), "build-old");
+  });
+
+  describe("an update that was cut off", () => {
+    const apps = () => path.join(scratch, "Applications");
+    const aside = (name: string, mtime: number) => {
+      const dir = path.join(apps(), name);
+      fs.cpSync(app(), dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "Contents", "MacOS", "StageUtilityOutput"), `#!/bin/sh\n# ${name}\n`);
+      fs.utimesSync(dir, mtime, mtime);
+    };
+
+    it("puts the newest previous copy back when the app is missing, and sweeps the rest", async () => {
+      answer({});
+      aside(".StageUtilityOutput.app.old.111", 1_000_000);
+      aside(".StageUtilityOutput.app.old.222", 2_000_000);
+      fs.rmSync(app(), { recursive: true });
+      fs.mkdirSync(path.join(apps(), ".StageUtilityOutput.app.new.333"));
+      const r = await run();
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.match(fs.readFileSync(path.join(app(), "Contents", "MacOS", "StageUtilityOutput"), "utf8"), /old\.222/, "the newest copy");
+      assert.deepEqual(leftovers(), []);
+      assert.match(r.out, /left .*StageUtilityOutput\.app missing; put back the previous copy from .*old\.222/);
+      assert.equal(checks().length, 1, "and the check went on as for an installed Mac");
+    });
+
+    it("deletes leftovers beside an app that is there, and says so", async () => {
+      answer({});
+      aside(".StageUtilityOutput.app.old.111", 1_000_000);
+      fs.mkdirSync(path.join(apps(), ".StageUtilityOutput.app.new.333"));
+      const r = await run();
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.equal(which(), "build-old", "the installed app is untouched");
+      assert.deepEqual(leftovers(), []);
+      assert.match(r.out, /removed .*StageUtilityOutput\.app\.old\.111, left by an update that did not finish/);
+      assert.match(r.out, /removed .*StageUtilityOutput\.app\.new\.333, left by an update that did not finish/);
+    });
+
+    it("still does not put back an app removed by hand, when nothing was left aside", async () => {
+      fs.rmSync(app(), { recursive: true });
+      const r = await run();
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.ok(!fs.existsSync(app()));
+      assert.match(updaterStatus(), /^answer=not-installed$/m);
+    });
+  });
+
+  describe("take_lock", () => {
+    const lock = () => path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "lock");
+    const stale = async () => (await sh("sh -c 'echo $$'")).out.trim();
+    // A shell that finds the dead holder, and in the moment between looking and
+    // taking over has another process do the same and start a live lock.
+    const raced = async (livePid: string, deadPid: string) => {
+      fs.mkdirSync(lock());
+      fs.writeFileSync(path.join(lock(), "pid"), `${deadPid}\n`);
+      return sh(
+        `. "${SCRIPT}"
+         UPDATE_LOCK="${lock()}"; LOCKED=0
+         swapped=0
+         kill() {
+           if [ "$swapped" = 0 ] && [ "$2" = "${deadPid}" ]; then
+             swapped=1
+             rm -rf "$UPDATE_LOCK"; mkdir "$UPDATE_LOCK"; printf '%s\\n' "${livePid}" >"$UPDATE_LOCK/pid"
+           fi
+           command kill "$@"
+         }
+         if take_lock 0; then echo TOOK; else echo REFUSED; fi
+         cat "$UPDATE_LOCK/pid"`,
+        { STAGE_INSTALL_SOURCED: "1", STAGE_INSTALL_TEST_ROOT: scratch },
+      );
+    };
+
+    it("takes over a lock whose holder is gone, leaving nothing renamed beside it", async () => {
+      fs.mkdirSync(lock());
+      fs.writeFileSync(path.join(lock(), "pid"), `${await stale()}\n`);
+      const r = await sh(`. "${SCRIPT}"; UPDATE_LOCK="${lock()}"; LOCKED=0; take_lock 0 && echo TOOK; cat "$UPDATE_LOCK/pid"`, {
+        STAGE_INSTALL_SOURCED: "1",
+        STAGE_INSTALL_TEST_ROOT: scratch,
+      });
+      assert.match(r.out, /^TOOK$/m, r.out + r.err);
+      assert.deepEqual(fs.readdirSync(path.dirname(lock())).filter((n) => n.startsWith("lock.")), []);
+    });
+
+    it("does not delete a live process's lock that was started while it was taking over a stale one", async () => {
+      const live = spawn("sleep", ["30"]);
+      try {
+        const r = await raced(String(live.pid), await stale());
+        assert.match(r.out, /^REFUSED$/m, "the second contender must not also hold the lock: " + r.out + r.err);
+        assert.equal(fs.readFileSync(path.join(lock(), "pid"), "utf8").trim(), String(live.pid), "the live holder's lock is intact");
+      } finally {
+        live.kill();
+      }
+    });
   });
 
   it("is skipped while an install or another check holds the lock", async () => {

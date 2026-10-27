@@ -63,10 +63,11 @@ describe("deploy.json, as the bundle wrote it", () => {
     ]);
   });
 
-  test("carries wrangler.jsonc's exports as they are, and keeps the secrets an upload does not name", () => {
+  test("carries wrangler.jsonc's exports as they are, and keeps the secrets and the dashboard's variables an upload does not name", () => {
     assert.deepEqual(written.exports, wrangler.exports);
     assert.ok(Object.keys(written.exports as object).includes("PublishHub"));
-    assert.deepEqual(written.keep_bindings, ["secret_text", "secret_key"]);
+    // A MAX_VIEWERS_PER_ADDRESS raised on the Worker would otherwise go at the next release's deploy.
+    assert.deepEqual(written.keep_bindings, ["plain_text", "json", "secret_text", "secret_key"]);
   });
 
   test("names the build id stamped into the document it ships, the app's version and the protocol", () => {
@@ -142,6 +143,14 @@ describe("deployManifest follows its sources", () => {
       { type: "plain_text", name: "GREETING", text: "hi" },
       { type: "json", name: "MAX_VIEWERS", json: 500 },
     ]);
+  });
+
+  test("keep_vars decides whether the variables set on the Worker are kept, as wrangler's does; the secrets always are", () => {
+    assert.deepEqual(deployManifest({ ...base, wrangler: { ...base.wrangler, keep_vars: true } }).keep_bindings, ["plain_text", "json", "secret_text", "secret_key"]);
+    const { keep_vars: _keep, ...without } = base.wrangler;
+    assert.deepEqual(deployManifest({ ...base, wrangler: without }).keep_bindings, ["secret_text", "secret_key"]);
+    assert.deepEqual(deployManifest({ ...base, wrangler: { ...base.wrangler, keep_vars: false } }).keep_bindings, ["secret_text", "secret_key"]);
+    assert.throws(() => deployManifest({ ...base, wrangler: { ...base.wrangler, keep_vars: "yes" } }), /keep_vars/);
   });
 
   test("a binding to another Worker's class is an error: this upload does not carry one", () => {
