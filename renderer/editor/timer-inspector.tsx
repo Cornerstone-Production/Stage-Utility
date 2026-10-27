@@ -72,7 +72,13 @@ export function TimerInspector({
             // Not trimmed as it is typed: a name of two words has a space in the
             // middle of typing it. Trimmed when the field is left.
             onChange={(e) => set({ timerName: e.target.value || null })}
-            onBlur={(e) => set({ timerName: e.target.value.trim() || null })}
+            onBlur={(e) => {
+              // Leaving the field untouched writes nothing: a write marks the layout
+              // unsaved, pushes an undo step and converts a retired widget.
+              const trimmed = e.target.value.trim();
+              if (trimmed === (c.timerName ?? "")) return;
+              set({ timerName: trimmed || null });
+            }}
           />
           <datalist id="timer-names">
             {names.map((n) => (

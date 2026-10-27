@@ -275,6 +275,26 @@ describe("the ProPresenter timer name", () => {
     }
   });
 
+  test("leaving the field without changing it writes nothing, whether it holds a name or nothing", async () => {
+    for (const config of [
+      { type: "timer", source: "propresenter", timerName: "Sermon" },
+      { type: "timer", source: "propresenter" },
+      { type: "pp-timer", timerName: "Sermon" },
+    ]) {
+      const m = await mount(config);
+      try {
+        const field = m.container.querySelector('[aria-label="Timer"]') as HTMLInputElement;
+        fireEvent.blur(field);
+        assert.equal(m.writes.length, 0, `${config.type} was written on a blur that changed nothing`);
+        fireEvent.blur(field, { target: { value: "  Sermon  " } });
+        assert.equal(m.writes.length, config.timerName ? 0 : 1, "a blur whose trimmed value is the stored one must not write");
+      } finally {
+        m.restore();
+        cleanup();
+      }
+    }
+  });
+
   test("an empty field follows the first running timer: clearing writes null", async () => {
     const m = await mount({ type: "timer", source: "propresenter", timerName: "Sermon" });
     try {
