@@ -370,8 +370,11 @@ export const LAYOUT_OBJECTS: Record<LayoutObjectType, LayoutObjectSpec> = extern
     // is the Service card again. Converted objects keep their own settings.
     config: () => ({ type: "timer", source: "service", nextItem: true }),
     style: () => READOUT(0.1),
-    // As the bare Service card it replaces: no ink of its own on Home.
+    // As the bare Service card it replaces: no ink of its own on Home, and its tile:
+    // extra large, drawn only while a service is live (LEGACY_HOME's home-live-status).
     homeStyle: BARE,
+    homeSize: "xl",
+    homeWhen: "live",
   },
   "countdown-timer": {
     label: "PCO countdown",
