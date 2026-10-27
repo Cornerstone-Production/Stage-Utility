@@ -6,6 +6,7 @@
 import type { AutomationSettings, Rule } from "../types/automation.js";
 import { DataStore } from "./data-store.js";
 import { isSafeKey } from "./safe-key.js";
+import { CALL_TRIGGER_ID } from "./cue-aliases.js";
 import { asArray, asObject, checked, optional, refuse, required, uniqueIds } from "./restore-check.js";
 
 /**
@@ -15,6 +16,11 @@ import { asArray, asObject, checked, optional, refuse, required, uniqueIds } fro
  * not the rules in memory it replaces. Param issues are NOT a refusal: a rule
  * with them lands as it was saved and shows Needs setup, which is what
  * automation-restore-keeps-issues.test.ts pins.
+ *
+ * A step's params, when present, must be an object. A called cue must have
+ * them: without a name a save refuses it anyway, and the cue checks read every
+ * rule's params, so one missing failed inside ANOTHER rule's check with a
+ * TypeError naming neither. Other steps may omit them, as a save allows.
  */
 const rulesRestoreCheck = checked(async (raw) => {
   const list = asArray(raw, "the rules");
@@ -24,8 +30,12 @@ const rulesRestoreCheck = checked(async (raw) => {
     required(rule.id, "string", `${what}'s id`);
     if (!isSafeKey(rule.id as string)) refuse(`${what}'s id is not allowed`);
     required(rule.name, "string", `${what}'s name`);
+    const label = typeof rule.name === "string" && rule.name ? `rule "${rule.name}"` : what;
     for (const step of ["trigger", "action"] as const) {
-      required(asObject(rule[step], `${what}'s ${step}`).id, "string", `${what}'s ${step} id`);
+      const s = asObject(rule[step], `${what}'s ${step}`);
+      required(s.id, "string", `${what}'s ${step} id`);
+      if (s.params !== undefined) asObject(s.params, `${label}'s ${step} params`);
+      else if (step === "trigger" && s.id === CALL_TRIGGER_ID) refuse(`${label} is a called cue with no trigger params`);
     }
     optional(rule.enabled, "boolean", `${what}'s enabled`);
     if (rule.conditions !== undefined) asArray(rule.conditions, `${what}'s conditions`);

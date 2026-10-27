@@ -285,6 +285,29 @@ describe("config restore checks", () => {
     await assert.rejects(() => configSnapshot.apply(bundleOf({ "views.json": [view, view] })), /lists the id "v1" more than once/);
   });
 
+  test("refuses a called cue with no params, naming it, and keeps a non-cue rule without them", async () => {
+    const rule = (GOOD["automation-rules.json"] as Record<string, unknown>[])[0];
+    // Two cues, so the other one's name check reads this one's aliases: that
+    // read once threw "Cannot read properties of undefined (reading 'aliases')".
+    const other = { ...rule, id: "r2", name: "Other", trigger: { id: "call.by-name", params: { name: "other" } } };
+    const bare = { ...rule, name: "Bare cue", trigger: { id: "call.by-name" } };
+    await assert.rejects(
+      () => configSnapshot.apply(bundleOf({ "automation-rules.json": [other, bare] })),
+      (err: Error) => {
+        assert.ok(err instanceof RestoreRefusedError, String(err));
+        assert.deepEqual(err.failures, ['automation-rules.json: rule "Bare cue" is a called cue with no trigger params']);
+        return true;
+      },
+    );
+    await assert.rejects(
+      () => configSnapshot.apply(bundleOf({ "automation-rules.json": [{ ...other, action: { id: "rosstalk.command", params: "x" } }] })),
+      /rule "Other"'s action params must be an object/,
+    );
+    const noParams = { ...rule, id: "r3", trigger: { id: "osc.value" }, action: { id: "rosstalk.command" } };
+    await configSnapshot.apply(bundleOf({ "automation-rules.json": [noParams] }));
+    assert.deepEqual(await readOnDisk("automation-rules.json"), [noParams]);
+  });
+
   test("refuses ids that would reach the prototype, and a binding to no screen", async () => {
     const rule = (GOOD["automation-rules.json"] as object[])[0];
     const view = (GOOD["views.json"] as object[])[0];
