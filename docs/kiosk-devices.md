@@ -455,14 +455,14 @@ Each signature is read once per version and cached beside the zips in
 the machine refuses the update. Each signature costs one more call to the releases API
 the first time it is asked for, from the same 60-an-hour allowance.
 
-**On a Mac**, the installer downloads the key from the server it was run from
+**On a Mac**, a first install downloads the key from the server it was run from
 (`/kiosk/release-signing.pub.pem`), verifies the zip with it, and writes it to
 `/Library/Application Support/StageUtilityUpdater/release-signing.pub.pem`. The updater
 verifies every update with `/usr/bin/openssl dgst -sha256 -verify` against that file
 and never asks the server for a key. A key that is not a 3072-bit RSA public key is
 refused at install, and no such key there holds an update as failed.
 
-**On a Windows PC**, the installer downloads the key as `/kiosk/release-signing.pub.xml`
+**On a Windows PC**, a first install downloads the key as `/kiosk/release-signing.pub.xml`
 and writes it to `%PROGRAMFILES%\StageUtility\release-signing.pub.xml`, beside the
 updater, where only an administrator can write. The updater verifies each new launcher
 with .NET's `RSA.VerifyData` (SHA-256, PKCS#1 v1.5) against that file, which Windows
@@ -483,15 +483,18 @@ from the server it is run from, over plain HTTP. So the first install trusts tha
 server, exactly as `curl ... | sudo sh` and `irm ... | iex` always have. From the first
 update on, the key on the machine decides: a server, or anything answering in its place,
 can still say *when* to update, but a payload it did not get from the release is
-refused. Running the installer again replaces the key with the server's, so a reinstall
-is a first install again.
+refused. Running the installer again keeps the key already installed, and on a Mac
+verifies the new app against it, so a server cannot swap the key by being run from
+again. Only an explicit choice takes the server's: `--replace-signing-key` on a Mac
+(`curl ... | sudo sh -s -- --replace-signing-key`), `$env:STAGE_REPLACE_SIGNING_KEY = '1'`
+before the installer on Windows. That run trusts the server as a first install does.
 
 **Rotating the key** is a new key pair, its public half committed in place of
 `scripts/kiosk/release-signing.pub.pem` and its private half set as the
 `RELEASE_SIGNING_KEY` secret (see [distribution](ops/distribution.md#the-release-signing-key)).
-A machine's updater keeps the key it was installed with, so it refuses every release
-signed with the new one until its installer is run again: run it on every Mac and PC,
-from a server on the first release signed with the new key.
+A machine keeps the key it was installed with, so it refuses every release signed with
+the new one until its installer is run again with the replace choice above: on every
+Mac and PC, from a server on the first release signed with the new key.
 
 ## Size
 

@@ -45,7 +45,7 @@ const jobs = doc.jobs;
 const needsOf = (j: Job): string[] => (j.needs === undefined ? [] : Array.isArray(j.needs) ? j.needs : [j.needs]);
 
 const KEY = testSigningKey();
-const OTHER_KEY = testSigningKey(3072 + 64);
+const OTHER_KEY = testSigningKey(3072, "other");
 
 let tree: string;
 let tmp: string;

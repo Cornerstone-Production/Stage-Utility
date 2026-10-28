@@ -45,14 +45,17 @@ function makeKey(bits: number): TestSigningKey {
   };
 }
 
-const made = new Map<number, TestSigningKey>();
+const made = new Map<string, TestSigningKey>();
 
-/** The process's test key of `bits` (3072, the release key's size, by default). */
-export function testSigningKey(bits = 3072): TestSigningKey {
-  let key = made.get(bits);
+/** The process's test key of `bits` (3072, the release key's size, by default).
+ *  A different `name` is a different key of the same size: a key a test can use
+ *  to stand for a rotated one, or for one an attacker made. */
+export function testSigningKey(bits = 3072, name = "release"): TestSigningKey {
+  const id = `${name}:${bits}`;
+  let key = made.get(id);
   if (!key) {
     key = makeKey(bits);
-    made.set(bits, key);
+    made.set(id, key);
   }
   return key;
 }

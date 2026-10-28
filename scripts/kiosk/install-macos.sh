@@ -14,6 +14,10 @@
 #                Mac the helper cannot run on.
 #                curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh -s -- --browser
 #   --dry-run    print every step and change nothing. Needs no sudo.
+#   --replace-signing-key
+#                take the server's release signing key even though this Mac already
+#                has one installed. Without it a re-run keeps the installed key and
+#                verifies the new app against it. For rotating the key.
 #   --check-update
 #                what the updater this installs runs every five minutes, as root:
 #                ask the server whether to update the helper, and do it. Not for
@@ -128,6 +132,8 @@ ZIP_CEILING=7800
 
 MODE=helper
 DRY=0
+# --replace-signing-key: take the server's key over the one already installed.
+REPLACE_KEY=0
 # Set in --check-update: the update in progress, so a failure records itself;
 # whether a failure from here holds that version (see record_update_failure);
 # whether a signal ended the run; and what the status file carries alongside.
@@ -184,12 +190,15 @@ would() { printf '    [dry-run] %s\n' "$*"; }
 
 usage() {
   cat <<'USAGE'
-Usage: install-macos.sh [--browser] [--dry-run] [--check-update]
+Usage: install-macos.sh [--browser] [--dry-run] [--replace-signing-key] [--check-update]
 
   (default)   install the Stage Utility Output helper (macOS 14 or later), and
               the updater that keeps it on the server's version
   --browser   install the Chrome kiosk instead
   --dry-run   print every step and change nothing; needs no sudo
+  --replace-signing-key
+              take the server's release signing key in place of the one
+              installed; without it a re-run keeps the installed key
   --check-update
               what the updater runs every five minutes; not for typing
   --help      this text
@@ -563,8 +572,23 @@ usable_key() {
   "$OPENSSL" rsa -pubin -in "$1" -noout -text 2>/dev/null | head -n 1 | grep -Eq 'Public-Key: \(3072 bit\)'
 }
 
-# The key an install verifies with, and leaves for the updater: the server's. The
-# first install trusts the server it was run from, as `curl ... | sudo sh` does.
+# The key an install verifies with, and leaves for the updater. On a Mac that has
+# one installed, that one, unless --replace-signing-key: a re-run is then held to
+# the key the first install trusted, and a server cannot swap it by being run
+# from again. Otherwise the server's, so the first install trusts the server it
+# was run from, as `curl ... | sudo sh` does.
+choose_signing_key() { # origin
+  if [ "$REPLACE_KEY" -ne 1 ] && { [ -e "$UPDATER_KEY" ] || [ -L "$UPDATER_KEY" ]; }; then
+    usable_key "$UPDATER_KEY" ||
+      die "the release signing key installed at $UPDATER_KEY is not a 3072-bit RSA public key. To take the server's in its place, run the installer again with --replace-signing-key."
+    SIGNING_KEY="$UPDATER_KEY"
+    KEY_FROM="installed on this Mac"
+    say "    keeping the release signing key installed on this Mac (--replace-signing-key takes the server's)"
+    return 0
+  fi
+  fetch_signing_key "$1"
+}
+
 fetch_signing_key() { # origin
   SIGNING_KEY="$WORK/release-signing.pub.pem"
   KEY_FROM="from $1"
@@ -607,7 +631,7 @@ fetch_helper() {
   # The updater has set the key it installed; it never asks for one.
   if [ -z "$SIGNING_KEY" ]; then
     [ "$MODE" != check ] || die "no release signing key to verify the update with; run the installer by hand"
-    fetch_signing_key "$origin"
+    choose_signing_key "$origin"
   fi
   # No idle limit on the server: a server that has not fetched the zip yet sends
   # nothing until it has all of it from GitHub, which curl would count as idle.
@@ -964,7 +988,9 @@ updater_files() {
   # The key this install verified the app with, which the updater verifies every
   # update against from now on. Replaced only by running the installer again.
   usable_key "$SIGNING_KEY" || { WHY="there is no release signing key to install"; return 1; }
-  put_file "$UPDATER_KEY" 644 <"$SIGNING_KEY" || { WHY="could not write $UPDATER_KEY"; return 1; }
+  if [ "$SIGNING_KEY" != "$UPDATER_KEY" ]; then
+    put_file "$UPDATER_KEY" 644 <"$SIGNING_KEY" || { WHY="could not write $UPDATER_KEY"; return 1; }
+  fi
   printf '%s\n' "$origin" | put_file "$UPDATER_ORIGIN" 644 || { WHY="could not write $UPDATER_ORIGIN"; return 1; }
   printf '%s\n' "$machine" | put_file "$UPDATER_DIR/device-id" 644 || { WHY="could not write $UPDATER_DIR/device-id"; return 1; }
   write_updater_plist "$UPDATER_PLIST" || { WHY="could not write $UPDATER_PLIST"; return 1; }
@@ -1351,7 +1377,11 @@ install_helper() {
   if [ "$DRY" -eq 1 ]; then
     origin="$(server_origin)"
     [ -n "$origin" ] || no_server_address
-    would "download $origin/kiosk/release-signing.pub.pem, the key every download is verified against"
+    if [ "$REPLACE_KEY" -ne 1 ] && [ -e "$UPDATER_KEY" ]; then
+      would "verify every download against the release signing key already installed at $UPDATER_KEY (--replace-signing-key takes the server's)"
+    else
+      would "download $origin/kiosk/release-signing.pub.pem, the key every download is verified against"
+    fi
     would "download $origin/kiosk/StageUtilityOutput-$ARCH.zip, its .sha256 and its .sig"
     would "failing that, ask $origin/api/update/status for its version and download the GitHub release's StageUtilityOutput-$ARCH.zip and its .sig"
     would "refuse a zip whose SHA-256 differs from the release's, or whose signature is missing or does not verify"
@@ -1588,6 +1618,7 @@ main() {
     case "$arg" in
       --browser) MODE=browser ;;
       --dry-run) DRY=1 ;;
+      --replace-signing-key) REPLACE_KEY=1 ;;
       --check-update) MODE=check ;;
       -h | --help)
         usage

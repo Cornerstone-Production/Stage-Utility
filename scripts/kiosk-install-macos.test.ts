@@ -32,7 +32,7 @@ const sha = (b: Buffer | string) => crypto.createHash("sha256").update(b).digest
 /** The release signing key these tests sign with, made for this run; and another
  *  one, for a signature that is well formed and not the release's. */
 const KEY = testSigningKey();
-const OTHER_KEY = testSigningKey(3072 + 64);
+const OTHER_KEY = testSigningKey(3072, "other");
 
 interface Result {
   status: number | null;
@@ -365,6 +365,18 @@ describe("--dry-run", () => {
     assert.match(r.out, /write the launcher/);
     assert.doesNotMatch(r.out, /StageUtilityOutput/);
     assert.deepEqual(fs.readdirSync(scratch), []);
+  });
+
+  it("plans to keep an installed signing key, and to take the server's with --replace-signing-key", async () => {
+    const key = path.join(scratch, "Library", "Application Support", "StageUtilityUpdater", "release-signing.pub.pem");
+    fs.mkdirSync(path.dirname(key), { recursive: true });
+    fs.writeFileSync(key, KEY.publicPem);
+    const keep = await dryRun(scratch, [], { ...server, STAGE_INSTALL_TEST_UNAME_M: "arm64" });
+    assert.equal(keep.status, 0, keep.err);
+    assert.match(keep.out, /verify every download against the release signing key already installed at .*release-signing\.pub\.pem \(--replace-signing-key takes the server's\)/);
+    const replace = await dryRun(scratch, ["--replace-signing-key"], { ...server, STAGE_INSTALL_TEST_UNAME_M: "arm64" });
+    assert.equal(replace.status, 0, replace.err);
+    assert.match(replace.out, /download http:\/\/192\.0\.2\.10:8788\/kiosk\/release-signing\.pub\.pem, the key every download is verified against/);
   });
 
   it("answers an unknown option with 2, and --help with the usage", async () => {
@@ -1017,6 +1029,56 @@ describe("fetching, verifying and swapping the app", { skip: !has("zip") && "zip
         // Root's own copies: the state folder is the console user's to rewrite.
         assert.equal(fs.readFileSync(path.join(updaterDir(), "device-id"), "utf8"), fs.readFileSync(path.join(stateDir(), "device-id"), "utf8"));
         assert.match(r.out, /every five minutes whether to update, and never/);
+      });
+
+      describe("a re-run, and the key it was installed with", () => {
+        const keyFile = () => path.join(updaterDir(), "release-signing.pub.pem");
+        /** First install with the release key; then a server offering another key, and an app signed by it. */
+        const installedThenSwapped = async () => {
+          publish(stageServer, "/kiosk", zipA);
+          stageServer.routes.set("/kiosk/install-macos.sh", { body: fs.readFileSync(SCRIPT) });
+          assert.equal((await whole(ME)).status, 0);
+          assert.equal(fs.readFileSync(keyFile(), "utf8"), KEY.publicPem);
+          publish(stageServer, "/kiosk", zipB, undefined, OTHER_KEY.sign(zipB.bytes));
+          stageServer.routes.set("/kiosk/release-signing.pub.pem", { body: OTHER_KEY.publicPem });
+          stageServer.hits.length = 0;
+        };
+
+        it("keeps the installed key, and holds the new app to it", async () => {
+          await installedThenSwapped();
+          const r = await whole(ME);
+          assert.equal(r.status, 1, r.out + r.err);
+          assert.match(r.out, /keeping the release signing key installed on this Mac/);
+          assert.match(r.err, /signature invalid: StageUtilityOutput-arm64\.zip\.sig does not verify against the release signing key installed on this Mac/);
+          assert.ok(!stageServer.hits.includes("/kiosk/release-signing.pub.pem"), "the server's key is not asked for");
+          assert.equal(fs.readFileSync(keyFile(), "utf8"), KEY.publicPem, "the installed key is unchanged");
+          assert.equal(marker2(), "build-a");
+        });
+
+        it("installs an app the installed key verifies, and leaves that key whole", async () => {
+          await installedThenSwapped();
+          publish(stageServer, "/kiosk", zipB); // signed by the installed key this time
+          const r = await whole(ME);
+          assert.equal(r.status, 0, r.out + r.err);
+          assert.equal(marker2(), "build-b");
+          assert.equal(fs.readFileSync(keyFile(), "utf8"), KEY.publicPem, "the key was not rewritten from itself");
+        });
+
+        it("takes the server's key with --replace-signing-key", async () => {
+          await installedThenSwapped();
+          const r = await whole(ME, {}, "REPLACE_KEY=1");
+          assert.equal(r.status, 0, r.out + r.err);
+          assert.equal(fs.readFileSync(keyFile(), "utf8"), OTHER_KEY.publicPem);
+          assert.equal(marker2(), "build-b");
+        });
+
+        it("refuses to install over a key that is not usable, and says how to replace it", async () => {
+          await installedThenSwapped();
+          fs.writeFileSync(keyFile(), "not a key\n");
+          const r = await whole(ME);
+          assert.equal(r.status, 1, r.out + r.err);
+          assert.match(r.err, /is not a 3072-bit RSA public key\. To take the server's in its place, run the installer again with --replace-signing-key/);
+        });
       });
 
       it("says plainly when it cannot, and leaves the helper installed", async () => {

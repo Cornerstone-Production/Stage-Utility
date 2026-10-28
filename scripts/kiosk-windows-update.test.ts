@@ -38,7 +38,7 @@ const hasPwsh = spawnSync("sh", ["-c", "command -v pwsh"]).status === 0;
 const sha = (b: Buffer | string) => crypto.createHash("sha256").update(b).digest("hex");
 /** The release signing key these tests sign with, made for this run; and another. */
 const KEY = testSigningKey();
-const OTHER_KEY = testSigningKey(3072 + 64);
+const OTHER_KEY = testSigningKey(3072, "other");
 
 /** The launcher a PC has, and the one the server has. Both parse. */
 const OLD = Buffer.from("Write-Output 'old launcher'\r\n");
@@ -651,7 +651,9 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
 
   describe("install-windows.ps1's Save-SigningKey", () => {
     const keyFile = () => path.join(app, "release-signing.pub.xml");
-    const saveKey = (base: string) =>
+    // Its pipeline output is printed after OUTPUT:, since Install-Updater reads its
+    // own output as its answer and anything there reads as a failure.
+    const saveKey = (base: string, env: Record<string, string> = {}) =>
       pwsh(
         [
           "-Command",
@@ -659,10 +661,31 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
             `$fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Save-SigningKey' }, $true);` +
             `if (-not $fn) { throw 'Save-SigningKey is gone' };` +
             `$ErrorActionPreference = 'Stop'; $AppDir = $env:APP_DIR; Invoke-Expression $fn.Extent.Text;` +
-            `Save-SigningKey -From $env:FROM`,
+            `$o = @(Save-SigningKey -From $env:FROM); Write-Output "OUTPUT:$($o.Count)"`,
         ],
-        { INSTALLER: path.join(KIOSK, "install-windows.ps1"), APP_DIR: app, FROM: base },
+        { INSTALLER: path.join(KIOSK, "install-windows.ps1"), APP_DIR: app, FROM: base, ...env },
       );
+    const REPLACE = { STAGE_REPLACE_SIGNING_KEY: "1" };
+
+    it("keeps a key already installed, asks the server for none, and returns nothing", async () => {
+      const f = await serve();
+      f.keyXml = OTHER_KEY.publicXml;
+      const r = await saveKey(f.base);
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.equal(fs.readFileSync(keyFile(), "utf8"), KEY.publicXml);
+      assert.ok(!f.paths.includes("/kiosk/release-signing.pub.xml"));
+      assert.match(r.out, /keeping the release signing key already installed/);
+      assert.match(r.out, /OUTPUT:0/, "nothing on the pipeline, or Install-Updater would read it as a failure");
+    });
+
+    it("takes the server's key over the installed one with STAGE_REPLACE_SIGNING_KEY=1", async () => {
+      const f = await serve();
+      f.keyXml = OTHER_KEY.publicXml;
+      const r = await saveKey(f.base, REPLACE);
+      assert.equal(r.status, 0, r.out + r.err);
+      assert.equal(fs.readFileSync(keyFile(), "utf8"), OTHER_KEY.publicXml);
+      assert.match(r.out, /OUTPUT:0/);
+    });
 
     it("writes the server's key beside the updater, as served", async () => {
       const f = await serve();
@@ -680,7 +703,7 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
       it(`refuses a key that ${label}, and keeps the one already installed`, async () => {
         const f = await serve();
         f.keyXml = xml;
-        const r = await saveKey(f.base);
+        const r = await saveKey(f.base, REPLACE);
         assert.notEqual(r.status, 0, r.out);
         assert.match(r.out + r.err, why);
         assert.equal(fs.readFileSync(keyFile(), "utf8"), KEY.publicXml, "the installed key is untouched");

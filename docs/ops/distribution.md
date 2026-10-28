@@ -136,10 +136,12 @@ and a lost key is replaced, not recovered.
 
 **Rotating it** (a leaked key, or a lost one) is the same three commands, with the new
 public key committed in place of the old. Releases from then on are signed with the new
-key. A machine's updater keeps the key it was installed with and refuses every release
-signed with another, so run the installer again on every Mac and Windows kiosk once
-their server runs the first release with the new key. Until then they stay on the
-version they have.
+key. A machine keeps the key it was installed with and refuses every release signed
+with another, and running its installer again keeps that key too. So once their server
+runs the first release with the new key, run the installer on every Mac with
+`--replace-signing-key` (`curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh -s -- --replace-signing-key`)
+and on every Windows kiosk with `$env:STAGE_REPLACE_SIGNING_KEY = '1'` set first. Until
+then they stay on the version they have.
 
 The runtime ships inside the archive, so a server needs neither Node, nor npm, nor a
 build toolchain — installed or to update. About 35 MB compressed, 115 MB on disk, of

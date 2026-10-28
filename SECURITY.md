@@ -197,7 +197,9 @@ When reporting, please include:
 
   The first install is the exception: the installer and the key it installs come from
   the server, over plain HTTP, so `curl ... | sudo sh` and `irm ... | iex` trust that
-  server as they always have, and so does any reinstall. An updater installed before
+  server as they always have. A reinstall keeps the key already on the machine unless it
+  is told to replace it (`--replace-signing-key`, `STAGE_REPLACE_SIGNING_KEY=1`), which
+  trusts the server again. An updater installed before
   signing existed checks the SHA-256 only, until its installer is run again. See
   [Signed updates](docs/kiosk-devices.md#signed-updates) and
   [The release signing key](docs/ops/distribution.md#the-release-signing-key), which
