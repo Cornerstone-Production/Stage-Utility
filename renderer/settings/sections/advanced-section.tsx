@@ -1173,269 +1173,278 @@ export function AdvancedSection({
         />
       </div>
 
+      {/* Two stacks, not a two-column grid. In a grid every row is as tall as its
+          tallest card, and Server is the length of the other three together: Host
+          names sat in a row beside it with a screen of empty space under it. Each
+          column now stacks on its own; on a narrow screen the two stacks follow
+          one another in the same order. */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 items-start">
-        <div className="su-card">
-          <div className="border-b border-line px-4 py-3">
-            <h3 className="text-callout font-semibold text-fg">Server</h3>
-          </div>
-          <FieldSet flat>
-            <FieldGroup>
-              <Field orientation="vertical">
-                <FieldContent>
-                  <FieldLabel>Public address (DNS)</FieldLabel>
-                  <FieldDescription>
-                    The address people use to reach this server — e.g. a DNS name behind a reverse proxy.
-                    When set, the connect QR code and the display links use it instead of the local IP.
-                    Leave blank to use the auto-detected network address.
-                  </FieldDescription>
-                </FieldContent>
-                <Input
-                  value={publicUrl}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => setPublicUrl(e.target.value)}
-                  onBlur={commitPublicUrl}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.blur();
-                  }}
-                  placeholder="http://stage-display.example.com"
-                  className="text-gray-12"
-                  aria-label="Public address (DNS)"
+        <div className="flex min-w-0 flex-col gap-6">
+          <div className="su-card">
+            <div className="border-b border-line px-4 py-3">
+              <h3 className="text-callout font-semibold text-fg">Server</h3>
+            </div>
+            <FieldSet flat>
+              <FieldGroup>
+                <Field orientation="vertical">
+                  <FieldContent>
+                    <FieldLabel>Public address (DNS)</FieldLabel>
+                    <FieldDescription>
+                      The address people use to reach this server — e.g. a DNS name behind a reverse proxy.
+                      When set, the connect QR code and the display links use it instead of the local IP.
+                      Leave blank to use the auto-detected network address.
+                    </FieldDescription>
+                  </FieldContent>
+                  <Input
+                    value={publicUrl}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setPublicUrl(e.target.value)}
+                    onBlur={commitPublicUrl}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                    }}
+                    placeholder="http://stage-display.example.com"
+                    className="text-gray-12"
+                    aria-label="Public address (DNS)"
+                  />
+                </Field>
+
+                <TimezoneField
+                  timezone={stageState.timezone ?? null}
+                  hostTimezone={stageState.hostTimezone ?? "UTC"}
+                  onChange={handlers.handleSetTimezone}
                 />
-              </Field>
-
-              <TimezoneField
-                timezone={stageState.timezone ?? null}
-                hostTimezone={stageState.hostTimezone ?? "UTC"}
-                onChange={handlers.handleSetTimezone}
-              />
-              <HourCycleField
-                hourCycle={stageState.hourCycle ?? "24h"}
-                onChange={handlers.handleSetHourCycle}
-              />
-
-              <Field orientation="horizontal">
-                <FieldContent>
-                  <FieldLabel>
-                    Wake around service times
-                    <InfoHint className="ml-1.5 align-middle">
-                      Church gear is off most of the week, so retrying at full speed is wasted
-                      traffic and log noise. Rehearsal and service windows come from Planning
-                      Center; outside them connections back off toward the idle interval below,
-                      and the Planning Center poll slows too. Nothing ever sleeps past the moment
-                      the next window opens, and if the schedule cannot be worked out — no
-                      credentials, a failed fetch, nothing planned — everything stays at full
-                      speed rather than going quiet.
-                    </InfoHint>
-                  </FieldLabel>
-                  <FieldDescription>
-                    Back off reconnects when gear is off for the week, and ramp up before a
-                    rehearsal or service. Off = a fixed 2-minute retry.
-                  </FieldDescription>
-                </FieldContent>
-                <Switch
-                  checked={rc.enabled}
-                  onCheckedChange={(v: boolean) => handlers.handleSetReconnectSchedule({ enabled: v })}
+                <HourCycleField
+                  hourCycle={stageState.hourCycle ?? "24h"}
+                  onChange={handlers.handleSetHourCycle}
                 />
-              </Field>
-              {rc.enabled && (
-                <>
-                  <Field orientation="horizontal">
-                    <FieldContent>
-                      <FieldLabel>Lead time before rehearsal (minutes)</FieldLabel>
-                      <FieldDescription>Start reconnecting this long before a scheduled rehearsal or service.</FieldDescription>
-                    </FieldContent>
-                    <NumberInput value={rc.leadMin} min={0} max={1440} className="w-28"
-                      onChange={(v) => { if (v !== rc.leadMin) handlers.handleSetReconnectSchedule({ leadMin: Math.round(v) }); }}
-                      aria-label="Lead time before rehearsal (minutes)" />
-                  </Field>
-                  <Field orientation="horizontal">
-                    <FieldContent>
-                      <FieldLabel>Keep active after service ends (minutes)</FieldLabel>
-                      <FieldDescription>Stay in fast-reconnect mode this long after the service end time.</FieldDescription>
-                    </FieldContent>
-                    <NumberInput value={rc.tailMin} min={0} max={1440} className="w-28"
-                      onChange={(v) => { if (v !== rc.tailMin) handlers.handleSetReconnectSchedule({ tailMin: Math.round(v) }); }}
-                      aria-label="Keep active after service ends (minutes)" />
-                  </Field>
-                  <Field orientation="horizontal">
-                    <FieldContent>
-                      <FieldLabel>Idle retry interval (minutes)</FieldLabel>
-                      <FieldDescription>Longest gap between reconnect attempts when far from any service (the dead-week cadence).</FieldDescription>
-                    </FieldContent>
-                    <NumberInput value={rc.dormantMin} min={1} max={1440} className="w-28"
-                      onChange={(v) => { if (v !== rc.dormantMin) handlers.handleSetReconnectSchedule({ dormantMin: Math.round(v) }); }}
-                      aria-label="Idle retry interval (minutes)" />
-                  </Field>
-                </>
-              )}
 
-              <Field orientation="horizontal">
-                <FieldContent>
-                  <FieldLabel>Pre-service ramp (minutes)</FieldLabel>
-                  <FieldDescription>Start sampling attendance this long before the service start, so the graph shows the room filling up. 0 = off.</FieldDescription>
-                </FieldContent>
-                <NumberInput value={tw.preMin} min={0} max={240} className="w-28"
-                  onChange={(v) => { if (v !== tw.preMin) handlers.handleSetTaperWindow({ preMin: Math.round(v) }); }}
-                  aria-label="Pre-service ramp (minutes)" />
-              </Field>
-              <Field orientation="horizontal">
-                <FieldContent>
-                  <FieldLabel>
-                    Post-service taper (minutes)
-                    <InfoHint className="ml-1.5 align-middle">
-                      Sampling continues even once the live plan is cleared, so an emptying room
-                      is still recorded. These samples are excluded from the Peak and Lowest
-                      figures — otherwise the taper would drag the low toward an empty room.
-                    </InfoHint>
-                  </FieldLabel>
-                  <FieldDescription>Keep sampling this long after the service ends, to capture how fast the room empties. 0 = off.</FieldDescription>
-                </FieldContent>
-                <NumberInput value={tw.postMin} min={0} max={240} className="w-28"
-                  onChange={(v) => { if (v !== tw.postMin) handlers.handleSetTaperWindow({ postMin: Math.round(v) }); }}
-                  aria-label="Post-service taper (minutes)" />
-              </Field>
-
-              <Field orientation="horizontal">
-                <FieldContent>
-                  <FieldLabel>Update Mac output helpers and Windows kiosks with this server</FieldLabel>
-                  <FieldDescription>
-                    When this server updates, each Mac running the output helper installs the same
-                    version on its own. Never during a service, or within the window around one. The
-                    helper restarts to finish, which takes its outputs off air for about three seconds.
-                    A Windows kiosk takes the new launcher at its next sign-in.
-                  </FieldDescription>
-                </FieldContent>
-                <Switch
-                  checked={stageState.autoUpdateMachines ?? true}
-                  onCheckedChange={(on: boolean) =>
-                    void invoke("stage:setAutoUpdateMachines", { enabled: on })
-                      .catch((e: unknown) => toast.error(`Could not change this setting: ${errorMessage(e)}`))
-                  }
-                  aria-label="Update Mac output helpers and Windows kiosks with this server"
-                />
-              </Field>
-
-              <Field orientation="horizontal">
-                <FieldContent>
-                  <FieldLabel>Answer devices looking for a server</FieldLabel>
-                  <FieldDescription>
-                    Off by default so a test instance on the same network cannot claim a screen
-                    meant for this one. Screens already claimed keep working either way — this only
-                    controls whether NEW ones can find you. Takes effect when the server restarts.
-                  </FieldDescription>
-                </FieldContent>
-                <Switch
-                  checked={stageState.kioskDiscovery ?? false}
-                  onCheckedChange={(on: boolean) =>
-                    void invoke("stage:setKioskDiscovery", { enabled: on })
-                      .catch((e: unknown) => toast.error(`Could not change this setting: ${errorMessage(e)}`))
-                  }
-                  aria-label="Answer kiosk devices looking for a server"
-                />
-              </Field>
-
-              <Field orientation="vertical">
-                <FieldContent>
-                  <FieldLabel>Setting up a screen</FieldLabel>
-                  <FieldDescription>
-                    On the machine that will show the display, run this once. It finds this server
-                    on its own — there is no address to type, and nothing to change if the server
-                    moves.
-                  </FieldDescription>
-                </FieldContent>
-                <Button
-                  variant="transparent"
-                  size="small"
-                  // Keeps the button padding so the hover pill has air, and pulls it back by that much so the text still sits on the column.
-                  className="self-start -ml-2"
-                  aria-expanded={showCommands}
-                  onClick={() => setShowCommands((v) => !v)}
-                >
-                  {showCommands ? "Hide commands" : "Show commands"}
-                </Button>
-                {showCommands && (
-                  <div className="flex flex-col gap-1.5">
-                    {[
-                      ["Linux / Raspberry Pi", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-linux.sh | sudo sh`],
-                      ["macOS", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-macos.sh | sudo sh`],
-                      ["Windows (elevated)", `irm ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-windows.ps1 | iex`],
-                    ].map(([os, cmd]) => (
-                      <div key={os}>
-                        <div className="text-caption2 text-fg-subtle">{os}</div>
-                        <code className="block select-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-caption1 text-fg">
-                          {cmd}
-                        </code>
-                      </div>
-                    ))}
-                  </div>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel>
+                      Wake around service times
+                      <InfoHint className="ml-1.5 align-middle">
+                        Church gear is off most of the week, so retrying at full speed is wasted
+                        traffic and log noise. Rehearsal and service windows come from Planning
+                        Center; outside them connections back off toward the idle interval below,
+                        and the Planning Center poll slows too. Nothing ever sleeps past the moment
+                        the next window opens, and if the schedule cannot be worked out — no
+                        credentials, a failed fetch, nothing planned — everything stays at full
+                        speed rather than going quiet.
+                      </InfoHint>
+                    </FieldLabel>
+                    <FieldDescription>
+                      Back off reconnects when gear is off for the week, and ramp up before a
+                      rehearsal or service. Off = a fixed 2-minute retry.
+                    </FieldDescription>
+                  </FieldContent>
+                  <Switch
+                    checked={rc.enabled}
+                    onCheckedChange={(v: boolean) => handlers.handleSetReconnectSchedule({ enabled: v })}
+                  />
+                </Field>
+                {rc.enabled && (
+                  <>
+                    <Field orientation="horizontal">
+                      <FieldContent>
+                        <FieldLabel>Lead time before rehearsal (minutes)</FieldLabel>
+                        <FieldDescription>Start reconnecting this long before a scheduled rehearsal or service.</FieldDescription>
+                      </FieldContent>
+                      <NumberInput value={rc.leadMin} min={0} max={1440} className="w-28"
+                        onChange={(v) => { if (v !== rc.leadMin) handlers.handleSetReconnectSchedule({ leadMin: Math.round(v) }); }}
+                        aria-label="Lead time before rehearsal (minutes)" />
+                    </Field>
+                    <Field orientation="horizontal">
+                      <FieldContent>
+                        <FieldLabel>Keep active after service ends (minutes)</FieldLabel>
+                        <FieldDescription>Stay in fast-reconnect mode this long after the service end time.</FieldDescription>
+                      </FieldContent>
+                      <NumberInput value={rc.tailMin} min={0} max={1440} className="w-28"
+                        onChange={(v) => { if (v !== rc.tailMin) handlers.handleSetReconnectSchedule({ tailMin: Math.round(v) }); }}
+                        aria-label="Keep active after service ends (minutes)" />
+                    </Field>
+                    <Field orientation="horizontal">
+                      <FieldContent>
+                        <FieldLabel>Idle retry interval (minutes)</FieldLabel>
+                        <FieldDescription>Longest gap between reconnect attempts when far from any service (the dead-week cadence).</FieldDescription>
+                      </FieldContent>
+                      <NumberInput value={rc.dormantMin} min={1} max={1440} className="w-28"
+                        onChange={(v) => { if (v !== rc.dormantMin) handlers.handleSetReconnectSchedule({ dormantMin: Math.round(v) }); }}
+                        aria-label="Idle retry interval (minutes)" />
+                    </Field>
+                  </>
                 )}
-              </Field>
 
-              <Field orientation="horizontal">
-                <FieldContent>
-                  <FieldLabel>Context bar</FieldLabel>
-                  <FieldDescription>
-                    Which readings appear above every page, and where they sit. Right-clicking the bar
-                    itself opens the same thing.
-                  </FieldDescription>
-                </FieldContent>
-                <Button variant="filled" size="small" onClick={() => setConfiguringBar(true)}>
-                  Configure…
-                </Button>
-              </Field>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel>Pre-service ramp (minutes)</FieldLabel>
+                    <FieldDescription>Start sampling attendance this long before the service start, so the graph shows the room filling up. 0 = off.</FieldDescription>
+                  </FieldContent>
+                  <NumberInput value={tw.preMin} min={0} max={240} className="w-28"
+                    onChange={(v) => { if (v !== tw.preMin) handlers.handleSetTaperWindow({ preMin: Math.round(v) }); }}
+                    aria-label="Pre-service ramp (minutes)" />
+                </Field>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel>
+                      Post-service taper (minutes)
+                      <InfoHint className="ml-1.5 align-middle">
+                        Sampling continues even once the live plan is cleared, so an emptying room
+                        is still recorded. These samples are excluded from the Peak and Lowest
+                        figures — otherwise the taper would drag the low toward an empty room.
+                      </InfoHint>
+                    </FieldLabel>
+                    <FieldDescription>Keep sampling this long after the service ends, to capture how fast the room empties. 0 = off.</FieldDescription>
+                  </FieldContent>
+                  <NumberInput value={tw.postMin} min={0} max={240} className="w-28"
+                    onChange={(v) => { if (v !== tw.postMin) handlers.handleSetTaperWindow({ postMin: Math.round(v) }); }}
+                    aria-label="Post-service taper (minutes)" />
+                </Field>
 
-              {/* The one thing worth keeping from the Connect tab's Tools list.
-                  Every other entry there — ServiceCue, Patch, History, Baptisms —
-                  is in the rail; the raw log is not, and it was the only route to
-                  it. Advanced is where the rest of the diagnostics already live. */}
-              <Field orientation="horizontal">
-                <FieldContent>
-                  <FieldLabel>Server log</FieldLabel>
-                  <FieldDescription>
-                    The raw log, for diagnosing a problem. Not something to hand to a volunteer.
-                  </FieldDescription>
-                </FieldContent>
-                <Button
-                  variant="filled"
-                  size="small"
-                  onClick={() => window.open("/log", "_blank", "noreferrer")}
-                >
-                  Open log
-                </Button>
-              </Field>
-            </FieldGroup>
-          </FieldSet>
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel>Update Mac output helpers and Windows kiosks with this server</FieldLabel>
+                    <FieldDescription>
+                      When this server updates, each Mac running the output helper installs the same
+                      version on its own. Never during a service, or within the window around one. The
+                      helper restarts to finish, which takes its outputs off air for about three seconds.
+                      A Windows kiosk takes the new launcher at its next sign-in.
+                    </FieldDescription>
+                  </FieldContent>
+                  <Switch
+                    checked={stageState.autoUpdateMachines ?? true}
+                    onCheckedChange={(on: boolean) =>
+                      void invoke("stage:setAutoUpdateMachines", { enabled: on })
+                        .catch((e: unknown) => toast.error(`Could not change this setting: ${errorMessage(e)}`))
+                    }
+                    aria-label="Update Mac output helpers and Windows kiosks with this server"
+                  />
+                </Field>
+
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel>Answer devices looking for a server</FieldLabel>
+                    <FieldDescription>
+                      Off by default so a test instance on the same network cannot claim a screen
+                      meant for this one. Screens already claimed keep working either way — this only
+                      controls whether NEW ones can find you. Takes effect when the server restarts.
+                    </FieldDescription>
+                  </FieldContent>
+                  <Switch
+                    checked={stageState.kioskDiscovery ?? false}
+                    onCheckedChange={(on: boolean) =>
+                      void invoke("stage:setKioskDiscovery", { enabled: on })
+                        .catch((e: unknown) => toast.error(`Could not change this setting: ${errorMessage(e)}`))
+                    }
+                    aria-label="Answer kiosk devices looking for a server"
+                  />
+                </Field>
+
+                <Field orientation="vertical">
+                  <FieldContent>
+                    <FieldLabel>Setting up a screen</FieldLabel>
+                    <FieldDescription>
+                      On the machine that will show the display, run this once. It finds this server
+                      on its own — there is no address to type, and nothing to change if the server
+                      moves.
+                    </FieldDescription>
+                  </FieldContent>
+                  <Button
+                    variant="transparent"
+                    size="small"
+                    // Keeps the button padding so the hover pill has air, and pulls it back by that much so the text still sits on the column.
+                    className="self-start -ml-2"
+                    aria-expanded={showCommands}
+                    onClick={() => setShowCommands((v) => !v)}
+                  >
+                    {showCommands ? "Hide commands" : "Show commands"}
+                  </Button>
+                  {showCommands && (
+                    <div className="flex flex-col gap-1.5">
+                      {[
+                        ["Linux / Raspberry Pi", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-linux.sh | sudo sh`],
+                        ["macOS", `curl -fsSL ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-macos.sh | sudo sh`],
+                        ["Windows (elevated)", `irm ${stageState.lanUrl ?? "http://<server>"}/kiosk/install-windows.ps1 | iex`],
+                      ].map(([os, cmd]) => (
+                        <div key={os}>
+                          <div className="text-caption2 text-fg-subtle">{os}</div>
+                          <code className="block select-all rounded-md border border-line bg-bg px-3 py-2 font-mono text-caption1 text-fg">
+                            {cmd}
+                          </code>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Field>
+
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel>Context bar</FieldLabel>
+                    <FieldDescription>
+                      Which readings appear above every page, and where they sit. Right-clicking the bar
+                      itself opens the same thing.
+                    </FieldDescription>
+                  </FieldContent>
+                  <Button variant="filled" size="small" onClick={() => setConfiguringBar(true)}>
+                    Configure…
+                  </Button>
+                </Field>
+
+                {/* The one thing worth keeping from the Connect tab's Tools list.
+                    Every other entry there — ServiceCue, Patch, History, Baptisms —
+                    is in the rail; the raw log is not, and it was the only route to
+                    it. Advanced is where the rest of the diagnostics already live. */}
+                <Field orientation="horizontal">
+                  <FieldContent>
+                    <FieldLabel>Server log</FieldLabel>
+                    <FieldDescription>
+                      The raw log, for diagnosing a problem. Not something to hand to a volunteer.
+                    </FieldDescription>
+                  </FieldContent>
+                  <Button
+                    variant="filled"
+                    size="small"
+                    onClick={() => window.open("/log", "_blank", "noreferrer")}
+                  >
+                    Open log
+                  </Button>
+                </Field>
+              </FieldGroup>
+            </FieldSet>
+          </div>
         </div>
 
-        <HostNamesCard />
+        <div className="flex min-w-0 flex-col gap-6">
+          <HostNamesCard />
 
-        <div className="su-card">
-          <div className="border-b border-line px-4 py-3">
-            <h3 className="text-callout font-semibold text-fg">Data</h3>
+          <div className="su-card">
+            <div className="border-b border-line px-4 py-3">
+              <h3 className="text-callout font-semibold text-fg">Data</h3>
+            </div>
+            <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
+              Automatic backups
+            </p>
+            <AutoBackupPanel />
+            <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
+              Config snapshots
+            </p>
+            <ConfigSnapshotPanel />
+            <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
+              Data archive
+            </p>
+            <DataArchivePanel />
+            <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
+              History milestones
+            </p>
+            <HistoryMilestonesPanel />
           </div>
-          <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
-            Automatic backups
-          </p>
-          <AutoBackupPanel />
-          <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
-            Config snapshots
-          </p>
-          <ConfigSnapshotPanel />
-          <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
-            Data archive
-          </p>
-          <DataArchivePanel />
-          <p className="px-4 pt-3 pb-1 text-caption2 font-semibold uppercase tracking-wide text-fg-muted">
-            History milestones
-          </p>
-          <HistoryMilestonesPanel />
-        </div>
 
-        <div className="su-card" data-flash-id={VIDEO_PORTS_FLASH_ID}>
-          <div className="border-b border-line px-4 py-3">
-            <h3 className="text-callout font-semibold text-fg">Video relay</h3>
+          <div className="su-card" data-flash-id={VIDEO_PORTS_FLASH_ID}>
+            <div className="border-b border-line px-4 py-3">
+              <h3 className="text-callout font-semibold text-fg">Video relay</h3>
+            </div>
+            <VideoRelayPortsPanel />
+            <VideoRelayFfmpegPanel />
           </div>
-          <VideoRelayPortsPanel />
-          <VideoRelayFfmpegPanel />
         </div>
       </div>
 
