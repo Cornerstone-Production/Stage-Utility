@@ -336,6 +336,9 @@ describe("the Windows kiosk scripts", { skip: !hasPwsh && "pwsh is not installed
         ["made by another key", () => OTHER_KEY.sign(NEW)],
         ["of other bytes", () => KEY.sign("Write-Output 'another launcher'\r\n")],
         ["that is not a signature at all", () => Buffer.from("<html>502 Bad Gateway</html>")],
+        // .NET throws on an empty signature rather than answering false: the path
+        // where the check itself fails must still refuse.
+        ["that is empty", () => Buffer.alloc(0)],
       ] as const) {
         it(`one ${label} is refused, though the digest matches: kiosk.ps1 is untouched, and the next check says why`, async () => {
           const f = await serve();
