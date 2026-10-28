@@ -288,7 +288,15 @@ export class Updater {
       this.logEvent(`${h.tag} is tagged but its release is not published yet; waiting for it`);
     }
     const heldSet = new Set(held.map((h) => h.tag));
-    return { tags: tags.filter((t) => !heldSet.has(t)), releases };
+    const kept = tags.filter((t) => !heldSet.has(t));
+    // Holding every tag on the track would leave no target, and no target means
+    // following the branch tip, unpinned: worse than the held tag. Take the tags
+    // as they are then, and say so.
+    if (held.length > 0 && latestOnTrack(kept, branch) === null) {
+      this.logEvent(`no published release on ${branch} is in this checkout's tags; not holding ${held[0].tag}`);
+      return { tags, releases };
+    }
+    return { tags: kept, releases };
   }
 
   /** Read the detached updater's last result file (written by scripts/update.*). */

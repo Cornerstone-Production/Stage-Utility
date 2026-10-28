@@ -87,6 +87,14 @@ describe("a checkout waits for a tag's release to be published", () => {
     assert.equal(none.targetTag, "v1.27.0");
   });
 
+  it("takes the tag rather than the branch tip when holding it would leave no tag", async (t: TestContext) => {
+    captureConsole(t, "log", "warn");
+    // The published release is not among this checkout's tags, so holding v1.28.0
+    // would leave nothing to pin to.
+    const s = await updaterFor(["v1.28.0"], async () => [release("v1.27.0")], "main").checkForUpdate();
+    assert.equal(s.targetTag, "v1.28.0", "fell back to following the branch tip");
+  });
+
   it("does not hold an unpublished tag older than the newest published one", async (t: TestContext) => {
     const lines = captureConsole(t, "log", "warn");
     // v1.25.0 fell off the API's first page; v1.27.0 is published.

@@ -20,7 +20,10 @@ one. A checkout waits: it takes a tag only once its release is published, and th
 tagged commits show as waiting to be released until then. The wait applies to a tag
 newer than the newest published release on the track, so a fork that has never
 published a release, or a tag older than the first page of the releases list, is never
-held. When the releases cannot be read (offline, rate limited) nothing is held. The
+held. When the releases cannot be read (offline, rate limited) nothing is held, so a
+checkout can then take a tag whose release is still being built. Nor is a tag held
+when no published release is among the checkout's tags, since nothing older would be
+left to update to. The
 `[updater]` log says `v1.28.0 is tagged but its release is not published yet; waiting
 for it` once per tag, and `could not read the published releases; choosing among all
 tags` once per outage.
