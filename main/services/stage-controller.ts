@@ -22,7 +22,6 @@ import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
 import { isDisplayKind, screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
 import { isSafeKey } from "./safe-key.js";
-import { isUpdateMode } from "../types/state.js";
 import {
   CAPTION_COLOR,
   ICON_COLOR,
@@ -82,6 +81,7 @@ import { viewsStore } from "./views-store.js";
 import { serviceCueLayoutsStore } from "./servicecue-layouts-store.js";
 import { serviceCueConfigStore } from "./servicecue-config-store.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
+import { autoApplyDecision, migrateAutoUpdate, type AutoApplyDecision } from "./auto-apply-gate.js";
 import { updater } from "./updater.js";
 import { announceIfNew } from "./update/announce.js";
 import { validateSlug } from "./reserved-slugs.js";
@@ -151,26 +151,6 @@ export function retuneEmbedFontSize(views: View[]): { views: View[]; changed: nu
     );
   }
   return { views: next, changed };
-}
-
-/**
- * Read the persisted auto-update settings, migrating the pre-mode boolean.
- * `enabled: true` meant "apply and restart in the window", which is auto-full;
- * `false`/absent meant nothing automatic at all, which is manual.
- */
-function migrateAutoUpdate(saved: unknown): AutoUpdateSettings {
-  const o = (saved ?? {}) as Partial<AutoUpdateSettings> & { enabled?: boolean };
-  const mode: AutoUpdateSettings["mode"] =
-    isUpdateMode(o.mode)
-      ? o.mode
-      : o.enabled === true
-        ? "auto-full"
-        : "manual";
-  return {
-    mode,
-    dayOfWeek: typeof o.dayOfWeek === "number" ? o.dayOfWeek : null,
-    hour: typeof o.hour === "number" ? o.hour : 3,
-  };
 }
 
 // Coalescing window (ms) for live device-status updates. Wireless metering arrives
@@ -1405,6 +1385,15 @@ export class StageController {
     return this.lastLive != null && this.lastLive.mode !== "none";
   }
 
+  /** Whether Planning Center's live reading is current: always without Planning
+   *  Center or a followed plan; with them, once a read has succeeded and none has
+   *  failed since. */
+  liveKnown(): boolean {
+    if (!this.pcoAppId || !this.pcoSecret) return true;
+    if (!this.state.serviceTypeId || !this.state.planId) return true;
+    return this.lastLive !== null && !this.liveStale;
+  }
+
   /**
    * Whether the service times and the live state are known well enough to restart
    * a Mac's outputs on: always without Planning Center; with it, once the windows
@@ -1414,8 +1403,7 @@ export class StageController {
    */
   serviceTimesKnown(): boolean {
     if (!this.pcoAppId || !this.pcoSecret) return true;
-    if (!serviceWindow.isKnown()) return false;
-    return !this.state.serviceTypeId || !this.state.planId || (this.lastLive !== null && !this.liveStale);
+    return serviceWindow.isKnown() && this.liveKnown();
   }
 
   /** Latest PCO live snapshot (null if none fetched yet) — for the update-lock guard. */
@@ -2878,7 +2866,11 @@ export class StageController {
       const status = await updater.checkForUpdate();
     // Once per available release, and only if somebody is connected to hear it.
     await announceIfNew(updater.getStatus());
-      if (this.shouldAutoApply(status.behind, new Date())) {
+      const decision = this.shouldAutoApply(status.behind, new Date());
+      if (!decision.apply && decision.why === "window") {
+        console.log("[stage-controller] auto-update waits: Planning Center's live state is unknown and a planned service window is open; it tries again at the next scheduled time");
+      }
+      if (decision.apply) {
         console.log("[stage-controller] auto-update window — applying update");
         // auto-install applies the build but leaves the restart to the operator,
         // so an update can land on Saturday and be taken on Monday.
@@ -2890,17 +2882,20 @@ export class StageController {
   }
 
   /** Auto-apply gate: enabled + something to pull + inside the scheduled
-   *  day/hour window + not mid-service. Exposed for unit testing. */
-  shouldAutoApply(behind: number, now: Date): boolean {
-    const cfg = this.state.autoUpdate;
-    if (cfg.mode === "manual" || behind <= 0) return false;
-    if (updater.phase === "updating") return false;
-    if (this.isServiceLive()) return false;
-    // The APP's zone. On a UTC host "Monday 03:00" fires at 22:00 Sunday in
-    // Chicago — i.e. an unattended restart in the middle of an evening service.
-    const p = zonedParts(now.getTime());
-    if (cfg.dayOfWeek != null && p.weekday !== cfg.dayOfWeek) return false;
-    return p.hour === cfg.hour;
+   *  day/hour window + not mid-service, falling back on the cached service
+   *  windows while the live state is unknown (auto-apply-gate.ts). */
+  shouldAutoApply(behind: number, now: Date): AutoApplyDecision {
+    return autoApplyDecision({
+      cfg: this.state.autoUpdate,
+      behind,
+      updating: updater.phase === "updating",
+      serviceLive: this.isServiceLive(),
+      liveKnown: this.liveKnown(),
+      windowUntil: serviceWindow.activeUntil(now.getTime()),
+      // The APP's zone. On a UTC host "Monday 03:00" fires at 22:00 Sunday in
+      // Chicago — i.e. an unattended restart in the middle of an evening service.
+      now: zonedParts(now.getTime()),
+    });
   }
 
   // ── Branding (app name + logo) ────────────────────────────────────────
