@@ -21,6 +21,17 @@ result file, sleeps briefly, then **kills the server** — the service manager
 relaunches it on the new build. On failure it writes the result and leaves the
 server running on the old build.
 
+### Automatic updates
+
+Settings → Advanced → Updates can install a new release on its own: **Install**
+applies it and leaves the restart to the operator, **Install + restart** does
+both. Either runs only at the chosen hour (and day, if one is set) in the app's
+time zone, and never while Planning Center reports a service live. When Planning
+Center is not answering, its last reading may be out of date, so the updater
+falls back on the service windows worked out from the plans it last read: inside
+one it waits for the next hour, outside one it goes ahead. An outage therefore
+never holds updates for longer than it overlaps a planned service.
+
 ### The machines that show screens follow
 
 A Mac running the output helper, and a Windows kiosk, carry software of their own
@@ -277,7 +288,7 @@ a path or a credential. If you see one, report it.
 | `[spl-history]` | The SPL records' own files, as for `[attendance-history]`: [When a recorded file cannot be read](reliability.md#when-a-recorded-file-cannot-be-read) |
 | `[spl-recorder]` | The SPL recording resumed or rebuilt from the archive, or resumed from its stored record because the archive could not be read, and archive-close failures: [Sound levels](../features/attendance-and-history.md#sound-levels). A closed record that could not be saved, held and retried until it is: [When a recorded service cannot be saved](reliability.md#when-a-recorded-service-cannot-be-saved) |
 | `[spl-series]` | A raw SPL sample series failing to read: [Sound levels](../features/attendance-and-history.md#sound-levels) |
-| `[stage-controller]` | Layout template and group library changes (saved, updated, deleted) — internal bookkeeping, not an operator signal. Also a screen being made (`createScreen`) and a view changing what it is for (`setViewRole view=… → console, screens: …`, with the screens showing it, which change with it; and `… not made: the screens changed since the operator was asked` when the screens they were shown are no longer the ones it would change), and, when a multi-step screen write fails, a warning naming the step that failed, what was put back, and anything that could not be: [Screens](../features/operator-app.md#screens). At startup, the migrations of views and screens skipped because `views.json` or `settings.json` could not be read: [When a store file cannot be read](reliability.md#when-a-store-file-cannot-be-read) |
+| `[stage-controller]` | Layout template and group library changes (saved, updated, deleted) — internal bookkeeping, not an operator signal. Also a screen being made (`createScreen`) and a view changing what it is for (`setViewRole view=… → console, screens: …`, with the screens showing it, which change with it; and `… not made: the screens changed since the operator was asked` when the screens they were shown are no longer the ones it would change), and, when a multi-step screen write fails, a warning naming the step that failed, what was put back, and anything that could not be: [Screens](../features/operator-app.md#screens). An automatic update waiting because Planning Center's live state is unknown and a planned service window is open (`auto-update waits: …`): [Automatic updates](#automatic-updates). At startup, the migrations of views and screens skipped because `views.json` or `settings.json` could not be read: [When a store file cannot be read](reliability.md#when-a-store-file-cannot-be-read) |
 | `[stream-starts]` | The first-seen live timestamp for a streaming platform failing to persist or clear |
 | `[surface-migration]` | A one-time pass that makes a view holding a button a console, and so the screens showing it control surfaces, on an install that predates surfaces: [Upgrading an existing install](../reference/data-model.md#upgrading-an-existing-install) |
 | `[tsl]` | Connection state to a Ross multiviewer over TSL UMD: [Ross MultiViewer](../integrations/ross-tsl.md) |

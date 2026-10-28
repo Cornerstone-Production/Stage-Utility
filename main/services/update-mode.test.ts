@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
 import type { AutoUpdateSettings, UpdateMode } from "../types/stage.js";
+import { autoApplyDecision } from "./auto-apply-gate.js";
 
 /** Mirrors migrateAutoUpdate in stage-controller.ts. */
 function migrate(saved: unknown): AutoUpdateSettings {
@@ -28,21 +29,27 @@ function migrate(saved: unknown): AutoUpdateSettings {
   };
 }
 
-/** Mirrors shouldAutoApply's decision, minus the updater/service lookups. */
+/** The gate, from the fields these tests vary. `now` is the app-zone weekday and hour. */
 function shouldAutoApply(opts: {
   mode: UpdateMode;
   behind: number;
   updating: boolean;
   serviceLive: boolean;
+  liveKnown?: boolean;
+  windowUntil?: number | null;
   dayOfWeek: number | null;
   hour: number;
-  now: Date;
+  now: { weekday: number; hour: number };
 }): boolean {
-  if (opts.mode === "manual" || opts.behind <= 0) return false;
-  if (opts.updating) return false;
-  if (opts.serviceLive) return false;
-  if (opts.dayOfWeek != null && opts.now.getDay() !== opts.dayOfWeek) return false;
-  return opts.now.getHours() === opts.hour;
+  return autoApplyDecision({
+    cfg: { mode: opts.mode, dayOfWeek: opts.dayOfWeek, hour: opts.hour },
+    behind: opts.behind,
+    updating: opts.updating,
+    serviceLive: opts.serviceLive,
+    liveKnown: opts.liveKnown ?? true,
+    windowUntil: opts.windowUntil ?? null,
+    now: opts.now,
+  }).apply;
 }
 
 describe("migration off the pre-mode boolean", () => {
@@ -84,7 +91,8 @@ describe("migration off the pre-mode boolean", () => {
 });
 
 describe("the auto-apply gate", () => {
-  const base = { behind: 2, updating: false, serviceLive: false, dayOfWeek: null, hour: 3, now: new Date(2026, 6, 26, 3, 0) };
+  const SUNDAY = 0;
+  const base = { behind: 2, updating: false, serviceLive: false, dayOfWeek: null, hour: 3, now: { weekday: SUNDAY, hour: 3 } };
 
   test("manual never auto-applies, even in the window", () => {
     assert.equal(shouldAutoApply({ ...base, mode: "manual" }), false);
@@ -111,13 +119,35 @@ describe("the auto-apply gate", () => {
   });
 
   test("the hour must match", () => {
-    assert.equal(shouldAutoApply({ ...base, mode: "auto-full", now: new Date(2026, 6, 26, 4, 0) }), false);
+    assert.equal(shouldAutoApply({ ...base, mode: "auto-full", now: { weekday: SUNDAY, hour: 4 } }), false);
   });
 
   test("a day restriction is honoured, and null means any day", () => {
-    const sunday = new Date(2026, 6, 26, 3, 0); // a Sunday
-    assert.equal(shouldAutoApply({ ...base, mode: "auto-full", dayOfWeek: sunday.getDay(), now: sunday }), true);
-    assert.equal(shouldAutoApply({ ...base, mode: "auto-full", dayOfWeek: (sunday.getDay() + 1) % 7, now: sunday }), false);
+    const sunday = { weekday: SUNDAY, hour: 3 };
+    assert.equal(shouldAutoApply({ ...base, mode: "auto-full", dayOfWeek: SUNDAY, now: sunday }), true);
+    assert.equal(shouldAutoApply({ ...base, mode: "auto-full", dayOfWeek: SUNDAY + 1, now: sunday }), false);
     assert.equal(shouldAutoApply({ ...base, mode: "auto-full", dayOfWeek: null, now: sunday }), true);
+  });
+
+  test("with the live state unknown, a cached service window open now holds it", () => {
+    // Planning Center not answering: the last reading said nothing was live, but a
+    // service may have started since. The cached plan says one is on now.
+    const d = autoApplyDecision({
+      cfg: { mode: "auto-full", dayOfWeek: null, hour: 3 },
+      behind: 2, updating: false, serviceLive: false, liveKnown: false, windowUntil: Date.now() + 60_000,
+      now: { weekday: SUNDAY, hour: 3 },
+    });
+    assert.deepEqual(d, { apply: false, why: "window" });
+  });
+
+  test("with the live state unknown and no cached window open, the schedule applies", () => {
+    // An outage, or bad credentials, must not hold every update for as long as it lasts.
+    assert.equal(shouldAutoApply({ ...base, mode: "auto-full", liveKnown: false, windowUntil: null }), true);
+  });
+
+  test("with the live state known, a window alone does not hold it", () => {
+    // The reading is current and says nothing is live: the pre-service lead is
+    // the operator's chosen hour to update, as before.
+    assert.equal(shouldAutoApply({ ...base, mode: "auto-full", liveKnown: true, windowUntil: Date.now() + 60_000 }), true);
   });
 });
