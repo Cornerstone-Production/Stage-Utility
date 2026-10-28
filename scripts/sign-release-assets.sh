@@ -17,8 +17,9 @@
 #
 # RELEASE_SIGNING_KEY is the PEM private key, from the GitHub Actions secret of
 # that name. It is written to a file only for openssl to read, in a private
-# temporary folder that is removed on exit. An empty one fails: a release is never
-# published unsigned.
+# temporary folder that is removed on exit. An empty one fails loudly, and the
+# release workflow runs --check before it tags, so a missing key stops a release
+# before there is one.
 #
 # SIGN_TEST_PUBLIC_KEY replaces the committed public key, for the tests only.
 set -euo pipefail
@@ -31,7 +32,7 @@ fail() {
 }
 
 [ -n "${RELEASE_SIGNING_KEY:-}" ] ||
-  fail "the RELEASE_SIGNING_KEY secret is not set, so this release cannot be signed and is not published. Set it to the private half of $PUB (docs/ops/distribution.md, The release signing key)."
+  fail "the RELEASE_SIGNING_KEY secret is not set, so this release cannot be signed. Set it to the private half of $PUB (docs/ops/distribution.md, The release signing key)."
 openssl pkey -pubin -in "$PUB" -noout >/dev/null 2>&1 ||
   fail "$PUB is not a public key openssl can read (is it still the placeholder?). Commit the public half of RELEASE_SIGNING_KEY there."
 

@@ -99,10 +99,17 @@ StageUtilityOutput-x86_64.zip.sig  when the helper was built
 ```
 
 Each is RSA-3072, PKCS#1 v1.5 over SHA-256, made by
-`scripts/sign-release-assets.sh` in the artifacts job with the private key in the
-`RELEASE_SIGNING_KEY` secret, and verified against the committed public key before the
-release is created. A release is never published without them: no secret, a secret
-that is not the committed key's private half, or no signature to attach fails the run.
+`scripts/sign-release-assets.sh` in a `sign` job of its own, with the private key in
+the `RELEASE_SIGNING_KEY` secret. That job installs and runs nothing from npm: it checks
+out the tag, signs the launcher as the tagged blob (`git show v<version>:…`) and the
+helper's zips from the helper job's artifact, and verifies each signature against the
+committed public key. The artifacts job checks the set again before it attaches it: one
+signature per payload, each verifying. No secret, or a secret that is not the committed
+key's private half, stops the run before it tags. A signing failure after the tag does
+not cost the release: it is published without signatures and the run carries an
+error annotation, and every Mac helper and Windows kiosk refuses that release, staying
+on the version it has, until a signed one. A partial or mismatched set is never
+attached.
 
 ## The release signing key
 
@@ -111,8 +118,9 @@ public half is `scripts/kiosk/release-signing.pub.pem`, the one copy in the tree
 server serves it to the installers and never has the private half.
 
 The release job checks the secret (`scripts/sign-release-assets.sh --check`) before it
-tags, so a missing or wrong key stops a release with nothing pushed, and the artifacts
-job signs with it. No other step sees it.
+tags, in a step that nothing from npm has run before, so a missing or wrong key stops a
+release with nothing pushed, and the `sign` job's signing step signs with it. No other
+step, job or workflow-level environment sees it.
 
 To make a key pair (once, on a trusted machine) and set the secret:
 

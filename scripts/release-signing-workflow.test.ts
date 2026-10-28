@@ -33,8 +33,16 @@ interface Step {
   uses?: string;
   run?: string;
   env?: Record<string, string>;
+  with?: Record<string, unknown>;
 }
-const jobs = (parse(fs.readFileSync(WORKFLOW, "utf8")) as { jobs: Record<string, { steps?: Step[] }> }).jobs;
+interface Job {
+  needs?: string | string[];
+  if?: string;
+  steps?: Step[];
+}
+const doc = parse(fs.readFileSync(WORKFLOW, "utf8")) as { jobs: Record<string, Job> };
+const jobs = doc.jobs;
+const needsOf = (j: Job): string[] => (j.needs === undefined ? [] : Array.isArray(j.needs) ? j.needs : [j.needs]);
 
 const KEY = testSigningKey();
 const OTHER_KEY = testSigningKey(3072 + 64);
@@ -98,7 +106,7 @@ describe("sign-release-assets.sh", () => {
     for (const env of [{}, { RELEASE_SIGNING_KEY: "" }]) {
       const r = sign(["sig-dist", zip], env);
       assert.equal(r.status, 1);
-      assert.match(r.stderr, /^::error title=Release signing::the RELEASE_SIGNING_KEY secret is not set, so this release cannot be signed and is not published/m);
+      assert.match(r.stderr, /^::error title=Release signing::the RELEASE_SIGNING_KEY secret is not set, so this release cannot be signed\./m);
       assert.ok(!fs.existsSync(path.join(tree, "sig-dist")));
     }
   });
@@ -142,16 +150,33 @@ describe("sign-release-assets.sh", () => {
 
 describe("release.yml", () => {
   const release = jobs["release"].steps ?? [];
+  const sign = jobs["sign"]?.steps ?? [];
   const artifacts = jobs["artifacts"].steps ?? [];
-  const SECRET = "${{ secrets.RELEASE_SIGNING_KEY }}";
+  const SECRET = "secrets.RELEASE_SIGNING_KEY";
 
-  it("proves the signing key before it tags, on every run that releases", () => {
+  /** Every place in the workflow, at any level, whose text names the secret. */
+  function secretHolders(node: unknown, at: string[] = []): string[] {
+    if (typeof node === "string") return node.includes(SECRET) ? [at.join(".")] : [];
+    if (Array.isArray(node)) return node.flatMap((v, i) => secretHolders(v, [...at, (v as Step)?.name ?? String(i)]));
+    if (node && typeof node === "object") return Object.entries(node).flatMap(([k, v]) => secretHolders(v, [...at, k]));
+    return [];
+  }
+
+  it("hands the secret to two steps' env and to nothing else: no workflow, job or other step env, no input, no script", () => {
+    assert.deepEqual(secretHolders(doc).sort(), [
+      "jobs.release.steps.Check the release signing key.env.RELEASE_SIGNING_KEY",
+      "jobs.sign.steps.Sign the update payloads.env.RELEASE_SIGNING_KEY",
+    ]);
+  });
+
+  it("proves the signing key before it tags, on every run that releases, with no npm before it", () => {
     const check = release.find((s) => s.run?.trim() === "scripts/sign-release-assets.sh --check");
     assert.ok(check, "no step runs sign-release-assets.sh --check");
-    assert.equal(check.env?.["RELEASE_SIGNING_KEY"], SECRET);
     assert.equal(check.if, "steps.version.outputs.skip == 'false'", "the same condition as the push: a run that releases checks the key");
-    const push = release.findIndex((s) => s.id === "push");
-    assert.ok(release.indexOf(check) < push, "the key is checked before anything is pushed");
+    const at = release.indexOf(check);
+    assert.ok(at < release.findIndex((s) => s.id === "push"), "the key is checked before anything is pushed");
+    const before = release.slice(0, at);
+    assert.deepEqual(before.filter((s) => /\bnpm\b|\bnpx\b/.test(s.run ?? "")).map((s) => s.name), [], "nothing from npm runs in the job before the key is in it");
     // Its shell, for real: a missing secret stops it, and the right one passes.
     const missing = runStep(check, {});
     assert.equal(missing.status, 1);
@@ -160,70 +185,90 @@ describe("release.yml", () => {
     assert.equal(good.status, 0, good.stdout + good.stderr);
   });
 
-  it("hands the secret to the two signing steps and to nothing else", () => {
-    const holders = Object.entries(jobs).flatMap(([job, j]) =>
-      (j.steps ?? []).filter((s) => Object.values(s.env ?? {}).includes(SECRET)).map((s) => `${job}: ${s.name}`),
-    );
-    assert.deepEqual(holders.sort(), ["artifacts: Sign the update payloads", "release: Check the release signing key"]);
+  it("signs in a job of its own that installs and runs nothing from npm", () => {
+    assert.ok(jobs["sign"], "no sign job");
+    assert.deepEqual(needsOf(jobs["sign"]).sort(), ["helper", "release"]);
+    assert.ok((jobs["sign"].if ?? "").includes("always()") && (jobs["sign"].if ?? "").includes("needs.release.outputs.published == 'true'"));
+    assert.deepEqual(sign.filter((s) => s.uses?.startsWith("actions/setup-node@") || /\bnpm\b|\bnpx\b|\bnode\b/.test(s.run ?? "")).map((s) => s.name ?? s.uses), []);
+    const checkout = sign.find((s) => s.uses?.startsWith("actions/checkout@"));
+    assert.equal(checkout?.with?.["ref"], "v${{ needs.release.outputs.version }}");
+    assert.equal(checkout?.with?.["persist-credentials"], false);
   });
 
-  /** A step's shell, run in `tree` with the scripts it calls where the checkout has them. */
+  /** A tree that is a git repository with the launcher tagged v1.2.3, and the scripts the steps call. */
+  function tagged(launcher: Buffer): void {
+    payload("scripts/kiosk/kiosk-windows.ps1", launcher);
+    fs.copyFileSync(KEY.publicFile(), path.join(tree, "scripts", "kiosk", "release-signing.pub.pem"));
+    const g = (args: string[]) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", ...args], { cwd: tree, encoding: "utf8" });
+    for (const args of [["init", "-q"], ["add", "."], ["commit", "-q", "-m", "v"], ["tag", "v1.2.3"]]) assert.equal(g(args).status, 0, args.join(" "));
+  }
+
+  /** A step's shell, run in `tree` with the signing script where the checkout has it. */
   function runStep(step: Step, env: Record<string, string>) {
     fs.mkdirSync(path.join(tree, "scripts"), { recursive: true });
     fs.copyFileSync(SCRIPT, path.join(tree, "scripts", "sign-release-assets.sh"));
     fs.chmodSync(path.join(tree, "scripts", "sign-release-assets.sh"), 0o755);
-    return run(["-c", step.run!], env);
+    return run(["-c", step.run!], { V: "1.2.3", RUNNER_TEMP: tmp, ...env });
   }
 
-  const signStep = artifacts.find((s) => s.name === "Sign the update payloads");
+  const signStep = sign.find((s) => s.name === "Sign the update payloads");
   const create = artifacts.find((s) => s.run?.includes("gh release create"));
+  const LAUNCHER = Buffer.from("Write-Output 'launcher'\n");
 
-  it("signs the launcher and the helper's zips after the zips are fetched and before the release is created", () => {
-    assert.ok(signStep?.run && create?.run);
-    const download = artifacts.findIndex((s) => s.uses?.startsWith("actions/download-artifact@"));
-    assert.ok(download >= 0 && artifacts.indexOf(signStep) > download, "signed after the helper's zips are downloaded");
-    assert.ok(artifacts.indexOf(signStep) < artifacts.indexOf(create), "signed before the release is created");
-    assert.equal(signStep.if, undefined, "signing is not conditional");
-
-    payload("scripts/kiosk/kiosk-windows.ps1", "Write-Output 'launcher'\r\n");
+  it("signs the tagged launcher, not the workspace's, and the helper's zips after they are fetched", () => {
+    assert.ok(signStep?.run);
+    const download = sign.findIndex((s) => s.uses?.startsWith("actions/download-artifact@"));
+    assert.ok(download >= 0 && sign.indexOf(signStep) > download, "signed after the helper's zips are downloaded");
+    assert.equal(sign[download].if, "${{ needs.helper.result == 'success' }}");
+    tagged(LAUNCHER);
+    // The workspace differs from the tag: what is signed must be the tag's.
+    fs.writeFileSync(path.join(tree, "scripts", "kiosk", "kiosk-windows.ps1"), "Write-Output 'changed after the tag'\r\n");
     payload("helper-dist/StageUtilityOutput-arm64.zip", "arm");
     payload("helper-dist/StageUtilityOutput-x86_64.zip", "x86");
     const r = runStep(signStep, { RELEASE_SIGNING_KEY: KEY.privatePem });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.deepEqual(fs.readdirSync(path.join(tree, "sig-dist")).sort(), ["StageUtilityOutput-arm64.zip.sig", "StageUtilityOutput-x86_64.zip.sig", "kiosk-windows.ps1.sig"]);
-    for (const [sig, file] of [["kiosk-windows.ps1.sig", "scripts/kiosk/kiosk-windows.ps1"], ["StageUtilityOutput-arm64.zip.sig", "helper-dist/StageUtilityOutput-arm64.zip"]]) {
-      assert.ok(crypto.verify("sha256", fs.readFileSync(path.join(tree, file)), KEY.publicPem, fs.readFileSync(path.join(tree, "sig-dist", sig))), sig);
-    }
+    assert.ok(crypto.verify("sha256", LAUNCHER, KEY.publicPem, fs.readFileSync(path.join(tree, "sig-dist", "kiosk-windows.ps1.sig"))), "the tagged launcher's signature");
+    assert.ok(crypto.verify("sha256", Buffer.from("arm"), KEY.publicPem, fs.readFileSync(path.join(tree, "sig-dist", "StageUtilityOutput-arm64.zip.sig"))));
   });
 
-  it("signs the launcher alone when no helper was built", () => {
-    payload("scripts/kiosk/kiosk-windows.ps1", "Write-Output 'launcher'\r\n");
+  it("signs the launcher alone when no helper was built, and fails without the secret", () => {
+    tagged(LAUNCHER);
     const r = runStep(signStep!, { RELEASE_SIGNING_KEY: KEY.privatePem });
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.deepEqual(fs.readdirSync(path.join(tree, "sig-dist")), ["kiosk-windows.ps1.sig"]);
+    fs.rmSync(path.join(tree, "sig-dist"), { recursive: true });
+    const missing = runStep(signStep!, {});
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /the RELEASE_SIGNING_KEY secret is not set/);
   });
 
-  it("fails the job when the secret is missing", () => {
-    payload("scripts/kiosk/kiosk-windows.ps1", "x");
-    const r = runStep(signStep!, {});
-    assert.equal(r.status, 1);
-    assert.match(r.stderr, /::error title=Release signing::the RELEASE_SIGNING_KEY secret is not set/);
+  it("hands its signatures to the artifacts job, which waits for it and fetches them only from a sign job that succeeded", () => {
+    const upload = sign.find((s) => s.uses?.startsWith("actions/upload-artifact@"));
+    const fetchSigs = artifacts.find((s) => s.name === "Fetch the release signatures");
+    assert.ok(upload && fetchSigs);
+    assert.equal(fetchSigs.with?.["name"], upload.with?.["name"]);
+    assert.equal(fetchSigs.with?.["path"], "sig-dist");
+    assert.equal(fetchSigs.if, "${{ needs.sign.result == 'success' }}");
+    assert.ok(needsOf(jobs["artifacts"]).includes("sign"));
+    assert.ok(artifacts.indexOf(fetchSigs) < artifacts.indexOf(create!));
   });
 
-  /** The create step's shell with `gh` and `node` stood in for; the files it attached. */
+  /** The create step's shell with `gh` stood in for; the files it attached and what it said. */
   function runCreate(populate: () => void): { status: number | null; err: string; attached: string[] } {
     const bin = fs.mkdtempSync(path.join(os.tmpdir(), "su-sign-bin-"));
     try {
       const log = path.join(tree, "gh.log");
       fs.writeFileSync(path.join(bin, "gh"), '#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >>"$GH_LOG"; done\n', { mode: 0o755 });
       fs.writeFileSync(path.join(bin, "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      tagged(LAUNCHER);
       payload("dist/stage-utility-1.2.3-linux-x64.tar.gz", "x");
       populate();
       const script = create!.run!.replaceAll("/tmp/notes.md", path.join(tree, "notes.md"));
       const r = spawnSync("bash", ["-c", script], {
         cwd: tree,
         encoding: "utf8",
-        env: { PATH: `${bin}:${process.env.PATH ?? ""}`, GH_LOG: log, GH_TOKEN: "x", V: "1.2.3", LAST: "v1.2.2", STABLE: "v1.2.0", PRE: "true" },
+        env: { PATH: `${bin}:${process.env.PATH ?? ""}`, GH_LOG: log, GH_TOKEN: "x", V: "1.2.3", LAST: "v1.2.2", STABLE: "v1.2.0", PRE: "true", RUNNER_TEMP: tmp },
       });
       const args = fs.existsSync(log) ? fs.readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
       return { status: r.status, err: r.stderr + r.stdout, attached: args.filter((a) => /^(dist|helper-dist|sig-dist)\//.test(a)).sort() };
@@ -231,21 +276,36 @@ describe("release.yml", () => {
       fs.rmSync(bin, { recursive: true, force: true });
     }
   }
+  const sigOf = (name: string, bytes: Buffer | string, key = KEY) => payload(`sig-dist/${name}.sig`, key.sign(bytes));
+  const UNSIGNED = /::error title=Release signing::v1\.2\.3 is published WITHOUT signatures: (.+)\. Every Mac helper and Windows kiosk refuses an unsigned update/;
 
-  it("attaches every signature the signing step made to the one release-create call", () => {
+  it("attaches a whole set that verifies to the one release-create call", () => {
     const r = runCreate(() => {
       payload("helper-dist/StageUtilityOutput-arm64.zip", "a");
-      payload("sig-dist/StageUtilityOutput-arm64.zip.sig", "s");
-      payload("sig-dist/kiosk-windows.ps1.sig", "s");
+      sigOf("StageUtilityOutput-arm64.zip", "a");
+      sigOf("kiosk-windows.ps1", LAUNCHER);
     });
     assert.equal(r.status, 0, r.err);
+    assert.doesNotMatch(r.err, /WITHOUT signatures/);
     assert.deepEqual(r.attached, ["dist/stage-utility-1.2.3-linux-x64.tar.gz", "helper-dist/StageUtilityOutput-arm64.zip", "sig-dist/StageUtilityOutput-arm64.zip.sig", "sig-dist/kiosk-windows.ps1.sig"]);
   });
 
-  it("does not create a release with no signatures", () => {
-    const r = runCreate(() => undefined);
-    assert.equal(r.status, 1);
-    assert.match(r.err, /::error::no signatures in sig-dist, so v1\.2\.3 is not published unsigned/);
-    assert.deepEqual(r.attached, [], "gh release create was never called");
-  });
+  for (const [label, populate, why] of [
+    ["no signatures, as after a sign job that failed", () => payload("helper-dist/StageUtilityOutput-arm64.zip", "a"), /the sign job left 0 signature\(s\) for 2 payload\(s\)/],
+    ["a set missing the helper's", () => {
+      payload("helper-dist/StageUtilityOutput-arm64.zip", "a");
+      sigOf("kiosk-windows.ps1", LAUNCHER);
+    }, /left 1 signature\(s\) for 2 payload\(s\)/],
+    ["a signature by another key", () => sigOf("kiosk-windows.ps1", LAUNCHER, OTHER_KEY), /sig-dist\/kiosk-windows\.ps1\.sig is missing or does not verify/],
+    ["a signature of other bytes", () => sigOf("kiosk-windows.ps1", "Write-Output 'not the tagged one'\n"), /does not verify/],
+  ] as const) {
+    it(`still publishes the archives, with no signature attached and an error, for ${label}`, () => {
+      const r = runCreate(populate);
+      assert.equal(r.status, 0, r.err);
+      assert.match(r.err, UNSIGNED);
+      assert.match(UNSIGNED.exec(r.err)?.[1] ?? "", why);
+      assert.ok(r.attached.includes("dist/stage-utility-1.2.3-linux-x64.tar.gz"), "the archives are published");
+      assert.deepEqual(r.attached.filter((a) => a.startsWith("sig-dist/")), [], "no partial or mismatched set is attached");
+    });
+  }
 });

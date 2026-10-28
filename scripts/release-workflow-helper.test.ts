@@ -199,17 +199,15 @@ describe("the helper's download reaches the release", () => {
       fs.writeFileSync(path.join(bin, "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
       fs.mkdirSync(path.join(tree, "dist"));
       for (const n of ["stage-utility-1.2.3-linux-x64.tar.gz", "stage-utility-1.2.3-darwin-arm64.tar.gz"]) fs.writeFileSync(path.join(tree, "dist", n), "x");
-      // What the signing step leaves; without it no release is created
-      // (scripts/release-signing-workflow.test.ts), which is not what these test.
-      fs.mkdirSync(path.join(tree, "sig-dist"));
-      fs.writeFileSync(path.join(tree, "sig-dist", "kiosk-windows.ps1.sig"), "s");
       populate(tree);
       // The step writes its notes to /tmp/notes.md; keep that inside the temp tree.
       const script = create.run!.replaceAll("/tmp/notes.md", path.join(tree, "notes.md"));
       const r = spawnSync("bash", ["-c", script], {
         cwd: tree,
         encoding: "utf8",
-        env: { PATH: `${bin}:${process.env.PATH ?? ""}`, GH_LOG: log, GH_TOKEN: "x", V: "1.2.3", LAST: "v1.2.2", STABLE: "v1.2.0", PRE: "true" },
+        // No signatures here (scripts/release-signing-workflow.test.ts covers them):
+        // the release is still created, which is what these test.
+        env: { PATH: `${bin}:${process.env.PATH ?? ""}`, GH_LOG: log, GH_TOKEN: "x", V: "1.2.3", LAST: "v1.2.2", STABLE: "v1.2.0", PRE: "true", RUNNER_TEMP: tree },
       });
       const args = fs.existsSync(log) ? fs.readFileSync(log, "utf8").split("\n").filter(Boolean) : [];
       return { status: r.status, err: r.stderr, attached: args.filter((a) => !a.startsWith("-") && /\.(tar\.gz|zip|sha256)$/.test(a)).sort() };
