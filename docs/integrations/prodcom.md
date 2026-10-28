@@ -60,7 +60,7 @@ check that covers the difference.
 
 On every SSE (re)connect the app primes itself from REST, in this order:
 
-- `GET /api/v1/channels` for each channel's name and colour, keyed by channel id
+- `GET /api/v1/channels` for each channel's name and color, keyed by channel id
 - `GET /api/v1/keywords` and `GET /api/v1/channels/{id}/keywords` for the words
   ProdCom marks sensitive (see [Sensitive keywords](#sensitive-keywords))
 - `GET /api/v1/transcript?since=…&limit=200&offset=…` for the transcript so far
@@ -98,11 +98,11 @@ produced (`automation`) are skipped and logged once per kind per connection —
 they are not something somebody said, and a stage or lobby wall is not where they
 belong.
 
-Per-speaker colour comes from the channel list, not from the transcript entry: a
-transcript entry has no colour field. The channel record is also the current
+Per-speaker color comes from the channel list, not from the transcript entry: a
+transcript entry has no color field. The channel record is also the current
 name, so a channel renamed mid-service is labelled correctly; where no channel
 record is available the entry's own denormalised `channelName` is used and the
-display picks its own colour.
+display picks its own color.
 
 If a key is required, it is sent as `Authorization: Bearer <key>` — the one
 security scheme the specification declares.
@@ -328,7 +328,7 @@ The `/log` page has the evidence when something looks wrong:
 - `[prodcom] backfill: N line(s) over P page(s)`, and
   `[prodcom] backfill failed after P page(s) (…)` when a page did not answer
 - `[prodcom] backfill skipped N line(s) older than 4h`
-- `[prodcom] channel list unavailable (…)` when colours could not be read
+- `[prodcom] channel list unavailable (…)` when colors could not be read
 - `[prodcom] keywords loaded: N global (M sensitive), …` on a change, and
   `[prodcom] hiding text that matches a keyword marked sensitive …` once per
   connection the first time anything is actually hidden

@@ -289,8 +289,8 @@ alone thins very little. PCO matches several tags from one tag group as "any of
 these" and tags from different groups as "all of these", so the picker names each
 tag's group.
 
-Colours come from the **tag**, not the calendar. A Calendar's own `color` is an
-enum of names with no value behind it; a Tag's is a real hex string. A tag colour
+Colors come from the **tag**, not the calendar. A Calendar's own `color` is an
+enum of names with no value behind it; a Tag's is a real hex string. A tag color
 with too little contrast against the display's backdrop is lightened until it is
 visible — the palette is the organisation's, and nothing else about it is
 changed.

@@ -23,8 +23,8 @@ const DEFAULT: string[] = [];
 /** POST /api/saved-colors: each colour text that is not blank, and at most
  *  MAX_SAVED_COLORS of them. */
 const restoreCheck = checked((raw) => {
-  const list = textList(raw, "the saved colours");
-  if (list.some((c) => !c.trim())) refuse("a saved colour is blank");
+  const list = textList(raw, "the saved colors");
+  if (list.some((c) => !c.trim())) refuse("a saved color is blank");
   // add() keeps the newest MAX_SAVED_COLORS, newest first, and so does this.
   return list.slice(0, MAX_SAVED_COLORS);
 });

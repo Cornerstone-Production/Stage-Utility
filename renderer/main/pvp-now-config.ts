@@ -58,18 +58,14 @@ export function withPvpNowLayout<C extends { layout?: PvpNowLayout; compact?: bo
 }
 
 /**
- * Which inspector rows the layout leaves unused, each with the reason said under
- * it, or `false` when the row applies. Next cue is drawn by Full only; Label is
- * borrowed by Compact's caption only; Countdown only draws neither, so a greyed
- * row is never a mystery.
+ * Which rows the layout leaves unused: `true` for a row it does not draw, which the
+ * inspector and the Home card menu then leave out. Next cue is drawn by Full only;
+ * Label is borrowed by Compact's caption only; Countdown only draws neither.
  */
-export function pvpNowRowStates(layout: PvpNowLayout): { nextCue: string | false; label: string | false } {
-  if (layout === "countdown") {
-    return { nextCue: "Not shown in Countdown only.", label: "Not shown in Countdown only." };
-  }
+export function pvpNowRowStates(layout: PvpNowLayout): { nextCue: boolean; label: boolean } {
   return {
-    nextCue: layout === "compact" ? "Not shown in Compact." : false,
-    label: layout === "full" ? "Used by Compact only." : false,
+    nextCue: layout !== "full",
+    label: layout !== "compact",
   };
 }
 

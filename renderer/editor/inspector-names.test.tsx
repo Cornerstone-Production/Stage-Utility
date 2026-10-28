@@ -26,7 +26,7 @@ const teardown = installRenderDom();
 const { render, cleanup, fireEvent, within, queryAllByRole } = await import("@testing-library/react");
 const React = await import("react");
 const { Inspector } = await import("./inspector.js");
-const { RowSwitch, RowText, RowNumber, RowSelect, RowToggle, PixelField, TypeSizeRows, NumberField, NumberInput } =
+const { RowSwitch, RowText, RowNumber, RowSelect, RowToggle, choiceLayout, PixelField, TypeSizeRows, NumberField, NumberInput } =
   await import("./inspector-rows.js");
 const { CuePicker } = await import("./cue-picker.js");
 const { ActionPicker } = await import("./action-picker.js");
@@ -82,7 +82,7 @@ describe("the Row helpers name their control after their label", () => {
     getByRole("combobox", { name: "Source" });
   });
 
-  test("RowToggle, as a two-way toggle and as the dropdown it becomes past two options", () => {
+  test("RowToggle, as a track for a short list and a dropdown for a long one", () => {
     const two = render(
       React.createElement(RowToggle as never, {
         label: "Shape",
@@ -95,6 +95,7 @@ describe("the Row helpers name their control after their label", () => {
     two.getByRole("group", { name: "Shape" });
     two.unmount();
 
+    // Three short words are still a track: the count is not what decides it.
     const three = render(
       React.createElement(RowToggle as never, {
         label: "Fit",
@@ -103,7 +104,29 @@ describe("the Row helpers name their control after their label", () => {
         onChange: () => {},
       }),
     );
-    three.getByRole("combobox", { name: "Fit" });
+    three.getByRole("group", { name: "Fit" });
+    three.unmount();
+
+    const five = render(
+      React.createElement(RowToggle as never, {
+        label: "Weight",
+        value: "a",
+        options: ["a", "b", "c", "d", "e"].map((v) => ({ value: v, label: v.toUpperCase() })),
+        onChange: () => {},
+      }),
+    );
+    five.getByRole("combobox", { name: "Weight" });
+  });
+
+  test("choiceLayout: beside, above its label, or a dropdown, by the words and never by the count of three", () => {
+    const words = (...w: string[]) => w.map((label) => ({ label }));
+    assert.equal(choiceLayout(words("Beside", "Above", "Arranged")), "beside");
+    assert.equal(choiceLayout(words("ProPresenter", "One")), "beside");
+    assert.equal(choiceLayout(words("Fit", "S", "M", "L")), "beside");
+    assert.equal(choiceLayout(words("Service", "ProPresenter", "Baptism")), "above");
+    assert.equal(choiceLayout(words("Fit whole picture", "Fill the box")), "above");
+    assert.equal(choiceLayout(words("Say it is offline", "Show the logo", "Show nothing")), "dropdown");
+    assert.equal(choiceLayout(words("A", "B", "C", "D", "E")), "dropdown");
   });
 
   test("PixelField", () => {

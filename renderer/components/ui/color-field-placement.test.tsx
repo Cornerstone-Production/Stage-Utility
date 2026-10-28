@@ -187,7 +187,7 @@ describe("a flipped panel follows its own body", () => {
     assert.notEqual(panelTop(), before, "the swap moved nothing at all");
 
     const back = [...panel().querySelectorAll("button")].find(
-      (b) => b.textContent?.trim() === "Back to colour",
+      (b) => b.textContent?.trim() === "Back to color",
     );
     assert.ok(back);
     fireEvent.click(back);

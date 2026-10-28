@@ -112,7 +112,7 @@ the gear provides one:
 | Sennheiser EW-DX | yes, where the rack reports `battery/lifetime` |
 | Shure PSM, Sennheiser ewG4, Spectera, SBC chargers | no — shows a dash |
 
-The reading is coloured against a service rather than a percentage: green past 90
+The reading is colored against a service rather than a percentage: green past 90
 minutes, amber past 30, red below — enough for a service, enough for one that has
 started, and time to go and swap it.
 

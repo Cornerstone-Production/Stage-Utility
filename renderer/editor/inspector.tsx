@@ -38,7 +38,6 @@ import {
   ChipToggle,
   ChipToggleRow,
   ErrorNote,
-  StackedField,
 } from "../components/ui";
 import { loadProcessedAttachment, FILL_WHEN_ACTIVE, STATUS_TEXT, obsModeText } from "../main/layout-renderer";
 import { MIN, clamp } from "../settings/sections/layout-geometry.js";
@@ -85,7 +84,7 @@ import { numberParamDefault } from "@main/services/automation-param-validation";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import {
-  Row, RowSwitch, StackedSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls, Segmented,
+  Row, RowSwitch, RowText, RowNumber, RowToggle, RowSelect, AlignPad, Section, MoreControls,
   ImageConfig, NumberField, NumberInput, PixelField, TypeSizeRows, setsOwnType, sizesTypeFromItsBox,
 } from "./inspector-rows";
 import { TimerInspector } from "./timer-inspector";
@@ -344,10 +343,9 @@ export function RossTalkButtonConfig({
 
 /**
  * Inspector controls for the Video widget: which feed, how it fits the box,
- * whether its name shows, and what to do while it is offline — each label
- * above its control and the Feed description in full, as the approved design
- * lays this section out (a label-left row truncated "When the feed is
- * offline" and hid the description behind an (i)).
+ * whether its name shows, and what to do while it is offline. Built from the
+ * shared rows; the Feed description reads in full under its control and the
+ * long labels ("When the feed is offline") go above theirs.
  *
  * Reads the feed list itself, via useVideoState — so it is subscribed only
  * while a Video object is the one being edited. Exported for
@@ -363,52 +361,34 @@ export function VideoConfig({
   const video = useVideoState();
   const feeds = video?.feeds ?? [];
   return (
-    <div className="flex flex-col gap-3.5">
-      <StackedField
+    <div className="flex flex-col gap-2.5">
+      <RowSelect
         label="Feed"
         description="Feeds are set up once on the Video feeds page. Change a feed there and every layout using it follows."
-      >
-        <Select value={c.feedId ?? ""} onValueChange={(v) => onConfig({ ...c, feedId: v || null })}>
-          <SelectTrigger aria-label="Feed" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="">Choose a feed</SelectItem>
-            {feeds.map((f) => (
-              <SelectItem key={f.id} value={f.id}>
-                {f.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </StackedField>
-      <StackedField label="Fit">
-        <Segmented
-          label="Fit"
-          value={c.fit ?? "contain"}
-          options={[
-            { value: "contain", label: "Fit whole picture" },
-            { value: "cover", label: "Fill the box" },
-          ]}
-          onChange={(v) => onConfig({ ...c, fit: v })}
-        />
-      </StackedField>
-      <StackedSwitch label="Show feed name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
-      <StackedField label="When the feed is offline">
-        <Select
-          value={c.whenOffline ?? "message"}
-          onValueChange={(v) => onConfig({ ...c, whenOffline: v as "message" | "logo" | "nothing" })}
-        >
-          <SelectTrigger aria-label="When the feed is offline" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="message">Say it is offline</SelectItem>
-            <SelectItem value="logo">Show the logo</SelectItem>
-            <SelectItem value="nothing">Show nothing</SelectItem>
-          </SelectContent>
-        </Select>
-      </StackedField>
+        value={c.feedId ?? ""}
+        options={[{ value: "", label: "Choose a feed" }, ...feeds.map((f) => ({ value: f.id, label: f.name }))]}
+        onChange={(v) => onConfig({ ...c, feedId: v || null })}
+      />
+      <RowToggle
+        label="Fit"
+        value={c.fit ?? "contain"}
+        options={[
+          { value: "contain", label: "Fit whole picture" },
+          { value: "cover", label: "Fill the box" },
+        ]}
+        onChange={(v) => onConfig({ ...c, fit: v })}
+      />
+      <RowSwitch label="Show feed name" checked={c.showLabel ?? true} onChange={(v) => onConfig({ ...c, showLabel: v })} />
+      <RowToggle
+        label="When the feed is offline"
+        value={c.whenOffline ?? "message"}
+        options={[
+          { value: "message", label: "Say it is offline" },
+          { value: "logo", label: "Show the logo" },
+          { value: "nothing", label: "Show nothing" },
+        ]}
+        onChange={(v) => onConfig({ ...c, whenOffline: v })}
+      />
       <p className="rounded-lg bg-fill px-2.5 py-2 text-caption1 text-fg-muted">
         Always muted, with no controls. A screen that can&apos;t keep up reports it on the Screens page.
       </p>
@@ -747,22 +727,24 @@ export function PvpNowInspector({
         onChange={(v) => onConfig(withPvpNowLayout(c, v))}
       />
       <RowSwitch label="Progress bar" checked={c.showProgress ?? true} onChange={(v) => onConfig({ ...c, showProgress: v })} />
-      <RowSwitch
-        label="Next cue"
-        // The caveat, where the operator makes the decision. It is the
-        // reason this is a switch at all.
-        hint="The next entry in the playlist — what plays next only while the playlist keeps auto-advancing. A cue fired by hand makes it wrong until the next poll."
-        checked={c.showNextCue ?? true}
-        onChange={(v) => onConfig({ ...c, showNextCue: v })}
-        disabled={rows.nextCue}
-      />
-      <RowSelect
-        label="Label"
-        value={c.nowLabel ?? DEFAULT_PVP_NOW_LABEL}
-        options={PVP_NOW_LABEL_OPTIONS}
-        onChange={(v) => onConfig({ ...c, nowLabel: v as PvpNowLabel })}
-        disabled={rows.label}
-      />
+      {!rows.nextCue && (
+        <RowSwitch
+          label="Next cue"
+          // The caveat, where the operator makes the decision. It is the
+          // reason this is a switch at all.
+          hint="The next entry in the playlist — what plays next only while the playlist keeps auto-advancing. A cue fired by hand makes it wrong until the next poll."
+          checked={c.showNextCue ?? true}
+          onChange={(v) => onConfig({ ...c, showNextCue: v })}
+        />
+      )}
+      {!rows.label && (
+        <RowSelect
+          label="Label"
+          value={c.nowLabel ?? DEFAULT_PVP_NOW_LABEL}
+          options={PVP_NOW_LABEL_OPTIONS}
+          onChange={(v) => onConfig({ ...c, nowLabel: v as PvpNowLabel })}
+        />
+      )}
       <RowSwitch
         label="Warn near the end"
         hint="The time turns amber, then red, as a clip runs out. Every layout."
@@ -1258,13 +1240,13 @@ export function Inspector({
           </div>
           <Row label="Ahead color">
             <div className="flex items-center gap-2">
-              <ColorField label="Ahead colour" allowAlpha={false} value={c.aheadColor ?? "#30a46c"} onChange={(v) => onConfig({ ...c, aheadColor: v })} />
+              <ColorField label="Ahead color" allowAlpha={false} value={c.aheadColor ?? "#30a46c"} onChange={(v) => onConfig({ ...c, aheadColor: v })} />
               {c.aheadColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, aheadColor: null })}>Reset</button>}
             </div>
           </Row>
           <Row label="Behind color">
             <div className="flex items-center gap-2">
-              <ColorField label="Behind colour" allowAlpha={false} value={c.behindColor ?? "#e5484d"} onChange={(v) => onConfig({ ...c, behindColor: v })} />
+              <ColorField label="Behind color" allowAlpha={false} value={c.behindColor ?? "#e5484d"} onChange={(v) => onConfig({ ...c, behindColor: v })} />
               {c.behindColor != null && <button type="button" className="text-xs text-fg-subtle hover:text-fg" onClick={() => onConfig({ ...c, behindColor: null })}>Reset</button>}
             </div>
           </Row>
@@ -1432,26 +1414,22 @@ export function Inspector({
               The retired per-platform objects have no picker: their type is
               the platform. */}
           {(c.type === "stream-status" || c.type === "home-streaming") && (
-            <StackedField
+            <RowToggle
               label="Source"
               description="Which platform to report. Any answers every one at once: live if anything is going out."
-            >
-              {/* Built from STREAMER_FOR, the one table that says which platforms
-                  exist and what each is called. Written out here as well, this list
-                  and the renderer's lookup were two places to add a platform and
-                  one to forget. */}
-              <Segmented
-                label="Source"
-                value={c.platform ?? "any"}
-                options={sourceOptions(STREAMER_FOR, "Any")}
-                // Every value comes from STREAMER_FOR, so it is one the union names.
-                onChange={(v) => onConfig({ ...c, platform: v as "any" | "resi" | "youtube" | "obs" })}
-              />
-            </StackedField>
+              value={c.platform ?? "any"}
+              // Built from STREAMER_FOR, the one table that says which platforms
+              // exist and what each is called. Written out here as well, this list
+              // and the renderer's lookup were two places to add a platform and
+              // one to forget.
+              options={sourceOptions(STREAMER_FOR, "Any")}
+              // Every value comes from STREAMER_FOR, so it is one the union names.
+              onChange={(v) => onConfig({ ...c, platform: v as "any" | "resi" | "youtube" | "obs" })}
+            />
           )}
           <RowSwitch
             label="Fill green when live"
-            hint="Off colours the word. On paints the whole widget — a signal that carries across a room."
+            hint="Off colors the word. On paints the whole widget — a signal that carries across a room."
             checked={c.fillWhenLive ?? FILL_WHEN_ACTIVE}
             onChange={(v) => onConfig({ ...c, fillWhenLive: v })}
           />
@@ -1759,7 +1737,7 @@ export function Inspector({
           its colour, the others are washed with one. */}
       <Row
         label={surfaceOf(s) === "solid" ? "Fill" : "Tint"}
-        hint="The colour on this surface. The swatches are washes made for a dark stage canvas; the picker takes any colour. On Glass they stay see-through, so tinted glass is still glass."
+        hint="The color on this surface. The swatches are washes made for a dark stage canvas; the picker takes any color. On Glass they stay see-through, so tinted glass is still glass."
       >
         <div role="group" aria-label="Tint" className="flex items-center gap-1.5 flex-wrap">
           {TINTS.map((t) => {
@@ -1815,7 +1793,7 @@ export function Inspector({
                 a ground is exactly where a translucent colour belongs, and the
                 native control could never express one. */}
             <ColorField
-              label="Custom colour"
+              label="Custom color"
               value={s.background ?? "#000000"}
               onChange={(v) => onStyle({ background: v })}
               className="absolute inset-0 [&>button]:size-6 [&>button]:rounded-full [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"
@@ -1833,7 +1811,7 @@ export function Inspector({
           <TypeSizeRows type={c.type} style={s} canvasHeight={canvas.height} onStyle={onStyle} />
           {/* Text, so no opacity: a translucent word over a wall is not a
               softer word, it is a harder one to read. */}
-          <Row label="Color"><ColorField label="Text colour" allowAlpha={false} value={s.color ?? "#ffffff"} onChange={(v) => onStyle({ color: v })} /></Row>
+          <Row label="Color"><ColorField label="Text color" allowAlpha={false} value={s.color ?? "#ffffff"} onChange={(v) => onStyle({ color: v })} /></Row>
           {/* One pad, not two rows of lettered buttons. What reads as active has
               to be the alignment the object will actually RENDER at, not a
               hard-coded guess: a readout with nothing stored aligns left, and
@@ -1856,7 +1834,7 @@ export function Inspector({
       <RowNumber label="Radius" value={pxOf(s.cornerRadius, 0)} step={1} min={0} max={Math.round(0.5 * canvas.height)} suffix="px" onChange={(px) => onStyle({ cornerRadius: px / canvas.height })} />
       <Row label="Border">
         <ColorField
-          label="Border colour"
+          label="Border color"
           value={s.borderColor ?? "#ffffff"}
           onChange={(v) => onStyle({ borderColor: v, borderWidth: s.borderWidth ?? 0 })}
         />

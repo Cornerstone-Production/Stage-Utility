@@ -45,43 +45,40 @@ const rowOf = (label: string): HTMLElement => {
   assert.ok(row, `no row labelled ${label}`);
   return row as HTMLElement;
 };
-const switchIn = (label: string) => rowOf(label).querySelector("button[role=switch]") as HTMLButtonElement;
-const selectIn = (label: string) => rowOf(label).querySelector("select") as HTMLSelectElement;
-const reasons = (text: string) => screen.queryAllByText(text).length;
 
-describe("which rows a layout greys out, and why", () => {
-  test("Countdown only: Next cue and Label are disabled, each saying so", async () => {
+describe("which rows a layout does not draw", () => {
+  const has = (label: string) => screen.queryByRole("switch", { name: label }) !== null || screen.queryByRole("combobox", { name: label }) !== null;
+
+  test("Countdown only: neither Next cue nor Label is drawn", async () => {
     await mount(base({ layout: "countdown" }));
-    assert.equal(switchIn("Next cue").disabled, true, "Next cue is still live under Countdown only");
-    assert.equal(selectIn("Label").disabled, true, "Label is still live under Countdown only");
-    assert.equal(reasons("Not shown in Countdown only."), 2);
+    assert.equal(has("Next cue"), false, "Next cue is still drawn under Countdown only");
+    assert.equal(has("Label"), false, "Label is still drawn under Countdown only");
   });
 
-  test("Compact: Label is live, Next cue is not", async () => {
+  test("Compact: Label is drawn, Next cue is not", async () => {
     await mount(base({ layout: "compact" }));
-    assert.equal(selectIn("Label").disabled, false);
-    assert.equal(switchIn("Next cue").disabled, true);
-    assert.equal(reasons("Not shown in Compact."), 1);
+    assert.equal(has("Label"), true);
+    assert.equal(has("Next cue"), false);
   });
 
-  test("Full: Next cue is live, Label is not", async () => {
+  test("Full: Next cue is drawn, Label is not", async () => {
     await mount(base({ layout: "full" }));
-    assert.equal(switchIn("Next cue").disabled, false);
-    assert.equal(selectIn("Label").disabled, true);
+    assert.equal(has("Next cue"), true);
+    assert.equal(has("Label"), false);
   });
 
-  test("a widget saved with the old Compact switch greys what Compact greys", async () => {
+  test("a widget saved with the old Compact switch draws what Compact draws", async () => {
     await mount(base({ layout: undefined, compact: true }));
-    assert.equal(selectIn("Label").disabled, false);
-    assert.equal(switchIn("Next cue").disabled, true);
+    assert.equal(has("Label"), true);
+    assert.equal(has("Next cue"), false);
   });
 
   for (const layout of ["full", "compact", "countdown"] as const) {
-    test(`Progress bar, Warn near the end and Count down stills stay live in ${layout}`, async () => {
+    test(`Progress bar, Warn near the end and Count down stills stay drawn in ${layout}`, async () => {
       await mount(base({ layout }));
-      assert.equal(switchIn("Progress bar").disabled, false);
-      assert.equal(switchIn("Count down stills").disabled, false);
-      assert.equal(switchIn("Warn near the end").disabled, false);
+      assert.equal(has("Progress bar"), true);
+      assert.equal(has("Count down stills"), true);
+      assert.equal(has("Warn near the end"), true);
     });
   }
 });

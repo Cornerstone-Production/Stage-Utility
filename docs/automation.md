@@ -497,7 +497,7 @@ so the cue would read **Unbound** on the console it was put on.
 view, a calendar console or Home — and adds a **Cue button** bound to the new cue
 to each one ticked, after the cue is made. The button goes under the lowest object
 in the layout, in the column of the layout's last button and sized and styled like
-it; with no button to copy it is the widget's default size, centred, with its text
+it; with no button to copy it is the widget's default size, centered, with its text
 sized to fit its name. The label is yours, or the cue's name when blank. A
 full-canvas background is not counted as content. When nothing fits below the other
 objects the button sits against the bottom edge and the confirmation says so. Drag it where you want it in the layout editor.

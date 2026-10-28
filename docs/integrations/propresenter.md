@@ -135,7 +135,7 @@ the **port** (default 1025). The machine must be on the same network as Stage.
 
 **Poll interval** applies only to the fallback: on a ProPresenter that supports
 `status/updates`, updates are pushed and there is no interval. Leave it blank —
-the field shows `1000` in grey — and the fallback polls at **1000 ms**, dropping
+the field shows `1000` in gray — and the fallback polls at **1000 ms**, dropping
 to a 5 s keepalive when nothing is reading the channel; open displays and
 in-process consumers such as an automation rule both count. **200 ms** is the
 floor the field accepts, because the poller ignores anything below it. Clearing

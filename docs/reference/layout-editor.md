@@ -18,7 +18,7 @@ and the panel never scrolls sideways.
 | | |
 |---|---|
 | **Content** | what this widget shows — the channel a mic tile reads, the mode OBS status watches, the text of a text object. Different for every widget type, and absent for the ones that have nothing to choose |
-| **Look** | how it is drawn — surface, tint, font size and weight, colour, alignment, corner radius, border. The same controls for every widget |
+| **Look** | how it is drawn — surface, tint, font size and weight, color, alignment, corner radius, border. The same controls for every widget |
 | **Place** | where it sits — position, size, and how it behaves when the window is not the shape it was designed for |
 
 The split tells you where to look: anything that changes the NUMBER is in
@@ -28,6 +28,24 @@ Content, anything that changes how the number is DRAWN is in Look.
 showing the time needs no source — rather than left as an empty heading.
 
 See [Widget reference](widgets.md) for what each widget's Content settings mean.
+
+### How the controls look
+
+Every widget's settings are drawn from one set of rows, so they look and behave the
+same on every widget, and a change to the set reaches all of them.
+
+- **Label beside the control.** A label too long for its column, or a panel narrower
+  than about 290px, puts the label above the control instead of cutting it off.
+- **A short choice is a track.** Up to four options draw as a row of segments with the
+  chosen one raised. When the words together fit beside the label, the track sits
+  beside it; when they are wider, the track runs full width under the label.
+- **A long list is a dropdown.** Five or more options, or words too long even for a
+  full-width track, become a dropdown. Whether a choice is a track or a dropdown
+  depends on its words, never on which widget it belongs to.
+- **A setting that does nothing right now is not shown.** Lyrics shows **Width** only
+  with the tag beside the words, and its **Underneath** settings only while **Show
+  what comes next** is on. Change the setting that decides it and the rows appear.
+- **A switch** has its label at the start of the row and the switch at the far end.
 
 ## Starting from something
 
@@ -118,7 +136,7 @@ applies it to every object's position and size at once.
 ### Align
 
 Snaps to the *other objects* rather than to the grid: their left, right, top and
-bottom edges, their centres, the canvas edges and its middle, and the spacing a
+bottom edges, their centers, the canvas edges and its middle, and the spacing a
 row has already established. Guides appear on the lines being matched and span
 only the objects that share them.
 
@@ -141,7 +159,7 @@ spot it should occupy, or tapped to drop it at the default position.
 A new widget arrives at one default size (0.3 by 0.16 of the canvas, a container 0.4 by
 0.32), except the [Message composer and Messages](widgets.md#control) widgets, which
 arrive at the size their content needs (0.34 by 0.9 and 0.3 by 0.8). Added into a
-selected container they keep that size, centred and held inside it; every other
+selected container they keep that size, centered and held inside it; every other
 widget added into a container is a band across its middle, as before.
 
 That larger target extends *outside* the object as well, so a tap just outside a
@@ -193,7 +211,7 @@ of them lays out exactly as it always has.
 
 | Mechanism | Effect |
 |---|---|
-| Pin (anchors) | Hold a distance from an edge or centre instead of drifting proportionally |
+| Pin (anchors) | Hold a distance from an edge or center instead of drifting proportionally |
 | Keep its shape | Scale evenly inside the space rather than stretching |
 | Min / max width | A control cannot shrink below tappable or balloon on a 4K screen |
 | Stacking | A genuinely different window shape reflows into a single column, in reading order |
@@ -242,12 +260,12 @@ would be paid for out of the state word.
 
 **Alignment** defaults to left, because three stacked lines of different widths
 read as one object when they share an edge. It is still yours to change per
-object under **Align** — a centred clock as a centrepiece is a normal thing to
+object under **Align** — a centered clock as a centerpiece is a normal thing to
 want.
 
 **Filled** is the same composition on a solid ground, used where a state has to
 carry across a room: a recorder painting itself red while recording, a section
-chip in its own colour. A filled widget is the same widget wearing a state, not a
+chip in its own color. A filled widget is the same widget wearing a state, not a
 different design.
 
 The caption and sub-line have pixel floors — they stop shrinking rather than
@@ -319,24 +337,24 @@ the corner radius and the shadow.
 | Outline | a hairline border and nothing behind it |
 
 The surface you pick is **stored**, not worked out from the fields afterwards. So
-tinting a Glass widget, rounding its corners or giving it a colour of your own
+tinting a Glass widget, rounding its corners or giving it a color of your own
 leaves it Glass, and the dropdown goes on saying Glass.
 
-**Tint** is the colour on it, and owns only the background. Any surface can wear
+**Tint** is the color on it, and owns only the background. Any surface can wear
 any tint, so a red Solid and a green Glass are both reachable. The row is called
-**Fill** on a Solid, because a solid *is* its colour rather than being washed
+**Fill** on a Solid, because a solid *is* its color rather than being washed
 with one.
 
 A tint is resolved against the surface it lands on: translucent over Glass, so
 tinted glass is still glass and the canvas still shows through, and opaque
 everywhere else. The swatch shows the hue; the surface decides the strength.
 
-The last dot in the row is a colour wheel — any colour you like. It stays yours:
+The last dot in the row is a color wheel — any color you like. It stays yours:
 changing the surface afterwards keeps it rather than resolving it back to a tint.
 
 ## What a widget's look is made of
 
-Surface, colour, radius, border, font and alignment. That is the whole list.
+Surface, color, radius, border, font and alignment. That is the whole list.
 
 Elevation, opacity, padding, text shadow and max-lines are not part of the model.
 A drop shadow under a card on a black wall is invisible, an opacity below one is a
@@ -349,28 +367,28 @@ earlier card, `#191919`, or an 8% hairline; each is folded into the current card
 once, on load, and the server logs how many under `[layout-defaults]`. A ground you picked yourself is never touched; an 8% border
 is raised on that one pass whoever set it, and any border set afterwards stays.
 
-## Picking a colour
+## Picking a color
 
-Every colour control in the app — text, fill, border, tint, a slot's colour, the
+Every color control in the app — text, fill, border, tint, a slot's color, the
 brand accent, an icon's tint — is the same panel: a saturation square, a hue
 slider, an opacity slider where opacity means something, a hex box you can type
 or paste into, and the palette the app itself is built from.
 
-It replaces the browser's native colour input, which could not be themed, could
+It replaces the browser's native color input, which could not be themed, could
 not express an opacity at all — a translucent ground had to be typed as a string
 somewhere else — and on a wall-mounted touch screen opened a system window over a
 live dashboard.
 
-Colours are stored as hex while they are opaque and `rgba()` once they are not.
+Colors are stored as hex while they are opaque and `rgba()` once they are not.
 Changes apply as you drag, so the canvas behind the panel shows the result rather
 than waiting for it to close.
 
-**Saved colours.** Under the palette is your own: **Save** keeps the colour in
-the panel, and it is then in every colour control in the app — the church's
+**Saved colors.** Under the palette is your own: **Save** keeps the color in
+the panel, and it is then in every color control in the app — the church's
 green, a sponsor's blue, whatever this year's stage is. They live on the server,
-not in one browser, so a colour mixed on a laptop is there on the tablet by the
+not in one browser, so a color mixed on a laptop is there on the tablet by the
 desk, and they ride along in the config backup. The same button forgets one when
-that colour is showing. Two dozen are kept; saving past that drops the oldest and
+that color is showing. Two dozen are kept; saving past that drops the oldest and
 says so.
 
 ## Selection
@@ -397,7 +415,7 @@ A translucent card ground is made opaque once, on the first start that finds one
 and the server logs what it changed under `[layout-defaults]`. It is an ordinary
 style field afterwards: change it on any object and it stays changed.
 
-A readout created before alignment defaulted to left may carry a centre alignment
+A readout created before alignment defaulted to left may carry a center alignment
 nobody picked. It is left alone, because the file cannot tell a default apart from
 a decision. Set the widget to whatever you want; it will stay.
 

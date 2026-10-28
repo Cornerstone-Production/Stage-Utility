@@ -151,13 +151,13 @@ A running item always outranks the tint.
 
 **From PCO** remaps rather than copying: PCO's swatches are pale pastels made for a
 white table and would read as near-white on a dark panel, so each hue maps to a
-colour chosen for a dark surface. Add a colour in PCO and rows follow within
+color chosen for a dark surface. Add a color in PCO and rows follow within
 fifteen minutes, including new custom item types.
 
 **By category** can use any category the service type defines, not just the columns
 this layout shows — "Lighting has a cue here" is useful to a stage manager without
-showing the cue text. Colours are assigned from the category name and are not
-configurable, since Planning Center has no colour for a note category.
+showing the cue text. Colors are assigned from the category name and are not
+configurable, since Planning Center has no color for a note category.
 
 ## Plan switcher
 
@@ -279,7 +279,7 @@ What the public sees is what ServiceCue shows here:
   Of the live position that is the current item's id, label and length, the countdown
   target, the mode and the clock; of the SPL recording, each item's id and peak. While
   nothing on the landing page is live or recording they are `null`
-- the brand logo and accent colour, the hour cycle and the time zone the app's clocks
+- the brand logo and accent color, the hour cycle and the time zone the app's clocks
   run in (the configured zone, or the server's own while none is set, so the page's
   clocks never fall back to the visitor's zone)
 

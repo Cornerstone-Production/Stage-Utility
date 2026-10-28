@@ -211,7 +211,7 @@ describe("the icon and its colour are one panel", () => {
       "the colour body is still there under the grid",
     );
 
-    fireEvent.click(inPanel("Back to colour"));
+    fireEvent.click(inPanel("Back to color"));
     await settle();
     assert.ok(panel().querySelector('[role="slider"]'), "there is no way back to the colour");
   });

@@ -402,7 +402,7 @@ function SlotRow({ slot, index, stackDivider, wirelessChannels, sharesWith, onCh
             className="flex-1 min-w-0"
           />
           <ColorField
-            label="Slot colour"
+            label="Slot color"
             allowAlpha={false}
             value={(slot.link as { kind: "static"; label: string; color: string }).color}
             onChange={(color: string) =>
