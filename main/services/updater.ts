@@ -422,7 +422,7 @@ export class Updater {
       // ever coming, which is exactly the false alarm this line exists to avoid.
       const unreleasedCommits = tagBased
         ? summarizeChangelog(
-            (await this.git(["log", "--format=%s", `${targetRef}..${upstream}`]).catch(() => "")).split("\n"),
+            (await this.git(["log", "--no-merges", "--format=%s", `${targetRef}..${upstream}`]).catch(() => "")).split("\n"),
           ).length
         : 0;
       // Curated, not raw: see changelog.ts for why the release workflow's own
@@ -439,7 +439,7 @@ export class Updater {
       // news to an operator, because Update will not bring them.
       const pending =
         behind > 0
-          ? summarizeChangelog((await this.git(["log", "--format=%s", `HEAD..${targetRef}`])).split("\n"))
+          ? summarizeChangelog((await this.git(["log", "--no-merges", "--format=%s", `HEAD..${targetRef}`])).split("\n"))
           : [];
       const behindUserFacing = pending.length;
       const changelog = pending.slice(0, CHANGELOG_CAP);

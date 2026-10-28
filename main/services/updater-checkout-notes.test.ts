@@ -57,7 +57,7 @@ async function checkoutGit(args: string[]): Promise<string> {
   if (a.startsWith("show -s")) return "2026-08-27T00:00:00Z";
   if (a.startsWith("rev-list --count")) return "2";
   // The flat changelog a checkout has always built for itself.
-  if (a.startsWith("log --format=%s")) {
+  if (a.startsWith("log ")) {
     return "fix(slots): stop cropping a face off before the browser sees it\nfix(editor): the canvas row keeps its height";
   }
   return "";
