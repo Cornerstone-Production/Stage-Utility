@@ -144,7 +144,8 @@ and it takes a cell — and so does everything else on the page at that moment, 
 the move stays local instead of rearranging the page behind it. Nothing re-packs
 afterwards, which is what lets you leave a deliberate gap between two widgets.
 Dropping onto an occupied cell pushes what was there downward rather than
-covering it.
+covering it, and so does growing a placed card, from its size chips or its
+right-click menu: it keeps its cell and the cards it grows onto move down.
 
 **Pack tight**, beside the pencil while editing, throws every placement away and
 lets the page flow again. It appears only once something has actually been

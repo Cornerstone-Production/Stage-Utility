@@ -855,7 +855,7 @@ chooses which; with one, it is not shown.
 | **Record status** | **Recorder** (any, OBS only or REAPER only), **Recording text**, **Idle text**, **Offline text** (blank uses `RECORDING`, `STANDBY` and `NO RECORDER`), **Fill red while recording** (on), **Hide when idle** (off) |
 | **OBS status** | **Show** (Recording, Streaming or Virtual camera), **Active text**, **Idle text**, **Offline text**, **Fill red when active** (on), **Show timecode** (off; recording only), **Hide when idle** (off) |
 | **REAPER status** | **Recording text**, **Idle text**, **Offline text**, **Fill red when recording** (on), **Show position** (off), **Hide when idle** (off) |
-| **Streaming status** | **Platform** (Any, Resi or YouTube), **Fill green when live** (on), **Show elapsed** (on), **Hide when idle** (off) |
+| **Streaming status** | **Source** (Any, Resi, YouTube or OBS), **Fill green when live** (on), **Show elapsed** (on), **Hide when idle** (off) |
 | **Integration status** | **Integration** (First available, or one), **Show label** (on) and **Label** |
 | **Live scores** | **Game** (any followed team, or one), **Show sport detail** (on) |
 | **ProVideoPlayer layers**, **ProVideoPlayer now** | See [ProVideoPlayer](#provideoplayer) |
