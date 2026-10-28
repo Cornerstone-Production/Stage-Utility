@@ -42,6 +42,12 @@ interface Job {
 }
 const doc = parse(fs.readFileSync(WORKFLOW, "utf8")) as { jobs: Record<string, Job> };
 const jobs = doc.jobs;
+/** A step as the allowlists name it: its name, the action it uses (without the
+ *  pinned version, which Dependabot moves), or both. */
+const stepId = (s: Step): string => {
+  const action = s.uses ? `uses ${s.uses.split("@")[0]}` : "";
+  return s.name ? (action ? `${s.name} (${action})` : s.name) : action;
+};
 const needsOf = (j: Job): string[] => (j.needs === undefined ? [] : Array.isArray(j.needs) ? j.needs : [j.needs]);
 
 const KEY = testSigningKey();
@@ -169,14 +175,21 @@ describe("release.yml", () => {
     ]);
   });
 
-  it("proves the signing key before it tags, on every run that releases, with no npm before it", () => {
+  it("proves the signing key before it tags, on every run that releases, with only the listed steps before it", () => {
     const check = release.find((s) => s.run?.trim() === "scripts/sign-release-assets.sh --check");
     assert.ok(check, "no step runs sign-release-assets.sh --check");
     assert.equal(check.if, "steps.version.outputs.skip == 'false'", "the same condition as the push: a run that releases checks the key");
     const at = release.indexOf(check);
     assert.ok(at < release.findIndex((s) => s.id === "push"), "the key is checked before anything is pushed");
-    const before = release.slice(0, at);
-    assert.deepEqual(before.filter((s) => /\bnpm\b|\bnpx\b/.test(s.run ?? "")).map((s) => s.name), [], "nothing from npm runs in the job before the key is in it");
+    // An allowlist, not a search for npm: any step added before the check, by
+    // whatever means it installs or runs code, has to be added here on purpose.
+    assert.deepEqual(release.slice(0, at + 1).map(stepId), [
+      "uses actions/checkout",
+      "Set up Node (uses actions/setup-node)",
+      "Mark the verified commit",
+      "Decide the version",
+      "Check the release signing key",
+    ]);
     // Its shell, for real: a missing secret stops it, and the right one passes.
     const missing = runStep(check, {});
     assert.equal(missing.status, 1);
@@ -185,11 +198,23 @@ describe("release.yml", () => {
     assert.equal(good.status, 0, good.stdout + good.stderr);
   });
 
-  it("signs in a job of its own that installs and runs nothing from npm", () => {
+  it("signs in a job of its own that installs and runs nothing it does not list", () => {
     assert.ok(jobs["sign"], "no sign job");
     assert.deepEqual(needsOf(jobs["sign"]).sort(), ["helper", "release"]);
     assert.ok((jobs["sign"].if ?? "").includes("always()") && (jobs["sign"].if ?? "").includes("needs.release.outputs.published == 'true'"));
-    assert.deepEqual(sign.filter((s) => s.uses?.startsWith("actions/setup-node@") || /\bnpm\b|\bnpx\b|\bnode\b/.test(s.run ?? "")).map((s) => s.name ?? s.uses), []);
+    // Exactly these steps, and the signing step runs exactly these commands.
+    assert.deepEqual(sign.map(stepId), [
+      "uses actions/checkout",
+      "Fetch the Mac output helper (uses actions/download-artifact)",
+      "Sign the update payloads",
+      "uses actions/upload-artifact",
+    ]);
+    const commands = (signStep?.run ?? "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith("#"))
+      .map((l) => l.split(/[\s(=]/)[0]);
+    assert.deepEqual([...new Set(commands)].sort(), ["git", "if", "mkdir", "payloads", "scripts/sign-release-assets.sh", "set"]);
     const checkout = sign.find((s) => s.uses?.startsWith("actions/checkout@"));
     assert.equal(checkout?.with?.["ref"], "v${{ needs.release.outputs.version }}");
     assert.equal(checkout?.with?.["persist-credentials"], false);
@@ -262,6 +287,8 @@ describe("release.yml", () => {
       fs.writeFileSync(path.join(bin, "gh"), '#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >>"$GH_LOG"; done\n', { mode: 0o755 });
       fs.writeFileSync(path.join(bin, "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
       tagged(LAUNCHER);
+      // The workspace differs from the tag: the set must verify against the tag's.
+      fs.writeFileSync(path.join(tree, "scripts", "kiosk", "kiosk-windows.ps1"), "Write-Output 'changed after the tag'\r\n");
       payload("dist/stage-utility-1.2.3-linux-x64.tar.gz", "x");
       populate();
       const script = create!.run!.replaceAll("/tmp/notes.md", path.join(tree, "notes.md"));

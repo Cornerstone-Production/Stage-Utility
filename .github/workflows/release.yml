@@ -312,12 +312,13 @@ jobs:
           echo "last=$LAST" >> "$GITHUB_OUTPUT"
           echo "stable=$STABLE" >> "$GITHUB_OUTPUT"
 
-      # The artifacts job signs every payload a machine updates itself from (see
+      # The sign job signs every payload a machine updates itself from (see
       # scripts/sign-release-assets.sh), and a published release cannot be added
       # to. So the key is proved here, before there is a tag: an absent secret, or
       # one that is not the private half of scripts/kiosk/release-signing.pub.pem,
       # stops the run with nothing pushed, rather than leaving a version that
-      # every updater refuses or one published unsigned.
+      # every updater refuses. Nothing from npm runs in this job before it
+      # (scripts/release-signing-workflow.test.ts lists the steps that may).
       - name: Check the release signing key
         if: steps.version.outputs.skip == 'false'
         env:
@@ -525,7 +526,7 @@ jobs:
           # For people reading the log. Not uploaded: GitHub serves each release
           # asset's SHA-256 as its `digest`, and that is what the server and the
           # installer verify the zips against. Their signatures are made in the
-          # artifacts job, which holds the signing key; this job does not.
+          # sign job, which holds the signing key; this job does not.
           ( cd helper-dist && shasum -a 256 StageUtilityOutput-*.zip )
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
