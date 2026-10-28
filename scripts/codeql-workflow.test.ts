@@ -30,6 +30,8 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { parse } from "yaml";
 
+import { type Entry, type Event, RELEASE_PUSH, changedFilesAction, listChanged } from "./changed-files-test-helpers.js";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOWS = path.join(HERE, "..", ".github", "workflows");
 
@@ -88,10 +90,14 @@ describe("codeql.yml's shape", () => {
     assert.deepEqual(caller.jobs["models"].permissions, { contents: "read" });
   });
 
-  it("lets a newer push replace an older pull request run, and gives every other run a group of its own", () => {
+  it("lets a newer push replace an older pull request run, and gives every other run, the release pull request's too, a group of its own", () => {
     // A pending run is replaced by a newer one in its group; the replaced push may be the one that changed Swift.
+    // A release pull request run judges only its own push, so it is never replaced.
     const c = (caller as unknown as { concurrency: { group: string; "cancel-in-progress": string } }).concurrency;
-    assert.equal(c.group, "codeql-${{ github.event.pull_request.number || github.run_id }}");
+    assert.equal(
+      c.group,
+      "codeql-${{ (github.head_ref != 'beta' || github.event.pull_request.head.repo.full_name != github.repository) && github.event.pull_request.number || github.run_id }}",
+    );
     assert.equal(c["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}");
   });
 
@@ -118,6 +124,25 @@ describe("which languages are gated", () => {
       );
     }
     for (const g of GATED) assert.equal(caller.jobs["changes"].outputs?.[g], `\${{ steps.gate.outputs.${g} }}`, g);
+  });
+
+  it("lists the changed files with the shared action, from a sparse checkout, before the gate reads them", () => {
+    const steps = caller.jobs["changes"].steps ?? [];
+    const action = REUSABLE.replace("workflows/codeql-language.yml", "actions/changed-files");
+    assert.deepEqual(
+      steps.map((s) => s.id ?? s.uses?.replace(/@.*/, "")),
+      ["actions/checkout", "files", "gate"],
+    );
+    assert.equal(steps[0].with?.["sparse-checkout"], ".github/actions");
+    assert.equal(String(steps[0].with?.["persist-credentials"]), "false");
+    assert.equal(steps[1].uses, action);
+    assert.deepEqual(steps[1].with, { token: "${{ github.token }}" });
+    assert.deepEqual(steps[2].env, {
+      EVENT: "${{ github.event_name }}",
+      REF: "${{ github.ref }}",
+      ALL: "${{ steps.files.outputs.all }}",
+      FILES: "${{ steps.files.outputs.file }}",
+    });
   });
 
   it("gates the model tests on the gate's answer for them", () => {
@@ -242,79 +267,38 @@ describe("the per-language workflow", () => {
   });
 });
 
-/** `gh api [--paginate] <endpoint> --jq <filter>`, answering as the REST API does. */
-const GH = `#!/bin/bash
-paginate=0; endpoint=""; filter=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    api) ;;
-    --paginate) paginate=1 ;;
-    --jq) filter="$2"; shift ;;
-    *) endpoint="$1" ;;
-  esac
-  shift
-done
-[ -n "$GH_FAIL" ] && { echo "api failure" >&2; exit 1; }
-[ "$endpoint" = "$GH_EXPECT" ] || { echo "unexpected endpoint $endpoint, wanted $GH_EXPECT" >&2; exit 1; }
-case "$endpoint" in
-  */pulls/*/files)
-    # 30 a page, 3000 in all; only a paginating call sees past the first page.
-    if [ "$paginate" = 1 ]; then jq 'limit(3000; .[])' "$GH_FIXTURE" | jq -s '.' | jq -r "$filter"
-    else jq 'limit(30; .[])' "$GH_FIXTURE" | jq -s '.' | jq -r "$filter"; fi ;;
-  */compare/*)
-    # 300 files at most, and an object rather than an array.
-    jq '{files: .[0:300]}' "$GH_FIXTURE" | jq -r "$filter" ;;
-esac
-`;
-
 describe("the gate decides which languages run", () => {
-  type Entry = string | { filename: string; previous_filename: string };
-  interface Case {
-    event: string;
-    ref?: string;
-    before?: string;
-    files?: Entry[] | "error";
-  }
   type Flags = Record<(typeof GATED)[number], boolean>;
   const all = (v: boolean): Flags => ({ swift: v, "c-cpp": v, ruby: v, actions: v, models: v });
+  type Case = Omit<Event, "via"> & { ref?: string; via?: Event["via"] };
 
-  function decide(c: Case): { flags: Flags; log: string } {
+  /** The changed-files action's own shell, then the gate's own shell on what it wrote. */
+  function decide(c: Case): { flags: Flags; log: string; calls: string[] } {
     assert.ok(gate?.run, "no gate step");
+    const listed = listChanged({ via: c.event === "pull_request" ? "pr" : c.event === "push" ? "compare" : "none", ...c });
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "su-codeql-gate-"));
-    const out = path.join(tmp, "output");
     try {
-      const before = c.before ?? "1".repeat(40);
-      const sha = "2".repeat(40);
-      const endpoint = c.event === "pull_request" ? "repos/o/r/pulls/1/files" : `repos/o/r/compare/${before}...${sha}`;
-      const fixture = path.join(tmp, "files.json");
-      fs.writeFileSync(
-        fixture,
-        JSON.stringify(Array.isArray(c.files) ? c.files.map((f) => (typeof f === "string" ? { filename: f } : f)) : []),
-      );
-      fs.writeFileSync(path.join(tmp, "gh"), GH, { mode: 0o755 });
+      const out = path.join(tmp, "output");
+      const file = path.join(tmp, "files.txt");
       fs.writeFileSync(out, "");
+      fs.writeFileSync(file, listed.files.map((f) => `${f}\n`).join(""));
       // Actions runs a `run:` step with no `shell:` as `bash -e {0}`.
       const r = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", gate.run as string], {
         encoding: "utf8",
         env: {
-          PATH: `${tmp}:${process.env["PATH"] ?? ""}`,
+          PATH: process.env["PATH"] ?? "",
           GITHUB_OUTPUT: out,
-          GH_FIXTURE: fixture,
-          GH_FAIL: c.files === "error" ? "1" : "",
-          GH_EXPECT: endpoint,
           EVENT: c.event,
           REF: c.ref ?? "refs/heads/beta",
-          REPO: "o/r",
-          PR_NUMBER: "1",
-          BEFORE: before,
-          SHA: sha,
+          ALL: String(listed.all),
+          FILES: file,
         },
       });
       assert.equal(r.status, 0, r.stderr);
       const lines = fs.readFileSync(out, "utf8").split("\n").filter(Boolean);
       assert.equal(lines.length, GATED.length, `one output per gated job, got ${lines.join(", ")}`);
       const flags = Object.fromEntries(lines.map((l) => l.split("=") as [string, string]).map(([k, v]) => [k, v === "true"]));
-      return { flags: flags as Flags, log: r.stdout };
+      return { flags: flags as Flags, log: listed.log + r.stdout, calls: listed.calls };
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -407,6 +391,87 @@ describe("the gate decides which languages run", () => {
 
   it("runs every language for an empty listing, which is a listing not yet ready", () => {
     for (const event of ["pull_request", "push"]) assert.deepEqual(decide({ event, files: [] }).flags, all(true), event);
+  });
+
+  describe("on the release pull request, beta into main", () => {
+    const docs = ["docs/a.md", "main/server.ts"];
+    const compare = [`repos/o/r/compare/${"1".repeat(40)}...${"2".repeat(40)}`];
+    const whole = ["repos/o/r/pulls/1/files"];
+
+    it("is judged by the files the push changed: a push with a helper change runs Swift and C/C++", () => {
+      const r = decide({ ...RELEASE_PUSH, via: "compare", files: [...docs, "helper/macos/Package.swift"] });
+      assert.deepEqual(r.flags, { ...all(false), swift: true, "c-cpp": true });
+      assert.deepEqual(r.calls, compare);
+    });
+
+    it("skips Swift and C/C++ for a push that left the helper alone, though the pull request holds it", () => {
+      const r = decide({ ...RELEASE_PUSH, via: "compare", files: docs });
+      assert.deepEqual(r.flags, all(false));
+      // The comparison, never the pull request's files, which always hold the helper.
+      assert.deepEqual(r.calls, compare);
+    });
+
+    it("lists the whole pull request when it is opened or reopened", () => {
+      for (const action of ["opened", "reopened"]) {
+        const r = decide({ ...RELEASE_PUSH, action, via: "pr", files: [...docs, "helper/macos/Package.swift"] });
+        assert.deepEqual(r.flags, { ...all(false), swift: true, "c-cpp": true }, action);
+        assert.deepEqual(r.calls, whole, action);
+      }
+    });
+
+    it("lists the whole pull request for any other branch, and for a fork's branch named beta", () => {
+      for (const head of [{ headRef: "feature/x", headRepo: "o/r" }, { headRef: "beta", headRepo: "someone/r" }, { headRef: "beta", headRepo: "" }]) {
+        const r = decide({ ...RELEASE_PUSH, ...head, via: "pr", files: [...docs, "helper/macos/Package.swift"] });
+        assert.deepEqual(r.flags, { ...all(false), swift: true, "c-cpp": true }, JSON.stringify(head));
+        assert.deepEqual(r.calls, whole, JSON.stringify(head));
+      }
+    });
+
+    it("lists the whole pull request when the event has no real previous commit", () => {
+      for (const before of ["", "0".repeat(40)]) {
+        const r = decide({ ...RELEASE_PUSH, before, via: "pr", files: docs });
+        assert.deepEqual(r.flags, all(false), JSON.stringify(before));
+        assert.deepEqual(r.calls, whole, JSON.stringify(before));
+      }
+    });
+
+    it("runs every language, and says why, when the push cannot be compared, lists nothing, or may be cut off", () => {
+      const failed = decide({ ...RELEASE_PUSH, via: "compare", files: "error" });
+      assert.deepEqual(failed.flags, all(true));
+      assert.match(failed.log, /could not compare the push to the release pull request/);
+      const empty = decide({ ...RELEASE_PUSH, via: "compare", files: [] });
+      assert.deepEqual(empty.flags, all(true));
+      assert.match(empty.log, /no files listed/);
+      const many = (n: number) => Array.from({ length: n }, (_, i) => `docs/page-${i}.md`);
+      const full = decide({ ...RELEASE_PUSH, via: "compare", files: many(300) });
+      assert.deepEqual(full.flags, all(true));
+      assert.match(full.log, /file list may be truncated/);
+      assert.deepEqual(decide({ ...RELEASE_PUSH, via: "compare", files: many(299) }).flags, all(false));
+    });
+
+    it("still runs every language for a change to the CodeQL workflow in that push", () => {
+      assert.deepEqual(decide({ ...RELEASE_PUSH, via: "compare", files: [".github/workflows/codeql.yml"] }).flags, all(true));
+    });
+  });
+
+  it("reads the action's inputs from the event's own fields", () => {
+    // The shell is run above with these set by hand; this is what sets them in Actions.
+    const step = changedFilesAction.runs.steps.find((s) => s.id === "list");
+    assert.deepEqual(step?.env, {
+      GH_TOKEN: "${{ inputs.token }}",
+      EVENT: "${{ github.event_name }}",
+      EVENT_ACTION: "${{ github.event.action }}",
+      HEAD_REF: "${{ github.event.pull_request.head.ref }}",
+      HEAD_REPO: "${{ github.event.pull_request.head.repo.full_name }}",
+      REPO: "${{ github.repository }}",
+      PR_NUMBER: "${{ github.event.pull_request.number }}",
+      BEFORE: "${{ github.event.before }}",
+      AFTER: "${{ github.event.after }}",
+    });
+    assert.deepEqual(changedFilesAction.outputs, {
+      all: { description: changedFilesAction.outputs["all"].description, value: "${{ steps.list.outputs.all }}" },
+      file: { description: changedFilesAction.outputs["file"].description, value: "${{ steps.list.outputs.file }}" },
+    });
   });
 
   it("counts the path a renamed file came from, so moving Swift out of the helper runs it", () => {
