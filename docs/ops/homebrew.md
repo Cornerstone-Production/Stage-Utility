@@ -1,6 +1,6 @@
 # Homebrew
 
-> **Update from Settings → Advanced, not from `brew upgrade`.** Both work, but
+> **Update from Settings → Advanced → Updates, not from `brew upgrade`.** Both work, but
 > only the in-app path restarts the service for you — see
 > [In-app updates](#in-app-updates).
 

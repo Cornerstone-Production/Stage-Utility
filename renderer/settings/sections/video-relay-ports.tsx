@@ -72,9 +72,9 @@ export function VideoRelayPortsPanel() {
   const state = useVideoState();
   if (!state?.ports) {
     return (
-      <p data-setting-id="video-relay-ports" className="px-4 py-3 text-caption1 text-fg-muted">
-        Loading…
-      </p>
+      // No data-setting-id: the id marks the real form, so a test that counts drawn
+      // rows cannot be satisfied by this placeholder.
+      <p className="px-4 py-3 text-caption1 text-fg-muted">Loading…</p>
     );
   }
   return <VideoRelayPortsForm initialPorts={state.ports} />;

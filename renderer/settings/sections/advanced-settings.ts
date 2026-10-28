@@ -314,6 +314,26 @@ export const ADVANCED_CARDS: readonly AdvancedCard[] = (() => {
   return [...seen.values()];
 })();
 
+/**
+ * The cards holding `hits`, best hit first. Equal ranks keep tab order, then the
+ * order cards have in the registry. Rows inside a card are not reordered: they
+ * keep the card's own order.
+ */
+export function cardsByBestHit(hits: readonly { setting: { tab: AdvancedTabId; card: string }; rank: number }[]): AdvancedCard[] {
+  const best = new Map<AdvancedCardKey, number>();
+  for (const h of hits) {
+    const key = cardKey(h.setting);
+    best.set(key, Math.min(best.get(key) ?? Infinity, h.rank));
+  }
+  const tabAt = (tab: AdvancedTabId) => ADVANCED_TABS.findIndex((t) => t.id === tab);
+  return ADVANCED_CARDS.filter((c) => best.has(c.key)).sort(
+    (a, b) =>
+      best.get(a.key)! - best.get(b.key)! ||
+      tabAt(a.tab) - tabAt(b.tab) ||
+      ADVANCED_CARDS.indexOf(a) - ADVANCED_CARDS.indexOf(b),
+  );
+}
+
 export function tabName(tab: AdvancedTabId): string {
   return ADVANCED_TABS.find((t) => t.id === tab)?.name ?? tab;
 }

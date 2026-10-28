@@ -35,6 +35,15 @@ function hintFor(draft: string): string {
   return "";
 }
 
+/** What the refuse switch says about itself, from the position it is in and whether the list was seeded. */
+export function enforceDescription(enforce: boolean, seeded: boolean): string {
+  if (enforce) return "A request by any other name gets a 403. This server's IP address always works.";
+  if (seeded) {
+    return "Off: other names are answered and listed below. Turning it on again accepts nothing new: accept the names you want first.";
+  }
+  return "Off: other names are answered and listed below. Turning it on also accepts each name in use over at least a day in the last 30 days, unless you dismissed it.";
+}
+
 /** One name in a list: the name, then whatever acts on it. */
 function NameRow({ name, children }: { name: string; children?: ReactNode }) {
   return (
@@ -129,13 +138,13 @@ export function HostNamesCard({
         >
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-footnote font-medium leading-tight text-fg">{enforceText.name}</span>
-            <span className="mt-0.5 text-caption2 leading-tight text-fg-subtle">{enforceText.description}</span>
-            {/* What turning it on does depends on whether the list was already seeded. */}
-            {!enforce && data?.seeded && (
-              <span className="mt-0.5 text-caption2 leading-tight text-fg-subtle">
-                The list is already seeded, so turning it on again accepts nothing new: accept the names you want first.
-              </span>
-            )}
+            {/* Not enforceText.description: that is the registry's one sentence for
+                Search to match, covering both switch positions at once. The row says
+                only what the switch does from where it stands, and what turning it
+                on does depends on whether the list was already seeded. */}
+            <span className="mt-0.5 text-caption2 leading-tight text-fg-subtle">
+              {enforceDescription(enforce, data?.seeded === true)}
+            </span>
           </div>
           <Switch
             checked={enforce}

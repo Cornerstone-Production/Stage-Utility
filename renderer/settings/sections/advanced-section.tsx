@@ -49,7 +49,7 @@ import {
   ADVANCED_TABS,
   DEFAULT_ADVANCED_TAB,
   SEARCH_TAB_ID,
-  cardKey,
+  cardsByBestHit,
   parseAdvancedTab,
   settingText,
   tabName,
@@ -59,10 +59,44 @@ import {
   type AdvancedTabId,
 } from "./advanced-settings";
 import { searchSettings, wordsOf } from "./advanced-search";
+import { ADVANCED_PANEL_ID, AdvancedSearchBox, AdvancedTabBar, searchShortcutLabel, tabButtonId } from "./advanced-tabs";
+import { useAdvancedSignals } from "../../app/advanced-signals";
 
 /** Words that find the Server log from Search. */
 const SERVER_LOG_WORDS = ["server", "log", "logs", "diagnostics", "debug", "errors"];
-import { ADVANCED_PANEL_ID, AdvancedSearchBox, AdvancedTabBar, searchShortcutLabel, tabButtonId } from "./advanced-tabs";
+
+/**
+ * Does a query offer the Server log? Every word must begin one of the log's words,
+ * and a word needs two letters: one letter begins half the alphabet and would offer
+ * the log for a lone "s" or "e".
+ */
+export function offersServerLog(query: string): boolean {
+  const words = wordsOf(query);
+  return words.length > 0 && words.every((w) => w.length >= 2 && SERVER_LOG_WORDS.some((k) => k.startsWith(w)));
+}
+
+/**
+ * The conditions under which a conditional row is drawn, each written once: the
+ * rows read them to decide what to draw, and `undrawnSettings` reads them to decide
+ * what Search may match.
+ */
+
+/** An install with no usable updater draws only the status line. Gated on a check having confirmed it. */
+function hasNoUpdater(s: SectionProps["updateStatus"]): boolean {
+  return !!s && s.canUpdate === false && !!s.lastCheckedAt;
+}
+/** The track switch: only where the install follows more than one track. */
+function drawsTrackRow(s: SectionProps["updateStatus"]): boolean {
+  return !!s && !hasNoUpdater(s) && (s.tracks?.length ?? 0) > 1;
+}
+/** The update window: only when updates are applied by themselves. */
+function drawsWindowRow(s: SectionProps["updateStatus"], autoUpdate: StageState["autoUpdate"]): boolean {
+  return !hasNoUpdater(s) && autoUpdate.mode !== "manual";
+}
+/** The reconnect timings: only while Wake around service times is on. */
+function drawsReconnectTimings(rc: { enabled: boolean }): boolean {
+  return rc.enabled;
+}
 
 /** Which rows a card draws. Every row by default; the Search tab narrows it to the matches. */
 export type ShowRow = (id: AdvancedSettingId) => boolean;
@@ -244,15 +278,14 @@ export function UpdatesPanel({
   autoUpdate,
   handlers,
   justUpdated,
-  onDismissJustUpdated,
   show = SHOW_ALL,
   children,
 }: {
   updateStatus: SectionProps["updateStatus"];
   autoUpdate: StageState["autoUpdate"];
   handlers: SectionProps["handlers"];
+  /** Set while the post-update banner is up: the result lines beneath would contradict it. */
   justUpdated?: { version: string } | null;
-  onDismissJustUpdated?: () => void;
   /** Which of the panel's rows to draw; all of them unless the Search tab narrows it. */
   show?: ShowRow;
   /** Further rows of the same card, drawn after the panel's own. */
@@ -429,7 +462,7 @@ export function UpdatesPanel({
   //
   // Only shown once a check has confirmed it (lastCheckedAt set) — otherwise a
   // freshly-restarted server flashes this before the first check runs.
-  if (s && s.canUpdate === false && s.lastCheckedAt) {
+  if (s && hasNoUpdater(s)) {
     return (
       <FieldSet flat>
         <FieldGroup>
@@ -455,163 +488,136 @@ export function UpdatesPanel({
     <FieldSet flat>
       <FieldGroup>
         {show("update-status") && (
-        <Field orientation="vertical" data-setting-id="update-status">
-          <FieldContent>
-            <FieldLabel>
-              {!s
-                ? "Checking for updates…"
-                : available > 0
-                  ? s.tagBased && s.targetTag
-                    ? `${s.targetTag} available`
-                    : `${plural(available, "update")} available`
-                  : "Up to date"}
-            </FieldLabel>
-            <FieldDescription>
-              {s ? (
-                <>
-                  Running {s.currentTag ?? `v${s.version}`}
-                  {s.currentSha ? ` · ${s.currentSha}` : ""}
-                  {s.currentDate ? ` · ${new Date(s.currentDate).toLocaleDateString()}` : ""}
-                  {s.branch ? ` (${s.branch})` : ""}.
-                  {available > 1 ? ` ${available} releases behind.` : ""}
-                  {s.lastCheckedAt ? ` Last checked ${new Date(s.lastCheckedAt).toLocaleString()}.` : ""}
-                  {/* Said plainly rather than hidden. The banner stays quiet because
-                      nothing pending changes what the app does, but Update still
-                      works if you want the version number to line up. */}
-                  {!s.tagBased && behindNews === 0 && behind > 0
-                    ? ` A version bump is pending (${plural(behind, "commit")}) — nothing user-facing.`
-                    : ""}
-                </>
-              ) : (
-                "Comparing this install against the latest release…"
-              )}
-            </FieldDescription>
+          <Field orientation="vertical" data-setting-id="update-status">
+            <FieldContent>
+              <FieldLabel>
+                {!s
+                  ? "Checking for updates…"
+                  : available > 0
+                    ? s.tagBased && s.targetTag
+                      ? `${s.targetTag} available`
+                      : `${plural(available, "update")} available`
+                    : "Up to date"}
+              </FieldLabel>
+              <FieldDescription>
+                {s ? (
+                  <>
+                    Running {s.currentTag ?? `v${s.version}`}
+                    {s.currentSha ? ` · ${s.currentSha}` : ""}
+                    {s.currentDate ? ` · ${new Date(s.currentDate).toLocaleDateString()}` : ""}
+                    {s.branch ? ` (${s.branch})` : ""}.
+                    {available > 1 ? ` ${available} releases behind.` : ""}
+                    {s.lastCheckedAt ? ` Last checked ${new Date(s.lastCheckedAt).toLocaleString()}.` : ""}
+                    {/* Said plainly rather than hidden. The banner stays quiet because
+                        nothing pending changes what the app does, but Update still
+                        works if you want the version number to line up. */}
+                    {!s.tagBased && behindNews === 0 && behind > 0
+                      ? ` A version bump is pending (${plural(behind, "commit")}) — nothing user-facing.`
+                      : ""}
+                  </>
+                ) : (
+                  "Comparing this install against the latest release…"
+                )}
+              </FieldDescription>
 
-            {/* Success banner after an auto-reload completes (set pre-restart). */}
-            {justUpdated ? (
-              <div className="mt-2 flex items-start gap-2 rounded-md border border-ok-9/30 bg-ok-9/6 p-2.5 text-caption1 text-green-11">
-                <CheckCircle2Icon className="size-4 shrink-0 mt-0.5 text-green-10" />
-                <div className="flex-1">
-                  <p className="font-medium">Update installed successfully.</p>
-                  {/* The handshake value is a git SHA — it has to change on every
-                      update, not just released ones, or kiosks would not reload.
-                      Right for that job, meaningless to read, so the banner names
-                      the release from live status and keeps the SHA as a fallback. */}
-                  <p className="text-caption2 text-green-11/80">
-                    Now running {s?.currentTag ?? (s ? `v${s.version}` : justUpdated.version)}.
+              {/* Live progress while applying (survives until the page auto-reloads). */}
+              {updating ? <UpdateProgress step={s?.step ?? null} /> : null}
+
+              {/* Changelog of pending commits */}
+              {!updating && available > 0 && s?.changelog?.length ? (
+                <div className="mt-2 rounded-md border border-gray-a4 bg-gray-a2">
+                  <p className="border-b border-gray-a4 px-2.5 py-1.5 text-caption2 font-medium text-gray-11">
+                    What's new
                   </p>
+                  <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto p-2.5 text-caption2 text-gray-11">
+                    {s.changelog.map((line, i) => (
+                      <li key={i} className="flex gap-1.5">
+                        <span className="shrink-0 text-gray-9">•</span>
+                        <span className="min-w-0 break-words">{line}</span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                {onDismissJustUpdated ? (
-                  <button
-                    type="button"
-                    onClick={onDismissJustUpdated}
-                    className="touch-target shrink-0 rounded p-0.5 text-green-11/70 hover:text-green-11"
-                    aria-label="Dismiss"
-                  >
-                    <XIcon className="size-3.5" />
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
+              ) : null}
 
-            {/* Live progress while applying (survives until the page auto-reloads). */}
-            {updating ? <UpdateProgress step={s?.step ?? null} /> : null}
-
-            {/* Changelog of pending commits */}
-            {!updating && available > 0 && s?.changelog?.length ? (
-              <div className="mt-2 rounded-md border border-gray-a4 bg-gray-a2">
-                <p className="border-b border-gray-a4 px-2.5 py-1.5 text-caption2 font-medium text-gray-11">
-                  What's new
+              {/* Last apply result */}
+              {/* Never beside the success banner. The version handshake is ground
+                  truth — the server demonstrably came back on a new version — while
+                  the result file is a claim written by the run that restarted it,
+                  and a strategy can write "failed" for a step that happened after
+                  the new build was already live. Showing both left the operator
+                  reading "Update installed successfully" directly above "Last
+                  update failed" for the same run. */}
+              {!justUpdated && !updating && s?.lastResult && !s.lastResult.ok ? (
+                <p className="mt-1 flex items-start gap-1.5 text-caption2 text-red-10">
+                  <AlertTriangleIcon className="size-3.5 shrink-0 mt-0.5" />
+                  Last update failed{s.lastResult.finishedAt ? ` (${new Date(s.lastResult.finishedAt).toLocaleString()})` : ""}.
+                  {s.lastResult.log ? ` ${s.lastResult.log.split("\n").filter(Boolean).slice(-1)[0]}` : ""}
                 </p>
-                <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto p-2.5 text-caption2 text-gray-11">
-                  {s.changelog.map((line, i) => (
-                    <li key={i} className="flex gap-1.5">
-                      <span className="shrink-0 text-gray-9">•</span>
-                      <span className="min-w-0 break-words">{line}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+              ) : null}
+              {!justUpdated && s && available === 0 && !awaiting && !updating && (!s.lastResult || s.lastResult.ok) ? (
+                <p className="mt-1 flex items-center gap-1.5 text-caption2 text-green-10">
+                  <CheckCircle2Icon className="size-3.5" /> You're on the latest release.
+                </p>
+              ) : null}
+              {/* Work is merged but not released. Normal for a few minutes while the
+                  release build runs; if it persists, that build failed and the track
+                  is stalled — which should read as "waiting", not "up to date". */}
+              {/* The package for a published release is still being built. Normal for
+                  a few minutes after a release; if it persists, that build failed —
+                  which must read as "waiting", not "up to date". */}
+              {!updating && available === 0 && awaiting ? (
+                <p className="mt-1 text-caption2 text-gray-9">
+                  {awaiting} has been released, but the {s?.trackSource === "formula" ? "Homebrew package" : "download"} for
+                  it isn't ready yet. It usually appears within a few minutes.
+                </p>
+              ) : null}
+              {!updating && available === 0 && !awaiting && unreleased > 0 ? (
+                <p className="mt-1 text-caption2 text-gray-9">
+                  {plural(unreleased, "commit")} merged since {s?.targetTag} and not yet
+                  released. Updates arrive once the release build passes.
+                </p>
+              ) : null}
+              {lock?.active && !updating ? (
+                <p className="mt-1 flex items-center gap-1.5 text-caption2 text-amber-11">
+                  <LockIcon className="size-3.5" /> Update &amp; restart locked — {lock.reasons.join(" · ")}. Finish the service, or override in the dialog.
+                </p>
+              ) : lockUnread && !updating ? (
+                <ErrorNote className="mt-1">Couldn't read the update lock, so Restart can't tell whether a service is running and asks first.</ErrorNote>
+              ) : null}
+            </FieldContent>
 
-            {/* Last apply result */}
-            {/* Never beside the success banner. The version handshake is ground
-                truth — the server demonstrably came back on a new version — while
-                the result file is a claim written by the run that restarted it,
-                and a strategy can write "failed" for a step that happened after
-                the new build was already live. Showing both left the operator
-                reading "Update installed successfully" directly above "Last
-                update failed" for the same run. */}
-            {!justUpdated && !updating && s?.lastResult && !s.lastResult.ok ? (
-              <p className="mt-1 flex items-start gap-1.5 text-caption2 text-red-10">
-                <AlertTriangleIcon className="size-3.5 shrink-0 mt-0.5" />
-                Last update failed{s.lastResult.finishedAt ? ` (${new Date(s.lastResult.finishedAt).toLocaleString()})` : ""}.
-                {s.lastResult.log ? ` ${s.lastResult.log.split("\n").filter(Boolean).slice(-1)[0]}` : ""}
-              </p>
-            ) : null}
-            {!justUpdated && s && available === 0 && !awaiting && !updating && (!s.lastResult || s.lastResult.ok) ? (
-              <p className="mt-1 flex items-center gap-1.5 text-caption2 text-green-10">
-                <CheckCircle2Icon className="size-3.5" /> You're on the latest release.
-              </p>
-            ) : null}
-            {/* Work is merged but not released. Normal for a few minutes while the
-                release build runs; if it persists, that build failed and the track
-                is stalled — which should read as "waiting", not "up to date". */}
-            {/* The package for a published release is still being built. Normal for
-                a few minutes after a release; if it persists, that build failed —
-                which must read as "waiting", not "up to date". */}
-            {!updating && available === 0 && awaiting ? (
-              <p className="mt-1 text-caption2 text-gray-9">
-                {awaiting} has been released, but the {s?.trackSource === "formula" ? "Homebrew package" : "download"} for
-                it isn't ready yet. It usually appears within a few minutes.
-              </p>
-            ) : null}
-            {!updating && available === 0 && !awaiting && unreleased > 0 ? (
-              <p className="mt-1 text-caption2 text-gray-9">
-                {plural(unreleased, "commit")} merged since {s?.targetTag} and not yet
-                released. Updates arrive once the release build passes.
-              </p>
-            ) : null}
-            {lock?.active && !updating ? (
-              <p className="mt-1 flex items-center gap-1.5 text-caption2 text-amber-11">
-                <LockIcon className="size-3.5" /> Update &amp; restart locked — {lock.reasons.join(" · ")}. Finish the service, or override in the dialog.
-              </p>
-            ) : lockUnread && !updating ? (
-              <ErrorNote className="mt-1">Couldn't read the update lock, so Restart can't tell whether a service is running and asks first.</ErrorNote>
-            ) : null}
-          </FieldContent>
-
-          <div className="flex flex-wrap gap-2">
-            <Button variant="filled" size="small" onClick={() => handlers.handleCheckUpdates()} disabled={updating}>
-              <RefreshCwIcon className="size-3.5 text-gray-9" />
-              Check now
-            </Button>
-            <GuardedButton
-              guard={guard}
-              variant="accent"
-              size="small"
-              onClick={onUpdateNow}
-              disabled={updating || (s?.tagBased ? available === 0 : behind === 0)}
-              icon={updating ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
-              label={updating ? "Updating…" : "Update now"}
-              lockedLabel="Update anyway"
-            />
-            <GuardedButton
-              guard={restartGuard}
-              variant="filled"
-              size="small"
-              onClick={onRestart}
-              disabled={updating}
-              icon={<RotateCwIcon className="size-3.5 text-gray-9" />}
-              label="Restart"
-              lockedLabel="Restart anyway"
-            />
-          </div>
-        </Field>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="filled" size="small" onClick={() => handlers.handleCheckUpdates()} disabled={updating}>
+                <RefreshCwIcon className="size-3.5 text-gray-9" />
+                Check now
+              </Button>
+              <GuardedButton
+                guard={guard}
+                variant="accent"
+                size="small"
+                onClick={onUpdateNow}
+                disabled={updating || (s?.tagBased ? available === 0 : behind === 0)}
+                icon={updating ? <Loader2Icon className="size-3.5 animate-spin" /> : <DownloadIcon className="size-3.5" />}
+                label={updating ? "Updating…" : "Update now"}
+                lockedLabel="Update anyway"
+              />
+              <GuardedButton
+                guard={restartGuard}
+                variant="filled"
+                size="small"
+                onClick={onRestart}
+                disabled={updating}
+                icon={<RotateCwIcon className="size-3.5 text-gray-9" />}
+                label="Restart"
+                lockedLabel="Restart anyway"
+              />
+            </div>
+          </Field>
         )}
 
         {/* Update track (beta / main) */}
-        {show("update-track") && s && (s.tracks?.length ?? 0) > 1 ? (
+        {show("update-track") && s && drawsTrackRow(s) ? (
           <Field orientation="horizontal" data-setting-id="update-track">
             <FieldContent>
               <FieldLabel>{settingText("update-track").name}</FieldLabel>
@@ -670,22 +676,22 @@ export function UpdatesPanel({
 
         {/* Update mode */}
         {show("update-mode") && (
-        <Field orientation="horizontal" data-setting-id="update-mode">
-          <FieldContent>
-            <FieldLabel>{settingText("update-mode").name}</FieldLabel>
-            <FieldDescription>{settingText("update-mode").description}</FieldDescription>
-          </FieldContent>
-          <Segmented
-            label="Updates"
-            value={autoUpdate.mode}
-            onChange={(mode) => handlers.handleSetAutoUpdate({ mode })}
-            options={[
-              { value: "manual", label: "Manual", hint: "Manual — I check and apply." },
-              { value: "auto-install", label: "Install", hint: "Install automatically, restart when I say." },
-              { value: "auto-full", label: "Install + restart", hint: "Install and restart automatically." },
-            ]}
-          />
-        </Field>
+          <Field orientation="horizontal" data-setting-id="update-mode">
+            <FieldContent>
+              <FieldLabel>{settingText("update-mode").name}</FieldLabel>
+              <FieldDescription>{settingText("update-mode").description}</FieldDescription>
+            </FieldContent>
+            <Segmented
+              label="Updates"
+              value={autoUpdate.mode}
+              onChange={(mode) => handlers.handleSetAutoUpdate({ mode })}
+              options={[
+                { value: "manual", label: "Manual", hint: "Manual — I check and apply." },
+                { value: "auto-install", label: "Install", hint: "Install automatically, restart when I say." },
+                { value: "auto-full", label: "Install + restart", hint: "Install and restart automatically." },
+              ]}
+            />
+          </Field>
         )}
 
         {show("update-mode") && autoUpdate.mode === "auto-install" ? (
@@ -695,7 +701,7 @@ export function UpdatesPanel({
           </p>
         ) : null}
 
-        {show("update-window") && autoUpdate.mode !== "manual" ? (
+        {show("update-window") && drawsWindowRow(s, autoUpdate) ? (
           <Field orientation="horizontal" data-setting-id="update-window">
             <FieldContent>
               <FieldLabel>{settingText("update-window").name}</FieldLabel>
@@ -1174,16 +1180,59 @@ const CARD_FLASH_IDS: Partial<Record<AdvancedCardKey, string>> = {
 function undrawnSettings(
   updateStatus: SectionProps["updateStatus"],
   autoUpdate: StageState["autoUpdate"],
-  reconnectEnabled: boolean,
+  rc: { enabled: boolean },
 ): Set<AdvancedSettingId> {
   const out = new Set<AdvancedSettingId>();
-  // An install with no usable updater draws only the status line.
-  const noUpdater = !!updateStatus && updateStatus.canUpdate === false && !!updateStatus.lastCheckedAt;
-  if (noUpdater) (["update-track", "update-mode", "update-window"] as const).forEach((id) => out.add(id));
-  if (!updateStatus || (updateStatus.tracks?.length ?? 0) <= 1) out.add("update-track");
-  if (autoUpdate.mode === "manual") out.add("update-window");
-  if (!reconnectEnabled) (["reconnect-lead", "reconnect-tail", "reconnect-idle"] as const).forEach((id) => out.add(id));
+  if (hasNoUpdater(updateStatus)) out.add("update-mode");
+  if (!drawsTrackRow(updateStatus)) out.add("update-track");
+  if (!drawsWindowRow(updateStatus, autoUpdate)) out.add("update-window");
+  if (!drawsReconnectTimings(rc)) (["reconnect-lead", "reconnect-tail", "reconnect-idle"] as const).forEach((id) => out.add(id));
   return out;
+}
+
+/**
+ * The note the pre-restart page leaves for the one that loads after it. Drawn above
+ * the tabs so it shows whichever tab the operator lands on.
+ */
+function JustUpdatedBanner({
+  updateStatus,
+  justUpdated,
+  onDismiss,
+}: {
+  updateStatus: SectionProps["updateStatus"];
+  justUpdated: { version: string };
+  onDismiss?: () => void;
+}) {
+  const s = updateStatus;
+  return (
+    <div
+      role="status"
+      data-just-updated=""
+      className="flex items-start gap-2 rounded-md border border-ok-9/30 bg-ok-9/6 p-2.5 text-caption1 text-green-11"
+    >
+      <CheckCircle2Icon className="size-4 shrink-0 mt-0.5 text-green-10" />
+      <div className="flex-1">
+        <p className="font-medium">Update installed successfully.</p>
+        {/* The handshake value is a git SHA — it has to change on every
+            update, not just released ones, or kiosks would not reload.
+            Right for that job, meaningless to read, so the banner names
+            the release from live status and keeps the SHA as a fallback. */}
+        <p className="text-caption2 text-green-11/80">
+          Now running {s?.currentTag ?? (s ? `v${s.version}` : justUpdated.version)}.
+        </p>
+      </div>
+      {onDismiss ? (
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="touch-target shrink-0 rounded p-0.5 text-green-11/70 hover:text-green-11"
+          aria-label="Dismiss"
+        >
+          <XIcon className="size-3.5" />
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 /** One card: its heading, an optional status on the right, and its rows. */
@@ -1256,8 +1305,9 @@ export function AdvancedSection({
   useEffect(() => {
     latest.current = { tab, onTabChange };
   });
-  function goTo(next: AdvancedPageTab) {
-    if (next === SEARCH_TAB_ID) setSearchAsked((n) => n + 1);
+  /** Open a tab. Opening Search also puts the cursor in its box, unless an arrow key got there: focus stays on the strip. */
+  function goTo(next: AdvancedPageTab, focusSearch = true) {
+    if (next === SEARCH_TAB_ID && focusSearch) setSearchAsked((n) => n + 1);
     if (latest.current.onTabChange) latest.current.onTabChange(next);
     else setOwnTab(next);
   }
@@ -1273,6 +1323,8 @@ export function AdvancedSection({
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "f") return;
+      // Something nearer already took the key, or a dialog is open and the page behind it is not the operator's focus.
+      if (e.defaultPrevented || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
       e.preventDefault();
       goTo(SEARCH_TAB_ID);
     }
@@ -1299,6 +1351,7 @@ export function AdvancedSection({
   const tw = stageState.taperWindow ?? { preMin: 60, postMin: 60 };
   const autoUpdate = stageState.autoUpdate ?? DEFAULT_AUTO_UPDATE;
 
+  const signals = useAdvancedSignals();
   const available = availableCount(updateStatus);
   const updatesBadge = !updateStatus
     ? undefined
@@ -1343,7 +1396,6 @@ export function AdvancedSection({
           autoUpdate={autoUpdate}
           handlers={handlers}
           justUpdated={justUpdated ?? null}
-          onDismissJustUpdated={onDismissJustUpdated}
           show={show}
         >
           {show("update-machines") && (
@@ -1391,7 +1443,7 @@ export function AdvancedSection({
             />
           </Field>
         )}
-        {rc.enabled && show("reconnect-lead") && (
+        {drawsReconnectTimings(rc) && show("reconnect-lead") && (
           <Field orientation="horizontal" data-setting-id="reconnect-lead">
             <FieldContent>
               <FieldLabel>{settingText("reconnect-lead").name}</FieldLabel>
@@ -1402,7 +1454,7 @@ export function AdvancedSection({
               aria-label="Lead time before rehearsal (minutes)" />
           </Field>
         )}
-        {rc.enabled && show("reconnect-tail") && (
+        {drawsReconnectTimings(rc) && show("reconnect-tail") && (
           <Field orientation="horizontal" data-setting-id="reconnect-tail">
             <FieldContent>
               <FieldLabel>{settingText("reconnect-tail").name}</FieldLabel>
@@ -1413,7 +1465,7 @@ export function AdvancedSection({
               aria-label="Keep active after service ends (minutes)" />
           </Field>
         )}
-        {rc.enabled && show("reconnect-idle") && (
+        {drawsReconnectTimings(rc) && show("reconnect-idle") && (
           <Field orientation="horizontal" data-setting-id="reconnect-idle">
             <FieldContent>
               <FieldLabel>{settingText("reconnect-idle").name}</FieldLabel>
@@ -1561,26 +1613,25 @@ export function AdvancedSection({
 
   const searching = tab === SEARCH_TAB_ID;
   const trimmedQuery = query.trim();
-  const undrawn = undrawnSettings(updateStatus, autoUpdate, rc.enabled);
+  const undrawn = undrawnSettings(updateStatus, autoUpdate, rc);
   const hits = searching
     ? searchSettings(
         ADVANCED_SETTINGS.filter((s) => !undrawn.has(s.id)),
         query,
-        ADVANCED_TABS.map((t) => t.id),
+        ADVANCED_TABS,
       )
     : [];
 
   // The log is a button on every tab, not a setting row, but "log" is the first
   // thing someone typing into Search for it will try.
-  const queryWords = wordsOf(query);
-  const logHit =
-    queryWords.length > 0 && queryWords.every((w) => SERVER_LOG_WORDS.some((k) => k.startsWith(w)));
+  const logHit = offersServerLog(query);
   const openLog = () => window.open("/log", "_blank", "noreferrer");
 
   let panel: ReactNode;
   if (searching) {
     const matched = new Set<string>(hits.map((h) => h.setting.id));
-    const cards = ADVANCED_CARDS.filter((c) => hits.some((h) => cardKey(h.setting) === c.key));
+    // Cards in the order of their best hit; the rows inside a card keep the card's own order.
+    const cards = cardsByBestHit(hits.map((h) => ({ setting: h.setting, rank: h.rank })));
     panel = (
       <div className="flex flex-col gap-4">
         <AdvancedSearchBox value={query} onChange={setQuery} inputRef={searchRef} />
@@ -1661,13 +1712,15 @@ export function AdvancedSection({
     <div className="flex flex-col gap-4 pt-5 max-sm:pt-4 pb-[50vh] max-sm:pb-24">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-title3 font-semibold text-fg">Advanced</h1>
-        {/* The raw log is not in the rail, and this was the only route to it. */}
+        {/* Opens the raw server log in a new tab. */}
         <Button variant="transparent" onClick={openLog} className="border border-line-strong">
           <FileTextIcon className="size-4 text-fg-muted" /> Server log
         </Button>
       </div>
 
-      <AdvancedTabBar tab={tab} onSelect={goTo} />
+      {justUpdated ? <JustUpdatedBanner updateStatus={updateStatus} justUpdated={justUpdated} onDismiss={onDismissJustUpdated} /> : null}
+
+      <AdvancedTabBar tab={tab} onSelect={goTo} onMove={(next) => goTo(next, false)} signals={signals} />
 
       <div role="tabpanel" id={ADVANCED_PANEL_ID} aria-labelledby={tabButtonId(tab)} className="flex flex-col gap-6">
         {panel}

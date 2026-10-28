@@ -131,7 +131,7 @@ in its place, printing the data directory and port the old daemon used and
 warning if this run's differ. In-app updates leave the registration as it is.
 
 An install already running does **not** need reinstalling to change track:
-**Settings → Advanced → Update track** switches between main and beta in place,
+**Settings → Advanced → Updates → Update track** switches between main and beta in place,
 in either direction, and keeps your configuration. Use that unless the box is
 too old to update itself.
 
@@ -162,7 +162,7 @@ On macOS or a Linux workstation, [Homebrew](homebrew.md) is a supported
 alternative: it runs the app as a user agent that starts at login (port 8788),
 rather than a system service that starts at boot; port 80 is served only where
 that account may bind it. Updates work from
-**Settings → Advanced** the same way.
+**Settings → Advanced → Updates** the same way.
 
 ## Uninstalling
 
@@ -262,7 +262,7 @@ reinstalls, until something boots it out.
 Left intact by every command above, because it holds config, history, and the
 encryption key that makes stored secrets readable. Remove it only when you mean
 to, and take a backup first if the machine may be rebuilt
-(**Settings → Advanced → Data → Config snapshots**, or copy the directory).
+(**Settings → Advanced → Data → Backups → Config snapshot**, or copy the directory).
 
 | Install | Data directory |
 |---|---|
@@ -272,8 +272,8 @@ to, and take a backup first if the machine may be rebuilt
 | Homebrew | `$(brew --prefix)/var/stage-utility` |
 | Checkout / dev | `~/.stage-utility` |
 
-A custom `STAGE_DATA` at install time overrides these; the running server prints
-its own path in **Settings → Advanced**.
+A custom `STAGE_DATA` at install time overrides these; the running server reports
+its own path as `dataDir` at `/api/version`.
 
 If the main port is already held when the service tries to bind it, the log
 names the holder rather than just its pid: if it answers `/api/version` as

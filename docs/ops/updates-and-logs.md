@@ -170,7 +170,7 @@ from the `[tag]` each line opens with, a level filter, a text filter, and copy a
 download buttons. Only the newest 2,000 matching lines are drawn; filtering still
 runs over all of them, and the count says so.
 
-Timestamps are drawn in the **app time zone** (Settings → Advanced), which the
+Timestamps are drawn in the **app time zone** (Settings → Advanced → General), which the
 header names. Not the server's UTC and not the viewer's browser zone: a log is
 read against a service that happened at a wall-clock time in the building.
 

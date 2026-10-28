@@ -18,6 +18,7 @@ import { after, afterEach, describe, test } from "node:test";
 
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
+import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 import type { SectionHandlers } from "../types.js";
 
 const teardown = installRenderDom();
@@ -88,6 +89,8 @@ function stubFetch() {
     }
     if (url.includes("/api/config/snapshots")) return ok([]);
     if (url.includes("/api/history/milestones")) return ok([]);
+    // The real ports form, not the Loading placeholder: it is the form that carries the id.
+    if (url.endsWith("/api/video/state")) return ok({ rev: 1, relay: { state: "off" }, kinds: [], ports: DEFAULT_VIDEO_PORTS, feeds: [] });
     return ok({});
   });
 }
@@ -125,6 +128,9 @@ describe("Advanced settings registry and page", () => {
         await settle();
         // The two data panels draw once their reads land.
         if (tab === "data") await eventually(() => assert.ok(idsDrawn(container).includes("auto-backups"), "backups never loaded"));
+        // The ports card draws a Loading placeholder until the video state lands; wait it out.
+        if (tab === "video") await eventually(() => assert.ok(idsDrawn(container).includes("video-relay-ports"), "the ports never loaded"));
+        assert.ok(!/Loading…/.test(container.textContent ?? ""), `the ${tab} tab still shows Loading…`);
         const here = idsDrawn(container);
         for (const id of here) {
           const entry = ADVANCED_SETTINGS.find((s) => s.id === id);

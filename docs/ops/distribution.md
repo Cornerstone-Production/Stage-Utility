@@ -45,7 +45,7 @@ their updater.
 
 ## Tracks
 
-Two update tracks, selectable in **Settings → Advanced → Update track**:
+Two update tracks, selectable in **Settings → Advanced → Updates → Update track**:
 
 - **main** — stable releases only.
 - **beta** — prereleases *and* stable releases, so a beta server is never held back

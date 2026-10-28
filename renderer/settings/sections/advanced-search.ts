@@ -3,9 +3,11 @@
 // Pure: it reads a list of settings and a query and returns the ones that match,
 // best first. A query is split into words and EVERY word must match somewhere in a
 // setting, in any order. A word matches a whole word or the start of one, in the
-// name, the card it sits in, the hidden keywords or the description. A word of four
-// letters or more also tolerates a typo, in the name or the card's name only: those
-// are short and exact, whereas a description is long enough that a one-letter slack
+// name, the card it sits in, the name of its tab, the hidden keywords or the
+// description. A longer word also finds a short name word it starts with
+// ("reconnecting" finds "reconnect"). A word of four letters or more also
+// tolerates a typo, in the name, the card's name or the tab's name only: those are
+// short and exact, whereas a description is long enough that a one-letter slack
 // would match nearly anything.
 
 export interface Searchable {
@@ -29,7 +31,8 @@ export const RANK = {
 
 /** The lowercase alphanumeric words of a string. */
 export function wordsOf(text: string): string[] {
-  return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  // Combining marks stay inside the word: "e" plus a combining accent is one letter to a reader.
+  return text.toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
 }
 
 /** Edits to turn `a` into `b`, where swapping two neighbours counts as one (optimal string alignment). */
@@ -78,22 +81,34 @@ function isTypoOf(word: string, nameWord: string): boolean {
 interface Index {
   name: string[];
   card: string[];
+  tab: string[];
   keywords: string[];
   description: string[];
 }
 
-function indexOf(s: Searchable): Index {
-  return { name: wordsOf(s.name), card: wordsOf(s.card ?? ""), keywords: s.keywords.flatMap(wordsOf), description: wordsOf(s.description) };
+function indexOf(s: Searchable, tabNames: ReadonlyMap<string, string>): Index {
+  return {
+    name: wordsOf(s.name),
+    card: wordsOf(s.card ?? ""),
+    tab: wordsOf(tabNames.get(s.tab) ?? ""),
+    keywords: s.keywords.flatMap(wordsOf), description: wordsOf(s.description),
+  };
+}
+
+/** Is `nameWord` a whole short word that `word` runs on from: "reconnecting" from "reconnect"? */
+function extendsNameWord(word: string, nameWord: string): boolean {
+  return nameWord.length >= 4 && word.length > nameWord.length && word.length - nameWord.length <= 3 && word.startsWith(nameWord);
 }
 
 /** The best (lowest) rank at which one query word matches this setting, or null when it does not. */
 function rankWord(word: string, ix: Index): number | null {
   if (ix.name.includes(word)) return RANK.nameWord;
-  if (ix.name.some((w) => w.startsWith(word))) return RANK.namePrefix;
-  if (ix.keywords.some((w) => w.startsWith(word))) return RANK.keyword;
-  if (ix.card.some((w) => w.startsWith(word))) return RANK.keyword;
+  if (ix.name.some((w) => w.startsWith(word) || extendsNameWord(word, w))) return RANK.namePrefix;
+  // A longer form of a keyword, card or tab word ("reconnecting") finds it too.
+  const atKeyword = (w: string) => w.startsWith(word) || extendsNameWord(word, w);
+  if (ix.keywords.some(atKeyword) || ix.card.some(atKeyword) || ix.tab.some(atKeyword)) return RANK.keyword;
   if (ix.description.some((w) => w.startsWith(word))) return RANK.description;
-  if (ix.name.some((w) => isTypoOf(word, w)) || ix.card.some((w) => isTypoOf(word, w))) return RANK.typo;
+  if ([ix.name, ix.card, ix.tab].some((words) => words.some((w) => isTypoOf(word, w)))) return RANK.typo;
   return null;
 }
 
@@ -103,37 +118,37 @@ export interface Hit<T> {
 }
 
 /**
- * The settings matching `query`, grouped by `tabOrder` and ordered within a tab by
- * rank, then by their place in `settings`. An empty query matches nothing: the
- * Search tab shows a hint instead of every setting.
+ * The settings matching `query`, best rank first; equal ranks keep tab order, then
+ * their place in `settings`. `tabs` is the page's tabs in order: it fixes that
+ * order and names each tab so a query can find a setting by the tab it is on. An
+ * empty query matches nothing: the Search tab shows a hint instead of every setting.
  */
 export function searchSettings<T extends Searchable>(
   settings: readonly T[],
   query: string,
-  tabOrder: readonly string[],
+  tabs: readonly { id: string; name: string }[],
 ): Hit<T>[] {
   const queryWords = wordsOf(query);
   if (queryWords.length === 0) return [];
 
-  const hits: { hit: Hit<T>; sum: number; at: number }[] = [];
+  const tabNames = new Map(tabs.map((t) => [t.id, t.name]));
+  const hits: { hit: Hit<T>; at: number }[] = [];
   settings.forEach((setting, at) => {
-    const ix = indexOf(setting);
+    const ix = indexOf(setting, tabNames);
     let worst = 0;
-    let sum = 0;
     for (const w of queryWords) {
       const r = rankWord(w, ix);
       if (r === null) return;
       worst = Math.max(worst, r);
-      sum += r;
     }
-    hits.push({ hit: { setting, rank: worst }, sum, at });
+    hits.push({ hit: { setting, rank: worst }, at });
   });
 
   const tabAt = (tab: string) => {
-    const i = tabOrder.indexOf(tab);
-    return i < 0 ? tabOrder.length : i;
+    const i = tabs.findIndex((t) => t.id === tab);
+    return i < 0 ? tabs.length : i;
   };
   return hits
-    .sort((a, b) => tabAt(a.hit.setting.tab) - tabAt(b.hit.setting.tab) || a.hit.rank - b.hit.rank || a.sum - b.sum || a.at - b.at)
+    .sort((a, b) => a.hit.rank - b.hit.rank || tabAt(a.hit.setting.tab) - tabAt(b.hit.setting.tab) || a.at - b.at)
     .map((h) => h.hit);
 }

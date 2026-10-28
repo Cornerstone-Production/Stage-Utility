@@ -7,7 +7,7 @@ import { describe, test } from "node:test";
 import { damerauLevenshtein, RANK, searchSettings, typoBudget, wordsOf, type Searchable } from "./advanced-search.js";
 import { ADVANCED_SETTINGS, ADVANCED_TABS } from "./advanced-settings.js";
 
-const TAB_ORDER = ADVANCED_TABS.map((t) => t.id);
+const TAB_ORDER = ADVANCED_TABS;
 
 function s(id: string, name: string, description = "", keywords: string[] = [], tab = "general"): Searchable {
   return { id, tab, name, description, keywords };
@@ -17,6 +17,11 @@ const ids = (hits: { setting: { id: string } }[]) => hits.map((h) => h.setting.i
 const real = (q: string) => ids(searchSettings(ADVANCED_SETTINGS, q, TAB_ORDER));
 
 describe("words and distance", () => {
+  test("a combining mark stays inside its word", () => {
+    // "cafe" written as e plus U+0301: splitting at the mark would leave "cafe" and drop the accent.
+    assert.deepEqual(wordsOf("Cafe\u0301 Menu"), ["cafe\u0301", "menu"]);
+  });
+
   test("words are lowercase alphanumeric runs", () => {
     assert.deepEqual(wordsOf("Public address (DNS), re-enter 12h"), ["public", "address", "dns", "re", "enter", "12h"]);
   });
@@ -124,18 +129,61 @@ describe("ranking", () => {
     assert.deepEqual(hits.map((h) => [h.setting.id, h.rank]), [["desc", RANK.description], ["typo", RANK.typo]]);
   });
 
-  test("results stay grouped by tab in tab order, ranked within each tab", () => {
+  test("best rank first across tabs; equal ranks by tab order, then by place in the list", () => {
     const list = [
       s("n-desc", "Other", "has zebra inside", [], "network"),
       s("g-name", "Zebra", "", [], "general"),
       s("n-name", "Zebra", "", [], "network"),
       s("g-desc", "Other", "has zebra inside", [], "general"),
+      s("n-name-2", "Zebra", "", [], "network"),
+      s("u-name", "Zebra", "", [], "updates"),
     ];
-    assert.deepEqual(ids(searchSettings(list, "zebra", TAB_ORDER)), ["g-name", "g-desc", "n-name", "n-desc"]);
+    assert.deepEqual(ids(searchSettings(list, "zebra", TAB_ORDER)), [
+      "g-name",
+      "u-name",
+      "n-name",
+      "n-name-2",
+      "g-desc",
+      "n-desc",
+    ]);
+  });
+
+  test("a longer word finds the short name word it starts with, at name-prefix rank", () => {
+    const list = [s("a", "Reconnect timings"), s("b", "Other", "reconnect in the description")];
+    assert.deepEqual(
+      searchSettings(list, "reconnecting", TAB_ORDER).map((h) => [h.setting.id, h.rank]),
+      [["a", RANK.namePrefix]],
+    );
+    // Within three letters and four-plus letters only.
+    assert.deepEqual(ids(searchSettings([s("a", "Reconnect timings")], "reconnectingly", TAB_ORDER)), []);
+    assert.deepEqual(ids(searchSettings([s("t", "Set the time")], "setting", TAB_ORDER)), [], '"set" is under four letters');
+    assert.deepEqual(ids(searchSettings([s("a", "Reconnect timings")], "reconnected", TAB_ORDER)), ["a"]);
   });
 });
 
 describe("the real registry", () => {
+  test("a tab's name finds every setting on that tab, misspelt or not", () => {
+    const onTab = (tab: string) => ADVANCED_SETTINGS.filter((x) => x.tab === tab).map((x) => x.id);
+    const cases: [string, string][] = [
+      ["schedule", "schedule"],
+      ["network", "network"],
+      ["data", "data"],
+      ["shedule", "schedule"],
+      ["netwrok", "network"],
+      ["dtaa", "data"],
+    ];
+    for (const [q, tab] of cases) {
+      const found = new Set(real(q));
+      for (const id of onTab(tab)) assert.ok(found.has(id), `"${q}" does not find ${id}`);
+    }
+    // Spelt right it ranks as a hidden keyword does, never as a typo or a description mention.
+    for (const [q, tab] of cases.slice(0, 3)) {
+      for (const hit of searchSettings(ADVANCED_SETTINGS, q, TAB_ORDER).filter((h) => h.setting.tab === tab)) {
+        assert.ok(hit.rank <= RANK.keyword, `"${q}" finds ${hit.setting.id} only at rank ${hit.rank}`);
+      }
+    }
+  });
+
   test("restore backup finds Upload and restore under Backups", () => {
     assert.ok(real("restore backup").includes("config-snapshot"));
   });
@@ -175,6 +223,11 @@ describe("the real registry", () => {
     assert.deepEqual(real("reconect"), reconnects);
     // Not a keyword typo: "atendance" is one edit from the Attendance sampling card.
     assert.deepEqual(real("atendance"), ADVANCED_SETTINGS.filter((x) => x.card === "Attendance sampling").map((x) => x.id));
+  });
+
+  test("a longer form of a card or keyword word finds every setting under it", () => {
+    const reconnects = ADVANCED_SETTINGS.filter((x) => x.card === "Reconnects").map((x) => x.id);
+    assert.deepEqual(real("reconnecting"), reconnects);
   });
 
   test("a name word outranks a description mention", () => {

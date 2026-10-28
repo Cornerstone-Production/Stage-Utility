@@ -491,6 +491,14 @@ sent to someone. `/settings/advanced` opens General; an address that is not a ta
 General too. The sidebar keeps **Advanced** lit on every tab. **Server log** at the
 right of the heading opens the raw log, `/log`, in a new tab.
 
+The tabs follow the keyboard pattern for tab strips: only the selected tab is reached with
+**Tab**, and the arrow keys, **Home** and **End** move to another tab and open it. While an
+update is waiting the **Updates** tab carries a dot, and while host names wait for an accept
+or a dismiss the **Network** tab carries their count. The sidebar's Advanced row shows the
+same two marks, and clicking it then opens the tab they are about (**Updates** when both
+apply). After an update restarts the server, a note saying so appears above the tabs, on
+whichever tab you land on, until you dismiss it.
+
 | Tab (`<tab>`) | Cards | Holds |
 |---|---|---|
 | **General** (`general`) | General | **Time zone**, **Clock format**, **Context bar** |
@@ -508,19 +516,26 @@ a narrow one.
 
 **Search** is the last tab. Press **Cmd-F** (**Ctrl-F** on Windows and Linux) anywhere
 on the page to open it with the cursor in the box and any earlier text selected. The
-page takes the key only while it is open. The query stays when you move between tabs.
+page takes the key only while it is open, and leaves it alone while a dialog is open or
+something else on the page has already used it. The query stays when you move between tabs.
 
 Every word you type must match the setting, in any order, in its name, the card it sits
-in, its description or words people use for it that the page does not print (`dns` finds
-the public address, `branch` the update track). A word matches the start of a word, so
-`recon` finds the reconnect settings. A word of four letters or more also forgives a typo
-in a setting's **name** or its card's: one slip up to seven letters, two from eight. A name match ranks above a hidden
-word, which ranks above the description, which ranks above a typo.
+in, the name of its tab, its description or words people use for it that the page does
+not print (`dns` finds the public address, `branch` the update track, `network` every
+setting on the Network tab). A word matches the start of a word, so `recon` finds the
+reconnect settings, and a longer word finds a short name word it starts with:
+`reconnecting` finds `reconnect`. A word of four letters or more also forgives a typo in a
+setting's **name**, its card's or its tab's: one slip up to seven letters, two from
+eight. A name match ranks above a card or tab name or a hidden word, which rank above the
+description, which ranks above a typo.
 
 Results are the settings themselves, working, in cards headed with the tab and the card
 (**Data › Backups**). Click the tab name to go there. A line above them counts the matches.
-Searching `log` also offers the **Server log**. A setting the page is not drawing, such as the reconnect timings while **Wake around
-service times** is off, is not searched.
+Cards are ordered by their best match, best first, and cards whose best matches rank
+alike keep the order of the tabs and then of the page. The rows inside a card keep the
+card's own order, whatever each one's rank. Searching `log` also offers the **Server
+log** (a word needs two letters to do that). A setting the page is not drawing, such as
+the reconnect timings while **Wake around service times** is off, is not searched.
 
 ## Read-only links to hand out
 

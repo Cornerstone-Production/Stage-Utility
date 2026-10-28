@@ -70,3 +70,50 @@ test("control: an add the server takes clears the field", async () => {
     stub.restore();
   }
 });
+
+// The refuse row's sentence follows the switch and whether the list was seeded.
+// The registry's one description (what Search reads) covers both positions at
+// once, so drawing it, or drawing a seeded note beside it, contradicts itself.
+const ALSO_ACCEPTS = "Turning it on also accepts";
+const ACCEPTS_NOTHING = "accepts nothing new";
+
+async function drawnRefuseRow(view: { enforce: boolean; seeded: boolean }): Promise<string> {
+  const stub = stubFetchWithLog((url) => (url.includes("/api/security/host-names") ? ok({ ...VIEW, ...view }) : ok({})));
+  const queryClient = new QueryClient({ defaultOptions: { queries: { gcTime: 0, retry: false } } });
+  const { container, unmount } = render(
+    React.createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      React.createElement(TooltipProvider, null, React.createElement(HostNamesCard)),
+    ),
+  );
+  try {
+    const row = () => container.querySelector('[data-setting-id="host-names-enforce"]');
+    // The switch is disabled until the view has been read.
+    await eventually(() => assert.equal((screen.getByLabelText("Refuse names not on the list") as HTMLButtonElement).disabled, false));
+    return (row()?.textContent ?? "").replace(/\s+/g, " ").trim();
+  } finally {
+    stub.restore();
+    unmount();
+  }
+}
+
+test("refuse row, off and never seeded: says turning it on accepts the names in use", async () => {
+  const row = await drawnRefuseRow({ enforce: false, seeded: false });
+  assert.ok(row.includes(ALSO_ACCEPTS), row);
+  assert.ok(!row.includes(ACCEPTS_NOTHING), row);
+  assert.ok(!row.includes("On: a request"), "drew the registry's two-position sentence");
+});
+
+test("refuse row, off but already seeded: says it accepts nothing new, and never the opposite", async () => {
+  const row = await drawnRefuseRow({ enforce: false, seeded: true });
+  assert.ok(row.includes(ACCEPTS_NOTHING), row);
+  assert.ok(!row.includes(ALSO_ACCEPTS), `contradictory pair drawn: ${row}`);
+});
+
+test("refuse row, on: says only what a refused request gets, not the Off/On sentence", async () => {
+  const row = await drawnRefuseRow({ enforce: true, seeded: true });
+  assert.ok(row.includes("A request by any other name gets a 403."), row);
+  assert.ok(!row.includes("Off:"), row);
+  assert.ok(!row.includes(ALSO_ACCEPTS) && !row.includes(ACCEPTS_NOTHING), row);
+});

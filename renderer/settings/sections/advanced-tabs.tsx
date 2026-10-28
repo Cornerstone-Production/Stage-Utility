@@ -3,9 +3,12 @@
 // Presentational only: which tab is current, and what the query is, belong to
 // AdvancedSection.
 
-import type { RefObject } from "react";
+import type { KeyboardEvent, RefObject } from "react";
 import { SearchIcon } from "lucide-react";
 
+import { plural } from "@main/services/plural";
+
+import type { AdvancedSignals } from "../../app/advanced-signals";
 import { cn } from "../../lib/cn";
 import { ADVANCED_TABS, SEARCH_TAB_ID, type AdvancedPageTab } from "./advanced-settings";
 
@@ -25,26 +28,86 @@ export function tabButtonId(tab: AdvancedPageTab): string {
 
 export const ADVANCED_PANEL_ID = "advanced-tab-panel";
 
-export function AdvancedTabBar({ tab, onSelect }: { tab: AdvancedPageTab; onSelect: (tab: AdvancedPageTab) => void }) {
-  const button = (id: AdvancedPageTab, label: string, className?: string, icon?: boolean) => (
-    <button
-      key={id}
-      id={tabButtonId(id)}
-      type="button"
-      role="tab"
-      aria-selected={tab === id}
-      aria-controls={ADVANCED_PANEL_ID}
-      onClick={() => onSelect(id)}
-      className={cn(
-        TAB_BUTTON,
-        tab === id ? "border-accent text-fg" : "border-transparent text-fg-muted hover:text-fg",
-        className,
-      )}
-    >
-      {icon && <SearchIcon className="size-3.5" aria-hidden="true" />}
-      {label}
-    </button>
-  );
+const TAB_ORDER: readonly AdvancedPageTab[] = [...ADVANCED_TABS.map((t) => t.id), SEARCH_TAB_ID];
+
+/** The tab an arrow key moves to from `tab`, or null for a key that is not one. Wraps at both ends. */
+export function tabAfterKey(tab: AdvancedPageTab, key: string): AdvancedPageTab | null {
+  const at = TAB_ORDER.indexOf(tab);
+  if (key === "ArrowRight") return TAB_ORDER[(at + 1) % TAB_ORDER.length];
+  if (key === "ArrowLeft") return TAB_ORDER[(at - 1 + TAB_ORDER.length) % TAB_ORDER.length];
+  if (key === "Home") return TAB_ORDER[0];
+  if (key === "End") return TAB_ORDER[TAB_ORDER.length - 1];
+  return null;
+}
+
+/**
+ * The strip. A click calls `onSelect`. An arrow key, Home or End moves focus to a
+ * neighbouring tab and calls `onMove`, which selects it without taking focus away
+ * from the strip (landing on Search must not jump into its box mid-arrow). Only the
+ * selected tab is in the tab order; the arrows reach the rest.
+ *
+ * `signals` puts a dot on Updates while an update waits and a count on Network
+ * while host names wait: the same two marks the rail's Advanced row carries.
+ */
+export function AdvancedTabBar({
+  tab,
+  onSelect,
+  onMove,
+  signals,
+}: {
+  tab: AdvancedPageTab;
+  onSelect: (tab: AdvancedPageTab) => void;
+  onMove: (tab: AdvancedPageTab) => void;
+  signals: AdvancedSignals;
+}) {
+  function onKeyDown(e: KeyboardEvent<HTMLButtonElement>, id: AdvancedPageTab) {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const next = tabAfterKey(id, e.key);
+    if (!next) return;
+    e.preventDefault();
+    document.getElementById(tabButtonId(next))?.focus();
+    onMove(next);
+  }
+
+  const button = (id: AdvancedPageTab, label: string, className?: string, icon?: boolean) => {
+    const names = id === "network" ? signals.hostNamesWaiting : 0;
+    const flagged = id === "updates" && signals.updateAvailable;
+    const said: string[] = [];
+    if (flagged) said.push("update available");
+    if (names > 0) said.push(`${plural(names, "host name")} waiting`);
+    return (
+      <button
+        key={id}
+        id={tabButtonId(id)}
+        type="button"
+        role="tab"
+        aria-selected={tab === id}
+        aria-controls={ADVANCED_PANEL_ID}
+        aria-label={said.length > 0 ? `${label}, ${said.join(", ")}` : undefined}
+        tabIndex={tab === id ? 0 : -1}
+        onClick={() => onSelect(id)}
+        onKeyDown={(e) => onKeyDown(e, id)}
+        className={cn(
+          TAB_BUTTON,
+          tab === id ? "border-accent text-fg" : "border-transparent text-fg-muted hover:text-fg",
+          className,
+        )}
+      >
+        {icon && <SearchIcon className="size-3.5" aria-hidden="true" />}
+        {label}
+        {flagged && <span data-signal="update" aria-hidden="true" className="block size-1.5 rounded-full bg-accent" />}
+        {names > 0 && (
+          <span
+            data-signal="host-names"
+            aria-hidden="true"
+            className="grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-semibold tabular-nums text-white"
+          >
+            {names}
+          </span>
+        )}
+      </button>
+    );
+  };
   return (
     <div role="tablist" aria-label="Advanced settings" className="flex gap-0.5 overflow-x-auto border-b border-line">
       {ADVANCED_TABS.map((t) => button(t.id, t.name))}
