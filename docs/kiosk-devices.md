@@ -86,8 +86,10 @@ curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
    `/Library/Application Support/StageUtility/`, and makes them as the Chrome kiosk
    did if they are missing. Running the installer again never makes a new id.
 2. Downloads `StageUtilityOutput-arm64.zip` or `StageUtilityOutput-x86_64.zip`,
-   whichever this Mac is (an Apple silicon Mac gets the arm64 app even from a shell running under Rosetta), and checks its SHA-256. The app is a few hundred MB
-   because it carries Chromium.
+   whichever this Mac is (an Apple silicon Mac gets the arm64 app even from a shell running under Rosetta), and checks its SHA-256 and the release's
+   [signature](#signed-updates) of it, against the release signing key it gets from
+   the server first. A zip whose signature is missing or does not verify is not
+   installed. The app is a few hundred MB because it carries Chromium.
 3. Unpacks it beside `/Applications`, checks it is the helper, then swaps it in. The
    old copy is kept until the new one is in place and put back if anything fails,
    so a Mac is never left without the app.
@@ -102,7 +104,8 @@ curl -fsSL http://<server>/kiosk/install-macos.sh | sudo sh
    nobody logged in the screen saver is left alone, since it is a per-account setting,
    and the token is readable by administrators until an account owns it: if the first
    account to log in is not one, run the installer again after it has.
-6. Installs the updater, so the helper follows the server's version from then on (see
+6. Installs the updater, with the release signing key the install verified the app
+   with, so the helper follows the server's version from then on (see
    [Keeping the helper on the server's version](#keeping-the-helper-on-the-servers-version)).
    A failure here is said plainly and leaves the helper installed; run the installer
    again to add it.
@@ -120,9 +123,9 @@ from the server the Mac belongs to. `STAGE_SERVER` is a different choice: it als
 `server` file, which pins the Mac to that server and skips discovery for good, so the
 Mac does not follow the server if it moves. Use it only where discovery's broadcast
 does not cross. If that server cannot supply a zip
-that matches its checksum, it falls back to the GitHub release for the version in the
-server's `/api/update/status`, taking the digest from the releases API and the zip from
-the release's downloads. The API call carries no token, so GitHub allows 60 an hour per
+that matches its checksum and its signature, it falls back to the GitHub release for the version in the
+server's `/api/update/status`, taking the digest from the releases API and the zip and
+its `.sig` from the release's downloads, and verifies both the same way. The API call carries no token, so GitHub allows 60 an hour per
 network; a refusal for that says so. If neither works, it installs nothing and says what each
 answered.
 A server that has not cached the zip yet sends nothing until it has all of it, so the
@@ -172,8 +175,9 @@ installs the same version on its own, with nobody at it.
 
 The installer leaves an updater beside the helper: in
 `/Library/Application Support/StageUtilityUpdater/`, a folder only root can write, a
-copy of the installer, the Mac's device id, and the server the install downloaded
-from (the one `STAGE_SERVER` names, when the Mac is pinned); and a LaunchDaemon,
+copy of the installer, the Mac's device id, the server the install downloaded
+from (the one `STAGE_SERVER` names, when the Mac is pinned), and the release signing
+key, `release-signing.pub.pem`; and a LaunchDaemon,
 `/Library/LaunchDaemons/com.stageutility.output-updater.plist`, that runs the copy with
 `--check-update` every five minutes and at boot. It reads nothing from the state
 folder, which the logged-in account owns. Each run:
@@ -194,9 +198,10 @@ folder, which the logged-in account owns. Each run:
    again** override the switch, the window, not knowing and a past failure, never a
    live service. With no Planning Center there is no window, and a Mac updates within
    five minutes of the server.
-3. Downloads the zip and its SHA-256 from that server exactly as an install does,
-   checks the app in it is the version the server named, and clears any
-   set-user-id bit (root unpacks it).
+3. Downloads the zip, its SHA-256 and its signature from that server exactly as an
+   install does, and verifies the signature against the key in its own folder, never
+   one the server sends. Then it checks the app in it is the version the server
+   named, and clears any set-user-id bit (root unpacks it).
 4. Stops the helper, swaps the new app in keeping the old one, and starts it through
    launchd. The download, the check and the unpacking all happen while the old helper
    is still on air; only the restart takes the outputs off. Measured on an automatic
@@ -210,9 +215,10 @@ folder, which the logged-in account owns. Each run:
    restarts it itself, and says so if it still cannot.
 
 **When an update fails.** A failure that belongs to the version (the new helper did
-not start, the server sent another version, the zip is not the helper) holds that
-version until someone presses Try again. A failure that does not (the download did not
-finish, the Mac shut down in the middle) is tried again on its own, half an hour later,
+not start, the server sent another version, the zip is not the helper, no readable key
+is installed) holds that version until someone presses Try again. A failure that does
+not (the download did not finish, its checksum or signature did not hold, the Mac shut
+down in the middle) is tried again on its own, half an hour later,
 then an hour, two, four, and every six hours after, and Screens shows it as retrying.
 A failed update keeps the outputs off air longer than a good one: the new helper is
 given its chance to start before the old one goes back. Measured with a build whose
@@ -227,19 +233,24 @@ root: it swaps the app, which runs as the logged-in account. A change to the ins
 itself, the agent file it writes for instance, reaches a Mac only when the installer is
 run again by hand, and a release that needs that says so in its notes.
 
-**What it trusts.** The app is downloaded over the network from the server, and checked
-against the SHA-256 that same server publishes, exactly as `curl ... | sudo sh` already
-trusts the server it is pointed at. That checks the download is whole, not who sent it:
-anything that can answer as the server on its address can also offer an update. So the
-updater only ever asks the address recorded at install, in a folder only root can
-write, never one a logged-in account or the network can change (the state folder's
-`server` file, discovery); and what it installs runs as the logged-in account, as the
-helper always has.
+**What it trusts.** The app is downloaded over the network from the server, and
+checked against the SHA-256 that same server publishes and against the release's
+signature, made in CI with a key the server never has. The checksum says the download
+is whole; the signature says it is the release's. A server, or anything that can answer
+as the server on its address, can still tell a Mac *when* to update, but not hand it a
+payload of its own: the signature is checked against the key installed with the
+updater, which an update never replaces. See [Signed updates](#signed-updates) for what
+the first install still trusts. The updater only ever asks the address recorded at
+install, in a folder only root can write, never one a logged-in account or the network
+can change (the state folder's `server` file, discovery); and what it installs runs as
+the logged-in account, as the helper always has.
 
 **Installed before this.** A helper installed by an installer older than 1.27.0 has no
 updater, and needs the installer run once more, at the Mac, to get it. Its screens say
 *Helper version unknown. Run the macOS installer once* once the server has been up
-longer than a check takes.
+longer than a check takes. An updater installed before signed updates verifies the
+checksum only, since the updater never replaces its own script; run the installer once
+more to give it the key and the signature check.
 
 **What Screens shows.** Each screen shown by a helper output has a line under its
 device saying what the Mac's helper runs and what it was told: up to date, waiting
@@ -261,7 +272,10 @@ failed and why, retrying and why, waiting for a login, the helper quit, Local Ne
 refused), Update
 now pressed, and a Mac that stopped checking. Never one per check. On the Mac,
 `/Library/Logs/StageUtility/helper-update.log`, the same decisions as the updater saw
-them, with the download and the swap.
+them, with the download, the signature (`signature valid`, `signature missing`,
+`signature invalid`, or `signature not checked` when no key is installed) and the swap.
+A refused signature is reported to the server at the next check, so Screens shows it
+as retrying or failed with the reason.
 
 **Coming from the Chrome kiosk.** If the earlier agent is there
 (`com.stageutility.kiosk`), the installer writes
@@ -427,10 +441,16 @@ own version and checked against the digest the releases API lists for it, like t
 | `GET /kiosk/kiosk-windows.ps1.sig` | The release's signature of the launcher, which the server itself serves from its own `scripts/kiosk`. It verifies only when that file is byte for byte the one the release was built from |
 | `GET /kiosk/release-signing.pub.pem` \| `.xml` | The public key, from `scripts/kiosk/release-signing.pub.pem`, as PEM and as .NET's `<RSAKeyValue>` |
 
-Each is read once per version and cached beside the zips in
+Each signature is read once per version and cached beside the zips in
 `cache/output-helper/<version>/`. A release that lists no signature answers `404`, and
 the machine refuses the update. Each signature costs one more call to the releases API
 the first time it is asked for, from the same 60-an-hour allowance.
+
+**On a Mac**, the installer downloads the key from the server it was run from
+(`/kiosk/release-signing.pub.pem`), verifies the zip with it, and writes it to
+`/Library/Application Support/StageUtilityUpdater/release-signing.pub.pem`. The updater
+verifies every update with `/usr/bin/openssl dgst -sha256 -verify` against that file
+and never asks the server for a key. No readable key there holds the update as failed.
 
 ## Size
 
